@@ -412,13 +412,16 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			PathPrefix: path, Tag: "guardian_manage", Limiter: guardianLimiter,
 		})
 	}
-	// Hosted action pages (ADR-0014): the consuming POST is the click that
+	// Hosted action pages (ADR-0014). The consuming POST is the click that
 	// spends a token — and, on the password pages, hashes a password — so
-	// only POSTs are metered; the GET preview is a single indexed lookup and
-	// stays free, so a user can reload the page without spending the budget
-	// their submit needs. Each page gets its own bucket sized like the RPC
-	// surface it stands in for (the same GATEWAY_RATE_LIMIT_* value, keyed
-	// under its own hosted_* tag).
+	// each page's POST gets its own bucket sized like the RPC surface it
+	// stands in for (the same GATEWAY_RATE_LIMIT_* value under its own
+	// hosted_* tag). Views (GET, and HEAD with it) are one or two indexed
+	// lookups that consume nothing; they share one generous bucket
+	// (GATEWAY_RATE_LIMIT_HOSTED_VIEW_PER_IP) so a reload never spends the
+	// budget a submit needs, while an unauthenticated URL still has a
+	// ceiling. The POST entries come first: the middleware stops at the
+	// first entry whose path and method match.
 	for _, page := range []struct {
 		path, tag string
 		perIP     int
@@ -435,6 +438,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		limits = append(limits, middleware.PathLimit{
 			PathPrefix: page.path, Tag: page.tag, Method: http.MethodPost,
 			Limiter: middleware.NewFixedWindowLimiter(window, page.perIP, 0),
+		})
+	}
+	viewLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitHostedViewPerIP, 0)
+	for _, path := range ui.ActionPaths() {
+		limits = append(limits, middleware.PathLimit{
+			PathPrefix: path, Tag: "hosted_view", Method: http.MethodGet, Limiter: viewLimiter,
 		})
 	}
 	return limits
@@ -690,7 +699,14 @@ func New(deps Deps) (*Built, error) {
 	// Hosted pages: the sign-in page and the emailed-link action pages
 	// (ADR-0014). Rendered per request so each offers exactly the sign-in
 	// options and branding the resolved project enables server-side.
-	mux.Handle("/auth/", ui.Handler(deps.Config, ui.Sources{Auth: authSvc, Teams: membershipSvc}, returnAllow.Enabled(), logger))
+	// A driver without a control plane has no membership service; convert
+	// explicitly so the interface is a true nil the page can test, not a
+	// typed nil that would pass the check and panic on use.
+	var teams ui.TeamInvitations
+	if membershipSvc != nil {
+		teams = membershipSvc
+	}
+	mux.Handle("/auth/", ui.Handler(deps.Config, ui.Sources{Auth: authSvc, Teams: teams}, returnAllow.Enabled(), logger))
 	logger.Info("hosted_pages_mounted",
 		zap.Strings("paths", ui.ActionPaths()),
 		zap.String("app_base_url", deps.Config.AppBaseURL),

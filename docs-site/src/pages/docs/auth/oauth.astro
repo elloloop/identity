@@ -519,12 +519,21 @@ window.location.href =
 // 3. /oauth/done in the SPA: exchange the otc for real tokens.
 const params = new URLSearchParams(window.location.search);
 const otc = params.get("code");
-const { user, accessToken, refreshToken } = await client.redeemOAuthCode({
-  code: otc,
-});
+const { user, accessToken, refreshToken, totpRequired, loginChallengeId } =
+  await client.redeemOAuthCode({ code: otc });
 
-storeTokens(accessToken, refreshToken);
-window.location.replace("/dashboard");`} lang="typescript" />
+if (totpRequired) {
+  // Second factor first: no session exists yet. Finish with
+  // verifyTotp({ loginChallengeId, code }), exactly as after passwordLogin.
+  showTotpPrompt(loginChallengeId);
+} else {
+  storeTokens(accessToken, refreshToken);
+  window.location.replace("/dashboard");
+}`} lang="typescript" />
+  <p>
+    The same page redeems the code the hosted magic-link page issues, so an
+    app with both flows needs one <code>/oauth/done</code> route.
+  </p>
   <p>
     See decision log §10 in <a href="https://github.com/elloloop/identity/blob/main/docs/IDENTITY.md"><code>docs/IDENTITY.md</code></a>
     for the design rationale (why a one-time code rather than a

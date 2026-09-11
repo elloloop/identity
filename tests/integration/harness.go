@@ -1557,6 +1557,9 @@ func (r *MemRepo) ConsumeQrLoginSession(_ context.Context, nodeID string, atMs i
 }
 
 func (r *MemRepo) CreateOAuthOneTimeCode(_ context.Context, rec *service.OAuthOneTimeCodeRecord) (string, error) {
+	if rec.LoginMethod != service.HandoverMethodOAuth && rec.LoginMethod != service.HandoverMethodMagicLink {
+		return "", fmt.Errorf("%w: unknown handover login method %q", service.ErrInvalidArgument, rec.LoginMethod)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	id := r.nextID()

@@ -180,7 +180,8 @@ func (r *pgRepository) FindMagicLinkTokenByHash(ctx context.Context, tokenHash s
 	const q = `
 		SELECT id, token_hash, email, return_to, expires_at_ms, created_at_ms, consumed_at_ms
 		  FROM magic_link_tokens
-		 WHERE project_id = $1 AND token_hash = $2`
+		 WHERE project_id = $1 AND token_hash = $2
+		 LIMIT 1`
 	var t service.MagicLinkTokenRecord
 	err := r.pool.QueryRow(ctx, q, r.projectID, tokenHash).Scan(
 		&t.NodeID, &t.TokenHash, &t.Email, &t.ReturnTo,

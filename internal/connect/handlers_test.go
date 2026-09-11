@@ -2,6 +2,8 @@ package connect
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/url"
 	"strings"
@@ -1774,6 +1776,42 @@ var _ = strings.Contains
 // the guard: the return allowlist alone enables the hosted magic-link page,
 // which mints handover codes, so redeem must be reachable without an OAuth
 // registry. An unknown code is then Unauthenticated, not Unavailable.
+// TestRedeemOAuthCode_SecondFactorOnTheWire locks in the response shape for
+// a handover whose user requires a second factor: totp_required and
+// login_challenge_id are set and the token pair is empty, the way
+// PasswordLogin expresses it, so a client can branch on the same fields.
+func TestRedeemOAuthCode_SecondFactorOnTheWire(t *testing.T) {
+	h := newHarness(t)
+	u := h.repo.seedUser(&service.User{Email: "second-factor@e.com", Status: "active", Role: "member", TotpRequired: true})
+	raw := "handover-code-under-test"
+	sum := sha256.Sum256([]byte(raw))
+	now := time.Now().UnixMilli()
+	if _, err := h.repo.CreateOAuthOneTimeCode(context.Background(), &service.OAuthOneTimeCodeRecord{
+		CodeHash:    hex.EncodeToString(sum[:]),
+		UserID:      u.ID,
+		LoginMethod: service.HandoverMethodMagicLink,
+		ExpiresAt:   now + time.Minute.Milliseconds(),
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("seed handover code: %v", err)
+	}
+
+	resp, err := h.client.RedeemOAuthCode(context.Background(),
+		connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: raw}))
+	if err != nil {
+		t.Fatalf("RedeemOAuthCode: %v", err)
+	}
+	if !resp.Msg.GetTotpRequired() {
+		t.Fatal("totp_required = false, want true")
+	}
+	if resp.Msg.GetLoginChallengeId() == "" {
+		t.Fatal("login_challenge_id empty, want a pending challenge")
+	}
+	if resp.Msg.GetAccessToken() != "" || resp.Msg.GetRefreshToken() != "" {
+		t.Fatal("token pair issued before the second factor")
+	}
+}
+
 func TestRedeemOAuthCode_HostedFlowEnabledWithoutOAuth(t *testing.T) {
 	h := newHarness(t) // testConfig sets OAuthAllowedReturnURLs, no registry
 	_, err := h.client.RedeemOAuthCode(context.Background(),

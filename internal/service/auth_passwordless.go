@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/url"
 	"strings"
 	"time"
 
@@ -261,7 +262,8 @@ func (s *AuthService) verifyAndConsumeEmailLoginCode(ctx context.Context, emailA
 // feature is unconfigured) rejects every return_to the same way.
 func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo string) error {
 	if !s.returnAllow.Allows(returnTo) {
-		s.logger.Info("magic_link_return_to_rejected")
+		s.logger.Info("magic_link_return_to_rejected",
+			zap.String("return_to_origin", returnOrigin(returnTo)))
 		return fmt.Errorf("%w: return_to is not allowed", ErrInvalidArgument)
 	}
 
@@ -318,7 +320,7 @@ func (s *AuthService) sendMagicLinkNow(ctx context.Context, emailAddr, returnTo 
 		return
 	}
 
-	link := fmt.Sprintf("%s"+HostedMagicLinkPath+"?token=%s", appBaseURL(ctx, s.cfg), rawToken)
+	link := appBaseURL(ctx, s.cfg) + HostedMagicLinkPath + "?token=" + rawToken
 	brand := resolveBranding(ctx, s.cfg)
 	html, text, err := email.Render(email.TemplateMagicLink, brand.templateData(map[string]any{
 		"Link":      link,
@@ -414,7 +416,10 @@ func (s *AuthService) RedeemMagicLinkForHandover(ctx context.Context, token, ipA
 		return nil, ErrMagicLinkInvalid
 	}
 	if !s.returnAllow.Allows(stored.ReturnTo) {
-		s.logger.Info("magic_link_handover_return_to_rejected")
+		// The origin, not the full URL (which carries the app's own query
+		// state), is enough to match a user report to an allowlist change.
+		s.logger.Info("magic_link_handover_return_to_rejected",
+			zap.String("return_to_origin", returnOrigin(stored.ReturnTo)))
 		return nil, ErrMagicLinkInvalid
 	}
 	rec, err := s.repo(ctx).ConsumeMagicLinkToken(ctx, tokenHash, s.nowMs())
@@ -561,4 +566,13 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
+}
+
+// returnOrigin reduces a return_to to its scheme and host for logging.
+func returnOrigin(returnTo string) string {
+	u, err := url.Parse(returnTo)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }

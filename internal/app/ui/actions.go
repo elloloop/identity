@@ -52,6 +52,8 @@ type actionText struct {
 	Next string
 	// DetailFallback stands in for {detail} when the preview names nothing.
 	DetailFallback string
+	// PasswordLabel labels the password field on pages that ask for one.
+	PasswordLabel string
 }
 
 // actionInput is what a submitted action form carries, plus the caller
@@ -82,12 +84,18 @@ type actionKind struct {
 	// redirects reports whether a successful POST leaves this origin; see
 	// pagePolicy.formAction.
 	redirects bool
-	// informational marks a page that only looks: a live link renders its
-	// intro and the onward link, and there is no POST.
-	informational bool
-	peek          func(ctx context.Context, src Sources, token string) (service.ActionLinkPreview, error)
-	act           func(ctx context.Context, src Sources, in actionInput) (actionResult, error)
+	// signInCarriesToken puts the link's token on the onward sign-in link
+	// (?join=) so the sign-in page can finish what this page cannot.
+	signInCarriesToken bool
+	peek               func(ctx context.Context, src Sources, token string) (service.ActionLinkPreview, error)
+	// act is the consuming step behind the POST. A kind without one only
+	// looks: a live link renders its intro and the onward link, and POST is
+	// refused.
+	act func(ctx context.Context, src Sources, in actionInput) (actionResult, error)
 }
+
+// informational reports whether the page only looks (it has no consuming step).
+func (k actionKind) informational() bool { return k.act == nil }
 
 // ActionPaths lists every hosted action page path, for wiring and logs.
 func ActionPaths() []string {
@@ -127,14 +135,15 @@ func actionKinds() []actionKind {
 		{
 			path: service.HostedResetPasswordPath,
 			text: actionText{
-				Heading: "Choose a new password",
-				Intro:   "Set a new password for {email}." + notYouHint,
-				Submit:  "Update password",
-				Done:    "Your password has been updated. You've been signed out everywhere; sign in with your new password.",
-				Used:    "This reset link has already been used. If you didn't change your password, request a new link from your app.",
-				Expired: "This reset link has expired. Request a new one from your app.",
-				Invalid: "This reset link isn't valid. Make sure you opened the full link from the email.",
-				Next:    "Sign in",
+				Heading:       "Choose a new password",
+				Intro:         "Set a new password for {email}." + notYouHint,
+				Submit:        "Update password",
+				PasswordLabel: "New password",
+				Done:          "Your password has been updated. You've been signed out everywhere; sign in with your new password.",
+				Used:          "This reset link has already been used. If you didn't change your password, request a new link from your app.",
+				Expired:       "This reset link has expired. Request a new one from your app.",
+				Invalid:       "This reset link isn't valid. Make sure you opened the full link from the email.",
+				Next:          "Sign in",
 			},
 			askPassword: true,
 			peek: func(ctx context.Context, src Sources, token string) (service.ActionLinkPreview, error) {
@@ -193,14 +202,15 @@ func actionKinds() []actionKind {
 		{
 			path: service.HostedAcceptInvitationPath,
 			text: actionText{
-				Heading: "Set up your account",
-				Intro:   "You've been invited{to_product} as {email}. Choose a password to finish setting up.",
-				Submit:  "Create account",
-				Done:    "Your account is ready. Sign in to get started.",
-				Used:    "This invitation has already been accepted. Sign in to continue.",
-				Expired: "This invitation has expired. Ask the person who invited you to send a new one.",
-				Invalid: "This invitation link isn't valid. Make sure you opened the full link from the email.",
-				Next:    "Sign in",
+				Heading:       "Set up your account",
+				Intro:         "You've been invited{to_product} as {email}. Choose a password to finish setting up.",
+				Submit:        "Create account",
+				PasswordLabel: "Password",
+				Done:          "Your account is ready. Sign in to get started.",
+				Used:          "This invitation has already been accepted. Sign in to continue.",
+				Expired:       "This invitation has expired. Ask the person who invited you to send a new one.",
+				Invalid:       "This invitation link isn't valid. Make sure you opened the full link from the email.",
+				Next:          "Sign in",
 			},
 			askName:     true,
 			askPassword: true,
@@ -215,19 +225,21 @@ func actionKinds() []actionKind {
 		{
 			// A tenant-membership invitation is accepted by a signed-in caller
 			// whose address matches (AcceptTenantInvitation), so this page
-			// cannot complete it: it says what the link is and sends the
-			// invitee to sign in.
+			// cannot complete it by itself: it says what the link is and
+			// sends the invitee to the sign-in page with the token, where a
+			// password sign-in (or sign-up) with that address accepts the
+			// invitation as its last step.
 			path: service.HostedJoinTeamPath,
 			text: actionText{
 				Heading:        "Join {detail}",
 				DetailFallback: "your team",
-				Intro:          "You've been invited to join {detail}{to_product} as {email}. Sign in with that address to accept the invitation.",
+				Intro:          "You've been invited to join {detail}{to_product} as {email}. Sign in with that address to join.",
 				Used:           "This invitation has already been accepted. Sign in to continue.",
 				Expired:        "This invitation has expired. Ask the person who invited you to send a new one.",
 				Invalid:        "This invitation link isn't valid. Make sure you opened the full link from the email.",
-				Next:           "Sign in",
+				Next:           "Sign in to join",
 			},
-			informational: true,
+			signInCarriesToken: true,
 			peek: func(ctx context.Context, src Sources, token string) (service.ActionLinkPreview, error) {
 				if src.Teams == nil {
 					return service.ActionLinkPreview{State: service.ActionLinkInvalid}, nil
@@ -240,23 +252,24 @@ func actionKinds() []actionKind {
 
 // actionPage is the template data for an action page.
 type actionPage struct {
-	Nonce        string
-	Title        string
-	Heading      string
-	Intro        string
-	Email        string
-	State        string
-	Message      string
-	Error        string
-	Token        string
-	Name         string
-	FormAction   string
-	AskName      bool
-	AskPassword  bool
-	Submit       string
-	Next         string
-	SignInURL    string
-	SupportEmail string
+	Nonce         string
+	Title         string
+	Heading       string
+	Intro         string
+	Email         string
+	State         string
+	Message       string
+	Error         string
+	Token         string
+	Name          string
+	FormAction    string
+	AskName       bool
+	AskPassword   bool
+	Submit        string
+	PasswordLabel string
+	Next          string
+	SignInURL     string
+	SupportEmail  string
 
 	text actionText
 }
@@ -266,7 +279,7 @@ func (h *handler) serveAction(w http.ResponseWriter, r *http.Request, kind actio
 	case http.MethodGet, http.MethodHead:
 		h.serveActionGet(w, r, kind)
 	case http.MethodPost:
-		if kind.informational {
+		if kind.informational() {
 			w.Header().Set("Allow", "GET, HEAD")
 			h.plainError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -274,7 +287,7 @@ func (h *handler) serveAction(w http.ResponseWriter, r *http.Request, kind actio
 		h.serveActionPost(w, r, kind)
 	default:
 		allow := "GET, HEAD, POST"
-		if kind.informational {
+		if kind.informational() {
 			allow = "GET, HEAD"
 		}
 		w.Header().Set("Allow", allow)
@@ -296,7 +309,7 @@ func (h *handler) serveActionGet(w http.ResponseWriter, r *http.Request, kind ac
 		return
 	}
 	page := h.newActionPage(r, kind, token, preview)
-	if kind.informational && preview.State == service.ActionLinkReady {
+	if kind.informational() && preview.State == service.ActionLinkReady {
 		page.setState(stateInfo)
 	} else {
 		page.setState(string(preview.State))
@@ -488,22 +501,38 @@ func (h *handler) newActionPage(r *http.Request, kind actionKind, token string, 
 		}
 		return path + "?" + scope.Encode()
 	}
+	// The sign-in link carries the token when the sign-in page finishes the
+	// action (a tenant invitation is accepted after sign-in), and only for a
+	// link that is still live — a spent or unknown token has nothing to hand on.
+	signIn := scope
+	if kind.signInCarriesToken && token != "" && preview.State == service.ActionLinkReady {
+		signIn = url.Values{}
+		for k, v := range scope {
+			signIn[k] = v
+		}
+		signIn.Set("join", token)
+	}
+	signInURL := loginPath
+	if len(signIn) > 0 {
+		signInURL = loginPath + "?" + signIn.Encode()
+	}
 
 	heading := fill.Replace(kind.text.Heading)
 	return &actionPage{
-		Title:        heading,
-		Heading:      heading,
-		Intro:        fill.Replace(kind.text.Intro),
-		Email:        preview.Email,
-		Token:        token,
-		FormAction:   withScope(kind.path),
-		AskName:      kind.askName,
-		AskPassword:  kind.askPassword,
-		Submit:       kind.text.Submit,
-		Next:         kind.text.Next,
-		SignInURL:    withScope(loginPath),
-		SupportEmail: brand.SupportEmail,
-		text:         kind.text,
+		Title:         heading,
+		Heading:       heading,
+		Intro:         fill.Replace(kind.text.Intro),
+		Email:         preview.Email,
+		Token:         token,
+		FormAction:    withScope(kind.path),
+		AskName:       kind.askName,
+		AskPassword:   kind.askPassword,
+		Submit:        kind.text.Submit,
+		PasswordLabel: kind.text.PasswordLabel,
+		Next:          kind.text.Next,
+		SignInURL:     signInURL,
+		SupportEmail:  brand.SupportEmail,
+		text:          kind.text,
 	}
 }
 

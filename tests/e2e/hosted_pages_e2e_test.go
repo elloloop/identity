@@ -370,4 +370,12 @@ func TestE2E_HostedPages_Guards(t *testing.T) {
 	if status, _, _ := hostedGet(t, h, "/auth/not-a-page"); status != http.StatusNotFound {
 		t.Fatalf("GET /auth/not-a-page = %d, want 404", status)
 	}
+
+	// The join-team page renders on every driver, including those without a
+	// membership store, where every token is simply unknown.
+	status, _, body = hostedGet(t, h, "/auth/join-team?token=not-a-real-token")
+	if status != http.StatusOK {
+		t.Fatalf("GET /auth/join-team = %d, want 200", status)
+	}
+	mustContain(t, body, "isn't valid")
 }

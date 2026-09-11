@@ -155,6 +155,12 @@ const DefaultProjectIDFallback = "default"
 // Deployments should set GATEWAY_DEFAULT_PRODUCT to their primary app's slug.
 const DefaultProductFallback = "default"
 
+// DefaultAppBaseURL is the local-development base URL emailed links and the
+// hosted pages are built on when GATEWAY_APP_BASE_URL is unset — shared by
+// Load and by the services that fall back to it for a Config built as a
+// struct literal, so the value lives once.
+const DefaultAppBaseURL = "http://localhost:9002"
+
 // Config holds all identity service configuration.
 type Config struct {
 	// Server & ports.
@@ -937,7 +943,7 @@ type Config struct {
 	EmailListUnsubscribe string
 
 	// Public app URLs used in email links.
-	AppBaseURL string // GATEWAY_APP_BASE_URL — e.g. "https://app.example.com"
+	AppBaseURL string // GATEWAY_APP_BASE_URL — e.g. "https://app.example.com"; default DefaultAppBaseURL
 
 	// How long an email-verification or password-reset token is valid for.
 	EmailTokenExpirySeconds int // GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS (default 86400)
@@ -989,6 +995,13 @@ type Config struct {
 	RateLimitResetPerIP int
 	// RateLimitVerifyPerIP is the per-IP request cap per window on the verification endpoints.
 	RateLimitVerifyPerIP int
+	// RateLimitHostedViewPerIP is the per-IP cap per window on GET and HEAD of
+	// the hosted action pages (/auth/verify-email and siblings), one shared
+	// bucket for all of them. A view is one or two indexed lookups that
+	// consume nothing, so the default is generous — a person reloading a page
+	// must never spend the budget their submit needs — while still bounding
+	// what a scanner or a crawler can drive against an unauthenticated URL.
+	RateLimitHostedViewPerIP int
 	// RateLimitPasswordlessPerIP is the per-IP cap per window on
 	// RequestEmailLoginCode + RequestMagicLink.
 	RateLimitPasswordlessPerIP int
@@ -1389,7 +1402,7 @@ func loadFromEnv() *Config {
 		EmailBrandSupportEmail: envStr("GATEWAY_EMAIL_BRAND_SUPPORT_EMAIL", ""),
 		EmailListUnsubscribe:   envStr("GATEWAY_EMAIL_LIST_UNSUBSCRIBE", ""),
 
-		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
+		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", DefaultAppBaseURL),
 		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
 		// 604800 = 7 days; team invitations are less time-sensitive than
 		// password resets.
@@ -1410,6 +1423,7 @@ func loadFromEnv() *Config {
 		RateLimitLoginPerIP:        envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
 		RateLimitResetPerIP:        envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
 		RateLimitVerifyPerIP:       envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
+		RateLimitHostedViewPerIP:   envInt("GATEWAY_RATE_LIMIT_HOSTED_VIEW_PER_IP", 60),
 		RateLimitPasswordlessPerIP: envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
 		RateLimitAssurancePerIP:    envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),

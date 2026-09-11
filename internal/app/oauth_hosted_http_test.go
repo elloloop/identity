@@ -477,3 +477,18 @@ func TestClientIPFromRequest(t *testing.T) {
 		t.Errorf("XFF IP = %q", got)
 	}
 }
+
+// TestHostedHTTP_JoinTeamWithoutControlPlane: on a driver with no membership
+// stores the page must fail closed to "invalid" — the wiring hands the UI a
+// true nil, not a typed nil that would slip past its check and panic.
+func TestHostedHTTP_JoinTeamWithoutControlPlane(t *testing.T) {
+	h := newHostedTestHandler(t, "", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/auth/join-team?token=abc", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%q", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "isn&#39;t valid") && !strings.Contains(rr.Body.String(), "isn't valid") {
+		t.Fatalf("page must report the link invalid, got %q", rr.Body.String())
+	}
+}

@@ -67,6 +67,13 @@
         const pageQuery = new URLSearchParams(window.location.search);
         const projectKey = pageQuery.get('project_key') || '';
         const returnTo = pageQuery.get('return_to') || '';
+        // A tenant invitation the join-team page handed on: accepting it needs
+        // a signed-in caller whose address matches, so it is the last step of
+        // a password sign-in (or sign-up) here.
+        const joinToken = pageQuery.get('join') || '';
+        if (joinToken) {
+            subtitle.textContent = 'Sign in with the invited address to join your team';
+        }
 
         const passwordEnabled = config.passwordLoginEnabled !== false;
         if (!passwordEnabled) {
@@ -182,6 +189,25 @@
             });
         }
 
+        // acceptTeamInvitation redeems the tenant invitation the join-team page
+        // handed on, now that there is a session for the invited address.
+        async function acceptTeamInvitation(accessToken) {
+            const acceptHeaders = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken };
+            if (projectKey) acceptHeaders['X-Project-Key'] = projectKey;
+            const res = await fetch('/identity.v1.IdentityService/AcceptTenantInvitation', {
+                method: 'POST',
+                headers: acceptHeaders,
+                body: JSON.stringify({ token: joinToken })
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                errorMsg.textContent = 'Signed in, but the invitation could not be accepted: ' + (body.message || body.code || 'unknown error') + '. Ask the person who invited you to send a new one.';
+                errorMsg.style.display = 'block';
+                return;
+            }
+            successMsg.textContent = 'You have joined the team.';
+        }
+
         function resetCaptcha() {
             captchaToken = '';
             if (captchaWidgetId !== null && window.turnstile) {
@@ -295,6 +321,7 @@
                     const token = data.accessToken || data.access_token;
                     resultData.textContent = 'Token: ' + token.substring(0, 30) + '...';
                     resultData.style.display = 'block';
+                    if (joinToken) await acceptTeamInvitation(token);
                 }
             } catch (err) {
                 errorMsg.textContent = err.message;

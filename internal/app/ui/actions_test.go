@@ -461,7 +461,8 @@ func TestHandler_UnknownPathAndMethods(t *testing.T) {
 
 // TestActionPages_JoinTeamOnlyLooks: a tenant-membership invitation lands on
 // a page that names the team and the address and sends the invitee to sign
-// in; it has no form and refuses POST, and its states read like the others.
+// in with the token; it has no form and refuses POST, and its states read
+// like the others.
 func TestActionPages_JoinTeamOnlyLooks(t *testing.T) {
 	teams := stubTeams{peek: func(_ context.Context, token string) (service.ActionLinkPreview, error) {
 		switch token {
@@ -484,7 +485,7 @@ func TestActionPages_JoinTeamOnlyLooks(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	body := text(rec)
-	assertContains(t, body, "Join Acme Design", "bob@acme.test", "Sign in with that address", `href="/auth/"`)
+	assertContains(t, body, "Join Acme Design", "bob@acme.test", "Sign in with that address", `href="/auth/?join=live"`)
 	assertNotContains(t, body, "<form")
 
 	assertContains(t, text(get(t, h, "/auth/join-team?token=used", nil)), "already been accepted")
@@ -545,4 +546,36 @@ func TestActionPaths_ListsEveryPage(t *testing.T) {
 			t.Errorf("ActionPaths missing %s", want)
 		}
 	}
+}
+
+// TestActionPages_JoinTeamTypedNilTeamsFailsClosed: production wires the
+// membership service through a concrete pointer that is nil on drivers
+// without a control plane; the page must answer "invalid", not panic, when
+// that typed nil reaches it.
+func TestActionPages_JoinTeamTypedNilTeamsFailsClosed(t *testing.T) {
+	var teams *service.MembershipService
+	h := Handler(&config.Config{}, Sources{Auth: stubService{}, Teams: teams}, false, nil)
+	rec := get(t, h, "/auth/join-team?token=live", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	assertContains(t, text(rec), "isn't valid")
+}
+
+// TestActionPages_JoinTeamHandsTokenToSignIn: a live tenant invitation's
+// onward link carries the token (and the project key) so the sign-in page
+// can accept it after sign-in; spent links hand nothing on.
+func TestActionPages_JoinTeamHandsTokenToSignIn(t *testing.T) {
+	teams := stubTeams{peek: func(_ context.Context, token string) (service.ActionLinkPreview, error) {
+		if token == "live" {
+			return service.ActionLinkPreview{State: service.ActionLinkReady, Email: "bob@acme.test", Detail: "Acme"}, nil
+		}
+		return service.ActionLinkPreview{State: service.ActionLinkUsed}, nil
+	}}
+	h := Handler(&config.Config{}, Sources{Auth: stubService{}, Teams: teams}, false, nil)
+	assertContains(t, text(get(t, h, "/auth/join-team?token=live", nil)), `href="/auth/?join=live"`, "Sign in to join")
+	assertContains(t, text(get(t, h, "/auth/join-team?token=live&project_key=pk_1", nil)), `href="/auth/?join=live&project_key=pk_1"`)
+	used := text(get(t, h, "/auth/join-team?token=spent", nil))
+	assertContains(t, used, `href="/auth/"`)
+	assertNotContains(t, used, "join=")
 }

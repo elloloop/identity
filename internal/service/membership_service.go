@@ -361,7 +361,7 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	if s.mailer == nil {
 		return
 	}
-	link := fmt.Sprintf("%s"+HostedJoinTeamPath+"?token=%s", appBaseURL(ctx, s.cfg), rawToken)
+	link := appBaseURL(ctx, s.cfg) + HostedJoinTeamPath + "?token=" + rawToken
 	var brand resolvedBranding
 	if s.cfg != nil {
 		brand = resolveBranding(ctx, s.cfg)
@@ -426,7 +426,10 @@ func (s *MembershipService) invitationTTL() time.Duration {
 // changing it: whose address it is for, the team's name, and whether it is
 // still open. An unknown token is ActionLinkInvalid, not an error.
 func (s *MembershipService) PeekTenantInvitation(ctx context.Context, rawToken string) (ActionLinkPreview, error) {
-	if strings.TrimSpace(rawToken) == "" {
+	// Nil-receiver safe: a deployment without a control plane has no
+	// membership service, and the page must answer "invalid" rather than
+	// panic if it is handed one anyway.
+	if s == nil || strings.TrimSpace(rawToken) == "" {
 		return ActionLinkPreview{State: ActionLinkInvalid}, nil
 	}
 	// Without a project there is no store to look in: the token cannot be

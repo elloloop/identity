@@ -475,3 +475,26 @@ func TestWeakPasswordError_UnwrapsAndCarriesIssues(t *testing.T) {
 	assert.Equal(t, "password does not meet strength requirements: Password must be at least 12 characters; Password is too common", err.Error())
 	assert.NoError(t, passwordIssuesToErr(nil))
 }
+
+// TestRedeemOAuthCode_SecondFactorDeferredToRedeem: the hosted magic-link
+// page never runs the second factor; redeeming its code for a TOTP-enrolled
+// user must return the challenge and no tokens, exactly as PasswordLogin does.
+func TestRedeemOAuthCode_SecondFactorDeferredToRedeem(t *testing.T) {
+	svc, repo, rec := passwordlessSvc(t)
+	ctx := context.Background()
+	user := seedUser(repo, "totp-handover@test.com", "", "active")
+	user.TotpRequired = true
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"totp_required": true}))
+
+	require.NoError(t, svc.RequestMagicLink(ctx, "totp-handover@test.com", "https://app.test/cb"))
+	handover, err := svc.RedeemMagicLinkForHandover(ctx, extractTokenFromLink(t, rec.Sent()[0].Text), "", "")
+	require.NoError(t, err)
+
+	result, err := svc.RedeemOAuthCode(ctx, handover.Code, "", "")
+	require.NoError(t, err)
+	assert.True(t, result.TotpRequired)
+	assert.NotEmpty(t, result.LoginChallengeID)
+	assert.Empty(t, result.AccessToken, "no session before the second factor")
+	assert.Empty(t, result.RefreshToken)
+	assert.Equal(t, 0, repo.refreshTokenCountForUser(user.ID))
+}

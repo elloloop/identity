@@ -60,8 +60,8 @@ import { Code } from "astro-expressive-code/components";
     <tr>
       <td><code>/auth/join-team</code></td>
       <td><code>CreateTenantInvitation</code> (team membership)</td>
-      <td>Nothing: the page only looks</td>
-      <td>Names the team and the invited address and links to sign in. Accepting needs a signed-in caller whose address matches (<code>AcceptTenantInvitation</code>), so the page cannot do it for them.</td>
+      <td>Nothing: the page consumes no token</td>
+      <td>Names the team and the invited address and sends the invitee to the hosted sign-in page with the token. A password sign-in or sign-up with that address accepts the invitation as its last step (<code>AcceptTenantInvitation</code>). OAuth and passkey sign-ins finish in the app, which accepts it for them.</td>
     </tr>
     </tbody>
   </table>
@@ -107,7 +107,8 @@ import { Code } from "astro-expressive-code/components";
     "Need help?" footer. A used, expired or unknown link explains itself and
     tells the user to request a new one from the app they were using; the
     hosted sign-in page itself has no forgot-password or magic-link request
-    yet. A password that fails the policy re-renders the form with the
+    yet, so a used or expired link is a dead end on the hosted pages until
+    the app offers a new one. A password that fails the policy re-renders the form with the
     requirement that failed; the link stays live. The copy is English only:
     a product that needs other languages serves its own routes for now.
   </p>
@@ -139,16 +140,18 @@ import { Code } from "astro-expressive-code/components";
       Every other page links to the sign-in page on the same origin.
     </li>
     <li>
-      <strong>Rate limits.</strong> Only the consuming POST is metered; the
-      GET preview is free, so reloading a page never spends the budget the
-      submit needs. Each page has its own per-IP bucket sized by the knob of
+      <strong>Rate limits.</strong> The consuming POST and the GET preview
+      are metered apart, so reloading a page never spends the budget the
+      submit needs. Previews of every page share one per-IP bucket sized by
+      <code>GATEWAY_RATE_LIMIT_HOSTED_VIEW_PER_IP</code> (default 60 per
+      minute). Each page's POST has its own per-IP bucket sized by the knob of
       the RPC it stands in for: <code>GATEWAY_RATE_LIMIT_VERIFY_PER_IP</code>
       (verify, email change), <code>GATEWAY_RATE_LIMIT_RESET_PER_IP</code>
       (reset), <code>GATEWAY_RATE_LIMIT_LOGIN_PER_IP</code> (magic link) and
       <code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code> (invitation). Buckets are
       per client IP, so a population behind one office or carrier NAT shares
-      them; raise the reset and signup knobs if such users hit 429s, which
-      the pages answer as plain text.
+      them; raise the reset, signup and view knobs if such users hit 429s,
+      which the pages answer as plain text.
     </li>
     <li>
       <strong>Request logs record the path only</strong>, so tokens do not

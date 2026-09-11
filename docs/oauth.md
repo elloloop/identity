@@ -233,11 +233,14 @@ is still enforced server-side on every login attempt.)
 
 The same handler serves the pages identity's own emails link to —
 `/auth/verify-email`, `/auth/reset-password`, `/auth/confirm-email-change`,
-`/auth/magic-link`, `/auth/accept-invitation` — so a product needs no
-frontend routes for them (ADR-0014). A GET previews the token without
-consuming it; the form POST is the click. The magic-link page hands the
-session to the app with the same one-time code as the OAuth callback, below.
-See the docs-site page "Hosted pages" for the full contract.
+`/auth/magic-link`, `/auth/accept-invitation`, `/auth/join-team` — so a
+product needs no frontend routes for them (ADR-0014). A GET previews the
+token without consuming it; the form POST is the click. The magic-link page
+hands the session to the app with the same one-time code as the OAuth
+callback, below. The join-team page consumes nothing itself: it carries the
+invitation token to the hosted sign-in page, which accepts the invitation
+after a password sign-in. See the docs-site page "Hosted pages" for the full
+contract.
 
 ### The one-time code
 

@@ -24,11 +24,6 @@ func (s *AuthService) emailTokenExpiry() time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
-// devAppBaseURL is the local-development base URL links are built on when a
-// Config built as a struct literal leaves AppBaseURL empty (config.Load
-// defaults it).
-const devAppBaseURL = "http://localhost:9002"
-
 // appBaseURL returns the public base URL links for the request's project are
 // built on, with any trailing slash trimmed, so callers can concatenate
 // "/auth/foo". When the request resolved to a project with a primary
@@ -46,7 +41,7 @@ func appBaseURL(ctx context.Context, cfg *config.Config) string {
 		u = strings.TrimRight(cfg.AppBaseURL, "/")
 	}
 	if u == "" {
-		u = devAppBaseURL
+		u = config.DefaultAppBaseURL
 	}
 	return u
 }
@@ -142,7 +137,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
-	link := fmt.Sprintf("%s"+HostedResetPasswordPath+"?token=%s", appBaseURL(ctx, s.cfg), rawToken)
+	link := appBaseURL(ctx, s.cfg) + HostedResetPasswordPath + "?token=" + rawToken
 	brand := resolveBranding(ctx, s.cfg)
 	html, text, err := email.Render(email.TemplatePasswordReset, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
@@ -301,7 +296,7 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 		return fmt.Errorf("creating verification token: %w", err)
 	}
 
-	link := fmt.Sprintf("%s"+HostedVerifyEmailPath+"?token=%s", appBaseURL(ctx, s.cfg), rawToken)
+	link := appBaseURL(ctx, s.cfg) + HostedVerifyEmailPath + "?token=" + rawToken
 	brand := resolveBranding(ctx, s.cfg)
 	html, text, err := email.Render(email.TemplateEmailVerification, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),

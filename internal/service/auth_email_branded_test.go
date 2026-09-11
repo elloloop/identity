@@ -35,11 +35,11 @@ func TestAppBaseURL_BrandedFromProjectScope(t *testing.T) {
 		t.Errorf("scope without domain: got %q, want https://fallback.example", got)
 	}
 
-	// Empty or nil config → localhost dev default.
-	if got := appBaseURL(context.Background(), &config.Config{}); got != devAppBaseURL {
-		t.Errorf("empty cfg: got %q, want %q", got, devAppBaseURL)
+	// Empty or nil config → the one shared localhost dev default.
+	if got := appBaseURL(context.Background(), &config.Config{}); got != config.DefaultAppBaseURL {
+		t.Errorf("empty cfg: got %q, want %q", got, config.DefaultAppBaseURL)
 	}
-	if got := appBaseURL(context.Background(), nil); got != devAppBaseURL {
-		t.Errorf("nil cfg: got %q, want %q", got, devAppBaseURL)
+	if got := appBaseURL(context.Background(), nil); got != config.DefaultAppBaseURL {
+		t.Errorf("nil cfg: got %q, want %q", got, config.DefaultAppBaseURL)
 	}
 }

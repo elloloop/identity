@@ -187,4 +187,26 @@ func TestRateLimitMiddleware_MethodFilter(t *testing.T) {
 	if got := do(http.MethodGet); got != http.StatusOK {
 		t.Fatalf("GET after the POST budget is spent = %d, want 200", got)
 	}
+
+	// A GET entry covers HEAD too — a HEAD is a GET whose body is discarded.
+	viewOnly := []PathLimit{{
+		PathPrefix: "/auth/verify-email", Tag: "hosted_view", Method: http.MethodGet,
+		Limiter: NewFixedWindowLimiter(time.Minute, 1, 0),
+	}}
+	hv := RateLimitMiddleware(viewOnly, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for i, method := range []string{http.MethodHead, http.MethodGet} {
+		req := httptest.NewRequest(method, "/auth/verify-email?token=t", nil)
+		req.Header.Set(ClientIPHeader, "9.9.9.8")
+		w := httptest.NewRecorder()
+		hv.ServeHTTP(w, req)
+		want := http.StatusOK
+		if i == 1 {
+			want = http.StatusTooManyRequests
+		}
+		if w.Code != want {
+			t.Fatalf("%s under a GET entry = %d, want %d", method, w.Code, want)
+		}
+	}
 }

@@ -1415,6 +1415,35 @@ func RunConformance(t *testing.T, driver Driver) {
 					t.Fatalf("Find(%q) = %#v, %v; want nil, nil", hash, rec, err)
 				}
 			}
+			// The lookup is clock-free: an expired, unswept row is returned
+			// with its stamps so the caller can say "expired" rather than
+			// "invalid". Expiry is the caller's judgement, never the driver's.
+			if _, err := r.CreateMagicLinkToken(ctx, &service.MagicLinkTokenRecord{
+				TokenHash: "ml-old", Email: "ml-old@example.com", ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create expired: %v", err)
+			}
+			old, err := r.FindMagicLinkTokenByHash(ctx, "ml-old")
+			if err != nil || old == nil || old.ExpiresAt != 1_000 {
+				t.Fatalf("Find(expired) = %#v, %v; want the row with ExpiresAt 1000", old, err)
+			}
+		})
+
+		t.Run("OAuthOneTimeCode_RejectsUnknownLoginMethod", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "otc-method@example.com")
+			// The SQL drivers enforce the value set with a CHECK constraint
+			// and the memory driver in code; every driver must refuse a value
+			// outside the two minting flows at write time.
+			for _, method := range []string{"", "telepathy"} {
+				if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
+					CodeHash: "otc-bad-" + method, UserID: userID, LoginMethod: method,
+					ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+				}); err == nil {
+					t.Fatalf("Create with login_method %q must fail", method)
+				}
+			}
 		})
 
 		t.Run("MagicLinkToken_ConsumeRaceSingleWinner", func(t *testing.T) {

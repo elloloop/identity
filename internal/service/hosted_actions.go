@@ -36,7 +36,7 @@ func (s *AuthService) linkState(consumedAt, expiresAt int64) ActionLinkState {
 	if consumedAt > 0 {
 		return ActionLinkUsed
 	}
-	if expiresAt > 0 && expiresAt < s.nowMs() {
+	if expiresAt > 0 && expiresAt <= s.nowMs() {
 		return ActionLinkExpired
 	}
 	return ActionLinkReady

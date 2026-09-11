@@ -1,6 +1,6 @@
 // Package ui serves the hosted pages under /auth/: the sign-in page and the
-// five pages an emailed action link lands on (verify email, reset password,
-// confirm email change, magic link, accept invitation). Every page is
+// pages an emailed action link lands on (verify email, reset password,
+// confirm email change, magic link, accept invitation, join team). Every page is
 // rendered per request from embedded templates so the sign-in options,
 // branding and Content-Security-Policy nonce reflect that request's
 // resolved project; nothing is served from a static file.
@@ -36,9 +36,9 @@ const (
 )
 
 // Service is what the hosted pages need from the auth service: the login
-// page's per-project options, the branding every page renders, and the five
-// emailed-link actions, each as a read-only preview (what the GET shows) and
-// the consuming step (what the POST does). Implemented by
+// page's per-project options, the branding every page renders, and the
+// emailed-link actions the auth service owns, each as a read-only preview
+// (what the GET shows) and the consuming step (what the POST does). Implemented by
 // service.AuthService; the indirection keeps this package free of the
 // service's construction graph in tests.
 type Service interface {
@@ -136,7 +136,7 @@ type handler struct {
 }
 
 // Handler returns the http.Handler for everything under /auth/: the sign-in
-// page at /auth/ and the five emailed-link action pages. hostedOAuthEnabled
+// page at /auth/ and the emailed-link action pages. hostedOAuthEnabled
 // reports whether the hosted OAuth routes are mounted at all; without them
 // the sign-in page renders no provider buttons.
 func Handler(cfg *config.Config, src Sources, hostedOAuthEnabled bool, logger *zap.Logger) http.Handler {

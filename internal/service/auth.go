@@ -822,8 +822,10 @@ type OAuthOneTimeCodeRecord struct {
 	CodeHash string
 	UserID   string
 	// LoginMethod is the flow that minted the code (HandoverMethodOAuth or
-	// HandoverMethodMagicLink). Redeem enforces that flow's login policy
-	// and records that flow's audit event; an unknown value is refused.
+	// HandoverMethodMagicLink). Every driver refuses any other value at
+	// write time (a CHECK constraint in the SQL drivers), and redeem
+	// enforces that flow's login policy and records that flow's audit
+	// event, refusing an unknown value it somehow finds.
 	LoginMethod string
 	ExpiresAt   int64 // epoch ms
 	CreatedAt   int64 // epoch ms

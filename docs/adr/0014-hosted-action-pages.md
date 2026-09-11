@@ -99,7 +99,9 @@ when the link is consumed.
   redirects only to the link's stored, allowlisted `return_to`; every other
   page links to the sign-in page on the same origin.
 - The hosted POSTs share the per-IP budgets of the RPC surfaces they stand in
-  for (verify, reset, login, signup).
+  for (verify, reset, login, signup). GET previews have a shared per-IP
+  budget of their own (`GATEWAY_RATE_LIMIT_HOSTED_VIEW_PER_IP`) so token
+  lookups are bounded without a reload ever costing a submit.
 
 ### Tenant invitations get their own page
 
@@ -108,8 +110,14 @@ signed-in caller whose address matches (`AcceptTenantInvitation`), so no
 server-rendered page can complete it. It also lives in a different store
 from the admin user invitation while sharing its URL, which is how a live
 tenant invitation would have been reported "invalid" by the accept-invitation
-page. It now mails `/auth/join-team`, a page that only looks: it names the
-team and the invited address and sends the invitee to sign in.
+page. It now mails `/auth/join-team`, a page that consumes nothing: it names
+the team and the invited address and sends the invitee to the hosted sign-in
+page with the token (`/auth/?join=<token>`). After a password sign-in or
+sign-up with the invited address, the sign-in page calls
+`AcceptTenantInvitation` with that token as its last step. Users who sign in
+with OAuth or a passkey leave the hosted page at the provider and finish in
+the app, which accepts the invitation for them; the token is not carried
+through the provider round trip.
 
 ### Deferred, in scope of this program
 
@@ -122,10 +130,11 @@ team and the invited address and sends the invitee to sign in.
 - **Theming.** The pages will read a project's Refraction design tokens,
   logo and favicon so they look like the product; today they carry the
   product name and support address from the existing `branding` block.
-- **Hub-served projects without an auth-domain.** Their links reach the
-  hub, which resolves the default project; the presented project key is not
-  carried into request context, so a link cannot embed it yet. Such a
-  project sets a primary auth-domain until it can.
+- **Hub-served projects without an auth-domain.** The hub's middleware
+  already accepts `?project_key=` on `/auth/*`, but the link builders run
+  under the project's own scope with no key to embed, so a mailed link
+  reaches the hub as the default project and the token is not found. Such a
+  project sets a primary auth-domain until the builders can embed the key.
 - **Requesting a new link from the hosted sign-in page.** The used and
   expired states send the user back to the app; the hosted sign-in page has
   no forgot-password or magic-link request yet.

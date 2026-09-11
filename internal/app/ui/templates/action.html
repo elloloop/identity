@@ -19,7 +19,7 @@
             {{end}}
             {{if .AskPassword}}
             <div class="form-group">
-                <label for="password">New password</label>
+                <label for="password">{{.PasswordLabel}}</label>
                 <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="••••••••"{{if .Error}} aria-invalid="true" aria-describedby="form-error"{{end}}>
             </div>
             <div class="form-group">
