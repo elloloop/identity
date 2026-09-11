@@ -54,12 +54,11 @@ func TestManagedChildAccount_Password_EndToEnd(t *testing.T) {
 	_, authed := seedAdult(t, h, "parent-mc@example.org")
 
 	create, err := authed.CreateManagedChildAccount(ctx, connect.NewRequest(&identitypb.CreateManagedChildAccountRequest{
-		Username:       "kid.one",
-		DisplayName:    "Kid One",
-		DateOfBirthMs:  time.Now().AddDate(-8, 0, 0).UnixMilli(),
-		Password:       goodPassword,
-		PolicyVersion:  "children-privacy-notice-v1",
-		StepUpPassword: goodPassword,
+		Username:      "kid.one",
+		DisplayName:   "Kid One",
+		DateOfBirthMs: time.Now().AddDate(-8, 0, 0).UnixMilli(),
+		Password:      goodPassword,
+		PolicyVersion: "children-privacy-notice-v1",
 	}))
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
@@ -71,8 +70,18 @@ func TestManagedChildAccount_Password_EndToEnd(t *testing.T) {
 	if child.GetStatus() != identitypb.UserStatus_USER_STATUS_ACTIVE {
 		t.Fatalf("child status = %v, want ACTIVE (born active, never pending)", child.GetStatus())
 	}
-	if create.Msg.GetConsent().GetConsentingUserId() == "" || !create.Msg.GetConsent().GetSteppedUp() {
-		t.Fatalf("consent record incomplete: %+v", create.Msg.GetConsent())
+	consent := create.Msg.GetConsent()
+	if consent.GetConsentingUserId() == "" {
+		t.Fatalf("consent record incomplete: %+v", consent)
+	}
+	// No step-up password was sent and none was asked for: the strong verified
+	// factor seeded on the adult is what admitted the call, and the record says
+	// so rather than claiming a password re-entry that never happened.
+	if consent.GetSteppedUp() {
+		t.Fatalf("consent stepped_up = true, want false: the create path proves no password")
+	}
+	if len(consent.GetVerificationFactors()) == 0 {
+		t.Fatalf("consent record must name the factor that admitted it: %+v", consent)
 	}
 	if create.Msg.GetEnrolmentToken() != "" {
 		t.Fatal("password arm must not return an enrolment token")
@@ -107,7 +116,6 @@ func TestManagedChildAccount_PasskeyEnrolment_EndToEnd(t *testing.T) {
 		DateOfBirthMs:    time.Now().AddDate(-9, 0, 0).UnixMilli(),
 		PasskeyEnrolment: true,
 		PolicyVersion:    "children-privacy-notice-v1",
-		StepUpPassword:   goodPassword,
 	}))
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
@@ -174,7 +182,6 @@ func TestManagedChildAccount_EnrolmentTicketMisuse(t *testing.T) {
 		DateOfBirthMs:    time.Now().AddDate(-7, 0, 0).UnixMilli(),
 		PasskeyEnrolment: true,
 		PolicyVersion:    "children-privacy-notice-v1",
-		StepUpPassword:   goodPassword,
 	}))
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)

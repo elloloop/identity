@@ -84,8 +84,7 @@ import { Code } from "astro-expressive-code/components";
     "display_name": "Kid One",
     "date_of_birth_ms": 1420070400000,
     "password": "the-parent-chosen-password",
-    "policy_version": "children-privacy-notice-v1",
-    "step_up_password": "the-parents-own-password"
+    "policy_version": "children-privacy-notice-v1"
   }'`}
   />
   <p>
@@ -114,8 +113,15 @@ import { Code } from "astro-expressive-code/components";
       verification.
     </li>
     <li>
-      <strong>A step-up re-authentication</strong>: <code>step_up_password</code>
-      is checked against the adult's stored hash on the call itself.
+      <strong>That factor is the whole identity check on this path.</strong> The
+      adult is <em>not</em> asked to re-enter their own password to add a child:
+      <code>step_up_password</code> is still accepted on the request for wire
+      compatibility, but it is ignored, so every create-path
+      <code>ConsentRecord</code> reads <code>stepped_up: false</code> and rests
+      on its verification factors instead. <code>GrantParentalConsent</code> and
+      every guardian management RPC still require the step-up, because they act
+      on an account that already exists; this RPC only ever creates a new, empty
+      one under the caller's own guardianship.
     </li>
     <li>
       <strong>A minor date of birth.</strong> A DOB that classifies as ADULT
@@ -127,9 +133,10 @@ import { Code } from "astro-expressive-code/components";
     The account, the guardian edge, and the <code>ConsentRecord</code> (carrying
     <code>policy_version</code>, the verification factors, and
     <code>stepped_up</code>) commit in a single transaction: no partial state is
-    reachable. The evidence is indistinguishable from a
-    <code>GrantParentalConsent</code> grant, which is the point — one format for
-    regulators, two ways of arriving at it.
+    reachable. The record is the same artifact a
+    <code>GrantParentalConsent</code> grant writes, which is the point — one
+    format for regulators, two ways of arriving at it;
+    <code>stepped_up</code> is what says which of the two this one came from.
   </p>
   <p>
     This is <strong>not self-signup</strong>, so the project's access mode

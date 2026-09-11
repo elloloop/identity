@@ -75,8 +75,14 @@ type ParentalConsentRecord struct {
 	// ParentalConsentFactor values present at the moment of consent (>= 1).
 	Factors string
 	// SteppedUp records whether the adult re-authenticated with a password at
-	// the moment of consent. False only when GuardianStepUpAllowNoPassword
-	// admitted an account holding no password.
+	// the moment of consent. It is evidence of what happened, not a pass/fail
+	// summary: a false here never means the consent was unverified, only that
+	// something other than a password re-entry admitted it. It is false for
+	// every CreateManagedChildAccount record (that path asks for no password —
+	// the mandatory strong verified factor is its re-authentication control),
+	// and on a GrantParentalConsent record only when
+	// GuardianStepUpAllowNoPassword admitted an account holding no password.
+	// Factors is the field that is never empty on either path.
 	SteppedUp        bool
 	ConsentIP        string
 	ConsentUserAgent string
