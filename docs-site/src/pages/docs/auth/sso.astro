@@ -1,0 +1,93 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Cross-product SSO">
+  <h1>Cross-product SSO</h1>
+  <p>
+    One authentication at the auth origin, many independently minted
+    per-product sessions. A user who completes the
+    <a href={`${import.meta.env.BASE_URL}/docs/auth/oauth`}>hosted OAuth
+    flow</a> at the auth origin additionally gets a server-side SSO session;
+    every product in the same project can then sign them in with a single
+    browser navigation — no second credential prompt — while still receiving
+    its <strong>own</strong> fresh token pair.
+  </p>
+
+  <h2>How it works</h2>
+  <ol>
+    <li>
+      The hosted OAuth callback mints the SSO session: an opaque token in a
+      <code>__Host-sso_session</code> cookie (HttpOnly, Secure,
+      <code>SameSite=Lax</code>, <code>Path=/</code>, no
+      <code>Domain</code> — the browser pins it to the exact auth origin
+      host). Only the token's SHA-256 hash is stored server-side, with its
+      own TTL.
+    </li>
+    <li>
+      A product links to
+      <code>GET /sso/continue?return_to=&lt;app url&gt;</code> on the auth
+      origin.
+    </li>
+    <li>
+      Continue-as validates the session and <strong>re-runs every
+      authorization gate</strong>: the return-URL allowlist, project access
+      mode, account status, the tenant login policy with the
+      <em>original</em> login method (a second factor now required falls
+      back to a full login), and the product age gate.
+    </li>
+    <li>
+      The user lands back at <code>return_to?code=&lt;otc&gt;</code> and the
+      product redeems the single-use code exactly as after a hosted login
+      (<code>RedeemOAuthCode</code>) — inheriting refresh rotation and
+      replay detection. Token pairs are never shared across products, and
+      sessions never bridge projects.
+    </li>
+  </ol>
+  <p>
+    With no valid session, <code>/sso/continue</code> redirects to the
+    hosted sign-in page, preserving the destination. With
+    <code>GATEWAY_SSO_CONTINUE_MODE=one_tap</code>, a confirmation page is
+    shown first and the code is minted only on the confirming POST.
+  </p>
+
+  <h2>Enabling it</h2>
+  <p>
+    Off by default — a disabled deployment registers no
+    <code>/sso</code> routes and mints no session.
+  </p>
+  <Code
+    lang="bash"
+    code={`# Required. Enabling without GATEWAY_OAUTH_ALLOWED_RETURN_URLS
+# (the allowlist continue-as validates return_to against) fails at boot.
+GATEWAY_SSO_ENABLED=true
+GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://product-a.example.com/callback
+
+# Absolute session lifetime, no sliding renewal (default 28800 = 8h).
+GATEWAY_SSO_SESSION_TTL_SECONDS=28800
+
+# silent (default) | one_tap.
+GATEWAY_SSO_CONTINUE_MODE=silent`}
+  />
+
+  <h2>Sign-out semantics</h2>
+  <ul>
+    <li>
+      <strong>Per-product logout</strong> revokes only that product's
+      tokens. The SSO session survives — signing out of one product is not
+      signing out of the auth origin.
+    </li>
+    <li>
+      <strong>Sign-out-everywhere</strong> (<code>RevokeAllSessions</code>)
+      revokes every session store, SSO included, and works for
+      password-less (OAuth-only) accounts.
+    </li>
+    <li>
+      The SSO session dies with the credential it was minted from: password
+      reset, email change, planted-credential clearing, account deletion
+      (including the sweeper purge), and refresh-replay detection all
+      revoke it — a leftover cookie can never continue-as afterwards.
+    </li>
+  </ul>
+</DocsLayout>

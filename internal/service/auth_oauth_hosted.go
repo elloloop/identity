@@ -123,11 +123,15 @@ func (s *AuthService) BeginHostedOAuth(
 
 // HostedOAuthCallbackResult is the output of CompleteHostedOAuth: the
 // validated return_to plus the freshly-minted one-time code the callback
-// appends as ?code=<otc>.
+// appends as ?code=<otc>. SSOSession is the plaintext SSO cookie token,
+// populated only when cross-product SSO is enabled (GATEWAY_SSO_ENABLED);
+// the handler sets it as the auth origin's __Host- cookie. The plaintext
+// exists only here and in the browser — the store keeps its hash.
 type HostedOAuthCallbackResult struct {
-	ReturnTo  string
-	Code      string
-	CSRFToken string
+	ReturnTo   string
+	Code       string
+	CSRFToken  string
+	SSOSession string
 }
 
 // CompleteHostedOAuth runs the hosted callback: it verifies the signed
@@ -199,7 +203,20 @@ func (s *AuthService) CompleteHostedOAuth(
 		return nil, err
 	}
 
-	return &HostedOAuthCallbackResult{ReturnTo: claims.ReturnTo, Code: otc, CSRFToken: claims.CSRFToken}, nil
+	callbackResult := &HostedOAuthCallbackResult{ReturnTo: claims.ReturnTo, Code: otc, CSRFToken: claims.CSRFToken}
+
+	// One authentication at the auth origin, many per-product sessions:
+	// with SSO on, the completed login also establishes the server-side
+	// SSO session whose cookie later drives the continue-as fast path.
+	if s.ssoEnabled() {
+		raw, err := s.mintSSOSession(ctx, result.User.ID, LoginMethodOAuth)
+		if err != nil {
+			return nil, err
+		}
+		callbackResult.SSOSession = raw
+	}
+
+	return callbackResult, nil
 }
 
 // mintOAuthOneTimeCode generates an opaque code, stores its hash bound
@@ -228,7 +245,10 @@ func (s *AuthService) mintOAuthOneTimeCode(ctx context.Context, userID string) (
 // replay, an expired code, or an unknown code all return
 // ErrOAuthCodeInvalid.
 func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAgent string) (*LoginResult, error) {
-	if !s.oauthResolver.available(ctx) {
+	// Codes are minted by the hosted callback AND by the SSO continue-as
+	// fast path, so an SSO-only deployment (no OAuth provider of its own)
+	// must still redeem.
+	if !s.oauthResolver.available(ctx) && !s.ssoEnabled() {
 		return nil, ErrOAuthDisabled
 	}
 	if strings.TrimSpace(code) == "" {
@@ -255,9 +275,10 @@ func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAge
 		return nil, err
 	}
 
-	// The hosted code was minted only after a verified provider login, so
-	// this is an oauth authentication; consult the tenant's LoginPolicy
-	// before issuing tokens, matching the headless OAuthLogin path.
+	// The code was minted only after a verified provider login (hosted
+	// callback) or a continue-as that re-ran the same gates, so this is an
+	// oauth authentication; consult the tenant's LoginPolicy before issuing
+	// tokens, matching the headless OAuthLogin path.
 	decision, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodOAuth)
 	if err != nil {
 		return nil, err

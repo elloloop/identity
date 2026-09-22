@@ -102,7 +102,7 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 	key := r.Header.Get(ProjectKeyHeader)
 	if key == "" {
 		switch {
-		case strings.HasPrefix(r.URL.Path, oauthPathPrefix):
+		case strings.HasPrefix(r.URL.Path, oauthPathPrefix), strings.HasPrefix(r.URL.Path, ssoProjectKeyPathPrefix):
 			var ok bool
 			if key, ok = oauthProjectKey(w, r); !ok {
 				writeConnectError(w, http.StatusBadRequest, "invalid_argument", "malformed form body")
@@ -175,11 +175,17 @@ const (
 	OAuthFormMaxBytes = 1 << 20
 	// oauthPathPrefix scopes the parameter-based project-key extraction to
 	// the browser-facing hosted OAuth routes (/oauth/start, /oauth/callback);
-	// authUIPathPrefix extends it (query-only) to the hosted auth UI, so the
-	// page can render a non-default project's options when served from the
-	// central hub. These are the only routes a key arrives without the header.
-	oauthPathPrefix  = "/oauth/"
-	authUIPathPrefix = "/auth/"
+	// ssoProjectKeyPathPrefix extends it to the cross-product continue-as
+	// route (/sso/continue), and authUIPathPrefix extends it (query-only) to
+	// the hosted auth UI, so the page can render a non-default project's
+	// options when served from the central hub. These are the only routes a
+	// key arrives without the header.
+	oauthPathPrefix = "/oauth/"
+	// ssoProjectKeyPathPrefix mirrors hostedOAuthPrefix's ssoPathPrefix
+	// twin in auth.go (same value, separate const per the file's own
+	// naming, as with oauthPathPrefix/hostedOAuthPrefix).
+	ssoProjectKeyPathPrefix = "/sso/"
+	authUIPathPrefix        = "/auth/"
 )
 
 // oauthProjectKey extracts the project key a hosted OAuth request carries in

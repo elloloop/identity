@@ -49,6 +49,13 @@ func (p *appTestStubProvider) Exchange(_ context.Context, _ oauth.ExchangeParams
 
 func newHostedTestHandler(t *testing.T, allowlist string, reg *oauth.Registry) http.Handler {
 	t.Helper()
+	return newHostedTestHandlerWithConfig(t, allowlist, reg, nil)
+}
+
+// newHostedTestHandlerWithConfig is newHostedTestHandler plus a config
+// mutation hook for features layered on the hosted flow (e.g. SSO).
+func newHostedTestHandlerWithConfig(t *testing.T, allowlist string, reg *oauth.Registry, mutate func(*config.Config)) http.Handler {
+	t.Helper()
 	signer := jwttest.NewSigner(t, "hosted-app-test")
 	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{
 		RPID: "localhost", RPName: "Test", Origin: "http://localhost:9002",
@@ -56,24 +63,28 @@ func newHostedTestHandler(t *testing.T, allowlist string, reg *oauth.Registry) h
 	if err != nil {
 		t.Fatalf("NewWebAuthnService: %v", err)
 	}
+	cfg := &config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
+		DefaultTenantID: "tenant",
+		// Open the env default project so the hosted-OAuth flow exercises the
+		// handler chain rather than the access gate (default-DENY without this).
+		DefaultProjectAccessMode: service.AccessModeOpen,
+		AuthAllowLocal:           true,
+		AllowedOrigins:           "http://localhost:9002",
+		JWTExpirySeconds:         900,
+		RefreshExpirySeconds:     604800,
+		LoginMaxFailedAttempts:   5,
+		LoginLockoutSeconds:      900,
+		PasskeyRPID:              "localhost",
+		PasskeyRPName:            "Test",
+		PasskeyOrigin:            "http://localhost:9002",
+		OAuthAllowedReturnURLs:   allowlist,
+	}
+	if mutate != nil {
+		mutate(cfg)
+	}
 	repo := memory.New()
 	built, err := New(Deps{
-		Config: &config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
-			DefaultTenantID: "tenant",
-			// Open the env default project so the hosted-OAuth flow exercises the
-			// handler chain rather than the access gate (default-DENY without this).
-			DefaultProjectAccessMode: service.AccessModeOpen,
-			AuthAllowLocal:           true,
-			AllowedOrigins:           "http://localhost:9002",
-			JWTExpirySeconds:         900,
-			RefreshExpirySeconds:     604800,
-			LoginMaxFailedAttempts:   5,
-			LoginLockoutSeconds:      900,
-			PasskeyRPID:              "localhost",
-			PasskeyRPName:            "Test",
-			PasskeyOrigin:            "http://localhost:9002",
-			OAuthAllowedReturnURLs:   allowlist,
-		},
+		Config:             cfg,
 		Logger:             zap.NewNop(),
 		Signer:             signer,
 		Repo:               repo,
