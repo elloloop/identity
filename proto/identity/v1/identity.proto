@@ -1670,8 +1670,10 @@ message AdminCreateProjectCredentialResponse {
 
 // AdminRevokeProjectCredentialRequest names the credential to revoke by the
 // credential_id AdminCreateProjectCredential returned, together with the
-// project it belongs to. A revoked credential stops authenticating at once;
-// the row is kept for audit.
+// project it belongs to. A revoked directory_reader key is refused on its next
+// lookup; a revoked publishable, secret or mTLS key stops selecting its
+// project within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS (default 30s) on
+// each replica, which caches project resolution. The row is kept for audit.
 message AdminRevokeProjectCredentialRequest {
   string project_id = 1;
   string credential_id = 2;
@@ -2104,7 +2106,9 @@ message LookupUsersResponse {
   // users holds one entry per requested address that names an ACTIVE account,
   // in request order. An address with no account, or whose account is not
   // active (invited, deactivated, suspended, pending consent or deletion), is
-  // omitted, so presence in this list means "active member of the project".
+  // omitted. Presence means an active account holds that address; it does not
+  // mean the address was verified, since a self-signed-up account is listed
+  // before its owner confirms it.
   repeated DirectoryUser users = 1;
 }
 
@@ -2533,7 +2537,8 @@ service IdentityService {
   rpc AdminCreateProjectCredential(AdminCreateProjectCredentialRequest) returns (AdminCreateProjectCredentialResponse);
   // Revokes a project credential of any kind. Operator-only, like the other
   // Admin* RPCs; NOT_FOUND when the project has no credential with that id,
-  // and idempotent on an already-revoked one.
+  // and idempotent on an already-revoked one. Takes effect per kind as
+  // AdminRevokeProjectCredentialRequest describes.
   rpc AdminRevokeProjectCredential(AdminRevokeProjectCredentialRequest) returns (AdminRevokeProjectCredentialResponse);
   rpc AdminAddProjectAuthDomain(AdminAddProjectAuthDomainRequest) returns (AdminAddProjectAuthDomainResponse);
   // Customer-owned custom auth-domains: a project registers a serving
@@ -2611,7 +2616,8 @@ service IdentityService {
   // AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
   // to that credential's project whatever the request Host. The credential
   // authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
-  // wrong, revoked or non-directory key; UNIMPLEMENTED on a build with no
-  // control plane.
+  // wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
+  // more than 100 addresses, or a blank address; UNIMPLEMENTED on a build
+  // with no control plane.
   rpc LookupUsers(LookupUsersRequest) returns (LookupUsersResponse);
 }

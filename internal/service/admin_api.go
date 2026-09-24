@@ -374,11 +374,12 @@ func (s *ControlPlaneAdminService) AdminCreateProjectCredential(ctx context.Cont
 }
 
 // AdminRevokeProjectCredential revokes one of a project's credentials, of any
-// kind. A revoked credential stops resolving a project and stops
-// authenticating a directory lookup on the next request that presents it — no
-// cache sits in front of either check. Revoking an already-revoked
-// credential is a no-op; a credential id the project does not own is
-// ErrNotFound, so a typo is not mistaken for a successful revocation.
+// kind. A revoked directory_reader key is refused on its next lookup, which
+// reads the credential uncached. A revoked publishable, secret or mTLS key
+// stops resolving a project once each replica's project-resolution cache
+// expires it, within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS. Revoking an
+// already-revoked credential is a no-op; a credential id the project does not
+// own is ErrNotFound, so a typo is not mistaken for a successful revocation.
 func (s *ControlPlaneAdminService) AdminRevokeProjectCredential(ctx context.Context, secret, projectID, credentialID string) error {
 	if err := s.authorize(secret); err != nil {
 		return err

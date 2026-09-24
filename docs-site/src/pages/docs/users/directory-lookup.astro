@@ -23,7 +23,9 @@ import { Code } from "astro-expressive-code/components";
     <strong>Postgres deployments only.</strong> Directory keys are project
     credentials, which live in the control plane. On a build without one
     (the memory and SQLite drivers) <code>LookupUsers</code> returns
-    <code>UNIMPLEMENTED</code>.
+    <code>UNIMPLEMENTED</code>. The <code>directory_reader</code> kind needs
+    migration 0033: run <code>identity migrate</code>, or set
+    <code>GATEWAY_POSTGRES_AUTO_MIGRATE</code>, before minting one.
   </div>
 
   <h2>What the key can and cannot do</h2>
@@ -37,7 +39,9 @@ import { Code } from "astro-expressive-code/components";
     <li>
       It is bound to the project it was minted for. Every lookup reads that
       project's users, whatever <code>Host</code> or
-      <code>X-Project-Key</code> the request carries.
+      <code>X-Project-Key</code> the request carries. It is not a project key
+      either: sent as <code>X-Project-Key</code>, or as the hosted OAuth
+      routes' <code>project_key</code> parameter, it selects no project.
     </li>
     <li>
       Matching is exact, ignoring case — the comparison sign-in uses. No
@@ -48,7 +52,9 @@ import { Code } from "astro-expressive-code/components";
       Only <strong>active</strong> accounts are returned. Invited,
       deactivated, suspended, and pending-consent or pending-deletion accounts
       are omitted, as are addresses with no account; an address is absent
-      rather than an error.
+      rather than an error. An entry does <em>not</em> mean the address was
+      verified: an account created through self-signup is returned before its
+      owner confirms the address.
     </li>
     <li>
       Each entry carries <code>id</code> (the account's <code>sub</code>),
@@ -57,10 +63,22 @@ import { Code } from "astro-expressive-code/components";
     </li>
     <li>
       A batch holds 1–100 addresses. Calls are rate-limited per client IP by
-      <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code> (default 120 per
-      window).
+      <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code> (default 120) per
+      <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window (default 60 s).
     </li>
   </ul>
+
+  <h3>Sizing the rate limit</h3>
+  <p>
+    The limit counts calls per client IP, and a service usually reaches the
+    identity server from a few egress addresses — so for a machine caller it
+    is effectively a per-service limit, shared by every instance behind one
+    address. Set it to the peak number of <code>LookupUsers</code> calls all
+    of those instances make in one window, with headroom; each call resolves
+    up to 100 addresses, so batch before you raise it. It must be a positive
+    integer: zero, a negative or a malformed value fails the boot, so the
+    lookup cannot be left unthrottled.
+  </p>
 
   <h2>Mint a key</h2>
   <p>
@@ -86,9 +104,11 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>Look up users</h2>
   <p>
-    Present the raw key in the <code>X-Directory-Key</code> header. It is
-    deliberately not the <code>Authorization</code> header, and it is not
-    CORS-allowed: this is a server-to-server call.
+    Present the raw key in the <code>X-Directory-Key</code> header, from
+    server-side code only. It is deliberately not the
+    <code>Authorization</code> header, and it is left out of the CORS
+    allow-list, so a browser cannot send it cross-origin: the key never
+    belongs in a web or mobile client.
   </p>
   <Code
     lang="bash"
@@ -114,19 +134,30 @@ import { Code } from "astro-expressive-code/components";
   -d '{"projectId": "<project-id>", "credentialId": "<credential-id>"}'`}
   />
   <p>
-    Revocation takes effect on the next request — nothing caches a
-    credential. Revoking an already-revoked key is a no-op;
+    A revoked directory key is refused on its next lookup: every lookup
+    reads the credential afresh. Revoking an already-revoked key is a no-op;
     a credential id the project does not own is <code>NOT_FOUND</code>.
+    To rotate, mint the new key, deploy it, then revoke the old one.
+  </p>
+  <p>
     <code>AdminRevokeProjectCredential</code> revokes project credentials of
-    every kind, not only directory keys. To rotate, mint the new key, deploy
-    it, then revoke the old one.
+    every kind, not only directory keys, but the other kinds are not refused
+    as promptly. A publishable, secret or mTLS key presented as
+    <code>X-Project-Key</code> (or <code>project_key</code>) selects its project through a per-replica
+    project-resolution cache that revocation does not clear, so each replica
+    keeps resolving the key for up to
+    <code>GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS</code> (default 30 s)
+    after the revoke. Plan an incident response around that window.
   </p>
 
   <h2>Audit</h2>
   <p>
     Minting and revoking record <code>project_credential_created</code> and
-    <code>project_credential_revoked</code>. Every lookup records
-    <code>directory_lookup</code> in the key's project, with the actor
+    <code>project_credential_revoked</code>, with the credential's project in
+    the event's details. Those two rows are written in the project of the host
+    the admin call was sent to — the project its <code>Host</code> resolves
+    to — not in the credential's project, so read them there. Every lookup
+    records <code>directory_lookup</code> in the key's project, with the actor
     <code>credential:&lt;credential-id&gt;</code> and the number of addresses
     requested and matched — never the addresses themselves. A refused
     presentation of a real key (wrong secret, wrong kind, revoked) is recorded

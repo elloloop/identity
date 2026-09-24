@@ -596,7 +596,8 @@ type IdentityServiceClient interface {
 	AdminCreateProjectCredential(context.Context, *connect.Request[v1.AdminCreateProjectCredentialRequest]) (*connect.Response[v1.AdminCreateProjectCredentialResponse], error)
 	// Revokes a project credential of any kind. Operator-only, like the other
 	// Admin* RPCs; NOT_FOUND when the project has no credential with that id,
-	// and idempotent on an already-revoked one.
+	// and idempotent on an already-revoked one. Takes effect per kind as
+	// AdminRevokeProjectCredentialRequest describes.
 	AdminRevokeProjectCredential(context.Context, *connect.Request[v1.AdminRevokeProjectCredentialRequest]) (*connect.Response[v1.AdminRevokeProjectCredentialResponse], error)
 	AdminAddProjectAuthDomain(context.Context, *connect.Request[v1.AdminAddProjectAuthDomainRequest]) (*connect.Response[v1.AdminAddProjectAuthDomainResponse], error)
 	// Customer-owned custom auth-domains: a project registers a serving
@@ -668,8 +669,9 @@ type IdentityServiceClient interface {
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
 	// to that credential's project whatever the request Host. The credential
 	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
-	// wrong, revoked or non-directory key; UNIMPLEMENTED on a build with no
-	// control plane.
+	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
+	// more than 100 addresses, or a blank address; UNIMPLEMENTED on a build
+	// with no control plane.
 	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
 }
 
@@ -2362,7 +2364,8 @@ type IdentityServiceHandler interface {
 	AdminCreateProjectCredential(context.Context, *connect.Request[v1.AdminCreateProjectCredentialRequest]) (*connect.Response[v1.AdminCreateProjectCredentialResponse], error)
 	// Revokes a project credential of any kind. Operator-only, like the other
 	// Admin* RPCs; NOT_FOUND when the project has no credential with that id,
-	// and idempotent on an already-revoked one.
+	// and idempotent on an already-revoked one. Takes effect per kind as
+	// AdminRevokeProjectCredentialRequest describes.
 	AdminRevokeProjectCredential(context.Context, *connect.Request[v1.AdminRevokeProjectCredentialRequest]) (*connect.Response[v1.AdminRevokeProjectCredentialResponse], error)
 	AdminAddProjectAuthDomain(context.Context, *connect.Request[v1.AdminAddProjectAuthDomainRequest]) (*connect.Response[v1.AdminAddProjectAuthDomainResponse], error)
 	// Customer-owned custom auth-domains: a project registers a serving
@@ -2434,8 +2437,9 @@ type IdentityServiceHandler interface {
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
 	// to that credential's project whatever the request Host. The credential
 	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
-	// wrong, revoked or non-directory key; UNIMPLEMENTED on a build with no
-	// control plane.
+	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
+	// more than 100 addresses, or a blank address; UNIMPLEMENTED on a build
+	// with no control plane.
 	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
 }
 

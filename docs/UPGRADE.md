@@ -16,13 +16,19 @@ credential behaves exactly as before.
   raw key in the `X-Directory-Key` header. It returns
   `{id, email, name, avatar_url}` for each address that names an **active**
   account in the credential's project, in request order; exact match
-  ignoring case, nothing else is disclosed. The key authorizes this RPC and no
-  other, and it reads only the project it was minted for, whatever the
-  request's `Host` or `X-Project-Key`.
+  ignoring case, nothing else is disclosed. An entry does not mean the
+  address was verified: a self-signed-up account is listed before its owner
+  confirms it. The key authorizes this RPC and no other, it reads only the
+  project it was minted for, whatever the request's `Host` or
+  `X-Project-Key`, and it is not itself a project key. Call it from
+  server-side code only; the header is not CORS-allowed.
 - **Revoke** with the new `AdminRevokeProjectCredential { project_id,
   credential_id }` (`X-Admin-Secret`). It works for credentials of every
-  kind, takes effect on the next request, is idempotent, and returns
-  `NOT_FOUND` for a credential the project does not own.
+  kind, is idempotent, and returns `NOT_FOUND` for a credential the project
+  does not own. A revoked directory key is refused on its next lookup. A
+  revoked publishable, secret or mTLS key stops selecting its project only
+  once each replica's project-resolution cache expires it — up to
+  `GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS` (default 30 s).
 
 Postgres only, like every project credential: **run `identity migrate`** (or
 set `GATEWAY_POSTGRES_AUTO_MIGRATE`) — migration 0033 widens the
@@ -31,10 +37,15 @@ directory credentials, since the narrower constraint cannot hold them. On the
 memory and SQLite drivers `LookupUsers` returns `UNIMPLEMENTED`.
 
 New knob: `GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` (default 120 per
-`GATEWAY_RATE_LIMIT_WINDOW_SECONDS` window) caps `LookupUsers` per client IP.
+`GATEWAY_RATE_LIMIT_WINDOW_SECONDS` window) caps `LookupUsers` per client IP —
+for a service behind one egress address, that is a per-service cap. It must be
+a positive integer: zero, negative or malformed fails the boot, and a `Config`
+built in code with the field left zero gets the default.
 New audit events: `directory_lookup` (actor `credential:<id>`, counts only,
 never addresses), `project_credential_created` and
-`project_credential_revoked` — minting was not audited before.
+`project_credential_revoked` — minting was not audited before. The two
+credential events land in the project the admin call's `Host` resolves to,
+not the credential's project.
 
 **Session revocation mode now scopes every project.** Under
 `GATEWAY_REVOCATION_MODE=session`, the repository that invalidates the session

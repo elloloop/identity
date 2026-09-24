@@ -11843,8 +11843,10 @@ func (x *AdminCreateProjectCredentialResponse) GetRawKey() string {
 
 // AdminRevokeProjectCredentialRequest names the credential to revoke by the
 // credential_id AdminCreateProjectCredential returned, together with the
-// project it belongs to. A revoked credential stops authenticating at once;
-// the row is kept for audit.
+// project it belongs to. A revoked directory_reader key is refused on its next
+// lookup; a revoked publishable, secret or mTLS key stops selecting its
+// project within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS (default 30s) on
+// each replica, which caches project resolution. The row is kept for audit.
 type AdminRevokeProjectCredentialRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
@@ -14522,7 +14524,9 @@ type LookupUsersResponse struct {
 	// users holds one entry per requested address that names an ACTIVE account,
 	// in request order. An address with no account, or whose account is not
 	// active (invited, deactivated, suspended, pending consent or deletion), is
-	// omitted, so presence in this list means "active member of the project".
+	// omitted. Presence means an active account holds that address; it does not
+	// mean the address was verified, since a self-signed-up account is listed
+	// before its owner confirms it.
 	Users         []*DirectoryUser `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
