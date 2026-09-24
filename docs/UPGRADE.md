@@ -1,5 +1,52 @@
 # Upgrade guide
 
+## v4.7 → v4.8 — read-only directory lookup for services (additive)
+
+A service that must resolve staff email addresses to accounts — including
+people who have never used that service — no longer needs an admin session.
+An operator mints a **directory reader** project credential, and the service
+presents it to one new RPC, `LookupUsers`. Everything is additive: no
+existing RPC, field or default changes, and a deployment that mints no such
+credential behaves exactly as before.
+
+- **Mint** with the existing `AdminCreateProjectCredential`
+  (`X-Admin-Secret`), `kind: "directory_reader"`. The response's `raw_key`
+  (`dk_<public>.<secret>`) is shown once; keep `credential_id`.
+- **Look up** with `LookupUsers { emails: [...] }` (1–100 addresses) and the
+  raw key in the `X-Directory-Key` header. It returns
+  `{id, email, name, avatar_url}` for each address that names an **active**
+  account in the credential's project, in request order; exact match
+  ignoring case, nothing else is disclosed. The key authorizes this RPC and no
+  other, and it reads only the project it was minted for, whatever the
+  request's `Host` or `X-Project-Key`.
+- **Revoke** with the new `AdminRevokeProjectCredential { project_id,
+  credential_id }` (`X-Admin-Secret`). It works for credentials of every
+  kind, takes effect on the next request, is idempotent, and returns
+  `NOT_FOUND` for a credential the project does not own.
+
+Postgres only, like every project credential: **run `identity migrate`** (or
+set `GATEWAY_POSTGRES_AUTO_MIGRATE`) — migration 0033 widens the
+`project_credentials.kind` constraint. Its down migration deletes any
+directory credentials, since the narrower constraint cannot hold them. On the
+memory and SQLite drivers `LookupUsers` returns `UNIMPLEMENTED`.
+
+New knob: `GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` (default 120 per
+`GATEWAY_RATE_LIMIT_WINDOW_SECONDS` window) caps `LookupUsers` per client IP.
+New audit events: `directory_lookup` (actor `credential:<id>`, counts only,
+never addresses), `project_credential_created` and
+`project_credential_revoked` — minting was not audited before.
+
+**Two routes the JWT layer used to swallow now reach their handlers.** The
+inbound SCIM server (`/scim/v2/*`) authenticates with its own bearer token,
+but the JWT middleware ran first and refused that token as an invalid access
+token, so every SCIM request failed with `401 unauthenticated` in a served
+deployment. The public SAML metadata document (`/saml/metadata`) was refused
+the same way. Both are now exempt from JWT enforcement; SCIM still requires
+`GATEWAY_SCIM_BEARER_TOKEN` on every request. If you enabled SCIM and gave up
+on it, it works now — and it is a live, write-capable surface as soon as it
+is enabled, so check that `GATEWAY_SCIM_ENABLED` is only set where you
+intend it.
+
 ## v4.6 → v4.7 — the deny layer holds at every door
 
 Follow-up to v4.6.0, from the review of the deny layer. Four behaviour changes,
