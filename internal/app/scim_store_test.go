@@ -33,6 +33,9 @@ type scimFakeRepo struct {
 	deleteCalled bool
 }
 
+// WithProject keeps the injected values on the scoped repository.
+func (r *scimFakeRepo) WithProject(string) service.Repository { return r }
+
 func (r *scimFakeRepo) GetUser(context.Context, string) (*service.User, error) {
 	return r.user, r.errGet
 }

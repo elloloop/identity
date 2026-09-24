@@ -26,6 +26,10 @@ type StubRepository struct{}
 
 var _ Repository = (*StubRepository)(nil)
 
+// WithProject returns the stub itself: it holds no data, so every project
+// answers identically.
+func (s StubRepository) WithProject(string) Repository { return s }
+
 func (StubRepository) FindUserByEmail(context.Context, string) (*User, error) {
 	return nil, ErrServiceUnavailable
 }

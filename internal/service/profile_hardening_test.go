@@ -59,6 +59,9 @@ type refetchFailRepo struct {
 	state int
 }
 
+// WithProject keeps the refetch failure on the scoped repository.
+func (r *refetchFailRepo) WithProject(string) Repository { return r }
+
 func (r *refetchFailRepo) GetUser(ctx context.Context, userID string) (*User, error) {
 	r.state++
 	if r.state == 2 {

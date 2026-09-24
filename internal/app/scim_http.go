@@ -82,7 +82,7 @@ func validateSCIMProject(lookup service.NativeOAuthProjectStore, projectID strin
 // one project's users — the cross-project provisioning hole. The bound repo is
 // built once and reused: every SCIM request shares the same project scope.
 func (h *scimHandler) scimProvider() http.Handler {
-	repo := service.ProjectBoundRepository(h.repo, h.projectID)
+	repo := h.repo.WithProject(h.projectID)
 	store := &repoSCIMStore{
 		repo:      repo,
 		audit:     h.audit,

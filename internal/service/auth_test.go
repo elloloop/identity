@@ -31,6 +31,9 @@ type signupRaceRepo struct {
 	findCalls int
 }
 
+// WithProject keeps the race on the scoped repository.
+func (r *signupRaceRepo) WithProject(string) Repository { return r }
+
 func (r *signupRaceRepo) FindUserByEmail(ctx context.Context, email string) (*User, error) {
 	r.findCalls++
 	if r.findCalls == 1 {

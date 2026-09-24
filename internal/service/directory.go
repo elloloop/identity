@@ -88,7 +88,7 @@ func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string,
 	if err != nil {
 		return nil, err
 	}
-	found, err := ProjectBoundRepository(s.users, cred.ProjectID).FindUsersByEmails(ctx, wanted)
+	found, err := s.users.WithProject(cred.ProjectID).FindUsersByEmails(ctx, wanted)
 	if err != nil {
 		return nil, err
 	}

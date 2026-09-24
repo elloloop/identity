@@ -118,6 +118,10 @@ type fakeRepo struct {
 	errGetUser    error // makes GetUser fail
 }
 
+// WithProject returns the fake itself: it is one store, so every project
+// reads the same rows.
+func (r *fakeRepo) WithProject(string) service.Repository { return r }
+
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		users:              make(map[string]*service.User),

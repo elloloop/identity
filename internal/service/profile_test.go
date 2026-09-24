@@ -28,6 +28,9 @@ type fakeRepoOverFakeDB struct {
 	db *fakeDB
 }
 
+// WithProject keeps the fakeDB facade on the scoped repository.
+func (f fakeRepoOverFakeDB) WithProject(string) Repository { return f }
+
 func (f fakeRepoOverFakeDB) GetUser(ctx context.Context, userID string) (*User, error) {
 	node, err := f.db.GetNode(ctx, "", "", typeUser, userID)
 	if err != nil {

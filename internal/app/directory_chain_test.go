@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/repo/memory"
 	"github.com/elloloop/identity/internal/service"
@@ -43,7 +44,7 @@ func (c chainCredentials) ProjectCredentialByPublicID(_ context.Context, publicI
 	return &cp, nil
 }
 
-func newDirectoryChainApp(t *testing.T) (http.Handler, service.Repository) {
+func newDirectoryChainApp(t *testing.T, cfg *config.Config) (http.Handler, service.Repository) {
 	t.Helper()
 	sum := sha256.Sum256([]byte(chainDirectorySecret))
 	pk, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: "localhost", RPName: "Identity Test", Origin: "http://localhost:9002"})
@@ -52,7 +53,7 @@ func newDirectoryChainApp(t *testing.T) (http.Handler, service.Repository) {
 	}
 	repo := memory.New()
 	built, err := New(Deps{
-		Config:             newTestConfig(),
+		Config:             cfg,
 		Logger:             zap.NewNop(),
 		Signer:             jwttest.NewSigner(t, "directory-chain"),
 		Repo:               repo,
@@ -92,14 +93,28 @@ func postRPC(t *testing.T, h http.Handler, path, body string, headers map[string
 // TestDirectoryLookup_ServedThroughFullChain proves the JWT-exempt LookupUsers
 // reaches its handler with only a directory key, resolves the credential's
 // project (not the Host-resolved default one), and discloses the minimal
-// profile.
+// profile — under both revocation modes, since session mode decorates the
+// repository the directory service binds to the credential's project.
 func TestDirectoryLookup_ServedThroughFullChain(t *testing.T) {
-	h, repo := newDirectoryChainApp(t)
+	for name, mode := range map[string]config.RevocationMode{
+		"ttl":     config.RevocationModeTTL,
+		"session": config.RevocationModeSession,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := newTestConfig()
+			cfg.RevocationMode = mode
+			assertDirectoryLookupServed(t, cfg)
+		})
+	}
+}
+
+func assertDirectoryLookupServed(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	h, repo := newDirectoryChainApp(t, cfg)
 	ctx := context.Background()
-	inProject, err := service.ProjectBoundRepository(repo, chainDirectoryProject).CreateUser(ctx, &service.User{
+	if _, err := repo.WithProject(chainDirectoryProject).CreateUser(ctx, &service.User{
 		Email: "staff@corp.test", Name: "Staff", Status: service.StatusActive, PhoneNumber: "+15550100",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("seed directory project: %v", err)
 	}
 	// Same address in the default project the request's Host resolves to.
@@ -118,8 +133,11 @@ func TestDirectoryLookup_ServedThroughFullChain(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Users) != 1 || resp.Users[0]["id"] != inProject {
-		t.Fatalf("users = %v, want only the credential project's account %q", resp.Users, inProject)
+	// The two projects' memory stores both number their first user mem-1, so
+	// the name is what tells the credential project's account from the
+	// default project's.
+	if len(resp.Users) != 1 || resp.Users[0]["name"] != "Staff" {
+		t.Fatalf("users = %v, want only the credential project's account (name Staff)", resp.Users)
 	}
 	for field := range resp.Users[0] {
 		switch field {
@@ -148,8 +166,8 @@ func TestDirectoryLookup_ServedThroughFullChain(t *testing.T) {
 // held for RPCs added later too, since the list comes from the descriptor.
 // The user-management RPCs are additionally pinned to 401.
 func TestDirectoryKey_GrantsNothingElse(t *testing.T) {
-	h, repo := newDirectoryChainApp(t)
-	target, err := service.ProjectBoundRepository(repo, chainDirectoryProject).CreateUser(context.Background(),
+	h, repo := newDirectoryChainApp(t, newTestConfig())
+	target, err := repo.WithProject(chainDirectoryProject).CreateUser(context.Background(),
 		&service.User{Email: "victim@corp.test", Status: service.StatusActive})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
@@ -183,7 +201,7 @@ func TestDirectoryKey_GrantsNothingElse(t *testing.T) {
 		}
 	}
 
-	u, err := service.ProjectBoundRepository(repo, chainDirectoryProject).GetUser(context.Background(), target)
+	u, err := repo.WithProject(chainDirectoryProject).GetUser(context.Background(), target)
 	if err != nil || u == nil || u.Status != service.StatusActive || u.Email != "victim@corp.test" {
 		t.Fatalf("target account changed under the directory key: %+v %v", u, err)
 	}

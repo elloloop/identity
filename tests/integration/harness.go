@@ -765,6 +765,10 @@ type MemRepo struct {
 	auditEvents        []*service.AuditEvent
 }
 
+// WithProject returns the repo itself: it is one store, so every project
+// reads the same rows.
+func (r *MemRepo) WithProject(string) service.Repository { return r }
+
 // NewMemRepo returns an empty MemRepo.
 func NewMemRepo() *MemRepo {
 	return &MemRepo{

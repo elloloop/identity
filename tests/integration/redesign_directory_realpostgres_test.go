@@ -13,6 +13,7 @@ import (
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
@@ -48,9 +49,26 @@ func requireConnectCode(t *testing.T, what string, err error, want connect.Code)
 // the composition root against a real Postgres: an operator mints a
 // directory_reader key, a service resolves addresses with it (active accounts
 // only, exact match, its own project only), the key opens no other RPC, and
-// revocation takes effect on the next call.
+// revocation takes effect on the next call — under both revocation modes,
+// since session mode decorates the repository the lookup binds to the
+// credential's project.
 func TestRedesign_DirectoryLookup_Flow(t *testing.T) {
-	h := startRedesignHarness(t)
+	for name, mode := range map[string]config.RevocationMode{
+		"ttl":     config.RevocationModeTTL,
+		"session": config.RevocationModeSession,
+	} {
+		t.Run(name, func(t *testing.T) {
+			directoryLookupFlow(t, startRedesignHarnessWith(t, func(cfg *config.Config) { cfg.RevocationMode = mode }))
+		})
+	}
+}
+
+// otherAliceName tells the second project's account apart from the default
+// project's one at the same address.
+const otherAliceName = "Other Project Alice"
+
+func directoryLookupFlow(t *testing.T, h *RedesignHarness) {
+	t.Helper()
 	ctx := context.Background()
 	unique := time.Now().UnixNano()
 	addr := func(local string) string { return fmt.Sprintf("%s-%d@corp-example.com", local, unique) }
@@ -71,8 +89,8 @@ func TestRedesign_DirectoryLookup_Flow(t *testing.T) {
 		t.Fatalf("AdminCreateProject: %v", err)
 	}
 	otherProject := other.Msg.GetProjectId()
-	otherAlice, err := service.ProjectBoundRepository(h.Stores.users, otherProject).CreateUser(ctx, &service.User{
-		Email: addr("alice"), Status: service.StatusActive, Role: "member",
+	otherAlice, err := h.Stores.users.WithProject(otherProject).CreateUser(ctx, &service.User{
+		Email: addr("alice"), Name: otherAliceName, Status: service.StatusActive, Role: "member",
 	})
 	if err != nil {
 		t.Fatalf("seed other project: %v", err)
@@ -88,7 +106,7 @@ func TestRedesign_DirectoryLookup_Flow(t *testing.T) {
 		t.Fatalf("LookupUsers: %v", err)
 	}
 	users := resp.Msg.GetUsers()
-	if len(users) != 1 || users[0].GetId() != alice.userID || users[0].GetEmail() != addr("alice") {
+	if len(users) != 1 || users[0].GetId() != alice.userID || users[0].GetEmail() != addr("alice") || users[0].GetName() == otherAliceName {
 		t.Fatalf("LookupUsers = %v, want only alice (%s) from the default project", users, alice.userID)
 	}
 
@@ -100,8 +118,8 @@ func TestRedesign_DirectoryLookup_Flow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LookupUsers (other project): %v", err)
 	}
-	if got := resp.Msg.GetUsers(); len(got) != 1 || got[0].GetId() != otherAlice {
-		t.Fatalf("other project's key saw %v, want only %s", got, otherAlice)
+	if got := resp.Msg.GetUsers(); len(got) != 1 || got[0].GetId() != otherAlice || got[0].GetName() != otherAliceName {
+		t.Fatalf("other project's key saw %v, want only %s (%s)", got, otherAlice, otherAliceName)
 	}
 
 	// The key opens nothing else — neither as X-Directory-Key nor as Bearer.

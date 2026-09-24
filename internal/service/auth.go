@@ -212,6 +212,15 @@ type PollQrResult struct {
 
 // Repository abstracts all persistence operations for the auth service.
 type Repository interface {
+	// WithProject returns a Repository bound to projectID (its storage
+	// shard): every read and write through it carries that project's
+	// `WHERE project_id = $1` boundary. It is part of the interface, not an
+	// optional capability, because a Repository that cannot be rebound would
+	// silently serve whatever project it was built for. A decorator must
+	// implement it itself and re-wrap the bound inner Repository — an
+	// embedded one's promoted WithProject returns the undecorated inner.
+	WithProject(projectID string) Repository
+
 	// Users
 	FindUserByEmail(ctx context.Context, email string) (*User, error)
 	// FindUserByUsername resolves a managed child account by its

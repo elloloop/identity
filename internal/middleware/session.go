@@ -57,17 +57,19 @@ func NewSessionMetrics(reg prometheus.Registerer) (*SessionMetrics, error) {
 	return &SessionMetrics{lookupDuration: hist}, nil
 }
 
-// SessionLookup is the interface the verification middleware uses to
-// resolve a `sid` claim to an active session. It's narrower than
-// service.Repository so tests can swap in a fake and the middleware
-// only takes a dependency on what it actually needs.
-type SessionLookup interface {
+// SessionSource is what the cache reads sessions from: a repository it can
+// bind to the project a request resolved to, since a session row lives in
+// exactly one project and a repository bound to another never finds it.
+type SessionSource interface {
 	GetSessionBySid(ctx context.Context, sid string) (*service.SessionRecord, error)
+	WithProject(projectID string) service.Repository
 }
 
-// SessionCache wraps a SessionLookup with an in-process TTL cache. The
-// cache is keyed by SID; entries store the resolved active/revoked
-// state plus the deadline past which the entry must be re-read.
+// SessionCache wraps a SessionSource with an in-process TTL cache. The
+// cache is keyed by SID; entries store the project the state was read
+// in, the resolved active/revoked state, and the deadline past which the
+// entry must be re-read. A request resolved to a different project than
+// the entry's re-reads rather than trusting another project's answer.
 //
 // The cache is invalidated synchronously on RevokeSession / RevokeSessionsForUser
 // inside the same process. Cross-replica revocation is bounded by the
@@ -83,7 +85,7 @@ type SessionLookup interface {
 // read-heavy with occasional invalidation. ristretto's strengths
 // (admission policy, cost-based eviction) don't apply.
 type SessionCache struct {
-	source  SessionLookup
+	source  SessionSource
 	ttl     time.Duration
 	metrics *SessionMetrics
 	now     func() time.Time
@@ -93,6 +95,7 @@ type SessionCache struct {
 
 type cacheEntry struct {
 	mu       sync.Mutex
+	project  string
 	rec      *service.SessionRecord
 	deadline time.Time
 	missing  bool // true means "verified missing at deadline time"
@@ -100,7 +103,7 @@ type cacheEntry struct {
 
 // NewSessionCache constructs a cache. When ttl <= 0 the cache is in
 // strict mode and every lookup goes through to source.
-func NewSessionCache(source SessionLookup, ttl time.Duration, metrics *SessionMetrics) *SessionCache {
+func NewSessionCache(source SessionSource, ttl time.Duration, metrics *SessionMetrics) *SessionCache {
 	if source == nil {
 		return nil
 	}
@@ -127,30 +130,31 @@ const (
 	SessionStateMissing
 )
 
-// Lookup resolves the session state for sid. TTL=0 always reads the
-// repository; otherwise a cached entry whose deadline hasn't passed
-// is served without I/O. Cache misses populate the entry under a
-// per-entry lock so concurrent first-readers issue a single repo
-// round-trip.
+// Lookup resolves the session state for sid in the project ctx resolved
+// to. TTL=0 always reads the repository; otherwise a cached entry for the
+// same project whose deadline hasn't passed is served without I/O. Cache
+// misses populate the entry under a per-entry lock so concurrent
+// first-readers issue a single repo round-trip.
 func (c *SessionCache) Lookup(ctx context.Context, sid string) (SessionState, error) {
 	if c == nil {
 		return SessionStateActive, nil
 	}
+	project := requestProject(ctx)
 	start := c.now()
 	if c.ttl <= 0 {
-		state, err := c.read(ctx, sid)
+		state, err := c.read(ctx, project, sid)
 		c.observe(start, state, err)
 		return state, err
 	}
 	now := start
 
 	// Fast path: cache hit served lock-free per sid. The entry's mu
-	// protects the deadline + payload pair; sync.Map handles the
-	// per-key concurrency for the outer map.
+	// protects the project + deadline + payload triple; sync.Map handles
+	// the per-key concurrency for the outer map.
 	if raw, ok := c.entries.Load(sid); ok {
 		entry := raw.(*cacheEntry)
 		entry.mu.Lock()
-		if entry.deadline.After(now) {
+		if entry.fresh(project, now) {
 			state := stateFromEntry(entry)
 			entry.mu.Unlock()
 			c.observeHit(start, state)
@@ -164,15 +168,15 @@ func (c *SessionCache) Lookup(ctx context.Context, sid string) (SessionState, er
 	entry := raw.(*cacheEntry)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	// A concurrent refiller may have already won; re-check the deadline
-	// before issuing the repo call.
-	if entry.deadline.After(c.now()) {
+	// A concurrent refiller may have already won; re-check before issuing
+	// the repo call.
+	if entry.fresh(project, c.now()) {
 		state := stateFromEntry(entry)
 		c.observeHit(start, state)
 		return state, nil
 	}
 
-	state, err := c.read(ctx, sid)
+	state, err := c.read(ctx, project, sid)
 	if err != nil {
 		// Don't cache transient errors — the next request retries the
 		// repo. Cache poisoning would block legitimate users until TTL.
@@ -182,6 +186,7 @@ func (c *SessionCache) Lookup(ctx context.Context, sid string) (SessionState, er
 	// Cache only the minimal state required to answer subsequent reads.
 	// The full SessionRecord isn't kept — the hot path never inspects
 	// anything other than SID + RevokedAtMs presence.
+	entry.project = project
 	switch state {
 	case SessionStateActive:
 		entry.rec = &service.SessionRecord{SID: sid}
@@ -198,8 +203,27 @@ func (c *SessionCache) Lookup(ctx context.Context, sid string) (SessionState, er
 	return state, nil
 }
 
-func (c *SessionCache) read(ctx context.Context, sid string) (SessionState, error) {
-	rec, err := c.source.GetSessionBySid(ctx, sid)
+// requestProject is the project the resolution middleware scoped the
+// request to; blank when none ran, which reads the source's own project.
+func requestProject(ctx context.Context) string {
+	if scope := service.ProjectScopeFromContext(ctx); scope != nil {
+		return scope.ProjectID
+	}
+	return ""
+}
+
+// fresh reports whether the entry answers for project at now. The caller
+// holds e.mu.
+func (e *cacheEntry) fresh(project string, now time.Time) bool {
+	return e.project == project && e.deadline.After(now)
+}
+
+func (c *SessionCache) read(ctx context.Context, project, sid string) (SessionState, error) {
+	getSession := c.source.GetSessionBySid
+	if project != "" {
+		getSession = c.source.WithProject(project).GetSessionBySid
+	}
+	rec, err := getSession(ctx, sid)
 	if err != nil {
 		return SessionStateMissing, err
 	}
@@ -260,9 +284,9 @@ func outcomeLabel(state SessionState, err error, hit bool) string {
 	return "missing"
 }
 
-// Invalidate drops cached state for sid. Called from
-// RevokingSessionLookup wrappers so a same-process revoke is visible
-// on the very next request.
+// Invalidate drops cached state for sid, whichever project it was read
+// in. Called from RevokingSessionRepository so a same-process revoke is
+// visible on the very next request.
 func (c *SessionCache) Invalidate(sid string) {
 	if c == nil {
 		return
@@ -291,6 +315,13 @@ func (c *SessionCache) InvalidateAll() {
 type RevokingSessionRepository struct {
 	service.Repository
 	cache *SessionCache
+}
+
+// WithProject binds the wrapped repository to projectID and re-wraps it,
+// so a project-scoped caller both reads only that project and still
+// invalidates the cache when it revokes.
+func (r *RevokingSessionRepository) WithProject(projectID string) service.Repository {
+	return &RevokingSessionRepository{Repository: r.Repository.WithProject(projectID), cache: r.cache}
 }
 
 // WrapSessionRepository returns a Repository that invalidates the

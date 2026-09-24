@@ -34,7 +34,7 @@ func newSCIMTestHandler(t *testing.T, enabled bool) (http.Handler, service.Repos
 	}).register(mux, enabled)
 	// Return the repository bound to the SAME fixed project the handler writes
 	// through, so test assertions read the partition the SCIM store mutates.
-	scoped := service.ProjectBoundRepository(repo, testSCIMProjectID)
+	scoped := repo.WithProject(testSCIMProjectID)
 	return mux, scoped
 }
 
@@ -185,12 +185,12 @@ func TestSCIM_IgnoresRequestProjectScope(t *testing.T) {
 
 	ctx := context.Background()
 	// The user must exist in the CONFIGURED project...
-	if u, err := service.ProjectBoundRepository(repo, testSCIMProjectID).
+	if u, err := repo.WithProject(testSCIMProjectID).
 		FindUserByEmail(ctx, "victim@example.com"); err != nil || u == nil {
 		t.Fatalf("user must land in configured project %q: %v %#v", testSCIMProjectID, err, u)
 	}
 	// ...and must NOT have leaked into the forged project.
-	if u, err := service.ProjectBoundRepository(repo, foreignProject).
+	if u, err := repo.WithProject(foreignProject).
 		FindUserByEmail(ctx, "victim@example.com"); err != nil || u != nil {
 		t.Fatalf("cross-project leak: user reachable from forged project %q: %#v (err=%v)", foreignProject, u, err)
 	}

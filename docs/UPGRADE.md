@@ -36,6 +36,17 @@ New audit events: `directory_lookup` (actor `credential:<id>`, counts only,
 never addresses), `project_credential_created` and
 `project_credential_revoked` — minting was not audited before.
 
+**Session revocation mode now scopes every project.** Under
+`GATEWAY_REVOCATION_MODE=session`, the repository that invalidates the session
+cache on revoke could not be rebound to a request's project, so every request
+— sign-in, profile, admin, SCIM, identity verification — read and wrote the
+boot-default project whatever project its `Host` or key resolved to. It is now
+bound like every other repository, and the session cache reads a session in
+the project it was issued in. A session-mode deployment serving more than one
+project finds each project's accounts where they belong; data such a
+deployment already wrote for a non-default project sits in the default
+project and is not moved.
+
 **Two routes the JWT layer used to swallow now reach their handlers.** The
 inbound SCIM server (`/scim/v2/*`) authenticates with its own bearer token,
 but the JWT middleware ran first and refused that token as an invalid access

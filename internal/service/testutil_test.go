@@ -219,6 +219,10 @@ type fakeRepo struct {
 	auditEvents         []*AuditEvent
 }
 
+// WithProject returns the fake itself: it is one store, so every project
+// reads the same rows.
+func (r *fakeRepo) WithProject(string) Repository { return r }
+
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		users:              make(map[string]*User),

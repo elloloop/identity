@@ -18,18 +18,37 @@ import (
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 )
 
-// stubLookup is a SessionLookup the cache uses to drive its slow path.
+// stubLookup is a SessionSource the cache uses to drive its slow path.
 // reads counts every GetSessionBySid call so tests can assert the
-// cache turned N requests into 1 repo read.
+// cache turned N requests into 1 repo read. WithProject returns an
+// independent per-project sibling, mirroring a driver's project boundary.
+// The embedded Repository is nil: any other method panics loudly.
 type stubLookup struct {
-	mu    sync.Mutex
-	rows  map[string]*service.SessionRecord
-	reads atomic.Int64
-	err   error
+	service.Repository
+	mu       sync.Mutex
+	rows     map[string]*service.SessionRecord
+	reads    atomic.Int64
+	err      error
+	projects map[string]*stubLookup
 }
 
 func newStubLookup() *stubLookup {
-	return &stubLookup{rows: map[string]*service.SessionRecord{}}
+	return &stubLookup{rows: map[string]*service.SessionRecord{}, projects: map[string]*stubLookup{}}
+}
+
+func (s *stubLookup) WithProject(projectID string) service.Repository {
+	return s.project(projectID)
+}
+
+func (s *stubLookup) project(projectID string) *stubLookup {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sibling, ok := s.projects[projectID]
+	if !ok {
+		sibling = newStubLookup()
+		s.projects[projectID] = sibling
+	}
+	return sibling
 }
 
 func (s *stubLookup) GetSessionBySid(_ context.Context, sid string) (*service.SessionRecord, error) {
@@ -220,6 +239,61 @@ func TestRevokingSessionRepository_InvalidatesCacheOnRevoke(t *testing.T) {
 	}
 }
 
+// A project-bound wrapper must still be the wrapper: a revoke through the
+// repository a request scoped to its project invalidates the cache too.
+func TestRevokingSessionRepository_WithProjectKeepsInvalidating(t *testing.T) {
+	t.Parallel()
+	src := newStubLookup()
+	src.project("p-b").put(&service.SessionRecord{SID: "s1", UserID: "u1"})
+	cache := NewSessionCache(src, 60*time.Second, nil)
+	bound := WrapSessionRepository(&fakeRepo{stub: src}, cache).WithProject("p-b")
+	if _, ok := bound.(*RevokingSessionRepository); !ok {
+		t.Fatalf("WithProject returned %T, want the wrapper", bound)
+	}
+	ctx := service.WithProjectScope(context.Background(), &service.ProjectScope{ProjectID: "p-b"})
+
+	if state, err := cache.Lookup(ctx, "s1"); err != nil || state != SessionStateActive {
+		t.Fatalf("warm: state=%v err=%v, want Active", state, err)
+	}
+	if err := bound.RevokeSession(ctx, "s1", 200); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := cache.Lookup(ctx, "s1"); err != nil || state != SessionStateRevoked {
+		t.Fatalf("after revoke: state=%v err=%v, want Revoked", state, err)
+	}
+}
+
+// A session lives in one project, so the cache reads it in the project the
+// request resolved to and never answers one project with another's entry.
+func TestSessionCache_ReadsTheRequestProject(t *testing.T) {
+	t.Parallel()
+	src := newStubLookup()
+	src.project("p-b").put(&service.SessionRecord{SID: "s1", UserID: "u1"})
+	cache := NewSessionCache(src, 60*time.Second, nil)
+	scoped := func(project string) context.Context {
+		return service.WithProjectScope(context.Background(), &service.ProjectScope{ProjectID: project})
+	}
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want SessionState
+	}{
+		{"owning project", scoped("p-b"), SessionStateActive},
+		{"cached for p-b, asked for p-a", scoped("p-a"), SessionStateMissing},
+		{"no scope reads the source's own project", context.Background(), SessionStateMissing},
+		{"owning project again", scoped("p-b"), SessionStateActive},
+	} {
+		state, err := cache.Lookup(tc.ctx, "s1")
+		if err != nil || state != tc.want {
+			t.Fatalf("%s: state=%v err=%v, want %v", tc.name, state, err, tc.want)
+		}
+	}
+	if got := src.project("p-b").reads.Load(); got != 2 {
+		t.Fatalf("p-b reads = %d, want 2 (a foreign-project lookup evicts the entry)", got)
+	}
+}
+
 func TestSessionMetrics_RecordsLookupOutcome(t *testing.T) {
 	t.Parallel()
 	src := newStubLookup()
@@ -258,6 +332,10 @@ func TestSessionMetrics_RecordsLookupOutcome(t *testing.T) {
 type fakeRepo struct {
 	service.Repository
 	stub *stubLookup
+}
+
+func (r *fakeRepo) WithProject(projectID string) service.Repository {
+	return &fakeRepo{stub: r.stub.project(projectID)}
 }
 
 func (r *fakeRepo) RevokeSession(_ context.Context, sid string, atMs int64) error {
