@@ -117,6 +117,7 @@ const (
 	IdentityService_SetUserQuota_FullMethodName                    = "/identity.v1.IdentityService/SetUserQuota"
 	IdentityService_AdminCreateProject_FullMethodName              = "/identity.v1.IdentityService/AdminCreateProject"
 	IdentityService_AdminCreateProjectCredential_FullMethodName    = "/identity.v1.IdentityService/AdminCreateProjectCredential"
+	IdentityService_AdminRevokeProjectCredential_FullMethodName    = "/identity.v1.IdentityService/AdminRevokeProjectCredential"
 	IdentityService_AdminAddProjectAuthDomain_FullMethodName       = "/identity.v1.IdentityService/AdminAddProjectAuthDomain"
 	IdentityService_AddProjectAuthDomain_FullMethodName            = "/identity.v1.IdentityService/AddProjectAuthDomain"
 	IdentityService_VerifyProjectAuthDomain_FullMethodName         = "/identity.v1.IdentityService/VerifyProjectAuthDomain"
@@ -140,6 +141,7 @@ const (
 	IdentityService_AdminGetProjectAssurance_FullMethodName        = "/identity.v1.IdentityService/AdminGetProjectAssurance"
 	IdentityService_AdminDeleteProjectOAuthProvider_FullMethodName = "/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider"
 	IdentityService_AdminListProjectOAuthProviders_FullMethodName  = "/identity.v1.IdentityService/AdminListProjectOAuthProviders"
+	IdentityService_LookupUsers_FullMethodName                     = "/identity.v1.IdentityService/LookupUsers"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -336,6 +338,10 @@ type IdentityServiceClient interface {
 	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
 	AdminCreateProject(ctx context.Context, in *AdminCreateProjectRequest, opts ...grpc.CallOption) (*AdminCreateProjectResponse, error)
 	AdminCreateProjectCredential(ctx context.Context, in *AdminCreateProjectCredentialRequest, opts ...grpc.CallOption) (*AdminCreateProjectCredentialResponse, error)
+	// Revokes a project credential of any kind. Operator-only, like the other
+	// Admin* RPCs; NOT_FOUND when the project has no credential with that id,
+	// and idempotent on an already-revoked one.
+	AdminRevokeProjectCredential(ctx context.Context, in *AdminRevokeProjectCredentialRequest, opts ...grpc.CallOption) (*AdminRevokeProjectCredentialResponse, error)
 	AdminAddProjectAuthDomain(ctx context.Context, in *AdminAddProjectAuthDomainRequest, opts ...grpc.CallOption) (*AdminAddProjectAuthDomainResponse, error)
 	// Customer-owned custom auth-domains: a project registers a serving
 	// hostname, proves ownership via a DNS TXT challenge, then it resolves.
@@ -401,6 +407,14 @@ type IdentityServiceClient interface {
 	AdminGetProjectAssurance(ctx context.Context, in *AdminGetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(ctx context.Context, in *AdminDeleteProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthProviderResponse, error)
 	AdminListProjectOAuthProviders(ctx context.Context, in *AdminListProjectOAuthProvidersRequest, opts ...grpc.CallOption) (*AdminListProjectOAuthProvidersResponse, error)
+	// Read-only directory lookup for services. Authenticated NOT by a user JWT
+	// but by a directory_reader project credential (minted with
+	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
+	// to that credential's project whatever the request Host. The credential
+	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
+	// wrong, revoked or non-directory key; UNIMPLEMENTED on a build with no
+	// control plane.
+	LookupUsers(ctx context.Context, in *LookupUsersRequest, opts ...grpc.CallOption) (*LookupUsersResponse, error)
 }
 
 type identityServiceClient struct {
@@ -1391,6 +1405,16 @@ func (c *identityServiceClient) AdminCreateProjectCredential(ctx context.Context
 	return out, nil
 }
 
+func (c *identityServiceClient) AdminRevokeProjectCredential(ctx context.Context, in *AdminRevokeProjectCredentialRequest, opts ...grpc.CallOption) (*AdminRevokeProjectCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminRevokeProjectCredentialResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminRevokeProjectCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AdminAddProjectAuthDomain(ctx context.Context, in *AdminAddProjectAuthDomainRequest, opts ...grpc.CallOption) (*AdminAddProjectAuthDomainResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminAddProjectAuthDomainResponse)
@@ -1621,6 +1645,16 @@ func (c *identityServiceClient) AdminListProjectOAuthProviders(ctx context.Conte
 	return out, nil
 }
 
+func (c *identityServiceClient) LookupUsers(ctx context.Context, in *LookupUsersRequest, opts ...grpc.CallOption) (*LookupUsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LookupUsersResponse)
+	err := c.cc.Invoke(ctx, IdentityService_LookupUsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
@@ -1815,6 +1849,10 @@ type IdentityServiceServer interface {
 	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
 	AdminCreateProject(context.Context, *AdminCreateProjectRequest) (*AdminCreateProjectResponse, error)
 	AdminCreateProjectCredential(context.Context, *AdminCreateProjectCredentialRequest) (*AdminCreateProjectCredentialResponse, error)
+	// Revokes a project credential of any kind. Operator-only, like the other
+	// Admin* RPCs; NOT_FOUND when the project has no credential with that id,
+	// and idempotent on an already-revoked one.
+	AdminRevokeProjectCredential(context.Context, *AdminRevokeProjectCredentialRequest) (*AdminRevokeProjectCredentialResponse, error)
 	AdminAddProjectAuthDomain(context.Context, *AdminAddProjectAuthDomainRequest) (*AdminAddProjectAuthDomainResponse, error)
 	// Customer-owned custom auth-domains: a project registers a serving
 	// hostname, proves ownership via a DNS TXT challenge, then it resolves.
@@ -1880,6 +1918,14 @@ type IdentityServiceServer interface {
 	AdminGetProjectAssurance(context.Context, *AdminGetProjectAssuranceRequest) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(context.Context, *AdminDeleteProjectOAuthProviderRequest) (*AdminDeleteProjectOAuthProviderResponse, error)
 	AdminListProjectOAuthProviders(context.Context, *AdminListProjectOAuthProvidersRequest) (*AdminListProjectOAuthProvidersResponse, error)
+	// Read-only directory lookup for services. Authenticated NOT by a user JWT
+	// but by a directory_reader project credential (minted with
+	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
+	// to that credential's project whatever the request Host. The credential
+	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
+	// wrong, revoked or non-directory key; UNIMPLEMENTED on a build with no
+	// control plane.
+	LookupUsers(context.Context, *LookupUsersRequest) (*LookupUsersResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
 }
 
@@ -2184,6 +2230,9 @@ func (UnimplementedIdentityServiceServer) AdminCreateProject(context.Context, *A
 func (UnimplementedIdentityServiceServer) AdminCreateProjectCredential(context.Context, *AdminCreateProjectCredentialRequest) (*AdminCreateProjectCredentialResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminCreateProjectCredential not implemented")
 }
+func (UnimplementedIdentityServiceServer) AdminRevokeProjectCredential(context.Context, *AdminRevokeProjectCredentialRequest) (*AdminRevokeProjectCredentialResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminRevokeProjectCredential not implemented")
+}
 func (UnimplementedIdentityServiceServer) AdminAddProjectAuthDomain(context.Context, *AdminAddProjectAuthDomainRequest) (*AdminAddProjectAuthDomainResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminAddProjectAuthDomain not implemented")
 }
@@ -2252,6 +2301,9 @@ func (UnimplementedIdentityServiceServer) AdminDeleteProjectOAuthProvider(contex
 }
 func (UnimplementedIdentityServiceServer) AdminListProjectOAuthProviders(context.Context, *AdminListProjectOAuthProvidersRequest) (*AdminListProjectOAuthProvidersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminListProjectOAuthProviders not implemented")
+}
+func (UnimplementedIdentityServiceServer) LookupUsers(context.Context, *LookupUsersRequest) (*LookupUsersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LookupUsers not implemented")
 }
 func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
 func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
@@ -4038,6 +4090,24 @@ func _IdentityService_AdminCreateProjectCredential_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_AdminRevokeProjectCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRevokeProjectCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminRevokeProjectCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminRevokeProjectCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminRevokeProjectCredential(ctx, req.(*AdminRevokeProjectCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AdminAddProjectAuthDomain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminAddProjectAuthDomainRequest)
 	if err := dec(in); err != nil {
@@ -4452,6 +4522,24 @@ func _IdentityService_AdminListProjectOAuthProviders_Handler(srv interface{}, ct
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_LookupUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LookupUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).LookupUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_LookupUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).LookupUsers(ctx, req.(*LookupUsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -4852,6 +4940,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _IdentityService_AdminCreateProjectCredential_Handler,
 		},
 		{
+			MethodName: "AdminRevokeProjectCredential",
+			Handler:    _IdentityService_AdminRevokeProjectCredential_Handler,
+		},
+		{
 			MethodName: "AdminAddProjectAuthDomain",
 			Handler:    _IdentityService_AdminAddProjectAuthDomain_Handler,
 		},
@@ -4942,6 +5034,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminListProjectOAuthProviders",
 			Handler:    _IdentityService_AdminListProjectOAuthProviders_Handler,
+		},
+		{
+			MethodName: "LookupUsers",
+			Handler:    _IdentityService_LookupUsers_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

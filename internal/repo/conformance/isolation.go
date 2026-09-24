@@ -130,6 +130,16 @@ func runProjectIsolationConformance(t *testing.T, driver Driver) {
 			t.Fatalf("B resolved the wrong row: got id=%q hash=%q, want id=%q hash=hash-B", gotB.ID, gotB.PasswordHash, uidB)
 		}
 
+		// The batch email lookup (the directory's read) is project-scoped the
+		// same way: B's batch surfaces only B's row for the shared address.
+		batchB, err := b.FindUsersByEmails(ctx, []string{sharedEmail})
+		if err != nil {
+			t.Fatalf("FindUsersByEmails in B: %v", err)
+		}
+		if len(batchB) != 1 || batchB[0].PasswordHash != "hash-B" {
+			t.Fatalf("cross-project leak: FindUsersByEmails in B = %#v, want only B's row", batchB)
+		}
+
 		// Cross-project GetUser must not surface the other project's data.
 		// (Check on DATA, not just non-nil: some backends restart their node-id
 		// counter per scope, so A and B can mint the same id string; a real

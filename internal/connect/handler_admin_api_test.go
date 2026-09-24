@@ -23,6 +23,7 @@ const handlerAdminSecret = "handler-operator-secret"
 // and the last auth-domain it was asked to ensure.
 type adminControlStore struct {
 	nextID         int
+	credentials    map[string]*service.AdminProjectCredential // credential id → row
 	domains        map[string]*service.AdminProjectAuthDomain // hostname → row
 	configs        map[string]string                          // projectID → config_json
 	configVersions map[string]int64                           // projectID → CAS token
@@ -127,7 +128,31 @@ func (s *adminControlStore) CreateProject(_ context.Context, p *service.AdminPro
 func (s *adminControlStore) CreateProjectCredential(_ context.Context, c *service.AdminProjectCredential) (string, error) {
 	id := s.mint("cred")
 	c.ID = id
+	if s.credentials == nil {
+		s.credentials = map[string]*service.AdminProjectCredential{}
+	}
+	cp := *c
+	s.credentials[id] = &cp
 	return id, nil
+}
+
+func (s *adminControlStore) RevokeProjectCredential(_ context.Context, projectID, credentialID string, _ int64) error {
+	c, ok := s.credentials[credentialID]
+	if !ok || c.ProjectID != projectID {
+		return service.ErrNotFound
+	}
+	c.Revoked = true
+	return nil
+}
+
+func (s *adminControlStore) ProjectCredentialByPublicID(_ context.Context, publicID string) (*service.AdminProjectCredential, error) {
+	for _, c := range s.credentials {
+		if c.PublicID == publicID {
+			cp := *c
+			return &cp, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *adminControlStore) EnsureAuthDomain(_ context.Context, projectID, hostname string, isPrimary bool, _ int64) error {
@@ -198,7 +223,7 @@ var _ service.ControlPlaneProjectStore = (*adminControlStore)(nil)
 // the no-control-plane build.
 func startAdminServer(t *testing.T, svc *service.ControlPlaneAdminService) identityconnectgen.IdentityServiceClient {
 	t.Helper()
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, svc, testConfig())
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, svc, nil, testConfig())
 	mux := http.NewServeMux()
 	path, handler := identityconnectgen.NewIdentityServiceHandler(h)
 	mux.Handle(path, handler)
@@ -270,6 +295,9 @@ func TestAdminRPCs_NilService_ReturnUnimplemented(t *testing.T) {
 	_, err = client.AdminCreateProjectCredential(ctx, withAdminSecret(&identitypb.AdminCreateProjectCredentialRequest{ProjectId: "p"}, handlerAdminSecret))
 	requireCode(t, err, connect.CodeUnimplemented)
 
+	_, err = client.AdminRevokeProjectCredential(ctx, withAdminSecret(&identitypb.AdminRevokeProjectCredentialRequest{ProjectId: "p", CredentialId: "c"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+
 	_, err = client.AdminAddProjectAuthDomain(ctx, withAdminSecret(&identitypb.AdminAddProjectAuthDomainRequest{ProjectId: "p", Hostname: "h.example.com"}, handlerAdminSecret))
 	requireCode(t, err, connect.CodeUnimplemented)
 
@@ -308,6 +336,10 @@ func TestAdminRPCs_BadSecret_Denied(t *testing.T) {
 
 	_, err = client.AdminCreateProjectCredential(ctx,
 		withAdminSecret(&identitypb.AdminCreateProjectCredentialRequest{ProjectId: "p"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	_, err = client.AdminRevokeProjectCredential(ctx,
+		withAdminSecret(&identitypb.AdminRevokeProjectCredentialRequest{ProjectId: "p", CredentialId: "c"}, "nope"))
 	requireCode(t, err, connect.CodePermissionDenied)
 
 	_, err = client.AdminAddProjectAuthDomain(ctx,

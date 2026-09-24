@@ -45,18 +45,27 @@ const (
 )
 
 // Credential kinds an operator may mint. "publishable" is a public lookup
-// key with no secret half; "secret" carries a secret shown exactly once.
+// key with no secret half; "secret" carries a secret shown exactly once;
+// "directory_reader" also carries a once-shown secret, and is the only kind
+// DirectoryService accepts — it authorizes the read-only LookupUsers RPC
+// against its own project and nothing else.
 const (
-	CredentialKindPublishable = "publishable"
-	CredentialKindSecret      = "secret"
+	CredentialKindPublishable     = "publishable"
+	CredentialKindSecret          = "secret"
+	CredentialKindDirectoryReader = "directory_reader"
 )
 
 // Credential public-id prefixes, so a key is self-describing at a glance
-// (Stripe-style): pk_ for publishable, sk_ for secret.
+// (Stripe-style): pk_ for publishable, sk_ for secret, dk_ for directory.
 const (
-	publishableKeyPrefix = "pk_"
-	secretKeyPrefix      = "sk_"
+	publishableKeyPrefix     = "pk_"
+	secretKeyPrefix          = "sk_"
+	directoryReaderKeyPrefix = "dk_"
 )
+
+// rawKeySeparator joins a credential's public id and secret half in the raw
+// key handed to the operator; the public id never contains it.
+const rawKeySeparator = "."
 
 // authDomainVerifyTXTPrefix prefixes the DNS TXT value a customer publishes to
 // prove control of a custom serving hostname. The full value is the prefix +
@@ -110,6 +119,9 @@ type AdminProjectCredential struct {
 	Kind       string
 	PublicID   string
 	SecretHash string
+	// Revoked is populated on reads (DirectoryCredentialStore) and ignored on
+	// writes: a credential is always minted active.
+	Revoked bool
 }
 
 // AdminProjectAuthDomain is a project's serving hostname as the admin service
@@ -135,6 +147,10 @@ type AdminProjectAuthDomain struct {
 type ControlPlaneProjectStore interface {
 	CreateProject(ctx context.Context, p *AdminProject) (string, error)
 	CreateProjectCredential(ctx context.Context, c *AdminProjectCredential) (string, error)
+	// RevokeProjectCredential marks the project's credential credentialID
+	// revoked at atMs. Idempotent on an already-revoked credential; a
+	// credential id the project does not own surfaces ErrNotFound.
+	RevokeProjectCredential(ctx context.Context, projectID, credentialID string, atMs int64) error
 	EnsureAuthDomain(ctx context.Context, projectID, hostname string, isPrimary bool, verifiedAtMs int64) error
 
 	// CreateAuthDomain registers an UNVERIFIED serving hostname (verifiedAtMs
@@ -310,12 +326,12 @@ type MintedCredential struct {
 	RawKey   string
 }
 
-// AdminCreateProjectCredential mints a lookup credential for a project. For a
-// publishable kind it generates a public id only (no secret). For a secret
-// kind it generates a public id AND a secret half: the secret's hash is
-// stored, and the full "publicID.secret" raw key is returned ONCE — the only
-// time it is ever shown, exactly like an API key. The public id is always the
-// lookup key the project resolver matches on.
+// AdminCreateProjectCredential mints a credential for a project. For a
+// publishable kind it generates a public id only (no secret). For the secret
+// and directory_reader kinds it generates a public id AND a secret half: the
+// secret's hash is stored, and the full "publicID.secret" raw key is returned
+// ONCE — the only time it is ever shown, exactly like an API key. The public
+// id is always the lookup key the project resolver matches on.
 func (s *ControlPlaneAdminService) AdminCreateProjectCredential(ctx context.Context, secret, projectID, kind string) (*MintedCredential, error) {
 	if err := s.authorize(secret); err != nil {
 		return nil, err
@@ -336,12 +352,12 @@ func (s *ControlPlaneAdminService) AdminCreateProjectCredential(ctx context.Cont
 		PublicID:  publicID,
 	}
 	out := &MintedCredential{PublicID: publicID}
-	if kind == CredentialKindSecret {
+	if kind != CredentialKindPublishable {
 		rawSecret := randomToken(adminSecretBytes)
 		cred.SecretHash = sha256Hex(rawSecret)
 		// The raw key is the public id and the secret joined; the caller
 		// presents it whole, and the resolver looks up by the public-id half.
-		out.RawKey = publicID + "." + rawSecret
+		out.RawKey = publicID + rawKeySeparator + rawSecret
 	}
 
 	id, err := s.projects.CreateProjectCredential(ctx, cred)
@@ -349,7 +365,37 @@ func (s *ControlPlaneAdminService) AdminCreateProjectCredential(ctx context.Cont
 		return nil, err
 	}
 	out.ID = id
+	s.audit.Log(ctx, audit.EventProjectCredentialCreated, audit.WithSuccess(true), audit.WithDetails(map[string]any{
+		"project_id":    projectID,
+		"credential_id": id,
+		"kind":          kind,
+	}))
 	return out, nil
+}
+
+// AdminRevokeProjectCredential revokes one of a project's credentials, of any
+// kind. A revoked credential stops resolving a project and stops
+// authenticating a directory lookup on the next request that presents it — no
+// cache sits in front of either check. Revoking an already-revoked
+// credential is a no-op; a credential id the project does not own is
+// ErrNotFound, so a typo is not mistaken for a successful revocation.
+func (s *ControlPlaneAdminService) AdminRevokeProjectCredential(ctx context.Context, secret, projectID, credentialID string) error {
+	if err := s.authorize(secret); err != nil {
+		return err
+	}
+	projectID = strings.TrimSpace(projectID)
+	credentialID = strings.TrimSpace(credentialID)
+	if projectID == "" || credentialID == "" {
+		return fmt.Errorf("%w: project_id and credential_id are required", ErrInvalidArgument)
+	}
+	if err := s.projects.RevokeProjectCredential(ctx, projectID, credentialID, s.nowFunc()); err != nil {
+		return err
+	}
+	s.audit.Log(ctx, audit.EventProjectCredentialRevoked, audit.WithSuccess(true), audit.WithDetails(map[string]any{
+		"project_id":    projectID,
+		"credential_id": credentialID,
+	}))
+	return nil
 }
 
 // AdminAddProjectAuthDomain registers a serving hostname on a project,
@@ -767,9 +813,11 @@ func normalizeCredentialKind(kind string) (canonical, prefix string, err error) 
 		return CredentialKindPublishable, publishableKeyPrefix, nil
 	case CredentialKindSecret:
 		return CredentialKindSecret, secretKeyPrefix, nil
+	case CredentialKindDirectoryReader:
+		return CredentialKindDirectoryReader, directoryReaderKeyPrefix, nil
 	default:
-		return "", "", fmt.Errorf("%w: credential kind %q (want %q or %q)",
-			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret)
+		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q or %q)",
+			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret, CredentialKindDirectoryReader)
 	}
 }
 

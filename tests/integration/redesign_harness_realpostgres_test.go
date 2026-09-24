@@ -104,6 +104,10 @@ type governanceStores struct {
 	// config_json (e.g. per-project OAuth providers) directly — the RPCs do not
 	// expose config authoring.
 	controlPlane service.ControlPlaneProjectStore
+	// users is the boot-default user repository (bound to the harness's
+	// default project; rebind with service.ProjectBoundRepository), so a test
+	// can seed account states no unauthenticated RPC can reach.
+	users service.Repository
 }
 
 // RedesignHarness is a full-stack, postgres-backed identity service plus the
@@ -214,6 +218,7 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 			policies:     built.LoginPolicyStore,
 			projects:     built.ProjectResolver(),
 			controlPlane: built.ControlPlaneStore(),
+			users:        built.Repository,
 		},
 	}
 }

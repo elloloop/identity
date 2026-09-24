@@ -1368,6 +1368,15 @@
     "anchor": "rate-limiting"
   },
   {
+    "name": "GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP",
+    "type": "integer",
+    "default": "120",
+    "required": false,
+    "description": "is the per-IP cap per window on LookupUsers, the service-to-service directory lookup (each call resolves up to service.MaxDirectoryLookupEmails addresses).",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
     "name": "GATEWAY_RATE_LIMIT_IDV_PER_IP",
     "type": "integer",
     "default": "5",

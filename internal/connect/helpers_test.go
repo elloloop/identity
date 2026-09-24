@@ -1409,6 +1409,26 @@ func (r *fakeRepo) GetUsersByIDs(_ context.Context, ids []string) ([]*service.Us
 	return out, nil
 }
 
+func (r *fakeRepo) FindUsersByEmails(_ context.Context, emails []string) ([]*service.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.User, 0, len(emails))
+	for _, u := range r.users {
+		if u.Email == "" {
+			continue
+		}
+		for _, e := range emails {
+			if strings.EqualFold(u.Email, e) {
+				cp := *u
+				out = append(out, &cp)
+				break
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 func (r *fakeRepo) SetDateOfBirthOnce(_ context.Context, userID string, dobMs int64, status string, nowMs int64) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -2243,7 +2263,7 @@ func newHarnessWith(
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 
-	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, cfg)
+	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, nil, cfg)
 
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)

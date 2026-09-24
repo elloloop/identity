@@ -82,6 +82,7 @@ var AuthExemptPaths = map[string]bool{
 	// the secret check, not the JWT, is their auth.
 	"/identity.v1.IdentityService/AdminCreateProject":              true,
 	"/identity.v1.IdentityService/AdminCreateProjectCredential":    true,
+	"/identity.v1.IdentityService/AdminRevokeProjectCredential":    true,
 	"/identity.v1.IdentityService/AdminAddProjectAuthDomain":       true,
 	"/identity.v1.IdentityService/AddProjectAuthDomain":            true,
 	"/identity.v1.IdentityService/VerifyProjectAuthDomain":         true,
@@ -107,9 +108,14 @@ var AuthExemptPaths = map[string]bool{
 	// RPCs), and GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP closes it entirely. It
 	// also self-secures by closing permanently once any platform admin exists.
 	"/identity.v1.IdentityService/CreateFirstPlatformAdmin": true,
-	"/.well-known/jwks.json":                                true,
-	"/health":                                               true,
-	"/healthz":                                              true,
+	// LookupUsers is called by a service, not a user: it is authenticated by
+	// a directory_reader project credential in X-Directory-Key, which the
+	// directory service verifies (hash compare, kind, revocation) and which
+	// scopes the lookup to that credential's project.
+	"/identity.v1.IdentityService/LookupUsers": true,
+	"/.well-known/jwks.json":                   true,
+	"/health":                                  true,
+	"/healthz":                                 true,
 	// The SAML IdP metadata is a public document an SP fetches to import the
 	// IdP's signing certificate; no caller of it holds a JWT.
 	SAMLMetadataPath: true,

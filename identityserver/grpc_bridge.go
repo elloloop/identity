@@ -491,6 +491,14 @@ func (b *grpcBridge) AdminCreateProject(ctx context.Context, in *identitypb.Admi
 	return invoke(ctx, in, b.h.AdminCreateProject)
 }
 
+func (b *grpcBridge) AdminRevokeProjectCredential(ctx context.Context, in *identitypb.AdminRevokeProjectCredentialRequest) (*identitypb.AdminRevokeProjectCredentialResponse, error) {
+	return invoke(ctx, in, b.h.AdminRevokeProjectCredential)
+}
+
+func (b *grpcBridge) LookupUsers(ctx context.Context, in *identitypb.LookupUsersRequest) (*identitypb.LookupUsersResponse, error) {
+	return invoke(ctx, in, b.h.LookupUsers)
+}
+
 func (b *grpcBridge) AdminCreateProjectCredential(ctx context.Context, in *identitypb.AdminCreateProjectCredentialRequest) (*identitypb.AdminCreateProjectCredentialResponse, error) {
 	return invoke(ctx, in, b.h.AdminCreateProjectCredential)
 }

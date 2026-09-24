@@ -424,7 +424,7 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	require.Nil(t, miss)
 
 	// Revoked credential → miss (a revoked key must not resolve).
-	require.NoError(t, store.RevokeProjectCredential(ctx, credID, 0))
+	require.NoError(t, store.RevokeProjectCredential(ctx, projID, credID, 0))
 	miss, err = store.ResolveByCredential(ctx, "pk_live")
 	require.NoError(t, err)
 	require.Nil(t, miss, "a revoked credential must not resolve a project")
@@ -650,19 +650,21 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 	require.Nil(t, credMiss)
 
 	// Revoke flips status + stamps revoked_at_ms, and is idempotent.
-	require.NoError(t, store.RevokeProjectCredential(ctx, credID, 0))
+	require.NoError(t, store.RevokeProjectCredential(ctx, projID, credID, 0))
 	cred, err = store.GetProjectCredentialByPublicID(ctx, "pk_live_abc")
 	require.NoError(t, err)
 	require.Equal(t, "revoked", cred.Status)
 	require.NotZero(t, cred.RevokedAtMs)
 	firstRevoked := cred.RevokedAtMs
-	require.NoError(t, store.RevokeProjectCredential(ctx, credID, 0),
+	require.NoError(t, store.RevokeProjectCredential(ctx, projID, credID, 0),
 		"re-revoking is a no-op, not an error")
 	cred, err = store.GetProjectCredentialByPublicID(ctx, "pk_live_abc")
 	require.NoError(t, err)
 	require.Equal(t, firstRevoked, cred.RevokedAtMs, "second revoke does not move the timestamp")
-	// Revoking an unknown credential is a no-op.
-	require.NoError(t, store.RevokeProjectCredential(ctx, "no-such-cred", 0))
+	// An unknown credential, or one owned by a different project, is
+	// NotFound — a mistyped id must never read as a successful revocation.
+	require.ErrorIs(t, store.RevokeProjectCredential(ctx, projID, "no-such-cred", 0), service.ErrNotFound)
+	require.ErrorIs(t, store.RevokeProjectCredential(ctx, "other-project", credID, 0), service.ErrNotFound)
 
 	// ── auth-domain round-trip ──────────────────────────────────────
 	// Seeded verified (verified_at_ms > 0) so it resolves; the verified
@@ -757,6 +759,8 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 	require.ErrorIs(t, err, service.ErrInvalidArgument)
 	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{ProjectID: projID})
 	require.ErrorIs(t, err, service.ErrInvalidArgument)
-	require.Error(t, store.RevokeProjectCredential(ctx, "", 0),
+	require.Error(t, store.RevokeProjectCredential(ctx, projID, "", 0),
 		"revoke with a blank credential id is an argument error")
+	require.Error(t, store.RevokeProjectCredential(ctx, "", credID, 0),
+		"revoke with a blank project id is an argument error")
 }

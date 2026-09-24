@@ -266,3 +266,66 @@ func runSetPrimaryAuthDomainSmoke(t *testing.T, dsn string) {
 	}
 	require.Equal(t, 1, primaries, "exactly one primary survives concurrent promotions")
 }
+
+// TestDirectoryCredentialStore_Smoke exercises the service.DirectoryCredentialStore
+// read LookupUsers authenticates against: a directory_reader credential (the
+// kind migration 0033 admits) round-trips with its hash and kind, revocation
+// surfaces as Revoked rather than a miss (so a refused presentation can be
+// audited), an unknown public id is a clean miss, and a suspended project's
+// credential does not resolve at all.
+func TestDirectoryCredentialStore_Smoke(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping directory credential store smoke test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	store := newProjectStore(ctx, t, dsn)
+
+	projID, err := store.CreateProject(ctx, &service.AdminProject{StorageScopeID: "scope-dir", Name: "Directory Co"})
+	require.NoError(t, err)
+	credID, err := store.CreateProjectCredential(ctx, &service.AdminProjectCredential{
+		ProjectID:  projID,
+		Kind:       service.CredentialKindDirectoryReader,
+		PublicID:   "dk_dir_smoke",
+		SecretHash: "dir-hash",
+	})
+	require.NoError(t, err, "migration 0033 admits the directory_reader kind")
+
+	got, err := store.ProjectCredentialByPublicID(ctx, "dk_dir_smoke")
+	require.NoError(t, err)
+	require.Equal(t, &service.AdminProjectCredential{
+		ID:         credID,
+		ProjectID:  projID,
+		Kind:       service.CredentialKindDirectoryReader,
+		PublicID:   "dk_dir_smoke",
+		SecretHash: "dir-hash",
+	}, got)
+
+	miss, err := store.ProjectCredentialByPublicID(ctx, "dk_unknown")
+	require.NoError(t, err)
+	require.Nil(t, miss)
+	miss, err = store.ProjectCredentialByPublicID(ctx, "")
+	require.NoError(t, err)
+	require.Nil(t, miss)
+
+	require.NoError(t, store.RevokeProjectCredential(ctx, projID, credID, 0))
+	got, err = store.ProjectCredentialByPublicID(ctx, "dk_dir_smoke")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.True(t, got.Revoked, "a revoked credential is reported as revoked, not hidden")
+
+	suspID, err := store.createProject(ctx, &Project{StorageScopeID: "scope-dir-susp", Name: "Suspended", Status: "suspended"})
+	require.NoError(t, err)
+	_, err = store.createProjectCredential(ctx, &ProjectCredential{
+		ProjectID: suspID, Kind: service.CredentialKindDirectoryReader, PublicID: "dk_dir_susp", SecretHash: "h",
+	})
+	require.NoError(t, err)
+	miss, err = store.ProjectCredentialByPublicID(ctx, "dk_dir_susp")
+	require.NoError(t, err)
+	require.Nil(t, miss, "a suspended project's credential must not authenticate")
+
+	_, err = store.createProjectCredential(ctx, &ProjectCredential{ProjectID: projID, Kind: "root", PublicID: "xx_bad"})
+	require.Error(t, err, "the kind constraint still rejects unknown kinds")
+}

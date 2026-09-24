@@ -133,6 +133,16 @@ func (b *Built) ControlPlaneStore() service.ControlPlaneProjectStore {
 	return b.ProjectStore
 }
 
+// DirectoryCredentialStore returns the control-plane credential read the
+// directory lookup authenticates against, or a true nil when this build has no
+// control plane (memory, sqlite) — avoiding the typed-nil trap.
+func (b *Built) DirectoryCredentialStore() service.DirectoryCredentialStore {
+	if b.ProjectStore == nil {
+		return nil
+	}
+	return b.ProjectStore
+}
+
 // NativeProjectLookup returns the control-plane project-by-id lookup as the
 // driver-agnostic service.NativeOAuthProjectStore NativeOAuthLogin uses, or a
 // true nil when this build has no control plane (memory) — avoiding the

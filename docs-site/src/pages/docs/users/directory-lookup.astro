@@ -1,0 +1,136 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Directory Lookup for Services">
+  <h1>Directory Lookup for Services</h1>
+  <p>
+    A backend service often has to turn a list of email addresses into
+    accounts — a chat service adding colleagues to a room, say — including
+    people who have never used that service. <code>LookupUsers</code> answers
+    exactly that and nothing more, for a machine credential that can do
+    nothing else: a <strong>directory reader</strong> key.
+  </p>
+  <p>
+    Use it instead of giving a service an admin account. An admin session can
+    list, edit and delete every user; a directory reader key can only resolve
+    addresses you already know to the minimal public profile of the
+    <em>active</em> accounts they name, in one project.
+  </p>
+
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+    <strong>Postgres deployments only.</strong> Directory keys are project
+    credentials, which live in the control plane. On a build without one
+    (the memory and SQLite drivers) <code>LookupUsers</code> returns
+    <code>UNIMPLEMENTED</code>.
+  </div>
+
+  <h2>What the key can and cannot do</h2>
+  <ul>
+    <li>
+      It authorizes <code>LookupUsers</code> and no other RPC. Presented to
+      anything else — as <code>X-Directory-Key</code> or as a Bearer token — it
+      is ignored, and the call is answered as if no credential were present
+      (<code>UNAUTHENTICATED</code> on every user-management RPC).
+    </li>
+    <li>
+      It is bound to the project it was minted for. Every lookup reads that
+      project's users, whatever <code>Host</code> or
+      <code>X-Project-Key</code> the request carries.
+    </li>
+    <li>
+      Matching is exact, ignoring case — the comparison sign-in uses. No
+      prefix, substring or domain search, so the directory cannot be listed
+      through it.
+    </li>
+    <li>
+      Only <strong>active</strong> accounts are returned. Invited,
+      deactivated, suspended, and pending-consent or pending-deletion accounts
+      are omitted, as are addresses with no account; an address is absent
+      rather than an error.
+    </li>
+    <li>
+      Each entry carries <code>id</code> (the account's <code>sub</code>),
+      <code>email</code>, <code>name</code> and <code>avatar_url</code>.
+      Phone numbers, roles, MFA and login state are never returned.
+    </li>
+    <li>
+      A batch holds 1–100 addresses. Calls are rate-limited per client IP by
+      <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code> (default 120 per
+      window).
+    </li>
+  </ul>
+
+  <h2>Mint a key</h2>
+  <p>
+    Directory keys are minted by the platform operator with the existing
+    <code>AdminCreateProjectCredential</code> RPC, authenticated by
+    <code>X-Admin-Secret</code> (<code>GATEWAY_ADMIN_API_SECRET</code>), with
+    <code>kind</code> set to <code>directory_reader</code>:
+  </p>
+  <Code
+    lang="bash"
+    code={`curl -sS -X POST https://auth.example.com/identity.v1.IdentityService/AdminCreateProjectCredential \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{"projectId": "<project-id>", "kind": "directory_reader"}'
+
+# {"credentialId":"8f3c…","publicId":"dk_4b1e…","rawKey":"dk_4b1e….c9a0…"}`}
+  />
+  <p>
+    <code>rawKey</code> is shown <strong>once</strong>; only a hash of its
+    secret half is stored. Put it in the calling service's secret store and
+    record <code>credentialId</code> — you need it to revoke the key.
+  </p>
+
+  <h2>Look up users</h2>
+  <p>
+    Present the raw key in the <code>X-Directory-Key</code> header. It is
+    deliberately not the <code>Authorization</code> header, and it is not
+    CORS-allowed: this is a server-to-server call.
+  </p>
+  <Code
+    lang="bash"
+    code={`curl -sS -X POST https://auth.example.com/identity.v1.IdentityService/LookupUsers \\
+  -H "X-Directory-Key: $DIRECTORY_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"emails": ["alice@corp.com", "bob@corp.com"]}'
+
+# {"users":[{"id":"u_31…","email":"alice@corp.com","name":"Alice","avatarUrl":"https://…"}]}`}
+  />
+  <p>
+    Results come back in request order. A missing, wrong, revoked or
+    non-directory key is <code>UNAUTHENTICATED</code>; an empty batch, a blank
+    address or more than 100 addresses is <code>INVALID_ARGUMENT</code>.
+  </p>
+
+  <h2>Revoke a key</h2>
+  <Code
+    lang="bash"
+    code={`curl -sS -X POST https://auth.example.com/identity.v1.IdentityService/AdminRevokeProjectCredential \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{"projectId": "<project-id>", "credentialId": "<credential-id>"}'`}
+  />
+  <p>
+    Revocation takes effect on the next request — nothing caches a
+    credential. Revoking an already-revoked key is a no-op;
+    a credential id the project does not own is <code>NOT_FOUND</code>.
+    <code>AdminRevokeProjectCredential</code> revokes project credentials of
+    every kind, not only directory keys. To rotate, mint the new key, deploy
+    it, then revoke the old one.
+  </p>
+
+  <h2>Audit</h2>
+  <p>
+    Minting and revoking record <code>project_credential_created</code> and
+    <code>project_credential_revoked</code>. Every lookup records
+    <code>directory_lookup</code> in the key's project, with the actor
+    <code>credential:&lt;credential-id&gt;</code> and the number of addresses
+    requested and matched — never the addresses themselves. A refused
+    presentation of a real key (wrong secret, wrong kind, revoked) is recorded
+    with <code>success=false</code> and a <code>reason</code>. The raw key and
+    its hash are never logged.
+  </p>
+</DocsLayout>

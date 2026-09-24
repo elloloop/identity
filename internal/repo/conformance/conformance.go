@@ -216,6 +216,58 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("FindUsersByEmails_BatchFetch", func(t *testing.T) {
+			// The directory lookup resolves a whole roster through this in ONE
+			// query, so every driver has to agree on the comparison (exact,
+			// ignoring case), on ordering, and on what it leaves out.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			a := createTestUser(t, r, "roster-a@example.com")
+			b := createTestUser(t, r, "Roster-B@Example.com")
+			inactive, err := r.CreateUser(ctx, &service.User{Email: "roster-off@example.com", Status: "deactivated", Role: "member"})
+			if err != nil {
+				t.Fatalf("CreateUser deactivated: %v", err)
+			}
+			createTestUser(t, r, "roster-a@example.com.evil")
+			createTestUser(t, r, "xroster-a@example.com")
+			if _, err := r.CreateUser(ctx, &service.User{IsAnonymous: true, Status: "active", Role: "member"}); err != nil {
+				t.Fatalf("CreateUser anonymous: %v", err)
+			}
+
+			got, err := r.FindUsersByEmails(ctx, []string{
+				"ROSTER-A@example.com", "roster-b@example.com", "roster-off@example.com",
+				"roster-a", "example.com", "nobody@example.com", "",
+			})
+			if err != nil {
+				t.Fatalf("FindUsersByEmails: %v", err)
+			}
+			// Case is ignored, but nothing else is loosened: no prefix,
+			// suffix or domain match, and the empty address matches no
+			// anonymous account. Status is the caller's business, so the
+			// deactivated account is returned. Ordered by id.
+			want := []string{a, b, inactive}
+			sort.Strings(want)
+			ids := make([]string, 0, len(got))
+			for _, u := range got {
+				ids = append(ids, u.ID)
+			}
+			if len(ids) != len(want) {
+				t.Fatalf("FindUsersByEmails = %v, want %v", ids, want)
+			}
+			for i := range want {
+				if ids[i] != want[i] {
+					t.Fatalf("FindUsersByEmails = %v, want %v (ordered by id)", ids, want)
+				}
+			}
+
+			if got, err := r.FindUsersByEmails(ctx, nil); err != nil || len(got) != 0 {
+				t.Fatalf("FindUsersByEmails(nil) = %#v %v, want empty and nil", got, err)
+			}
+			if got, err := r.FindUsersByEmails(ctx, []string{""}); err != nil || len(got) != 0 {
+				t.Fatalf("FindUsersByEmails(\"\") = %#v %v, want empty and nil (anonymous accounts never match)", got, err)
+			}
+		})
+
 		t.Run("SetDateOfBirthOnce_IsCompareAndSet", func(t *testing.T) {
 			// The DOB completion ticket is reusable within its TTL, so two
 			// submissions can both read date_of_birth_ms = 0. Exactly one

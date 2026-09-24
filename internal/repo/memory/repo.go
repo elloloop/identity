@@ -477,6 +477,31 @@ func (r *Repo) GetUsersByIDs(_ context.Context, ids []string) ([]*service.User, 
 	return out, nil
 }
 
+// FindUsersByEmails mirrors the SQL drivers' batch email fetch: exact match
+// ignoring case, accounts with no email never match, ordered by id.
+func (r *Repo) FindUsersByEmails(_ context.Context, emails []string) ([]*service.User, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.User, 0, len(emails))
+	for _, u := range r.users {
+		if u.Email == "" {
+			continue
+		}
+		for _, e := range emails {
+			if strings.EqualFold(u.Email, e) {
+				cp := *u
+				out = append(out, &cp)
+				break
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 func (r *Repo) SetDateOfBirthOnce(
 	_ context.Context, userID string, dobMs int64, status string, nowMs int64,
 ) (bool, error) {

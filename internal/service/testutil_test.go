@@ -183,6 +183,7 @@ type fakeRepo struct {
 	listGuardianEdgesErr  error // ListGuardiansOfChild / ListChildrenOfGuardian fail
 	findUserByUsernameErr error // FindUserByUsername fails
 	getUsersByIDsErr      error // GetUsersByIDs fails
+	findUsersByEmailsErr  error // FindUsersByEmails fails
 	setDOBOnceErr         error // SetDateOfBirthOnce fails
 	// createManagedChildErr makes CreateManagedChildAccount fail before any
 	// mutation, exercising the atomicity contract from the caller's side.
@@ -1799,6 +1800,31 @@ func (r *fakeRepo) GetUsersByIDs(_ context.Context, ids []string) ([]*User, erro
 		if u, ok := r.users[id]; ok {
 			cp := *u
 			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// FindUsersByEmails mirrors the drivers' batch email fetch: case-insensitive
+// exact match, empty emails never match, ordered by id.
+func (r *fakeRepo) FindUsersByEmails(_ context.Context, emails []string) ([]*User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.findUsersByEmailsErr != nil {
+		return nil, r.findUsersByEmailsErr
+	}
+	out := make([]*User, 0, len(emails))
+	for _, u := range r.users {
+		if u.Email == "" {
+			continue
+		}
+		for _, e := range emails {
+			if strings.EqualFold(u.Email, e) {
+				cp := *u
+				out = append(out, &cp)
+				break
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

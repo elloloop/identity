@@ -1008,6 +1008,10 @@ type Config struct {
 	RateLimitIDVPerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
 	RateLimitBootstrapPerIP int
+	// RateLimitDirectoryPerIP is the per-IP cap per window on LookupUsers, the
+	// service-to-service directory lookup (each call resolves up to
+	// service.MaxDirectoryLookupEmails addresses).
+	RateLimitDirectoryPerIP int
 
 	// Postgres (the primary persistence driver).
 
@@ -1415,6 +1419,7 @@ func loadFromEnv() *Config {
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
 		RateLimitIDVPerIP:          envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
+		RateLimitDirectoryPerIP:    envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", 120),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),

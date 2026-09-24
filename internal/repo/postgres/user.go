@@ -491,6 +491,37 @@ func (r *pgRepository) GetUsersByIDs(ctx context.Context, ids []string) ([]*serv
 	return out, nil
 }
 
+func (r *pgRepository) FindUsersByEmails(ctx context.Context, emails []string) ([]*service.User, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+	// lower() on both sides is FindUserByEmail's comparison, and the
+	// (project_id, lower(email)) index serves it.
+	const q = `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND email <> ''
+		  AND lower(email) IN (SELECT lower(e) FROM unnest($2::text[]) AS e)
+		ORDER BY id ASC`
+	rows, err := r.pool.Query(ctx, q, r.projectID, emails)
+	if err != nil {
+		return nil, wrapPgErr("FindUsersByEmails", err)
+	}
+	defer rows.Close()
+
+	out := make([]*service.User, 0, len(emails))
+	for rows.Next() {
+		u, scanErr := scanUser(rows)
+		if scanErr != nil {
+			return nil, wrapPgErr("FindUsersByEmails", scanErr)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapPgErr("FindUsersByEmails", err)
+	}
+	return out, nil
+}
+
 func (r *pgRepository) SetDateOfBirthOnce(
 	ctx context.Context, userID string, dobMs int64, status string, nowMs int64,
 ) (bool, error) {

@@ -273,3 +273,37 @@ func assertQuotaExhausts(t *testing.T, handler http.Handler, path, ip string, qu
 	handler.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusTooManyRequests, w.Code, "%s must refuse over quota", path)
 }
+
+// TestBuildRateLimits_DirectoryLookupLimited asserts LookupUsers carries its
+// own per-IP quota: it is JWT-exempt, so without one a caller could drive a
+// credential read per request, and a valid credential could walk the
+// directory by guessing addresses at line rate.
+func TestBuildRateLimits_DirectoryLookupLimited(t *testing.T) {
+	const path = "/identity.v1.IdentityService/LookupUsers"
+	cfg := &config.Config{
+		RateLimitWindowSeconds:  60,
+		RateLimitDirectoryPerIP: 2,
+		// Other quotas non-zero so unrelated paths stay enabled.
+		RateLimitSignupPerIP:       10,
+		RateLimitLoginPerIP:        30,
+		RateLimitResetPerIP:        5,
+		RateLimitVerifyPerIP:       20,
+		RateLimitPasswordlessPerIP: 5,
+		RateLimitPhonePerIP:        5,
+		RateLimitBootstrapPerIP:    5,
+	}
+	limits := buildRateLimits(cfg)
+	var found bool
+	for _, l := range limits {
+		if l.PathPrefix == path {
+			found = true
+			require.Equal(t, "directory_lookup", l.Tag)
+		}
+	}
+	require.True(t, found, "LookupUsers must carry a rate limit")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, path, "9.9.9.9", 2)
+}
