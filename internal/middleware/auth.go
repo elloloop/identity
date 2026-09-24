@@ -110,7 +110,21 @@ var AuthExemptPaths = map[string]bool{
 	"/.well-known/jwks.json":                                true,
 	"/health":                                               true,
 	"/healthz":                                              true,
+	// The SAML IdP metadata is a public document an SP fetches to import the
+	// IdP's signing certificate; no caller of it holds a JWT.
+	SAMLMetadataPath: true,
 }
+
+// SAMLMetadataPath is the well-known path the SAML IdP serves its
+// EntityDescriptor XML on. SPs are configured with this URL to import the
+// IdP's signing certificate and SSO/SLO endpoints.
+const SAMLMetadataPath = "/saml/metadata"
+
+// SCIMPathPrefix is the mount point of the inbound SCIM 2.0 server. A SCIM
+// client authenticates with the deployment's SCIM bearer token, which the SCIM
+// handler verifies itself. That token is not a JWT, so enforcing JWTs here
+// would refuse every SCIM request before the handler could check it.
+const SCIMPathPrefix = "/scim/v2/"
 
 // hostedOAuthPrefix is the path prefix for the browser-facing hosted
 // OAuth routes (GET /oauth/start/{provider}, GET/POST /oauth/callback/
@@ -124,9 +138,12 @@ const authUIPrefix = "/auth/"
 
 // isAuthExempt reports whether path bypasses JWT enforcement: either an
 // exact-match entry in AuthExemptPaths or any path under the hosted
-// OAuth prefix or the auth UI prefix.
+// OAuth, auth UI or SCIM prefix.
 func isAuthExempt(path string) bool {
-	return AuthExemptPaths[path] || strings.HasPrefix(path, hostedOAuthPrefix) || strings.HasPrefix(path, authUIPrefix)
+	return AuthExemptPaths[path] ||
+		strings.HasPrefix(path, hostedOAuthPrefix) ||
+		strings.HasPrefix(path, authUIPrefix) ||
+		strings.HasPrefix(path, SCIMPathPrefix)
 }
 
 // AuthMiddleware verifies JWT Bearer tokens on non-exempt paths and injects the

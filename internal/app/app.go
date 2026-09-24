@@ -688,7 +688,7 @@ func New(deps Deps) (*Built, error) {
 			return nil, err
 		}
 		logger.Info("scim_server_enabled",
-			zap.String("mount", "/scim/v2/"),
+			zap.String("mount", middleware.SCIMPathPrefix),
 			zap.String("project_id", deps.Config.SCIMProjectID))
 		(&scimHandler{
 			repo:        repo,
