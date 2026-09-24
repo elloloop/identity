@@ -64,6 +64,19 @@ const (
 	StatusDeactivated = "deactivated"
 )
 
+// isActiveStatus reports whether a user status is a normal, fully-usable
+// account. A blank status is a legacy row written before the column carried a
+// default, and counts as active; every other status (invited, deactivated,
+// suspended, pending consent or deletion) does not.
+func isActiveStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", StatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
 // User represents a user in the identity system.
 type User struct {
 	ID               string
@@ -582,8 +595,7 @@ type Repository interface {
 	// one of emails exactly, ignoring case (FindUserByEmail's comparison),
 	// ordered by id. Accounts with no email (anonymous) never match, addresses
 	// that name no account are simply absent, and status is NOT filtered —
-	// the caller decides which states it discloses. It backs the directory
-	// lookup, which otherwise issues one FindUserByEmail per address.
+	// the caller decides which states it discloses.
 	FindUsersByEmails(ctx context.Context, emails []string) ([]*User, error)
 
 	// SetDateOfBirthOnce stores a date of birth ONLY while the account still

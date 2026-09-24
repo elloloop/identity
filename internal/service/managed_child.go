@@ -154,7 +154,7 @@ func (s *AuthService) CreateManagedChildAccount(
 	if caller == nil {
 		return nil, fmt.Errorf("%w: calling user not found", ErrNotFound)
 	}
-	if !isActiveConsentingAccount(caller.Status) {
+	if !isActiveStatus(caller.Status) {
 		s.auditManagedChildFailure(ctx, callerUserID, "caller_inactive", ip, userAgent)
 		return nil, ErrAccountNotActive
 	}

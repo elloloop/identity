@@ -1244,13 +1244,13 @@ func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr
 	}
 
 	status := strings.ToLower(user.Status)
-	switch status {
-	case "", StatusActive, StatusPendingDeletion:
+	switch {
+	case isActiveStatus(status) || status == StatusPendingDeletion:
 		// PENDING_DELETION is deliberately allowed to authenticate (unlike
 		// DEACTIVATED/SUSPENDED): a successful login is exactly the signal that
 		// cancels the pending deletion, which issueTokens does before minting
 		// tokens.
-	case "invited":
+	case status == "invited":
 		return fmt.Errorf("%w: accept your invitation first", ErrInvitationPending)
 	default:
 		return fmt.Errorf("%w: account is %s", ErrAccountNotActive, status)

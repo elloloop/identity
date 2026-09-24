@@ -140,20 +140,6 @@ func DecodeConsentFactors(csv string) []ParentalConsentFactor {
 	return out
 }
 
-// isActiveConsentingAccount reports whether a consenting adult's account is in
-// a state from which it may grant consent. A blank status (a legacy/newly
-// created row) and "active" both qualify; any other status (deactivated,
-// suspended, pending deletion, and — critically — pending_parental_consent, so
-// one gated child cannot consent for another) does not.
-func isActiveConsentingAccount(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", StatusActive:
-		return true
-	default:
-		return false
-	}
-}
-
 // strongVerifiedFactors returns the strong verified factors present on the
 // adult's account right now. It is the single source of truth for check (a).
 func (s *AuthService) strongVerifiedFactors(ctx context.Context, adult *User) ([]ParentalConsentFactor, error) {
@@ -219,7 +205,7 @@ func (s *AuthService) GrantParentalConsent(
 	if adult == nil {
 		return nil, fmt.Errorf("%w: consenting user not found", ErrNotFound)
 	}
-	if !isActiveConsentingAccount(adult.Status) {
+	if !isActiveStatus(adult.Status) {
 		return nil, ErrAccountNotActive
 	}
 

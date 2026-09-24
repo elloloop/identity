@@ -145,7 +145,7 @@ func (s *adminControlStore) RevokeProjectCredential(_ context.Context, projectID
 	return nil
 }
 
-func (s *adminControlStore) ProjectCredentialByPublicID(_ context.Context, publicID string) (*service.AdminProjectCredential, error) {
+func (s *adminControlStore) ActiveProjectCredentialByPublicID(_ context.Context, publicID string) (*service.AdminProjectCredential, error) {
 	for _, c := range s.credentials {
 		if c.PublicID == publicID {
 			cp := *c

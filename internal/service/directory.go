@@ -32,12 +32,12 @@ const (
 // ProjectStore satisfies it; drivers without a control plane have no
 // credentials, and the app wires no DirectoryService for them.
 type DirectoryCredentialStore interface {
-	// ProjectCredentialByPublicID returns the credential whose public id is
-	// publicID — revoked or not, with Revoked set accordingly — when its
-	// project is ACTIVE. It returns (nil, nil) when no credential has that
-	// public id or its project is suspended; only an infrastructure failure
-	// is an error.
-	ProjectCredentialByPublicID(ctx context.Context, publicID string) (*AdminProjectCredential, error)
+	// ActiveProjectCredentialByPublicID returns the credential whose public
+	// id is publicID — revoked or not, with Revoked set accordingly — when
+	// its project is ACTIVE. It returns (nil, nil) when no credential has
+	// that public id or its project is suspended; only an infrastructure
+	// failure is an error.
+	ActiveProjectCredentialByPublicID(ctx context.Context, publicID string) (*AdminProjectCredential, error)
 }
 
 // DirectoryUser is the minimal profile a directory lookup discloses: enough to
@@ -115,7 +115,7 @@ func (s *DirectoryService) authenticate(ctx context.Context, presentedKey string
 	if !ok || publicID == "" || secret == "" {
 		return nil, refused
 	}
-	cred, err := s.credentials.ProjectCredentialByPublicID(ctx, publicID)
+	cred, err := s.credentials.ActiveProjectCredentialByPublicID(ctx, publicID)
 	if err != nil {
 		return nil, err
 	}
@@ -191,11 +191,7 @@ func activeDirectoryUsersInOrder(wanted []string, found []*User) []DirectoryUser
 }
 
 // isActiveDirectoryAccount reports whether u is a live, credentialed member of
-// the project. A blank status is a legacy active row, as on the login path.
+// the project.
 func isActiveDirectoryAccount(u *User) bool {
-	if u == nil || u.IsAnonymous || u.Email == "" {
-		return false
-	}
-	status := strings.ToLower(u.Status)
-	return status == "" || status == StatusActive
+	return u != nil && !u.IsAnonymous && u.Email != "" && isActiveStatus(u.Status)
 }

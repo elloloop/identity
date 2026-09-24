@@ -138,7 +138,7 @@ func (s *AuthService) authorizeGuardianAction(
 			map[string]any{"step": "not_guardian"})
 		return nil, nil, fmt.Errorf("%w: %s", ErrPermissionDenied, guardianRefusalNotAllowed)
 	}
-	if !isActiveConsentingAccount(guardian.Status) {
+	if !isActiveStatus(guardian.Status) {
 		s.auditGuardianAction(ctx, op, guardianUserID, childUserID, false, ip, userAgent,
 			map[string]any{"step": "guardian_inactive"})
 		return nil, nil, ErrAccountNotActive
@@ -321,8 +321,9 @@ func (s *AuthService) DeactivateManagedChildAccount(
 	if err != nil {
 		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(child.Status)) {
-	case StatusDeactivated:
+	status := strings.ToLower(strings.TrimSpace(child.Status))
+	switch {
+	case status == StatusDeactivated:
 		// Already deactivated — but the status write and the session cut are
 		// separate statements, so a first attempt can have stored the status
 		// and then failed to revoke. Re-run the revocation (it is idempotent)
@@ -334,9 +335,7 @@ func (s *AuthService) DeactivateManagedChildAccount(
 		s.auditGuardianAction(ctx, guardianOpDeactivate, guardianUserID, child.ID, true, ip, userAgent,
 			map[string]any{"reason": reason, "unchanged": true})
 		return nil
-	case "", StatusActive:
-		// eligible — fall through
-	default:
+	case !isActiveStatus(status):
 		s.auditGuardianAction(ctx, guardianOpDeactivate, guardianUserID, child.ID, false, ip, userAgent,
 			map[string]any{"step": "child_status", "status": child.Status})
 		return fmt.Errorf("%w: account is %s", ErrAccountNotActive, child.Status)
@@ -370,14 +369,15 @@ func (s *AuthService) ReactivateManagedChildAccount(
 	if err != nil {
 		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(child.Status)) {
-	case "", StatusActive:
+	status := strings.ToLower(strings.TrimSpace(child.Status))
+	switch {
+	case isActiveStatus(status):
 		s.auditGuardianAction(ctx, guardianOpReactivate, guardianUserID, child.ID, true, ip, userAgent,
 			map[string]any{"unchanged": true})
 		return nil
-	case StatusDeactivated:
+	case status == StatusDeactivated:
 		// eligible — fall through
-	case StatusPendingParentalConsent:
+	case status == StatusPendingParentalConsent:
 		s.auditGuardianAction(ctx, guardianOpReactivate, guardianUserID, child.ID, false, ip, userAgent,
 			map[string]any{"step": "child_status", "status": child.Status})
 		return ErrParentalConsentRequired
