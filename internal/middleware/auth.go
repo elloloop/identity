@@ -126,11 +126,17 @@ var AuthExemptPaths = map[string]bool{
 // IdP's signing certificate and SSO/SLO endpoints.
 const SAMLMetadataPath = "/saml/metadata"
 
-// SCIMPathPrefix is the mount point of the inbound SCIM 2.0 server. A SCIM
-// client authenticates with the deployment's SCIM bearer token, which the SCIM
-// handler verifies itself. That token is not a JWT, so enforcing JWTs here
-// would refuse every SCIM request before the handler could check it.
-const SCIMPathPrefix = "/scim/v2/"
+// scimMountPath is the root of the inbound SCIM 2.0 server, and
+// SCIMPathPrefix its subtree. A SCIM client authenticates with the
+// deployment's SCIM bearer token, which the SCIM handler verifies itself. That
+// token is not a JWT, so enforcing JWTs here would refuse every SCIM request
+// before the handler could check it. The bare root is exempt too, so a client
+// configured with the base URL gets the mux's redirect into the subtree rather
+// than a JWT refusal.
+const (
+	scimMountPath  = "/scim/v2"
+	SCIMPathPrefix = scimMountPath + "/"
+)
 
 // hostedOAuthPrefix is the path prefix for the browser-facing hosted
 // OAuth routes (GET /oauth/start/{provider}, GET/POST /oauth/callback/
@@ -149,6 +155,7 @@ func isAuthExempt(path string) bool {
 	return AuthExemptPaths[path] ||
 		strings.HasPrefix(path, hostedOAuthPrefix) ||
 		strings.HasPrefix(path, authUIPrefix) ||
+		path == scimMountPath ||
 		strings.HasPrefix(path, SCIMPathPrefix)
 }
 

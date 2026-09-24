@@ -354,6 +354,13 @@ func TestSCIM_ServedThroughFullChain(t *testing.T) {
 		t.Fatalf("filtered list totalResults = %d, want 1", page.TotalResults)
 	}
 
+	// The bare base URL reaches the mux, which redirects into the subtree,
+	// rather than dying in the JWT layer.
+	bare := scimReq(t, handler, http.MethodGet, "/scim/v2", cfg.SCIMBearerToken, "")
+	if bare.Code < http.StatusMultipleChoices || bare.Code >= http.StatusBadRequest || bare.Header().Get("Location") != "/scim/v2/" {
+		t.Fatalf("bare /scim/v2: status = %d Location = %q, want a redirect to /scim/v2/", bare.Code, bare.Header().Get("Location"))
+	}
+
 	// A wrong token is still refused — by the SCIM handler (SCIM error shape),
 	// not by the JWT layer, which is what proves the request reached it.
 	wrong := scimReq(t, handler, http.MethodGet, "/scim/v2/Users", "not-the-scim-token", "")
