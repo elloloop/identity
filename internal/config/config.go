@@ -109,6 +109,11 @@ const (
 	// deleter of live accounts.
 	MaxAnonymousRetentionDays = 10000
 
+	// DefaultRateLimitDirectoryPerIP is the LookupUsers per-IP cap per window
+	// when none is configured. A Config built in code with the field left zero
+	// gets it too: the directory surface is never unthrottled.
+	DefaultRateLimitDirectoryPerIP = 120
+
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
 	DefaultAgeGateChildMaxAge = 12
@@ -1010,7 +1015,9 @@ type Config struct {
 	RateLimitBootstrapPerIP int
 	// RateLimitDirectoryPerIP is the per-IP cap per window on LookupUsers, the
 	// service-to-service directory lookup (each call resolves up to
-	// service.MaxDirectoryLookupEmails addresses).
+	// service.MaxDirectoryLookupEmails addresses). Unlike the other per-IP
+	// caps it cannot be switched off: a zero, negative or malformed value is
+	// refused at boot.
 	RateLimitDirectoryPerIP int
 
 	// Postgres (the primary persistence driver).
@@ -1419,7 +1426,7 @@ func loadFromEnv() *Config {
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
 		RateLimitIDVPerIP:          envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
-		RateLimitDirectoryPerIP:    envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", 120),
+		RateLimitDirectoryPerIP:    envPositiveInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
@@ -1769,6 +1776,26 @@ func envInt(key string, def int) int {
 	return n
 }
 
+// invalidPositiveInt is what envPositiveInt yields for a set value that is not
+// a positive integer, so Validate can refuse it rather than boot on a default
+// the operator did not choose.
+const invalidPositiveInt = -1
+
+// envPositiveInt reads a positive integer environment variable. Returns def if
+// the variable is unset or empty, and invalidPositiveInt if it is malformed,
+// zero or negative.
+func envPositiveInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return invalidPositiveInt
+	}
+	return n
+}
+
 // envFloat reads a float64 environment variable. Returns def if the
 // variable is unset, empty, or not a valid float.
 func envFloat(key string, def float64) float64 {
@@ -1890,6 +1917,13 @@ func (c *Config) Validate() error {
 
 	if c.SessionCacheTTLSeconds < 0 {
 		return fmt.Errorf("config: GATEWAY_SESSION_CACHE_TTL_SECONDS=%d must be >= 0", c.SessionCacheTTLSeconds)
+	}
+
+	switch {
+	case c.RateLimitDirectoryPerIP == 0:
+		c.RateLimitDirectoryPerIP = DefaultRateLimitDirectoryPerIP
+	case c.RateLimitDirectoryPerIP < 0:
+		return errors.New("config: GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP must be a positive integer")
 	}
 
 	if err := c.validateSMS(); err != nil {
