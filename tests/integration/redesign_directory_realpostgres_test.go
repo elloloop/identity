@@ -106,8 +106,9 @@ func directoryLookupFlow(t *testing.T, h *RedesignHarness) {
 		t.Fatalf("LookupUsers: %v", err)
 	}
 	users := resp.Msg.GetUsers()
-	if len(users) != 1 || users[0].GetId() != alice.userID || users[0].GetEmail() != addr("alice") || users[0].GetName() == otherAliceName {
-		t.Fatalf("LookupUsers = %v, want only alice (%s) from the default project", users, alice.userID)
+	if len(users) != 1 || users[0].GetId() != alice.userID || users[0].GetEmail() != addr("alice") || users[0].GetName() == otherAliceName ||
+		users[0].GetEmailVerified() {
+		t.Fatalf("LookupUsers = %v, want only alice (%s, unverified password signup) from the default project", users, alice.userID)
 	}
 
 	// The other project's key sees the other project's alice, never ours.

@@ -151,7 +151,7 @@ func TestDirectoryLookup_ReturnsActiveAccountsInRequestOrder(t *testing.T) {
 
 	alice := f.seed(t, dirTestProjectA, &User{
 		Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png", Status: StatusActive,
-		PhoneNumber: "+15550100", PasswordHash: "hash", TotpRequired: true, Role: "admin",
+		PhoneNumber: "+15550100", PasswordHash: "hash", TotpRequired: true, Role: "admin", EmailVerified: true,
 	})
 	bob := f.seed(t, dirTestProjectA, &User{Email: "bob@corp.test", Name: "Bob", Status: StatusActive})
 	legacy := f.seed(t, dirTestProjectA, &User{Email: "legacy@corp.test", Name: "Legacy"}) // blank status = legacy active
@@ -170,7 +170,7 @@ func TestDirectoryLookup_ReturnsActiveAccountsInRequestOrder(t *testing.T) {
 	}
 	want := []DirectoryUser{
 		{ID: bob, Email: "bob@corp.test", Name: "Bob"},
-		{ID: alice, Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png"},
+		{ID: alice, Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png", EmailVerified: true},
 		{ID: legacy, Email: "legacy@corp.test", Name: "Legacy"},
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {

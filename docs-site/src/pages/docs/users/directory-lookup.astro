@@ -52,13 +52,15 @@ import { Code } from "astro-expressive-code/components";
       Only <strong>active</strong> accounts are returned. Invited,
       deactivated, suspended, and pending-consent or pending-deletion accounts
       are omitted, as are addresses with no account; an address is absent
-      rather than an error. An entry does <em>not</em> mean the address was
-      verified: an account created through self-signup is returned before its
-      owner confirms the address.
+      rather than an error. Every entry is an active member of the key's
+      project; <code>email_verified</code> says whether the address was
+      proven — consumers that treat presence as identity (e.g. a staff
+      directory) should require it.
     </li>
     <li>
       Each entry carries <code>id</code> (the account's <code>sub</code>),
-      <code>email</code>, <code>name</code> and <code>avatar_url</code>.
+      <code>email</code>, <code>name</code>, <code>avatar_url</code> and
+      <code>email_verified</code>.
       Phone numbers, roles, MFA and login state are never returned.
     </li>
     <li>
@@ -117,7 +119,7 @@ import { Code } from "astro-expressive-code/components";
   -H "Content-Type: application/json" \\
   -d '{"emails": ["alice@corp.com", "bob@corp.com"]}'
 
-# {"users":[{"id":"u_31…","email":"alice@corp.com","name":"Alice","avatarUrl":"https://…"}]}`}
+# {"users":[{"id":"u_31…","email":"alice@corp.com","name":"Alice","avatarUrl":"https://…","emailVerified":true}]}`}
   />
   <p>
     Results come back in request order. A missing, wrong, revoked or

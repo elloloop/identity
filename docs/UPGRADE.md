@@ -14,11 +14,12 @@ credential behaves exactly as before.
   (`dk_<public>.<secret>`) is shown once; keep `credential_id`.
 - **Look up** with `LookupUsers { emails: [...] }` (1–100 addresses) and the
   raw key in the `X-Directory-Key` header. It returns
-  `{id, email, name, avatar_url}` for each address that names an **active**
-  account in the credential's project, in request order; exact match
-  ignoring case, nothing else is disclosed. An entry does not mean the
-  address was verified: a self-signed-up account is listed before its owner
-  confirms it. The key authorizes this RPC and no other, it reads only the
+  `{id, email, name, avatar_url, email_verified}` for each address that
+  names an **active** account in the credential's project, in request order;
+  exact match ignoring case, nothing else is disclosed. Every entry is an
+  active member of the key's project; `email_verified` says whether the
+  address was proven — consumers that treat presence as identity (e.g. a
+  staff directory) should require it. The key authorizes this RPC and no other, it reads only the
   project it was minted for, whatever the request's `Host` or
   `X-Project-Key`, and it is not itself a project key. Call it from
   server-side code only; the header is not CORS-allowed.

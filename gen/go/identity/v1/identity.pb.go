@@ -14453,10 +14453,14 @@ func (x *LookupUsersRequest) GetEmails() []string {
 type DirectoryUser struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// id is the account's stable id — the `sub` claim of its access tokens.
-	Id            string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Email         string `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	AvatarUrl     string `protobuf:"bytes,4,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
+	Id        string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Email     string `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	Name      string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	AvatarUrl string `protobuf:"bytes,4,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
+	// email_verified says whether the account's owner proved the address.
+	// Consumers that treat presence as identity (e.g. a staff directory)
+	// should require it.
+	EmailVerified bool `protobuf:"varint,5,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14519,14 +14523,21 @@ func (x *DirectoryUser) GetAvatarUrl() string {
 	return ""
 }
 
+func (x *DirectoryUser) GetEmailVerified() bool {
+	if x != nil {
+		return x.EmailVerified
+	}
+	return false
+}
+
 type LookupUsersResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// users holds one entry per requested address that names an ACTIVE account,
 	// in request order. An address with no account, or whose account is not
 	// active (invited, deactivated, suspended, pending consent or deletion), is
-	// omitted. Presence means an active account holds that address; it does not
-	// mean the address was verified, since a self-signed-up account is listed
-	// before its owner confirms it.
+	// omitted. Every entry is an active member of the key's project;
+	// email_verified says whether the address was proven — consumers that
+	// treat presence as identity (e.g. a staff directory) should require it.
 	Users         []*DirectoryUser `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -16746,13 +16757,14 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"&AdminListProjectOAuthProvidersResponse\x12E\n" +
 	"\tproviders\x18\x01 \x03(\v2'.identity.v1.ProjectOAuthProviderConfigR\tproviders\",\n" +
 	"\x12LookupUsersRequest\x12\x16\n" +
-	"\x06emails\x18\x01 \x03(\tR\x06emails\"h\n" +
+	"\x06emails\x18\x01 \x03(\tR\x06emails\"\x8f\x01\n" +
 	"\rDirectoryUser\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
-	"avatar_url\x18\x04 \x01(\tR\tavatarUrl\"G\n" +
+	"avatar_url\x18\x04 \x01(\tR\tavatarUrl\x12%\n" +
+	"\x0eemail_verified\x18\x05 \x01(\bR\remailVerified\"G\n" +
 	"\x13LookupUsersResponse\x120\n" +
 	"\x05users\x18\x01 \x03(\v2\x1a.identity.v1.DirectoryUserR\x05users\"=\n" +
 	"\x1fCreateAssuranceChallengeRequest\x12\x1a\n" +

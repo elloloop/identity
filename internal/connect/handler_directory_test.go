@@ -56,7 +56,7 @@ func TestLookupUsers_MintLookupRevoke(t *testing.T) {
 	repo := newFakeRepo()
 	alice, err := repo.CreateUser(ctx, &service.User{
 		Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png",
-		Status: service.StatusActive, PhoneNumber: "+15550100", Role: "admin",
+		Status: service.StatusActive, PhoneNumber: "+15550100", Role: "admin", EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
@@ -84,7 +84,9 @@ func TestLookupUsers_MintLookupRevoke(t *testing.T) {
 	if len(users) != 1 {
 		t.Fatalf("users = %v, want only the active account", users)
 	}
-	want := &identitypb.DirectoryUser{Id: alice, Email: "alice@corp.test", Name: "Alice", AvatarUrl: "https://cdn.test/a.png"}
+	want := &identitypb.DirectoryUser{
+		Id: alice, Email: "alice@corp.test", Name: "Alice", AvatarUrl: "https://cdn.test/a.png", EmailVerified: true,
+	}
 	if users[0].String() != want.String() {
 		t.Fatalf("user = %v, want %v", users[0], want)
 	}

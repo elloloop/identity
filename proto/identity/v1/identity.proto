@@ -2100,15 +2100,19 @@ message DirectoryUser {
   string email = 2;
   string name = 3;
   string avatar_url = 4;
+  // email_verified says whether the account's owner proved the address.
+  // Consumers that treat presence as identity (e.g. a staff directory)
+  // should require it.
+  bool email_verified = 5;
 }
 
 message LookupUsersResponse {
   // users holds one entry per requested address that names an ACTIVE account,
   // in request order. An address with no account, or whose account is not
   // active (invited, deactivated, suspended, pending consent or deletion), is
-  // omitted. Presence means an active account holds that address; it does not
-  // mean the address was verified, since a self-signed-up account is listed
-  // before its owner confirms it.
+  // omitted. Every entry is an active member of the key's project;
+  // email_verified says whether the address was proven — consumers that
+  // treat presence as identity (e.g. a staff directory) should require it.
   repeated DirectoryUser users = 1;
 }
 

@@ -47,6 +47,8 @@ type DirectoryUser struct {
 	Email     string
 	Name      string
 	AvatarURL string
+	// EmailVerified reports whether the account's owner proved the address.
+	EmailVerified bool
 }
 
 // DirectoryService answers read-only directory lookups for services. Its
@@ -185,7 +187,9 @@ func activeDirectoryUsersInOrder(wanted []string, found []*User) []DirectoryUser
 		if !ok {
 			continue
 		}
-		out = append(out, DirectoryUser{ID: u.ID, Email: u.Email, Name: u.Name, AvatarURL: u.AvatarURL})
+		out = append(out, DirectoryUser{
+			ID: u.ID, Email: u.Email, Name: u.Name, AvatarURL: u.AvatarURL, EmailVerified: u.EmailVerified,
+		})
 	}
 	return out
 }

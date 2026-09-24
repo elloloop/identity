@@ -260,6 +260,23 @@ func RunConformance(t *testing.T, driver Driver) {
 				}
 			}
 
+			// Verified and unverified accounts are both returned, each with
+			// its stored email-verified state: the directory discloses it.
+			if err := r.SetUserEmailVerified(ctx, a, 1_700_000_000_000); err != nil {
+				t.Fatalf("SetUserEmailVerified: %v", err)
+			}
+			got, err = r.FindUsersByEmails(ctx, []string{"roster-a@example.com", "roster-b@example.com"})
+			if err != nil {
+				t.Fatalf("FindUsersByEmails after verify: %v", err)
+			}
+			verified := map[string]bool{}
+			for _, u := range got {
+				verified[u.ID] = u.EmailVerified
+			}
+			if len(got) != 2 || !verified[a] || verified[b] {
+				t.Fatalf("email_verified by id = %v, want %s verified and %s not", verified, a, b)
+			}
+
 			if got, err := r.FindUsersByEmails(ctx, nil); err != nil || len(got) != 0 {
 				t.Fatalf("FindUsersByEmails(nil) = %#v %v, want empty and nil", got, err)
 			}
