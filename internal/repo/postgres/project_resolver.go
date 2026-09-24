@@ -14,16 +14,25 @@ import (
 // of the same control-plane tables CreateProject* writes.
 var _ service.ProjectResolver = (*ProjectStore)(nil)
 
-// ResolveByCredential resolves the active project an active credential
-// public id belongs to. A revoked credential, a suspended project, an
-// unknown id, or a blank id is a clean miss (nil, nil); only an
-// infrastructure failure returns an error.
+// projectSelectorKinds are the credential kinds whose public id selects a
+// request's project (X-Project-Key / ?project_key=). A directory_reader key is
+// not one: it authorizes LookupUsers alone, which reads the key's own project.
+var projectSelectorKinds = map[string]bool{
+	service.CredentialKindPublishable: true,
+	service.CredentialKindSecret:      true,
+	credentialKindMTLS:                true,
+}
+
+// ResolveByCredential resolves the active project an active project-selecting
+// credential public id belongs to. A revoked credential, a kind that does not
+// select a project, a suspended project, an unknown id, or a blank id is a
+// clean miss (nil, nil); only an infrastructure failure returns an error.
 func (s *ProjectStore) ResolveByCredential(ctx context.Context, publicID string) (*service.ResolvedProject, error) {
 	cred, err := s.GetProjectCredentialByPublicID(ctx, publicID)
 	if err != nil {
 		return nil, err
 	}
-	if cred == nil || cred.Status != credentialStatusActive {
+	if cred == nil || cred.Status != credentialStatusActive || !projectSelectorKinds[cred.Kind] {
 		return nil, nil
 	}
 	proj, err := s.GetProjectByID(ctx, cred.ProjectID)

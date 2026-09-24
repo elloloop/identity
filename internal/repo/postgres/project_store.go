@@ -71,6 +71,9 @@ type ProjectAuthDomain struct {
 const (
 	projectStatusActive    = "active"
 	credentialStatusActive = "active"
+	// credentialKindMTLS is the client-certificate credential kind the
+	// schema admits; operators cannot mint it through the admin API yet.
+	credentialKindMTLS = "mtls"
 )
 
 // ProjectStore is the Postgres-backed, control-plane registry store. It

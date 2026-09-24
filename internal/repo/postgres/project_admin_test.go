@@ -303,6 +303,16 @@ func TestDirectoryCredentialStore_Smoke(t *testing.T) {
 		SecretHash: "dir-hash",
 	}, got)
 
+	resolved, err := store.ResolveByCredential(ctx, "dk_dir_smoke")
+	require.NoError(t, err)
+	require.Nil(t, resolved, "a directory key must not select a project as X-Project-Key")
+	_, err = store.createProjectCredential(ctx, &ProjectCredential{ProjectID: projID, Kind: credentialKindMTLS, PublicID: "mt_dir_smoke"})
+	require.NoError(t, err)
+	resolved, err = store.ResolveByCredential(ctx, "mt_dir_smoke")
+	require.NoError(t, err)
+	require.NotNil(t, resolved, "an mtls credential still selects its project")
+	require.Equal(t, projID, resolved.ID)
+
 	miss, err := store.ActiveProjectCredentialByPublicID(ctx, "dk_unknown")
 	require.NoError(t, err)
 	require.Nil(t, miss)
