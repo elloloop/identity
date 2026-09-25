@@ -19,8 +19,9 @@ behaviour:
 
   **Consider rotating `GATEWAY_SCIM_BEARER_TOKEN`.** v4.8 made the SCIM surface
   reachable, and until this release a request carrying a wrong token was
-  neither throttled nor recorded, so there is no trail of whether anyone tried
-  to guess it. Generate a new token of at least 32 characters, set it in your
+  neither throttled nor audited; only the request log recorded its 401. Check
+  any request logs you retain for 401s under `/scim/v2/` before deciding, and
+  rotate if you cannot rule out guessing. Generate a new token of at least 32 characters, set it in your
   IdP's SCIM connector, then restart identity with it.
 - **Hosts that serve identity through `RegisterGRPC`.** `LookupUsers` is now
   rate-limited on the native gRPC surface too, drawing on the same per-IP

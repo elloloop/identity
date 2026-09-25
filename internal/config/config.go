@@ -115,6 +115,10 @@ const (
 	// never unthrottled.
 	DefaultRateLimitDirectoryPerIP = 120
 
+	// DefaultRateLimitSCIMPerIP is the per-IP cap per window on requests
+	// under /scim/v2/ when GATEWAY_RATE_LIMIT_SCIM_PER_IP is unset.
+	DefaultRateLimitSCIMPerIP = 300
+
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
 	DefaultAgeGateChildMaxAge = 12
@@ -1435,7 +1439,7 @@ func loadFromEnv() *Config {
 		RateLimitIDVPerIP:          envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 		RateLimitDirectoryPerIP:    envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
-		RateLimitSCIMPerIP:         envInt("GATEWAY_RATE_LIMIT_SCIM_PER_IP", 300),
+		RateLimitSCIMPerIP:         envInt("GATEWAY_RATE_LIMIT_SCIM_PER_IP", DefaultRateLimitSCIMPerIP),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),

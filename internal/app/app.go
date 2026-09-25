@@ -432,7 +432,7 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// id can still drive a credential read per call. The quota bounds
 			// that, and bounds how fast even a valid credential can walk the
 			// directory by guessing addresses.
-			PathPrefix: "/identity.v1.IdentityService/LookupUsers", Tag: "directory_lookup",
+			PathPrefix: identityconnectgen.IdentityServiceLookupUsersProcedure, Tag: "directory_lookup",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
 		},
 		{

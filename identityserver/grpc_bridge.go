@@ -48,7 +48,13 @@ type grpcBridge struct {
 }
 
 func newGRPCBridge(built *app.Built, logger *zap.Logger) *grpcBridge {
-	directoryLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceLookupUsersProcedure)
+	directoryLimit, ok := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceLookupUsersProcedure)
+	if !ok {
+		// app.Build always configures this limit; reaching here means the
+		// wiring drifted and LookupUsers runs unthrottled on this surface.
+		logger.Error("directory_lookup_grpc_unthrottled",
+			zap.String("procedure", identityv1connect.IdentityServiceLookupUsersProcedure))
+	}
 	return &grpcBridge{
 		h:              built.ConnectHandler,
 		directoryLimit: directoryLimit,
