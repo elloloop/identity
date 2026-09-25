@@ -188,6 +188,13 @@ func signupMembershipUser(t *testing.T, h *RedesignHarness, emailAddr string) me
 	if err != nil {
 		t.Fatalf("signupMembershipUser PasswordSignup(%s): %v", emailAddr, err)
 	}
+	// Accepting an invitation needs a verified address; verify it the way the
+	// user would, through the mailed link.
+	if _, err := h.Client.VerifyEmail(context.Background(), connect.NewRequest(&identitypb.VerifyEmailRequest{
+		Token: extractMailedToken(t, h, emailAddr),
+	})); err != nil {
+		t.Fatalf("signupMembershipUser VerifyEmail(%s): %v", emailAddr, err)
+	}
 	return membershipUser{
 		client: h.AuthedClient(signup.Msg.GetAccessToken()),
 		userID: signup.Msg.GetUser().GetId(),

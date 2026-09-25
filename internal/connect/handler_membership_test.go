@@ -178,7 +178,7 @@ func TestMembership_InviteThenAccept_Handler(t *testing.T) {
 		Role: service.RoleOwner, Status: service.MembershipStatusActive,
 	}}
 	users := &connectUserDirectory{byID: map[string]*service.User{
-		"invitee": {ID: "invitee", Email: "invitee@acme.com"},
+		"invitee": {ID: "invitee", Email: "invitee@acme.com", EmailVerified: true},
 	}}
 	svc := newMembershipSvc(invitations, members, &connectTenantStore{}, users)
 	srv := startMembershipServer(t, svc)

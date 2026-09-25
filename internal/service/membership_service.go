@@ -172,7 +172,8 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 //
 // Email-match policy: a leaked token must not let the wrong account join. The
 // caller is looked up and their email compared to the invitation email, both
-// canonicalized as sign-in canonicalizes an address (CanonicalizeEmail); a mismatch is PermissionDenied. An expired invitation is
+// canonicalized as sign-in canonicalizes an address (CanonicalizeEmail), and
+// the caller's email must be verified; a mismatch is PermissionDenied. An expired invitation is
 // marked expired and rejected; an unknown/revoked/already-accepted token is
 // rejected without mutation.
 func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID, rawToken string) (*TenantMembership, error) {
@@ -222,6 +223,13 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	}
 	if CanonicalizeEmail(caller.Email) != CanonicalizeEmail(inv.Email) {
 		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
+	}
+	// The match is by canonical mailbox, so another spelling of the invited
+	// address (a "+tag", Gmail dots) can accept. That holds only for an
+	// address its holder has proved: an unverified account could have been
+	// registered by anyone.
+	if !caller.EmailVerified {
+		return nil, fmt.Errorf("%w: verify your email address before accepting the invitation", ErrPermissionDenied)
 	}
 
 	m := &TenantMembership{

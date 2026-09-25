@@ -125,8 +125,10 @@ func newFakeUserDirectory() *fakeUserDirectory {
 	return &fakeUserDirectory{byID: map[string]*User{}}
 }
 
+// put stores a user whose email is verified, as every account that accepts
+// an invitation must be.
 func (d *fakeUserDirectory) put(id, emailAddr string) {
-	d.byID[id] = &User{ID: id, Email: emailAddr}
+	d.byID[id] = &User{ID: id, Email: emailAddr, EmailVerified: true}
 }
 
 func (d *fakeUserDirectory) GetUser(_ context.Context, userID string) (*User, error) {
@@ -414,7 +416,8 @@ func TestAcceptTenantInvitation_ComparesCanonicalAddresses(t *testing.T) {
 		callerEmail string
 		wantErr     error
 	}{
-		{"INVITEE+team@acme.com", nil},
+		{"INVITEE+team@acme.com", nil}, // a +tag is dropped on every domain, not only Gmail
+		{"inv.itee@acme.com", ErrPermissionDenied}, // dots are dropped only at Gmail
 		{"invitée@acme.com", ErrPermissionDenied},
 		{"invitee@acme.co", ErrPermissionDenied},
 	} {
@@ -443,6 +446,20 @@ func TestCreateTenantInvitation_StoresCanonicalEmail(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, invs, 1)
 	require.Equal(t, mInvitee, invs[0].Email)
+}
+
+// Matching by canonical mailbox is safe only for a proven address: an account
+// whose email is unverified cannot accept, even with the invited address.
+func TestAcceptTenantInvitation_RequiresVerifiedEmail(t *testing.T) {
+	f := newMembershipFixtureNoMail()
+	rawToken := f.seedInvite(t)
+	f.users.byID[mInviteeID] = &User{ID: mInviteeID, Email: mInvitee}
+	_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, rawToken)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	stored, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mInviteeID)
+	require.Nil(t, stored, "no membership for an unverified caller")
+	invs, _ := f.invitations.ListInvitationsForTenant(context.Background(), mTestProject, mTestTenant)
+	require.Equal(t, InvitationStatusPending, invs[0].Status, "the invitation stays redeemable once verified")
 }
 
 func TestAcceptTenantInvitation_UnknownTokenNotFound(t *testing.T) {

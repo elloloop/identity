@@ -316,7 +316,9 @@ type IdentityServiceClient interface {
 	// except for AcceptTenantInvitation — gated on the caller being an
 	// owner/admin member of the target tenant. AcceptTenantInvitation is the
 	// redeemer's own action: any authenticated caller may redeem a token, but
-	// only for an invitation addressed to their own account email. Available
+	// only for an invitation addressed to their own account email (compared in
+	// the canonical form sign-in uses, so a "+tag" spelling of it matches), and
+	// only once that email is verified. Available
 	// only on the postgres control-plane driver; memory deployments
 	// return Unimplemented.
 	CreateTenantInvitation(ctx context.Context, in *CreateTenantInvitationRequest, opts ...grpc.CallOption) (*CreateTenantInvitationResponse, error)
@@ -1840,7 +1842,9 @@ type IdentityServiceServer interface {
 	// except for AcceptTenantInvitation — gated on the caller being an
 	// owner/admin member of the target tenant. AcceptTenantInvitation is the
 	// redeemer's own action: any authenticated caller may redeem a token, but
-	// only for an invitation addressed to their own account email. Available
+	// only for an invitation addressed to their own account email (compared in
+	// the canonical form sign-in uses, so a "+tag" spelling of it matches), and
+	// only once that email is verified. Available
 	// only on the postgres control-plane driver; memory deployments
 	// return Unimplemented.
 	CreateTenantInvitation(context.Context, *CreateTenantInvitationRequest) (*CreateTenantInvitationResponse, error)
