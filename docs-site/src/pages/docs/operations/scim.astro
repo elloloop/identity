@@ -14,13 +14,13 @@ import { Code } from "astro-expressive-code/components";
     console.
   </p>
 
-  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+  <aside role="note" class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
     <strong>Disabled by default.</strong> When
     <code>GATEWAY_SCIM_ENABLED</code> is unset the <code>/scim/v2/*</code>
     routes are never registered and return <code>404</code>. The headless
     RPCs are unaffected. Turning SCIM on requires a bearer token <em>and</em> a
     project id; the server refuses to boot otherwise.
-  </div>
+  </aside>
 
   <h2>Enable it</h2>
   <Code
@@ -46,6 +46,30 @@ GATEWAY_SCIM_PROJECT_ID=<project-id>`}
     The SCIM token can write. A service that only needs to resolve email
     addresses to accounts should use a read-only
     <a href="/identity/docs/users/directory-lookup">directory reader key</a> instead.
+  </p>
+
+  <h2>Rate limit and refused requests</h2>
+  <p>
+    Every request under <code>/scim/v2/</code> counts against a per-client-IP
+    limit, <code>GATEWAY_RATE_LIMIT_SCIM_PER_IP</code> (default 300) per
+    <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window (default 60 s).
+    The limit is checked before the bearer token, so a caller guessing the
+    token is held to it too. Over the limit a request gets
+    <code>429 Too Many Requests</code> with a <code>Retry-After</code> header
+    giving the window in seconds. Size it for your IdP's peak sync rate — a
+    first full import is the burstiest — or set it to <code>0</code> to turn
+    it off.
+  </p>
+  <p>
+    A request with a missing or wrong bearer token is refused with
+    <code>401</code>, logged as a <code>scim_auth_failed</code> warning, and
+    audited as <code>scim_auth_failed</code> under the configured project with
+    <code>success=false</code>, the client IP, user agent and a
+    <code>reason</code> (<code>missing_token</code> or
+    <code>invalid_token</code>). The presented token is never recorded. A
+    stream of <code>invalid_token</code> entries means someone is trying
+    tokens: rotate <code>GATEWAY_SCIM_BEARER_TOKEN</code> (set the new value
+    in the IdP's connector, then restart identity with it).
   </p>
 
   <h2>external_id correlation</h2>
@@ -117,12 +141,12 @@ GATEWAY_SCIM_PROJECT_ID=<project-id>`}
     attribute syncs produces one event per write — chatty by design.
   </p>
 
-  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+  <aside role="note" class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
     <strong>Deferred.</strong> SCIM <code>/Groups</code> is not yet
     implemented. Each bearer token is scoped to one project
     (<code>GATEWAY_SCIM_PROJECT_ID</code>); multiplexing several projects
     through a single credential is intentionally out of scope. The
     <code>/Users</code> surface above is complete and tested across all
     storage backends.
-  </div>
+  </aside>
 </DocsLayout>

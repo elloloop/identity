@@ -184,6 +184,13 @@ const (
 	// wrong secret) is logged with success=false and a `reason`.
 	EventDirectoryLookup EventType = "directory_lookup"
 
+	// EventSCIMAuthFailed records a request to the SCIM surface refused for a
+	// missing or wrong bearer token. The actor is "system:scim" (the caller is
+	// unknown by definition); the details carry a `reason` (missing_token |
+	// invalid_token) and the entry the client IP and user agent. The presented
+	// token is never logged.
+	EventSCIMAuthFailed EventType = "scim_auth_failed"
+
 	// EventParentalConsentGranted records an adult granting verifiable
 	// parental consent for a child-band account, moving it out of
 	// PENDING_PARENTAL_CONSENT. The actor is the consenting adult and the
@@ -283,6 +290,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectCredentialCreated:      {},
 	EventProjectCredentialRevoked:      {},
 	EventDirectoryLookup:               {},
+	EventSCIMAuthFailed:                {},
 	EventParentalConsentGranted:        {},
 	EventParentalConsentRevoked:        {},
 	EventGuardianEdgeCreated:           {},
