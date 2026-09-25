@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -38,11 +37,11 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 	}
 	// Stored in the canonical form sign-in resolves an account by, so the
 	// changed address is the one sign-in, the directory and SCIM find.
-	newEmail = CanonicalizeEmail(newEmail)
+	newEmail, usable := CanonicalMailbox(newEmail)
 	if newEmail == "" {
 		return fmt.Errorf("%w: new email is required", ErrInvalidArgument)
 	}
-	if !looksLikeEmail(newEmail) {
+	if !usable {
 		return fmt.Errorf("%w: new email is not a valid address", ErrInvalidArgument)
 	}
 	if currentPassword == "" {
@@ -267,21 +266,4 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 		}),
 	)
 	return user, nil
-}
-
-// looksLikeEmail performs a minimal syntactic check on an email
-// address. Real validation happens when the user clicks the link in
-// the inbox; we just want to reject obviously malformed input early.
-func looksLikeEmail(s string) bool {
-	at := strings.IndexByte(s, '@')
-	if at <= 0 || at == len(s)-1 {
-		return false
-	}
-	if strings.IndexByte(s[at+1:], '.') < 0 {
-		return false
-	}
-	if strings.ContainsAny(s, " \t\r\n") {
-		return false
-	}
-	return true
 }

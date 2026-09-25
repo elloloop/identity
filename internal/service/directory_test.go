@@ -190,7 +190,7 @@ func TestDirectoryLookup_ExactMatchOnly(t *testing.T) {
 	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
 	f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive, EmailVerified: true})
 
-	for _, probe := range []string{"alice", "corp.test", "@corp.test", "lice@corp.test", "alice@corp", "alice@corp.test.evil", "%", "*"} {
+	for _, probe := range []string{"alice", "corp.test", "@corp.test", "+alice@corp.test", "lice@corp.test", "alice@corp", "alice@corp.test.evil", "%", "*"} {
 		got, err := f.svc.LookupUsers(context.Background(), key, []string{probe})
 		if err != nil {
 			t.Fatalf("LookupUsers(%q): %v", probe, err)

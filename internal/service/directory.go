@@ -201,7 +201,9 @@ func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret st
 }
 
 // directoryLookupEmails validates a lookup batch and returns its addresses
-// de-duplicated by canonical form, first occurrence first.
+// de-duplicated by canonical form, first occurrence first. An address that is
+// not a mailbox an account can hold once canonical (CanonicalMailbox — "alice",
+// "+x@corp.com") names nobody, so it is left out rather than looked up.
 func directoryLookupEmails(emails []string) ([]directoryAddress, error) {
 	if len(emails) == 0 {
 		return nil, fmt.Errorf("%w: at least one email is required", ErrInvalidArgument)
@@ -221,7 +223,10 @@ func directoryLookupEmails(emails []string) ([]directoryAddress, error) {
 			return nil, fmt.Errorf("%w: an email in the lookup is longer than %d bytes",
 				ErrInvalidArgument, MaxDirectoryLookupEmailLength)
 		}
-		canonical := CanonicalizeEmail(e)
+		canonical, usable := CanonicalMailbox(e)
+		if !usable {
+			continue
+		}
 		i, ok := index[canonical]
 		if !ok {
 			index[canonical] = len(out)

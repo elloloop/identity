@@ -100,6 +100,30 @@ func CanonicalizeEmail(addr string) string {
 	return local + "@" + domain
 }
 
+// CanonicalMailbox canonicalizes addr (CanonicalizeEmail) and reports whether
+// the result is a mailbox an account can hold: a non-empty local part, a
+// domain containing a dot, and no whitespace. Every path that stores or looks
+// up a canonical address checks it: canonicalizing drops a "+tag", so an
+// address that was nothing but one ("+x@corp.com") has no local part left.
+func CanonicalMailbox(addr string) (string, bool) {
+	c := CanonicalizeEmail(addr)
+	return c, isUsableMailbox(c)
+}
+
+// isUsableMailbox is CanonicalMailbox's check on an already-canonical
+// address: a minimal syntactic one, since the mailbox itself is proven only
+// when its owner acts on a message sent to it.
+func isUsableMailbox(s string) bool {
+	at := strings.LastIndexByte(s, '@')
+	if at <= 0 || at == len(s)-1 {
+		return false
+	}
+	if strings.IndexByte(s[at+1:], '.') < 0 {
+		return false
+	}
+	return !strings.ContainsAny(s, " \t\r\n")
+}
+
 // canonicalEmail is an email address that has been through CanonicalizeEmail
 // (via canonicalize). It is the ONLY thing the per-project access gate accepts,
 // so the compiler rejects a raw, possibly-non-canonical string at the gate

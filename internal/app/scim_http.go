@@ -267,8 +267,12 @@ func (s *repoSCIMStore) CreateUser(ctx context.Context, u scim.User) (scim.User,
 	if !u.Active {
 		status = statusDeactivated
 	}
+	email, err := scimEmail(u.Email)
+	if err != nil {
+		return scim.User{}, err
+	}
 	su := &service.User{
-		Email:      service.CanonicalizeEmail(u.Email),
+		Email:      email,
 		Name:       joinName(u.GivenName, u.FamilyName),
 		ExternalID: u.ExternalID,
 		Status:     status,
@@ -328,8 +332,12 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 	if !u.Active {
 		status = statusDeactivated
 	}
+	email, err := scimEmail(u.Email)
+	if err != nil {
+		return scim.User{}, err
+	}
 	fields := map[string]any{
-		"email":       service.CanonicalizeEmail(u.Email),
+		"email":       email,
 		"name":        joinName(u.GivenName, u.FamilyName),
 		"external_id": u.ExternalID,
 		"status":      status,
@@ -390,11 +398,15 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 	fields := map[string]any{}
 	// userName and email both map to the host email column; an explicit email
 	// wins when both are present.
-	if patch.UserName != nil {
-		fields["email"] = service.CanonicalizeEmail(*patch.UserName)
-	}
-	if patch.Email != nil {
-		fields["email"] = service.CanonicalizeEmail(*patch.Email)
+	for _, value := range []*string{patch.UserName, patch.Email} {
+		if value == nil {
+			continue
+		}
+		email, err := scimEmail(*value)
+		if err != nil {
+			return scim.User{}, err
+		}
+		fields["email"] = email
 	}
 	if patch.ExternalID != nil {
 		fields["external_id"] = *patch.ExternalID
@@ -518,6 +530,17 @@ func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]sci
 		out = append(out, toSCIMUser(u))
 	}
 	return out, total, nil
+}
+
+// scimEmail is the address a SCIM write stores for an IdP's userName or
+// email: its canonical form, refused as an invalid value when that is not a
+// mailbox an account can hold (a bare "+tag" local part, no domain).
+func scimEmail(raw string) (string, error) {
+	email, usable := service.CanonicalMailbox(raw)
+	if !usable {
+		return "", fmt.Errorf("%w: %q is not a usable email address", scim.ErrInvalidValue, raw)
+	}
+	return email, nil
 }
 
 // filterEmail resolves a userName / emails filter value to the address to

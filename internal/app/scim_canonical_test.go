@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -158,5 +159,48 @@ func TestSCIM_BlankUserNameFilterMatchesNobody(t *testing.T) {
 		if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"totalResults":0`) {
 			t.Fatalf("filter userName eq %q: status = %d body=%s, want an empty page", value, list.Code, list.Body.String())
 		}
+	}
+}
+
+// A PATCH of userName stores the canonical form, like create and replace, and
+// a value with no mailbox left once canonical is refused as an invalid value
+// instead of being stored as "@example.com".
+func TestSCIM_PatchStoresCanonicalAndRefusesUnusableAddresses(t *testing.T) {
+	h, repo, token := newSCIMLoginApp(t)
+	create := scimReq(t, h, http.MethodPost, "/scim/v2/Users", token,
+		`{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"first@example.com","active":true}`)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d body=%s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("decode create: %v %s", err, create.Body.String())
+	}
+
+	patch := scimReq(t, h, http.MethodPatch, "/scim/v2/Users/"+created.ID, token,
+		`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"replace","path":"userName","value":"New.Name+HR@Example.com"}]}`)
+	if patch.Code != http.StatusOK {
+		t.Fatalf("patch: status = %d body=%s", patch.Code, patch.Body.String())
+	}
+	if u, err := repo.GetUser(context.Background(), created.ID); err != nil || u == nil || u.Email != "new.name@example.com" {
+		t.Fatalf("after patch stored user = %+v, %v; want email new.name@example.com", u, err)
+	}
+
+	for _, req := range []struct {
+		method, path, body string
+	}{
+		{http.MethodPost, "/scim/v2/Users", `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"+x@example.com","active":true}`},
+		{http.MethodPut, "/scim/v2/Users/" + created.ID, `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"+x@example.com","active":true}`},
+		{http.MethodPatch, "/scim/v2/Users/" + created.ID, `{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"replace","path":"userName","value":"+x@example.com"}]}`},
+	} {
+		rec := scimReq(t, h, req.method, req.path, token, req.body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"invalidValue"`) {
+			t.Fatalf("%s %s with +x@example.com: status = %d body=%s, want 400 invalidValue", req.method, req.path, rec.Code, rec.Body.String())
+		}
+	}
+	if u, _ := repo.GetUser(context.Background(), created.ID); u == nil || u.Email != "new.name@example.com" {
+		t.Fatalf("a refused write changed the stored user: %+v", u)
 	}
 }

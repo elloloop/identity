@@ -229,7 +229,7 @@ func TestRequestEmailChange_InvalidNewEmailRejected(t *testing.T) {
 	}
 }
 
-func TestLooksLikeEmailRejectsMalformedAddresses(t *testing.T) {
+func TestCanonicalMailboxRejectsUnusableAddresses(t *testing.T) {
 	t.Parallel()
 	cases := map[string]bool{
 		"alice@example.com":       true,
@@ -240,10 +240,12 @@ func TestLooksLikeEmailRejectsMalformedAddresses(t *testing.T) {
 		"alice@":                  false,
 		"alice@sub.example.com":   true,
 		"alice+label@example.com": true,
+		"+label@example.com":      false, // nothing left of the local part once the tag is dropped
+		"+@example.com":           false,
 	}
 	for addr, want := range cases {
-		if got := looksLikeEmail(addr); got != want {
-			t.Fatalf("looksLikeEmail(%q) = %v, want %v", addr, got, want)
+		if _, got := CanonicalMailbox(addr); got != want {
+			t.Fatalf("CanonicalMailbox(%q) usable = %v, want %v", addr, got, want)
 		}
 	}
 }
