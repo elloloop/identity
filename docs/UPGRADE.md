@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.8 → next — SCIM throttling and audit; directory limit on every transport; wildcard origins; one email comparison rule (migration 0034)
+## v4.8 → v4.9 — SCIM throttling and audit; directory limit on every transport; wildcard origins; one email comparison rule (migration 0034)
 
 **Postgres deployments get migration 0034, which rewrites the `users` table
 under an exclusive lock.** Read
