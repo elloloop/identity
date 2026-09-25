@@ -185,14 +185,14 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	require.ErrorIs(t, is.SetInvitationStatus(ctx, "", "id", service.InvitationStatusRevoked, 0), service.ErrInvalidArgument)
 }
 
-// TestInvitationStore_OneOpenInviteUnderFoldEmail pins the one-open-invite
-// rule to service.FoldEmail, like account emails, rather than the database
-// locale's lower(): an address differing only in ASCII case replaces the open
-// invite, one differing in a non-ASCII letter is a different recipient.
-func TestInvitationStore_OneOpenInviteUnderFoldEmail(t *testing.T) {
+// TestInvitationStore_OneOpenInvitePerMailbox: a new invitation revokes every
+// pending one naming the same mailbox in canonical form — including one stored
+// before the service canonicalized, with the address as typed — and leaves an
+// invitation to a different mailbox open.
+func TestInvitationStore_OneOpenInvitePerMailbox(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {
-		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping invitation fold test")
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping invitation mailbox test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -214,10 +214,12 @@ func TestInvitationStore_OneOpenInviteUnderFoldEmail(t *testing.T) {
 		return inv.Status
 	}
 
-	invite("zoé@acme.com", "fold-1")
-	invite("ZOé@ACME.com", "fold-2")
-	require.Equal(t, service.InvitationStatusRevoked, status("fold-1"), "ASCII case names the same recipient")
-	invite("zoÉ@acme.com", "fold-3")
-	require.Equal(t, service.InvitationStatusPending, status("fold-2"), "a different non-ASCII letter is another recipient")
-	require.Equal(t, service.InvitationStatusPending, status("fold-3"))
+	invite("Zoe+Old@gmail.com", "legacy") // stored as typed, before canonicalization
+	invite("zoe@gmail.com", "canonical")
+	require.Equal(t, service.InvitationStatusRevoked, status("legacy"), "a +tag spelling names the same mailbox")
+	invite("Z.o.e@googlemail.com", "gmail-variant")
+	require.Equal(t, service.InvitationStatusRevoked, status("canonical"), "a Gmail-dot spelling names the same mailbox")
+	invite("zoé@gmail.com", "other")
+	require.Equal(t, service.InvitationStatusPending, status("gmail-variant"), "a different letter is another mailbox")
+	require.Equal(t, service.InvitationStatusPending, status("other"))
 }

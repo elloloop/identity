@@ -467,14 +467,17 @@ func (s *repoSCIMStore) DeleteUser(ctx context.Context, id string) error {
 }
 
 func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]scim.User, int, error) {
-	// userName maps to email; both filter the same column, by the canonical
-	// form the writes above store.
+	// userName maps to email; both filter the same column.
 	email := f.Email
 	if email == "" {
 		email = f.UserName
 	}
 	if email != "" {
-		email = service.CanonicalizeEmail(email)
+		resolved, err := s.filterEmail(ctx, email)
+		if err != nil {
+			return nil, 0, err
+		}
+		email = resolved
 	}
 	offset := f.StartIndex - 1
 	if offset < 0 {
@@ -510,6 +513,29 @@ func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]sci
 		out = append(out, toSCIMUser(u))
 	}
 	return out, total, nil
+}
+
+// filterEmail resolves a userName / emails filter value to the address to
+// match. The writes above store the canonical form, so that is what the filter
+// matches — unless no account has it and the value as sent names one: an
+// account provisioned before SCIM canonicalized was stored as the IdP spelled
+// it, and an IdP re-sync filters by that spelling before deciding to create,
+// so missing it would create a second account for the same mailbox. The next
+// PUT or PATCH of that account rewrites it in canonical form.
+func (s *repoSCIMStore) filterEmail(ctx context.Context, raw string) (string, error) {
+	canonical := service.CanonicalizeEmail(raw)
+	asSent := strings.TrimSpace(raw)
+	if service.FoldEmail(asSent) == service.FoldEmail(canonical) {
+		return canonical, nil
+	}
+	n, err := s.repo.CountUsers(ctx, service.UserListFilter{Email: canonical})
+	if err != nil {
+		return "", mapStoreErr(err)
+	}
+	if n > 0 {
+		return canonical, nil
+	}
+	return asSent, nil
 }
 
 func toSCIMUser(u *service.User) scim.User {

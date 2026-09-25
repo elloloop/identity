@@ -115,7 +115,9 @@ func (s *AdminService) InviteUser(
 		return nil, err
 	}
 
-	email = strings.TrimSpace(strings.ToLower(email))
+	// Stored in the canonical form sign-in resolves an account by, so the
+	// invitee's sign-in, the directory and SCIM all find this account.
+	email = CanonicalizeEmail(email)
 	if email == "" || !strings.Contains(email, "@") {
 		return nil, errors.New("valid email is required")
 	}

@@ -6029,6 +6029,15 @@ components:
             email_verified says whether the account's owner proved the address.
              Always true when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the
              default), because unverified accounts are then not returned.
+        requestedEmail:
+          type: string
+          title: requested_email
+          description: |-
+            requested_email is the entry of LookupUsersRequest.emails (trimmed,
+             otherwise as sent) that found this account — the first of them when
+             several canonicalize to the same address. email is the address on file,
+             which can differ from it in case, a "+tag" or Gmail dots: pair results
+             with requests by requested_email.
       title: DirectoryUser
       additionalProperties: false
       description: |-
@@ -7116,9 +7125,7 @@ components:
              GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default). Addresses that
              canonicalize to the same address yield a single entry. Entries follow
              request order, but omissions shift positions: match each entry to a
-             request by its email, never by index. The entry's email is the address
-             the account has on file, which can differ from the requested spelling in
-             case, a "+tag" or Gmail dots.
+             request by its requested_email, never by index or by email.
       title: LookupUsersResponse
       additionalProperties: false
     identity.v1.NativeOAuthLoginRequest:

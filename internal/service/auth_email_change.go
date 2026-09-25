@@ -36,7 +36,9 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 	if userID == "" {
 		return fmt.Errorf("%w: user id is required", ErrUnauthenticated)
 	}
-	newEmail = strings.TrimSpace(strings.ToLower(newEmail))
+	// Stored in the canonical form sign-in resolves an account by, so the
+	// changed address is the one sign-in, the directory and SCIM find.
+	newEmail = CanonicalizeEmail(newEmail)
 	if newEmail == "" {
 		return fmt.Errorf("%w: new email is required", ErrInvalidArgument)
 	}
@@ -65,7 +67,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 
 	// Reject a new address sign-in already resolves to this account (the same
 	// canonical form). Avoids creating a pointless token + emails.
-	if CanonicalizeEmail(user.Email) == CanonicalizeEmail(newEmail) {
+	if CanonicalizeEmail(user.Email) == newEmail {
 		return fmt.Errorf("%w: new email matches current email", ErrInvalidArgument)
 	}
 

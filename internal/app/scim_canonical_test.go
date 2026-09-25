@@ -110,3 +110,38 @@ func TestSCIM_ProvisionedAccountIsTheOneSignInResolves(t *testing.T) {
 		t.Fatalf("accounts for %q = %+v, %v; want only the provisioned one", canonical, users, err)
 	}
 }
+
+// An account provisioned before SCIM canonicalized carries the address as the
+// IdP spelled it. An IdP re-sync filters by that spelling before it decides to
+// create, so the filter must still find the account, and the re-sync's PUT
+// then stores the canonical form sign-in resolves.
+func TestSCIM_FilterFindsAccountStoredBeforeCanonicalization(t *testing.T) {
+	h, repo, token := newSCIMLoginApp(t)
+	ctx := context.Background()
+	const asProvisioned = "Élodie.Martin+HR@Example.com"
+	id, err := repo.CreateUser(ctx, &service.User{Email: asProvisioned, Status: service.StatusActive, Role: "member"})
+	if err != nil {
+		t.Fatalf("seed legacy account: %v", err)
+	}
+
+	list := scimReq(t, h, http.MethodGet,
+		`/scim/v2/Users?filter=userName%20eq%20%22%C3%89lodie.Martin%2BHR@Example.com%22`, token, "")
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"totalResults":1`) || !strings.Contains(list.Body.String(), id) {
+		t.Fatalf("filter by the provisioned spelling: status = %d body=%s, want the legacy account", list.Code, list.Body.String())
+	}
+
+	put := scimReq(t, h, http.MethodPut, "/scim/v2/Users/"+id, token,
+		`{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"`+asProvisioned+`","active":true}`)
+	if put.Code != http.StatusOK {
+		t.Fatalf("re-sync PUT: status = %d body=%s", put.Code, put.Body.String())
+	}
+	if u, err := repo.FindUserByEmail(ctx, "élodie.martin@example.com"); err != nil || u == nil || u.ID != id {
+		t.Fatalf("after re-sync FindUserByEmail(canonical) = %+v, %v; want %s", u, err, id)
+	}
+	// Once canonical, the same filter resolves by the canonical form.
+	list = scimReq(t, h, http.MethodGet,
+		`/scim/v2/Users?filter=userName%20eq%20%22%C3%89lodie.Martin%2BHR@Example.com%22`, token, "")
+	if !strings.Contains(list.Body.String(), `"totalResults":1`) || !strings.Contains(list.Body.String(), id) {
+		t.Fatalf("filter after re-sync: body=%s, want the account", list.Body.String())
+	}
+}

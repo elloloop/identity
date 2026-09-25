@@ -55,6 +55,18 @@ type DirectoryUser struct {
 	// Always true when the deployment requires verified email, since an
 	// unverified account is then not returned at all.
 	EmailVerified bool
+	// RequestedEmail is the requested address (trimmed, otherwise as sent)
+	// that found the account — the first of them when several canonicalize
+	// to it. Email is the address on file, which can differ from it in case,
+	// a "+tag" or Gmail dots, so callers pair results with requests by this.
+	RequestedEmail string
+}
+
+// directoryAddress is one requested address: as sent (trimmed), and in the
+// canonical form it is looked up by.
+type directoryAddress struct {
+	requested string
+	canonical string
 }
 
 // DirectoryService answers read-only directory lookups for services. Its
@@ -111,7 +123,11 @@ func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string,
 	}
 	ctx = WithProjectScope(ctx, &ProjectScope{ProjectID: cred.ProjectID})
 
-	found, err := s.users.WithProject(cred.ProjectID).FindUsersByEmails(ctx, wanted)
+	canonical := make([]string, len(wanted))
+	for i, a := range wanted {
+		canonical[i] = a.canonical
+	}
+	found, err := s.users.WithProject(cred.ProjectID).FindUsersByEmails(ctx, canonical)
 	if err != nil {
 		return nil, err
 	}
@@ -183,8 +199,8 @@ func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret st
 }
 
 // directoryLookupEmails validates a lookup batch and returns its addresses
-// canonicalized and de-duplicated, first occurrence first.
-func directoryLookupEmails(emails []string) ([]string, error) {
+// de-duplicated by canonical form, first occurrence first.
+func directoryLookupEmails(emails []string) ([]directoryAddress, error) {
 	if len(emails) == 0 {
 		return nil, fmt.Errorf("%w: at least one email is required", ErrInvalidArgument)
 	}
@@ -193,7 +209,7 @@ func directoryLookupEmails(emails []string) ([]string, error) {
 			ErrInvalidArgument, MaxDirectoryLookupEmails, len(emails))
 	}
 	seen := make(map[string]bool, len(emails))
-	out := make([]string, 0, len(emails))
+	out := make([]directoryAddress, 0, len(emails))
 	for _, e := range emails {
 		e = strings.TrimSpace(e)
 		if e == "" {
@@ -208,7 +224,7 @@ func directoryLookupEmails(emails []string) ([]string, error) {
 			continue
 		}
 		seen[canonical] = true
-		out = append(out, canonical)
+		out = append(out, directoryAddress{requested: e, canonical: canonical})
 	}
 	return out, nil
 }
@@ -217,7 +233,7 @@ func directoryLookupEmails(emails []string) ([]string, error) {
 // orders them by the address that requested them. It pairs them under
 // FoldEmail, the rule the repository matched them by, so no account the
 // repository returned for a requested address can fail to pair with it.
-func (s *DirectoryService) directoryUsersInOrder(wanted []string, found []*User) []DirectoryUser {
+func (s *DirectoryService) directoryUsersInOrder(wanted []directoryAddress, found []*User) []DirectoryUser {
 	byEmail := make(map[string]*User, len(found))
 	for _, u := range found {
 		if isActiveDirectoryAccount(u) && (u.EmailVerified || !s.requireVerifiedEmail) {
@@ -225,13 +241,14 @@ func (s *DirectoryService) directoryUsersInOrder(wanted []string, found []*User)
 		}
 	}
 	out := make([]DirectoryUser, 0, len(byEmail))
-	for _, e := range wanted {
-		u, ok := byEmail[FoldEmail(e)]
+	for _, a := range wanted {
+		u, ok := byEmail[FoldEmail(a.canonical)]
 		if !ok {
 			continue
 		}
 		out = append(out, DirectoryUser{
 			ID: u.ID, Email: u.Email, Name: u.Name, AvatarURL: u.AvatarURL, EmailVerified: u.EmailVerified,
+			RequestedEmail: a.requested,
 		})
 	}
 	return out

@@ -6,7 +6,8 @@ Accepted (2026-06-11).
 
 **Amended** (2026-09-25): which layer normalizes is now explicit. The service
 canonicalizes every address it stores or looks up on the sign-up, sign-in,
-SCIM and directory-lookup paths (`CanonicalizeEmail`: trim, lower-case,
+SCIM, directory-lookup, admin-invite, email-change and tenant-invitation
+paths (`CanonicalizeEmail`: trim, lower-case,
 plus-tag and Gmail-dot removal, IDN punycode). The stores compare what they
 are given under one storage rule, `FoldEmail`, which lowers ASCII letters
 only: uniqueness and lookup key on `users.email_fold`, a stored generated

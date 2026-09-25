@@ -199,6 +199,26 @@ func TestRequestEmailChange_SameCanonicalAddressRejected(t *testing.T) {
 	}
 }
 
+// The requested address is stored on the change token, and so on the account
+// once confirmed, in canonical form.
+func TestRequestEmailChange_StoresCanonicalNewEmail(t *testing.T) {
+	t.Parallel()
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
+	if err := svc.RequestEmailChange(context.Background(), user.ID, " New.Me+Work@GoogleMail.com ", "Str0ng!Pass1"); err != nil {
+		t.Fatalf("RequestEmailChange: %v", err)
+	}
+	var got []string
+	repo.mu.Lock()
+	for _, tok := range repo.emailChanges {
+		got = append(got, tok.NewEmail)
+	}
+	repo.mu.Unlock()
+	if len(got) != 1 || got[0] != "newme@gmail.com" {
+		t.Fatalf("change token new emails = %q, want [newme@gmail.com]", got)
+	}
+}
+
 func TestRequestEmailChange_InvalidNewEmailRejected(t *testing.T) {
 	t.Parallel()
 	svc, repo, _ := newAuthSvcWithMailer(t)

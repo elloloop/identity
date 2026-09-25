@@ -178,8 +178,8 @@ leaves the same dirty state, and the refusal names the version to force.
 The service canonicalizes every address it is given before any store sees it.
 Canonicalizing trims the address, lower-cases it, drops a `+tag`, drops Gmail
 dots and punycodes an internationalized domain. Sign-up and sign-in already
-did this. This release applies it to SCIM, `LookupUsers`, tenant invitations
-and the email-change check as well. The stores then compare what they are
+did this. This release applies it to SCIM, `LookupUsers`, tenant invitations,
+admin `InviteUser` and email change as well. The stores then compare what they are
 given under one rule: ASCII letters fold, every other character must match
 exactly. Before this release Postgres compared by the database locale's
 `lower()`, while SQLite and the memory driver compared by ASCII case, so the
@@ -209,12 +209,18 @@ same addresses could match on one deployment and not on another.
   account outside SCIM deprovisioning. Responses carry the canonical address
   as `userName`, which can differ from what your IdP sent. The `userName eq` /
   `emails eq` filter canonicalizes its value, so an IdP searching by its own
-  spelling still finds the user.
+  spelling still finds the user. An account provisioned by an earlier release
+  (stored as the IdP spelled it) is still found by that spelling, so an IdP
+  that filters before it creates does not create a second account. The next
+  `PUT` or `PATCH` of that account stores the canonical form.
 - **`LookupUsers`.** Each requested address is canonicalized exactly as
   sign-in canonicalizes it, so the lookup finds the account sign-in with that
   address would. Addresses that canonicalize to the same address produce one
   entry. The entry's `email` is the address on file, which can differ from
-  the requested spelling in case, a `+tag` or Gmail dots.
+  the requested spelling in case, a `+tag` or Gmail dots, so each entry now
+  also carries **`requested_email`** (`requestedEmail` in JSON), the address
+  you sent that found it. Pair results with requests by that field, not by
+  `email`. The field is additive; older clients ignore it.
 - **`LookupUsers` error order.** The batch is now validated before the
   directory key is looked up. A request with a missing key, or one not shaped
   `<public id>.<secret>`, is still `UNAUTHENTICATED`. A request with a
@@ -224,10 +230,16 @@ same addresses could match on one deployment and not on another.
 - **Tenant invitations** are stored in canonical form. Accepting one compares
   the caller's address and the invited address in canonical form, so a `+tag`
   variant of the invited mailbox may accept, and an address differing in a
-  non-ASCII letter may not.
-- **Email change** refuses a new address whose canonical form equals the
-  current one, for example `me+x@corp.com` for `me@corp.com`, because sign-in
-  already resolves it to the same account.
+  non-ASCII letter may not. A new invitation revokes every pending one for
+  the same mailbox, including one stored before this release under another
+  spelling.
+- **Admin `InviteUser`** stores the invited address in canonical form, and
+  refuses a variant spelling of an existing account's mailbox as a
+  duplicate.
+- **Email change** stores the new address in canonical form, and refuses one
+  whose canonical form equals the current address, for example
+  `me+x@corp.com` for `me@corp.com`, because sign-in already resolves it to
+  the same account.
 
 ## v4.7 → v4.8 — directory lookup for services (additive); session-mode and SCIM fixes (behaviour changes)
 
