@@ -184,12 +184,12 @@ import { Code } from "astro-expressive-code/components";
   <p>
     With the setting off, a caller <strong>must not</strong> treat an entry
     with <code>email_verified: false</code> as proof that the account owns the
-    address, and must not authorize anything on that basis — granting access
-    addressed to that email, merging it with another record, or sending it
-    something meant for the address's owner. Anyone can register an address
-    they do not control, so such an entry says only that someone signed up
-    with it. Act on it only once <code>email_verified</code> is
-    <code>true</code>.
+    address, and must not authorize anything on that basis — granting the
+    account access that was given to the address, linking it to records keyed
+    by the address, or showing it data meant for the address's owner. Anyone
+    can register an address they do not control, so such an entry says only
+    that someone signed up with it. Act on it only once
+    <code>email_verified</code> is <code>true</code>.
   </p>
 
   <h2>Revoke a key</h2>
