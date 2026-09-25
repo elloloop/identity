@@ -76,6 +76,26 @@ func TestForceMigrationVersion_RefusesBadInput(t *testing.T) {
 	}
 }
 
+// TestDirtyVersionError_NamesTheRecovery pins the recovery the refusal names
+// for a failed migration in the middle, at the start and at the end of the
+// set.
+func TestDirtyVersionError_NamesTheRecovery(t *testing.T) {
+	middle := dirtyVersionError{version: 33, previous: 32, next: 34}.Error()
+	for _, want := range []string{"identity migrate force 32", "rolling back migration 34", "identity migrate force 34"} {
+		if !strings.Contains(middle, want) {
+			t.Errorf("middle: %q lacks %q", middle, want)
+		}
+	}
+	first := dirtyVersionError{version: 1, next: 2}.Error()
+	if !strings.Contains(first, "drop the schema_migrations table") || strings.Contains(first, "force 0") {
+		t.Errorf("first: %q, want the empty-database recovery and no force to 0", first)
+	}
+	last := dirtyVersionError{version: 34, previous: 33}.Error()
+	if !strings.Contains(last, "identity migrate force 33") || strings.Contains(last, "rolling back") {
+		t.Errorf("last: %q, want force 33 and no rollback branch", last)
+	}
+}
+
 // emailFoldMigrationVersion is 0034, whose lock_timeout the dirty-state test
 // trips.
 const emailFoldMigrationVersion = 34
@@ -114,6 +134,7 @@ func TestMigrate_FailedMigrationIsForcedAndRerun(t *testing.T) {
 	var dirty dirtyVersionError
 	require.ErrorAs(t, err, &dirty)
 	require.Equal(t, emailFoldMigrationVersion, dirty.version)
+	require.Equal(t, emailFoldMigrationVersion-1, dirty.previous)
 	require.Contains(t, err.Error(), forcePrevious)
 	require.False(t, hasColumn(ctx, t, holder, "users", "email_fold"), "the failed migration must leave no change behind")
 	require.NoError(t, tx.Rollback(ctx))

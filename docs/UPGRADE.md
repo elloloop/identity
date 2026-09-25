@@ -136,8 +136,10 @@ revoke the extra invitation) before upgrading.
 **Rolling back.** The down migration restores the locale `lower()` indexes. It
 fails if accounts or open invitations created after the upgrade differ only in
 the case of a non-ASCII letter (`é` and `É`) and the database locale folds
-them. Its SQL then rolls back and version 34 is left dirty with its changes
-still present; clear that with `identity migrate force 34`. Find such rows
+them. Its SQL then rolls back, leaving 0034 in place, but the runner records
+version **33** as dirty (it marks the version a migration moves to). Clear
+that with `identity migrate force 34`, which is the version the schema is
+really at. Find such rows
 before migrating down, as a `BYPASSRLS` role:
 
 ```sql
@@ -175,7 +177,8 @@ cleared. To recover:
 Because every statement in 0034 is guarded with `IF [NOT] EXISTS`, forcing 33
 and re-running is also right when you added the column or the new indexes by
 hand: the re-run skips what exists and finishes the rest. Any failed migration
-leaves the same dirty state, and the refusal names the version to force.
+leaves the same dirty state, and the refusal names the version to force for a
+failed apply and for a failed rollback.
 
 ### One email comparison rule
 

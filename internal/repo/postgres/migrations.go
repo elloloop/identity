@@ -73,23 +73,47 @@ func withDirtyVersionHint(m *migrate.Migrate, err error) error {
 	if verr != nil || !dirty {
 		return err
 	}
-	return fmt.Errorf("%w: %w", err, dirtyVersionError{version: int(version)})
+	src, serr := iofs.New(migrationFS, migrationsDir)
+	if serr != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+	hint := dirtyVersionError{version: int(version)}
+	if prev, perr := src.Prev(version); perr == nil {
+		hint.previous = int(prev)
+	}
+	if next, nerr := src.Next(version); nerr == nil {
+		hint.next = int(next)
+	}
+	return fmt.Errorf("%w: %w", err, hint)
 }
 
 // dirtyVersionError explains a dirty schema version and names the command
-// that clears it. Each identity migration runs as one transaction, so a
-// failed one leaves none of its changes behind and the schema is still at the
-// version before it; the operator confirms that and forces it.
+// that clears it. golang-migrate marks the version a migration moves TO dirty
+// before running it: going up that is the failed migration's own version,
+// going down (rolling migration next back) the version below it. Each identity
+// migration runs as one transaction, so a failed one leaves the schema where
+// it was, and the operator records that version.
 type dirtyVersionError struct {
-	version int
+	version  int
+	previous int // the migration before version; 0 when version is the first
+	next     int // the migration after version; 0 when version is the last
 }
 
 func (e dirtyVersionError) Error() string {
-	return fmt.Sprintf("schema version %d is marked dirty: migration %d failed part-way. "+
-		"Each identity migration runs in one transaction, so a failed one normally leaves none of its changes behind. "+
-		"Confirm that, then run `identity migrate force %d` followed by `identity migrate`; "+
-		"if migration %d's changes are present after all, run `identity migrate force %d` instead",
-		e.version, e.version, e.version-1, e.version, e.version)
+	msg := fmt.Sprintf("schema version %d is marked dirty because a migration failed part-way. "+
+		"Each identity migration runs in one transaction, so the failed one left no change behind. ", e.version)
+	if e.previous > 0 {
+		msg += fmt.Sprintf("If applying migration %d failed, confirm its changes are absent, then run "+
+			"`identity migrate force %d` followed by `identity migrate`", e.version, e.previous)
+	} else {
+		msg += fmt.Sprintf("If applying migration %d, the first, failed, the database holds no identity schema: "+
+			"drop the schema_migrations table and run `identity migrate` again", e.version)
+	}
+	if e.next > 0 {
+		msg += fmt.Sprintf(". If rolling back migration %d failed, run `identity migrate force %d`", e.next, e.next)
+	}
+	return msg
 }
 
 func newMigrator(dsn string) (*migrate.Migrate, error) {
