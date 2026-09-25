@@ -188,3 +188,42 @@ func TestParseAllowedOrigins_InvalidPattern_Rejected(t *testing.T) {
 		})
 	}
 }
+
+func TestRedact(t *testing.T) {
+	t.Parallel()
+
+	const secret = "s3cret-pw"
+	cases := map[string]string{
+		"https://app.example.app":                         "https://app.example.app",
+		"https://*.previews.example.app/auth":             "https://*.previews.example.app/auth",
+		"https://user:" + secret + "@app.example.app/x":   "https://REDACTED@app.example.app/x",
+		"https://" + secret + "@app.example.app":          "https://REDACTED@app.example.app",
+		"https://user:" + secret + "@*.example.app":       "https://REDACTED@*.example.app",
+		"user:" + secret + "@app.example.app":             redactedEntry,
+		"https://user:" + secret + "@app.example.app/%zz": redactedEntry,
+	}
+	for in, want := range cases {
+		got := Redact(in)
+		assert.Equal(t, want, got, in)
+		assert.NotContains(t, got, secret, in)
+	}
+}
+
+// TestValidateAllowedOrigins_ErrorsNeverCarryCredentials pins that a rejected
+// entry's credentials never reach the error (and so the boot log or an admin
+// API response).
+func TestValidateAllowedOrigins_ErrorsNeverCarryCredentials(t *testing.T) {
+	t.Parallel()
+
+	const secret = "s3cret-pw"
+	for _, entry := range []string{
+		"https://user:" + secret + "@app.example.app",
+		"https://user:" + secret + "@*.previews.example.app",
+		"https://user:" + secret + "@app.example.app/%zz",
+		"https://user:" + secret + "@app.example.app/path",
+	} {
+		_, err := ValidateAllowedOrigins([]string{entry}, true)
+		require.Error(t, err, entry)
+		assert.NotContains(t, err.Error(), secret, entry)
+	}
+}

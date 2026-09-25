@@ -72,6 +72,11 @@ func TestParsePattern_Rejections(t *testing.T) {
 		{"https://*.pages.dev", ErrPatternParentPublicSuffix},
 		{"https://*.github.io", ErrPatternParentPublicSuffix},
 		{"https://*.Pages.Dev", ErrPatternParentPublicSuffix},
+		// Parents under a wildcard suffix rule: every one-label child of these
+		// is itself a public suffix.
+		{"https://*.stolos.io", ErrPatternParentPublicSuffix},
+		{"https://*.compute.amazonaws.com", ErrPatternParentPublicSuffix},
+		{"https://user:pw@*.previews.example.app", ErrPatternUserinfo},
 		// A numeric last label would let the pattern match IPv4 literals.
 		{"https://*.0.0.1", ErrPatternParentNumeric},
 		{"https://*.example.123", ErrPatternParentNumeric},
@@ -99,6 +104,7 @@ func TestParsePattern_Canonical(t *testing.T) {
 		"https://*.previews.example.app:8443":  "https://*.previews.example.app:8443",
 		"https://*.xn--bcher-kva.example":      "https://*.xn--bcher-kva.example",
 		"https://*.myproj.pages.dev":           "https://*.myproj.pages.dev",
+		"https://*.feature.myproj.pages.dev":   "https://*.feature.myproj.pages.dev",
 		"https://*.example.co.uk":              "https://*.example.co.uk",
 		"https://*.previews.example.app:0443":  "https://*.previews.example.app",
 		"https://*.previews.example.app:08443": "https://*.previews.example.app:8443",

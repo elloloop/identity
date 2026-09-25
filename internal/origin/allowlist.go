@@ -56,7 +56,7 @@ func ValidateAllowedOrigins(origins []string, allowCredentials bool) (Allowlist,
 		}
 		u, err := parseBareOrigin(entry)
 		if err != nil {
-			return Allowlist{}, fmt.Errorf("cors: origin %q invalid: %w", entry, err)
+			return Allowlist{}, fmt.Errorf("cors: origin %q invalid: %w", Redact(entry), err)
 		}
 		if !IsPattern(entry) {
 			a.exact = append(a.exact, entry)
@@ -64,7 +64,7 @@ func ValidateAllowedOrigins(origins []string, allowCredentials bool) (Allowlist,
 		}
 		p, err := ParsePattern(u)
 		if err != nil {
-			return Allowlist{}, fmt.Errorf("cors: origin %q invalid: %w", entry, err)
+			return Allowlist{}, fmt.Errorf("cors: origin %q invalid: %w", Redact(entry), err)
 		}
 		a.patterns = append(a.patterns, p)
 	}
@@ -83,7 +83,7 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	}
 	u, err := url.Parse(s)
 	if err != nil {
-		return nil, err
+		return nil, errInvalidURL
 	}
 	if u.Host == "" {
 		return nil, errors.New("host is empty")
@@ -102,6 +102,32 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	}
 	return u, nil
 }
+
+// errInvalidURL replaces url.Parse's error, which quotes the whole input and so
+// would carry any credentials in it into logs.
+var errInvalidURL = errors.New("not a valid URL")
+
+// Redact renders a configured allowlist entry for a log line or an error
+// message without any credentials it carries: userinfo is replaced wholesale
+// (neither the user nor the password appears), and any other entry that
+// contains "@" — where a credential could hide in a shape url.Parse does not
+// read as userinfo — is not echoed at all.
+func Redact(entry string) string {
+	if u, err := url.Parse(entry); err == nil && u.User != nil {
+		masked := *u
+		masked.User = url.User(redactedUserinfo)
+		return masked.String()
+	}
+	if strings.Contains(entry, "@") {
+		return redactedEntry
+	}
+	return entry
+}
+
+const (
+	redactedUserinfo = "REDACTED"
+	redactedEntry    = "[entry withheld: may contain credentials]"
+)
 
 // Exact returns a copy of the exact origins in configured order.
 func (a Allowlist) Exact() []string { return slices.Clone(a.exact) }

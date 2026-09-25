@@ -60,14 +60,14 @@ func ParseReturnAllowlist(csv string) (ReturnAllowlist, error) {
 		if origin.IsPattern(raw) {
 			e, err := parseReturnPattern(raw)
 			if err != nil {
-				return ReturnAllowlist{}, fmt.Errorf("return URL pattern %q: %w", raw, err)
+				return ReturnAllowlist{}, fmt.Errorf("return URL pattern %q: %w", origin.Redact(raw), err)
 			}
 			a.entries = append(a.entries, e)
 			continue
 		}
 		u, ok := parseReturnURL(raw)
 		if !ok || u.RawQuery != "" || u.Fragment != "" {
-			a.ignored = append(a.ignored, raw)
+			a.ignored = append(a.ignored, origin.Redact(raw))
 			continue
 		}
 		a.entries = append(a.entries, returnEntry{raw: raw, url: u})
@@ -78,10 +78,8 @@ func ParseReturnAllowlist(csv string) (ReturnAllowlist, error) {
 func parseReturnPattern(raw string) (returnEntry, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return returnEntry{}, err
-	}
-	if u.User != nil {
-		return returnEntry{}, errors.New("userinfo not allowed")
+		// url.Parse's error quotes the whole input, credentials included.
+		return returnEntry{}, errors.New("not a valid URL")
 	}
 	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 		return returnEntry{}, errors.New("query and fragment not allowed")
@@ -121,8 +119,8 @@ func (a ReturnAllowlist) Patterns() []string {
 	return out
 }
 
-// Ignored returns the malformed non-wildcard entries that admit nothing (for
-// a startup warning).
+// Ignored returns the malformed non-wildcard entries that admit nothing, with
+// any credentials redacted (origin.Redact), for a startup warning.
 func (a ReturnAllowlist) Ignored() []string { return slices.Clone(a.ignored) }
 
 // Allows reports whether returnTo is permitted by an exact origin, a

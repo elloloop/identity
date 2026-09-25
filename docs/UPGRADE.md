@@ -41,7 +41,9 @@ behaviour:
     each one before upgrading.
   - An entry that is not a valid pattern — including one whose parent is a
     public suffix, such as `https://*.co.uk`, `https://*.vercel.app`,
-    `https://*.netlify.app`, `https://*.pages.dev` or `https://*.github.io` —
+    `https://*.netlify.app`, `https://*.pages.dev` or `https://*.github.io`,
+    or one directly under a wildcard suffix rule such as
+    `https://*.compute.amazonaws.com` —
     makes the server **refuse to start** (`cors config invalid: …` /
     `GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: …`). Scope a preview pattern
     to your own project instead: `https://*.<project>.pages.dev`.

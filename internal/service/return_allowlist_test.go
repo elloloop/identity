@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/elloloop/identity/internal/origin"
@@ -234,5 +235,41 @@ func TestReturnAllowlist_EmptyDeniesAll(t *testing.T) {
 	a := mustReturnAllowlist(t, "")
 	if a.Allows("https://anything.test/") {
 		t.Error("empty allowlist allowed a return_to")
+	}
+}
+
+// TestParseReturnAllowlist_NeverEchoesCredentials pins that neither a pattern
+// boot error nor an ignored entry reported for the startup warning carries a
+// password from the configured value.
+func TestParseReturnAllowlist_NeverEchoesCredentials(t *testing.T) {
+	t.Parallel()
+
+	const secret = "s3cret-pw"
+	for _, entry := range []string{
+		"https://user:" + secret + "@*.previews.example.app/auth",
+		"https://user:" + secret + "@*.previews.example.app/%zz",
+	} {
+		_, err := ParseReturnAllowlist(entry)
+		if err == nil {
+			t.Fatalf("entry with userinfo accepted: %q", entry)
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error leaks the password: %v", err)
+		}
+	}
+
+	a := mustReturnAllowlist(t, strings.Join([]string{
+		"https://user:" + secret + "@app.example.app/auth",
+		"user:" + secret + "@app.example.app",
+		"https://user:" + secret + "@app.example.app/%zz",
+	}, ","))
+	ignored := a.Ignored()
+	if len(ignored) != 3 {
+		t.Fatalf("Ignored() = %v, want 3 entries", ignored)
+	}
+	for _, e := range ignored {
+		if strings.Contains(e, secret) {
+			t.Errorf("ignored entry leaks the password: %q", e)
+		}
 	}
 }

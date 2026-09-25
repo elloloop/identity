@@ -507,7 +507,7 @@ func New(deps Deps) (*Built, error) {
 	for _, entry := range returnAllow.Ignored() {
 		logger.Warn("oauth_allowed_return_url_ignored",
 			zap.String("entry", entry),
-			zap.String("hint", "not an absolute http(s) URL without query or fragment; it admits no return_to"))
+			zap.String("hint", "not an absolute http(s) URL without userinfo, query or fragment; it admits no return_to"))
 	}
 
 	trustedProxies, err := middleware.ParseTrustedProxies(deps.Config.TrustedProxies)

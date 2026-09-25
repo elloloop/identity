@@ -31,6 +31,7 @@ const (
 // Pattern parse errors. Each names one startup rejection of a wildcard entry.
 var (
 	ErrPatternScheme             = errors.New("wildcard origin must use https")
+	ErrPatternUserinfo           = errors.New("wildcard origin must not carry userinfo")
 	ErrPatternLabel              = errors.New("wildcard must be the entire leftmost host label, as in https://*.parent.example")
 	ErrPatternParentShort        = errors.New("wildcard parent domain must have at least two labels")
 	ErrPatternParentLabel        = errors.New("wildcard parent domain has an invalid DNS label")
@@ -53,15 +54,20 @@ func IsPattern(entry string) bool { return strings.Contains(entry, wildcard) }
 
 // ParsePattern validates the scheme, host and port of a wildcard entry.
 // Callers apply their own rules to the rest of the URL (CORS allows no path;
-// a return URL keeps its path prefix) and reject userinfo before calling.
+// a return URL keeps its path prefix).
 //
 // A parent that is itself a public suffix — an ICANN suffix like co.uk or a
-// private one like a shared static-hosting domain — is refused: every tenant
-// of that suffix could otherwise receive a user's OAuth code or make
+// private one like a shared static-hosting domain — is refused, and so is a
+// parent under a wildcard suffix rule (*.<parent> on the list), whose every
+// single-label child is a public suffix: either way, every tenant of the
+// shared suffix could otherwise receive a user's OAuth code or make
 // credentialed CORS calls.
 func ParsePattern(u *url.URL) (Pattern, error) {
 	if u.Scheme != httpsScheme {
 		return Pattern{}, ErrPatternScheme
+	}
+	if u.User != nil {
+		return Pattern{}, ErrPatternUserinfo
 	}
 	if strings.Contains(u.Path+u.RawQuery+u.Fragment, wildcard) {
 		return Pattern{}, ErrPatternLabel
@@ -83,7 +89,7 @@ func ParsePattern(u *url.URL) (Pattern, error) {
 		return Pattern{}, ErrPatternParentNumeric
 	}
 	parent := strings.Join(parentLabels, ".")
-	if suffix, _ := publicsuffix.PublicSuffix(parent); suffix == parent {
+	if isPublicSuffix(parent) || isPublicSuffix(probeLabel+"."+parent) {
 		return Pattern{}, ErrPatternParentPublicSuffix
 	}
 	port, err := canonicalPort(u)
@@ -101,6 +107,15 @@ func canonicalPort(u *url.URL) (string, error) {
 		return "", ErrPatternPort
 	}
 	return strconv.Itoa(n), nil
+}
+
+// probeLabel stands for "any single label" when asking whether the parent sits
+// under a wildcard public-suffix rule.
+const probeLabel = "x"
+
+func isPublicSuffix(domain string) bool {
+	suffix, _ := publicsuffix.PublicSuffix(domain)
+	return suffix == domain
 }
 
 func isNumeric(l string) bool {
