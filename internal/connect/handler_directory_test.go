@@ -10,7 +10,6 @@ import (
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
-	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -35,7 +34,7 @@ func startDirectoryServer(t *testing.T, repo *fakeRepo, withDirectory bool) iden
 
 func withDirectoryKey(msg *identitypb.LookupUsersRequest, key string) *connect.Request[identitypb.LookupUsersRequest] {
 	req := connect.NewRequest(msg)
-	req.Header().Set(middleware.DirectoryKeyHeader, key)
+	req.Header().Set(DirectoryKeyHeader, key)
 	return req
 }
 

@@ -536,7 +536,8 @@ func TestReactivateManagedChildAccount_CannotBypassConsentGate(t *testing.T) {
 // guardian path does not overwrite another state machine's state.
 func TestDeactivateManagedChildAccount_RefusesOtherStates(t *testing.T) {
 	ctx := context.Background()
-	for _, status := range []string{StatusPendingParentalConsent, StatusPendingDeletion} {
+	// A padded status is a corrupt row, not an active account.
+	for _, status := range []string{StatusPendingParentalConsent, StatusPendingDeletion, " active "} {
 		f := newGuardianFixture(ctx, t)
 		if err := f.repo.UpdateUser(ctx, f.child.ID, map[string]any{"status": status}); err != nil {
 			t.Fatalf("seed status: %v", err)
@@ -735,6 +736,16 @@ func TestGuardianManagement_ReactivateIdempotentAndRefusals(t *testing.T) {
 	}
 	if err := f2.svc.ReactivateManagedChildAccount(ctx, f2.guardian.ID, f2.child.ID, strongPW, "", ""); !errors.Is(err, ErrAccountNotActive) {
 		t.Fatalf("err = %v, want ErrAccountNotActive", err)
+	}
+
+	// A padded status is a corrupt row: refuse it rather than report it as
+	// already active, matching what sign-in does with the same row.
+	f3 := newGuardianFixture(ctx, t)
+	if err := f3.repo.UpdateUser(ctx, f3.child.ID, map[string]any{"status": " active "}); err != nil {
+		t.Fatalf("seed status: %v", err)
+	}
+	if err := f3.svc.ReactivateManagedChildAccount(ctx, f3.guardian.ID, f3.child.ID, strongPW, "", ""); !errors.Is(err, ErrAccountNotActive) {
+		t.Fatalf("padded status: err = %v, want ErrAccountNotActive", err)
 	}
 }
 

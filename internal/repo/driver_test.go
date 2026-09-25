@@ -29,8 +29,7 @@ func TestBuildMemoryDriver(t *testing.T) {
 
 // assertNoGovernancePlane verifies a control-plane-free driver's accessors
 // return true nils (not interfaces wrapping typed-nil pointers) so the
-// service layer's `== nil` checks behave. Covers ProjectResolver,
-// TenantAutoFormer and LoginGovernance together.
+// service layer's `== nil` checks behave.
 func assertNoGovernancePlane(t *testing.T, built *Built, driver string) {
 	t.Helper()
 	if r := built.ProjectResolver(); r != nil {
@@ -41,6 +40,9 @@ func assertNoGovernancePlane(t *testing.T, built *Built, driver string) {
 	}
 	if cp := built.ControlPlaneStore(); cp != nil {
 		t.Errorf("Build %s: ControlPlaneStore() = %v, want true nil", driver, cp)
+	}
+	if dc := built.DirectoryCredentialStore(); dc != nil {
+		t.Errorf("Build %s: DirectoryCredentialStore() = %v, want true nil", driver, dc)
 	}
 	if np := built.NativeProjectLookup(); np != nil {
 		t.Errorf("Build %s: NativeProjectLookup() = %v, want true nil", driver, np)
@@ -110,6 +112,9 @@ func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
 	if empty.ControlPlaneStore() != nil {
 		t.Error("empty ControlPlaneStore: want nil interface")
 	}
+	if empty.DirectoryCredentialStore() != nil {
+		t.Error("empty DirectoryCredentialStore: want nil interface")
+	}
 	if empty.NativeProjectLookup() != nil {
 		t.Error("empty NativeProjectLookup: want nil interface")
 	}
@@ -149,6 +154,9 @@ func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
 	}
 	if full.ControlPlaneStore() == nil {
 		t.Error("full ControlPlaneStore: want non-nil")
+	}
+	if full.DirectoryCredentialStore() == nil {
+		t.Error("full DirectoryCredentialStore: want non-nil")
 	}
 	if full.NativeProjectLookup() == nil {
 		t.Error("full NativeProjectLookup: want non-nil")

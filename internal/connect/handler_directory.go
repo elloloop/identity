@@ -6,14 +6,18 @@ import (
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
-	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
 
+// DirectoryKeyHeader carries a directory_reader project credential
+// ("<public id>.<secret>") to LookupUsers, the one RPC it authorizes. It is
+// deliberately not the Authorization header: the JWT layer never sees it,
+// so the credential cannot be confused with a session on any other RPC, and
+// the handler that verifies it is the only code that reads it.
+const DirectoryKeyHeader = "X-Directory-Key"
+
 // LookupUsers resolves email addresses to active accounts for a service
-// holding a directory_reader credential. The credential arrives in the
-// DirectoryKeyHeader, never the Authorization header, so no JWT-verifying layer
-// ever mistakes it for a session — and no RPC but this one reads it.
+// holding a directory_reader credential presented in DirectoryKeyHeader.
 func (h *IdentityHandler) LookupUsers(
 	ctx context.Context,
 	req *connect.Request[identitypb.LookupUsersRequest],
@@ -21,7 +25,7 @@ func (h *IdentityHandler) LookupUsers(
 	if h.directory == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	found, err := h.directory.LookupUsers(ctx, req.Header().Get(middleware.DirectoryKeyHeader), req.Msg.GetEmails())
+	found, err := h.directory.LookupUsers(ctx, req.Header().Get(DirectoryKeyHeader), req.Msg.GetEmails())
 	if err != nil {
 		return nil, toConnectError(err)
 	}
