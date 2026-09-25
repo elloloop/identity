@@ -176,9 +176,9 @@ func TestDirectoryLookup_ReturnsActiveAccountsInRequestOrder(t *testing.T) {
 		t.Fatalf("LookupUsers: %v", err)
 	}
 	want := []DirectoryUser{
-		{ID: bob, Email: "bob@corp.test", Name: "Bob", EmailVerified: true, RequestedEmail: "bob@corp.test"},
-		{ID: alice, Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png", EmailVerified: true, RequestedEmail: "ALICE@corp.test"},
-		{ID: legacy, Email: "legacy@corp.test", Name: "Legacy", EmailVerified: true, RequestedEmail: "legacy@corp.test"},
+		{ID: bob, Email: "bob@corp.test", Name: "Bob", EmailVerified: true, RequestedEmails: []string{"bob@corp.test"}},
+		{ID: alice, Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png", EmailVerified: true, RequestedEmails: []string{"ALICE@corp.test"}},
+		{ID: legacy, Email: "legacy@corp.test", Name: "Legacy", EmailVerified: true, RequestedEmails: []string{"legacy@corp.test"}},
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("LookupUsers =\n  %+v\nwant\n  %+v", got, want)
@@ -386,23 +386,27 @@ func TestDirectoryLookup_CanonicalizesAsSignInDoes(t *testing.T) {
 	}
 }
 
-// Each entry names the requested address that found it, so a caller can pair
-// results with requests even when the address on file is spelled differently;
-// of several requests for one mailbox, the first is the one named.
-func TestDirectoryLookup_NamesTheRequestedAddress(t *testing.T) {
+// Each entry lists every requested spelling that found it, so a caller can
+// pair results with requests even when the address on file is spelled
+// differently, and no request for the mailbox reads as a miss.
+func TestDirectoryLookup_NamesEveryRequestedSpelling(t *testing.T) {
 	f := newDirectoryFixture(t)
 	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
+	bob := f.seed(t, dirTestProjectA, &User{Email: "bob@corp.com", Status: StatusActive, EmailVerified: true})
 	alice := f.seed(t, dirTestProjectA, &User{Email: "alicesmith@gmail.com", Status: StatusActive, EmailVerified: true})
 
 	got, err := f.svc.LookupUsers(context.Background(), key, []string{
-		"  Alice.Smith+news@googlemail.com ", "alicesmith@gmail.com",
+		"bob+jira@corp.com", "  Alice.Smith+news@googlemail.com ", "bob@corp.com", "bob+jira@corp.com", "alicesmith@gmail.com",
 	})
 	if err != nil {
 		t.Fatalf("LookupUsers: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != alice || got[0].Email != "alicesmith@gmail.com" ||
-		got[0].RequestedEmail != "Alice.Smith+news@googlemail.com" {
-		t.Fatalf("LookupUsers = %+v, want one entry for %s naming the first requested spelling", got, alice)
+	want := []DirectoryUser{
+		{ID: bob, Email: "bob@corp.com", EmailVerified: true, RequestedEmails: []string{"bob+jira@corp.com", "bob@corp.com"}},
+		{ID: alice, Email: "alicesmith@gmail.com", EmailVerified: true, RequestedEmails: []string{"Alice.Smith+news@googlemail.com", "alicesmith@gmail.com"}},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("LookupUsers =\n  %+v\nwant\n  %+v", got, want)
 	}
 }
 
@@ -467,9 +471,9 @@ func TestDirectoryLookup_RequireVerifiedEmail(t *testing.T) {
 				return got
 			}
 
-			want := []DirectoryUser{{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true, RequestedEmail: "proven@corp.test"}}
+			want := []DirectoryUser{{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true, RequestedEmails: []string{"proven@corp.test"}}}
 			if !required {
-				want = append([]DirectoryUser{{ID: claimed, Email: "claimed@corp.test", Name: "Claimed", RequestedEmail: "claimed@corp.test"}}, want...)
+				want = append([]DirectoryUser{{ID: claimed, Email: "claimed@corp.test", Name: "Claimed", RequestedEmails: []string{"claimed@corp.test"}}}, want...)
 			}
 			if got := lookup(); fmt.Sprint(got) != fmt.Sprint(want) {
 				t.Fatalf("before verification: LookupUsers = %+v, want %+v", got, want)
@@ -479,8 +483,8 @@ func TestDirectoryLookup_RequireVerifiedEmail(t *testing.T) {
 				t.Fatalf("verify: %v", err)
 			}
 			want = []DirectoryUser{
-				{ID: claimed, Email: "claimed@corp.test", Name: "Claimed", EmailVerified: true, RequestedEmail: "claimed@corp.test"},
-				{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true, RequestedEmail: "proven@corp.test"},
+				{ID: claimed, Email: "claimed@corp.test", Name: "Claimed", EmailVerified: true, RequestedEmails: []string{"claimed@corp.test"}},
+				{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true, RequestedEmails: []string{"proven@corp.test"}},
 			}
 			if got := lookup(); fmt.Sprint(got) != fmt.Sprint(want) {
 				t.Fatalf("after verification: LookupUsers = %+v, want %+v", got, want)

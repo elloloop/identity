@@ -141,8 +141,8 @@ func assertDirectoryLookupServed(t *testing.T, cfg *config.Config) {
 	}
 	for field := range resp.Users[0] {
 		switch field {
-		// requestedEmail echoes the caller's own input back.
-		case "id", "email", "name", "avatarUrl", "emailVerified", "requestedEmail":
+		// requestedEmails echoes the caller's own input back.
+		case "id", "email", "name", "avatarUrl", "emailVerified", "requestedEmails":
 		default:
 			t.Fatalf("directory entry discloses %q: %v", field, resp.Users[0])
 		}

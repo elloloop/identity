@@ -6029,15 +6029,18 @@ components:
             email_verified says whether the account's owner proved the address.
              Always true when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the
              default), because unverified accounts are then not returned.
-        requestedEmail:
-          type: string
-          title: requested_email
+        requestedEmails:
+          type: array
+          items:
+            type: string
+          title: requested_emails
           description: |-
-            requested_email is the entry of LookupUsersRequest.emails (trimmed,
-             otherwise as sent) that found this account — the first of them when
-             several canonicalize to the same address. email is the address on file,
-             which can differ from it in case, a "+tag" or Gmail dots: pair results
-             with requests by requested_email.
+            requested_emails are the entries of LookupUsersRequest.emails (trimmed,
+             otherwise as sent, each distinct spelling once, in request order) that
+             found this account: every requested spelling that canonicalizes to its
+             address. email is the address on file, which can differ from them in
+             case, a "+tag" or Gmail dots, so pair results with requests by
+             requested_emails.
       title: DirectoryUser
       additionalProperties: false
       description: |-
@@ -7124,8 +7127,8 @@ components:
              omitted, as is one whose account's email is unverified while
              GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default). Addresses that
              canonicalize to the same address yield a single entry. Entries follow
-             request order, but omissions shift positions: match each entry to a
-             request by its requested_email, never by index or by email.
+             request order, but omissions shift positions: match each entry to the
+             requests it answers by its requested_emails, never by index or by email.
       title: LookupUsersResponse
       additionalProperties: false
     identity.v1.NativeOAuthLoginRequest:

@@ -218,9 +218,10 @@ same addresses could match on one deployment and not on another.
   address would. Addresses that canonicalize to the same address produce one
   entry. The entry's `email` is the address on file, which can differ from
   the requested spelling in case, a `+tag` or Gmail dots, so each entry now
-  also carries **`requested_email`** (`requestedEmail` in JSON), the address
-  you sent that found it. Pair results with requests by that field, not by
-  `email`. The field is additive; older clients ignore it.
+  also carries **`requested_emails`** (`requestedEmails` in JSON): every
+  address you sent that found it, each distinct spelling once. Pair results
+  with requests by that field, not by `email`. The field is additive; older
+  clients ignore it.
 - **`LookupUsers` error order.** The batch is now validated before the
   directory key is looked up. A request with a missing key, or one not shaped
   `<public id>.<secret>`, is still `UNAUTHENTICATED`. A request with a

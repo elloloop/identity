@@ -32,12 +32,12 @@ func (h *IdentityHandler) LookupUsers(
 	users := make([]*identitypb.DirectoryUser, 0, len(found))
 	for _, u := range found {
 		users = append(users, &identitypb.DirectoryUser{
-			Id:             u.ID,
-			Email:          u.Email,
-			Name:           u.Name,
-			AvatarUrl:      u.AvatarURL,
-			EmailVerified:  u.EmailVerified,
-			RequestedEmail: u.RequestedEmail,
+			Id:              u.ID,
+			Email:           u.Email,
+			Name:            u.Name,
+			AvatarUrl:       u.AvatarURL,
+			EmailVerified:   u.EmailVerified,
+			RequestedEmails: u.RequestedEmails,
 		})
 	}
 	return connect.NewResponse(&identitypb.LookupUsersResponse{Users: users}), nil

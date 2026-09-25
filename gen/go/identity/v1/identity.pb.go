@@ -14465,14 +14465,15 @@ type DirectoryUser struct {
 	// Always true when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the
 	// default), because unverified accounts are then not returned.
 	EmailVerified bool `protobuf:"varint,5,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
-	// requested_email is the entry of LookupUsersRequest.emails (trimmed,
-	// otherwise as sent) that found this account — the first of them when
-	// several canonicalize to the same address. email is the address on file,
-	// which can differ from it in case, a "+tag" or Gmail dots: pair results
-	// with requests by requested_email.
-	RequestedEmail string `protobuf:"bytes,6,opt,name=requested_email,json=requestedEmail,proto3" json:"requested_email,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// requested_emails are the entries of LookupUsersRequest.emails (trimmed,
+	// otherwise as sent, each distinct spelling once, in request order) that
+	// found this account: every requested spelling that canonicalizes to its
+	// address. email is the address on file, which can differ from them in
+	// case, a "+tag" or Gmail dots, so pair results with requests by
+	// requested_emails.
+	RequestedEmails []string `protobuf:"bytes,6,rep,name=requested_emails,json=requestedEmails,proto3" json:"requested_emails,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *DirectoryUser) Reset() {
@@ -14540,11 +14541,11 @@ func (x *DirectoryUser) GetEmailVerified() bool {
 	return false
 }
 
-func (x *DirectoryUser) GetRequestedEmail() string {
+func (x *DirectoryUser) GetRequestedEmails() []string {
 	if x != nil {
-		return x.RequestedEmail
+		return x.RequestedEmails
 	}
-	return ""
+	return nil
 }
 
 type LookupUsersResponse struct {
@@ -14555,8 +14556,8 @@ type LookupUsersResponse struct {
 	// omitted, as is one whose account's email is unverified while
 	// GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default). Addresses that
 	// canonicalize to the same address yield a single entry. Entries follow
-	// request order, but omissions shift positions: match each entry to a
-	// request by its requested_email, never by index or by email.
+	// request order, but omissions shift positions: match each entry to the
+	// requests it answers by its requested_emails, never by index or by email.
 	Users         []*DirectoryUser `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -16776,15 +16777,15 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"&AdminListProjectOAuthProvidersResponse\x12E\n" +
 	"\tproviders\x18\x01 \x03(\v2'.identity.v1.ProjectOAuthProviderConfigR\tproviders\",\n" +
 	"\x12LookupUsersRequest\x12\x16\n" +
-	"\x06emails\x18\x01 \x03(\tR\x06emails\"\xb8\x01\n" +
+	"\x06emails\x18\x01 \x03(\tR\x06emails\"\xba\x01\n" +
 	"\rDirectoryUser\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"avatar_url\x18\x04 \x01(\tR\tavatarUrl\x12%\n" +
-	"\x0eemail_verified\x18\x05 \x01(\bR\remailVerified\x12'\n" +
-	"\x0frequested_email\x18\x06 \x01(\tR\x0erequestedEmail\"G\n" +
+	"\x0eemail_verified\x18\x05 \x01(\bR\remailVerified\x12)\n" +
+	"\x10requested_emails\x18\x06 \x03(\tR\x0frequestedEmails\"G\n" +
 	"\x13LookupUsersResponse\x120\n" +
 	"\x05users\x18\x01 \x03(\v2\x1a.identity.v1.DirectoryUserR\x05users\"=\n" +
 	"\x1fCreateAssuranceChallengeRequest\x12\x1a\n" +

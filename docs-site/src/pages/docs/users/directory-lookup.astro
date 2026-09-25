@@ -152,17 +152,17 @@ import { Code } from "astro-expressive-code/components";
     code={`curl -sS -X POST https://auth.example.com/identity.v1.IdentityService/LookupUsers \\
   -H "X-Directory-Key: $DIRECTORY_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"emails": ["Alice+team@corp.com", "bob@corp.com"]}'
+  -d '{"emails": ["Alice+team@corp.com", "alice@corp.com", "bob@corp.com"]}'
 
-# {"users":[{"id":"u_31…","email":"alice@corp.com","name":"Alice","avatarUrl":"https://…","emailVerified":true,"requestedEmail":"Alice+team@corp.com"}]}`}
+# {"users":[{"id":"u_31…","email":"alice@corp.com","name":"Alice","avatarUrl":"https://…","emailVerified":true,"requestedEmails":["Alice+team@corp.com","alice@corp.com"]}]}`}
   />
   <p>
     Results come back in request order, one entry per distinct address that
     names an account the lookup may return. Addresses that canonicalize to the
     same address produce one entry. Because omitted addresses leave no gap,
-    match each entry to your request by its <code>requestedEmail</code> — the
-    address you sent that found it, trimmed, and the first of them when
-    several name the same mailbox — never by position. Its
+    match each entry to your requests by its <code>requestedEmails</code> —
+    every address you sent that found it, trimmed, each distinct spelling
+    once — never by position. Its
     <code>email</code> is the address the account has on file, which can
     differ from the spelling you sent in case, a <code>+tag</code> or Gmail
     dots.

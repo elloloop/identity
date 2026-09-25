@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.uber.org/zap"
@@ -55,18 +56,19 @@ type DirectoryUser struct {
 	// Always true when the deployment requires verified email, since an
 	// unverified account is then not returned at all.
 	EmailVerified bool
-	// RequestedEmail is the requested address (trimmed, otherwise as sent)
-	// that found the account — the first of them when several canonicalize
-	// to it. Email is the address on file, which can differ from it in case,
-	// a "+tag" or Gmail dots, so callers pair results with requests by this.
-	RequestedEmail string
+	// RequestedEmails are the requested addresses (trimmed, otherwise as
+	// sent, each distinct spelling once, in request order) that found the
+	// account: every one that canonicalizes to its address. Email is the
+	// address on file, which can differ from them in case, a "+tag" or Gmail
+	// dots, so callers pair results with requests by these.
+	RequestedEmails []string
 }
 
-// directoryAddress is one requested address: as sent (trimmed), and in the
-// canonical form it is looked up by.
+// directoryAddress is one requested mailbox: the canonical form it is looked
+// up by, and every distinct spelling of it the request carried.
 type directoryAddress struct {
-	requested string
 	canonical string
+	requested []string
 }
 
 // DirectoryService answers read-only directory lookups for services. Its
@@ -208,7 +210,7 @@ func directoryLookupEmails(emails []string) ([]directoryAddress, error) {
 		return nil, fmt.Errorf("%w: at most %d emails per lookup, got %d",
 			ErrInvalidArgument, MaxDirectoryLookupEmails, len(emails))
 	}
-	seen := make(map[string]bool, len(emails))
+	index := make(map[string]int, len(emails))
 	out := make([]directoryAddress, 0, len(emails))
 	for _, e := range emails {
 		e = strings.TrimSpace(e)
@@ -220,11 +222,15 @@ func directoryLookupEmails(emails []string) ([]directoryAddress, error) {
 				ErrInvalidArgument, MaxDirectoryLookupEmailLength)
 		}
 		canonical := CanonicalizeEmail(e)
-		if seen[canonical] {
+		i, ok := index[canonical]
+		if !ok {
+			index[canonical] = len(out)
+			out = append(out, directoryAddress{canonical: canonical, requested: []string{e}})
 			continue
 		}
-		seen[canonical] = true
-		out = append(out, directoryAddress{requested: e, canonical: canonical})
+		if !slices.Contains(out[i].requested, e) {
+			out[i].requested = append(out[i].requested, e)
+		}
 	}
 	return out, nil
 }
@@ -248,7 +254,7 @@ func (s *DirectoryService) directoryUsersInOrder(wanted []directoryAddress, foun
 		}
 		out = append(out, DirectoryUser{
 			ID: u.ID, Email: u.Email, Name: u.Name, AvatarURL: u.AvatarURL, EmailVerified: u.EmailVerified,
-			RequestedEmail: a.requested,
+			RequestedEmails: a.requested,
 		})
 	}
 	return out
