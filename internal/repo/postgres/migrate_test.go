@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
@@ -76,23 +77,51 @@ func TestForceMigrationVersion_RefusesBadInput(t *testing.T) {
 	}
 }
 
-// TestDirtyVersionError_NamesTheRecovery pins the recovery the refusal names
-// for a failed migration in the middle, at the start and at the end of the
-// set.
-func TestDirtyVersionError_NamesTheRecovery(t *testing.T) {
-	middle := dirtyVersionError{version: 33, previous: 32, next: 34}.Error()
-	for _, want := range []string{"identity migrate force 32", "rolling back migration 34", "identity migrate force 34"} {
-		if !strings.Contains(middle, want) {
-			t.Errorf("middle: %q lacks %q", middle, want)
+// TestDescribeDirtyVersion places a dirty version among the embedded
+// migrations: in the middle, the first, the last, and one this build does not
+// ship — left by a newer release — which must never read as "first".
+func TestDescribeDirtyVersion(t *testing.T) {
+	src, err := iofs.New(migrationFS, migrationsDir)
+	require.NoError(t, err)
+	defer func() { _ = src.Close() }()
+	latest := latestEmbeddedVersion(t)
+
+	for _, tc := range []struct {
+		name    string
+		version int
+		want    DirtyMigrationError
+	}{
+		{"middle", 33, DirtyMigrationError{Version: 33, Known: true, Latest: latest, Previous: 32, Next: 34}},
+		{"first", 1, DirtyMigrationError{Version: 1, Known: true, Latest: latest, First: true, Next: 2}},
+		{"latest", latest, DirtyMigrationError{Version: latest, Known: true, Latest: latest, Previous: latest - 1}},
+		{"newer release", latest + 1, DirtyMigrationError{Version: latest + 1, Latest: latest}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := describeDirtyVersion(src, uint(tc.version))
+			require.NoError(t, err)
+			require.Equal(t, tc.want, *got)
+		})
+	}
+
+	newer, err := describeDirtyVersion(src, uint(latest+1))
+	require.NoError(t, err)
+	require.Contains(t, newer.Error(), "newer identity release")
+	require.NotContains(t, newer.Error(), "can be cleared")
+}
+
+func latestEmbeddedVersion(t *testing.T) int {
+	t.Helper()
+	src, err := iofs.New(migrationFS, migrationsDir)
+	require.NoError(t, err)
+	defer func() { _ = src.Close() }()
+	v, err := src.First()
+	require.NoError(t, err)
+	for {
+		next, err := src.Next(v)
+		if err != nil {
+			return int(v)
 		}
-	}
-	first := dirtyVersionError{version: 1, next: 2}.Error()
-	if !strings.Contains(first, "drop the schema_migrations table") || strings.Contains(first, "force 0") {
-		t.Errorf("first: %q, want the empty-database recovery and no force to 0", first)
-	}
-	last := dirtyVersionError{version: 34, previous: 33}.Error()
-	if !strings.Contains(last, "identity migrate force 33") || strings.Contains(last, "rolling back") {
-		t.Errorf("last: %q, want force 33 and no rollback branch", last)
+		v = next
 	}
 }
 
@@ -128,21 +157,19 @@ func TestMigrate_FailedMigrationIsForcedAndRerun(t *testing.T) {
 	_, err = tx.Exec(ctx, `LOCK TABLE users IN ACCESS SHARE MODE`)
 	require.NoError(t, err)
 
-	forcePrevious := fmt.Sprintf("identity migrate force %d", emailFoldMigrationVersion-1)
 	err = Migrate(scratch)
 	require.Error(t, err, "0034 must fail while another transaction holds a lock on users")
-	var dirty dirtyVersionError
+	var dirty *DirtyMigrationError
 	require.ErrorAs(t, err, &dirty)
-	require.Equal(t, emailFoldMigrationVersion, dirty.version)
-	require.Equal(t, emailFoldMigrationVersion-1, dirty.previous)
-	require.Contains(t, err.Error(), forcePrevious)
+	require.Equal(t, emailFoldMigrationVersion, dirty.Version)
+	require.Equal(t, emailFoldMigrationVersion-1, dirty.Previous)
 	require.False(t, hasColumn(ctx, t, holder, "users", "email_fold"), "the failed migration must leave no change behind")
 	require.NoError(t, tx.Rollback(ctx))
 
 	// With the lock gone the run still refuses: the version is dirty.
 	err = Migrate(scratch)
 	require.ErrorAs(t, err, &dirty)
-	require.Contains(t, err.Error(), forcePrevious)
+	require.Equal(t, emailFoldMigrationVersion, dirty.Version)
 
 	replaced, err := ForceMigrationVersion(scratch, emailFoldMigrationVersion-1)
 	require.NoError(t, err)

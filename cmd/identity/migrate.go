@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -78,9 +79,34 @@ func runMigrate(opts identityserver.Options, cmd migrateCommand, logger *zap.Log
 	}
 	logger.Info("identity_migrate_starting")
 	if err := identityserver.Migrate(opts); err != nil {
-		logger.Error("identity_migrate_failed", zap.Error(err))
+		fields := []zap.Field{zap.Error(err)}
+		var dirty *identityserver.DirtyMigrationError
+		if errors.As(err, &dirty) {
+			fields = append(fields, zap.String("recovery", dirtyMigrationRecovery(dirty)))
+		}
+		logger.Error("identity_migrate_failed", fields...)
 		return 1
 	}
 	logger.Info("identity_migrate_complete")
 	return 0
+}
+
+// dirtyMigrationRecovery names the commands that clear a dirty schema version.
+func dirtyMigrationRecovery(d *identityserver.DirtyMigrationError) string {
+	if !d.Known {
+		return fmt.Sprintf("version %d is newer than this build's migrations (latest %d): "+
+			"recover with the identity release that applied it (its `identity migrate force`); "+
+			"never drop schema_migrations or force an older version from this build", d.Version, d.Latest)
+	}
+	var msg string
+	if d.First {
+		msg = fmt.Sprintf("if applying migration %d failed: drop the schema_migrations table, then run `identity migrate`", d.Version)
+	} else {
+		msg = fmt.Sprintf("if applying migration %d failed: confirm its changes are absent, run `identity migrate force %d`, "+
+			"then `identity migrate`", d.Version, d.Previous)
+	}
+	if d.Next > 0 {
+		msg += fmt.Sprintf("; if rolling back migration %d failed: run `identity migrate force %d`", d.Next, d.Next)
+	}
+	return msg
 }

@@ -46,3 +46,10 @@ func ForceMigrationVersion(opts Options, version int) (previousVersion int, prev
 	}
 	return replaced.Version, replaced.Dirty, nil
 }
+
+// DirtyMigrationError is the error Migrate wraps when the schema version is
+// left, or found, dirty by a failed migration. It says where that version
+// sits among the migrations this build ships, so the caller can decide which
+// version to record with ForceMigrationVersion — or that a newer release must
+// recover the database. Match it with errors.As.
+type DirtyMigrationError = pgrepo.DirtyMigrationError

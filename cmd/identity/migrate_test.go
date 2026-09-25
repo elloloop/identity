@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -82,6 +83,41 @@ func TestParseMigrateCommand(t *testing.T) {
 		got, err := parseMigrateCommand(c.args)
 		if (err != nil) != c.wantErr || got != c.want {
 			t.Errorf("parseMigrateCommand(%v) = %+v, %v; want %+v, error %t", c.args, got, err, c.want, c.wantErr)
+		}
+	}
+}
+
+func TestDirtyMigrationRecovery(t *testing.T) {
+	cases := []struct {
+		name      string
+		dirty     identityserver.DirtyMigrationError
+		want      []string
+		mustNotBe []string
+	}{
+		{
+			"middle", identityserver.DirtyMigrationError{Version: 33, Known: true, Latest: 34, Previous: 32, Next: 34},
+			[]string{"identity migrate force 32", "identity migrate force 34"}, []string{"schema_migrations"},
+		},
+		{
+			"first", identityserver.DirtyMigrationError{Version: 1, Known: true, Latest: 34, First: true, Next: 2},
+			[]string{"drop the schema_migrations table"}, []string{"force 0"},
+		},
+		{
+			"newer release", identityserver.DirtyMigrationError{Version: 35, Latest: 34},
+			[]string{"newer than this build", "never drop schema_migrations"}, []string{"force 34", "force 35"},
+		},
+	}
+	for _, c := range cases {
+		got := dirtyMigrationRecovery(&c.dirty)
+		for _, w := range c.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s: %q lacks %q", c.name, got, w)
+			}
+		}
+		for _, n := range c.mustNotBe {
+			if strings.Contains(got, n) {
+				t.Errorf("%s: %q must not contain %q", c.name, got, n)
+			}
 		}
 	}
 }

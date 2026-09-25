@@ -81,8 +81,8 @@ type MigrationState struct {
 	Dirty   bool
 }
 
-// withDirtyVersionHint adds the recovery to err when the run left, or found,
-// the schema version dirty.
+// withDirtyVersionHint wraps err with a *DirtyMigrationError when the run
+// left, or found, the schema version dirty.
 func withDirtyVersionHint(m *migrate.Migrate, err error) error {
 	version, dirty, verr := m.Version()
 	if verr != nil || !dirty {
@@ -93,40 +93,88 @@ func withDirtyVersionHint(m *migrate.Migrate, err error) error {
 		return err
 	}
 	defer func() { _ = src.Close() }()
-	hint := dirtyVersionError{version: int(version)}
+	dirtyErr, derr := describeDirtyVersion(src, version)
+	if derr != nil {
+		return err
+	}
+	return fmt.Errorf("%w: %w", err, dirtyErr)
+}
+
+// describeDirtyVersion places a dirty version among the embedded migrations.
+func describeDirtyVersion(src source.Driver, version uint) (*DirtyMigrationError, error) {
+	e := &DirtyMigrationError{Version: int(version)}
+	first, err := src.First()
+	if err != nil {
+		return nil, err
+	}
+	for v := first; ; {
+		e.Latest = int(v)
+		if v == version {
+			e.Known = true
+		}
+		next, nerr := src.Next(v)
+		if errors.Is(nerr, fs.ErrNotExist) {
+			break
+		}
+		if nerr != nil {
+			return nil, nerr
+		}
+		v = next
+	}
+	if !e.Known {
+		return e, nil
+	}
+	e.First = version == first
 	if prev, perr := src.Prev(version); perr == nil {
-		hint.previous = int(prev)
+		e.Previous = int(prev)
 	}
 	if next, nerr := src.Next(version); nerr == nil {
-		hint.next = int(next)
+		e.Next = int(next)
 	}
-	return fmt.Errorf("%w: %w", err, hint)
+	return e, nil
 }
 
-// dirtyVersionError explains a dirty schema version and names the command
-// that clears it. golang-migrate marks the version a migration moves TO dirty
-// before running it: going up that is the failed migration's own version,
-// going down (rolling migration next back) the version below it. Each identity
+// DirtyMigrationError reports a schema version golang-migrate left marked
+// dirty, placed among the migrations this build embeds, so a caller can name
+// the version to record. golang-migrate marks the version a migration moves
+// TO dirty before running it: going up that is the failed migration's own
+// version, going down (rolling Next back) the version below it. Each embedded
 // migration runs as one transaction, so a failed one leaves the schema where
-// it was, and the operator records that version.
-type dirtyVersionError struct {
-	version  int
-	previous int // the migration before version; 0 when version is the first
-	next     int // the migration after version; 0 when version is the last
+// it was.
+type DirtyMigrationError struct {
+	// Version is the dirty version.
+	Version int
+	// Known reports whether this build embeds a migration with Version. When
+	// it does not, a newer release migrated the database, and only that
+	// release knows how to recover it.
+	Known bool
+	// Latest is the newest migration this build embeds.
+	Latest int
+	// First reports whether Version is the first embedded migration, so a
+	// failed apply of it left no identity schema at all.
+	First bool
+	// Previous and Next are the embedded migrations around a known Version,
+	// or 0 when there is none.
+	Previous int
+	Next     int
 }
 
-func (e dirtyVersionError) Error() string {
-	msg := fmt.Sprintf("schema version %d is marked dirty because a migration failed part-way. "+
-		"Each identity migration runs in one transaction, so the failed one left no change behind. ", e.version)
-	if e.previous > 0 {
-		msg += fmt.Sprintf("If applying migration %d failed, confirm its changes are absent, then run "+
-			"`identity migrate force %d` followed by `identity migrate`", e.version, e.previous)
-	} else {
-		msg += fmt.Sprintf("If applying migration %d, the first, failed, the database holds no identity schema: "+
-			"drop the schema_migrations table and run `identity migrate` again", e.version)
+func (e *DirtyMigrationError) Error() string {
+	if !e.Known {
+		return fmt.Sprintf("schema version %d is marked dirty, and it is not a migration this build embeds "+
+			"(the latest is %d): a newer identity release migrated this database. Recover it with that release; "+
+			"do not record an older version or clear the migration history from this build", e.Version, e.Latest)
 	}
-	if e.next > 0 {
-		msg += fmt.Sprintf(". If rolling back migration %d failed, run `identity migrate force %d`", e.next, e.next)
+	msg := fmt.Sprintf("schema version %d is marked dirty because a migration failed part-way; "+
+		"each migration runs in one transaction, so the failed one left no change behind. ", e.Version)
+	if e.First {
+		msg += fmt.Sprintf("If applying migration %d, the first, failed, the database holds no identity schema "+
+			"and its migration history can be cleared", e.Version)
+	} else {
+		msg += fmt.Sprintf("If applying migration %d failed, record version %d", e.Version, e.Previous)
+	}
+	if e.Next > 0 {
+		msg += fmt.Sprintf("; if rolling back migration %d failed, record version %d", e.Next, e.Next)
 	}
 	return msg
 }
