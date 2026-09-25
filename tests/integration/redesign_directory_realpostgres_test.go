@@ -14,6 +14,7 @@ import (
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/config"
+	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
@@ -21,7 +22,7 @@ import (
 // directoryClient returns a Connect client presenting a directory credential
 // in X-Directory-Key and nothing else.
 func (h *RedesignHarness) directoryClient(rawKey string) identityconnectgen.IdentityServiceClient {
-	return h.ClientWithHost("", map[string]string{middleware.DirectoryKeyHeader: rawKey})
+	return h.ClientWithHost("", map[string]string{identityconnect.DirectoryKeyHeader: rawKey})
 }
 
 func mintDirectoryKey(t *testing.T, h *RedesignHarness, projectID string) *identitypb.AdminCreateProjectCredentialResponse {

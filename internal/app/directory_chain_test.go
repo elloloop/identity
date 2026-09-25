@@ -14,7 +14,7 @@ import (
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/config"
-	"github.com/elloloop/identity/internal/middleware"
+	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/repo/memory"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
@@ -123,7 +123,7 @@ func assertDirectoryLookupServed(t *testing.T, cfg *config.Config) {
 	}
 
 	rec := postRPC(t, h, lookupUsersPath, `{"emails":["member@corp.test"]}`,
-		map[string]string{middleware.DirectoryKeyHeader: chainDirectoryKey})
+		map[string]string{identityconnect.DirectoryKeyHeader: chainDirectoryKey})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("LookupUsers: status = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -150,7 +150,7 @@ func assertDirectoryLookupServed(t *testing.T, cfg *config.Config) {
 	// Without the key, or with a wrong one, the RPC is refused.
 	for name, hdr := range map[string]map[string]string{
 		"no key":       nil,
-		"wrong secret": {middleware.DirectoryKeyHeader: chainDirectoryPublic + ".nope"},
+		"wrong secret": {identityconnect.DirectoryKeyHeader: chainDirectoryPublic + ".nope"},
 		"as bearer":    {"Authorization": "Bearer " + chainDirectoryKey},
 	} {
 		if rec := postRPC(t, h, lookupUsersPath, `{"emails":["member@corp.test"]}`, hdr); rec.Code != http.StatusUnauthorized {
@@ -176,7 +176,7 @@ func TestDirectoryLookup_ServedWithVerifiedEmailRequired(t *testing.T) {
 	}
 
 	rec := postRPC(t, h, lookupUsersPath, `{"emails":["unproven@corp.test","proven@corp.test"]}`,
-		map[string]string{middleware.DirectoryKeyHeader: chainDirectoryKey})
+		map[string]string{identityconnect.DirectoryKeyHeader: chainDirectoryKey})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("LookupUsers: status = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -205,8 +205,8 @@ func TestDirectoryKey_GrantsNothingElse(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	withKey := map[string]string{
-		middleware.DirectoryKeyHeader: chainDirectoryKey,
-		"Authorization":               "Bearer " + chainDirectoryKey,
+		identityconnect.DirectoryKeyHeader: chainDirectoryKey,
+		"Authorization":                    "Bearer " + chainDirectoryKey,
 	}
 
 	methods := identitypb.File_identity_v1_identity_proto.Services().ByName("IdentityService").Methods()
