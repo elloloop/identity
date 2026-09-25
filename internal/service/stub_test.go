@@ -32,6 +32,7 @@ func TestStubRepository_ReturnsServiceUnavailable(t *testing.T) {
 		{"DeleteTotpCredential", func() error { return r.DeleteTotpCredential(ctx, "uid") }},
 		{"SetUserIDVVerified", func() error { return r.SetUserIDVVerified(ctx, "uid", 0) }},
 		{"CreateIdentityVerification", func() error { return r.CreateIdentityVerification(ctx, nil) }},
+		{"FindUsersByEmails", func() error { _, err := r.FindUsersByEmails(ctx, []string{"e@x"}); return err }},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) {

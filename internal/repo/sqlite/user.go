@@ -478,6 +478,42 @@ func (r *sqliteRepository) GetUsersByIDs(ctx context.Context, ids []string) ([]*
 	return out, nil
 }
 
+func (r *sqliteRepository) FindUsersByEmails(ctx context.Context, emails []string) ([]*service.User, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(emails)+1)
+	args = append(args, r.projectID)
+	placeholders := make([]string, 0, len(emails))
+	for i, e := range emails {
+		placeholders = append(placeholders, fmt.Sprintf("lower($%d)", i+2))
+		args = append(args, e)
+	}
+	q := `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND email <> ''
+		  AND lower(email) IN (` + strings.Join(placeholders, ", ") + `)
+		ORDER BY id ASC`
+	rows, err := r.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, wrapErr("FindUsersByEmails", err)
+	}
+	defer rows.Close()
+
+	out := make([]*service.User, 0, len(emails))
+	for rows.Next() {
+		u, scanErr := scanUser(rows)
+		if scanErr != nil {
+			return nil, wrapErr("FindUsersByEmails", scanErr)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapErr("FindUsersByEmails", err)
+	}
+	return out, nil
+}
+
 func (r *sqliteRepository) SetDateOfBirthOnce(
 	ctx context.Context, userID string, dobMs int64, status string, nowMs int64,
 ) (bool, error) {

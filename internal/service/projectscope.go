@@ -2,16 +2,6 @@ package service
 
 import "context"
 
-// projectScopedRepository is the optional capability a Repository driver
-// implements to return a sibling bound to a different project (storage
-// shard) while sharing its connection pool. The postgres driver implements
-// it (WithProject); the postgres and memory drivers implement it too so the per-request
-// project scope reaches every backend. A driver that does not implement it
-// (none in tree) falls back to the boot-default repository.
-type projectScopedRepository interface {
-	WithProject(projectID string) Repository
-}
-
 // requestProjectID resolves the project a request operates under: the
 // per-request ProjectScope when the project-resolution middleware injected
 // one (ADR-0002), else the service's boot-default project. This single
@@ -26,54 +16,27 @@ func requestProjectID(ctx context.Context, defaultProjectID string) string {
 	return defaultProjectID
 }
 
-// scopedRepository returns defaultRepo bound to the request's project when
-// the driver supports per-project binding and a scope is present; otherwise
-// it returns defaultRepo unchanged. The mandatory `WHERE project_id = $1`
-// predicate is enforced inside the returned repository.
+// scopedRepository returns defaultRepo bound to the request's project. The
+// mandatory `WHERE project_id = $1` predicate is enforced inside the returned
+// repository.
 func scopedRepository(ctx context.Context, defaultRepo Repository, defaultProjectID string) Repository {
 	if defaultRepo == nil {
 		return nil
 	}
-	scoper, ok := defaultRepo.(projectScopedRepository)
-	if !ok {
-		return defaultRepo
-	}
-	return scoper.WithProject(requestProjectID(ctx, defaultProjectID))
-}
-
-// ProjectBoundRepository returns defaultRepo bound to a FIXED project,
-// independent of any per-request project scope in context. It backs surfaces
-// whose credential authorizes exactly one project — the inbound SCIM server,
-// whose single deployment-wide bearer token is pinned to GATEWAY_SCIM_PROJECT_ID.
-// Every read/write through the returned repository carries the mandatory
-// `WHERE project_id = $1` predicate for that one project, so the credential can
-// neither read nor mutate another project's users regardless of which
-// auth-domain/Host the request arrived on. A driver without per-project binding
-// is returned unchanged (only the single-project memory driver, which pins all
-// data to one store).
-func ProjectBoundRepository(defaultRepo Repository, projectID string) Repository {
-	if defaultRepo == nil {
-		return nil
-	}
-	scoper, ok := defaultRepo.(projectScopedRepository)
-	if !ok {
-		return defaultRepo
-	}
-	return scoper.WithProject(projectID)
+	return defaultRepo.WithProject(requestProjectID(ctx, defaultProjectID))
 }
 
 // scopedDB returns bootDB bound to the request's project. The postgres DB
 // is the same concrete type as its Repository (it ignores the per-call
 // tenant argument and filters on its bound project), so it is rebound via
-// WithProject and asserted back to DB. A graph transport that
-// partitioned on the per-call tenant argument every method already takes
-// would need no rebinding; the in-tree drivers all bind via WithProject and are
-// returned unchanged.
+// WithProject and asserted back to DB. A DB that is not also a Repository —
+// a graph transport partitioning on the per-call tenant argument every method
+// already takes — needs no rebinding and is returned unchanged.
 func scopedDB(ctx context.Context, bootDB DB, defaultProjectID string) DB {
 	if bootDB == nil {
 		return nil
 	}
-	scoper, ok := bootDB.(projectScopedRepository)
+	scoper, ok := bootDB.(Repository)
 	if !ok {
 		return bootDB
 	}

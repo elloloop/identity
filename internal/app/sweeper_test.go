@@ -56,6 +56,9 @@ type mockSweepRepo struct {
 	skip bool
 }
 
+// WithProject keeps the recording on the scoped repository.
+func (r *mockSweepRepo) WithProject(string) service.Repository { return r }
+
 func (m *mockSweepRepo) DeleteAuditEventsBefore(_ context.Context, cutoffMs int64) (int, error) {
 	m.auditCalls.Add(1)
 	m.auditCutoff.Store(cutoffMs)

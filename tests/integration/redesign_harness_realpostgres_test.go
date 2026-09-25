@@ -104,6 +104,10 @@ type governanceStores struct {
 	// config_json (e.g. per-project OAuth providers) directly — the RPCs do not
 	// expose config authoring.
 	controlPlane service.ControlPlaneProjectStore
+	// users is the boot-default user repository (bound to the harness's
+	// default project; rebind with WithProject), so a test
+	// can seed account states no unauthenticated RPC can reach.
+	users service.Repository
 }
 
 // RedesignHarness is a full-stack, postgres-backed identity service plus the
@@ -133,6 +137,14 @@ type RedesignHarness struct {
 // server, and returns the handles the redesign tests drive.
 func startRedesignHarness(t *testing.T) *RedesignHarness {
 	t.Helper()
+	return startRedesignHarnessWith(t, func(*config.Config) {})
+}
+
+// startRedesignHarnessWith is startRedesignHarness with mutate applied to the
+// config before boot, for a test that needs a non-default knob (e.g. the
+// session revocation mode).
+func startRedesignHarnessWith(t *testing.T, mutate func(*config.Config)) *RedesignHarness {
+	t.Helper()
 
 	dsn := os.Getenv("GATEWAY_POSTGRES_DSN")
 	if dsn == "" {
@@ -149,6 +161,7 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 	brandedAuthDomain := uniq + brandedAuthDomainSuffix
 
 	cfg := newRedesignTestConfig(dsn, projectID, tenantID, brandedAuthDomain)
+	mutate(&cfg)
 
 	dns := newFakeDNSResolver()
 	mailer := NewRecordingMailer()
@@ -214,6 +227,7 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 			policies:     built.LoginPolicyStore,
 			projects:     built.ProjectResolver(),
 			controlPlane: built.ControlPlaneStore(),
+			users:        built.Repository,
 		},
 	}
 }

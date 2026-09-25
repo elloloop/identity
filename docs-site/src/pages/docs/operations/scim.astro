@@ -42,6 +42,11 @@ GATEWAY_SCIM_PROJECT_ID=<project-id>`}
     project's user pool. To provision more than one project, run one scoped
     credential per project.
   </p>
+  <p>
+    The SCIM token can write. A service that only needs to resolve email
+    addresses to accounts should use a read-only
+    <a href="/identity/docs/users/directory-lookup">directory reader key</a> instead.
+  </p>
 
   <h2>external_id correlation</h2>
   <p>

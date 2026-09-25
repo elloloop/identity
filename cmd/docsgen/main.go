@@ -117,6 +117,7 @@ var envHelperType = map[string]string{
 	"envStr":                "string",
 	"envStrRaw":             "string",
 	"envInt":                "integer",
+	"envPositiveInt":        "integer",
 	"envFloat":              "number",
 	"envBool":               "boolean",
 	"revocationModeFromEnv": "string",

@@ -91,13 +91,11 @@ func (s *ProfileService) DeleteMyAccount(ctx context.Context, actorID, reason st
 		return 0, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
-	switch strings.ToLower(user.Status) {
-	case StatusPendingDeletion:
+	switch {
+	case strings.EqualFold(user.Status, StatusPendingDeletion):
 		// Already scheduled — return the existing instant idempotently.
 		return user.DeletionScheduledAtMs, nil
-	case "", StatusActive:
-		// eligible — fall through
-	default:
+	case !isActiveStatus(user.Status):
 		return 0, fmt.Errorf("%w: account is %s", ErrAccountDeletionNotAllowed, user.Status)
 	}
 

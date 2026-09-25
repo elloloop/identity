@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/pkg/samlidp"
 )
 
@@ -16,7 +17,7 @@ func TestSAMLHandler_DisabledMountsNothing(t *testing.T) {
 	(&samlHandler{issuer: samlidp.NewNoopIssuer(), logger: zap.NewNop()}).register(mux)
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, samlMetadataPath, nil))
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, middleware.SAMLMetadataPath, nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("disabled IdP must 404, got %d", rec.Code)
 	}
@@ -37,7 +38,7 @@ func TestSAMLHandler_EnabledServesMetadata(t *testing.T) {
 	(&samlHandler{issuer: iss, logger: zap.NewNop()}).register(mux)
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, samlMetadataPath, nil))
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, middleware.SAMLMetadataPath, nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -58,8 +59,32 @@ func TestSAMLHandler_MetadataRejectsNonGET(t *testing.T) {
 	(&samlHandler{issuer: iss, logger: zap.NewNop()}).register(mux)
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, samlMetadataPath, nil))
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, middleware.SAMLMetadataPath, nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
+// TestSAMLMetadata_ServedThroughFullChain asserts the public metadata document
+// is reachable through the served middleware chain without a JWT: an SP that
+// imports the IdP's certificate holds no identity session.
+func TestSAMLMetadata_ServedThroughFullChain(t *testing.T) {
+	key, cert := samlTestKeyCert(t)
+	cfg := newTestConfig()
+	cfg.SAMLIDPEnabled = true
+	cfg.SAMLEntityID = "https://idp.example/saml/metadata"
+	cfg.SAMLSSOURL = "https://idp.example/saml/sso"
+	cfg.SAMLSigningKey = key
+	cfg.SAMLSigningCert = cert
+	handler, _, stop := buildTestApp(t, cfg)
+	defer stop()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, middleware.SAMLMetadataPath, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("metadata: status = %d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "EntityDescriptor") {
+		t.Fatalf("metadata body is not an EntityDescriptor: %s", rec.Body.String())
 	}
 }

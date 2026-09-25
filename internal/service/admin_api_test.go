@@ -37,9 +37,14 @@ type fakeControlPlaneStore struct {
 	// updateErr makes UpdateProjectConfig fail with a NON-conflict store error, so
 	// a test can prove the retry helper surfaces such an error immediately rather
 	// than retrying it.
-	updateErr  error
-	createErr  error
-	credErr    error
+	updateErr error
+	createErr error
+	credErr   error
+	// lookupErr makes ActiveProjectCredentialByPublicID fail (an infrastructure
+	// error on the directory-credential read).
+	lookupErr error
+	// suspended marks projects whose credentials no longer resolve.
+	suspended  map[string]bool
 	domainErr  error
 	nextID     int
 	lastDomain struct {
@@ -54,6 +59,7 @@ func newFakeControlPlaneStore() *fakeControlPlaneStore {
 	return &fakeControlPlaneStore{
 		projects:       map[string]*AdminProject{},
 		credentials:    map[string]*AdminProjectCredential{},
+		suspended:      map[string]bool{},
 		authDomains:    map[string]string{},
 		domainRows:     map[string]map[string]*AdminProjectAuthDomain{},
 		configs:        map[string]string{},
@@ -94,6 +100,33 @@ func (f *fakeControlPlaneStore) CreateProjectCredential(_ context.Context, c *Ad
 	f.credentials[id] = &cp
 	c.ID = id
 	return id, nil
+}
+
+// RevokeProjectCredential mirrors the postgres store: idempotent on an
+// already-revoked credential, ErrNotFound for an id the project does not own.
+func (f *fakeControlPlaneStore) RevokeProjectCredential(_ context.Context, projectID, credentialID string, _ int64) error {
+	c, ok := f.credentials[credentialID]
+	if !ok || c.ProjectID != projectID {
+		return ErrNotFound
+	}
+	c.Revoked = true
+	return nil
+}
+
+// ActiveProjectCredentialByPublicID mirrors the postgres DirectoryCredentialStore
+// read: any credential with that public id, unless its project is suspended.
+func (f *fakeControlPlaneStore) ActiveProjectCredentialByPublicID(_ context.Context, publicID string) (*AdminProjectCredential, error) {
+	if f.lookupErr != nil {
+		return nil, f.lookupErr
+	}
+	for _, c := range f.credentials {
+		if c.PublicID != publicID || f.suspended[c.ProjectID] {
+			continue
+		}
+		cp := *c
+		return &cp, nil
+	}
+	return nil, nil
 }
 
 func (f *fakeControlPlaneStore) EnsureAuthDomain(_ context.Context, projectID, hostname string, isPrimary bool, verifiedAtMs int64) error {
@@ -226,6 +259,8 @@ func (f *fakeControlPlaneStore) GetProjectConfig(_ context.Context, projectID st
 }
 
 var _ ControlPlaneProjectStore = (*fakeControlPlaneStore)(nil)
+
+var _ DirectoryCredentialStore = (*fakeControlPlaneStore)(nil)
 
 // fakeLoginPolicyStore is an in-memory LoginPolicyStore for the admin-policy
 // service tests: one policy per (projectID, tenantID), nil-on-miss.
@@ -427,6 +462,9 @@ func TestControlPlaneAdmin_DisabledWhenSecretEmpty(t *testing.T) {
 	if err := f.svc.AdminAddProjectAuthDomain(ctx, "anything", "proj", "h.example.com", true); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("AdminAddProjectAuthDomain: err = %v, want ErrUnimplemented", err)
 	}
+	if err := f.svc.AdminRevokeProjectCredential(ctx, "anything", "proj", "cred"); !errors.Is(err, ErrUnimplemented) {
+		t.Fatalf("AdminRevokeProjectCredential: err = %v, want ErrUnimplemented", err)
+	}
 	if _, err := f.svc.AdminCreateTenant(ctx, "anything", "proj", "Acme", "acme.com"); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("AdminCreateTenant: err = %v, want ErrUnimplemented", err)
 	}
@@ -460,6 +498,9 @@ func TestControlPlaneAdmin_WrongOrMissingSecretDenied(t *testing.T) {
 		}
 		if err := f.svc.AdminAddProjectAuthDomain(ctx, presented, "proj", "h.example.com", false); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("AdminAddProjectAuthDomain(secret=%q): err = %v, want ErrPermissionDenied", presented, err)
+		}
+		if err := f.svc.AdminRevokeProjectCredential(ctx, presented, "proj", "cred"); !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("AdminRevokeProjectCredential(secret=%q): err = %v, want ErrPermissionDenied", presented, err)
 		}
 		if _, err := f.svc.AdminCreateTenant(ctx, presented, "proj", "Acme", "acme.com"); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("AdminCreateTenant(secret=%q): err = %v, want ErrPermissionDenied", presented, err)
@@ -558,6 +599,83 @@ func TestControlPlaneAdmin_CreatePublishableCredential_NoSecret(t *testing.T) {
 	stored := f.projects.credentials[got.ID]
 	if stored == nil || stored.Kind != CredentialKindPublishable || stored.SecretHash != "" {
 		t.Fatalf("stored publishable credential = %+v", stored)
+	}
+}
+
+func TestControlPlaneAdmin_CreateDirectoryReaderCredential(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	got, err := f.svc.AdminCreateProjectCredential(ctx, testAdminSecret, "proj-1", "  Directory_Reader ")
+	if err != nil {
+		t.Fatalf("AdminCreateProjectCredential: %v", err)
+	}
+	if !strings.HasPrefix(got.PublicID, directoryReaderKeyPrefix) {
+		t.Fatalf("public id %q lacks the directory-key prefix %q", got.PublicID, directoryReaderKeyPrefix)
+	}
+	publicID, rawSecret, ok := strings.Cut(got.RawKey, rawKeySeparator)
+	if !ok || publicID != got.PublicID || rawSecret == "" {
+		t.Fatalf("raw key %q is not %q + %q + secret", got.RawKey, got.PublicID, rawKeySeparator)
+	}
+	stored := f.projects.credentials[got.ID]
+	if stored == nil {
+		t.Fatalf("credential %q not stored", got.ID)
+	}
+	if stored.Kind != CredentialKindDirectoryReader || stored.ProjectID != "proj-1" {
+		t.Fatalf("stored credential = %+v, want a proj-1 directory_reader", stored)
+	}
+	if stored.SecretHash != sha256Hex(rawSecret) {
+		t.Fatal("stored secret hash is not the hash of the secret half")
+	}
+	if n := f.audit.countByEventTypeAndDetail(string(audit.EventProjectCredentialCreated), "kind", CredentialKindDirectoryReader); n != 1 {
+		t.Fatalf("project_credential_created events = %d, want 1", n)
+	}
+	for _, d := range f.audit.details {
+		if strings.Contains(d, rawSecret) || strings.Contains(d, stored.SecretHash) {
+			t.Fatalf("audit details leak the secret or its hash: %s", d)
+		}
+	}
+}
+
+func TestControlPlaneAdmin_RevokeProjectCredential(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+	minted, err := f.svc.AdminCreateProjectCredential(ctx, testAdminSecret, "proj-1", CredentialKindDirectoryReader)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+
+	if err := f.svc.AdminRevokeProjectCredential(ctx, testAdminSecret, "other-project", minted.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoke through the wrong project: err = %v, want ErrNotFound", err)
+	}
+	if f.projects.credentials[minted.ID].Revoked {
+		t.Fatal("a refused revoke must not revoke")
+	}
+	if err := f.svc.AdminRevokeProjectCredential(ctx, testAdminSecret, "proj-1", "no-such-cred"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoke unknown credential: err = %v, want ErrNotFound", err)
+	}
+	for _, args := range [][2]string{{"", minted.ID}, {"proj-1", ""}, {"  ", "  "}} {
+		if err := f.svc.AdminRevokeProjectCredential(ctx, testAdminSecret, args[0], args[1]); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("revoke(%q, %q): err = %v, want ErrInvalidArgument", args[0], args[1], err)
+		}
+	}
+	if n := f.audit.countByEventType(string(audit.EventProjectCredentialRevoked)); n != 0 {
+		t.Fatalf("refused revokes were audited as revocations: %d", n)
+	}
+
+	if err := f.svc.AdminRevokeProjectCredential(ctx, testAdminSecret, " proj-1 ", " "+minted.ID+" "); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if !f.projects.credentials[minted.ID].Revoked {
+		t.Fatal("credential not revoked")
+	}
+	if err := f.svc.AdminRevokeProjectCredential(ctx, testAdminSecret, "proj-1", minted.ID); err != nil {
+		t.Fatalf("re-revoke must be idempotent: %v", err)
+	}
+	if n := f.audit.countByEventTypeAndDetail(string(audit.EventProjectCredentialRevoked), "credential_id", minted.ID); n != 2 {
+		t.Fatalf("project_credential_revoked events = %d, want 2", n)
 	}
 }
 

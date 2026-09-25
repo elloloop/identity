@@ -105,7 +105,7 @@ func newSCIMObservedHandler(t *testing.T) (http.Handler, service.Repository, *ca
 		tenantID:    scimEventTenantID,
 		logger:      zap.NewNop(),
 	}).register(mux, true)
-	return mux, service.ProjectBoundRepository(repo, testSCIMProjectID), pub, aud
+	return mux, repo.WithProject(testSCIMProjectID), pub, aud
 }
 
 // TestSCIM_EmitsAuditAndLifecycleEvents is the #302 invariant: a SCIM
@@ -319,6 +319,9 @@ type countingListRepo struct {
 	listCalls  int
 	total      int
 }
+
+// WithProject keeps the counters on the scoped repository.
+func (r *countingListRepo) WithProject(string) service.Repository { return r }
 
 func (r *countingListRepo) CountUsers(context.Context, service.UserListFilter) (int, error) {
 	r.countCalls++

@@ -168,6 +168,22 @@ const (
 	EventProjectOAuthProviderSet     EventType = "project_oauth_provider_set"
 	EventProjectOAuthProviderRemoved EventType = "project_oauth_provider_removed"
 
+	// EventProjectCredentialCreated / EventProjectCredentialRevoked record an
+	// operator minting or revoking a project credential. The details carry
+	// the project id, credential id and (on creation) kind; the raw key and its
+	// hash are never logged.
+	EventProjectCredentialCreated EventType = "project_credential_created"
+	EventProjectCredentialRevoked EventType = "project_credential_revoked"
+
+	// EventDirectoryLookup records a service resolving email addresses through
+	// LookupUsers with a directory_reader credential. The actor is
+	// "credential:<id>"; the details carry the number of addresses asked for
+	// and matched — never the addresses themselves, so the trail records who
+	// read the directory and how much without copying it. A refused
+	// presentation of a real directory_reader credential (revoked, or the
+	// wrong secret) is logged with success=false and a `reason`.
+	EventDirectoryLookup EventType = "directory_lookup"
+
 	// EventParentalConsentGranted records an adult granting verifiable
 	// parental consent for a child-band account, moving it out of
 	// PENDING_PARENTAL_CONSENT. The actor is the consenting adult and the
@@ -264,6 +280,9 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectConfigUpdated:          {},
 	EventProjectOAuthProviderSet:       {},
 	EventProjectOAuthProviderRemoved:   {},
+	EventProjectCredentialCreated:      {},
+	EventProjectCredentialRevoked:      {},
+	EventDirectoryLookup:               {},
 	EventParentalConsentGranted:        {},
 	EventParentalConsentRevoked:        {},
 	EventGuardianEdgeCreated:           {},

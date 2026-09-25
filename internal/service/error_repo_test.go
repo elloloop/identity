@@ -60,6 +60,9 @@ type errorRepo struct {
 	failRecordNativeTokenRedeem    bool
 }
 
+// WithProject keeps the error injection on the scoped repository.
+func (r *errorRepo) WithProject(string) Repository { return r }
+
 func (r *errorRepo) RecordNativeTokenRedemption(ctx context.Context, rec *NativeTokenRedemptionRecord) (string, error) {
 	if r.failRecordNativeTokenRedeem {
 		return "", errInjected

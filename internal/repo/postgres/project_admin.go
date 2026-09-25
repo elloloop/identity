@@ -19,6 +19,10 @@ var _ service.ControlPlaneProjectStore = (*ProjectStore)(nil)
 // the read-side lookup NativeOAuthLogin uses to validate a product→project id.
 var _ service.NativeOAuthProjectStore = (*ProjectStore)(nil)
 
+// The ProjectStore is also the postgres driver's service.DirectoryCredentialStore:
+// the credential read the directory lookup authenticates against.
+var _ service.DirectoryCredentialStore = (*ProjectStore)(nil)
+
 // ActiveProjectByID resolves an ACTIVE control-plane project by id as the
 // driver-agnostic service.AdminProject, or (nil, nil) when no such active
 // project exists. It delegates to GetProjectByID and treats a suspended
@@ -83,6 +87,32 @@ func (s *ProjectStore) CreateProjectCredential(ctx context.Context, c *service.A
 	}
 	c.ID = id
 	return id, nil
+}
+
+// ActiveProjectCredentialByPublicID is the postgres driver's
+// service.DirectoryCredentialStore read: the credential with publicID, revoked
+// or not, provided its project is ACTIVE. An unknown public id or a suspended
+// project is a clean miss (nil, nil) — a suspended project serves nothing.
+func (s *ProjectStore) ActiveProjectCredentialByPublicID(ctx context.Context, publicID string) (*service.AdminProjectCredential, error) {
+	c, err := s.GetProjectCredentialByPublicID(ctx, publicID)
+	if err != nil || c == nil {
+		return nil, err
+	}
+	p, err := s.GetProjectByID(ctx, c.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil || p.Status != projectStatusActive {
+		return nil, nil
+	}
+	return &service.AdminProjectCredential{
+		ID:         c.ID,
+		ProjectID:  c.ProjectID,
+		Kind:       c.Kind,
+		PublicID:   c.PublicID,
+		SecretHash: c.SecretHash,
+		Revoked:    c.Status != credentialStatusActive,
+	}, nil
 }
 
 // CreateAuthDomain registers an UNVERIFIED custom serving hostname (the

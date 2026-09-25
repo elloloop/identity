@@ -109,6 +109,11 @@ const (
 	// deleter of live accounts.
 	MaxAnonymousRetentionDays = 10000
 
+	// DefaultRateLimitDirectoryPerIP is the LookupUsers per-IP cap per window
+	// when none is configured. A Config built in code with the field left zero
+	// gets it too: the directory surface is never unthrottled.
+	DefaultRateLimitDirectoryPerIP = 120
+
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
 	DefaultAgeGateChildMaxAge = 12
@@ -890,9 +895,11 @@ type Config struct {
 	AuthAllowLocal bool
 
 	// AuthRequireVerifiedEmail blocks authentication until the account's email
-	// is verified. Default ON. Closes an account pre-hijacking vector: an
-	// attacker who plants a password account for an unverified address cannot
-	// use it, and a session is never issued for an unverified account.
+	// is verified, and keeps accounts with an unverified email out of
+	// LookupUsers results. Default ON. Closes an account pre-hijacking vector:
+	// an attacker who plants a password account for an unverified address
+	// cannot use it, a session is never issued for an unverified account, and
+	// a directory lookup never presents the account as the address's owner.
 	AuthRequireVerifiedEmail bool
 
 	// SMTP single-provider config (simple form); SMTPProviders, if set, takes precedence.
@@ -1008,6 +1015,13 @@ type Config struct {
 	RateLimitIDVPerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
 	RateLimitBootstrapPerIP int
+	// RateLimitDirectoryPerIP is the per-IP cap per window on LookupUsers,
+	// each call of which resolves up to 100 addresses; it must be positive, and
+	// a zero, negative or malformed value is refused at boot. Unlike the other
+	// per-IP caps it cannot be switched off. It applies to the HTTP handler
+	// only: a host that serves identity on its own gRPC server through
+	// RegisterGRPC applies its own limits there.
+	RateLimitDirectoryPerIP int
 
 	// Postgres (the primary persistence driver).
 
@@ -1136,6 +1150,11 @@ type Config struct {
 	// removed in a breaking release. Nil for a Config built in code, which
 	// is the point — see the comment on detectRemovedEnvVars.
 	removedEnvVarErr error
+
+	// rejectedRateLimitDirectory is the GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP
+	// value Load read when it was not a positive integer, so Validate can
+	// quote it. Load reads it for the reason it detects removed variables.
+	rejectedRateLimitDirectory string
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -1145,6 +1164,9 @@ func Load() *Config {
 	// Stamped here so Validate stays a pure receiver check; see
 	// removedEnvVarErr.
 	c.removedEnvVarErr = detectRemovedEnvVars()
+	if c.RateLimitDirectoryPerIP == invalidPositiveInt {
+		c.rejectedRateLimitDirectory = os.Getenv("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP")
+	}
 
 	// The anonymous retention window must outlive the refresh lifetime, or
 	// the sweep reaps accounts whose only credential is still valid. That
@@ -1415,6 +1437,7 @@ func loadFromEnv() *Config {
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
 		RateLimitIDVPerIP:          envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
+		RateLimitDirectoryPerIP:    envPositiveInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
@@ -1764,6 +1787,26 @@ func envInt(key string, def int) int {
 	return n
 }
 
+// invalidPositiveInt is what envPositiveInt yields for a set value that is not
+// a positive integer, so Validate can refuse it rather than boot on a default
+// the operator did not choose.
+const invalidPositiveInt = -1
+
+// envPositiveInt reads a positive integer environment variable. Returns def if
+// the variable is unset or empty, and invalidPositiveInt if it is malformed,
+// zero or negative.
+func envPositiveInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return invalidPositiveInt
+	}
+	return n
+}
+
 // envFloat reads a float64 environment variable. Returns def if the
 // variable is unset, empty, or not a valid float.
 func envFloat(key string, def float64) float64 {
@@ -1885,6 +1928,17 @@ func (c *Config) Validate() error {
 
 	if c.SessionCacheTTLSeconds < 0 {
 		return fmt.Errorf("config: GATEWAY_SESSION_CACHE_TTL_SECONDS=%d must be >= 0", c.SessionCacheTTLSeconds)
+	}
+
+	switch {
+	case c.RateLimitDirectoryPerIP == 0:
+		c.RateLimitDirectoryPerIP = DefaultRateLimitDirectoryPerIP
+	case c.RateLimitDirectoryPerIP < 0:
+		rejected := c.rejectedRateLimitDirectory
+		if rejected == "" {
+			rejected = strconv.Itoa(c.RateLimitDirectoryPerIP)
+		}
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP=%q must be a positive integer", rejected)
 	}
 
 	if err := c.validateSMS(); err != nil {

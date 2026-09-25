@@ -96,6 +96,11 @@ type Deps struct {
 	// Config.AdminAPISecret is set.
 	ControlPlaneStore service.ControlPlaneProjectStore
 
+	// DirectoryCredentials is the control-plane credential read LookupUsers
+	// authenticates against. Non-nil ONLY for the postgres driver; when nil no
+	// DirectoryService is constructed and LookupUsers returns Unimplemented.
+	DirectoryCredentials service.DirectoryCredentialStore
+
 	// NativeOAuthProjects is the control-plane project-by-id lookup
 	// NativeOAuthLogin uses to validate a product→project id. Non-nil ONLY for
 	// the postgres driver; nil on drivers without a control plane, where native
@@ -406,6 +411,15 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			PathPrefix: "/identity.v1.IdentityService/CreateFirstPlatformAdmin", Tag: "first_admin_bootstrap",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitBootstrapPerIP, 0),
 		},
+		{
+			// Directory lookup: authenticated by a machine credential, not a
+			// session, and JWT-exempt, so a caller holding only a leaked public
+			// id can still drive a credential read per call. The quota bounds
+			// that, and bounds how fast even a valid credential can walk the
+			// directory by guessing addresses.
+			PathPrefix: "/identity.v1.IdentityService/LookupUsers", Tag: "directory_lookup",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
+		},
 	}
 	for _, path := range guardianManagementPaths {
 		limits = append(limits, middleware.PathLimit{
@@ -646,7 +660,8 @@ func New(deps Deps) (*Built, error) {
 	domainSvc := buildDomainService(deps, logger)
 	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, auditLog, logger)
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, deps.Config)
+	directorySvc := buildDirectoryService(deps, repo, auditLog)
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
@@ -688,7 +703,7 @@ func New(deps Deps) (*Built, error) {
 			return nil, err
 		}
 		logger.Info("scim_server_enabled",
-			zap.String("mount", "/scim/v2/"),
+			zap.String("mount", middleware.SCIMPathPrefix),
 			zap.String("project_id", deps.Config.SCIMProjectID))
 		(&scimHandler{
 			repo:        repo,
@@ -967,6 +982,16 @@ func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *za
 		auditLog,
 		logger,
 	)
+}
+
+// buildDirectoryService returns the DirectoryService backing LookupUsers, or
+// nil when the build has no control plane to hold directory credentials. The
+// Connect handler treats nil as "disabled" and returns CodeUnimplemented.
+func buildDirectoryService(deps Deps, users service.Repository, auditLog *audit.Logger) *service.DirectoryService {
+	if deps.DirectoryCredentials == nil {
+		return nil
+	}
+	return service.NewDirectoryService(deps.DirectoryCredentials, users, deps.Config.AuthRequireVerifiedEmail, auditLog)
 }
 
 // mailDeliveryConfigured reports whether outbound mail actually delivers, as

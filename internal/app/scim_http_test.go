@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"
 	"github.com/elloloop/identity/internal/service"
 )
@@ -33,7 +34,7 @@ func newSCIMTestHandler(t *testing.T, enabled bool) (http.Handler, service.Repos
 	}).register(mux, enabled)
 	// Return the repository bound to the SAME fixed project the handler writes
 	// through, so test assertions read the partition the SCIM store mutates.
-	scoped := service.ProjectBoundRepository(repo, testSCIMProjectID)
+	scoped := repo.WithProject(testSCIMProjectID)
 	return mux, scoped
 }
 
@@ -184,12 +185,12 @@ func TestSCIM_IgnoresRequestProjectScope(t *testing.T) {
 
 	ctx := context.Background()
 	// The user must exist in the CONFIGURED project...
-	if u, err := service.ProjectBoundRepository(repo, testSCIMProjectID).
+	if u, err := repo.WithProject(testSCIMProjectID).
 		FindUserByEmail(ctx, "victim@example.com"); err != nil || u == nil {
 		t.Fatalf("user must land in configured project %q: %v %#v", testSCIMProjectID, err, u)
 	}
 	// ...and must NOT have leaked into the forged project.
-	if u, err := service.ProjectBoundRepository(repo, foreignProject).
+	if u, err := repo.WithProject(foreignProject).
 		FindUserByEmail(ctx, "victim@example.com"); err != nil || u != nil {
 		t.Fatalf("cross-project leak: user reachable from forged project %q: %#v (err=%v)", foreignProject, u, err)
 	}
@@ -317,5 +318,56 @@ func TestSCIM_DiscoveryEndpoints(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status = %d", p, rec.Code)
 		}
+	}
+}
+
+// TestSCIM_ServedThroughFullChain drives SCIM through the served middleware
+// chain rather than the bare mux. The SCIM bearer token is not a JWT, so if
+// the JWT middleware ever claims /scim/v2/* again every request dies with the
+// JWT layer's 401 before the SCIM handler sees it — which the mux-level tests
+// above cannot notice.
+func TestSCIM_ServedThroughFullChain(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.SCIMEnabled = true
+	cfg.SCIMBearerToken = strings.Repeat("s", config.MinSCIMBearerTokenLength)
+	cfg.SCIMProjectID = testSCIMProjectID
+	handler, _, stop := buildTestApp(t, cfg)
+	defer stop()
+
+	create := scimReq(t, handler, http.MethodPost, "/scim/v2/Users", cfg.SCIMBearerToken,
+		`{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"chain@example.com","active":true}`)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d body=%s, want 201", create.Code, create.Body.String())
+	}
+
+	list := scimReq(t, handler, http.MethodGet, `/scim/v2/Users?filter=userName%20eq%20%22chain@example.com%22`, cfg.SCIMBearerToken, "")
+	if list.Code != http.StatusOK {
+		t.Fatalf("filtered list: status = %d body=%s, want 200", list.Code, list.Body.String())
+	}
+	var page struct {
+		TotalResults int `json:"totalResults"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if page.TotalResults != 1 {
+		t.Fatalf("filtered list totalResults = %d, want 1", page.TotalResults)
+	}
+
+	// The bare base URL reaches the mux, which redirects into the subtree,
+	// rather than dying in the JWT layer.
+	bare := scimReq(t, handler, http.MethodGet, "/scim/v2", cfg.SCIMBearerToken, "")
+	if bare.Code < http.StatusMultipleChoices || bare.Code >= http.StatusBadRequest || bare.Header().Get("Location") != "/scim/v2/" {
+		t.Fatalf("bare /scim/v2: status = %d Location = %q, want a redirect to /scim/v2/", bare.Code, bare.Header().Get("Location"))
+	}
+
+	// A wrong token is still refused — by the SCIM handler (SCIM error shape),
+	// not by the JWT layer, which is what proves the request reached it.
+	wrong := scimReq(t, handler, http.MethodGet, "/scim/v2/Users", "not-the-scim-token", "")
+	if wrong.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong token: status = %d, want 401", wrong.Code)
+	}
+	if !strings.Contains(wrong.Body.String(), "urn:ietf:params:scim:api:messages:2.0:Error") {
+		t.Fatalf("wrong token refused by %q, want the SCIM handler's error", wrong.Body.String())
 	}
 }

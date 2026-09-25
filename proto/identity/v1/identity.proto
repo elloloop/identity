@@ -1651,7 +1651,10 @@ message AdminCreateProjectResponse {
 message AdminCreateProjectCredentialRequest {
   string project_id = 1;
   // kind selects the credential type: "publishable" (a public lookup key,
-  // no secret) or "secret" (a key whose secret half is shown ONCE).
+  // no secret), "secret" (a key whose secret half is shown ONCE), or
+  // "directory_reader" (a machine credential whose secret half is shown ONCE
+  // and which authorizes exactly one thing: LookupUsers against this
+  // project's directory, presented in the X-Directory-Key header).
   string kind = 2;
 }
 
@@ -1664,6 +1667,19 @@ message AdminCreateProjectCredentialResponse {
   // has no secret half.
   string raw_key = 3;
 }
+
+// AdminRevokeProjectCredentialRequest names the credential to revoke by the
+// credential_id AdminCreateProjectCredential returned, together with the
+// project it belongs to. A revoked directory_reader key is refused on its next
+// lookup; a revoked publishable, secret or mTLS key stops selecting its
+// project within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS (default 30s) on
+// each replica, which caches project resolution. The row is kept for audit.
+message AdminRevokeProjectCredentialRequest {
+  string project_id = 1;
+  string credential_id = 2;
+}
+
+message AdminRevokeProjectCredentialResponse {}
 
 message AdminAddProjectAuthDomainRequest {
   string project_id = 1;
@@ -2062,6 +2078,45 @@ message AdminListProjectOAuthProvidersResponse {
   // providers lists every configured provider with secrets REDACTED, ordered by
   // provider key.
   repeated ProjectOAuthProviderConfig providers = 1;
+}
+
+// ─── Directory lookup (machine credential) ──────────────────────────
+
+// LookupUsersRequest resolves email addresses to accounts in the project the
+// presented directory_reader credential belongs to.
+message LookupUsersRequest {
+  // emails to resolve, 1..100 entries of at most 320 bytes each. Each is
+  // compared with an account's primary email exactly, ignoring case (the
+  // comparison sign-in uses): there is no prefix, substring or domain
+  // matching. Entries that differ only in case are one address.
+  repeated string emails = 1;
+}
+
+// DirectoryUser is the minimal public profile a directory lookup discloses.
+// Contact details beyond the matched email, credentials, MFA and login state
+// are never part of it.
+message DirectoryUser {
+  // id is the account's stable id — the `sub` claim of its access tokens.
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string avatar_url = 4;
+  // email_verified says whether the account's owner proved the address.
+  // Always true when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the
+  // default), because unverified accounts are then not returned.
+  bool email_verified = 5;
+}
+
+message LookupUsersResponse {
+  // users holds one entry per distinct requested address that names an
+  // ACTIVE account. An address with no account, or whose account is not
+  // active (invited, deactivated, suspended, pending consent or deletion), is
+  // omitted, as is one whose account's email is unverified while
+  // GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default). Addresses that
+  // differ only in case yield a single entry. Entries follow request order,
+  // but omissions shift positions: match each entry to a request by its
+  // email, never by index.
+  repeated DirectoryUser users = 1;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────
@@ -2487,6 +2542,11 @@ service IdentityService {
   // (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
   rpc AdminCreateProject(AdminCreateProjectRequest) returns (AdminCreateProjectResponse);
   rpc AdminCreateProjectCredential(AdminCreateProjectCredentialRequest) returns (AdminCreateProjectCredentialResponse);
+  // Revokes a project credential of any kind. Operator-only, like the other
+  // Admin* RPCs; NOT_FOUND when the project has no credential with that id,
+  // and idempotent on an already-revoked one. Takes effect per kind as
+  // AdminRevokeProjectCredentialRequest describes.
+  rpc AdminRevokeProjectCredential(AdminRevokeProjectCredentialRequest) returns (AdminRevokeProjectCredentialResponse);
   rpc AdminAddProjectAuthDomain(AdminAddProjectAuthDomainRequest) returns (AdminAddProjectAuthDomainResponse);
   // Customer-owned custom auth-domains: a project registers a serving
   // hostname, proves ownership via a DNS TXT challenge, then it resolves.
@@ -2557,4 +2617,16 @@ service IdentityService {
   rpc AdminGetProjectAssurance(AdminGetProjectAssuranceRequest) returns (AdminGetProjectAssuranceResponse);
   rpc AdminDeleteProjectOAuthProvider(AdminDeleteProjectOAuthProviderRequest) returns (AdminDeleteProjectOAuthProviderResponse);
   rpc AdminListProjectOAuthProviders(AdminListProjectOAuthProvidersRequest) returns (AdminListProjectOAuthProvidersResponse);
+
+  // Read-only directory lookup for services. Authenticated NOT by a user JWT
+  // but by a directory_reader project credential (minted with
+  // AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
+  // to that credential's project whatever the request Host. The credential
+  // authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
+  // wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
+  // more than 100 addresses, or a blank or over-320-byte address;
+  // UNIMPLEMENTED on a build with no control plane. Over the rate limit the
+  // server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
+  // which Connect clients surface as UNAVAILABLE.
+  rpc LookupUsers(LookupUsersRequest) returns (LookupUsersResponse);
 }

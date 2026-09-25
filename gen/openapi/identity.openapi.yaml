@@ -431,6 +431,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.AdminListProjectOAuthProvidersResponse'
+  /identity.v1.IdentityService/AdminRevokeProjectCredential:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminRevokeProjectCredential
+      description: |-
+        Revokes a project credential of any kind. Operator-only, like the other
+         Admin* RPCs; NOT_FOUND when the project has no credential with that id,
+         and idempotent on an already-revoked one. Takes effect per kind as
+         AdminRevokeProjectCredentialRequest describes.
+      operationId: identity.v1.IdentityService.AdminRevokeProjectCredential
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminRevokeProjectCredentialRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminRevokeProjectCredentialResponse'
   /identity.v1.IdentityService/AdminSetProjectAssurance:
     post:
       tags:
@@ -2633,6 +2673,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.LogoutResponse'
+  /identity.v1.IdentityService/LookupUsers:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: LookupUsers
+      description: |-
+        Read-only directory lookup for services. Authenticated NOT by a user JWT
+         but by a directory_reader project credential (minted with
+         AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
+         to that credential's project whatever the request Host. The credential
+         authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
+         wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
+         more than 100 addresses, or a blank or over-320-byte address;
+         UNIMPLEMENTED on a build with no control plane. Over the rate limit the
+         server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
+         which Connect clients surface as UNAVAILABLE.
+      operationId: identity.v1.IdentityService.LookupUsers
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.LookupUsersRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.LookupUsersResponse'
   /identity.v1.IdentityService/NativeOAuthLogin:
     post:
       tags:
@@ -4724,7 +4810,10 @@ components:
           title: kind
           description: |-
             kind selects the credential type: "publishable" (a public lookup key,
-             no secret) or "secret" (a key whose secret half is shown ONCE).
+             no secret), "secret" (a key whose secret half is shown ONCE), or
+             "directory_reader" (a machine credential whose secret half is shown ONCE
+             and which authorizes exactly one thing: LookupUsers against this
+             project's directory, presented in the X-Directory-Key header).
       title: AdminCreateProjectCredentialRequest
       additionalProperties: false
     identity.v1.AdminCreateProjectCredentialResponse:
@@ -4884,6 +4973,28 @@ components:
             providers lists every configured provider with secrets REDACTED, ordered by
              provider key.
       title: AdminListProjectOAuthProvidersResponse
+      additionalProperties: false
+    identity.v1.AdminRevokeProjectCredentialRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        credentialId:
+          type: string
+          title: credential_id
+      title: AdminRevokeProjectCredentialRequest
+      additionalProperties: false
+      description: |-
+        AdminRevokeProjectCredentialRequest names the credential to revoke by the
+         credential_id AdminCreateProjectCredential returned, together with the
+         project it belongs to. A revoked directory_reader key is refused on its next
+         lookup; a revoked publishable, secret or mTLS key stops selecting its
+         project within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS (default 30s) on
+         each replica, which caches project resolution. The row is kept for audit.
+    identity.v1.AdminRevokeProjectCredentialResponse:
+      type: object
+      title: AdminRevokeProjectCredentialResponse
       additionalProperties: false
     identity.v1.AdminSetProjectAssuranceRequest:
       type: object
@@ -5886,6 +5997,35 @@ components:
       type: object
       title: DeleteUserResponse
       additionalProperties: false
+    identity.v1.DirectoryUser:
+      type: object
+      properties:
+        id:
+          type: string
+          title: id
+          description: id is the account's stable id — the `sub` claim of its access tokens.
+        email:
+          type: string
+          title: email
+        name:
+          type: string
+          title: name
+        avatarUrl:
+          type: string
+          title: avatar_url
+        emailVerified:
+          type: boolean
+          title: email_verified
+          description: |-
+            email_verified says whether the account's owner proved the address.
+             Always true when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the
+             default), because unverified accounts are then not returned.
+      title: DirectoryUser
+      additionalProperties: false
+      description: |-
+        DirectoryUser is the minimal public profile a directory lookup discloses.
+         Contact details beyond the matched email, credentials, MFA and login state
+         are never part of it.
     identity.v1.DisableTotpRequest:
       type: object
       properties:
@@ -6929,6 +7069,43 @@ components:
     identity.v1.LogoutResponse:
       type: object
       title: LogoutResponse
+      additionalProperties: false
+    identity.v1.LookupUsersRequest:
+      type: object
+      properties:
+        emails:
+          type: array
+          items:
+            type: string
+          title: emails
+          description: |-
+            emails to resolve, 1..100 entries of at most 320 bytes each. Each is
+             compared with an account's primary email exactly, ignoring case (the
+             comparison sign-in uses): there is no prefix, substring or domain
+             matching. Entries that differ only in case are one address.
+      title: LookupUsersRequest
+      additionalProperties: false
+      description: |-
+        LookupUsersRequest resolves email addresses to accounts in the project the
+         presented directory_reader credential belongs to.
+    identity.v1.LookupUsersResponse:
+      type: object
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.DirectoryUser'
+          title: users
+          description: |-
+            users holds one entry per distinct requested address that names an
+             ACTIVE account. An address with no account, or whose account is not
+             active (invited, deactivated, suspended, pending consent or deletion), is
+             omitted, as is one whose account's email is unverified while
+             GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default). Addresses that
+             differ only in case yield a single entry. Entries follow request order,
+             but omissions shift positions: match each entry to a request by its
+             email, never by index.
+      title: LookupUsersResponse
       additionalProperties: false
     identity.v1.NativeOAuthLoginRequest:
       type: object

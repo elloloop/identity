@@ -325,6 +325,9 @@ const (
 	// IdentityServiceAdminCreateProjectCredentialProcedure is the fully-qualified name of the
 	// IdentityService's AdminCreateProjectCredential RPC.
 	IdentityServiceAdminCreateProjectCredentialProcedure = "/identity.v1.IdentityService/AdminCreateProjectCredential"
+	// IdentityServiceAdminRevokeProjectCredentialProcedure is the fully-qualified name of the
+	// IdentityService's AdminRevokeProjectCredential RPC.
+	IdentityServiceAdminRevokeProjectCredentialProcedure = "/identity.v1.IdentityService/AdminRevokeProjectCredential"
 	// IdentityServiceAdminAddProjectAuthDomainProcedure is the fully-qualified name of the
 	// IdentityService's AdminAddProjectAuthDomain RPC.
 	IdentityServiceAdminAddProjectAuthDomainProcedure = "/identity.v1.IdentityService/AdminAddProjectAuthDomain"
@@ -394,6 +397,9 @@ const (
 	// IdentityServiceAdminListProjectOAuthProvidersProcedure is the fully-qualified name of the
 	// IdentityService's AdminListProjectOAuthProviders RPC.
 	IdentityServiceAdminListProjectOAuthProvidersProcedure = "/identity.v1.IdentityService/AdminListProjectOAuthProviders"
+	// IdentityServiceLookupUsersProcedure is the fully-qualified name of the IdentityService's
+	// LookupUsers RPC.
+	IdentityServiceLookupUsersProcedure = "/identity.v1.IdentityService/LookupUsers"
 )
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
@@ -588,6 +594,11 @@ type IdentityServiceClient interface {
 	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
 	AdminCreateProject(context.Context, *connect.Request[v1.AdminCreateProjectRequest]) (*connect.Response[v1.AdminCreateProjectResponse], error)
 	AdminCreateProjectCredential(context.Context, *connect.Request[v1.AdminCreateProjectCredentialRequest]) (*connect.Response[v1.AdminCreateProjectCredentialResponse], error)
+	// Revokes a project credential of any kind. Operator-only, like the other
+	// Admin* RPCs; NOT_FOUND when the project has no credential with that id,
+	// and idempotent on an already-revoked one. Takes effect per kind as
+	// AdminRevokeProjectCredentialRequest describes.
+	AdminRevokeProjectCredential(context.Context, *connect.Request[v1.AdminRevokeProjectCredentialRequest]) (*connect.Response[v1.AdminRevokeProjectCredentialResponse], error)
 	AdminAddProjectAuthDomain(context.Context, *connect.Request[v1.AdminAddProjectAuthDomainRequest]) (*connect.Response[v1.AdminAddProjectAuthDomainResponse], error)
 	// Customer-owned custom auth-domains: a project registers a serving
 	// hostname, proves ownership via a DNS TXT challenge, then it resolves.
@@ -653,6 +664,17 @@ type IdentityServiceClient interface {
 	AdminGetProjectAssurance(context.Context, *connect.Request[v1.AdminGetProjectAssuranceRequest]) (*connect.Response[v1.AdminGetProjectAssuranceResponse], error)
 	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)
 	AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error)
+	// Read-only directory lookup for services. Authenticated NOT by a user JWT
+	// but by a directory_reader project credential (minted with
+	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
+	// to that credential's project whatever the request Host. The credential
+	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
+	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
+	// more than 100 addresses, or a blank or over-320-byte address;
+	// UNIMPLEMENTED on a build with no control plane. Over the rate limit the
+	// server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
+	// which Connect clients surface as UNAVAILABLE.
+	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
 }
 
 // NewIdentityServiceClient constructs a client for the identity.v1.IdentityService service. By
@@ -1254,6 +1276,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminCreateProjectCredential")),
 			connect.WithClientOptions(opts...),
 		),
+		adminRevokeProjectCredential: connect.NewClient[v1.AdminRevokeProjectCredentialRequest, v1.AdminRevokeProjectCredentialResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminRevokeProjectCredentialProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminRevokeProjectCredential")),
+			connect.WithClientOptions(opts...),
+		),
 		adminAddProjectAuthDomain: connect.NewClient[v1.AdminAddProjectAuthDomainRequest, v1.AdminAddProjectAuthDomainResponse](
 			httpClient,
 			baseURL+IdentityServiceAdminAddProjectAuthDomainProcedure,
@@ -1392,6 +1420,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminListProjectOAuthProviders")),
 			connect.WithClientOptions(opts...),
 		),
+		lookupUsers: connect.NewClient[v1.LookupUsersRequest, v1.LookupUsersResponse](
+			httpClient,
+			baseURL+IdentityServiceLookupUsersProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("LookupUsers")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -1495,6 +1529,7 @@ type identityServiceClient struct {
 	setUserQuota                    *connect.Client[v1.SetUserQuotaRequest, v1.SetUserQuotaResponse]
 	adminCreateProject              *connect.Client[v1.AdminCreateProjectRequest, v1.AdminCreateProjectResponse]
 	adminCreateProjectCredential    *connect.Client[v1.AdminCreateProjectCredentialRequest, v1.AdminCreateProjectCredentialResponse]
+	adminRevokeProjectCredential    *connect.Client[v1.AdminRevokeProjectCredentialRequest, v1.AdminRevokeProjectCredentialResponse]
 	adminAddProjectAuthDomain       *connect.Client[v1.AdminAddProjectAuthDomainRequest, v1.AdminAddProjectAuthDomainResponse]
 	addProjectAuthDomain            *connect.Client[v1.AddProjectAuthDomainRequest, v1.AddProjectAuthDomainResponse]
 	verifyProjectAuthDomain         *connect.Client[v1.VerifyProjectAuthDomainRequest, v1.VerifyProjectAuthDomainResponse]
@@ -1518,6 +1553,7 @@ type identityServiceClient struct {
 	adminGetProjectAssurance        *connect.Client[v1.AdminGetProjectAssuranceRequest, v1.AdminGetProjectAssuranceResponse]
 	adminDeleteProjectOAuthProvider *connect.Client[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse]
 	adminListProjectOAuthProviders  *connect.Client[v1.AdminListProjectOAuthProvidersRequest, v1.AdminListProjectOAuthProvidersResponse]
+	lookupUsers                     *connect.Client[v1.LookupUsersRequest, v1.LookupUsersResponse]
 }
 
 // BeginOAuthLogin calls identity.v1.IdentityService.BeginOAuthLogin.
@@ -2010,6 +2046,11 @@ func (c *identityServiceClient) AdminCreateProjectCredential(ctx context.Context
 	return c.adminCreateProjectCredential.CallUnary(ctx, req)
 }
 
+// AdminRevokeProjectCredential calls identity.v1.IdentityService.AdminRevokeProjectCredential.
+func (c *identityServiceClient) AdminRevokeProjectCredential(ctx context.Context, req *connect.Request[v1.AdminRevokeProjectCredentialRequest]) (*connect.Response[v1.AdminRevokeProjectCredentialResponse], error) {
+	return c.adminRevokeProjectCredential.CallUnary(ctx, req)
+}
+
 // AdminAddProjectAuthDomain calls identity.v1.IdentityService.AdminAddProjectAuthDomain.
 func (c *identityServiceClient) AdminAddProjectAuthDomain(ctx context.Context, req *connect.Request[v1.AdminAddProjectAuthDomainRequest]) (*connect.Response[v1.AdminAddProjectAuthDomainResponse], error) {
 	return c.adminAddProjectAuthDomain.CallUnary(ctx, req)
@@ -2124,6 +2165,11 @@ func (c *identityServiceClient) AdminDeleteProjectOAuthProvider(ctx context.Cont
 // AdminListProjectOAuthProviders calls identity.v1.IdentityService.AdminListProjectOAuthProviders.
 func (c *identityServiceClient) AdminListProjectOAuthProviders(ctx context.Context, req *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error) {
 	return c.adminListProjectOAuthProviders.CallUnary(ctx, req)
+}
+
+// LookupUsers calls identity.v1.IdentityService.LookupUsers.
+func (c *identityServiceClient) LookupUsers(ctx context.Context, req *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error) {
+	return c.lookupUsers.CallUnary(ctx, req)
 }
 
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
@@ -2318,6 +2364,11 @@ type IdentityServiceHandler interface {
 	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
 	AdminCreateProject(context.Context, *connect.Request[v1.AdminCreateProjectRequest]) (*connect.Response[v1.AdminCreateProjectResponse], error)
 	AdminCreateProjectCredential(context.Context, *connect.Request[v1.AdminCreateProjectCredentialRequest]) (*connect.Response[v1.AdminCreateProjectCredentialResponse], error)
+	// Revokes a project credential of any kind. Operator-only, like the other
+	// Admin* RPCs; NOT_FOUND when the project has no credential with that id,
+	// and idempotent on an already-revoked one. Takes effect per kind as
+	// AdminRevokeProjectCredentialRequest describes.
+	AdminRevokeProjectCredential(context.Context, *connect.Request[v1.AdminRevokeProjectCredentialRequest]) (*connect.Response[v1.AdminRevokeProjectCredentialResponse], error)
 	AdminAddProjectAuthDomain(context.Context, *connect.Request[v1.AdminAddProjectAuthDomainRequest]) (*connect.Response[v1.AdminAddProjectAuthDomainResponse], error)
 	// Customer-owned custom auth-domains: a project registers a serving
 	// hostname, proves ownership via a DNS TXT challenge, then it resolves.
@@ -2383,6 +2434,17 @@ type IdentityServiceHandler interface {
 	AdminGetProjectAssurance(context.Context, *connect.Request[v1.AdminGetProjectAssuranceRequest]) (*connect.Response[v1.AdminGetProjectAssuranceResponse], error)
 	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)
 	AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error)
+	// Read-only directory lookup for services. Authenticated NOT by a user JWT
+	// but by a directory_reader project credential (minted with
+	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
+	// to that credential's project whatever the request Host. The credential
+	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
+	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
+	// more than 100 addresses, or a blank or over-320-byte address;
+	// UNIMPLEMENTED on a build with no control plane. Over the rate limit the
+	// server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
+	// which Connect clients surface as UNAVAILABLE.
+	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
 }
 
 // NewIdentityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -2980,6 +3042,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminCreateProjectCredential")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceAdminRevokeProjectCredentialHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminRevokeProjectCredentialProcedure,
+		svc.AdminRevokeProjectCredential,
+		connect.WithSchema(identityServiceMethods.ByName("AdminRevokeProjectCredential")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAdminAddProjectAuthDomainHandler := connect.NewUnaryHandler(
 		IdentityServiceAdminAddProjectAuthDomainProcedure,
 		svc.AdminAddProjectAuthDomain,
@@ -3116,6 +3184,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceAdminListProjectOAuthProvidersProcedure,
 		svc.AdminListProjectOAuthProviders,
 		connect.WithSchema(identityServiceMethods.ByName("AdminListProjectOAuthProviders")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceLookupUsersHandler := connect.NewUnaryHandler(
+		IdentityServiceLookupUsersProcedure,
+		svc.LookupUsers,
+		connect.WithSchema(identityServiceMethods.ByName("LookupUsers")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -3316,6 +3390,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminCreateProjectHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminCreateProjectCredentialProcedure:
 			identityServiceAdminCreateProjectCredentialHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminRevokeProjectCredentialProcedure:
+			identityServiceAdminRevokeProjectCredentialHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminAddProjectAuthDomainProcedure:
 			identityServiceAdminAddProjectAuthDomainHandler.ServeHTTP(w, r)
 		case IdentityServiceAddProjectAuthDomainProcedure:
@@ -3362,6 +3438,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminDeleteProjectOAuthProviderHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminListProjectOAuthProvidersProcedure:
 			identityServiceAdminListProjectOAuthProvidersHandler.ServeHTTP(w, r)
+		case IdentityServiceLookupUsersProcedure:
+			identityServiceLookupUsersHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3763,6 +3841,10 @@ func (UnimplementedIdentityServiceHandler) AdminCreateProjectCredential(context.
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminCreateProjectCredential is not implemented"))
 }
 
+func (UnimplementedIdentityServiceHandler) AdminRevokeProjectCredential(context.Context, *connect.Request[v1.AdminRevokeProjectCredentialRequest]) (*connect.Response[v1.AdminRevokeProjectCredentialResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminRevokeProjectCredential is not implemented"))
+}
+
 func (UnimplementedIdentityServiceHandler) AdminAddProjectAuthDomain(context.Context, *connect.Request[v1.AdminAddProjectAuthDomainRequest]) (*connect.Response[v1.AdminAddProjectAuthDomainResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminAddProjectAuthDomain is not implemented"))
 }
@@ -3853,4 +3935,8 @@ func (UnimplementedIdentityServiceHandler) AdminDeleteProjectOAuthProvider(conte
 
 func (UnimplementedIdentityServiceHandler) AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminListProjectOAuthProviders is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.LookupUsers is not implemented"))
 }

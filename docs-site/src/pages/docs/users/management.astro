@@ -34,6 +34,12 @@ import { Code } from "astro-expressive-code/components";
     All RPCs in this section require <code>role=admin</code>. The
     requirement is enforced in the Connect handler and audit logged.
   </p>
+  <p>
+    A backend service that only needs to resolve email addresses to accounts
+    should not hold an admin session: give it a read-only
+    <a href="/identity/docs/users/directory-lookup">directory reader key</a>
+    for <code>LookupUsers</code> instead.
+  </p>
 
   <h3>List users</h3>
   <p>

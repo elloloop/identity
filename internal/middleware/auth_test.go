@@ -85,6 +85,32 @@ func TestAuthMiddleware_OperatorRPCs_Exempt(t *testing.T) {
 	}
 }
 
+// The SCIM server authenticates with its own bearer token, so its root and
+// subtree pass the JWT layer — and only those: a sibling path sharing the
+// prefix string is still enforced.
+func TestAuthMiddleware_SCIMPaths(t *testing.T) {
+	kr := testSigner(t)
+	for path, exempt := range map[string]bool{
+		"/scim/v2":       true,
+		"/scim/v2/":      true,
+		"/scim/v2/Users": true,
+		"/scim/v2x":      false,
+		"/scim":          false,
+	} {
+		t.Run(path, func(t *testing.T) {
+			var called bool
+			var userID string
+			handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			assert.Equal(t, exempt, called, "reached the handler without a JWT")
+			if !exempt {
+				assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			}
+		})
+	}
+}
+
 func TestAuthMiddleware_ExemptPath_NoToken_Passes(t *testing.T) {
 	kr := testSigner(t)
 	var called bool

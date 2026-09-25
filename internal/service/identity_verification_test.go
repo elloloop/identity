@@ -282,6 +282,9 @@ type idvFailingRepo struct {
 	failUpdate    bool
 }
 
+// WithProject keeps the failure injection on the scoped repository.
+func (r *idvFailingRepo) WithProject(string) Repository { return r }
+
 func (r *idvFailingRepo) CreateIdentityVerification(ctx context.Context, rec *IdentityVerificationRecord) error {
 	if r.failCreate {
 		return errors.New("injected create error")

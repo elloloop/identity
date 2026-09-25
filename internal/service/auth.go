@@ -64,6 +64,19 @@ const (
 	StatusDeactivated = "deactivated"
 )
 
+// isActiveStatus reports whether a user status is a normal, fully-usable
+// account. A blank status is a legacy row written before the column carried a
+// default, and counts as active; every other status (invited, deactivated,
+// suspended, pending consent or deletion) does not.
+func isActiveStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", StatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
 // User represents a user in the identity system.
 type User struct {
 	ID               string
@@ -212,6 +225,15 @@ type PollQrResult struct {
 
 // Repository abstracts all persistence operations for the auth service.
 type Repository interface {
+	// WithProject returns a Repository bound to projectID (its storage
+	// shard): every read and write through it carries that project's
+	// `WHERE project_id = $1` boundary. It is part of the interface, not an
+	// optional capability, because a Repository that cannot be rebound would
+	// silently serve whatever project it was built for. A decorator must
+	// implement it itself and re-wrap the bound inner Repository — an
+	// embedded one's promoted WithProject returns the undecorated inner.
+	WithProject(projectID string) Repository
+
 	// Users
 	FindUserByEmail(ctx context.Context, email string) (*User, error)
 	// FindUserByUsername resolves a managed child account by its
@@ -568,6 +590,13 @@ type Repository interface {
 	// whose account was deleted — does not fail the whole read. It exists
 	// because the guardian listings otherwise issue one GetUser per edge.
 	GetUsersByIDs(ctx context.Context, ids []string) ([]*User, error)
+
+	// FindUsersByEmails fetches, in ONE query, the accounts whose email equals
+	// one of emails exactly, ignoring case (FindUserByEmail's comparison),
+	// ordered by id. Accounts with no email (anonymous) never match, addresses
+	// that name no account are simply absent, and status is NOT filtered —
+	// the caller decides which states it discloses.
+	FindUsersByEmails(ctx context.Context, emails []string) ([]*User, error)
 
 	// SetDateOfBirthOnce stores a date of birth ONLY while the account still
 	// has none, and reports whether this caller was the one that set it. It

@@ -82,6 +82,7 @@ var AuthExemptPaths = map[string]bool{
 	// the secret check, not the JWT, is their auth.
 	"/identity.v1.IdentityService/AdminCreateProject":              true,
 	"/identity.v1.IdentityService/AdminCreateProjectCredential":    true,
+	"/identity.v1.IdentityService/AdminRevokeProjectCredential":    true,
 	"/identity.v1.IdentityService/AdminAddProjectAuthDomain":       true,
 	"/identity.v1.IdentityService/AddProjectAuthDomain":            true,
 	"/identity.v1.IdentityService/VerifyProjectAuthDomain":         true,
@@ -107,10 +108,35 @@ var AuthExemptPaths = map[string]bool{
 	// RPCs), and GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP closes it entirely. It
 	// also self-secures by closing permanently once any platform admin exists.
 	"/identity.v1.IdentityService/CreateFirstPlatformAdmin": true,
-	"/.well-known/jwks.json":                                true,
-	"/health":                                               true,
-	"/healthz":                                              true,
+	// LookupUsers is called by a service, not a user: it is authenticated by
+	// a directory_reader project credential in X-Directory-Key, which the
+	// directory service verifies (hash compare, kind, revocation) and which
+	// scopes the lookup to that credential's project.
+	"/identity.v1.IdentityService/LookupUsers": true,
+	"/.well-known/jwks.json":                   true,
+	"/health":                                  true,
+	"/healthz":                                 true,
+	// The SAML IdP metadata is a public document an SP fetches to import the
+	// IdP's signing certificate; no caller of it holds a JWT.
+	SAMLMetadataPath: true,
 }
+
+// SAMLMetadataPath is the well-known path the SAML IdP serves its
+// EntityDescriptor XML on. SPs are configured with this URL to import the
+// IdP's signing certificate and SSO/SLO endpoints.
+const SAMLMetadataPath = "/saml/metadata"
+
+// scimMountPath is the root of the inbound SCIM 2.0 server, and
+// SCIMPathPrefix its subtree. A SCIM client authenticates with the
+// deployment's SCIM bearer token, which the SCIM handler verifies itself. That
+// token is not a JWT, so enforcing JWTs here would refuse every SCIM request
+// before the handler could check it. The bare root is exempt too, so a client
+// configured with the base URL gets the mux's redirect into the subtree rather
+// than a JWT refusal.
+const (
+	scimMountPath  = "/scim/v2"
+	SCIMPathPrefix = scimMountPath + "/"
+)
 
 // hostedOAuthPrefix is the path prefix for the browser-facing hosted
 // OAuth routes (GET /oauth/start/{provider}, GET/POST /oauth/callback/
@@ -124,9 +150,13 @@ const authUIPrefix = "/auth/"
 
 // isAuthExempt reports whether path bypasses JWT enforcement: either an
 // exact-match entry in AuthExemptPaths or any path under the hosted
-// OAuth prefix or the auth UI prefix.
+// OAuth, auth UI or SCIM prefix.
 func isAuthExempt(path string) bool {
-	return AuthExemptPaths[path] || strings.HasPrefix(path, hostedOAuthPrefix) || strings.HasPrefix(path, authUIPrefix)
+	return AuthExemptPaths[path] ||
+		strings.HasPrefix(path, hostedOAuthPrefix) ||
+		strings.HasPrefix(path, authUIPrefix) ||
+		path == scimMountPath ||
+		strings.HasPrefix(path, SCIMPathPrefix)
 }
 
 // AuthMiddleware verifies JWT Bearer tokens on non-exempt paths and injects the

@@ -59,6 +59,21 @@ func (h *IdentityHandler) AdminCreateProjectCredential(
 	}), nil
 }
 
+// AdminRevokeProjectCredential revokes one of a project's credentials.
+// Operator-only.
+func (h *IdentityHandler) AdminRevokeProjectCredential(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminRevokeProjectCredentialRequest],
+) (*connect.Response[identitypb.AdminRevokeProjectCredentialResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	if err := h.controlAdmin.AdminRevokeProjectCredential(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.CredentialId); err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminRevokeProjectCredentialResponse{}), nil
+}
+
 // AdminAddProjectAuthDomain registers a serving hostname on a project,
 // idempotently and seeded verified. Operator-only.
 func (h *IdentityHandler) AdminAddProjectAuthDomain(

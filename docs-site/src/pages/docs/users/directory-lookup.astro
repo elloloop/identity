@@ -1,0 +1,212 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Directory Lookup for Services">
+  <h1>Directory Lookup for Services</h1>
+  <p>
+    <code>LookupUsers</code> resolves a batch of email addresses to the
+    accounts they name in one project, whether or not those accounts have
+    ever used the calling service. It is authorized by a machine credential
+    that can do nothing else: a <strong>directory reader</strong> key.
+  </p>
+  <p>
+    Use it instead of giving a service an admin account. An admin session can
+    list, edit and delete every user; a directory reader key can only resolve
+    addresses you already know to the minimal public profile of the
+    <em>active</em> accounts they name, in one project.
+  </p>
+
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+    <strong>Postgres deployments only.</strong> Directory keys are project
+    credentials, which live in the control plane. On a build without one
+    (the memory and SQLite drivers) <code>LookupUsers</code> returns
+    <code>UNIMPLEMENTED</code>. The <code>directory_reader</code> kind needs
+    migration 0033: run <code>identity migrate</code>, or set
+    <code>GATEWAY_POSTGRES_AUTO_MIGRATE</code>, before minting one.
+  </div>
+
+  <h2>What the key can and cannot do</h2>
+  <ul>
+    <li>
+      It authorizes <code>LookupUsers</code> and no other RPC. Presented to
+      anything else — as <code>X-Directory-Key</code> or as a Bearer token — it
+      is ignored, and the call is answered as if no credential were present
+      (<code>UNAUTHENTICATED</code> on every user-management RPC).
+    </li>
+    <li>
+      It is bound to the project it was minted for. Every lookup reads that
+      project's users, whatever <code>Host</code> or
+      <code>X-Project-Key</code> the request carries. It is not a project key
+      either: sent as <code>X-Project-Key</code>, or as the hosted OAuth
+      routes' <code>project_key</code> parameter, it selects no project.
+    </li>
+    <li>
+      Matching is exact, ignoring case — the comparison sign-in uses. No
+      prefix, substring or domain search, so the directory cannot be listed
+      through it.
+    </li>
+    <li>
+      Only <strong>active</strong> accounts are returned. Invited,
+      deactivated, suspended, and pending-consent or pending-deletion accounts
+      are omitted, as are addresses with no account; an address is absent
+      rather than an error.
+    </li>
+    <li>
+      Only accounts whose owner has <strong>verified</strong> the address are
+      returned while <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> is on,
+      which is the default. Anyone can sign up with an address they do not
+      own, so without this rule the lookup would return whoever registered it
+      first. With the setting off, unverified accounts are returned too, with
+      <code>email_verified: false</code>; with it on, every entry has
+      <code>email_verified: true</code>. See
+      <a href="#verified-email">Verified email</a> below.
+    </li>
+    <li>
+      Each entry carries <code>id</code> (the account's <code>sub</code>),
+      <code>email</code>, <code>name</code>, <code>avatar_url</code> and
+      <code>email_verified</code>.
+      Phone numbers, roles, MFA and login state are never returned.
+    </li>
+    <li>
+      A batch holds 1–100 addresses of at most 320 bytes each. Calls are
+      rate-limited per client IP by
+      <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code> (default 120) per
+      <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window (default 60 s).
+    </li>
+  </ul>
+
+  <h3>Sizing the rate limit</h3>
+  <p>
+    The limit counts calls per client IP, and a service usually reaches the
+    identity server from a few egress addresses — so for a machine caller it
+    is effectively a per-service limit, shared by every instance behind one
+    address. Set it to the peak number of <code>LookupUsers</code> calls all
+    of those instances make in one window, with headroom; each call resolves
+    up to 100 addresses, so batch before you raise it. It must be a positive
+    integer: zero, a negative or a malformed value fails the boot, so the
+    lookup cannot be left unthrottled.
+  </p>
+  <p>
+    A throttled call is refused before it reaches the lookup, with HTTP
+    <code>429 Too Many Requests</code>, a <code>Retry-After: 60</code> header
+    and a plain-text body. A Connect client reports it as
+    <code>UNAVAILABLE</code>. Back off and retry; the count resets when the
+    window rolls over.
+  </p>
+  <p>
+    The limit is enforced by the HTTP handler. A host that serves identity on
+    its own gRPC server through <code>RegisterGRPC</code> (see
+    <a href="https://github.com/elloloop/identity/blob/main/docs/embedding.md"><code>docs/embedding.md</code></a>)
+    bypasses it and must apply its own limit there.
+  </p>
+
+  <h2>Mint a key</h2>
+  <p>
+    Directory keys are minted by the platform operator with the existing
+    <code>AdminCreateProjectCredential</code> RPC, authenticated by
+    <code>X-Admin-Secret</code> (<code>GATEWAY_ADMIN_API_SECRET</code>), with
+    <code>kind</code> set to <code>directory_reader</code>:
+  </p>
+  <Code
+    lang="bash"
+    code={`curl -sS -X POST https://auth.example.com/identity.v1.IdentityService/AdminCreateProjectCredential \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{"projectId": "<project-id>", "kind": "directory_reader"}'
+
+# {"credentialId":"8f3c…","publicId":"dk_4b1e…","rawKey":"dk_4b1e….c9a0…"}`}
+  />
+  <p>
+    <code>rawKey</code> is shown <strong>once</strong>; only a hash of its
+    secret half is stored. Put it in the calling service's secret store and
+    record <code>credentialId</code> — you need it to revoke the key.
+  </p>
+
+  <h2>Look up users</h2>
+  <p>
+    Present the raw key in the <code>X-Directory-Key</code> header, from
+    server-side code only. It is deliberately not the
+    <code>Authorization</code> header, and it is left out of the CORS
+    allow-list, so a browser cannot send it cross-origin: the key never
+    belongs in a web or mobile client.
+  </p>
+  <Code
+    lang="bash"
+    code={`curl -sS -X POST https://auth.example.com/identity.v1.IdentityService/LookupUsers \\
+  -H "X-Directory-Key: $DIRECTORY_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"emails": ["alice@corp.com", "bob@corp.com"]}'
+
+# {"users":[{"id":"u_31…","email":"alice@corp.com","name":"Alice","avatarUrl":"https://…","emailVerified":true}]}`}
+  />
+  <p>
+    Results come back in request order, one entry per distinct address that
+    names an account the lookup may return. Addresses that differ only in case
+    are the same address and produce one entry. Because omitted addresses
+    leave no gap, match each entry to your request by its <code>email</code>,
+    never by position.
+  </p>
+  <p>
+    A missing, wrong, revoked or non-directory key is
+    <code>UNAUTHENTICATED</code>; an empty batch, a blank address, an address
+    longer than 320 bytes or more than 100 addresses is
+    <code>INVALID_ARGUMENT</code>.
+  </p>
+
+  <h2 id="verified-email">Verified email</h2>
+  <p>
+    <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> (default
+    <code>true</code>) is the deployment-wide rule that an unverified address
+    cannot be used: password sign-up issues no session until the address is
+    verified, and password sign-in is refused. The directory lookup follows
+    the same rule, so an account created by signing up with an address is not
+    returned until its owner confirms the verification link.
+  </p>
+  <p>
+    Set it to <code>false</code> only if your deployment accepts unverified
+    addresses everywhere. The lookup then returns those accounts as well, and
+    <code>email_verified</code> tells the two apart.
+  </p>
+
+  <h2>Revoke a key</h2>
+  <Code
+    lang="bash"
+    code={`curl -sS -X POST https://auth.example.com/identity.v1.IdentityService/AdminRevokeProjectCredential \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{"projectId": "<project-id>", "credentialId": "<credential-id>"}'`}
+  />
+  <p>
+    A revoked directory key is refused on its next lookup: every lookup
+    reads the credential afresh. Revoking an already-revoked key is a no-op;
+    a credential id the project does not own is <code>NOT_FOUND</code>.
+    To rotate, mint the new key, deploy it, then revoke the old one.
+  </p>
+  <p>
+    <code>AdminRevokeProjectCredential</code> revokes project credentials of
+    every kind, not only directory keys, but the other kinds are not refused
+    as promptly. A publishable, secret or mTLS key presented as
+    <code>X-Project-Key</code> (or <code>project_key</code>) selects its project through a per-replica
+    project-resolution cache that revocation does not clear, so each replica
+    keeps resolving the key for up to
+    <code>GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS</code> (default 30 s)
+    after the revoke. Plan an incident response around that window.
+  </p>
+
+  <h2>Audit</h2>
+  <p>
+    Every event is recorded in the credential's project. Minting and revoking
+    record <code>project_credential_created</code> and
+    <code>project_credential_revoked</code>. Every lookup records
+    <code>directory_lookup</code>, with the actor
+    <code>credential:&lt;credential-id&gt;</code> and the number of addresses
+    requested and matched — never the addresses themselves. A refused
+    presentation of a real directory key (wrong secret, or revoked) is
+    recorded with <code>success=false</code> and a <code>reason</code>.
+    Presenting the public id of another kind of credential, such as a
+    publishable key, is refused without an audit row. The raw key and its
+    hash are never logged.
+  </p>
+</DocsLayout>

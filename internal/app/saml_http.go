@@ -5,13 +5,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/pkg/samlidp"
 )
-
-// samlMetadataPath is the well-known path the IdP serves its SAML
-// EntityDescriptor XML on. SPs are configured with this URL to import the
-// IdP's signing certificate and SSO/SLO endpoints.
-const samlMetadataPath = "/saml/metadata"
 
 // samlHandler is the browser-facing SAML IdP surface. In this slice it
 // serves IdP metadata; the interactive SSO POST/Redirect binding and SLO
@@ -30,7 +26,7 @@ func (h *samlHandler) register(mux *http.ServeMux) {
 	if h.issuer == nil || !h.issuer.Enabled() {
 		return
 	}
-	mux.HandleFunc(samlMetadataPath, h.metadata)
+	mux.HandleFunc(middleware.SAMLMetadataPath, h.metadata)
 }
 
 func (h *samlHandler) metadata(w http.ResponseWriter, r *http.Request) {

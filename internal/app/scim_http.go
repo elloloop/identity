@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/events"
@@ -51,7 +52,7 @@ func (h *scimHandler) register(mux *http.ServeMux, enabled bool) {
 	if !enabled {
 		return
 	}
-	mux.Handle("/scim/v2/", h.authenticate(h.scimProvider()))
+	mux.Handle(middleware.SCIMPathPrefix, h.authenticate(h.scimProvider()))
 }
 
 // validateSCIMProject fails boot when GATEWAY_SCIM_PROJECT_ID does not name a
@@ -81,7 +82,7 @@ func validateSCIMProject(lookup service.NativeOAuthProjectStore, projectID strin
 // one project's users — the cross-project provisioning hole. The bound repo is
 // built once and reused: every SCIM request shares the same project scope.
 func (h *scimHandler) scimProvider() http.Handler {
-	repo := service.ProjectBoundRepository(h.repo, h.projectID)
+	repo := h.repo.WithProject(h.projectID)
 	store := &repoSCIMStore{
 		repo:      repo,
 		audit:     h.audit,

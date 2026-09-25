@@ -43,7 +43,12 @@ type IdentityHandler struct {
 	// JWT. nil on memory (no control plane) and when no secret is
 	// configured — both disable the surface (CodeUnimplemented).
 	controlAdmin *service.ControlPlaneAdminService
-	cfg          *config.Config
+	// directory backs LookupUsers, authenticated by a directory_reader
+	// project credential rather than a user JWT. nil when the build has no
+	// control plane (memory, sqlite), which disables the RPC
+	// (CodeUnimplemented).
+	directory *service.DirectoryService
+	cfg       *config.Config
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service
@@ -58,6 +63,9 @@ type IdentityHandler struct {
 //
 // controlAdmin is optional: nil (memory, or no configured admin secret)
 // causes the control-plane admin RPCs to return CodeUnimplemented.
+//
+// directory is optional: nil (no control plane) causes LookupUsers to
+// return CodeUnimplemented.
 func NewIdentityHandler(
 	auth *service.AuthService,
 	admin *service.AdminService,
@@ -68,6 +76,7 @@ func NewIdentityHandler(
 	domains *service.DomainService,
 	members *service.MembershipService,
 	controlAdmin *service.ControlPlaneAdminService,
+	directory *service.DirectoryService,
 	cfg *config.Config,
 ) *IdentityHandler {
 	return &IdentityHandler{
@@ -80,6 +89,7 @@ func NewIdentityHandler(
 		domains:      domains,
 		members:      members,
 		controlAdmin: controlAdmin,
+		directory:    directory,
 		cfg:          cfg,
 	}
 }

@@ -765,6 +765,10 @@ type MemRepo struct {
 	auditEvents        []*service.AuditEvent
 }
 
+// WithProject returns the repo itself: it is one store, so every project
+// reads the same rows.
+func (r *MemRepo) WithProject(string) service.Repository { return r }
+
 // NewMemRepo returns an empty MemRepo.
 func NewMemRepo() *MemRepo {
 	return &MemRepo{
@@ -2277,6 +2281,29 @@ func (r *MemRepo) GetUsersByIDs(_ context.Context, ids []string) ([]*service.Use
 		if u, ok := r.users[id]; ok {
 			cp := *u
 			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (r *MemRepo) FindUsersByEmails(_ context.Context, emails []string) ([]*service.User, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.User, 0, len(emails))
+	for _, u := range r.users {
+		if u.Email == "" {
+			continue
+		}
+		for _, e := range emails {
+			if strings.EqualFold(u.Email, e) {
+				cp := *u
+				out = append(out, &cp)
+				break
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

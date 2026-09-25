@@ -71,6 +71,9 @@ type ProjectAuthDomain struct {
 const (
 	projectStatusActive    = "active"
 	credentialStatusActive = "active"
+	// credentialKindMTLS is the client-certificate credential kind the
+	// schema admits; operators cannot mint it through the admin API yet.
+	credentialKindMTLS = "mtls"
 )
 
 // ProjectStore is the Postgres-backed, control-plane registry store. It
@@ -430,14 +433,15 @@ func (s *ProjectStore) GetProjectCredentialByPublicID(ctx context.Context, publi
 	return c, nil
 }
 
-// RevokeProjectCredential marks a credential revoked at atMs (defaulting to
-// now when zero). Revoking is idempotent: an already-revoked or
-// non-existent credential is a no-op that returns nil. A revoked credential
-// no longer resolves a project for new requests, though the row is retained
-// for audit.
-func (s *ProjectStore) RevokeProjectCredential(ctx context.Context, credentialID string, atMs int64) error {
-	if credentialID == "" {
-		return errors.New("postgres: RevokeProjectCredential: missing credential id")
+// RevokeProjectCredential marks projectID's credential credentialID revoked at
+// atMs (defaulting to now when zero). Revoking is idempotent: an
+// already-revoked credential keeps its original revoked_at_ms and returns nil.
+// A credential id the project does not own surfaces service.ErrNotFound, so a
+// mistyped id is never reported as revoked. A revoked credential no longer
+// resolves a project for new requests, though the row is retained for audit.
+func (s *ProjectStore) RevokeProjectCredential(ctx context.Context, projectID, credentialID string, atMs int64) error {
+	if projectID == "" || credentialID == "" {
+		return errors.New("postgres: RevokeProjectCredential: missing project or credential id")
 	}
 	if atMs == 0 {
 		atMs = nowMs()
@@ -445,10 +449,14 @@ func (s *ProjectStore) RevokeProjectCredential(ctx context.Context, credentialID
 	const q = `
 		UPDATE project_credentials
 		   SET status = 'revoked',
-		       revoked_at_ms = $2
-		 WHERE id = $1 AND status <> 'revoked'`
-	if _, err := s.pool.Exec(ctx, q, credentialID, atMs); err != nil {
+		       revoked_at_ms = CASE WHEN status = 'revoked' THEN revoked_at_ms ELSE $3 END
+		 WHERE id = $1 AND project_id = $2`
+	tag, err := s.pool.Exec(ctx, q, credentialID, projectID, atMs)
+	if err != nil {
 		return wrapPgErr("RevokeProjectCredential", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: project %q has no credential %q", service.ErrNotFound, projectID, credentialID)
 	}
 	return nil
 }
