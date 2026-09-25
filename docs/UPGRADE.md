@@ -1,5 +1,51 @@
 # Upgrade guide
 
+## v4.8 → next — SCIM throttling and audit; directory limit on every transport
+
+No schema change and no migration. Two groups of deployments see a change in
+behaviour:
+
+- **`GATEWAY_SCIM_ENABLED` deployments.** Every request under `/scim/v2/` now
+  counts against a per-client-IP limit, **`GATEWAY_RATE_LIMIT_SCIM_PER_IP`**
+  (default 300 per `GATEWAY_RATE_LIMIT_WINDOW_SECONDS` window; `0` turns it
+  off). The limit is checked before the bearer token, so it also holds a
+  caller trying tokens. Over it a request gets HTTP 429 with a `Retry-After`
+  header. If your IdP pushes faster than that from one address — a first full
+  import is the burstiest — raise the limit before upgrading. A request with
+  a missing or wrong bearer token is now logged (`scim_auth_failed`, warning)
+  and audited (`scim_auth_failed`, `success=false`, with the client IP, user
+  agent and a `reason` of `missing_token` or `invalid_token`; never the token)
+  under `GATEWAY_SCIM_PROJECT_ID`.
+
+  **Consider rotating `GATEWAY_SCIM_BEARER_TOKEN`.** v4.8 made the SCIM surface
+  reachable, and until this release a request carrying a wrong token was
+  neither throttled nor recorded, so there is no trail of whether anyone tried
+  to guess it. Generate a new token of at least 32 characters, set it in your
+  IdP's SCIM connector, then restart identity with it.
+- **Hosts that serve identity through `RegisterGRPC`.** `LookupUsers` is now
+  rate-limited on the native gRPC surface too, drawing on the same per-IP
+  budget (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`) as the HTTP handler. A
+  throttled call fails with `RESOURCE_EXHAUSTED` and carries the wait, in
+  seconds, in its `retry-after` response metadata. The caller is the
+  connection's peer address, or the first untrusted `x-forwarded-for` hop
+  when the peer is in `GATEWAY_TRUSTED_PROXIES`. A host that already throttles
+  `LookupUsers` in its own interceptor can keep doing so; both limits apply.
+
+Also changed:
+
+- **`Retry-After` follows the window.** Every per-IP limit's 429 now carries
+  `Retry-After` equal to `GATEWAY_RATE_LIMIT_WINDOW_SECONDS` (rounded up to a
+  whole second) instead of a fixed `60`. Deployments on the default 60-second
+  window see no difference.
+- **`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` is parsed like the other limits.**
+  A value that is not an integer, or `0`, now leaves the default (120) in
+  force instead of failing the boot; a negative value still fails it. The
+  limit still cannot be switched off.
+- **Boot log.** Startup logs `directory_lookup_enabled` (with the effective
+  per-IP limit, window and verified-email rule) or `directory_lookup_disabled`,
+  as it already does for SCIM.
+- **New audit event:** `scim_auth_failed`.
+
 ## v4.7 → v4.8 — directory lookup for services (additive); session-mode and SCIM fixes (behaviour changes)
 
 This release adds a read-only lookup RPC and the credential kind that

@@ -1372,7 +1372,7 @@
     "type": "integer",
     "default": "120",
     "required": false,
-    "description": "is the per-IP cap per window on LookupUsers, each call of which resolves up to 100 addresses; it must be positive, and a zero, negative or malformed value is refused at boot.",
+    "description": "is the per-IP cap per window on LookupUsers across the HTTP and native gRPC surfaces; unlike the other per-IP caps it cannot be switched off, so zero selects the default and a negative value is refused at boot.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },
@@ -1418,6 +1418,15 @@
     "default": "5",
     "required": false,
     "description": "is the per-IP request cap per window on RequestPasswordReset.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_SCIM_PER_IP",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "is the per-IP cap per window on every request under /scim/v2/, authenticated or not, so the SCIM bearer token cannot be guessed at line rate and refused attempts cannot flood the audit trail.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },

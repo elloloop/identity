@@ -3,15 +3,25 @@ package identityserver
 import (
 	"context"
 	"errors"
+	"net"
+	"strconv"
+	"strings"
+	"time"
 
 	"connectrpc.com/connect"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/protoadapt"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	"github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
+	"github.com/elloloop/identity/internal/app"
 	identityconnect "github.com/elloloop/identity/internal/connect"
+	"github.com/elloloop/identity/internal/middleware"
 )
 
 // grpcBridge adapts identity's Connect service implementation to the
@@ -24,13 +34,68 @@ import (
 // This reuses the one service-layer wiring rather than duplicating
 // handler logic: RegisterGRPC and Handler both drive the same
 // *identityconnect.IdentityHandler.
+//
+// The HTTP middleware chain does not run here, so the one per-IP limit that
+// cannot be switched off — LookupUsers' — is enforced by the bridge itself,
+// from the same limiter instance the HTTP chain uses: a client IP has one
+// directory budget across both surfaces.
 type grpcBridge struct {
 	identitypb.UnimplementedIdentityServiceServer
-	h *identityconnect.IdentityHandler
+	h              *identityconnect.IdentityHandler
+	directoryLimit middleware.PathLimit
+	trustedProxies []*net.IPNet
+	logger         *zap.Logger
 }
 
-func newGRPCBridge(h *identityconnect.IdentityHandler) *grpcBridge {
-	return &grpcBridge{h: h}
+func newGRPCBridge(built *app.Built, logger *zap.Logger) *grpcBridge {
+	directoryLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceLookupUsersProcedure)
+	return &grpcBridge{
+		h:              built.ConnectHandler,
+		directoryLimit: directoryLimit,
+		trustedProxies: built.TrustedProxies,
+		logger:         logger,
+	}
+}
+
+// retryAfterMetadataKey carries a throttled call's wait, in whole seconds,
+// in the response header metadata — the gRPC counterpart of the HTTP
+// Retry-After header.
+const retryAfterMetadataKey = "retry-after"
+
+// throttle charges the calling client IP against limit. Over quota it
+// answers RESOURCE_EXHAUSTED with the limit's window in retry-after
+// metadata, before the RPC runs.
+func (b *grpcBridge) throttle(ctx context.Context, limit middleware.PathLimit) error {
+	clientIP := b.clientIP(ctx)
+	if limit.Allow(clientIP, time.Now()) {
+		return nil
+	}
+	if err := grpc.SetHeader(ctx, metadata.Pairs(retryAfterMetadataKey, strconv.Itoa(limit.RetryAfterSeconds()))); err != nil {
+		b.logger.Warn("rate_limit_retry_after_not_sent", zap.String("path", limit.PathPrefix), zap.Error(err))
+	}
+	b.logger.Info(
+		"rate_limit_exceeded",
+		zap.String("path", limit.PathPrefix),
+		zap.String("tag", limit.Tag),
+		zap.String("client_ip", clientIP),
+	)
+	return status.Error(codes.ResourceExhausted, "rate limit exceeded")
+}
+
+// clientIP attributes a native-gRPC call the way ClientIPMiddleware
+// attributes an HTTP request: the transport peer, unless it is a trusted
+// proxy, in which case the first untrusted x-forwarded-for hop. "" when the
+// transport has no peer address.
+func (b *grpcBridge) clientIP(ctx context.Context) string {
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.Addr == nil {
+		return ""
+	}
+	var xff string
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		xff = strings.Join(md.Get("x-forwarded-for"), ",")
+	}
+	return middleware.ResolveClientIP(p.Addr.String(), xff, b.trustedProxies)
 }
 
 // invoke runs one Connect handler method behind the gRPC interface. It
@@ -496,6 +561,9 @@ func (b *grpcBridge) AdminRevokeProjectCredential(ctx context.Context, in *ident
 }
 
 func (b *grpcBridge) LookupUsers(ctx context.Context, in *identitypb.LookupUsersRequest) (*identitypb.LookupUsersResponse, error) {
+	if err := b.throttle(ctx, b.directoryLimit); err != nil {
+		return nil, err
+	}
 	return invoke(ctx, in, b.h.LookupUsers)
 }
 

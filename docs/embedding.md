@@ -158,6 +158,16 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
 }
 ```
 
+**Rate limits are the host's responsibility too, with one exception.** The
+per-IP limits on the sign-up, sign-in and other abuse-prone RPCs live in the
+HTTP chain; apply your own in an interceptor. `LookupUsers` is the exception:
+its limit cannot be switched off, so the bridge enforces it itself, from the
+same per-IP budget (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`) the HTTP surface
+uses. A throttled call fails with `RESOURCE_EXHAUSTED` and a `retry-after`
+response metadata value in seconds. The caller is the connection's peer
+address, or the first untrusted `x-forwarded-for` hop when the peer is in
+`GATEWAY_TRUSTED_PROXIES`.
+
 Unauthenticated RPCs (`PasswordSignup`, `PasswordLogin`, `BeginOAuthLogin`,
 …) work without any of this. JWKS verification keys are still served over
 the HTTP surface at `/.well-known/jwks.json`; a native-gRPC-only host

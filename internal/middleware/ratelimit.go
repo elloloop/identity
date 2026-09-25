@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,9 @@ import (
 // variant can replace it without changing call sites.
 type RateLimiter interface {
 	Allow(key string, now time.Time) bool
+	// Window is the length of one quota window: the longest a refused
+	// caller waits before its count resets.
+	Window() time.Duration
 }
 
 // FixedWindowLimiter is a bounded, fixed-window in-memory rate limiter.
@@ -72,6 +77,14 @@ func (l *FixedWindowLimiter) Allow(key string, now time.Time) bool {
 	return true
 }
 
+// Window returns the limiter's window length; zero for a nil limiter.
+func (l *FixedWindowLimiter) Window() time.Duration {
+	if l == nil {
+		return 0
+	}
+	return l.window
+}
+
 func (l *FixedWindowLimiter) evictLocked(nowMs, windowMs int64) {
 	for k, v := range l.counts {
 		if nowMs-v.startMs >= windowMs {
@@ -95,49 +108,68 @@ type PathLimit struct {
 	Tag        string // metric label / log field
 }
 
+// Allow reports whether a request from clientIP has quota left on this
+// limit. Without a resolved client IP the request cannot be attributed to
+// a caller, so it is admitted rather than charged to a shared bucket every
+// such request would exhaust together.
+func (pl PathLimit) Allow(clientIP string, now time.Time) bool {
+	if pl.Limiter == nil || clientIP == "" {
+		return true
+	}
+	return pl.Limiter.Allow(pl.Tag+"|"+clientIP, now)
+}
+
+// RetryAfterSeconds is the Retry-After value, in whole seconds, a caller
+// refused by this limit is told to wait: its window rounded up, and never
+// less than one second so a sub-second window does not advertise "retry
+// now".
+func (pl PathLimit) RetryAfterSeconds() int {
+	if pl.Limiter == nil {
+		return 1
+	}
+	return max(1, int(math.Ceil(pl.Limiter.Window().Seconds())))
+}
+
+// MatchPathLimit returns the first limit in limits whose prefix matches path
+// and which has a limiter. Every transport that enforces the configured
+// limits selects through it, so an RPC is held to the same budget however
+// it arrives.
+func MatchPathLimit(limits []PathLimit, path string) (PathLimit, bool) {
+	for _, pl := range limits {
+		if pl.Limiter != nil && pl.PathPrefix != "" && strings.HasPrefix(path, pl.PathPrefix) {
+			return pl, true
+		}
+	}
+	return PathLimit{}, false
+}
+
 // RateLimitMiddleware enforces per-IP+path quotas using the configured
 // PathLimit entries. Requests whose path matches a PathLimit are checked
 // against its limiter; everything else passes through.
 //
 // The client IP comes from ClientIPHeader (set by ClientIPMiddleware), so
 // this middleware must be installed after it. Rate-limited responses
-// return 429 with a Retry-After header.
+// return 429 with a Retry-After header of the limit's window.
 func RateLimitMiddleware(limits []PathLimit, logger *zap.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			for _, pl := range limits {
-				if pl.Limiter == nil || pl.PathPrefix == "" {
-					continue
-				}
-				if !strings.HasPrefix(r.URL.Path, pl.PathPrefix) {
-					continue
-				}
-				clientIP := r.Header.Get(ClientIPHeader)
-				if clientIP == "" {
-					// Without a resolved IP we cannot rate-limit safely.
-					// Fail open — the audit logger will still see the
-					// path and rate from upstream observability.
-					next.ServeHTTP(w, r)
-					return
-				}
-				key := pl.Tag + "|" + clientIP
-				if !pl.Limiter.Allow(key, time.Now()) {
-					w.Header().Set("Retry-After", "60")
-					http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-					logger.Info(
-						"rate_limit_exceeded",
-						zap.String("path", r.URL.Path),
-						zap.String("tag", pl.Tag),
-						zap.String("client_ip", clientIP),
-					)
-					return
-				}
-				break
+			pl, ok := MatchPathLimit(limits, r.URL.Path)
+			clientIP := r.Header.Get(ClientIPHeader)
+			if !ok || pl.Allow(clientIP, time.Now()) {
+				next.ServeHTTP(w, r)
+				return
 			}
-			next.ServeHTTP(w, r)
+			w.Header().Set("Retry-After", strconv.Itoa(pl.RetryAfterSeconds()))
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			logger.Info(
+				"rate_limit_exceeded",
+				zap.String("path", r.URL.Path),
+				zap.String("tag", pl.Tag),
+				zap.String("client_ip", clientIP),
+			)
 		})
 	}
 }
