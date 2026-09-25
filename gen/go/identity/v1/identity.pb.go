@@ -14408,7 +14408,9 @@ type LookupUsersRequest struct {
 	// domain punycoded) and then compared with an account's primary email, so
 	// an entry finds exactly the account sign-in with that address would. There
 	// is no prefix, substring or domain matching. Entries that canonicalize to
-	// the same address are one address.
+	// the same address are one address. An entry that is not a usable address
+	// once canonical (no "@" or domain, or nothing but a "+tag" before the "@")
+	// names nobody: it is omitted from the response, not refused.
 	Emails        []string `protobuf:"bytes,1,rep,name=emails,proto3" json:"emails,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
