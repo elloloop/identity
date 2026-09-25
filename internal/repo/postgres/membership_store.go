@@ -205,11 +205,12 @@ func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 
 // CreateInvitation atomically enforces one-open-invite: in a single
 // transaction it revokes any existing pending invitation for the same
-// (project, tenant, mailbox) and inserts the new one. The mailbox is compared
-// in canonical form (service.CanonicalizeEmail) in Go rather than in SQL: the
-// service stores invitations canonical, but one stored before it did carries
-// the address as typed, and a SQL comparison could not tell that its "+tag"
-// or Gmail-dot spelling names the same mailbox. This is the
+// (project, tenant, email under service.FoldEmail) and inserts the new one.
+// The service stores invitations in canonical form, and migration 0034
+// canonicalized the pending ones stored before it did, so the fold key names
+// the mailbox. Creates for one mailbox are serialized by a transaction-scoped
+// advisory lock, so concurrent ones each revoke the one before and exactly
+// one stays pending; the fold-keyed partial unique index is the backstop. This is the
 // authoritative enforcement (the partial unique index is defense-in-depth,
 // and the memory driver — should they ever gain invitations — must
 // match these revoke-then-insert semantics).
@@ -249,9 +250,21 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Revoke any open invite for the same recipient first, so the new one
-	// is the only pending row — one open invite per (project, tenant, mailbox).
-	if err := revokeOpenInvitationsFor(ctx, tx, inv); err != nil {
-		return "", err
+	// is the only pending row — one open invite per (project, tenant, email).
+	key := service.FoldEmail(inv.Email)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		invitationLockKey(inv.ProjectID, inv.TenantID, key),
+	); err != nil {
+		return "", wrapPgErr("CreateInvitation(lock)", err)
+	}
+	if _, err := tx.Exec(
+		ctx, `
+		UPDATE tenant_invitations SET status = 'revoked'
+		WHERE project_id = $1 AND tenant_id = $2
+		  AND lower(email COLLATE "C") = $3 AND status = 'pending'`,
+		inv.ProjectID, inv.TenantID, key,
+	); err != nil {
+		return "", wrapPgErr("CreateInvitation(revoke)", err)
 	}
 
 	if _, err := tx.Exec(
@@ -275,45 +288,12 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	return id, nil
 }
 
-// revokeOpenInvitationsFor revokes, inside tx, the pending invitations of
-// inv's tenant whose address names the same mailbox as inv's. The pending
-// rows are locked while they are compared, so a concurrent create for the
-// same tenant waits rather than reading a row this one is revoking.
-func revokeOpenInvitationsFor(ctx context.Context, tx pgx.Tx, inv *service.TenantInvitation) error {
-	rows, err := tx.Query(ctx, `
-		SELECT id, email FROM tenant_invitations
-		WHERE project_id = $1 AND tenant_id = $2 AND status = 'pending'
-		FOR UPDATE`,
-		inv.ProjectID, inv.TenantID,
-	)
-	if err != nil {
-		return wrapPgErr("CreateInvitation(pending)", err)
-	}
-	mailbox := service.CanonicalizeEmail(inv.Email)
-	var same []string
-	for rows.Next() {
-		var id, email string
-		if err := rows.Scan(&id, &email); err != nil {
-			rows.Close()
-			return wrapPgErr("CreateInvitation(pending)", err)
-		}
-		if service.CanonicalizeEmail(email) == mailbox {
-			same = append(same, id)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return wrapPgErr("CreateInvitation(pending)", err)
-	}
-	if len(same) == 0 {
-		return nil
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE tenant_invitations SET status = 'revoked' WHERE id = ANY($1)`, same,
-	); err != nil {
-		return wrapPgErr("CreateInvitation(revoke)", err)
-	}
-	return nil
+// invitationLockKey names the advisory lock that serializes invitation
+// creates for one (project, tenant, folded email). The length prefixes keep
+// distinct triples from sharing a key string whatever characters they hold.
+func invitationLockKey(projectID, tenantID, foldedEmail string) string {
+	return fmt.Sprintf("tenant_invitation:%d:%s:%d:%s:%s",
+		len(projectID), projectID, len(tenantID), tenantID, foldedEmail)
 }
 
 // GetInvitationByTokenHash resolves an invitation by its hashed token

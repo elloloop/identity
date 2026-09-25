@@ -60,7 +60,11 @@ every other character kept. It replaces the unique index
 `users_project_email_partial_uidx` (on the locale's `lower(email)`) with
 `users_project_email_fold_uidx` on `(project_id, email_fold) WHERE email <> ''`,
 and `tenant_invitations_open_email_uidx` with
-`tenant_invitations_open_email_fold_uidx`. Email lookups, the `ListUsers` and
+`tenant_invitations_open_email_fold_uidx`. It also rewrites each *pending*
+tenant invitation with an all-ASCII address in the canonical form the
+service now stores (see below), and revokes all but the newest of any that
+then name one mailbox. Pending invitations with a non-ASCII address keep
+their spelling. Email lookups, the `ListUsers` and
 SCIM email filters and the admin user query compare `email_fold` with `=`.
 Under `FORCE ROW LEVEL SECURITY` only such a leakproof comparison can use the
 index. The old `lower(email)` comparison read every row of the project on
@@ -231,9 +235,10 @@ same addresses could match on one deployment and not on another.
 - **Tenant invitations** are stored in canonical form. Accepting one compares
   the caller's address and the invited address in canonical form, so a `+tag`
   variant of the invited mailbox may accept, and an address differing in a
-  non-ASCII letter may not. A new invitation revokes every pending one for
-  the same mailbox, including one stored before this release under another
-  spelling.
+  non-ASCII letter may not. A new invitation revokes the pending one for the
+  same mailbox; 0034 canonicalized the pending all-ASCII invitations stored
+  before this release, so that covers them too. Concurrent invitations to one
+  mailbox now leave exactly one pending instead of failing.
 - **Admin `InviteUser`** stores the invited address in canonical form, and
   refuses a variant spelling of an existing account's mailbox as a
   duplicate.

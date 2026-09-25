@@ -49,6 +49,47 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_project_email_fold_uidx
     WHERE email <> '';
 DROP INDEX IF EXISTS users_project_email_partial_uidx;
 
+-- Pending invitations stored before the service canonicalized carry the
+-- address as typed (trimmed and lower-cased). Rewrite them in the canonical
+-- form the service now stores (service.CanonicalizeEmail) so that the fold of
+-- a pending invitation names its mailbox and the revoke-then-insert, which
+-- compares folds, finds it. For an all-ASCII address the canonical form is
+-- exactly: lower-cased; one trailing dot dropped from the domain;
+-- googlemail.com read as gmail.com; the local part cut at its first "+"; and,
+-- at gmail.com, its dots removed. Non-ASCII addresses (whose canonical form
+-- punycodes the domain) are left as they are. Where several pending
+-- invitations canonicalize to one mailbox, all but the newest are revoked
+-- first — what creating the newest would have done.
+WITH parts AS (
+    SELECT id, project_id, tenant_id, created_at_ms,
+           substring(lower(email COLLATE "C") FROM '^(.*)@') AS local_part,
+           regexp_replace(substring(lower(email COLLATE "C") FROM '@([^@]*)$'), '\.$', '') AS raw_domain
+    FROM tenant_invitations
+    WHERE status = 'pending' AND email ~ '^[!-~]+@[!-~]+$'
+), domains AS (
+    SELECT *, CASE WHEN raw_domain = 'googlemail.com' THEN 'gmail.com' ELSE raw_domain END AS domain
+    FROM parts
+), canonical AS (
+    SELECT id, project_id, tenant_id, created_at_ms,
+           CASE WHEN domain = 'gmail.com' THEN replace(split_part(local_part, '+', 1), '.', '')
+                ELSE split_part(local_part, '+', 1)
+           END || '@' || domain AS email
+    FROM domains
+), ranked AS (
+    SELECT id, email,
+           row_number() OVER (PARTITION BY project_id, tenant_id, email
+                              ORDER BY created_at_ms DESC, id DESC) AS newest_first
+    FROM canonical
+), superseded AS (
+    UPDATE tenant_invitations t SET status = 'revoked'
+    FROM ranked r
+    WHERE t.id = r.id AND r.newest_first > 1
+    RETURNING t.id
+)
+UPDATE tenant_invitations t SET email = r.email
+FROM ranked r
+WHERE t.id = r.id AND r.newest_first = 1 AND t.email <> r.email;
+
 -- The one-open-invite index follows the same rule as the revoke-then-insert
 -- that enforces it. tenant_invitations has no RLS, so an expression index is
 -- usable here.

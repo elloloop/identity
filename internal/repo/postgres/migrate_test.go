@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elloloop/identity/internal/service"
 )
 
 // TestMigrate_EmptyDSN_Errors runs without a database: an empty DSN must
@@ -162,4 +164,74 @@ func hasColumn(ctx context.Context, t *testing.T, conn *pgx.Conn, table, column 
 		`SELECT count(*) FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
 		table, column).Scan(&n))
 	return n == 1
+}
+
+// TestMigrate_0034CanonicalizesPendingInvitations: pending invitations stored
+// before the service canonicalized carry the address as typed. 0034 rewrites
+// each all-ASCII one in exactly the form service.CanonicalizeEmail gives,
+// revokes all but the newest of any that then name one mailbox, and leaves
+// non-ASCII addresses and settled invitations as they are.
+func TestMigrate_0034CanonicalizesPendingInvitations(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping real-postgres 0034 invitation test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	scratch := createScratchDatabase(ctx, t, dsn)
+	m, err := newMigrator(scratch)
+	require.NoError(t, err)
+	require.NoError(t, m.Migrate(uint(emailFoldMigrationVersion-1)))
+	closeMigrator(m)
+
+	conn, err := pgx.Connect(ctx, scratch)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close(ctx) }()
+	_, err = conn.Exec(ctx, `
+		INSERT INTO projects (id, storage_scope_id, created_at_ms, updated_at_ms) VALUES ('p', 'scope-p', 0, 0);
+		INSERT INTO tenants (id, project_id, created_at_ms, updated_at_ms) VALUES ('t', 'p', 0, 0)`)
+	require.NoError(t, err)
+	seed := []struct {
+		id, email, status string
+	}{
+		{"old-tag", "zoe+old@gmail.com", "pending"},
+		{"new-dots", "z.o.e@googlemail.com", "pending"}, // same mailbox, newer: survives
+		{"tagged", "bob+jira@corp.com", "pending"},
+		{"trailing-dot", "carol@corp.com.", "pending"},
+		{"dots-kept", "d.ave@corp.com", "pending"},
+		{"non-ascii", "zoé+x@corp.com", "pending"},
+		{"settled", "eve+x@corp.com", "accepted"},
+	}
+	for i, s := range seed {
+		_, err := conn.Exec(ctx, `
+			INSERT INTO tenant_invitations (id, project_id, tenant_id, token_hash, email, status, expires_at_ms, created_at_ms)
+			VALUES ($1, 'p', 't', $1, $2, $3, 9999999999999, $4)`, s.id, s.email, s.status, i)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, Migrate(scratch))
+
+	got := map[string][2]string{}
+	rows, err := conn.Query(ctx, `SELECT id, email, status FROM tenant_invitations`)
+	require.NoError(t, err)
+	for rows.Next() {
+		var id, email, status string
+		require.NoError(t, rows.Scan(&id, &email, &status))
+		got[id] = [2]string{email, status}
+	}
+	require.NoError(t, rows.Err())
+
+	require.Equal(t, "revoked", got["old-tag"][1], "the older of two invitations to one mailbox is revoked")
+	for _, id := range []string{"new-dots", "tagged", "trailing-dot", "dots-kept"} {
+		var original string
+		for _, s := range seed {
+			if s.id == id {
+				original = s.email
+			}
+		}
+		require.Equal(t, [2]string{service.CanonicalizeEmail(original), "pending"}, got[id],
+			"%s: the migration's canonical form must be CanonicalizeEmail's", id)
+	}
+	require.Equal(t, [2]string{"zoé+x@corp.com", "pending"}, got["non-ascii"])
+	require.Equal(t, [2]string{"eve+x@corp.com", "accepted"}, got["settled"])
 }
