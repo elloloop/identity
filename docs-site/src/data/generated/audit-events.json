@@ -46,6 +46,7 @@
   "project_oauth_provider_set",
   "qr_login_approved",
   "qr_login_rejected",
+  "scim_auth_failed",
   "session_revoked",
   "totp_disabled",
   "totp_enabled",

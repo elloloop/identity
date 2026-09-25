@@ -1,16 +1,24 @@
 package config
 
 import (
-	"strconv"
 	"strings"
 	"testing"
 )
 
-const directoryRateLimitEnv = "GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP"
+const (
+	directoryRateLimitEnv = "GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP"
+	scimRateLimitEnv      = "GATEWAY_RATE_LIMIT_SCIM_PER_IP"
+)
 
+// The directory cap is parsed like every other GATEWAY_* integer: a positive
+// value is taken as-is, and unset, zero or malformed input leaves the
+// default in force — never an unthrottled lookup.
 func TestRateLimitDirectoryPerIP_FromEnv(t *testing.T) {
 	for raw, want := range map[string]int{
 		"":    DefaultRateLimitDirectoryPerIP,
+		"0":   DefaultRateLimitDirectoryPerIP,
+		"abc": DefaultRateLimitDirectoryPerIP,
+		"1e3": DefaultRateLimitDirectoryPerIP,
 		"300": 300,
 		"1":   1,
 	} {
@@ -27,17 +35,13 @@ func TestRateLimitDirectoryPerIP_FromEnv(t *testing.T) {
 	}
 }
 
-// A value that would disable or silently replace the throttle is refused at
-// boot rather than run unthrottled or on a default the operator did not pick.
-func TestRateLimitDirectoryPerIP_RejectsNonPositiveOrMalformed(t *testing.T) {
-	for _, raw := range []string{"0", "-5", "abc", "12.5", "1e3"} {
-		t.Run("env="+raw, func(t *testing.T) {
-			t.Setenv(directoryRateLimitEnv, raw)
-			err := Load().Validate()
-			if err == nil || !strings.Contains(err.Error(), directoryRateLimitEnv+"="+strconv.Quote(raw)) {
-				t.Fatalf("Validate = %v, want an error naming %s and quoting %q", err, directoryRateLimitEnv, raw)
-			}
-		})
+// A negative cap is refused at boot rather than read as "disabled", the
+// meaning a non-positive value has on the other per-IP caps.
+func TestRateLimitDirectoryPerIP_RejectsNegative(t *testing.T) {
+	t.Setenv(directoryRateLimitEnv, "-5")
+	err := Load().Validate()
+	if err == nil || !strings.Contains(err.Error(), directoryRateLimitEnv+"=-5") {
+		t.Fatalf("Validate = %v, want an error naming %s=-5", err, directoryRateLimitEnv)
 	}
 }
 
@@ -54,7 +58,35 @@ func TestRateLimitDirectoryPerIP_BuiltInCode(t *testing.T) {
 	}
 
 	cfg.RateLimitDirectoryPerIP = -3
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), `="-3"`) {
-		t.Fatalf("Validate = %v, want the negative cap refused and quoted", err)
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), directoryRateLimitEnv+"=-3") {
+		t.Fatalf("Validate = %v, want the negative cap refused", err)
+	}
+}
+
+func TestRateLimitSCIMPerIP_FromEnv(t *testing.T) {
+	for raw, want := range map[string]int{
+		"":    300,
+		"abc": 300,
+		"0":   0,
+		"50":  50,
+	} {
+		t.Run("env="+raw, func(t *testing.T) {
+			t.Setenv(scimRateLimitEnv, raw)
+			cfg := Load()
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			if cfg.RateLimitSCIMPerIP != want {
+				t.Fatalf("RateLimitSCIMPerIP = %d, want %d", cfg.RateLimitSCIMPerIP, want)
+			}
+		})
+	}
+}
+
+func TestRateLimitSCIMPerIP_RejectsNegative(t *testing.T) {
+	t.Setenv(scimRateLimitEnv, "-1")
+	err := Load().Validate()
+	if err == nil || !strings.Contains(err.Error(), scimRateLimitEnv+"=-1") {
+		t.Fatalf("Validate = %v, want an error naming %s=-1", err, scimRateLimitEnv)
 	}
 }

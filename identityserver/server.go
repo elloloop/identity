@@ -320,9 +320,11 @@ func (s *Server) Handler() http.Handler {
 // middleware that populates X-Authenticated-User-Id, health, JWKS) is
 // HTTP-only. Over native gRPC the host is responsible for authentication
 // — supply a server interceptor that verifies the bearer token and
-// forwards identity's expected metadata (see docs/embedding.md).
+// forwards identity's expected metadata (see docs/embedding.md) — and for
+// every per-IP limit except LookupUsers', which the bridge enforces from
+// the same budget as the HTTP surface.
 func (s *Server) RegisterGRPC(reg grpc.ServiceRegistrar) {
-	identitypb.RegisterIdentityServiceServer(reg, newGRPCBridge(s.built.ConnectHandler))
+	identitypb.RegisterIdentityServiceServer(reg, newGRPCBridge(s.built, s.logger))
 }
 
 // Start launches the background workers: the async audit flusher, the

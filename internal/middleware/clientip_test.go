@@ -103,29 +103,29 @@ func TestStripPort_NoPort(t *testing.T) {
 
 func TestResolveClientIP_TrustedPeerEmptyXFF_FallsBackToPeer(t *testing.T) {
 	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.RemoteAddr = "10.0.0.5:80"
 	// No XFF header.
-	got := resolveClientIP(req, trusted)
+	got := ResolveClientIP("10.0.0.5:80", "", trusted)
 	assert.Equal(t, "10.0.0.5", got)
 }
 
 func TestResolveClientIP_AllTrustedHops_FallsBackToLeftmost(t *testing.T) {
 	trusted, _ := ParseTrustedProxies("10.0.0.0/8,192.168.0.0/16")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.RemoteAddr = "10.0.0.5:80"
-	req.Header.Set("X-Forwarded-For", "10.0.0.7, 192.168.1.1, 10.0.0.9")
-	got := resolveClientIP(req, trusted)
+	got := ResolveClientIP("10.0.0.5:80", "10.0.0.7, 192.168.1.1, 10.0.0.9", trusted)
 	assert.Equal(t, "10.0.0.7", got, "all hops trusted; fall back to left-most")
 }
 
 func TestResolveClientIP_XFFWithEmptyEntries(t *testing.T) {
 	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.RemoteAddr = "10.0.0.5:80"
-	req.Header.Set("X-Forwarded-For", "1.2.3.4, , 10.0.0.7")
-	got := resolveClientIP(req, trusted)
+	got := ResolveClientIP("10.0.0.5:80", "1.2.3.4, , 10.0.0.7", trusted)
 	assert.Equal(t, "1.2.3.4", got, "empty entries skipped, real client returned")
+}
+
+// An untrusted peer is the client whatever X-Forwarded-For it sends, so a
+// caller cannot pick its own address.
+func TestResolveClientIP_UntrustedPeerIgnoresXFF(t *testing.T) {
+	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
+	assert.Equal(t, "203.0.113.9", ResolveClientIP("203.0.113.9:4000", "1.2.3.4", trusted))
+	assert.Equal(t, "203.0.113.9", ResolveClientIP("203.0.113.9:4000", "1.2.3.4", nil))
 }
 
 func TestIpIn_ParseFailsReturnsFalse(t *testing.T) {

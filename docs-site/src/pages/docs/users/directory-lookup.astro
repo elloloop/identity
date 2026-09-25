@@ -18,14 +18,16 @@ import { Code } from "astro-expressive-code/components";
     <em>active</em> accounts they name, in one project.
   </p>
 
-  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+  <aside role="note" class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
     <strong>Postgres deployments only.</strong> Directory keys are project
     credentials, which live in the control plane. On a build without one
     (the memory and SQLite drivers) <code>LookupUsers</code> returns
     <code>UNIMPLEMENTED</code>. The <code>directory_reader</code> kind needs
     migration 0033: run <code>identity migrate</code>, or set
-    <code>GATEWAY_POSTGRES_AUTO_MIGRATE</code>, before minting one.
-  </div>
+    <code>GATEWAY_POSTGRES_AUTO_MIGRATE</code>, before minting one. The boot
+    log says which applies: <code>directory_lookup_enabled</code>, with the
+    effective rate limit, or <code>directory_lookup_disabled</code>.
+  </aside>
 
   <h2>What the key can and cannot do</h2>
   <ul>
@@ -62,7 +64,8 @@ import { Code } from "astro-expressive-code/components";
       which is the default. Anyone can sign up with an address they do not
       own, so without this rule the lookup would return whoever registered it
       first. With the setting off, unverified accounts are returned too, with
-      <code>email_verified: false</code>; with it on, every entry has
+      <code>email_verified: false</code>, and such an entry proves nothing
+      about who owns the address; with it on, every entry has
       <code>email_verified: true</code>. See
       <a href="#verified-email">Verified email</a> below.
     </li>
@@ -76,7 +79,8 @@ import { Code } from "astro-expressive-code/components";
       A batch holds 1–100 addresses of at most 320 bytes each. Calls are
       rate-limited per client IP by
       <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code> (default 120) per
-      <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window (default 60 s).
+      <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window (default 60 s),
+      on every transport identity serves.
     </li>
   </ul>
 
@@ -87,22 +91,30 @@ import { Code } from "astro-expressive-code/components";
     is effectively a per-service limit, shared by every instance behind one
     address. Set it to the peak number of <code>LookupUsers</code> calls all
     of those instances make in one window, with headroom; each call resolves
-    up to 100 addresses, so batch before you raise it. It must be a positive
-    integer: zero, a negative or a malformed value fails the boot, so the
-    lookup cannot be left unthrottled.
+    up to 100 addresses, so batch before you raise it. Unlike the other
+    per-IP limits it cannot be switched off: unset, zero or a value that is
+    not an integer leaves the default of 120 in force, and a negative value
+    fails the boot.
   </p>
   <p>
     A throttled call is refused before it reaches the lookup, with HTTP
-    <code>429 Too Many Requests</code>, a <code>Retry-After: 60</code> header
+    <code>429 Too Many Requests</code>, a <code>Retry-After</code> header
+    giving the window in seconds (<code>60</code> with the default window)
     and a plain-text body. A Connect client reports it as
-    <code>UNAVAILABLE</code>. Back off and retry; the count resets when the
-    window rolls over.
+    <code>UNAVAILABLE</code>. Back off for at least that long; the count
+    resets when the window rolls over.
   </p>
   <p>
-    The limit is enforced by the HTTP handler. A host that serves identity on
-    its own gRPC server through <code>RegisterGRPC</code> (see
+    A host that embeds identity and serves it on its own gRPC server through
+    <code>RegisterGRPC</code> (see
     <a href="https://github.com/elloloop/identity/blob/main/docs/embedding.md"><code>docs/embedding.md</code></a>)
-    bypasses it and must apply its own limit there.
+    gets the same limit there, drawn from the same per-IP budget as the HTTP
+    handler, so serving both does not double what a caller may spend. A
+    throttled native gRPC call fails with <code>RESOURCE_EXHAUSTED</code> and
+    carries the wait in its <code>retry-after</code> response metadata. The
+    caller's address is the connection's peer, or the first untrusted
+    <code>x-forwarded-for</code> hop when the peer is in
+    <code>GATEWAY_TRUSTED_PROXIES</code> — the rule the HTTP handler uses.
   </p>
 
   <h2>Mint a key</h2>
@@ -176,6 +188,16 @@ import { Code } from "astro-expressive-code/components";
     Set it to <code>false</code> only if your deployment accepts unverified
     addresses everywhere. The lookup then returns those accounts as well, and
     <code>email_verified</code> tells the two apart.
+  </p>
+  <p>
+    With the setting off, a caller <strong>must not</strong> treat an entry
+    with <code>email_verified: false</code> as proof that the account owns the
+    address, and must not authorize anything on that basis — granting the
+    account access that was given to the address, linking it to records keyed
+    by the address, or showing it data meant for the address's owner. Anyone
+    can register an address they do not control, so such an entry says only
+    that someone signed up with it. Act on it only once
+    <code>email_verified</code> is <code>true</code>.
   </p>
 
   <h2>Revoke a key</h2>

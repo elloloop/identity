@@ -155,3 +155,84 @@ func TestFixedWindowLimiter_NilReceiverAlwaysAllows(t *testing.T) {
 	var l *FixedWindowLimiter
 	assert.True(t, l.Allow("a", time.Now()))
 }
+
+// Retry-After is the limit's own window, so a deployment that changes
+// GATEWAY_RATE_LIMIT_WINDOW_SECONDS never tells callers to come back before
+// (or long after) their count resets.
+func TestRateLimitMiddleware_RetryAfterFollowsWindow(t *testing.T) {
+	for _, tc := range []struct {
+		window time.Duration
+		want   string
+	}{
+		{time.Minute, "60"},
+		{90 * time.Second, "90"},
+		{1500 * time.Millisecond, "2"},
+		{100 * time.Millisecond, "1"},
+	} {
+		t.Run(tc.window.String(), func(t *testing.T) {
+			limits := []PathLimit{{
+				PathPrefix: "/p",
+				Tag:        "t",
+				Limiter:    NewFixedWindowLimiter(tc.window, 1, 0),
+			}}
+			handler := RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			var rec *httptest.ResponseRecorder
+			for range 2 {
+				req := httptest.NewRequest(http.MethodPost, "/p", nil)
+				req.Header.Set(ClientIPHeader, "1.2.3.4")
+				rec = httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+			}
+			assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+			assert.Equal(t, tc.want, rec.Header().Get("Retry-After"))
+		})
+	}
+}
+
+func TestPathLimit_Allow(t *testing.T) {
+	pl := PathLimit{Tag: "t", Limiter: NewFixedWindowLimiter(time.Minute, 1, 0)}
+	now := time.Now()
+	assert.True(t, pl.Allow("1.2.3.4", now))
+	assert.False(t, pl.Allow("1.2.3.4", now), "second call from the same IP is over quota")
+	assert.True(t, pl.Allow("5.6.7.8", now), "another IP has its own count")
+	assert.True(t, pl.Allow("", now), "an unattributable request is admitted")
+	assert.True(t, PathLimit{Tag: "t"}.Allow("1.2.3.4", now), "no limiter admits")
+}
+
+// The key is tag|ip, so two limits sharing one limiter under different tags
+// keep separate counts.
+func TestPathLimit_AllowKeysByTag(t *testing.T) {
+	shared := NewFixedWindowLimiter(time.Minute, 1, 0)
+	now := time.Now()
+	assert.True(t, PathLimit{Tag: "a", Limiter: shared}.Allow("1.2.3.4", now))
+	assert.True(t, PathLimit{Tag: "b", Limiter: shared}.Allow("1.2.3.4", now))
+	assert.False(t, PathLimit{Tag: "a", Limiter: shared}.Allow("1.2.3.4", now))
+}
+
+func TestPathLimit_RetryAfterSecondsWithoutLimiter(t *testing.T) {
+	assert.Equal(t, 1, PathLimit{}.RetryAfterSeconds())
+}
+
+func TestFixedWindowLimiter_Window(t *testing.T) {
+	assert.Equal(t, 90*time.Second, NewFixedWindowLimiter(90*time.Second, 1, 0).Window())
+	var l *FixedWindowLimiter
+	assert.Zero(t, l.Window())
+}
+
+func TestMatchPathLimit(t *testing.T) {
+	l := NewFixedWindowLimiter(time.Minute, 1, 0)
+	limits := []PathLimit{
+		{PathPrefix: "/a", Tag: "no-limiter"},
+		{PathPrefix: "", Tag: "no-prefix", Limiter: l},
+		{PathPrefix: "/a", Tag: "first", Limiter: l},
+		{PathPrefix: "/a/b", Tag: "second", Limiter: l},
+	}
+	pl, ok := MatchPathLimit(limits, "/a/b")
+	assert.True(t, ok)
+	assert.Equal(t, "first", pl.Tag, "the first matching entry with a limiter wins")
+
+	_, ok = MatchPathLimit(limits, "/c")
+	assert.False(t, ok)
+}

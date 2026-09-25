@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -306,4 +307,41 @@ func TestBuildRateLimits_DirectoryLookupLimited(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	assertQuotaExhausts(t, handler, path, "9.9.9.9", 2)
+}
+
+// TestBuildRateLimits_SCIMLimited asserts every request under /scim/v2/
+// carries a per-IP quota, so the deployment-wide bearer token cannot be
+// guessed at line rate, and that a zero quota switches it off like the other
+// operator-tunable limits.
+func TestBuildRateLimits_SCIMLimited(t *testing.T) {
+	const path = "/scim/v2/Users"
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitSCIMPerIP: 2}
+	limits := buildRateLimits(cfg)
+	pl, ok := middleware.MatchPathLimit(limits, path)
+	require.True(t, ok, "SCIM must carry a rate limit")
+	require.Equal(t, "scim", pl.Tag)
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, path, "9.9.9.9", 2)
+
+	cfg.RateLimitSCIMPerIP = 0
+	pl, _ = middleware.MatchPathLimit(buildRateLimits(cfg), path)
+	now := time.Now()
+	for i := range 50 {
+		require.True(t, pl.Allow("9.9.9.9", now), "a zero quota admits request %d", i+1)
+	}
+}
+
+// Every limiter counts over the configured window, which the 429's
+// Retry-After then reports; an unset window falls back to one minute.
+func TestBuildRateLimits_WindowFromConfig(t *testing.T) {
+	cfg := &config.Config{RateLimitWindowSeconds: 90, RateLimitDirectoryPerIP: 1}
+	pl, ok := middleware.MatchPathLimit(buildRateLimits(cfg), "/identity.v1.IdentityService/LookupUsers")
+	require.True(t, ok)
+	assert.Equal(t, 90*time.Second, pl.Limiter.Window())
+	assert.Equal(t, 90, pl.RetryAfterSeconds())
+
+	assert.Equal(t, time.Minute, rateLimitWindow(&config.Config{}))
 }

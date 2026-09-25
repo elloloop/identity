@@ -674,9 +674,15 @@ type IdentityServiceClient interface {
 	// is checked before the key is looked up, so a key shaped
 	// "<public id>.<secret>" that is wrong still gets INVALID_ARGUMENT for a
 	// malformed batch; only a missing or malformed key is refused first;
-	// UNIMPLEMENTED on a build with no control plane. Over the rate limit the
-	// server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
-	// which Connect clients surface as UNAVAILABLE.
+	// UNIMPLEMENTED on a build with no control plane. Calls are rate-limited
+	// per client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS), with one budget shared by the HTTP
+	// handler (Connect, gRPC and gRPC-Web) and the native gRPC registration.
+	// Over the limit the call is refused before the RPC runs: over HTTP with
+	// status 429 and a Retry-After header of the window in seconds, which
+	// Connect clients surface as UNAVAILABLE; over the native gRPC
+	// registration with RESOURCE_EXHAUSTED and the same value in the
+	// "retry-after" response metadata.
 	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
 }
 
@@ -2447,9 +2453,15 @@ type IdentityServiceHandler interface {
 	// is checked before the key is looked up, so a key shaped
 	// "<public id>.<secret>" that is wrong still gets INVALID_ARGUMENT for a
 	// malformed batch; only a missing or malformed key is refused first;
-	// UNIMPLEMENTED on a build with no control plane. Over the rate limit the
-	// server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
-	// which Connect clients surface as UNAVAILABLE.
+	// UNIMPLEMENTED on a build with no control plane. Calls are rate-limited
+	// per client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS), with one budget shared by the HTTP
+	// handler (Connect, gRPC and gRPC-Web) and the native gRPC registration.
+	// Over the limit the call is refused before the RPC runs: over HTTP with
+	// status 429 and a Retry-After header of the window in seconds, which
+	// Connect clients surface as UNAVAILABLE; over the native gRPC
+	// registration with RESOURCE_EXHAUSTED and the same value in the
+	// "retry-after" response metadata.
 	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
 }
 

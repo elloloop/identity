@@ -39,6 +39,7 @@ type captureNodeWriter struct {
 type auditWrite struct {
 	projectID string
 	eventType string
+	data      map[string]any
 }
 
 func (w *captureNodeWriter) ExecuteAtomic(_ context.Context, projectID, _ string, ops []graph.Operation) (*graph.CommitResult, error) {
@@ -46,7 +47,7 @@ func (w *captureNodeWriter) ExecuteAtomic(_ context.Context, projectID, _ string
 	defer w.mu.Unlock()
 	for _, op := range ops {
 		et, _ := op.Data[fieldEventType].(string)
-		w.writes = append(w.writes, auditWrite{projectID: projectID, eventType: et})
+		w.writes = append(w.writes, auditWrite{projectID: projectID, eventType: et, data: op.Data})
 	}
 	return &graph.CommitResult{Success: true, Applied: true}, nil
 }
@@ -84,6 +85,13 @@ const scimEventTenantID = "tenant-x"
 // the handler's fixed-scope override is exercised end-to-end.
 func newSCIMObservedHandler(t *testing.T) (http.Handler, service.Repository, *captureEventPublisher, *captureNodeWriter) {
 	t.Helper()
+	return newSCIMObservedHandlerLogging(t, zap.NewNop())
+}
+
+// newSCIMObservedHandlerLogging is newSCIMObservedHandler with the handler's
+// logger supplied, for tests that assert on what the handler logs.
+func newSCIMObservedHandlerLogging(t *testing.T, logger *zap.Logger) (http.Handler, service.Repository, *captureEventPublisher, *captureNodeWriter) {
+	t.Helper()
 	repo := memory.New()
 	aud := &captureNodeWriter{}
 	auditLog := audit.NewLogger(aud, testSCIMProjectID, zap.NewNop()).
@@ -103,7 +111,7 @@ func newSCIMObservedHandler(t *testing.T) (http.Handler, service.Repository, *ca
 		audit:       auditLog,
 		publisher:   pub,
 		tenantID:    scimEventTenantID,
-		logger:      zap.NewNop(),
+		logger:      logger,
 	}).register(mux, true)
 	return mux, repo.WithProject(testSCIMProjectID), pub, aud
 }

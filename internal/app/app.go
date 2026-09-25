@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -206,11 +207,18 @@ type Deps struct {
 //   - ConnectHandler is the Connect service implementation. The native
 //     gRPC bridge registers against this so both mount surfaces share
 //     one service-layer wiring.
+//   - RateLimits are the per-IP limits Handler enforces, and TrustedProxies
+//     the proxies whose X-Forwarded-For it honours when attributing a
+//     caller. The native gRPC bridge enforces the directory limit from the
+//     same limiter instances, so a client IP has one budget across both
+//     surfaces.
 //   - Start launches the background workers (audit flusher, sweeper);
 //     it is idempotent. Stop drains them; safe to call multiple times.
 type Built struct {
 	Handler        http.Handler
 	ConnectHandler *identityconnect.IdentityHandler
+	RateLimits     []middleware.PathLimit
+	TrustedProxies []*net.IPNet
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -231,10 +239,6 @@ func (b *Built) Stop() {
 	b.stopOnce.Do(b.stopWork)
 }
 
-// buildRateLimits maps the unauthenticated, abuse-prone RPC paths to
-// per-IP fixed-window limiters from config. The window falls back to one
-// minute when unset. Extracted from New so the wiring (which path gets
-// which quota) is unit-testable without standing up the whole app.
 // guardianManagementPaths are the parental account-management RPCs. Every
 // one of them verifies a step-up password (a bcrypt) before it does anything,
 // the read-only profile view included, so a guardian holding a session can
@@ -251,11 +255,22 @@ var guardianManagementPaths = []string{
 	"/identity.v1.IdentityService/DeleteManagedChildAccount",
 }
 
-func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
+// rateLimitWindow is the window every per-IP limiter counts over:
+// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, or one minute when that is unset.
+func rateLimitWindow(cfg *config.Config) time.Duration {
 	window := time.Duration(cfg.RateLimitWindowSeconds) * time.Second
 	if window <= 0 {
-		window = time.Minute
+		return time.Minute
 	}
+	return window
+}
+
+// buildRateLimits maps the unauthenticated, abuse-prone RPC paths to
+// per-IP fixed-window limiters from config. Extracted from New so the
+// wiring (which path gets which quota) is unit-testable without standing up
+// the whole app.
+func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
+	window := rateLimitWindow(cfg)
 	// One limiter instance shared by every guardian-management path, so the
 	// budget is the surface's, not each RPC's. The login budget is the right
 	// analogue: the cost driver is the same password verification.
@@ -417,8 +432,17 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// id can still drive a credential read per call. The quota bounds
 			// that, and bounds how fast even a valid credential can walk the
 			// directory by guessing addresses.
-			PathPrefix: "/identity.v1.IdentityService/LookupUsers", Tag: "directory_lookup",
+			PathPrefix: identityconnectgen.IdentityServiceLookupUsersProcedure, Tag: "directory_lookup",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
+		},
+		{
+			// SCIM: every request carries the deployment-wide bearer token,
+			// checked before anything else runs. Counting every request, not
+			// only refused ones, keeps the limit ahead of the check, so a
+			// caller guessing the token is throttled and cannot flood the
+			// audit trail with refusals.
+			PathPrefix: middleware.SCIMPathPrefix, Tag: "scim",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSCIMPerIP, 0),
 		},
 	}
 	for _, path := range guardianManagementPaths {
@@ -660,7 +684,7 @@ func New(deps Deps) (*Built, error) {
 	domainSvc := buildDomainService(deps, logger)
 	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, auditLog, logger)
-	directorySvc := buildDirectoryService(deps, repo, auditLog)
+	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
@@ -834,6 +858,8 @@ func New(deps Deps) (*Built, error) {
 	return &Built{
 		Handler:        chain,
 		ConnectHandler: handler,
+		RateLimits:     rateLimits,
+		TrustedProxies: trustedProxies,
 		startWork:      startWork,
 		stopWork:       stopWork,
 	}, nil
@@ -987,10 +1013,17 @@ func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *za
 // buildDirectoryService returns the DirectoryService backing LookupUsers, or
 // nil when the build has no control plane to hold directory credentials. The
 // Connect handler treats nil as "disabled" and returns CodeUnimplemented.
-func buildDirectoryService(deps Deps, users service.Repository, auditLog *audit.Logger) *service.DirectoryService {
+// Either way the outcome is logged once at boot, as SCIM's is.
+func buildDirectoryService(deps Deps, users service.Repository, auditLog *audit.Logger, logger *zap.Logger) *service.DirectoryService {
 	if deps.DirectoryCredentials == nil {
+		logger.Info("directory_lookup_disabled",
+			zap.String("hint", "LookupUsers needs directory_reader credentials, which only the postgres driver's control plane holds"))
 		return nil
 	}
+	logger.Info("directory_lookup_enabled",
+		zap.Int("rate_limit_per_ip", deps.Config.RateLimitDirectoryPerIP),
+		zap.Duration("rate_limit_window", rateLimitWindow(deps.Config)),
+		zap.Bool("require_verified_email", deps.Config.AuthRequireVerifiedEmail))
 	return service.NewDirectoryService(deps.DirectoryCredentials, users, deps.Config.AuthRequireVerifiedEmail, auditLog)
 }
 
