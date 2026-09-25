@@ -1,74 +1,162 @@
 # Upgrade guide
 
-## v4.7 → v4.8 — read-only directory lookup for services (additive)
+## v4.7 → v4.8 — directory lookup for services (additive); session-mode and SCIM fixes (behaviour changes)
 
-A service that must resolve staff email addresses to accounts — including
-people who have never used that service — no longer needs an admin session.
-An operator mints a **directory reader** project credential, and the service
-presents it to one new RPC, `LookupUsers`. Everything is additive: no
-existing RPC, field or default changes, and a deployment that mints no such
-credential behaves exactly as before.
+This release adds a read-only lookup RPC and the credential kind that
+authorizes it. It also fixes two defects, and those fixes change behaviour for
+two groups of deployments:
 
-- **Mint** with the existing `AdminCreateProjectCredential`
-  (`X-Admin-Secret`), `kind: "directory_reader"`. The response's `raw_key`
+- deployments running `GATEWAY_REVOCATION_MODE=session` with more than one
+  project serving traffic — read
+  [Session revocation mode](#session-revocation-mode-binds-each-request-to-its-project)
+  **before** upgrading;
+- deployments with `GATEWAY_SCIM_ENABLED` set.
+
+Every other deployment sees only the additions.
+
+### Additions
+
+- **Directory reader credentials.** Mint one with the existing
+  `AdminCreateProjectCredential` (`X-Admin-Secret`),
+  `kind: "directory_reader"`. The response's `raw_key`
   (`dk_<public>.<secret>`) is shown once; keep `credential_id`.
-- **Look up** with `LookupUsers { emails: [...] }` (1–100 addresses) and the
-  raw key in the `X-Directory-Key` header. It returns
-  `{id, email, name, avatar_url, email_verified}` for each address that
-  names an **active** account in the credential's project, in request order;
-  exact match ignoring case, nothing else is disclosed. Every entry is an
-  active member of the key's project; `email_verified` says whether the
-  address was proven — consumers that treat presence as identity (e.g. a
-  staff directory) should require it. The key authorizes this RPC and no other, it reads only the
-  project it was minted for, whatever the request's `Host` or
-  `X-Project-Key`, and it is not itself a project key. Call it from
-  server-side code only; the header is not CORS-allowed.
-- **Revoke** with the new `AdminRevokeProjectCredential { project_id,
-  credential_id }` (`X-Admin-Secret`). It works for credentials of every
-  kind, is idempotent, and returns `NOT_FOUND` for a credential the project
-  does not own. A revoked directory key is refused on its next lookup. A
-  revoked publishable, secret or mTLS key stops selecting its project only
-  once each replica's project-resolution cache expires it — up to
+- **`LookupUsers`.** Send `{ emails: [...] }` (1–100 addresses, each at most
+  320 bytes) with the raw key in the `X-Directory-Key` header. The response
+  holds `{id, email, name, avatar_url, email_verified}` for each distinct
+  address that names an **active** account in the credential's project.
+  Matching is exact, ignoring case, and addresses that differ only in case
+  count once. Omitted addresses leave no gap, so match entries to your request
+  by `email`, not by position. While `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` is
+  on (the default), accounts whose email is unverified are not returned.
+  Otherwise whoever signed up with an address first would be returned as its
+  owner. With the setting off they are returned with `email_verified: false`.
+  The key authorizes this RPC and no other. It reads only the project it was
+  minted for, whatever the request's `Host` or `X-Project-Key`, and it is not
+  itself a project key. Call it from server-side code only: the header is not
+  CORS-allowed.
+- **`AdminRevokeProjectCredential { project_id, credential_id }`**
+  (`X-Admin-Secret`). It revokes credentials of every kind, is idempotent,
+  and returns `NOT_FOUND` for a credential the project does not own. A revoked
+  directory key is refused on its next lookup. A revoked publishable, secret
+  or mTLS key keeps selecting its project until each replica's
+  project-resolution cache expires it, which takes up to
   `GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS` (default 30 s).
+- **Migration 0033** (Postgres only, like every project credential): **run
+  `identity migrate`** or set `GATEWAY_POSTGRES_AUTO_MIGRATE`. It widens the
+  `project_credentials.kind` constraint. Its down migration deletes any
+  directory credentials, because the narrower constraint cannot hold them. On
+  the memory and SQLite drivers `LookupUsers` returns `UNIMPLEMENTED`.
+- **`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`** (default 120 per
+  `GATEWAY_RATE_LIMIT_WINDOW_SECONDS` window) caps `LookupUsers` per client
+  IP. For a service behind one egress address, that is a cap for the whole
+  service. It must be a positive integer: zero, negative or malformed fails
+  the boot, and a `Config` built in code with the field left zero gets the
+  default. A throttled call gets HTTP 429 with `Retry-After: 60`, which
+  Connect clients report as `UNAVAILABLE`. The limit is enforced by the HTTP
+  handler only; a host serving identity through `RegisterGRPC` must apply its
+  own.
+- **Audit events**: `directory_lookup` (actor `credential:<id>`, counts only,
+  never addresses), `project_credential_created` and
+  `project_credential_revoked`. Minting was not audited before. All three are
+  written in the credential's project.
+- **Dependencies**: `google.golang.org/grpc` v1.83.2 (GO-2026-6443) and
+  `golang.org/x/net` v0.58.0.
 
-Postgres only, like every project credential: **run `identity migrate`** (or
-set `GATEWAY_POSTGRES_AUTO_MIGRATE`) — migration 0033 widens the
-`project_credentials.kind` constraint. Its down migration deletes any
-directory credentials, since the narrower constraint cannot hold them. On the
-memory and SQLite drivers `LookupUsers` returns `UNIMPLEMENTED`.
+### Behaviour changes
 
-New knob: `GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` (default 120 per
-`GATEWAY_RATE_LIMIT_WINDOW_SECONDS` window) caps `LookupUsers` per client IP —
-for a service behind one egress address, that is a per-service cap. It must be
-a positive integer: zero, negative or malformed fails the boot, and a `Config`
-built in code with the field left zero gets the default.
-New audit events: `directory_lookup` (actor `credential:<id>`, counts only,
-never addresses), `project_credential_created` and
-`project_credential_revoked` — minting was not audited before. The two
-credential events land in the project the admin call's `Host` resolves to,
-not the credential's project.
+#### Session revocation mode binds each request to its project
 
-**Session revocation mode now scopes every project.** Under
-`GATEWAY_REVOCATION_MODE=session`, the repository that invalidates the session
-cache on revoke could not be rebound to a request's project, so every request
-— sign-in, profile, admin, SCIM, identity verification — read and wrote the
-boot-default project whatever project its `Host` or key resolved to. It is now
-bound like every other repository, and the session cache reads a session in
-the project it was issued in. A session-mode deployment serving more than one
-project finds each project's accounts where they belong; data such a
-deployment already wrote for a non-default project sits in the default
-project and is not moved.
+Under `GATEWAY_REVOCATION_MODE=session`, the repository that clears the
+session cache on revoke could not be bound to a request's project. Every
+request — sign-up, sign-in, profile, admin, SCIM, identity verification — read
+and wrote the default project (`GATEWAY_DEFAULT_PROJECT_ID`), whatever project
+its `Host` or `X-Project-Key` resolved to. An account created through another
+project was stored under the default project, together with its sessions,
+refresh tokens and sign-in credentials. v4.8 binds every request to the
+project it resolved to, and the session cache reads a session in that project.
+Nothing moves the rows already written.
 
-**Two routes the JWT layer used to swallow now reach their handlers.** The
-inbound SCIM server (`/scim/v2/*`) authenticates with its own bearer token,
-but the JWT middleware ran first and refused that token as an invalid access
-token, so every SCIM request failed with `401 unauthenticated` in a served
-deployment. The public SAML metadata document (`/saml/metadata`) was refused
-the same way. Both are now exempt from JWT enforcement; SCIM still requires
-`GATEWAY_SCIM_BEARER_TOKEN` on every request. If you enabled SCIM and gave up
-on it, it works now — and it is a live, write-capable surface as soon as it
-is enabled, so check that `GATEWAY_SCIM_ENABLED` is only set where you
-intend it.
+**Am I affected?** Only if both hold on the version you are upgrading from:
+
+1. `GATEWAY_REVOCATION_MODE=session`, and
+2. requests resolved to a project other than the default one, by an
+   auth-domain `Host` or an `X-Project-Key`.
+
+TTL mode (the default) and single-project deployments are not affected.
+
+**What happens at upgrade.** For each account created through a non-default
+project:
+
+1. **Its user is signed out.** Its sessions are stored in the default project.
+   The session check now looks in the account's own project, finds nothing and
+   refuses the access token.
+2. **Signing in on that project finds no account.** Password sign-in fails as
+   it does for an unknown address. A method that creates an account on first
+   use (OAuth, passwordless email) creates a new one.
+3. **Signing up again mints a new `sub`.** Anything downstream keyed on the
+   old id no longer matches, and the old account stays in the default project.
+
+**Finding the affected accounts.** The misplaced rows carry the default
+project's id, and nothing on them records the project the request was for. On
+their own they cannot be told apart from genuine default-project accounts. The
+audit trail can tell some of them apart: audit events were always written in
+the project the request resolved to, including under session mode. Run this
+against the database **before** upgrading, with your default project's id:
+
+```sql
+SELECT u.id, u.email, a.project_id AS used_through, count(*) AS events
+FROM users u
+JOIN audit_events a ON a.actor = u.id AND a.project_id <> u.project_id
+WHERE u.project_id = '<GATEWAY_DEFAULT_PROJECT_ID>'
+GROUP BY u.id, u.email, a.project_id
+ORDER BY u.email, a.project_id;
+```
+
+Read the result as follows:
+
+- **One `used_through` project, and no events of its own in the default
+  project**: the account was created through that project and belongs there.
+- **Events in more than one project**: the account was used through several.
+  The data does not say which project it belongs to.
+- **Accounts with no surviving audit event** — retention
+  (`GATEWAY_AUDIT_RETENTION_DAYS`, default 730) removed them, or they were
+  never written — do not appear at all. Nothing distinguishes them from
+  genuine default-project accounts.
+
+**What to do.**
+
+- If the query returns no rows, no account with a surviving audit trail is
+  misplaced; upgrade normally. An account whose events are gone can still be
+  misplaced, and its user will find it missing as described above.
+- If it returns rows, **hold the upgrade** until you have chosen, for each
+  account, one of two paths. identity ships no tool for either.
+  - **Let the user sign up again** on their project after the upgrade. This
+    creates a new `sub`. Re-key anything downstream on the email address, then
+    delete the stale default-project account.
+  - **Move the account before upgrading.** With the server stopped, in one
+    transaction, set `project_id` to the target project on the account's
+    `users` row and on every row that references the account in the other
+    data-plane tables. The move fails on the per-project unique email index
+    where the target project already has an account at that address. Rehearse
+    it on a copy of the database first.
+
+  Either way, users of the affected projects must sign in again.
+
+#### SCIM is a live write surface
+
+The inbound SCIM server (`/scim/v2/*`) authenticates with its own bearer
+token, but the JWT middleware ran first and refused that token as an invalid
+access token. Every SCIM request therefore failed with `401 unauthenticated`
+in a served deployment, and the public SAML metadata document
+(`/saml/metadata`) was refused the same way. Both are now exempt from JWT
+enforcement; SCIM still requires `GATEWAY_SCIM_BEARER_TOKEN` on every request.
+
+**If `GATEWAY_SCIM_ENABLED` is set, SCIM starts working at upgrade.** Any
+client holding `GATEWAY_SCIM_BEARER_TOKEN` can then list, create, replace,
+patch and delete users in `GATEWAY_SCIM_PROJECT_ID`. This holds even if no
+client ever worked against it before. Before upgrading, confirm that the
+variable is set only where you intend it, and that only your provisioning
+client holds the token.
 
 ## v4.6 → v4.7 — the deny layer holds at every door
 
