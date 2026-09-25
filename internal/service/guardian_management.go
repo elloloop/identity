@@ -321,7 +321,9 @@ func (s *AuthService) DeactivateManagedChildAccount(
 	if err != nil {
 		return err
 	}
-	status := strings.ToLower(strings.TrimSpace(child.Status))
+	// Case-folded like isActiveStatus, but never trimmed: a padded status is
+	// a corrupt row and must be refused, not matched.
+	status := strings.ToLower(child.Status)
 	switch {
 	case status == StatusDeactivated:
 		// Already deactivated — but the status write and the session cut are
@@ -369,7 +371,9 @@ func (s *AuthService) ReactivateManagedChildAccount(
 	if err != nil {
 		return err
 	}
-	status := strings.ToLower(strings.TrimSpace(child.Status))
+	// Case-folded like isActiveStatus, but never trimmed: a padded status is
+	// a corrupt row and must be refused, not matched.
+	status := strings.ToLower(child.Status)
 	switch {
 	case isActiveStatus(status):
 		s.auditGuardianAction(ctx, guardianOpReactivate, guardianUserID, child.ID, true, ip, userAgent,
