@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -828,8 +827,9 @@ func (r *MemRepo) FindUserByEmail(_ context.Context, email string) (*service.Use
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	key := service.FoldEmail(email)
 	for _, u := range r.users {
-		if u.Email == email {
+		if u.Email != "" && service.FoldEmail(u.Email) == key {
 			cp := *u
 			return &cp, nil
 		}
@@ -867,10 +867,11 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 		offset = 0
 	}
 
+	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	matched := make([]*service.User, 0, len(r.users))
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
@@ -907,11 +908,12 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 }
 
 func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
@@ -973,11 +975,11 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
-		// Case-insensitive + ErrAlreadyExists-wrapped, matching the production
-		// memory driver and the cross-driver conformance contract. The
-		// uniqueness index is PARTIAL (WHERE email <> '') since 0028/0013, so
-		// users without an address — every anonymous user — never collide.
-		if u.Email != "" && strings.EqualFold(existing.Email, u.Email) {
+		// Under service.FoldEmail + ErrAlreadyExists-wrapped, matching the
+		// production memory driver and the cross-driver conformance contract.
+		// The SQL uniqueness index is PARTIAL (WHERE email <> ''), so users
+		// without an address — every anonymous user — never collide.
+		if u.Email != "" && service.FoldEmail(existing.Email) == service.FoldEmail(u.Email) {
 			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
 		}
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
@@ -1023,7 +1025,7 @@ func (r *MemRepo) UpdateUser(_ context.Context, userID string, fields map[string
 	if v, ok := fields["email"]; ok {
 		if addr, _ := v.(string); addr != "" {
 			for id, other := range r.users {
-				if id != userID && strings.EqualFold(other.Email, addr) {
+				if id != userID && service.FoldEmail(other.Email) == service.FoldEmail(addr) {
 					return fmt.Errorf("email %q: %w", addr, service.ErrAlreadyExists)
 				}
 			}
@@ -2072,10 +2074,10 @@ func (r *MemRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, at
 		return fmt.Errorf("user %s not found", userID)
 	}
 	// Enforce uniqueness across users, on the same terms as CreateUser and the
-	// SQL drivers: case-insensitive, and wrapping ErrAlreadyExists so callers
-	// can tell a collision from any other failure.
+	// SQL drivers: under service.FoldEmail, and wrapping ErrAlreadyExists so
+	// callers can tell a collision from any other failure.
 	for id, other := range r.users {
-		if id != userID && newEmail != "" && strings.EqualFold(other.Email, newEmail) {
+		if id != userID && newEmail != "" && service.FoldEmail(other.Email) == service.FoldEmail(newEmail) {
 			return fmt.Errorf("email %q: %w", newEmail, service.ErrAlreadyExists)
 		}
 	}
@@ -2299,7 +2301,7 @@ func (r *MemRepo) FindUsersByEmails(_ context.Context, emails []string) ([]*serv
 			continue
 		}
 		for _, e := range emails {
-			if strings.EqualFold(u.Email, e) {
+			if service.FoldEmail(u.Email) == service.FoldEmail(e) {
 				cp := *u
 				out = append(out, &cp)
 				break

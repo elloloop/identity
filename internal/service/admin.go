@@ -115,17 +115,24 @@ func (s *AdminService) InviteUser(
 		return nil, err
 	}
 
-	email = strings.TrimSpace(strings.ToLower(email))
+	email = strings.TrimSpace(email)
 	if email == "" || !strings.Contains(email, "@") {
 		return nil, errors.New("valid email is required")
 	}
+	// Stored in the canonical form sign-in resolves an account by, so the
+	// invitee's sign-in, the directory and SCIM all find this account.
+	cemail, usable := canonicalMailbox(email)
+	if !usable {
+		return nil, errors.New("valid email is required")
+	}
+	email = string(cemail)
 	// Refuse an invite the invitee could never redeem: under an allowlist/closed
 	// project the access gate denies at AcceptInvitation, so sending one would
 	// dead-end onboarding while the admin thinks it worked. Login-context
 	// (isSignup=false) permits open and invite mode and checks the allowlist,
 	// then applies the project's deny layer — so an invite to a blocked domain
 	// is refused even on an open project.
-	if scope := ProjectScopeFromContext(ctx); scope != nil && !accessPermits(s.cfg, scope.Access, canonicalize(email), false) {
+	if scope := ProjectScopeFromContext(ctx); scope != nil && !accessPermits(s.cfg, scope.Access, cemail, false) {
 		return nil, ErrAccessNotAllowed
 	}
 	role = strings.ToLower(strings.TrimSpace(role))

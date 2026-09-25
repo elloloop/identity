@@ -176,9 +176,9 @@ func TestDirectoryLookup_ReturnsActiveAccountsInRequestOrder(t *testing.T) {
 		t.Fatalf("LookupUsers: %v", err)
 	}
 	want := []DirectoryUser{
-		{ID: bob, Email: "bob@corp.test", Name: "Bob", EmailVerified: true},
-		{ID: alice, Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png", EmailVerified: true},
-		{ID: legacy, Email: "legacy@corp.test", Name: "Legacy", EmailVerified: true},
+		{ID: bob, Email: "bob@corp.test", Name: "Bob", EmailVerified: true, RequestedEmails: []string{"bob@corp.test"}},
+		{ID: alice, Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png", EmailVerified: true, RequestedEmails: []string{"ALICE@corp.test"}},
+		{ID: legacy, Email: "legacy@corp.test", Name: "Legacy", EmailVerified: true, RequestedEmails: []string{"legacy@corp.test"}},
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("LookupUsers =\n  %+v\nwant\n  %+v", got, want)
@@ -190,7 +190,7 @@ func TestDirectoryLookup_ExactMatchOnly(t *testing.T) {
 	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
 	f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive, EmailVerified: true})
 
-	for _, probe := range []string{"alice", "corp.test", "@corp.test", "lice@corp.test", "alice@corp", "alice@corp.test.", "%", "*"} {
+	for _, probe := range []string{"alice", "corp.test", "@corp.test", "+alice@corp.test", "lice@corp.test", "alice@corp", "alice@corp.test.evil", "%", "*"} {
 		got, err := f.svc.LookupUsers(context.Background(), key, []string{probe})
 		if err != nil {
 			t.Fatalf("LookupUsers(%q): %v", probe, err)
@@ -299,7 +299,11 @@ func TestDirectoryLookup_RefusesEveryOtherPresentation(t *testing.T) {
 	}
 }
 
-func TestDirectoryLookup_ValidatesTheBatchAfterAuthenticating(t *testing.T) {
+// The batch is checked before the credential store is read, so a malformed
+// batch costs no control-plane query. A key that is not even shaped like one
+// is refused first; the batch bounds are public, so a caller whose key is
+// merely wrong learns nothing from them.
+func TestDirectoryLookup_ValidatesTheBatchBeforeReadingTheCredential(t *testing.T) {
 	f := newDirectoryFixture(t)
 	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
 
@@ -318,10 +322,15 @@ func TestDirectoryLookup_ValidatesTheBatchAfterAuthenticating(t *testing.T) {
 		if _, err := f.svc.LookupUsers(context.Background(), key, emails); !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("%s: err = %v, want ErrInvalidArgument", name, err)
 		}
-		// An unauthenticated caller learns nothing about input validation.
 		if _, err := f.svc.LookupUsers(context.Background(), "", emails); !errors.Is(err, ErrUnauthenticated) {
 			t.Fatalf("%s without a key: err = %v, want ErrUnauthenticated", name, err)
 		}
+		// A store that fails every read proves the batch was refused first.
+		f.store.lookupErr = errors.New("credential store must not be read")
+		if _, err := f.svc.LookupUsers(context.Background(), key, emails); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("%s with the store failing: err = %v, want ErrInvalidArgument before any read", name, err)
+		}
+		f.store.lookupErr = nil
 	}
 
 	// An address of exactly the maximum length is accepted.
@@ -340,6 +349,64 @@ func TestDirectoryLookup_ValidatesTheBatchAfterAuthenticating(t *testing.T) {
 	}
 	if ids := directoryIDs(got); len(ids) != 1 || ids[0] != alice {
 		t.Fatalf("batch at the limit = %v, want [%s] once", ids, alice)
+	}
+}
+
+// A lookup canonicalizes each address as sign-in does, so it finds exactly
+// the account sign-in with that address would: case (Unicode included), a
+// plus tag, Gmail dots and a trailing FQDN dot do not make a different
+// address. Once canonical, the stored address is compared under FoldEmail,
+// so an account whose stored address was never canonicalized (non-ASCII
+// capitals) is not found — nor can sign-in reach it.
+func TestDirectoryLookup_CanonicalizesAsSignInDoes(t *testing.T) {
+	f := newDirectoryFixture(t)
+	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
+	emile := f.seed(t, dirTestProjectA, &User{Email: "émile@corp.test", Status: StatusActive, EmailVerified: true})
+	alice := f.seed(t, dirTestProjectA, &User{Email: "alicesmith@gmail.com", Status: StatusActive, EmailVerified: true})
+	kate := f.seed(t, dirTestProjectA, &User{Email: "kate@corp.test", Status: StatusActive, EmailVerified: true})
+	f.seed(t, dirTestProjectA, &User{Email: "Ëlise@corp.test", Status: StatusActive, EmailVerified: true})
+
+	for _, tc := range []struct {
+		emails []string
+		want   []string
+	}{
+		{[]string{"ÉMILE@CORP.TEST", "émile@corp.test"}, []string{emile}}, // one address, asked twice
+		{[]string{"Alice.Smith+news@googlemail.com"}, []string{alice}},
+		{[]string{"KATE+x@corp.test.", "zzz@corp.test"}, []string{kate}},
+		{[]string{"\u212aate@corp.test"}, []string{kate}}, // sign-in lowers KELVIN SIGN to "k" too
+		{[]string{"Ëlise@corp.test"}, nil},
+	} {
+		got, err := f.svc.LookupUsers(context.Background(), key, tc.emails)
+		if err != nil {
+			t.Fatalf("LookupUsers(%q): %v", tc.emails, err)
+		}
+		if ids := directoryIDs(got); fmt.Sprint(ids) != fmt.Sprint(tc.want) {
+			t.Fatalf("LookupUsers(%q) = %v, want %v", tc.emails, ids, tc.want)
+		}
+	}
+}
+
+// Each entry lists every requested spelling that found it, so a caller can
+// pair results with requests even when the address on file is spelled
+// differently, and no request for the mailbox reads as a miss.
+func TestDirectoryLookup_NamesEveryRequestedSpelling(t *testing.T) {
+	f := newDirectoryFixture(t)
+	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
+	bob := f.seed(t, dirTestProjectA, &User{Email: "bob@corp.com", Status: StatusActive, EmailVerified: true})
+	alice := f.seed(t, dirTestProjectA, &User{Email: "alicesmith@gmail.com", Status: StatusActive, EmailVerified: true})
+
+	got, err := f.svc.LookupUsers(context.Background(), key, []string{
+		"bob+jira@corp.com", "  Alice.Smith+news@googlemail.com ", "bob@corp.com", "bob+jira@corp.com", "alicesmith@gmail.com",
+	})
+	if err != nil {
+		t.Fatalf("LookupUsers: %v", err)
+	}
+	want := []DirectoryUser{
+		{ID: bob, Email: "bob@corp.com", EmailVerified: true, RequestedEmails: []string{"bob+jira@corp.com", "bob@corp.com"}},
+		{ID: alice, Email: "alicesmith@gmail.com", EmailVerified: true, RequestedEmails: []string{"Alice.Smith+news@googlemail.com", "alicesmith@gmail.com"}},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("LookupUsers =\n  %+v\nwant\n  %+v", got, want)
 	}
 }
 
@@ -404,9 +471,9 @@ func TestDirectoryLookup_RequireVerifiedEmail(t *testing.T) {
 				return got
 			}
 
-			want := []DirectoryUser{{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true}}
+			want := []DirectoryUser{{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true, RequestedEmails: []string{"proven@corp.test"}}}
 			if !required {
-				want = append([]DirectoryUser{{ID: claimed, Email: "claimed@corp.test", Name: "Claimed"}}, want...)
+				want = append([]DirectoryUser{{ID: claimed, Email: "claimed@corp.test", Name: "Claimed", RequestedEmails: []string{"claimed@corp.test"}}}, want...)
 			}
 			if got := lookup(); fmt.Sprint(got) != fmt.Sprint(want) {
 				t.Fatalf("before verification: LookupUsers = %+v, want %+v", got, want)
@@ -416,8 +483,8 @@ func TestDirectoryLookup_RequireVerifiedEmail(t *testing.T) {
 				t.Fatalf("verify: %v", err)
 			}
 			want = []DirectoryUser{
-				{ID: claimed, Email: "claimed@corp.test", Name: "Claimed", EmailVerified: true},
-				{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true},
+				{ID: claimed, Email: "claimed@corp.test", Name: "Claimed", EmailVerified: true, RequestedEmails: []string{"claimed@corp.test"}},
+				{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true, RequestedEmails: []string{"proven@corp.test"}},
 			}
 			if got := lookup(); fmt.Sprint(got) != fmt.Sprint(want) {
 				t.Fatalf("after verification: LookupUsers = %+v, want %+v", got, want)

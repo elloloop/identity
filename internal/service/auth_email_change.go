@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -36,11 +35,13 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 	if userID == "" {
 		return fmt.Errorf("%w: user id is required", ErrUnauthenticated)
 	}
-	newEmail = strings.TrimSpace(strings.ToLower(newEmail))
+	// Stored in the canonical form sign-in resolves an account by, so the
+	// changed address is the one sign-in, the directory and SCIM find.
+	newEmail, usable := CanonicalMailbox(newEmail)
 	if newEmail == "" {
 		return fmt.Errorf("%w: new email is required", ErrInvalidArgument)
 	}
-	if !looksLikeEmail(newEmail) {
+	if !usable {
 		return fmt.Errorf("%w: new email is not a valid address", ErrInvalidArgument)
 	}
 	if currentPassword == "" {
@@ -63,9 +64,9 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		return fmt.Errorf("%w: invalid password", ErrUnauthenticated)
 	}
 
-	// Reject if new == current (case-insensitively). Avoids creating a
-	// pointless token + emails.
-	if strings.EqualFold(strings.TrimSpace(user.Email), newEmail) {
+	// Reject a new address sign-in already resolves to this account (the same
+	// canonical form). Avoids creating a pointless token + emails.
+	if CanonicalizeEmail(user.Email) == newEmail {
 		return fmt.Errorf("%w: new email matches current email", ErrInvalidArgument)
 	}
 
@@ -212,7 +213,14 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
-	existing, err := s.repo(ctx).FindUserByEmail(ctx, rec.NewEmail)
+	// A token minted before RequestEmailChange canonicalized carries the
+	// address as typed; store the canonical form every lookup resolves by.
+	newEmail, usable := canonicalMailbox(rec.NewEmail)
+	if !usable {
+		return nil, errNoUsableMailbox
+	}
+
+	existing, err := s.repo(ctx).FindUserByEmail(ctx, string(newEmail))
 	if err != nil {
 		return nil, fmt.Errorf("checking email uniqueness: %w", err)
 	}
@@ -226,16 +234,16 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 	// would otherwise have every outstanding token as a hole in the new
 	// policy. Redemption is the authoritative point, the same place the
 	// passwordless flows put their decisive access check.
-	if err := s.enforceProjectAccessLogin(ctx, canonicalize(rec.NewEmail)); err != nil {
+	if err := s.enforceProjectAccessLogin(ctx, newEmail); err != nil {
 		return nil, err
 	}
 
 	now := s.nowMs()
-	if err := s.repo(ctx).UpdateUserEmail(ctx, user.ID, rec.NewEmail, now); err != nil {
+	if err := s.repo(ctx).UpdateUserEmail(ctx, user.ID, string(newEmail), now); err != nil {
 		return nil, fmt.Errorf("updating user email: %w", err)
 	}
 
-	user.Email = rec.NewEmail
+	user.Email = string(newEmail)
 	user.EmailVerified = true
 	user.EmailVerifiedAt = now
 	user.UpdatedAt = time.UnixMilli(now)
@@ -261,25 +269,8 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 		audit.WithDetails(map[string]any{
 			"step":      "email_change_confirmed",
 			"old_email": rec.OldEmail,
-			"new_email": rec.NewEmail,
+			"new_email": string(newEmail),
 		}),
 	)
 	return user, nil
-}
-
-// looksLikeEmail performs a minimal syntactic check on an email
-// address. Real validation happens when the user clicks the link in
-// the inbox; we just want to reject obviously malformed input early.
-func looksLikeEmail(s string) bool {
-	at := strings.IndexByte(s, '@')
-	if at <= 0 || at == len(s)-1 {
-		return false
-	}
-	if strings.IndexByte(s[at+1:], '.') < 0 {
-		return false
-	}
-	if strings.ContainsAny(s, " \t\r\n") {
-		return false
-	}
-	return true
 }

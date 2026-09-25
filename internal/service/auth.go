@@ -166,10 +166,11 @@ const (
 // UserListFilter narrows and paginates a Repository.ListUsers query. Zero
 // values mean "no constraint": an empty Email/ExternalID does not filter,
 // and a non-positive Limit means "use the driver default". Equality
-// filters are case-insensitive for Email (RFC 7644 §3.4.2 treats userName
-// — mapped to email — case-insensitively) and exact for ExternalID.
+// filters ignore ASCII case for Email (FoldEmail; RFC 7644 §3.4.2 treats
+// userName — mapped to email — case-insensitively) and are exact for
+// ExternalID.
 type UserListFilter struct {
-	Email      string // exact (case-insensitive) email match when non-empty
+	Email      string // exact email match under FoldEmail when non-empty
 	ExternalID string // exact external_id match when non-empty
 	Offset     int    // skip this many matching rows (cursor)
 	Limit      int    // max rows to return; <=0 → driver default
@@ -243,6 +244,10 @@ type Repository interface {
 	WithProject(projectID string) Repository
 
 	// Users
+
+	// FindUserByEmail returns the account whose email equals email under
+	// FoldEmail (exact, up to ASCII case), or nil; the empty address matches
+	// nobody.
 	FindUserByEmail(ctx context.Context, email string) (*User, error)
 	// FindUserByUsername resolves a managed child account by its
 	// project-unique username (empty username matches nobody). It backs
@@ -600,8 +605,8 @@ type Repository interface {
 	GetUsersByIDs(ctx context.Context, ids []string) ([]*User, error)
 
 	// FindUsersByEmails fetches, in ONE query, the accounts whose email equals
-	// one of emails exactly, ignoring case (FindUserByEmail's comparison),
-	// ordered by id. Accounts with no email (anonymous) never match, addresses
+	// one of emails under FoldEmail (FindUserByEmail's comparison), ordered
+	// by id. Accounts with no email (anonymous) never match, addresses
 	// that name no account are simply absent, and status is NOT filtered —
 	// the caller decides which states it discloses.
 	FindUsersByEmails(ctx context.Context, emails []string) ([]*User, error)
@@ -656,7 +661,8 @@ type Repository interface {
 	MarkEmailChangeTokenConsumed(ctx context.Context, tokenID string, atMs int64) error
 	// UpdateUserEmail sets the user's primary email and marks it verified
 	// (since the new address has just proven control via the consumed
-	// token). Implementations must also set updated_at = atMs.
+	// token). Implementations must also set updated_at = atMs. An address
+	// another account already holds under FoldEmail is ErrAlreadyExists.
 	UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error
 
 	// OAuth identities — links a (provider, provider_user_id) pair to a
@@ -1653,7 +1659,7 @@ func (s *AuthService) maybeAutoFormTenant(ctx context.Context, user *User) {
 		return
 	}
 	// Split on the last '@' (via emailDomain) so the auto-formed tenant keys on
-	// the same domain canonicalizeEmail produced — a quoted local part with '@'
+	// the same domain CanonicalizeEmail produced — a quoted local part with '@'
 	// must not yield a bogus domain and spawn a spurious tenant.
 	domain := emailDomain(user.Email)
 	if domain == "" || s.cfg.IsPublicEmailDomain(domain) {
@@ -1994,7 +2000,7 @@ func passwordIssuesToErr(issues []string) error {
 	return nil
 }
 
-// validateEmailFormat + canonicalizeEmail live in email_canonicalize.go
+// validateEmailFormat + CanonicalizeEmail live in email_canonicalize.go
 // so the surface they cover (format, length, reserved TLDs, disposable
 // providers, Gmail-style normalization) is in one place.
 

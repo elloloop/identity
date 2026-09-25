@@ -186,7 +186,7 @@ func withProjectLoginDefaults(projectID, allowedMethods string, require2FA bool)
 }
 
 // TestEmailDomain_SplitsOnLastAt guards the invariant that emailDomain extracts
-// the domain exactly as canonicalizeEmail does (LAST '@'). A quoted local part
+// the domain exactly as CanonicalizeEmail does (LAST '@'). A quoted local part
 // containing '@' must not be split on the first '@' — that would mis-resolve the
 // tenant LoginPolicy (SSO/2FA bypass) and the access allowlist.
 func TestEmailDomain_SplitsOnLastAt(t *testing.T) {

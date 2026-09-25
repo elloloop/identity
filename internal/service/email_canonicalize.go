@@ -61,7 +61,7 @@ var gmailDomains = map[string]bool{
 	"googlemail.com": true,
 }
 
-// canonicalizeEmail returns the canonical form used for duplicate
+// CanonicalizeEmail returns the canonical form used for duplicate
 // detection and lookup. It implements Gmail's normalization rules:
 //
 //   - Lowercase + trim (always).
@@ -77,7 +77,7 @@ var gmailDomains = map[string]bool{
 // returns the input unchanged when there's no '@' to split on so
 // callers can run it before validateEmailFormat without a panic.
 // Production code runs validation FIRST, canonicalization SECOND.
-func canonicalizeEmail(addr string) string {
+func CanonicalizeEmail(addr string) string {
 	addr = strings.TrimSpace(strings.ToLower(addr))
 	at := strings.LastIndex(addr, "@")
 	if at < 0 {
@@ -100,7 +100,43 @@ func canonicalizeEmail(addr string) string {
 	return local + "@" + domain
 }
 
-// canonicalEmail is an email address that has been through canonicalizeEmail
+// CanonicalMailbox canonicalizes addr (CanonicalizeEmail) and reports whether
+// the result is a mailbox an account can hold: a non-empty local part, a
+// domain containing a dot, and no whitespace. Every path that stores or looks
+// up an account's address from caller or provider input checks it:
+// canonicalizing drops a "+tag", so an address that was nothing but one
+// ("+x@corp.com") has no local part left, whatever the raw address's own
+// validation said.
+func CanonicalMailbox(addr string) (string, bool) {
+	c := CanonicalizeEmail(addr)
+	return c, isUsableMailbox(c)
+}
+
+// canonicalMailbox is CanonicalMailbox for the paths that go on to the access
+// gate, which takes the canonicalEmail type.
+func canonicalMailbox(addr string) (canonicalEmail, bool) {
+	c, usable := CanonicalMailbox(addr)
+	return canonicalEmail(c), usable
+}
+
+// errNoUsableMailbox refuses an address with no mailbox left once canonical.
+var errNoUsableMailbox = fmt.Errorf("%w: email has no mailbox once its +tag is removed", ErrInvalidArgument)
+
+// isUsableMailbox is CanonicalMailbox's check on an already-canonical
+// address: a minimal syntactic one, since the mailbox itself is proven only
+// when its owner acts on a message sent to it.
+func isUsableMailbox(s string) bool {
+	at := strings.LastIndexByte(s, '@')
+	if at <= 0 || at == len(s)-1 {
+		return false
+	}
+	if strings.IndexByte(s[at+1:], '.') < 0 {
+		return false
+	}
+	return !strings.ContainsAny(s, " \t\r\n")
+}
+
+// canonicalEmail is an email address that has been through CanonicalizeEmail
 // (via canonicalize). It is the ONLY thing the per-project access gate accepts,
 // so the compiler rejects a raw, possibly-non-canonical string at the gate
 // boundary: the "canonicalize once, at the caller, then compare like-for-like"
@@ -109,7 +145,7 @@ func canonicalizeEmail(addr string) string {
 type canonicalEmail string
 
 // canonicalize is the sole constructor for canonicalEmail: it runs
-// canonicalizeEmail and tags the result canonical. Call it exactly once per
+// CanonicalizeEmail and tags the result canonical. Call it exactly once per
 // request at the entry point and reuse the value for BOTH the access gate and
 // the DB/user operations (string(cemail)), so a request canonicalizes once
 // rather than once per consumer. It is idempotent — re-wrapping an
@@ -117,11 +153,11 @@ type canonicalEmail string
 // challenge/token email) yields the same value and self-heals a legacy
 // non-canonical row.
 func canonicalize(raw string) canonicalEmail {
-	return canonicalEmail(canonicalizeEmail(raw))
+	return canonicalEmail(CanonicalizeEmail(raw))
 }
 
 // canonicalizeDomain returns the canonical form of a bare email domain,
-// mirroring the domain handling inside canonicalizeEmail so a domain compared on
+// mirroring the domain handling inside CanonicalizeEmail so a domain compared on
 // its own resolves identically to the domain of a canonicalized address (IDN
 // punycoding makes visually-equivalent unicode domains compare equal). A domain
 // that cannot be punycoded is returned unchanged — validateEmailFormat rejects
@@ -157,7 +193,7 @@ func canonicalizeDomain(domain string) string {
 //     and friends — the top free-tier abuse vector).
 //
 // On success, returns nil. The caller usually pairs this with
-// canonicalizeEmail to get the storage/lookup form.
+// CanonicalizeEmail to get the storage/lookup form.
 func validateEmailFormat(addr string) error {
 	if addr == "" {
 		return errors.New("email is required")

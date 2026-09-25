@@ -155,13 +155,16 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 	// Canonicalize the provider email so the by-email lookup/create in
 	// upsertOAuthUser → resolveOrCreateUserByEmail uses the SAME canonical key
 	// every other flow stores under, rather than minting a duplicate of an
-	// account held as alicesmith@gmail.com. canonicalizeEmail trims + lowercases,
+	// account held as alicesmith@gmail.com. CanonicalizeEmail trims + lowercases,
 	// so the empty-email guard still holds. Canonicalized ONCE here; carried as
 	// cemail into upsert/resolve (gate) and as email (string) for logging.
-	cemail := canonicalize(identity.Email)
+	cemail, usable := canonicalMailbox(identity.Email)
 	email := string(cemail)
 	if email == "" {
 		return nil, fmt.Errorf("%w: provider returned no email", ErrUnauthenticated)
+	}
+	if !usable {
+		return nil, fmt.Errorf("%w: provider returned an email with no usable mailbox", ErrUnauthenticated)
 	}
 
 	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail)

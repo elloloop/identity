@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -183,4 +184,82 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, Email: "x@y.com", TokenHash: "h"})
 	require.ErrorIs(t, err, service.ErrInvalidArgument, "missing expires_at_ms")
 	require.ErrorIs(t, is.SetInvitationStatus(ctx, "", "id", service.InvitationStatusRevoked, 0), service.ErrInvalidArgument)
+}
+
+// TestInvitationStore_OneOpenInviteUnderFoldEmail: the store compares the
+// canonical address the service gives it under service.FoldEmail, so an
+// address differing only in ASCII case replaces the open invite and one
+// differing in a non-ASCII letter is another recipient. (Pending invitations
+// stored before the service canonicalized are rewritten by migration 0034 —
+// TestMigrate_0034CanonicalizesPendingInvitations.)
+func TestInvitationStore_OneOpenInviteUnderFoldEmail(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping invitation fold test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+
+	invite := func(email, tokenHash string) {
+		t.Helper()
+		_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+			ProjectID: projectID, TenantID: tenantID, Email: email,
+			TokenHash: tokenHash, ExpiresAtMs: nowMs() + 86_400_000,
+		})
+		require.NoError(t, err)
+	}
+	status := func(tokenHash string) string {
+		t.Helper()
+		inv, err := is.GetInvitationByTokenHash(ctx, projectID, tokenHash)
+		require.NoError(t, err)
+		return inv.Status
+	}
+
+	invite("zoé@acme.com", "fold-1")
+	invite("ZOé@ACME.com", "fold-2")
+	require.Equal(t, service.InvitationStatusRevoked, status("fold-1"), "ASCII case names the same recipient")
+	invite("zoÉ@acme.com", "fold-3")
+	require.Equal(t, service.InvitationStatusPending, status("fold-2"), "a different non-ASCII letter is another recipient")
+	require.Equal(t, service.InvitationStatusPending, status("fold-3"))
+}
+
+// TestInvitationStore_ConcurrentCreatesLeaveOneOpenInvite: creates for one
+// mailbox are serialized, so however many race, each succeeds by revoking the
+// one before it and exactly one stays pending.
+func TestInvitationStore_ConcurrentCreatesLeaveOneOpenInvite(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping concurrent invitation test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+
+	const racers = 8
+	errs := make(chan error, racers)
+	for i := range racers {
+		go func() {
+			_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+				ProjectID: projectID, TenantID: tenantID, Email: "race@acme.com",
+				TokenHash: fmt.Sprintf("race-%d", i), ExpiresAtMs: nowMs() + 86_400_000,
+			})
+			errs <- err
+		}()
+	}
+	for range racers {
+		require.NoError(t, <-errs)
+	}
+	list, err := is.ListInvitationsForTenant(ctx, projectID, tenantID)
+	require.NoError(t, err)
+	pending := 0
+	for _, inv := range list {
+		if inv.Status == service.InvitationStatusPending {
+			pending++
+		}
+	}
+	require.Len(t, list, racers)
+	require.Equal(t, 1, pending, "one open invite per mailbox, however the creates interleave")
 }

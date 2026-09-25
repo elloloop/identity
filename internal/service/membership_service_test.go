@@ -406,6 +406,46 @@ func TestAcceptTenantInvitation_WrongEmailDenied(t *testing.T) {
 	require.Equal(t, InvitationStatusPending, invs[0].Status)
 }
 
+// The caller's address and the invitation's are compared in the canonical
+// form sign-in resolves an account by: a plus tag or a Gmail-style variant of
+// the invited mailbox is the same mailbox, a different non-ASCII letter is not.
+func TestAcceptTenantInvitation_ComparesCanonicalAddresses(t *testing.T) {
+	for _, tc := range []struct {
+		callerEmail string
+		wantErr     error
+	}{
+		{"INVITEE+team@acme.com", nil},             // a +tag is dropped on every domain, not only Gmail
+		{"inv.itee@acme.com", ErrPermissionDenied}, // dots are dropped only at Gmail
+		{"invitée@acme.com", ErrPermissionDenied},
+		{"invitee@acme.co", ErrPermissionDenied},
+	} {
+		t.Run(tc.callerEmail, func(t *testing.T) {
+			f := newMembershipFixtureNoMail()
+			rawToken := f.seedInvite(t)
+			f.users.put(mInviteeID, tc.callerEmail)
+			_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, rawToken)
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, tc.wantErr)
+		})
+	}
+}
+
+// An invitation is stored in canonical form, so the one-open-invite rule and
+// the accept check see the invited mailbox however it was typed.
+func TestCreateTenantInvitation_StoresCanonicalEmail(t *testing.T) {
+	f := newMembershipFixtureNoMail()
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, "  Invitee+Team@ACME.com ", RoleMember)
+	require.NoError(t, err)
+	invs, err := f.invitations.ListInvitationsForTenant(context.Background(), mTestProject, mTestTenant)
+	require.NoError(t, err)
+	require.Len(t, invs, 1)
+	require.Equal(t, mInvitee, invs[0].Email)
+}
+
 func TestAcceptTenantInvitation_UnknownTokenNotFound(t *testing.T) {
 	f := newMembershipFixtureNoMail()
 	f.users.put(mInviteeID, mInvitee)

@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -217,8 +216,9 @@ func (r *Repo) FindUserByEmail(_ context.Context, email string) (*service.User, 
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	key := service.FoldEmail(email)
 	for _, u := range r.users {
-		if u.Email == email {
+		if u.Email != "" && service.FoldEmail(u.Email) == key {
 			cp := *u
 			return &cp, nil
 		}
@@ -268,10 +268,11 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 		offset = 0
 	}
 
+	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	matched := make([]*service.User, 0, len(r.users))
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
@@ -347,11 +348,12 @@ func (r *Repo) ListUsersPendingDeletionBefore(_ context.Context, cutoffMs int64,
 // /Users totalResults so a page reports the true match count rather than the
 // page size. Mirrors the SQL drivers.
 func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
@@ -369,12 +371,12 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
-		// Case-insensitive, mirroring the SQL drivers' lower(email) unique
+		// Under FoldEmail, mirroring the SQL drivers' folded-email unique
 		// index: every backend signals a duplicate identically (the SCIM
 		// server maps this sentinel to HTTP 409 Conflict). The index is
 		// PARTIAL (WHERE email <> ''), so users without an address — every
 		// anonymous user — do not collide with each other.
-		if u.Email != "" && strings.EqualFold(existing.Email, u.Email) {
+		if u.Email != "" && service.FoldEmail(existing.Email) == service.FoldEmail(u.Email) {
 			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
 		}
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
@@ -418,13 +420,13 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 			}
 		}
 	}
-	// Mirror the SQL drivers' per-project unique (lower(email)) index: an
+	// Mirror the SQL drivers' per-project folded-email unique index: an
 	// email change that collides with another user is a conflict, so a SCIM
 	// PUT/PATCH that reuses an address fails identically across backends.
 	if v, ok := fields["email"]; ok {
 		if email, _ := v.(string); email != "" {
 			for id, other := range r.users {
-				if id != userID && strings.EqualFold(other.Email, email) {
+				if id != userID && service.FoldEmail(other.Email) == service.FoldEmail(email) {
 					return fmt.Errorf("email %q: %w", email, service.ErrAlreadyExists)
 				}
 			}
@@ -478,24 +480,22 @@ func (r *Repo) GetUsersByIDs(_ context.Context, ids []string) ([]*service.User, 
 }
 
 // FindUsersByEmails mirrors the SQL drivers' batch email fetch: exact match
-// ignoring case, accounts with no email never match, ordered by id.
+// under FoldEmail, accounts with no email never match, ordered by id.
 func (r *Repo) FindUsersByEmails(_ context.Context, emails []string) ([]*service.User, error) {
 	if len(emails) == 0 {
 		return nil, nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	wanted := make(map[string]bool, len(emails))
+	for _, e := range emails {
+		wanted[service.FoldEmail(e)] = true
+	}
 	out := make([]*service.User, 0, len(emails))
 	for _, u := range r.users {
-		if u.Email == "" {
-			continue
-		}
-		for _, e := range emails {
-			if strings.EqualFold(u.Email, e) {
-				cp := *u
-				out = append(out, &cp)
-				break
-			}
+		if u.Email != "" && wanted[service.FoldEmail(u.Email)] {
+			cp := *u
+			out = append(out, &cp)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -1493,9 +1493,10 @@ func (r *Repo) UpdateUserEmail(_ context.Context, userID, newEmail string, atMs 
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
 	}
+	// The SQL drivers' folded-email unique index, as in UpdateUser.
 	for id, other := range r.users {
-		if id != userID && other.Email == newEmail {
-			return fmt.Errorf("email %q already in use", newEmail)
+		if id != userID && newEmail != "" && service.FoldEmail(other.Email) == service.FoldEmail(newEmail) {
+			return fmt.Errorf("email %q: %w", newEmail, service.ErrAlreadyExists)
 		}
 	}
 	u.Email = newEmail
@@ -1789,13 +1790,13 @@ func (r *Repo) CreateManagedChildAccount(_ context.Context, u *service.User, edg
 		}
 	}
 	// The SQL drivers enforce these two inside the same transaction, via
-	// users_project_email_partial_uidx and the parental_consents primary key,
+	// users_project_email_fold_uidx and the parental_consents primary key,
 	// so a colliding email or a reused consent id is ErrAlreadyExists there.
 	// Checking them here keeps the drivers identical — and stops a reused
 	// consent id from overwriting a retained compliance artifact in place.
 	if u.Email != "" {
 		for _, existing := range r.users {
-			if strings.EqualFold(existing.Email, u.Email) {
+			if service.FoldEmail(existing.Email) == service.FoldEmail(u.Email) {
 				return fmt.Errorf("email %q: %w", u.Email, service.ErrAlreadyExists)
 			}
 		}

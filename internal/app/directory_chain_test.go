@@ -36,7 +36,7 @@ type chainCredentials struct {
 	cred *service.AdminProjectCredential
 }
 
-func (c chainCredentials) ActiveProjectCredentialByPublicID(_ context.Context, publicID string) (*service.AdminProjectCredential, error) {
+func (c chainCredentials) CredentialByPublicIDInActiveProject(_ context.Context, publicID string) (*service.AdminProjectCredential, error) {
 	if publicID != c.cred.PublicID {
 		return nil, nil
 	}
@@ -141,7 +141,8 @@ func assertDirectoryLookupServed(t *testing.T, cfg *config.Config) {
 	}
 	for field := range resp.Users[0] {
 		switch field {
-		case "id", "email", "name", "avatarUrl", "emailVerified":
+		// requestedEmails echoes the caller's own input back.
+		case "id", "email", "name", "avatarUrl", "emailVerified", "requestedEmails":
 		default:
 			t.Fatalf("directory entry discloses %q: %v", field, resp.Users[0])
 		}

@@ -415,9 +415,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			if !errors.Is(err, service.ErrAlreadyExists) {
 				t.Fatalf("CreateUser duplicate email: want ErrAlreadyExists, got %v", err)
 			}
-			// The uniqueness is case-insensitive on every driver (the SQL
-			// lower(email) index), so a differently-cased address is the SAME
-			// account and must also conflict.
+			// Uniqueness ignores ASCII case on every driver (service.FoldEmail;
+			// runEmailFoldConformance pins the rule), so a differently-cased
+			// address is the SAME account and must also conflict.
 			_, err = r.CreateUser(ctx, &service.User{Email: "DUP@Example.COM", Status: "active"})
 			if !errors.Is(err, service.ErrAlreadyExists) {
 				t.Fatalf("CreateUser case-insensitive duplicate email: want ErrAlreadyExists, got %v", err)
@@ -2649,6 +2649,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runParentalConsentConformance(t, driver)
 	runGuardianEdgeConformance(t, driver)
 	runManagedChildConformance(t, driver)
+	runEmailFoldConformance(t, driver)
 }
 
 // uniqueHash returns a per-call unique token-hash string. Tests use

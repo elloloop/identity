@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -265,7 +264,7 @@ func (r *fakeRepo) FindUserByEmail(_ context.Context, email string) (*User, erro
 		return nil, nil
 	}
 	for _, u := range r.users {
-		if u.Email == email {
+		if u.Email != "" && FoldEmail(u.Email) == FoldEmail(email) {
 			cp := *u
 			return &cp, nil
 		}
@@ -315,7 +314,7 @@ func (r *fakeRepo) ListUsers(_ context.Context, filter UserListFilter) ([]*User,
 	defer r.mu.Unlock()
 	var out []*User
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+		if filter.Email != "" && FoldEmail(u.Email) != FoldEmail(filter.Email) {
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
@@ -367,7 +366,7 @@ func (r *fakeRepo) CountUsers(_ context.Context, filter UserListFilter) (int, er
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+		if filter.Email != "" && FoldEmail(u.Email) != FoldEmail(filter.Email) {
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
@@ -393,7 +392,7 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
 	for _, existing := range r.users {
 		// Mirrors the drivers' PARTIAL unique index (WHERE email <> ''):
 		// users without an address — every anonymous user — never collide.
-		if u.Email != "" && existing.Email == u.Email {
+		if u.Email != "" && FoldEmail(existing.Email) == FoldEmail(u.Email) {
 			return "", fmt.Errorf("%w: user with email %s already exists", ErrAlreadyExists, u.Email)
 		}
 		// Same posture for the (project_id, username) partial unique index.
@@ -1810,8 +1809,8 @@ func (r *fakeRepo) GetUsersByIDs(_ context.Context, ids []string) ([]*User, erro
 	return out, nil
 }
 
-// FindUsersByEmails mirrors the drivers' batch email fetch: case-insensitive
-// exact match, empty emails never match, ordered by id.
+// FindUsersByEmails mirrors the drivers' batch email fetch: exact match under
+// FoldEmail, empty emails never match, ordered by id.
 func (r *fakeRepo) FindUsersByEmails(_ context.Context, emails []string) ([]*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1824,7 +1823,7 @@ func (r *fakeRepo) FindUsersByEmails(_ context.Context, emails []string) ([]*Use
 			continue
 		}
 		for _, e := range emails {
-			if strings.EqualFold(u.Email, e) {
+			if FoldEmail(u.Email) == FoldEmail(e) {
 				cp := *u
 				out = append(out, &cp)
 				break

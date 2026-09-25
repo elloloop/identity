@@ -4,6 +4,32 @@
 
 Accepted (2026-06-11).
 
+**Amended** (2026-09-25): which layer normalizes is now explicit. The service
+canonicalizes every address it stores or looks up on the sign-up, sign-in,
+SCIM, directory-lookup, admin-invite, email-change and tenant-invitation
+paths (`CanonicalizeEmail`: trim, lower-case,
+plus-tag and Gmail-dot removal, IDN punycode). The stores compare what they
+are given under one storage rule, `FoldEmail`, which lowers ASCII letters
+only: uniqueness and lookup key on `users.email_fold`, a stored generated
+column `lower(email COLLATE "C")` (Postgres migration 0034), instead of on
+`lower(email)`. The database-default `lower()` folded by locale, so the same
+rows compared differently from one deployment to another and from the SQLite
+and memory drivers, and under FORCE row-level security it kept the lookup from
+using the index. The canonical email is still stored only in `email`, and a
+generated column cannot drift from it, so decision 3's objection to a second
+column does not apply.
+
+The trade-off, stated plainly: canonicalization drops a `+tag` on every
+domain, not only where the mail provider is known to deliver sub-addresses,
+so `bob+x@corp.com` and `bob@corp.com` are one account on every domain, and
+a provider that treats them as different mailboxes cannot have both. So
+another spelling of an address reaches the same account wherever an address
+is paired with one, including tenant-invitation acceptance; whether the
+address was proved is a separate question each path answers (the directory
+lookup returns only verified accounts by default). An address is how an
+account is found, never what authorizes it: anything downstream that grants access must key on the
+account's user id, not on its email.
+
 **Supersedes** the per-tenant-user portions of decision-log entries §2
 ("Identity tenant ↔ tenant-shard-db tenant is 1:1" — the part that made a
 user belong to exactly one storage tenant) and §13 (the "resolve-or-create by
@@ -34,7 +60,7 @@ The converged model puts the user pool at the **Project** level and makes
 The verified fix **H2** pins the email representation:
 
 > Keep the **canonical** email IN the `email` column — do NOT add a separate
-> `canonical_email` field. This matches today's `canonicalizeEmail`.
+> `canonical_email` field. This matches today's `CanonicalizeEmail`.
 
 ## Decision
 
@@ -51,7 +77,7 @@ The verified fix **H2** pins the email representation:
    verified domain of tenant Acme."
 
 3. **Canonical email stays in `email` (H2).** The canonical form
-   (`canonicalizeEmail`) is stored directly in `email`; uniqueness uses
+   (`CanonicalizeEmail`) is stored directly in `email`; uniqueness uses
    `lower(email)`. No `canonical_email` column is added — that would be a second
    source of truth for a value the column already holds.
 

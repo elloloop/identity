@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 
 	"go.uber.org/zap"
 
@@ -248,9 +247,11 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 // discoverable credentials (usernameless flow).
 func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (string, string, error) {
 	var allowedIDs []string
-	if email != "" {
-		email = trimEmail(email)
-		user, err := s.repo(ctx).FindUserByEmail(ctx, email)
+	// Looked up by the canonical form accounts are stored under. An address
+	// with no mailbox once canonical names nobody, so it takes the same path
+	// as an unknown one: an empty allow list.
+	if canonical, usable := CanonicalMailbox(email); usable {
+		user, err := s.repo(ctx).FindUserByEmail(ctx, canonical)
 		if err != nil {
 			return "", "", err
 		}
@@ -431,10 +432,6 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 }
 
 // ���─ helpers ────────────────────────────────────────────────────────────
-
-func trimEmail(email string) string {
-	return strings.TrimSpace(strings.ToLower(email))
-}
 
 func coalesce(vals ...string) string {
 	for _, v := range vals {

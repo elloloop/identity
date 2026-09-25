@@ -1,9 +1,14 @@
 # Upgrade guide
 
-## v4.8 → next — SCIM throttling and audit; directory limit on every transport; wildcard origins
+## v4.8 → next — SCIM throttling and audit; directory limit on every transport; wildcard origins; one email comparison rule (migration 0034)
 
-No schema change and no migration. Four groups of deployments see a change in
-behaviour:
+**Postgres deployments get migration 0034, which rewrites the `users` table
+under an exclusive lock.** Read
+[Migration 0034 rewrites `users`](#migration-0034-rewrites-users-postgres)
+**before** upgrading. Every deployment gets one rule for comparing email
+addresses; see
+[One email comparison rule](#one-email-comparison-rule). Four further groups
+of deployments see a change in behaviour:
 
 - **`GATEWAY_SCIM_ENABLED` deployments.** Every request under `/scim/v2/` now
   counts against a per-client-IP limit, **`GATEWAY_RATE_LIMIT_SCIM_PER_IP`**
@@ -118,6 +123,305 @@ Also changed:
 - **`Vary: Origin`** is sent on every response that passes through the CORS
   middleware, so a shared cache never serves one origin's CORS headers to
   another.
+
+### Migration 0034 rewrites `users` (Postgres)
+
+**What it does.** It adds `users.email_fold`, a stored generated column
+`lower(email COLLATE "C")`: the address with its ASCII letters lowered and
+every other character kept. It replaces the unique index
+`users_project_email_partial_uidx` (on the locale's `lower(email)`) with
+`users_project_email_fold_uidx` on `(project_id, email_fold) WHERE email <> ''`,
+and `tenant_invitations_open_email_uidx` with
+`tenant_invitations_open_email_fold_uidx`. It also rewrites each *pending*
+tenant invitation with an all-ASCII address in the canonical form the
+service now stores (see below). Where several pending invitations of a
+tenant name one mailbox, it first revokes all but the newest and then
+renames the newest, so it resolves those collisions itself. Pending
+invitations with a non-ASCII address keep their spelling. Email lookups, the `ListUsers` and
+SCIM email filters and the admin user query compare `email_fold` with `=`.
+Under `FORCE ROW LEVEL SECURITY` only such a leakproof comparison can use the
+index. The old `lower(email)` comparison read every row of the project on
+every lookup.
+
+**How it is applied.** Run `identity migrate` **before any replica of the new
+version serves traffic**: the new version queries `users.email_fold`, and
+until 0034 has run every email lookup fails with
+`column "email_fold" does not exist`. The alternative is
+`GATEWAY_POSTGRES_AUTO_MIGRATE`, which applies it when the first new replica
+boots, before that replica serves. The SQLite driver needs no migration: its
+`lower()` already folds ASCII only.
+
+**Locking and sizing.** Adding a stored generated column rewrites the whole
+`users` table under an `ACCESS EXCLUSIVE` lock. The unique index is then
+built in the same transaction. Sign-in, token refresh, SCIM and every other
+read or write of `users` waits until both finish, for a time that grows with
+the table. Estimate it by timing the migration on a restored copy of
+production, or at least check the table's size:
+
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('users'));
+```
+
+**Do not rely on auto-migrate for a large `users` table.** Under auto-migrate
+the rewrite runs inside the booting replica, and a startup or liveness probe
+that gives up first restarts the container, killing the rewrite part-way
+(the transaction rolls back and the version is left dirty; see below). Run
+`identity migrate` as a separate job in a maintenance window instead, or at
+least give the first new replica a startup probe longer than the rewrite
+takes. The migration sets
+`lock_timeout = '10s'`. That bounds only the wait to *acquire* the lock:
+queued behind a long-running transaction, the `ALTER` would otherwise stall
+every later query on `users`. The timeout does not bound the rewrite itself.
+If it fires, the migration fails; see
+[If 0034 fails](#if-0034-fails-the-version-is-left-dirty).
+
+Every statement is guarded with `IF [NOT] EXISTS`, so you can shorten the
+exclusive window by applying the pieces yourself, as a role that owns the
+tables:
+
+```sql
+-- 1. In the window: the rewrite (ACCESS EXCLUSIVE for its duration).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_fold TEXT COLLATE "C"
+    GENERATED ALWAYS AS (lower(email COLLATE "C")) STORED;
+-- 2. Afterwards, without blocking writes (not inside a transaction):
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS users_project_email_fold_uidx
+    ON users (project_id, email_fold) WHERE email <> '';
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS tenant_invitations_open_email_fold_uidx
+    ON tenant_invitations (project_id, tenant_id, lower(email COLLATE "C"))
+    WHERE status = 'pending';
+-- 3. Then `identity migrate`: it rewrites the pending invitations and drops
+--    the two old indexes, skipping what exists.
+```
+
+**Pre-flight: no two rows may collide under the new indexes.** Addresses equal
+under the ASCII fold were already equal under the old `lower()` in every
+locale that lowers ASCII letters to ASCII. A Turkic locale does not (`I`
+lowers to a dotless `ı`), so a colliding pair can exist there. If one does,
+the index build fails and so does the migration
+([If 0034 fails](#if-0034-fails-the-version-is-left-dirty)). `users` has
+`FORCE ROW LEVEL SECURITY`, so run this as a role with `BYPASSRLS` or as a
+superuser. `SET row_security = off` makes any other role fail instead of
+reporting an empty result:
+
+```sql
+SET row_security = off;
+SELECT project_id, lower(email COLLATE "C") AS email_fold, array_agg(id) AS ids
+FROM users WHERE email <> ''
+GROUP BY 1, 2 HAVING count(*) > 1;
+```
+
+Resolve any rows this returns (merge the accounts, or change one address)
+before upgrading. Pending tenant invitations need no pre-flight: the
+migration revokes all but the newest invitation per canonical mailbox before
+it builds their index.
+
+**Rolling back.** The down migration restores the locale `lower()` indexes and
+drops `users.email_fold`. It does not undo the invitation rewrite: pending
+invitations keep their canonical addresses, and the ones it revoked stay
+revoked. It fails if accounts or open invitations created after the upgrade differ only in
+the case of a non-ASCII letter (`é` and `É`) and the database locale folds
+them. Its SQL then rolls back, leaving 0034 in place, but the runner records
+version **33** as dirty (it marks the version a migration moves to). Clear
+that with `identity migrate force 34`, which is the version the schema is
+really at. Find such rows
+before migrating down, as a `BYPASSRLS` role:
+
+```sql
+SET row_security = off;
+SELECT project_id, lower(email) AS email_lower, array_agg(id ORDER BY created_at_ms) AS ids
+FROM users WHERE email <> ''
+GROUP BY 1, 2 HAVING count(*) > 1;
+```
+
+Resolve them before migrating down.
+
+#### If 0034 fails, the version is left dirty
+
+When the lock timeout fires or the index build fails, the migration's SQL
+rolls back as one transaction and changes nothing. The migration runner
+still records schema version 34 as *dirty*. Every later `identity migrate`,
+and every boot with `GATEWAY_POSTGRES_AUTO_MIGRATE`, then refuses to run, and
+replicas that auto-migrate fail to boot until it is cleared. The error says
+which version to record ("record version 33"), and `identity migrate` logs
+the command that records it (`record_version_with`). To recover:
+
+1. Confirm the migration did not apply. The column is absent unless you
+   added it by hand:
+
+   ```sql
+   SELECT count(*) FROM information_schema.columns
+   WHERE table_name = 'users' AND column_name = 'email_fold';  -- 0
+   SELECT version, dirty FROM schema_migrations;               -- 34, true
+   ```
+
+2. Remove the cause (end the long-running transaction, or resolve the
+   collisions the pre-flight query lists).
+3. Run `identity migrate force 33`, which records version 33, clears the flag
+   and runs nothing. Then run `identity migrate`, which applies 0034 again.
+
+Because every statement in 0034 is guarded with `IF [NOT] EXISTS`, forcing 33
+and re-running is also right when you added the column or the new indexes by
+hand: the re-run skips what exists and finishes the rest. Any failed migration
+leaves the same dirty state, and the refusal names the version to record for a
+failed apply and for a failed rollback. If it says the dirty version is newer
+than this build, a newer identity release migrated the database: recover with
+that release, never with this one.
+
+#### `identity migrate` refuses other arguments
+
+`identity migrate` now accepts no argument except
+`force [--override] <version>`.
+Anything else — a flag such as `--verbose`, a stray word — exits with status 2
+instead of being ignored. Check any migrate Job or script that passes extra
+`args` before upgrading, or the step will fail.
+
+### One email comparison rule
+
+The service canonicalizes every address it is given before any store sees it.
+Canonicalizing trims the address, lower-cases it, drops a `+tag`, drops Gmail
+dots and punycodes an internationalized domain. Sign-up and sign-in already
+did this. This release applies it to SCIM, `LookupUsers`, tenant invitations,
+admin `InviteUser` and email change as well. The stores then compare what they are
+given under one rule: ASCII letters fold, every other character must match
+exactly. Before this release Postgres compared by the database locale's
+`lower()`, while SQLite and the memory driver compared by ASCII case, so the
+same addresses could match on one deployment and not on another.
+
+- **Accounts stored in a non-canonical form stop matching.** Lookups,
+  `LookupUsers` and the admin `InviteUser` duplicate check all compare the
+  canonical form of the address they are given with the stored address under
+  the ASCII fold. An account whose stored address is not canonical is
+  therefore found only by its own spelling (up to ASCII case), and not at all
+  by `LookupUsers`, which canonicalizes. Sign-up and sign-in always stored
+  canonical addresses. Earlier releases did not canonicalize in:
+  - SCIM, which stored the address as the IdP sent it (capitals, `+tag`,
+    Gmail dots);
+  - email change and admin `InviteUser`, which stored it lower-cased but kept
+    a `+tag` or Gmail dots.
+
+  On a Postgres database whose locale folds non-ASCII letters (for example
+  `en_US.UTF-8`), a stored `Élodie@corp.com` also used to match
+  `élodie@corp.com` and no longer does. List every account whose stored
+  address differs from its canonical form, as a `BYPASSRLS` role. The query
+  computes the canonical form the way the service does, except that it does
+  not punycode an internationalized domain; list those separately with
+  `WHERE email ~ '@.*[^!-~]'`.
+
+  ```sql
+  SET row_security = off;
+  WITH parts AS (
+      SELECT project_id, id, email,
+             substring(lower(email) FROM '^(.*)@') AS local_part,
+             regexp_replace(substring(lower(email) FROM '@([^@]*)$'), '\.$', '') AS raw_domain
+      FROM users WHERE email <> ''
+  ), domains AS (
+      SELECT *, CASE WHEN raw_domain = 'googlemail.com' THEN 'gmail.com' ELSE raw_domain END AS domain
+      FROM parts
+  )
+  SELECT project_id, id, email,
+         CASE WHEN domain = 'gmail.com' THEN replace(split_part(local_part, '+', 1), '.', '')
+              ELSE split_part(local_part, '+', 1)
+         END || '@' || domain AS canonical_email
+  FROM domains
+  WHERE email <> CASE WHEN domain = 'gmail.com' THEN replace(split_part(local_part, '+', 1), '.', '')
+                      ELSE split_part(local_part, '+', 1)
+                 END || '@' || domain
+  ORDER BY project_id, canonical_email;
+  ```
+
+  Fixing them:
+  - Re-sync a SCIM-provisioned account from your IdP (a SCIM `PUT` or `PATCH`
+    of the user); that stores the canonical form.
+  - Two rows of one project that share a `canonical_email` are two accounts
+    for one mailbox. Decide which one to keep before changing either.
+  - Every other row can be rewritten in place after the upgrade, as a
+    `BYPASSRLS` role. There is no API that sets an account's address to
+    another spelling of the same mailbox, because email change refuses it.
+    The statement below skips any row whose canonical form another account in
+    the project already holds, or that shares it with another listed row.
+    It records no audit event.
+
+  ```sql
+  SET row_security = off;
+  WITH parts AS (
+      SELECT project_id, id, email,
+             substring(lower(email) FROM '^(.*)@') AS local_part,
+             regexp_replace(substring(lower(email) FROM '@([^@]*)$'), '\.$', '') AS raw_domain
+      FROM users WHERE email <> '' AND email !~ '@.*[^!-~]'
+  ), domains AS (
+      SELECT *, CASE WHEN raw_domain = 'googlemail.com' THEN 'gmail.com' ELSE raw_domain END AS domain
+      FROM parts
+  ), canonical AS (
+      SELECT project_id, id, email,
+             CASE WHEN domain = 'gmail.com' THEN replace(split_part(local_part, '+', 1), '.', '')
+                  ELSE split_part(local_part, '+', 1)
+             END || '@' || domain AS canonical_email
+      FROM domains
+  ), fixable AS (
+      SELECT c.* FROM canonical c
+      WHERE c.email <> c.canonical_email
+        AND (SELECT count(*) FROM canonical o
+             WHERE o.project_id = c.project_id AND o.canonical_email = c.canonical_email) = 1
+  )
+  UPDATE users u
+  SET email = f.canonical_email,
+      updated_at_ms = (extract(epoch FROM clock_timestamp()) * 1000)::bigint
+  FROM fixable f
+  WHERE u.id = f.id;
+  ```
+
+- **SCIM.** `userName` and `emails` are stored in canonical form, so a
+  provisioned account is the one sign-in finds, and a later self-sign-up with
+  the same mailbox is refused as a duplicate instead of creating a second
+  account outside SCIM deprovisioning. Responses carry the canonical address
+  as `userName`, which can differ from what your IdP sent. The `userName eq` /
+  `emails eq` filter canonicalizes its value, so an IdP searching by its own
+  spelling still finds the user. An account provisioned by an earlier release
+  (stored as the IdP spelled it) is still found by that spelling, so an IdP
+  that filters before it creates does not create a second account. The next
+  `PUT` or `PATCH` of that account stores the canonical form.
+- **`LookupUsers`.** Each requested address is canonicalized exactly as
+  sign-in canonicalizes it, so the lookup finds the account sign-in with that
+  address would. Addresses that canonicalize to the same address produce one
+  entry. The entry's `email` is the address on file, which can differ from
+  the requested spelling in case, a `+tag` or Gmail dots, so each entry now
+  also carries **`requested_emails`** (`requestedEmails` in JSON): every
+  address you sent that found it, each distinct spelling once. Pair results
+  with requests by that field, not by `email`. The field is additive; older
+  clients ignore it.
+- **`LookupUsers` error order.** The batch is now validated before the
+  directory key is looked up. A request with a missing key, or one not shaped
+  `<public id>.<secret>`, is still `UNAUTHENTICATED`. A request with a
+  well-formed but wrong key and a malformed batch (empty, more than 100
+  addresses, a blank or over-320-byte address) now gets `INVALID_ARGUMENT`
+  instead of `UNAUTHENTICATED`.
+- **Tenant invitations** are stored in canonical form. Accepting one compares
+  the caller's address and the invited address in canonical form, so a `+tag`
+  variant of the invited mailbox may accept, and an address differing in a
+  non-ASCII letter may not (`PERMISSION_DENIED`). A new invitation revokes the pending one for the same mailbox, and
+  concurrent invitations to one mailbox leave one pending instead of failing.
+  That holds for every invitation created from this release on, and for the
+  pending all-ASCII ones 0034 canonicalized. A pending invitation with a
+  non-ASCII address stored before this release keeps its spelling: if that
+  spelling is not canonical (a `+tag`, a Gmail variant), a new invitation to
+  the same mailbox leaves it pending beside the new one until it expires or
+  is revoked.
+- **Admin `InviteUser`** stores the invited address in canonical form, and
+  refuses it as a duplicate when an account already holds that canonical
+  form. An account stored in a non-canonical form (see above) is not
+  recognised by that check.
+- **Addresses that are nothing but a `+tag`** (`+x@corp.com`) pass the
+  address format check but have no mailbox left once canonical. Every path
+  that stores or looks up an account's address now refuses them: sign-up and
+  sign-in (`INVALID_ARGUMENT`), passkey sign-up, the anonymous upgrade, admin
+  `InviteUser`, email change, tenant invitations, SCIM (`invalidValue`) and
+  the first-admin bootstrap. OAuth sign-in refuses such a provider address as
+  unauthenticated. Passwordless requests and password resets still answer as
+  before but send nothing, and `LookupUsers` returns no entry for them.
+- **Email change** stores the new address in canonical form, and refuses one
+  whose canonical form equals the current address, for example
+  `me+x@corp.com` for `me@corp.com`, because sign-in already resolves it to
+  the same account.
 
 ## v4.7 → v4.8 — directory lookup for services (additive); session-mode and SCIM fixes (behaviour changes)
 

@@ -164,7 +164,9 @@ func (h *scimHandler) refuse(ctx context.Context, w http.ResponseWriter, r *http
 }
 
 // repoSCIMStore adapts service.Repository to scim.Store. It maps the SCIM
-// User core schema onto the host User model: userName ⇒ email, externalId ⇒
+// User core schema onto the host User model: userName ⇒ email (canonicalized
+// as sign-up canonicalizes it, service.CanonicalizeEmail, so a provisioned
+// account is the one sign-in and a later self-sign-up resolve), externalId ⇒
 // ExternalID, name ⇒ a single Name field is not stored (the host has only a
 // display Name), so given/family are joined into Name and split back out on
 // read for round-tripping. active is the inverse of the "deactivated" status;
@@ -265,8 +267,12 @@ func (s *repoSCIMStore) CreateUser(ctx context.Context, u scim.User) (scim.User,
 	if !u.Active {
 		status = statusDeactivated
 	}
+	email, err := scimEmail(u.Email)
+	if err != nil {
+		return scim.User{}, err
+	}
 	su := &service.User{
-		Email:      u.Email,
+		Email:      email,
 		Name:       joinName(u.GivenName, u.FamilyName),
 		ExternalID: u.ExternalID,
 		Status:     status,
@@ -326,8 +332,12 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 	if !u.Active {
 		status = statusDeactivated
 	}
+	email, err := scimEmail(u.Email)
+	if err != nil {
+		return scim.User{}, err
+	}
 	fields := map[string]any{
-		"email":       u.Email,
+		"email":       email,
 		"name":        joinName(u.GivenName, u.FamilyName),
 		"external_id": u.ExternalID,
 		"status":      status,
@@ -387,12 +397,19 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 
 	fields := map[string]any{}
 	// userName and email both map to the host email column; an explicit email
-	// wins when both are present.
-	if patch.UserName != nil {
-		fields["email"] = *patch.UserName
-	}
+	// wins when both are present, and only the value that is stored is
+	// validated, so an IdP whose userName is not an address can still send
+	// one alongside it.
+	address := patch.UserName
 	if patch.Email != nil {
-		fields["email"] = *patch.Email
+		address = patch.Email
+	}
+	if address != nil {
+		email, err := scimEmail(*address)
+		if err != nil {
+			return scim.User{}, err
+		}
+		fields["email"] = email
 	}
 	if patch.ExternalID != nil {
 		fields["external_id"] = *patch.ExternalID
@@ -470,6 +487,18 @@ func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]sci
 	if email == "" {
 		email = f.UserName
 	}
+	if email != "" {
+		resolved, err := s.filterEmail(ctx, email)
+		if err != nil {
+			return nil, 0, err
+		}
+		// A filter on a blank address names nobody. Passed on as "" it would
+		// read as no filter at all and list every user.
+		if resolved == "" {
+			return nil, 0, nil
+		}
+		email = resolved
+	}
 	offset := f.StartIndex - 1
 	if offset < 0 {
 		offset = 0
@@ -504,6 +533,40 @@ func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]sci
 		out = append(out, toSCIMUser(u))
 	}
 	return out, total, nil
+}
+
+// scimEmail is the address a SCIM write stores for an IdP's userName or
+// email: its canonical form, refused as an invalid value when that is not a
+// mailbox an account can hold (a bare "+tag" local part, no domain).
+func scimEmail(raw string) (string, error) {
+	email, usable := service.CanonicalMailbox(raw)
+	if !usable {
+		return "", fmt.Errorf("%w: %q is not a usable email address", scim.ErrInvalidValue, raw)
+	}
+	return email, nil
+}
+
+// filterEmail resolves a userName / emails filter value to the address to
+// match. The writes above store the canonical form, so that is what the filter
+// matches — unless no account has it and the value as sent names one: an
+// account provisioned before SCIM canonicalized was stored as the IdP spelled
+// it, and an IdP re-sync filters by that spelling before deciding to create,
+// so missing it would create a second account for the same mailbox. The next
+// PUT or PATCH of that account rewrites it in canonical form.
+func (s *repoSCIMStore) filterEmail(ctx context.Context, raw string) (string, error) {
+	canonical := service.CanonicalizeEmail(raw)
+	asSent := strings.TrimSpace(raw)
+	if service.FoldEmail(asSent) == service.FoldEmail(canonical) {
+		return canonical, nil
+	}
+	n, err := s.repo.CountUsers(ctx, service.UserListFilter{Email: canonical})
+	if err != nil {
+		return "", mapStoreErr(err)
+	}
+	if n > 0 {
+		return canonical, nil
+	}
+	return asSent, nil
 }
 
 func toSCIMUser(u *service.User) scim.User {

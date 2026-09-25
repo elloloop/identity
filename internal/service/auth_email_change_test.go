@@ -186,6 +186,39 @@ func TestRequestEmailChange_SameAsCurrentRejected(t *testing.T) {
 	}
 }
 
+// A new address that canonicalizes to the current one is the same mailbox
+// sign-in already resolves to this account.
+func TestRequestEmailChange_SameCanonicalAddressRejected(t *testing.T) {
+	t.Parallel()
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
+	for _, same := range []string{"OLD+x@test.com", " old@TEST.com "} {
+		if err := svc.RequestEmailChange(context.Background(), user.ID, same, "Str0ng!Pass1"); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("RequestEmailChange(%q): want ErrInvalidArgument, got %v", same, err)
+		}
+	}
+}
+
+// The requested address is stored on the change token, and so on the account
+// once confirmed, in canonical form.
+func TestRequestEmailChange_StoresCanonicalNewEmail(t *testing.T) {
+	t.Parallel()
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
+	if err := svc.RequestEmailChange(context.Background(), user.ID, " New.Me+Work@GoogleMail.com ", "Str0ng!Pass1"); err != nil {
+		t.Fatalf("RequestEmailChange: %v", err)
+	}
+	var got []string
+	repo.mu.Lock()
+	for _, tok := range repo.emailChanges {
+		got = append(got, tok.NewEmail)
+	}
+	repo.mu.Unlock()
+	if len(got) != 1 || got[0] != "newme@gmail.com" {
+		t.Fatalf("change token new emails = %q, want [newme@gmail.com]", got)
+	}
+}
+
 func TestRequestEmailChange_InvalidNewEmailRejected(t *testing.T) {
 	t.Parallel()
 	svc, repo, _ := newAuthSvcWithMailer(t)
@@ -196,7 +229,7 @@ func TestRequestEmailChange_InvalidNewEmailRejected(t *testing.T) {
 	}
 }
 
-func TestLooksLikeEmailRejectsMalformedAddresses(t *testing.T) {
+func TestCanonicalMailboxRejectsUnusableAddresses(t *testing.T) {
 	t.Parallel()
 	cases := map[string]bool{
 		"alice@example.com":       true,
@@ -207,10 +240,12 @@ func TestLooksLikeEmailRejectsMalformedAddresses(t *testing.T) {
 		"alice@":                  false,
 		"alice@sub.example.com":   true,
 		"alice+label@example.com": true,
+		"+label@example.com":      false, // nothing left of the local part once the tag is dropped
+		"+@example.com":           false,
 	}
 	for addr, want := range cases {
-		if got := looksLikeEmail(addr); got != want {
-			t.Fatalf("looksLikeEmail(%q) = %v, want %v", addr, got, want)
+		if _, got := CanonicalMailbox(addr); got != want {
+			t.Fatalf("CanonicalMailbox(%q) usable = %v, want %v", addr, got, want)
 		}
 	}
 }
@@ -564,5 +599,40 @@ func TestConfirmEmailChange_PostUpdateSideEffectFailuresStillReturnUpdatedUser(t
 				t.Fatalf("repo user not updated: %+v", updated)
 			}
 		})
+	}
+}
+
+// A change token minted before RequestEmailChange canonicalized carries the
+// address as typed. Confirming it stores the canonical form, and refuses one
+// with no mailbox left once canonical.
+func TestConfirmEmailChange_CanonicalizesAPreUpgradeToken(t *testing.T) {
+	t.Parallel()
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
+	mint := func(raw, newEmail string) {
+		t.Helper()
+		if err := repo.CreateEmailChangeToken(context.Background(), &EmailChangeToken{
+			TokenHash: sha256Hex(raw), UserID: user.ID, OldEmail: user.Email, NewEmail: newEmail,
+			ExpiresAt: nowMs() + 60_000, CreatedAt: nowMs(),
+		}); err != nil {
+			t.Fatalf("mint token: %v", err)
+		}
+	}
+
+	mint("tag-only", "+work@example.com")
+	if _, err := svc.ConfirmEmailChange(context.Background(), "tag-only"); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("confirming a tag-only address: err = %v, want ErrInvalidArgument", err)
+	}
+
+	mint("legacy", "New.Me+work@GoogleMail.com")
+	got, err := svc.ConfirmEmailChange(context.Background(), "legacy")
+	if err != nil {
+		t.Fatalf("ConfirmEmailChange: %v", err)
+	}
+	if got.Email != "newme@gmail.com" {
+		t.Fatalf("returned email = %q, want the canonical newme@gmail.com", got.Email)
+	}
+	if stored, _ := repo.GetUser(context.Background(), user.ID); stored == nil || stored.Email != "newme@gmail.com" {
+		t.Fatalf("stored user = %+v, want email newme@gmail.com", stored)
 	}
 }

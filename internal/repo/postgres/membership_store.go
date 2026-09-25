@@ -205,7 +205,12 @@ func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 
 // CreateInvitation atomically enforces one-open-invite: in a single
 // transaction it revokes any existing pending invitation for the same
-// (project, tenant, lower(email)) and inserts the new one. This is the
+// (project, tenant, email under service.FoldEmail) and inserts the new one.
+// The service stores invitations in canonical form, and migration 0034
+// canonicalized the pending ones stored before it did, so the fold key names
+// the mailbox. Creates for one mailbox are serialized by a transaction-scoped
+// advisory lock, so concurrent ones each revoke the one before and exactly
+// one stays pending; the fold-keyed partial unique index is the backstop. This is the
 // authoritative enforcement (the partial unique index is defense-in-depth,
 // and the memory driver — should they ever gain invitations — must
 // match these revoke-then-insert semantics).
@@ -246,12 +251,18 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 
 	// Revoke any open invite for the same recipient first, so the new one
 	// is the only pending row — one open invite per (project, tenant, email).
+	key := service.FoldEmail(inv.Email)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		invitationLockKey(inv.ProjectID, inv.TenantID, key),
+	); err != nil {
+		return "", wrapPgErr("CreateInvitation(lock)", err)
+	}
 	if _, err := tx.Exec(
 		ctx, `
 		UPDATE tenant_invitations SET status = 'revoked'
 		WHERE project_id = $1 AND tenant_id = $2
-		  AND lower(email) = lower($3) AND status = 'pending'`,
-		inv.ProjectID, inv.TenantID, inv.Email,
+		  AND lower(email COLLATE "C") = $3 AND status = 'pending'`,
+		inv.ProjectID, inv.TenantID, key,
 	); err != nil {
 		return "", wrapPgErr("CreateInvitation(revoke)", err)
 	}
@@ -275,6 +286,14 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	inv.Role = role
 	inv.Status = service.InvitationStatusPending
 	return id, nil
+}
+
+// invitationLockKey names the advisory lock that serializes invitation
+// creates for one (project, tenant, folded email). The length prefixes keep
+// distinct triples from sharing a key string whatever characters they hold.
+func invitationLockKey(projectID, tenantID, foldedEmail string) string {
+	return fmt.Sprintf("tenant_invitation:%d:%s:%d:%s:%s",
+		len(projectID), projectID, len(tenantID), tenantID, foldedEmail)
 }
 
 // GetInvitationByTokenHash resolves an invitation by its hashed token

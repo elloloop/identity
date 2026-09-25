@@ -45,9 +45,19 @@ import { Code } from "astro-expressive-code/components";
       routes' <code>project_key</code> parameter, it selects no project.
     </li>
     <li>
-      Matching is exact, ignoring case — the comparison sign-in uses. No
-      prefix, substring or domain search, so the directory cannot be listed
-      through it.
+      Each address is canonicalized the way sign-in canonicalizes the address
+      it is given — trimmed and lower-cased, a <code>+tag</code> dropped,
+      Gmail dots dropped, an internationalized domain punycoded — so it finds
+      exactly the account signing in with that address would. A
+      <code>+tag</code> is dropped on every domain, so
+      <code>bob+x@corp.com</code> finds the account at
+      <code>bob@corp.com</code>. No prefix, substring or domain search, so the
+      directory cannot be listed through it.
+    </li>
+    <li>
+      Key anything you authorize on the returned <code>id</code>, never on the
+      email: several spellings resolve to one account, and an account's
+      address can change.
     </li>
     <li>
       Only <strong>active</strong> accounts are returned. Invited,
@@ -149,21 +159,29 @@ import { Code } from "astro-expressive-code/components";
     code={`curl -sS -X POST https://auth.example.com/identity.v1.IdentityService/LookupUsers \\
   -H "X-Directory-Key: $DIRECTORY_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"emails": ["alice@corp.com", "bob@corp.com"]}'
+  -d '{"emails": ["Alice+team@corp.com", "alice@corp.com", "bob@corp.com"]}'
 
-# {"users":[{"id":"u_31…","email":"alice@corp.com","name":"Alice","avatarUrl":"https://…","emailVerified":true}]}`}
+# {"users":[{"id":"u_31…","email":"alice@corp.com","name":"Alice","avatarUrl":"https://…","emailVerified":true,"requestedEmails":["Alice+team@corp.com","alice@corp.com"]}]}`}
   />
   <p>
     Results come back in request order, one entry per distinct address that
-    names an account the lookup may return. Addresses that differ only in case
-    are the same address and produce one entry. Because omitted addresses
-    leave no gap, match each entry to your request by its <code>email</code>,
-    never by position.
+    names an account the lookup may return. Addresses that canonicalize to the
+    same address produce one entry. Because omitted addresses leave no gap,
+    match each entry to your requests by its <code>requestedEmails</code> —
+    every address you sent that found it, trimmed, each distinct spelling
+    once — never by position. Its
+    <code>email</code> is the address the account has on file, which can
+    differ from the spelling you sent in case, a <code>+tag</code> or Gmail
+    dots.
   </p>
   <p>
     A missing, wrong, revoked or non-directory key is
     <code>UNAUTHENTICATED</code>; an empty batch, a blank address, an address
     longer than 320 bytes or more than 100 addresses is
+    <code>INVALID_ARGUMENT</code>. The batch is checked before the key is
+    looked up: a missing key, or one not shaped
+    <code>&lt;public id&gt;.&lt;secret&gt;</code>, is refused first, but a
+    well-formed wrong key with a malformed batch gets
     <code>INVALID_ARGUMENT</code>.
   </p>
 

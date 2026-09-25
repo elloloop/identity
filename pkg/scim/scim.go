@@ -107,6 +107,9 @@ type ListFilter struct {
 var (
 	ErrNotFound = errors.New("scim: resource not found")
 	ErrConflict = errors.New("scim: uniqueness conflict")
+	// ErrInvalidValue marks an attribute value the Store refuses; wrap it
+	// with the reason, which becomes the error detail.
+	ErrInvalidValue = errors.New("scim: invalid attribute value")
 )
 
 // splitName splits a SCIM formatted/display name into given/family parts on

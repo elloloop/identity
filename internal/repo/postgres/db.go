@@ -123,6 +123,9 @@ type dbFieldSpec struct {
 	col             string
 	kind            string
 	caseInsensitive bool
+	// foldCol names the stored service.FoldEmail key of col: a filter on col
+	// compares that column with the folded value, as FindUserByEmail does.
+	foldCol string
 }
 
 const (
@@ -133,7 +136,7 @@ const (
 
 var (
 	userQueryFields = map[string]dbFieldSpec{
-		dbUfEmail:            {col: "email", kind: dbKindString, caseInsensitive: true},
+		dbUfEmail:            {col: "email", kind: dbKindString, foldCol: "email_fold"},
 		dbUfName:             {col: "name", kind: dbKindString},
 		dbUfRole:             {col: "role", kind: dbKindString},
 		dbUfAvatarURL:        {col: "avatar_url", kind: dbKindString},
@@ -685,11 +688,15 @@ func (r *pgRepository) getUserNode(ctx context.Context, userID string) (*graph.N
 	return userNodeFromRecord(u), nil
 }
 
+func (r *pgRepository) userNodesQuery(filter map[string]any) (string, []any) {
+	return buildSelectQuery(`SELECT `+userColumns+` FROM users WHERE project_id = $1 AND NOT is_anonymous`, r.projectID, filter, userQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
+}
+
 func (r *pgRepository) queryUserNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
 	// NOT is_anonymous, matching Repository.ListUsers' filter: this is the
 	// admin/graph listing path, and a credential-less account has no email
 	// to present. Both user-listing surfaces answer to one rule.
-	query, args := buildSelectQuery(`SELECT `+userColumns+` FROM users WHERE project_id = $1 AND NOT is_anonymous`, r.projectID, filter, userQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
+	query, args := r.userNodesQuery(filter)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, wrapPgErr("QueryNodes(users)", err)
@@ -1102,18 +1109,19 @@ func buildSelectQuery(base string, projectID string, filter map[string]any, spec
 			if !ok {
 				continue
 			}
-			if spec.caseInsensitive {
-				// `col <> ''` keeps a PARTIAL index on that column usable.
-				// users_project_email_partial_uidx (0028) is predicated on
-				// `email <> ''`, and Postgres only uses a partial index when
-				// the query provably implies its predicate — a
-				// `lower(col) = lower($n)` clause against a parameter does
-				// not. Without this the admin invite/create duplicate-address
-				// check falls back to a full project scan. Semantically a
-				// no-op: an empty needle never equals a non-empty value, and
-				// callers filtering on "" want no rows either way.
+			// `col <> ''` proves the predicate of the partial
+			// users_project_email_fold_uidx (0034), which Postgres uses only
+			// when the query implies it; without it the admin invite/create
+			// duplicate-address check scans the project. Semantically a
+			// no-op: an empty needle never equals a non-empty value, and
+			// callers filtering on "" want no rows either way.
+			switch {
+			case spec.foldCol != "":
+				fmt.Fprintf(&sb, " AND %s <> '' AND %s = $%d", spec.col, spec.foldCol, idx)
+				s = service.FoldEmail(s)
+			case spec.caseInsensitive:
 				fmt.Fprintf(&sb, " AND %s <> '' AND lower(%s) = lower($%d)", spec.col, spec.col, idx)
-			} else {
+			default:
 				fmt.Fprintf(&sb, " AND %s = $%d", spec.col, idx)
 			}
 			args = append(args, s)

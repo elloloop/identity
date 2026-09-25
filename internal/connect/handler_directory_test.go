@@ -85,6 +85,7 @@ func TestLookupUsers_MintLookupRevoke(t *testing.T) {
 	}
 	want := &identitypb.DirectoryUser{
 		Id: alice, Email: "alice@corp.test", Name: "Alice", AvatarUrl: "https://cdn.test/a.png", EmailVerified: true,
+		RequestedEmails: []string{"Alice@Corp.Test"},
 	}
 	if users[0].String() != want.String() {
 		t.Fatalf("user = %v, want %v", users[0], want)

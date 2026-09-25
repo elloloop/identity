@@ -42,7 +42,7 @@ func (s *AuthService) enforceSessionTimeout(ctx context.Context, email string, n
 }
 
 // emailDomain returns the domain part of an email. It splits on the LAST '@'
-// so it computes exactly the same domain as canonicalizeEmail — a quoted local
+// so it computes exactly the same domain as CanonicalizeEmail — a quoted local
 // part may itself contain '@' (e.g. "a@b"@example.com), and splitting on the
 // first '@' would yield a bogus domain that mis-resolves the tenant LoginPolicy
 // and the access allowlist. Returns "" when the address has no '@'.
@@ -205,7 +205,7 @@ func (g *LoginGovernance) resolvePolicy(ctx context.Context, projectID string, l
 		return nil, nil
 	}
 	// Split on the LAST '@' (via emailDomain) so the tenant lookup key matches
-	// canonicalizeEmail's domain — a quoted local part containing '@' must not
+	// CanonicalizeEmail's domain — a quoted local part containing '@' must not
 	// resolve to a bogus domain and thereby skip the tenant's SSO/2FA policy.
 	domainName := emailDomain(email)
 	if domainName == "" {

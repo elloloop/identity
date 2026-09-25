@@ -155,9 +155,8 @@ func runRepositorySmoke(t *testing.T, dsn, projectID string) {
 	require.NoError(t, err)
 	require.NotEmpty(t, id)
 
-	// Case-insensitive lookup is postgres-specific (uses lower(email)
-	// in the unique index) — the conformance suite asserts only the
-	// exact-match contract.
+	// The lookup goes through the email_fold column its unique index is
+	// built on; the conformance suite pins the folding rule itself.
 	byEmail, err := repo.FindUserByEmail(ctx, "Alice@Example.com")
 	require.NoError(t, err)
 	require.NotNil(t, byEmail)

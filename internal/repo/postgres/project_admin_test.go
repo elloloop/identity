@@ -293,7 +293,7 @@ func TestDirectoryCredentialStore_Smoke(t *testing.T) {
 	})
 	require.NoError(t, err, "migration 0033 admits the directory_reader kind")
 
-	got, err := store.ActiveProjectCredentialByPublicID(ctx, "dk_dir_smoke")
+	got, err := store.CredentialByPublicIDInActiveProject(ctx, "dk_dir_smoke")
 	require.NoError(t, err)
 	require.Equal(t, &service.AdminProjectCredential{
 		ID:         credID,
@@ -313,15 +313,15 @@ func TestDirectoryCredentialStore_Smoke(t *testing.T) {
 	require.NotNil(t, resolved, "an mtls credential still selects its project")
 	require.Equal(t, projID, resolved.ID)
 
-	miss, err := store.ActiveProjectCredentialByPublicID(ctx, "dk_unknown")
+	miss, err := store.CredentialByPublicIDInActiveProject(ctx, "dk_unknown")
 	require.NoError(t, err)
 	require.Nil(t, miss)
-	miss, err = store.ActiveProjectCredentialByPublicID(ctx, "")
+	miss, err = store.CredentialByPublicIDInActiveProject(ctx, "")
 	require.NoError(t, err)
 	require.Nil(t, miss)
 
 	require.NoError(t, store.RevokeProjectCredential(ctx, projID, credID, 0))
-	got, err = store.ActiveProjectCredentialByPublicID(ctx, "dk_dir_smoke")
+	got, err = store.CredentialByPublicIDInActiveProject(ctx, "dk_dir_smoke")
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.True(t, got.Revoked, "a revoked credential is reported as revoked, not hidden")
@@ -332,7 +332,7 @@ func TestDirectoryCredentialStore_Smoke(t *testing.T) {
 		ProjectID: suspID, Kind: service.CredentialKindDirectoryReader, PublicID: "dk_dir_susp", SecretHash: "h",
 	})
 	require.NoError(t, err)
-	miss, err = store.ActiveProjectCredentialByPublicID(ctx, "dk_dir_susp")
+	miss, err = store.CredentialByPublicIDInActiveProject(ctx, "dk_dir_susp")
 	require.NoError(t, err)
 	require.Nil(t, miss, "a suspended project's credential must not authenticate")
 

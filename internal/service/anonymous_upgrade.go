@@ -60,7 +60,10 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 	if err := validateEmailFormat(email); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
-	cemail := canonicalize(email)
+	cemail, usable := canonicalMailbox(email)
+	if !usable {
+		return nil, errNoUsableMailbox
+	}
 	email = string(cemail)
 	// Before any password work, and before the address probe below, so a
 	// restricted project neither mints a disallowed account nor answers
@@ -214,12 +217,15 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 		return nil, fmt.Errorf("%w: provider returned no stable subject", ErrUnauthenticated)
 	}
 
-	email := canonicalize(strings.TrimSpace(strings.ToLower(identity.Email)))
+	email, usable := canonicalMailbox(identity.Email)
 	if email == "" {
 		// A permanent account must have an address. Without one it cannot be
 		// recovered, cannot be allowlisted, and occupies the empty-email slot
 		// the partial index exists to keep free for anonymous users.
 		return nil, fmt.Errorf("%w: provider returned no email, which a permanent account requires", ErrInvalidArgument)
+	}
+	if !usable {
+		return nil, errNoUsableMailbox
 	}
 	// Same gate as the password path: this is what provisions an identified
 	// account in the project's namespace.

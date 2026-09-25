@@ -572,7 +572,9 @@ type IdentityServiceClient interface {
 	// except for AcceptTenantInvitation — gated on the caller being an
 	// owner/admin member of the target tenant. AcceptTenantInvitation is the
 	// redeemer's own action: any authenticated caller may redeem a token, but
-	// only for an invitation addressed to their own account email. Available
+	// only for an invitation addressed to their own account email (compared in
+	// the canonical form sign-in uses, so a "+tag" spelling of it matches;
+	// PERMISSION_DENIED otherwise). Available
 	// only on the postgres control-plane driver; memory deployments
 	// return Unimplemented.
 	CreateTenantInvitation(context.Context, *connect.Request[v1.CreateTenantInvitationRequest]) (*connect.Response[v1.CreateTenantInvitationResponse], error)
@@ -670,7 +672,10 @@ type IdentityServiceClient interface {
 	// to that credential's project whatever the request Host. The credential
 	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
 	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
-	// more than 100 addresses, or a blank or over-320-byte address;
+	// more than 100 addresses, or a blank or over-320-byte address. The batch
+	// is checked before the key is looked up, so a key shaped
+	// "<public id>.<secret>" that is wrong still gets INVALID_ARGUMENT for a
+	// malformed batch; only a missing or malformed key is refused first;
 	// UNIMPLEMENTED on a build with no control plane. Calls are rate-limited
 	// per client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per
 	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS), with one budget shared by the HTTP
@@ -2348,7 +2353,9 @@ type IdentityServiceHandler interface {
 	// except for AcceptTenantInvitation — gated on the caller being an
 	// owner/admin member of the target tenant. AcceptTenantInvitation is the
 	// redeemer's own action: any authenticated caller may redeem a token, but
-	// only for an invitation addressed to their own account email. Available
+	// only for an invitation addressed to their own account email (compared in
+	// the canonical form sign-in uses, so a "+tag" spelling of it matches;
+	// PERMISSION_DENIED otherwise). Available
 	// only on the postgres control-plane driver; memory deployments
 	// return Unimplemented.
 	CreateTenantInvitation(context.Context, *connect.Request[v1.CreateTenantInvitationRequest]) (*connect.Response[v1.CreateTenantInvitationResponse], error)
@@ -2446,7 +2453,10 @@ type IdentityServiceHandler interface {
 	// to that credential's project whatever the request Host. The credential
 	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
 	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
-	// more than 100 addresses, or a blank or over-320-byte address;
+	// more than 100 addresses, or a blank or over-320-byte address. The batch
+	// is checked before the key is looked up, so a key shaped
+	// "<public id>.<secret>" that is wrong still gets INVALID_ARGUMENT for a
+	// malformed batch; only a missing or malformed key is refused first;
 	// UNIMPLEMENTED on a build with no control plane. Calls are rate-limited
 	// per client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per
 	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS), with one budget shared by the HTTP
