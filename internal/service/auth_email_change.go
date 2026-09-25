@@ -213,7 +213,14 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
-	existing, err := s.repo(ctx).FindUserByEmail(ctx, rec.NewEmail)
+	// A token minted before RequestEmailChange canonicalized carries the
+	// address as typed; store the canonical form every lookup resolves by.
+	newEmail, usable := canonicalMailbox(rec.NewEmail)
+	if !usable {
+		return nil, errNoUsableMailbox
+	}
+
+	existing, err := s.repo(ctx).FindUserByEmail(ctx, string(newEmail))
 	if err != nil {
 		return nil, fmt.Errorf("checking email uniqueness: %w", err)
 	}
@@ -227,16 +234,16 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 	// would otherwise have every outstanding token as a hole in the new
 	// policy. Redemption is the authoritative point, the same place the
 	// passwordless flows put their decisive access check.
-	if err := s.enforceProjectAccessLogin(ctx, canonicalize(rec.NewEmail)); err != nil {
+	if err := s.enforceProjectAccessLogin(ctx, newEmail); err != nil {
 		return nil, err
 	}
 
 	now := s.nowMs()
-	if err := s.repo(ctx).UpdateUserEmail(ctx, user.ID, rec.NewEmail, now); err != nil {
+	if err := s.repo(ctx).UpdateUserEmail(ctx, user.ID, string(newEmail), now); err != nil {
 		return nil, fmt.Errorf("updating user email: %w", err)
 	}
 
-	user.Email = rec.NewEmail
+	user.Email = string(newEmail)
 	user.EmailVerified = true
 	user.EmailVerifiedAt = now
 	user.UpdatedAt = time.UnixMilli(now)
@@ -262,7 +269,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 		audit.WithDetails(map[string]any{
 			"step":      "email_change_confirmed",
 			"old_email": rec.OldEmail,
-			"new_email": rec.NewEmail,
+			"new_email": string(newEmail),
 		}),
 	)
 	return user, nil

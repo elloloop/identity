@@ -601,3 +601,38 @@ func TestConfirmEmailChange_PostUpdateSideEffectFailuresStillReturnUpdatedUser(t
 		})
 	}
 }
+
+// A change token minted before RequestEmailChange canonicalized carries the
+// address as typed. Confirming it stores the canonical form, and refuses one
+// with no mailbox left once canonical.
+func TestConfirmEmailChange_CanonicalizesAPreUpgradeToken(t *testing.T) {
+	t.Parallel()
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
+	mint := func(raw, newEmail string) {
+		t.Helper()
+		if err := repo.CreateEmailChangeToken(context.Background(), &EmailChangeToken{
+			TokenHash: sha256Hex(raw), UserID: user.ID, OldEmail: user.Email, NewEmail: newEmail,
+			ExpiresAt: nowMs() + 60_000, CreatedAt: nowMs(),
+		}); err != nil {
+			t.Fatalf("mint token: %v", err)
+		}
+	}
+
+	mint("tag-only", "+work@example.com")
+	if _, err := svc.ConfirmEmailChange(context.Background(), "tag-only"); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("confirming a tag-only address: err = %v, want ErrInvalidArgument", err)
+	}
+
+	mint("legacy", "New.Me+work@GoogleMail.com")
+	got, err := svc.ConfirmEmailChange(context.Background(), "legacy")
+	if err != nil {
+		t.Fatalf("ConfirmEmailChange: %v", err)
+	}
+	if got.Email != "newme@gmail.com" {
+		t.Fatalf("returned email = %q, want the canonical newme@gmail.com", got.Email)
+	}
+	if stored, _ := repo.GetUser(context.Background(), user.ID); stored == nil || stored.Email != "newme@gmail.com" {
+		t.Fatalf("stored user = %+v, want email newme@gmail.com", stored)
+	}
+}
