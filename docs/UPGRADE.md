@@ -101,9 +101,17 @@ project's id, and nothing on them records the project the request was for. On
 their own they cannot be told apart from genuine default-project accounts. The
 audit trail can tell some of them apart: audit events were always written in
 the project the request resolved to, including under session mode. Run this
-against the database **before** upgrading, with your default project's id:
+against the database **before** upgrading, with your default project's id.
+
+`users` and `audit_events` have `FORCE ROW LEVEL SECURITY` keyed on
+`app.current_project_id` (migration 0016), so under the application role — which
+must not have `BYPASSRLS` (`docs/postgres-rls.md`) — the query silently returns
+no rows and reads as an all-clear. Run it as a role with `BYPASSRLS` or as a
+superuser. The `SET row_security = off` line makes a role without `BYPASSRLS`
+fail with an error instead of returning an empty result:
 
 ```sql
+SET row_security = off;
 SELECT u.id, u.email, a.project_id AS used_through, count(*) AS events
 FROM users u
 JOIN audit_events a ON a.actor = u.id AND a.project_id <> u.project_id
@@ -125,7 +133,8 @@ Read the result as follows:
 
 **What to do.**
 
-- If the query returns no rows, no account with a surviving audit trail is
+- If the query (run as described above, without an error) returns no rows,
+  no account with a surviving audit trail is
   misplaced; upgrade normally. An account whose events are gone can still be
   misplaced, and its user will find it missing as described above.
 - If it returns rows, **hold the upgrade** until you have chosen, for each
@@ -134,9 +143,14 @@ Read the result as follows:
     creates a new `sub`. Re-key anything downstream on the email address, then
     delete the stale default-project account.
   - **Move the account before upgrading.** With the server stopped, in one
-    transaction, set `project_id` to the target project on the account's
-    `users` row and on every row that references the account in the other
-    data-plane tables. The move fails on the per-project unique email index
+    transaction and as a role with `BYPASSRLS` (under row-level security an
+    `UPDATE` of another project's rows changes zero rows without an error),
+    set `project_id` to the target project on the account's `users` row and on
+    every row that references the account in the other data-plane tables —
+    every table migration `0016_enable_rls_data_plane.up.sql` and later
+    migrations put under `FORCE ROW LEVEL SECURITY` that carries a user id
+    (`SELECT relname FROM pg_class WHERE relforcerowsecurity` lists them).
+    Check each `UPDATE`'s row count. The move fails on the per-project unique email index
     where the target project already has an account at that address. Rehearse
     it on a copy of the database first.
 

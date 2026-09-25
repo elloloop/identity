@@ -495,8 +495,10 @@ func (r *pgRepository) FindUsersByEmails(ctx context.Context, emails []string) (
 	if len(emails) == 0 {
 		return nil, nil
 	}
-	// lower() on both sides is FindUserByEmail's comparison, and the
-	// (project_id, lower(email)) index serves it.
+	// lower() on both sides is FindUserByEmail's comparison. Under FORCE
+	// row-level security lower() is not leakproof, so the planner cannot use
+	// the (project_id, lower(email)) index as an index condition here and the
+	// project's rows are scanned — the same as FindUserByEmail today.
 	const q = `SELECT ` + userColumns + `
 		FROM users
 		WHERE project_id = $1 AND email <> ''
