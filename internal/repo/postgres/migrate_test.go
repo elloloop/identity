@@ -64,12 +64,12 @@ func TestMigrate_AppliesAndIdempotent(t *testing.T) {
 // DSN, and a version no embedded migration has, are refused before any
 // connection is attempted.
 func TestForceMigrationVersion_RefusesBadInput(t *testing.T) {
-	if err := ForceMigrationVersion(" ", 1); err == nil {
+	if _, err := ForceMigrationVersion(" ", 1); err == nil {
 		t.Fatal("ForceMigrationVersion with a blank DSN: want error, got nil")
 	}
 	const unreachable = "postgres://nobody@127.0.0.1:1/none?sslmode=disable"
 	for _, version := range []int{0, -1, 9999} {
-		err := ForceMigrationVersion(unreachable, version)
+		_, err := ForceMigrationVersion(unreachable, version)
 		if err == nil || !strings.Contains(err.Error(), "version") {
 			t.Fatalf("ForceMigrationVersion(%d) = %v, want a version error before connecting", version, err)
 		}
@@ -144,7 +144,10 @@ func TestMigrate_FailedMigrationIsForcedAndRerun(t *testing.T) {
 	require.ErrorAs(t, err, &dirty)
 	require.Contains(t, err.Error(), forcePrevious)
 
-	require.NoError(t, ForceMigrationVersion(scratch, emailFoldMigrationVersion-1))
+	replaced, err := ForceMigrationVersion(scratch, emailFoldMigrationVersion-1)
+	require.NoError(t, err)
+	require.Equal(t, MigrationState{Version: emailFoldMigrationVersion, Dirty: true}, replaced,
+		"force reports the dirty version it overwrote")
 	require.NoError(t, Migrate(scratch))
 	require.True(t, hasColumn(ctx, t, holder, "users", "email_fold"))
 }

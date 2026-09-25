@@ -318,7 +318,8 @@ same addresses could match on one deployment and not on another.
   variant of the invited mailbox may accept, and an address differing in a
   non-ASCII letter may not. **Accepting now requires the caller's email to be
   verified**, since another spelling of the invited address can accept: an
-  unverified caller gets `PERMISSION_DENIED` and the invitation stays
+  unverified caller gets `FAILED_PRECONDITION` (a caller whose address is not
+  the invited one still gets `PERMISSION_DENIED`), and the invitation stays
   redeemable once they verify. A new invitation revokes the pending one for the
   same mailbox; 0034 canonicalized the pending all-ASCII invitations stored
   before this release, so that covers them too. Concurrent invitations to one

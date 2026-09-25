@@ -229,7 +229,7 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	// address its holder has proved: an unverified account could have been
 	// registered by anyone.
 	if !caller.EmailVerified {
-		return nil, fmt.Errorf("%w: verify your email address before accepting the invitation", ErrPermissionDenied)
+		return nil, fmt.Errorf("%w: verify your email address before accepting the invitation", ErrEmailVerificationRequired)
 	}
 
 	m := &TenantMembership{

@@ -68,7 +68,9 @@ func TestParseMigrateCommand(t *testing.T) {
 		wantErr bool
 	}{
 		{[]string{"identity", "migrate"}, migrateCommand{}, false},
-		{[]string{"identity", "migrate", "--verbose"}, migrateCommand{}, false},
+		{[]string{"identity", "migrate", "--verbose"}, migrateCommand{}, true},
+		{[]string{"identity", "migrate", "--verbose", "force", "33"}, migrateCommand{}, true},
+		{[]string{"identity", "migrate", "up"}, migrateCommand{}, true},
 		{[]string{"identity", "migrate", "force", "33"}, migrateCommand{forceVersion: 33}, false},
 		{[]string{"identity", "migrate", "force"}, migrateCommand{}, true},
 		{[]string{"identity", "migrate", "force", "33", "34"}, migrateCommand{}, true},

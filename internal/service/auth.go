@@ -1114,7 +1114,9 @@ var (
 	ErrInvitationPending         = errors.New("account has not completed invitation")
 	ErrIDVRequired               = errors.New("identity verification required")
 	// ErrEmailVerificationRequired is returned when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
-	// is enabled and the account's email is not yet verified. Like ErrIDVRequired
+	// is enabled and the account's email is not yet verified, and when an
+	// account whose email is unverified tries to accept a tenant invitation.
+	// Like ErrIDVRequired
 	// it is a "do something else first" precondition (verify your email, then
 	// retry), mapped to CodeFailedPrecondition by the Connect layer.
 	ErrEmailVerificationRequired = errors.New("email verification required")

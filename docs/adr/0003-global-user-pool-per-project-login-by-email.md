@@ -19,6 +19,16 @@ using the index. The canonical email is still stored only in `email`, and a
 generated column cannot drift from it, so decision 3's objection to a second
 column does not apply.
 
+The trade-off, stated plainly: canonicalization drops a `+tag` on every
+domain, not only where the mail provider is known to deliver sub-addresses,
+so `bob+x@corp.com` and `bob@corp.com` are one account on every domain, and
+a provider that treats them as different mailboxes cannot have both. Every
+path that pairs an address with an account relies on the address's owner
+having proved it (a verified email for invitation acceptance and for the
+directory lookup by default). An address is how an account is found, never
+what authorizes it: anything downstream that grants access must key on the
+account's user id, not on its email.
+
 **Supersedes** the per-tenant-user portions of decision-log entries §2
 ("Identity tenant ↔ tenant-shard-db tenant is 1:1" — the part that made a
 user belong to exactly one storage tenant) and §13 (the "resolve-or-create by

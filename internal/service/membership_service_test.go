@@ -455,7 +455,8 @@ func TestAcceptTenantInvitation_RequiresVerifiedEmail(t *testing.T) {
 	rawToken := f.seedInvite(t)
 	f.users.byID[mInviteeID] = &User{ID: mInviteeID, Email: mInvitee}
 	_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, rawToken)
-	require.ErrorIs(t, err, ErrPermissionDenied)
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	require.NotErrorIs(t, err, ErrPermissionDenied, "an unverified caller is told to verify, not that the invitation is not theirs")
 	stored, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mInviteeID)
 	require.Nil(t, stored, "no membership for an unverified caller")
 	invs, _ := f.invitations.ListInvitationsForTenant(context.Background(), mTestProject, mTestTenant)

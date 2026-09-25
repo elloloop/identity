@@ -145,3 +145,18 @@ func TestSCIM_FilterFindsAccountStoredBeforeCanonicalization(t *testing.T) {
 		t.Fatalf("filter after re-sync: body=%s, want the account", list.Body.String())
 	}
 }
+
+// A userName filter on a blank address names nobody: it must return an empty
+// page, not fall through to an unfiltered list of every user.
+func TestSCIM_BlankUserNameFilterMatchesNobody(t *testing.T) {
+	h, repo, token := newSCIMLoginApp(t)
+	if _, err := repo.CreateUser(context.Background(), &service.User{Email: "someone@example.com", Status: service.StatusActive, Role: "member"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	for _, value := range []string{"%20", "%20%20%20"} {
+		list := scimReq(t, h, http.MethodGet, `/scim/v2/Users?filter=userName%20eq%20%22`+value+`%22`, token, "")
+		if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"totalResults":0`) {
+			t.Fatalf("filter userName eq %q: status = %d body=%s, want an empty page", value, list.Code, list.Body.String())
+		}
+	}
+}

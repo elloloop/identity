@@ -48,9 +48,16 @@ import { Code } from "astro-expressive-code/components";
       Each address is canonicalized the way sign-in canonicalizes the address
       it is given — trimmed and lower-cased, a <code>+tag</code> dropped,
       Gmail dots dropped, an internationalized domain punycoded — so it finds
-      exactly the account signing in with that address would. No prefix,
-      substring or domain search, so the directory cannot be listed through
-      it.
+      exactly the account signing in with that address would. A
+      <code>+tag</code> is dropped on every domain, so
+      <code>bob+x@corp.com</code> finds the account at
+      <code>bob@corp.com</code>. No prefix, substring or domain search, so the
+      directory cannot be listed through it.
+    </li>
+    <li>
+      Key anything you authorize on the returned <code>id</code>, never on the
+      email: several spellings resolve to one account, and an account's
+      address can change.
     </li>
     <li>
       Only <strong>active</strong> accounts are returned. Invited,

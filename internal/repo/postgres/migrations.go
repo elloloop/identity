@@ -43,27 +43,42 @@ func runMigrations(dsn string) error {
 }
 
 // forceMigrationVersion records version as the schema's migration version
-// and clears the dirty flag, without running any migration. version must be
-// one of the embedded migrations.
-func forceMigrationVersion(dsn string, version int) error {
+// and clears the dirty flag, without running any migration, and returns the
+// state it replaced. version must be one of the embedded migrations.
+func forceMigrationVersion(dsn string, version int) (MigrationState, error) {
 	src, err := iofs.New(migrationFS, migrationsDir)
 	if err != nil {
-		return fmt.Errorf("postgres: open migrations source: %w", err)
+		return MigrationState{}, fmt.Errorf("postgres: open migrations source: %w", err)
 	}
 	err = requireKnownVersion(src, version)
 	_ = src.Close()
 	if err != nil {
-		return err
+		return MigrationState{}, err
 	}
 	m, err := newMigrator(dsn)
 	if err != nil {
-		return err
+		return MigrationState{}, err
 	}
 	defer closeMigrator(m)
-	if err := m.Force(version); err != nil {
-		return fmt.Errorf("postgres: force migration version %d: %w", version, err)
+	var replaced MigrationState
+	switch v, dirty, verr := m.Version(); {
+	case errors.Is(verr, migrate.ErrNilVersion):
+	case verr != nil:
+		return MigrationState{}, fmt.Errorf("postgres: read migration version: %w", verr)
+	default:
+		replaced = MigrationState{Version: int(v), Dirty: dirty}
 	}
-	return nil
+	if err := m.Force(version); err != nil {
+		return MigrationState{}, fmt.Errorf("postgres: force migration version %d: %w", version, err)
+	}
+	return replaced, nil
+}
+
+// MigrationState is a database's recorded schema migration version. Version
+// is 0 when no migration has been recorded.
+type MigrationState struct {
+	Version int
+	Dirty   bool
 }
 
 // withDirtyVersionHint adds the recovery to err when the run left, or found,

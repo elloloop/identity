@@ -24,10 +24,11 @@ func Migrate(dsn string) error {
 // any migration. It is the entry point behind `identity migrate force
 // <version>`: after a failed migration, every later Migrate refuses to run
 // until an operator has confirmed which version the schema is really at.
-// version must be one of the embedded migrations.
-func ForceMigrationVersion(dsn string, version int) error {
+// version must be one of the embedded migrations. It returns the state it
+// replaced, so the operator's record shows what was overwritten.
+func ForceMigrationVersion(dsn string, version int) (MigrationState, error) {
 	if strings.TrimSpace(dsn) == "" {
-		return errors.New("postgres: ForceMigrationVersion: empty DSN")
+		return MigrationState{}, errors.New("postgres: ForceMigrationVersion: empty DSN")
 	}
 	return forceMigrationVersion(dsn, version)
 }

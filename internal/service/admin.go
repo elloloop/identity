@@ -115,10 +115,16 @@ func (s *AdminService) InviteUser(
 		return nil, err
 	}
 
-	// Stored in the canonical form sign-in resolves an account by, so the
-	// invitee's sign-in, the directory and SCIM all find this account.
-	email = CanonicalizeEmail(email)
+	email = strings.TrimSpace(email)
 	if email == "" || !strings.Contains(email, "@") {
+		return nil, errors.New("valid email is required")
+	}
+	// Stored in the canonical form sign-in resolves an account by, so the
+	// invitee's sign-in, the directory and SCIM all find this account. The
+	// canonical form is checked again: canonicalizing drops a "+tag", so an
+	// address that was nothing but one ("+x@corp.com") has no mailbox left.
+	email = CanonicalizeEmail(email)
+	if !looksLikeEmail(email) {
 		return nil, errors.New("valid email is required")
 	}
 	// Refuse an invite the invitee could never redeem: under an allowlist/closed

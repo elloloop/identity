@@ -126,6 +126,20 @@ func TestAdminService_InviteUser_StoresCanonicalEmail(t *testing.T) {
 	}
 }
 
+// An address with no mailbox once canonicalized is refused, not stored as
+// "@corp.com".
+func TestAdminService_InviteUser_RejectsAddressWithNoCanonicalMailbox(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	svc := newTestAdminService(db)
+	for _, bad := range []string{"+x@corp.com", "  +@corp.com ", "@corp.com", "nobody"} {
+		if _, err := svc.InviteUser(context.Background(), "admin-1", bad, "", "member", "", 0, false); err == nil ||
+			!strings.Contains(err.Error(), "valid email is required") {
+			t.Errorf("InviteUser(%q): err = %v, want valid email is required", bad, err)
+		}
+	}
+}
+
 func TestAdminService_InviteUser_DuplicateEmail(t *testing.T) {
 	db := newFakeDB()
 	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")

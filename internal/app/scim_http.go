@@ -477,6 +477,11 @@ func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]sci
 		if err != nil {
 			return nil, 0, err
 		}
+		// A filter on a blank address names nobody. Passed on as "" it would
+		// read as no filter at all and list every user.
+		if resolved == "" {
+			return nil, 0, nil
+		}
 		email = resolved
 	}
 	offset := f.StartIndex - 1

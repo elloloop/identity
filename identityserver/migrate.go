@@ -32,14 +32,17 @@ func Migrate(opts Options) error {
 // version and clears the dirty flag a failed migration leaves, without
 // running any migration. It is the programmatic entry point behind
 // `identity migrate force <version>`; Migrate's error names the version to
-// force when it finds the schema dirty. It requires GATEWAY_POSTGRES_DSN.
-func ForceMigrationVersion(opts Options, version int) error {
+// force when it finds the schema dirty. It returns the version and dirty
+// flag it replaced (version 0 when none was recorded). It requires
+// GATEWAY_POSTGRES_DSN.
+func ForceMigrationVersion(opts Options, version int) (previousVersion int, previousDirty bool, err error) {
 	dsn := strings.TrimSpace(opts.Config.PostgresDSN)
 	if dsn == "" {
-		return errors.New("identityserver: ForceMigrationVersion requires GATEWAY_POSTGRES_DSN to be set")
+		return 0, false, errors.New("identityserver: ForceMigrationVersion requires GATEWAY_POSTGRES_DSN to be set")
 	}
-	if err := pgrepo.ForceMigrationVersion(dsn, version); err != nil {
-		return fmt.Errorf("identityserver: force migration version: %w", err)
+	replaced, err := pgrepo.ForceMigrationVersion(dsn, version)
+	if err != nil {
+		return 0, false, fmt.Errorf("identityserver: force migration version: %w", err)
 	}
-	return nil
+	return replaced.Version, replaced.Dirty, nil
 }

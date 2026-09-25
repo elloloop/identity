@@ -38,14 +38,15 @@ type migrateCommand struct {
 	forceVersion int
 }
 
-// parseMigrateCommand parses the arguments after `identity migrate`. Other
-// trailing arguments are ignored, as they always were; `force` must be
-// followed by exactly one positive version.
+// parseMigrateCommand parses the arguments after `identity migrate`: none,
+// or `force` and exactly one positive version. Anything else is refused
+// rather than ignored, so a mistyped invocation cannot run migrations the
+// operator did not ask for.
 func parseMigrateCommand(args []string) (migrateCommand, error) {
-	if len(args) < 3 || args[2] != migrateForceArg {
+	if len(args) == 2 {
 		return migrateCommand{}, nil
 	}
-	if len(args) != 4 {
+	if args[2] != migrateForceArg || len(args) != 4 {
 		return migrateCommand{}, fmt.Errorf("usage: %s", migrateUsage)
 	}
 	version, err := strconv.Atoi(args[3])
@@ -64,11 +65,15 @@ func parseMigrateCommand(args []string) (migrateCommand, error) {
 func runMigrate(opts identityserver.Options, cmd migrateCommand, logger *zap.Logger) int {
 	if cmd.forceVersion > 0 {
 		logger.Info("identity_migrate_force_starting", zap.Int("version", cmd.forceVersion))
-		if err := identityserver.ForceMigrationVersion(opts, cmd.forceVersion); err != nil {
+		previous, previousDirty, err := identityserver.ForceMigrationVersion(opts, cmd.forceVersion)
+		if err != nil {
 			logger.Error("identity_migrate_force_failed", zap.Error(err))
 			return 1
 		}
-		logger.Info("identity_migrate_force_complete", zap.Int("version", cmd.forceVersion))
+		logger.Info("identity_migrate_force_complete",
+			zap.Int("version", cmd.forceVersion),
+			zap.Int("previous_version", previous),
+			zap.Bool("previous_dirty", previousDirty))
 		return 0
 	}
 	logger.Info("identity_migrate_starting")
