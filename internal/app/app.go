@@ -454,6 +454,53 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	return limits
 }
 
+// loadAllowedOrigins parses the process-wide CORS allowlist and logs what it
+// admits. A malformed entry fails startup.
+func loadAllowedOrigins(cfg *config.Config, logger *zap.Logger) (origin.Allowlist, error) {
+	allowed, err := origin.ParseAllowedOrigins(cfg.AllowedOrigins, true)
+	if err != nil {
+		return origin.Allowlist{}, fmt.Errorf("cors config invalid: %w", err)
+	}
+	logger.Info("cors_allowed_origins",
+		zap.Strings("origins", allowed.Exact()),
+		zap.Strings("origin_patterns", allowed.Patterns()))
+	return allowed, nil
+}
+
+// loadReturnAllowlist parses GATEWAY_OAUTH_ALLOWED_RETURN_URLS. Browser-facing
+// hosted OAuth routes are registered only when it has a usable entry; the
+// headless BeginOAuthLogin / OAuthLogin RPCs work regardless. A malformed
+// wildcard entry fails startup, as a malformed CORS origin does; any other
+// unusable entry is logged and ignored.
+func loadReturnAllowlist(cfg *config.Config, logger *zap.Logger) (service.ReturnAllowlist, error) {
+	allow, err := service.ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs)
+	if err != nil {
+		return service.ReturnAllowlist{}, fmt.Errorf("GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: %w", err)
+	}
+	for _, entry := range allow.Ignored() {
+		logger.Warn("oauth_allowed_return_url_ignored",
+			zap.String("entry", entry),
+			zap.String("hint", "not an absolute http(s) URL without userinfo, query or fragment; it admits no return_to"))
+	}
+	return allow, nil
+}
+
+// logHostedOAuthFlow records at boot whether the hosted OAuth routes are
+// served and, when they are not, why.
+func logHostedOAuthFlow(logger *zap.Logger, allow service.ReturnAllowlist) {
+	if allow.Enabled() {
+		logger.Info("oauth_hosted_flow_enabled",
+			zap.Strings("allowed_return_urls", allow.Entries()),
+			zap.Strings("allowed_return_url_patterns", allow.Patterns()))
+		return
+	}
+	hint := "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"
+	if len(allow.Ignored()) > 0 {
+		hint = "every GATEWAY_OAUTH_ALLOWED_RETURN_URLS entry was ignored (see oauth_allowed_return_url_ignored); fix them to enable GET /oauth/start + /oauth/callback"
+	}
+	logger.Info("oauth_hosted_flow_disabled", zap.String("hint", hint))
+}
+
 // New assembles the identity service from injected dependencies. It
 // builds the middleware chain, the Connect-RPC service handler, and the
 // background workers — but does NOT start the workers; the caller starts
@@ -488,26 +535,13 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.DefaultProjectID = config.DefaultProjectIDFallback
 	}
 
-	allowedOrigins, err := origin.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
+	allowedOrigins, err := loadAllowedOrigins(deps.Config, logger)
 	if err != nil {
-		return nil, fmt.Errorf("cors config invalid: %w", err)
+		return nil, err
 	}
-	logger.Info("cors_allowed_origins",
-		zap.Strings("origins", allowedOrigins.Exact()),
-		zap.Strings("origin_patterns", allowedOrigins.Patterns()))
-
-	// Browser-facing hosted OAuth routes are registered only when
-	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS has a usable entry; the headless
-	// BeginOAuthLogin / OAuthLogin RPCs work regardless. A malformed wildcard
-	// entry fails startup here, as a malformed CORS origin does above.
-	returnAllow, err := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
+	returnAllow, err := loadReturnAllowlist(deps.Config, logger)
 	if err != nil {
-		return nil, fmt.Errorf("GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: %w", err)
-	}
-	for _, entry := range returnAllow.Ignored() {
-		logger.Warn("oauth_allowed_return_url_ignored",
-			zap.String("entry", entry),
-			zap.String("hint", "not an absolute http(s) URL without userinfo, query or fragment; it admits no return_to"))
+		return nil, err
 	}
 
 	trustedProxies, err := middleware.ParseTrustedProxies(deps.Config.TrustedProxies)
@@ -717,17 +751,7 @@ func New(deps Deps) (*Built, error) {
 	// Default auth UI (login/signup). Rendered per request so it offers
 	// exactly the sign-in options the resolved project enables server-side.
 	mux.Handle("/auth/", ui.Handler(deps.Config, authSvc, returnAllow.Enabled()))
-	if returnAllow.Enabled() {
-		logger.Info("oauth_hosted_flow_enabled",
-			zap.Strings("allowed_return_urls", returnAllow.Entries()),
-			zap.Strings("allowed_return_url_patterns", returnAllow.Patterns()))
-	} else {
-		hint := "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"
-		if len(returnAllow.Ignored()) > 0 {
-			hint = "every GATEWAY_OAUTH_ALLOWED_RETURN_URLS entry was ignored (see oauth_allowed_return_url_ignored); fix them to enable GET /oauth/start + /oauth/callback"
-		}
-		logger.Info("oauth_hosted_flow_disabled", zap.String("hint", hint))
-	}
+	logHostedOAuthFlow(logger, returnAllow)
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
 	// Inbound SCIM 2.0 provisioning (#260). Registered only when
