@@ -189,24 +189,89 @@ exactly. Before this release Postgres compared by the database locale's
 `lower()`, while SQLite and the memory driver compared by ASCII case, so the
 same addresses could match on one deployment and not on another.
 
-- **Accounts whose stored address has non-ASCII capitals.** Every sign-up and
-  sign-in path already stored and looked up lower-cased addresses. SCIM
-  stored the address exactly as the IdP sent it. On a Postgres database whose
-  locale folds non-ASCII letters (for example `en_US.UTF-8`), a stored
-  `Élodie@corp.com` used to match a lookup for `élodie@corp.com`. It no
-  longer does, because `É` and `é` differ once ASCII case is ignored. Find
-  such accounts before upgrading, as a `BYPASSRLS` role:
+- **Accounts stored in a non-canonical form stop matching.** Lookups,
+  `LookupUsers` and the admin `InviteUser` duplicate check all compare the
+  canonical form of the address they are given with the stored address under
+  the ASCII fold. An account whose stored address is not canonical is
+  therefore found only by its own spelling (up to ASCII case), and not at all
+  by `LookupUsers`, which canonicalizes. Sign-up and sign-in always stored
+  canonical addresses. Earlier releases did not canonicalize in:
+  - SCIM, which stored the address as the IdP sent it (capitals, `+tag`,
+    Gmail dots);
+  - email change and admin `InviteUser`, which stored it lower-cased but kept
+    a `+tag` or Gmail dots.
+
+  On a Postgres database whose locale folds non-ASCII letters (for example
+  `en_US.UTF-8`), a stored `Élodie@corp.com` also used to match
+  `élodie@corp.com` and no longer does. List every account whose stored
+  address differs from its canonical form, as a `BYPASSRLS` role. The query
+  computes the canonical form the way the service does, except that it does
+  not punycode an internationalized domain; list those separately with
+  `WHERE email ~ '@.*[^!-~]'`.
 
   ```sql
   SET row_security = off;
-  SELECT project_id, id, email FROM users
-  WHERE email <> '' AND lower(email) <> lower(email COLLATE "C");
+  WITH parts AS (
+      SELECT project_id, id, email,
+             substring(lower(email) FROM '^(.*)@') AS local_part,
+             regexp_replace(substring(lower(email) FROM '@([^@]*)$'), '\.$', '') AS raw_domain
+      FROM users WHERE email <> ''
+  ), domains AS (
+      SELECT *, CASE WHEN raw_domain = 'googlemail.com' THEN 'gmail.com' ELSE raw_domain END AS domain
+      FROM parts
+  )
+  SELECT project_id, id, email,
+         CASE WHEN domain = 'gmail.com' THEN replace(split_part(local_part, '+', 1), '.', '')
+              ELSE split_part(local_part, '+', 1)
+         END || '@' || domain AS canonical_email
+  FROM domains
+  WHERE email <> CASE WHEN domain = 'gmail.com' THEN replace(split_part(local_part, '+', 1), '.', '')
+                      ELSE split_part(local_part, '+', 1)
+                 END || '@' || domain
+  ORDER BY project_id, canonical_email;
   ```
 
-  For a SCIM-provisioned account, a full re-sync from your IdP (a SCIM `PUT`
-  or `PATCH` of the user) rewrites the address in canonical form. The same
-  applies to stored addresses that carry a `+tag` or Gmail dots: sign-in
-  never matched those, and a re-sync fixes them too.
+  Fixing them:
+  - Re-sync a SCIM-provisioned account from your IdP (a SCIM `PUT` or `PATCH`
+    of the user); that stores the canonical form.
+  - Two rows of one project that share a `canonical_email` are two accounts
+    for one mailbox. Decide which one to keep before changing either.
+  - Every other row can be rewritten in place after the upgrade, as a
+    `BYPASSRLS` role. There is no API that sets an account's address to
+    another spelling of the same mailbox, because email change refuses it.
+    The statement below skips any row whose canonical form another account in
+    the project already holds, or that shares it with another listed row.
+    It records no audit event.
+
+  ```sql
+  SET row_security = off;
+  WITH parts AS (
+      SELECT project_id, id, email,
+             substring(lower(email) FROM '^(.*)@') AS local_part,
+             regexp_replace(substring(lower(email) FROM '@([^@]*)$'), '\.$', '') AS raw_domain
+      FROM users WHERE email <> '' AND email !~ '@.*[^!-~]'
+  ), domains AS (
+      SELECT *, CASE WHEN raw_domain = 'googlemail.com' THEN 'gmail.com' ELSE raw_domain END AS domain
+      FROM parts
+  ), canonical AS (
+      SELECT project_id, id, email,
+             CASE WHEN domain = 'gmail.com' THEN replace(split_part(local_part, '+', 1), '.', '')
+                  ELSE split_part(local_part, '+', 1)
+             END || '@' || domain AS canonical_email
+      FROM domains
+  ), fixable AS (
+      SELECT c.* FROM canonical c
+      WHERE c.email <> c.canonical_email
+        AND (SELECT count(*) FROM canonical o
+             WHERE o.project_id = c.project_id AND o.canonical_email = c.canonical_email) = 1
+  )
+  UPDATE users u
+  SET email = f.canonical_email,
+      updated_at_ms = (extract(epoch FROM clock_timestamp()) * 1000)::bigint
+  FROM fixable f
+  WHERE u.id = f.id;
+  ```
+
 - **SCIM.** `userName` and `emails` are stored in canonical form, so a
   provisioned account is the one sign-in finds, and a later self-sign-up with
   the same mailbox is refused as a duplicate instead of creating a second
@@ -240,8 +305,9 @@ same addresses could match on one deployment and not on another.
   before this release, so that covers them too. Concurrent invitations to one
   mailbox now leave exactly one pending instead of failing.
 - **Admin `InviteUser`** stores the invited address in canonical form, and
-  refuses a variant spelling of an existing account's mailbox as a
-  duplicate.
+  refuses it as a duplicate when an account already holds that canonical
+  form. An account stored in a non-canonical form (see above) is not
+  recognised by that check.
 - **Email change** stores the new address in canonical form, and refuses one
   whose canonical form equals the current address, for example
   `me+x@corp.com` for `me@corp.com`, because sign-in already resolves it to
