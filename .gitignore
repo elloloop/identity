@@ -6,6 +6,11 @@
 # `go build ./examples/embedded` drops a binary named after the package dir
 # into the working directory; keep it out of the repo root.
 /embedded
+# A bare `go build` inside a command or example directory drops a binary
+# named after that directory into it.
+/cmd/*/identity
+/cmd/*/docsgen
+/examples/*/embedded
 
 # IDE
 .vscode/
