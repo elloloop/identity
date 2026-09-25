@@ -95,16 +95,22 @@ func TestDirtyMigrationRecovery(t *testing.T) {
 		mustNotBe []string
 	}{
 		{
-			"middle", identityserver.DirtyMigrationError{Version: 33, Known: true, Latest: 34, Previous: 32, Next: 34},
-			[]string{"identity migrate force 32", "identity migrate force 34"}, []string{"schema_migrations"},
+			"middle",
+			identityserver.DirtyMigrationError{Version: 33, Known: true, Latest: 34, Previous: 32, Next: 34},
+			[]string{"identity migrate force 32", "identity migrate force 34"},
+			[]string{"schema_migrations"},
 		},
 		{
-			"first", identityserver.DirtyMigrationError{Version: 1, Known: true, Latest: 34, First: true, Next: 2},
-			[]string{"drop the schema_migrations table"}, []string{"force 0"},
+			"first",
+			identityserver.DirtyMigrationError{Version: 1, Known: true, Latest: 34, First: true, Next: 2},
+			[]string{"drop the schema_migrations table"},
+			[]string{"force 0"},
 		},
 		{
-			"newer release", identityserver.DirtyMigrationError{Version: 35, Latest: 34},
-			[]string{"newer than this build", "never drop schema_migrations"}, []string{"force 34", "force 35"},
+			"newer release",
+			identityserver.DirtyMigrationError{Version: 35, Latest: 34},
+			[]string{"newer than this build", "never drop schema_migrations"},
+			[]string{"force 34", "force 35"},
 		},
 	}
 	for _, c := range cases {
