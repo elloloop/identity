@@ -184,3 +184,40 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	require.ErrorIs(t, err, service.ErrInvalidArgument, "missing expires_at_ms")
 	require.ErrorIs(t, is.SetInvitationStatus(ctx, "", "id", service.InvitationStatusRevoked, 0), service.ErrInvalidArgument)
 }
+
+// TestInvitationStore_OneOpenInviteUnderFoldEmail pins the one-open-invite
+// rule to service.FoldEmail, like account emails, rather than the database
+// locale's lower(): an address differing only in ASCII case replaces the open
+// invite, one differing in a non-ASCII letter is a different recipient.
+func TestInvitationStore_OneOpenInviteUnderFoldEmail(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping invitation fold test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+
+	invite := func(email, tokenHash string) {
+		t.Helper()
+		_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+			ProjectID: projectID, TenantID: tenantID, Email: email,
+			TokenHash: tokenHash, ExpiresAtMs: nowMs() + 86_400_000,
+		})
+		require.NoError(t, err)
+	}
+	status := func(tokenHash string) string {
+		t.Helper()
+		inv, err := is.GetInvitationByTokenHash(ctx, projectID, tokenHash)
+		require.NoError(t, err)
+		return inv.Status
+	}
+
+	invite("zoé@acme.com", "fold-1")
+	invite("ZOé@ACME.com", "fold-2")
+	require.Equal(t, service.InvitationStatusRevoked, status("fold-1"), "ASCII case names the same recipient")
+	invite("zoÉ@acme.com", "fold-3")
+	require.Equal(t, service.InvitationStatusPending, status("fold-2"), "a different non-ASCII letter is another recipient")
+	require.Equal(t, service.InvitationStatusPending, status("fold-3"))
+}

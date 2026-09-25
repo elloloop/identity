@@ -268,10 +268,11 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 		offset = 0
 	}
 
+	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	matched := make([]*service.User, 0, len(r.users))
 	for _, u := range r.users {
-		if filter.Email != "" && service.FoldEmail(u.Email) != service.FoldEmail(filter.Email) {
+		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
@@ -347,11 +348,12 @@ func (r *Repo) ListUsersPendingDeletionBefore(_ context.Context, cutoffMs int64,
 // /Users totalResults so a page reports the true match count rather than the
 // page size. Mirrors the SQL drivers.
 func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && service.FoldEmail(u.Email) != service.FoldEmail(filter.Email) {
+		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {

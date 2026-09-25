@@ -670,7 +670,10 @@ type IdentityServiceClient interface {
 	// to that credential's project whatever the request Host. The credential
 	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
 	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
-	// more than 100 addresses, or a blank or over-320-byte address;
+	// more than 100 addresses, or a blank or over-320-byte address. The batch
+	// is checked before the key is looked up, so a key shaped
+	// "<public id>.<secret>" that is wrong still gets INVALID_ARGUMENT for a
+	// malformed batch; only a missing or malformed key is refused first;
 	// UNIMPLEMENTED on a build with no control plane. Over the rate limit the
 	// server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
 	// which Connect clients surface as UNAVAILABLE.
@@ -2440,7 +2443,10 @@ type IdentityServiceHandler interface {
 	// to that credential's project whatever the request Host. The credential
 	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
 	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
-	// more than 100 addresses, or a blank or over-320-byte address;
+	// more than 100 addresses, or a blank or over-320-byte address. The batch
+	// is checked before the key is looked up, so a key shaped
+	// "<public id>.<secret>" that is wrong still gets INVALID_ARGUMENT for a
+	// malformed batch; only a missing or malformed key is refused first;
 	// UNIMPLEMENTED on a build with no control plane. Over the rate limit the
 	// server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
 	// which Connect clients surface as UNAVAILABLE.

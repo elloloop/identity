@@ -65,16 +65,20 @@ func TestPostgres_EmailLookupsUseTheIndexUnderRLS(t *testing.T) {
 	_, err = owner.Exec(ctx, `ANALYZE users`)
 	require.NoError(t, err)
 
+	countQuery, countArgs := admin.countUsersQuery(service.UserListFilter{Email: "USER7@example.com"})
+	nodesQuery, nodesArgs := admin.userNodesQuery(map[string]any{dbUfEmail: "USER7@example.com"})
 	for _, probe := range []struct {
 		name  string
 		query string
-		arg   any
+		args  []any
 	}{
-		{"FindUserByEmail", findUserByEmailQuery, service.FoldEmail("USER7@example.com")},
-		{"FindUsersByEmails", findUsersByEmailsQuery, foldEmails([]string{"USER7@example.com", "user8@EXAMPLE.com"})},
+		{"FindUserByEmail", findUserByEmailQuery, []any{projectID, service.FoldEmail("USER7@example.com")}},
+		{"FindUsersByEmails", findUsersByEmailsQuery, []any{projectID, foldEmails([]string{"USER7@example.com", "user8@EXAMPLE.com"})}},
+		{"ListUsers and CountUsers email filter", countQuery, countArgs},
+		{"QueryNodes users email filter", nodesQuery, nodesArgs},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
-			rows, err := app.Query(ctx, `EXPLAIN (COSTS OFF) `+probe.query, projectID, probe.arg)
+			rows, err := app.Query(ctx, `EXPLAIN (COSTS OFF) `+probe.query, probe.args...)
 			require.NoError(t, err)
 			plan, err := pgx.CollectRows(rows, pgx.RowTo[string])
 			require.NoError(t, err)

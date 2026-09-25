@@ -108,7 +108,7 @@ Kept auth/data tables (each gains `project_id`, uniqueness re-scoped to
 - **CSV columns.** `allowed_methods` etc. are plain `TEXT` CSV (matches the
   proto `transports`/`enum_values` CSV convention).
 - **Email canonicalization (H2).** The canonical form is kept IN `email`
-  (matches today's `canonicalizeEmail`); there is NO separate
+  (matches today's `CanonicalizeEmail`); there is NO separate
   `canonical_email` column. Uniqueness uses `lower(email)` exactly as today.
 
 ---

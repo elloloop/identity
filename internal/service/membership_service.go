@@ -171,8 +171,8 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 // invitation accepted.
 //
 // Email-match policy: a leaked token must not let the wrong account join. The
-// caller is looked up and their email compared (case-insensitively) to the
-// invitation email; a mismatch is PermissionDenied. An expired invitation is
+// caller is looked up and their email compared to the invitation email, both
+// canonicalized as sign-in canonicalizes an address (CanonicalizeEmail); a mismatch is PermissionDenied. An expired invitation is
 // marked expired and rejected; an unknown/revoked/already-accepted token is
 // rejected without mutation.
 func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID, rawToken string) (*TenantMembership, error) {
@@ -220,7 +220,7 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
-	if !strings.EqualFold(strings.TrimSpace(caller.Email), inv.Email) {
+	if CanonicalizeEmail(caller.Email) != CanonicalizeEmail(inv.Email) {
 		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
 	}
 
@@ -462,11 +462,12 @@ func (s *MembershipService) requireTenantAdmin(ctx context.Context, projectID, t
 	return m, nil
 }
 
-// normalizeInvitationEmail trims and lower-cases an invitation email,
-// rejecting a blank one or one without an '@'. Full RFC validation lives
-// upstream; this is the minimal sanity gate the store and email-match rely on.
+// normalizeInvitationEmail canonicalizes an invitation email as sign-up
+// canonicalizes an account's (CanonicalizeEmail), rejecting a blank one or one
+// without an '@'. Full RFC validation lives upstream; this is the minimal
+// sanity gate the store and email-match rely on.
 func normalizeInvitationEmail(emailAddr string) (string, error) {
-	e := strings.ToLower(strings.TrimSpace(emailAddr))
+	e := CanonicalizeEmail(emailAddr)
 	if e == "" {
 		return "", fmt.Errorf("%w: missing email", ErrInvalidArgument)
 	}

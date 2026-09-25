@@ -63,9 +63,9 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		return fmt.Errorf("%w: invalid password", ErrUnauthenticated)
 	}
 
-	// Reject if new == current (case-insensitively). Avoids creating a
-	// pointless token + emails.
-	if strings.EqualFold(strings.TrimSpace(user.Email), newEmail) {
+	// Reject a new address sign-in already resolves to this account (the same
+	// canonical form). Avoids creating a pointless token + emails.
+	if CanonicalizeEmail(user.Email) == CanonicalizeEmail(newEmail) {
 		return fmt.Errorf("%w: new email matches current email", ErrInvalidArgument)
 	}
 

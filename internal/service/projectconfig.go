@@ -581,7 +581,7 @@ type ProjectAccessConfig struct {
 
 	// AllowedEmails is the explicit per-address allowlist for AccessModeAllowlist.
 	// Entries are validated as well-formed emails and canonicalized
-	// (canonicalizeEmail) at parse time, so a listed alice.smith+tag@gmail.com
+	// (CanonicalizeEmail) at parse time, so a listed alice.smith+tag@gmail.com
 	// matches a login as alicesmith@gmail.com.
 	AllowedEmails []string `json:"allowed_emails"`
 
@@ -861,7 +861,7 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 	if len(a.AllowedEmails) > 0 {
 		out.AllowedEmails = make([]string, 0, len(a.AllowedEmails))
 		for _, e := range a.AllowedEmails {
-			out.AllowedEmails = append(out.AllowedEmails, canonicalizeEmail(e))
+			out.AllowedEmails = append(out.AllowedEmails, CanonicalizeEmail(e))
 		}
 	}
 	if len(a.AllowedDomains) > 0 {
@@ -874,7 +874,7 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 	if len(a.ExemptEmails) > 0 {
 		out.ExemptEmails = make([]string, 0, len(a.ExemptEmails))
 		for _, e := range a.ExemptEmails {
-			out.ExemptEmails = append(out.ExemptEmails, canonicalizeEmail(e))
+			out.ExemptEmails = append(out.ExemptEmails, CanonicalizeEmail(e))
 		}
 	}
 	return out

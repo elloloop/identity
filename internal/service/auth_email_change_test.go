@@ -186,6 +186,19 @@ func TestRequestEmailChange_SameAsCurrentRejected(t *testing.T) {
 	}
 }
 
+// A new address that canonicalizes to the current one is the same mailbox
+// sign-in already resolves to this account.
+func TestRequestEmailChange_SameCanonicalAddressRejected(t *testing.T) {
+	t.Parallel()
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
+	for _, same := range []string{"OLD+x@test.com", " old@TEST.com "} {
+		if err := svc.RequestEmailChange(context.Background(), user.ID, same, "Str0ng!Pass1"); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("RequestEmailChange(%q): want ErrInvalidArgument, got %v", same, err)
+		}
+	}
+}
+
 func TestRequestEmailChange_InvalidNewEmailRejected(t *testing.T) {
 	t.Parallel()
 	svc, repo, _ := newAuthSvcWithMailer(t)

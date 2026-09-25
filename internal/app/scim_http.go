@@ -122,7 +122,9 @@ func (h *scimHandler) authenticate(next http.Handler) http.Handler {
 }
 
 // repoSCIMStore adapts service.Repository to scim.Store. It maps the SCIM
-// User core schema onto the host User model: userName ⇒ email, externalId ⇒
+// User core schema onto the host User model: userName ⇒ email (canonicalized
+// as sign-up canonicalizes it, service.CanonicalizeEmail, so a provisioned
+// account is the one sign-in and a later self-sign-up resolve), externalId ⇒
 // ExternalID, name ⇒ a single Name field is not stored (the host has only a
 // display Name), so given/family are joined into Name and split back out on
 // read for round-tripping. active is the inverse of the "deactivated" status;
@@ -224,7 +226,7 @@ func (s *repoSCIMStore) CreateUser(ctx context.Context, u scim.User) (scim.User,
 		status = statusDeactivated
 	}
 	su := &service.User{
-		Email:      u.Email,
+		Email:      service.CanonicalizeEmail(u.Email),
 		Name:       joinName(u.GivenName, u.FamilyName),
 		ExternalID: u.ExternalID,
 		Status:     status,
@@ -285,7 +287,7 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 		status = statusDeactivated
 	}
 	fields := map[string]any{
-		"email":       u.Email,
+		"email":       service.CanonicalizeEmail(u.Email),
 		"name":        joinName(u.GivenName, u.FamilyName),
 		"external_id": u.ExternalID,
 		"status":      status,
@@ -347,10 +349,10 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 	// userName and email both map to the host email column; an explicit email
 	// wins when both are present.
 	if patch.UserName != nil {
-		fields["email"] = *patch.UserName
+		fields["email"] = service.CanonicalizeEmail(*patch.UserName)
 	}
 	if patch.Email != nil {
-		fields["email"] = *patch.Email
+		fields["email"] = service.CanonicalizeEmail(*patch.Email)
 	}
 	if patch.ExternalID != nil {
 		fields["external_id"] = *patch.ExternalID
@@ -423,10 +425,14 @@ func (s *repoSCIMStore) DeleteUser(ctx context.Context, id string) error {
 }
 
 func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]scim.User, int, error) {
-	// userName maps to email; both filter the same column.
+	// userName maps to email; both filter the same column, by the canonical
+	// form the writes above store.
 	email := f.Email
 	if email == "" {
 		email = f.UserName
+	}
+	if email != "" {
+		email = service.CanonicalizeEmail(email)
 	}
 	offset := f.StartIndex - 1
 	if offset < 0 {

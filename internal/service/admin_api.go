@@ -700,21 +700,21 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 		return nil, ErrUnimplemented
 	}
 	if s.disableFirstAdminBootstrap {
-		s.recordBootstrapBlocked(ctx, canonicalizeEmail(email), bootstrapBlockedDisabled)
+		s.recordBootstrapBlocked(ctx, CanonicalizeEmail(email), bootstrapBlockedDisabled)
 		return nil, ErrFirstAdminBootstrapDisabled
 	}
 	// When an admin secret is configured the bootstrap is gated on it too, so a
 	// fresh internet-exposed deployment cannot have an anonymous caller win the
 	// first-admin race. TOFU stays zero-config ONLY when no secret is set.
 	if s.secret != "" && subtle.ConstantTimeCompare([]byte(secret), []byte(s.secret)) != 1 {
-		s.recordBootstrapBlocked(ctx, canonicalizeEmail(email), bootstrapBlockedSecretDenied)
+		s.recordBootstrapBlocked(ctx, CanonicalizeEmail(email), bootstrapBlockedSecretDenied)
 		return nil, ErrPermissionDenied
 	}
 	email = strings.TrimSpace(email)
 	if err := validateEmailFormat(email); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
-	canonicalEmail := canonicalizeEmail(email)
+	canonicalEmail := CanonicalizeEmail(email)
 
 	// Unlocked fast-path: on a provisioned deployment the bootstrap is
 	// permanently closed, and that closed state is the overwhelmingly common

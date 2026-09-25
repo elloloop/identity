@@ -688,11 +688,15 @@ func (r *pgRepository) getUserNode(ctx context.Context, userID string) (*graph.N
 	return userNodeFromRecord(u), nil
 }
 
+func (r *pgRepository) userNodesQuery(filter map[string]any) (string, []any) {
+	return buildSelectQuery(`SELECT `+userColumns+` FROM users WHERE project_id = $1 AND NOT is_anonymous`, r.projectID, filter, userQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
+}
+
 func (r *pgRepository) queryUserNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
 	// NOT is_anonymous, matching Repository.ListUsers' filter: this is the
 	// admin/graph listing path, and a credential-less account has no email
 	// to present. Both user-listing surfaces answer to one rule.
-	query, args := buildSelectQuery(`SELECT `+userColumns+` FROM users WHERE project_id = $1 AND NOT is_anonymous`, r.projectID, filter, userQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
+	query, args := r.userNodesQuery(filter)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, wrapPgErr("QueryNodes(users)", err)

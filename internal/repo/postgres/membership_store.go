@@ -205,7 +205,7 @@ func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 
 // CreateInvitation atomically enforces one-open-invite: in a single
 // transaction it revokes any existing pending invitation for the same
-// (project, tenant, lower(email)) and inserts the new one. This is the
+// (project, tenant, email under service.FoldEmail) and inserts the new one. This is the
 // authoritative enforcement (the partial unique index is defense-in-depth,
 // and the memory driver — should they ever gain invitations — must
 // match these revoke-then-insert semantics).
@@ -250,8 +250,8 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 		ctx, `
 		UPDATE tenant_invitations SET status = 'revoked'
 		WHERE project_id = $1 AND tenant_id = $2
-		  AND lower(email) = lower($3) AND status = 'pending'`,
-		inv.ProjectID, inv.TenantID, inv.Email,
+		  AND lower(email COLLATE "C") = $3 AND status = 'pending'`,
+		inv.ProjectID, inv.TenantID, service.FoldEmail(inv.Email),
 	); err != nil {
 		return "", wrapPgErr("CreateInvitation(revoke)", err)
 	}

@@ -106,9 +106,9 @@ func scanUser(s scanner) (*service.User, error) {
 }
 
 // FindUserByEmail, like every account-email comparison in this driver,
-// compares lower(email) — the expression users_project_email_partial_uidx is built on
-// — with a parameter folded by service.FoldEmail. SQLite's built-in lower()
-// folds ASCII letters only, which is exactly FoldEmail's rule.
+// compares lower(email), the expression users_project_email_partial_uidx is
+// built on, with a parameter folded by service.FoldEmail. SQLite's built-in
+// lower() folds ASCII letters only, which is exactly FoldEmail's rule.
 func (r *sqliteRepository) FindUserByEmail(ctx context.Context, email string) (*service.User, error) {
 	if email == "" {
 		return nil, nil

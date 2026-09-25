@@ -747,7 +747,7 @@ func (s *AuthService) OAuthLogin(
 	// the SAME key every other flow stores under — otherwise an OAuth login for
 	// alice.smith@gmail.com would mint a duplicate of an account stored as
 	// alicesmith@gmail.com, breaking the one-account-per-email invariant.
-	// canonicalizeEmail already trims + lowercases, so the empty-email guard holds.
+	// CanonicalizeEmail already trims + lowercases, so the empty-email guard holds.
 	// Canonicalized ONCE here; carried as cemail into upsert/resolve (gate) and as
 	// email (string) for the DB link/profile writes and logging.
 	cemail := canonicalize(identity.Email)

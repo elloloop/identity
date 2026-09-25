@@ -190,7 +190,7 @@ func TestDirectoryLookup_ExactMatchOnly(t *testing.T) {
 	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
 	f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive, EmailVerified: true})
 
-	for _, probe := range []string{"alice", "corp.test", "@corp.test", "lice@corp.test", "alice@corp", "alice@corp.test.", "%", "*"} {
+	for _, probe := range []string{"alice", "corp.test", "@corp.test", "lice@corp.test", "alice@corp", "alice@corp.test.evil", "%", "*"} {
 		got, err := f.svc.LookupUsers(context.Background(), key, []string{probe})
 		if err != nil {
 			t.Fatalf("LookupUsers(%q): %v", probe, err)
@@ -352,23 +352,29 @@ func TestDirectoryLookup_ValidatesTheBatchBeforeReadingTheCredential(t *testing.
 	}
 }
 
-// Addresses pair with accounts under FoldEmail, the rule every driver matches
-// by: ASCII case is ignored and nothing else is, so a KELVIN SIGN or a
-// different non-ASCII case names a different address.
-func TestDirectoryLookup_FoldsASCIICaseOnly(t *testing.T) {
+// A lookup canonicalizes each address as sign-in does, so it finds exactly
+// the account sign-in with that address would: case (Unicode included), a
+// plus tag, Gmail dots and a trailing FQDN dot do not make a different
+// address. Once canonical, the stored address is compared under FoldEmail,
+// so an account whose stored address was never canonicalized (non-ASCII
+// capitals) is not found — nor can sign-in reach it.
+func TestDirectoryLookup_CanonicalizesAsSignInDoes(t *testing.T) {
 	f := newDirectoryFixture(t)
 	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
+	emile := f.seed(t, dirTestProjectA, &User{Email: "émile@corp.test", Status: StatusActive, EmailVerified: true})
+	alice := f.seed(t, dirTestProjectA, &User{Email: "alicesmith@gmail.com", Status: StatusActive, EmailVerified: true})
 	kate := f.seed(t, dirTestProjectA, &User{Email: "kate@corp.test", Status: StatusActive, EmailVerified: true})
-	emile := f.seed(t, dirTestProjectA, &User{Email: "Émile@corp.test", Status: StatusActive, EmailVerified: true})
+	f.seed(t, dirTestProjectA, &User{Email: "Ëlise@corp.test", Status: StatusActive, EmailVerified: true})
 
 	for _, tc := range []struct {
 		emails []string
 		want   []string
 	}{
-		{[]string{"ÉMILE@CORP.TEST", "Émile@corp.test"}, []string{emile}}, // one address, asked twice
-		{[]string{"KATE@corp.test"}, []string{kate}},
-		{[]string{"émile@corp.test"}, nil},
-		{[]string{"\u212aate@corp.test"}, nil},
+		{[]string{"ÉMILE@CORP.TEST", "émile@corp.test"}, []string{emile}}, // one address, asked twice
+		{[]string{"Alice.Smith+news@googlemail.com"}, []string{alice}},
+		{[]string{"KATE+x@corp.test.", "zzz@corp.test"}, []string{kate}},
+		{[]string{"\u212aate@corp.test"}, []string{kate}}, // sign-in lowers KELVIN SIGN to "k" too
+		{[]string{"Ëlise@corp.test"}, nil},
 	} {
 		got, err := f.svc.LookupUsers(context.Background(), key, tc.emails)
 		if err != nil {

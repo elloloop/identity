@@ -14403,9 +14403,12 @@ func (x *AdminListProjectOAuthProvidersResponse) GetProviders() []*ProjectOAuthP
 type LookupUsersRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// emails to resolve, 1..100 entries of at most 320 bytes each. Each is
-	// compared with an account's primary email exactly, ignoring case (the
-	// comparison sign-in uses): there is no prefix, substring or domain
-	// matching. Entries that differ only in case are one address.
+	// canonicalized the way sign-in canonicalizes the address it is given
+	// (trimmed and lower-cased, a "+tag" dropped, Gmail dots dropped, an IDN
+	// domain punycoded) and then compared with an account's primary email, so
+	// an entry finds exactly the account sign-in with that address would. There
+	// is no prefix, substring or domain matching. Entries that canonicalize to
+	// the same address are one address.
 	Emails        []string `protobuf:"bytes,1,rep,name=emails,proto3" json:"emails,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -14538,9 +14541,11 @@ type LookupUsersResponse struct {
 	// active (invited, deactivated, suspended, pending consent or deletion), is
 	// omitted, as is one whose account's email is unverified while
 	// GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default). Addresses that
-	// differ only in case yield a single entry. Entries follow request order,
-	// but omissions shift positions: match each entry to a request by its
-	// email, never by index.
+	// canonicalize to the same address yield a single entry. Entries follow
+	// request order, but omissions shift positions: match each entry to a
+	// request by its email, never by index. The entry's email is the address
+	// the account has on file, which can differ from the requested spelling in
+	// case, a "+tag" or Gmail dots.
 	Users         []*DirectoryUser `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

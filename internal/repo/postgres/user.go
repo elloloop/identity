@@ -228,13 +228,17 @@ func (r *pgRepository) ListUsers(ctx context.Context, filter service.UserListFil
 // /Users totalResults so a page can report the true match count rather than
 // the page size — and never silently truncates large projects at the page cap.
 func (r *pgRepository) CountUsers(ctx context.Context, filter service.UserListFilter) (int, error) {
-	where, args := r.userFilterWhere(filter)
-	q := `SELECT count(*) FROM users WHERE ` + strings.Join(where, " AND ")
+	q, args := r.countUsersQuery(filter)
 	var n int
 	if err := r.pool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
 		return 0, wrapPgErr("CountUsers", err)
 	}
 	return n, nil
+}
+
+func (r *pgRepository) countUsersQuery(filter service.UserListFilter) (string, []any) {
+	where, args := r.userFilterWhere(filter)
+	return `SELECT count(*) FROM users WHERE ` + strings.Join(where, " AND "), args
 }
 
 // userFilterWhere builds the project-scoped WHERE predicates and positional

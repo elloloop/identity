@@ -84,17 +84,19 @@ func NewDirectoryService(credentials DirectoryCredentialStore, users Repository,
 }
 
 // LookupUsers resolves emails to the ACTIVE accounts they name in the project
-// presentedKey belongs to, in request order. Addresses match exactly, up to
-// ASCII case (FoldEmail); an address naming no active account — or, when
-// verified email is required, only an unverified one — is simply absent.
+// presentedKey belongs to, in request order. Each address is canonicalized
+// as sign-in canonicalizes the address it is given (CanonicalizeEmail), so
+// the lookup finds exactly the account sign-in with that address would; an
+// address naming no active account — or, when verified email is required,
+// only an unverified one — is simply absent.
 //
 // The request's own project scope (Host, X-Project-Key) is ignored: the
 // credential selects the project, so it can never read another project's
 // users, whichever auth-domain it is presented against.
 func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string, emails []string) ([]DirectoryUser, error) {
-	publicID, secret, ok := strings.Cut(presentedKey, rawKeySeparator)
-	if !ok || publicID == "" || secret == "" {
-		return nil, errInvalidDirectoryKey
+	publicID, secret, err := splitDirectoryKey(presentedKey)
+	if err != nil {
+		return nil, err
 	}
 	// The batch is checked before the credential is read, so a malformed
 	// request costs no control-plane query. Its bounds are public, so a
@@ -126,15 +128,29 @@ func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string,
 	return out, nil
 }
 
-// errInvalidDirectoryKey is every refusal of a presented directory key, so a
-// caller learns nothing about which part was wrong.
+// errInvalidDirectoryKey is every refusal of a presented directory key — one
+// not shaped "<public id>.<secret>", an unknown public id, another kind's
+// credential, a wrong secret, a revoked credential or a suspended project —
+// so a caller learns nothing about which part was wrong.
 var errInvalidDirectoryKey = fmt.Errorf("%w: invalid directory key", ErrUnauthenticated)
 
-// authenticate resolves a presented "<public id>.<secret>" key to an active
-// directory_reader credential. A refusal against a directory_reader
-// credential that exists is audited under its project with the reason; any
-// other kind's public id is public by design (a publishable key ships in
-// clients), so presenting one records nothing.
+// splitDirectoryKey splits a presented key into its public id and secret,
+// refusing one that is not shaped "<public id>.<secret>" before anything is
+// read.
+func splitDirectoryKey(presentedKey string) (publicID, secret string, err error) {
+	publicID, secret, ok := strings.Cut(presentedKey, rawKeySeparator)
+	if !ok || publicID == "" || secret == "" {
+		return "", "", errInvalidDirectoryKey
+	}
+	return publicID, secret, nil
+}
+
+// authenticate resolves a split directory key (splitDirectoryKey) to an
+// active directory_reader credential; every refusal is errInvalidDirectoryKey.
+// A refusal against a directory_reader credential that exists is audited
+// under its project with the reason; any other kind's public id is public by
+// design (a publishable key ships in clients), so presenting one records
+// nothing.
 func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret string) (*AdminProjectCredential, error) {
 	// Hashed before the read, so a public id that names no credential costs
 	// the same hash as one that does and the refusal's timing does not tell
@@ -167,7 +183,7 @@ func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret st
 }
 
 // directoryLookupEmails validates a lookup batch and returns its addresses
-// trimmed and de-duplicated under FoldEmail, first occurrence first.
+// canonicalized and de-duplicated, first occurrence first.
 func directoryLookupEmails(emails []string) ([]string, error) {
 	if len(emails) == 0 {
 		return nil, fmt.Errorf("%w: at least one email is required", ErrInvalidArgument)
@@ -187,12 +203,12 @@ func directoryLookupEmails(emails []string) ([]string, error) {
 			return nil, fmt.Errorf("%w: an email in the lookup is longer than %d bytes",
 				ErrInvalidArgument, MaxDirectoryLookupEmailLength)
 		}
-		key := FoldEmail(e)
-		if seen[key] {
+		canonical := CanonicalizeEmail(e)
+		if seen[canonical] {
 			continue
 		}
-		seen[key] = true
-		out = append(out, e)
+		seen[canonical] = true
+		out = append(out, canonical)
 	}
 	return out, nil
 }

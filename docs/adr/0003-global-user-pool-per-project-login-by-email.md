@@ -4,15 +4,19 @@
 
 Accepted (2026-06-11).
 
-**Amended** (2026-09-25): uniqueness and lookup key on `users.email_fold`, a
-stored generated column `lower(email COLLATE "C")` (Postgres migration 0034),
-instead of on `lower(email)`. The canonical email is still stored only in
-`email`, and a generated column cannot drift from it, so decision 3's objection
-to a second column does not apply. The fold is ASCII-only
-(`service.FoldEmail`), the rule the SQLite and memory drivers apply too: the
-database-default `lower()` folds by locale, so the same addresses matched
-differently from one deployment to another, and under FORCE row-level security
-it kept the lookup from using the index.
+**Amended** (2026-09-25): which layer normalizes is now explicit. The service
+canonicalizes every address it stores or looks up on the sign-up, sign-in,
+SCIM and directory-lookup paths (`CanonicalizeEmail`: trim, lower-case,
+plus-tag and Gmail-dot removal, IDN punycode). The stores compare what they
+are given under one storage rule, `FoldEmail`, which lowers ASCII letters
+only: uniqueness and lookup key on `users.email_fold`, a stored generated
+column `lower(email COLLATE "C")` (Postgres migration 0034), instead of on
+`lower(email)`. The database-default `lower()` folded by locale, so the same
+rows compared differently from one deployment to another and from the SQLite
+and memory drivers, and under FORCE row-level security it kept the lookup from
+using the index. The canonical email is still stored only in `email`, and a
+generated column cannot drift from it, so decision 3's objection to a second
+column does not apply.
 
 **Supersedes** the per-tenant-user portions of decision-log entries §2
 ("Identity tenant ↔ tenant-shard-db tenant is 1:1" — the part that made a
@@ -44,7 +48,7 @@ The converged model puts the user pool at the **Project** level and makes
 The verified fix **H2** pins the email representation:
 
 > Keep the **canonical** email IN the `email` column — do NOT add a separate
-> `canonical_email` field. This matches today's `canonicalizeEmail`.
+> `canonical_email` field. This matches today's `CanonicalizeEmail`.
 
 ## Decision
 
@@ -61,7 +65,7 @@ The verified fix **H2** pins the email representation:
    verified domain of tenant Acme."
 
 3. **Canonical email stays in `email` (H2).** The canonical form
-   (`canonicalizeEmail`) is stored directly in `email`; uniqueness uses
+   (`CanonicalizeEmail`) is stored directly in `email`; uniqueness uses
    `lower(email)`. No `canonical_email` column is added — that would be a second
    source of truth for a value the column already holds.
 

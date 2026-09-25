@@ -661,7 +661,8 @@ type Repository interface {
 	MarkEmailChangeTokenConsumed(ctx context.Context, tokenID string, atMs int64) error
 	// UpdateUserEmail sets the user's primary email and marks it verified
 	// (since the new address has just proven control via the consumed
-	// token). Implementations must also set updated_at = atMs.
+	// token). Implementations must also set updated_at = atMs. An address
+	// another account already holds under FoldEmail is ErrAlreadyExists.
 	UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error
 
 	// OAuth identities — links a (provider, provider_user_id) pair to a
@@ -1648,7 +1649,7 @@ func (s *AuthService) maybeAutoFormTenant(ctx context.Context, user *User) {
 		return
 	}
 	// Split on the last '@' (via emailDomain) so the auto-formed tenant keys on
-	// the same domain canonicalizeEmail produced — a quoted local part with '@'
+	// the same domain CanonicalizeEmail produced — a quoted local part with '@'
 	// must not yield a bogus domain and spawn a spurious tenant.
 	domain := emailDomain(user.Email)
 	if domain == "" || s.cfg.IsPublicEmailDomain(domain) {
@@ -1989,7 +1990,7 @@ func passwordIssuesToErr(issues []string) error {
 	return nil
 }
 
-// validateEmailFormat + canonicalizeEmail live in email_canonicalize.go
+// validateEmailFormat + CanonicalizeEmail live in email_canonicalize.go
 // so the surface they cover (format, length, reserved TLDs, disposable
 // providers, Gmail-style normalization) is in one place.
 
