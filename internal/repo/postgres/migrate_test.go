@@ -137,7 +137,7 @@ func createScratchDatabase(ctx context.Context, t *testing.T, dsn string) string
 	_, err = admin.Exec(ctx, `CREATE DATABASE `+name)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		dropCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		dropCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		c, err := pgx.Connect(dropCtx, dsn)
 		if err != nil {
