@@ -572,10 +572,9 @@ type IdentityServiceClient interface {
 	// except for AcceptTenantInvitation — gated on the caller being an
 	// owner/admin member of the target tenant. AcceptTenantInvitation is the
 	// redeemer's own action: any authenticated caller may redeem a token, but
-	// only once their account email is verified (FAILED_PRECONDITION until it
-	// is, checked first) and only for an invitation addressed to that email
-	// (compared in the canonical form sign-in uses, so a "+tag" spelling of it
-	// matches; PERMISSION_DENIED otherwise). Available
+	// only for an invitation addressed to their own account email (compared in
+	// the canonical form sign-in uses, so a "+tag" spelling of it matches;
+	// PERMISSION_DENIED otherwise). Available
 	// only on the postgres control-plane driver; memory deployments
 	// return Unimplemented.
 	CreateTenantInvitation(context.Context, *connect.Request[v1.CreateTenantInvitationRequest]) (*connect.Response[v1.CreateTenantInvitationResponse], error)
@@ -2354,10 +2353,9 @@ type IdentityServiceHandler interface {
 	// except for AcceptTenantInvitation — gated on the caller being an
 	// owner/admin member of the target tenant. AcceptTenantInvitation is the
 	// redeemer's own action: any authenticated caller may redeem a token, but
-	// only once their account email is verified (FAILED_PRECONDITION until it
-	// is, checked first) and only for an invitation addressed to that email
-	// (compared in the canonical form sign-in uses, so a "+tag" spelling of it
-	// matches; PERMISSION_DENIED otherwise). Available
+	// only for an invitation addressed to their own account email (compared in
+	// the canonical form sign-in uses, so a "+tag" spelling of it matches;
+	// PERMISSION_DENIED otherwise). Available
 	// only on the postgres control-plane driver; memory deployments
 	// return Unimplemented.
 	CreateTenantInvitation(context.Context, *connect.Request[v1.CreateTenantInvitationRequest]) (*connect.Response[v1.CreateTenantInvitationResponse], error)

@@ -178,8 +178,7 @@ func TestMembership_InviteThenAccept_Handler(t *testing.T) {
 		Role: service.RoleOwner, Status: service.MembershipStatusActive,
 	}}
 	users := &connectUserDirectory{byID: map[string]*service.User{
-		"invitee":    {ID: "invitee", Email: "invitee@acme.com", EmailVerified: true},
-		"unverified": {ID: "unverified", Email: "invitee@acme.com"},
+		"invitee": {ID: "invitee", Email: "invitee@acme.com"},
 	}}
 	svc := newMembershipSvc(invitations, members, &connectTenantStore{}, users)
 	srv := startMembershipServer(t, svc)
@@ -199,12 +198,6 @@ func TestMembership_InviteThenAccept_Handler(t *testing.T) {
 	if created.Msg.GetInvitation().GetEmail() != "invitee@acme.com" {
 		t.Fatalf("invitation email = %q", created.Msg.GetInvitation().GetEmail())
 	}
-
-	// An account holding the invited address but not having verified it is
-	// told to verify first.
-	_, err = srv.client.AcceptTenantInvitation(ctx,
-		withAuth(&identitypb.AcceptTenantInvitationRequest{Token: created.Msg.GetRawToken()}, "unverified"))
-	requireCode(t, err, connect.CodeFailedPrecondition)
 
 	// The invitee redeems it and becomes a member.
 	accepted, err := srv.client.AcceptTenantInvitation(ctx,

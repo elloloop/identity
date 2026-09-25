@@ -125,10 +125,8 @@ func newFakeUserDirectory() *fakeUserDirectory {
 	return &fakeUserDirectory{byID: map[string]*User{}}
 }
 
-// put stores a user whose email is verified, as every account that accepts
-// an invitation must be.
 func (d *fakeUserDirectory) put(id, emailAddr string) {
-	d.byID[id] = &User{ID: id, Email: emailAddr, EmailVerified: true}
+	d.byID[id] = &User{ID: id, Email: emailAddr}
 }
 
 func (d *fakeUserDirectory) GetUser(_ context.Context, userID string) (*User, error) {
@@ -446,32 +444,6 @@ func TestCreateTenantInvitation_StoresCanonicalEmail(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, invs, 1)
 	require.Equal(t, mInvitee, invs[0].Email)
-}
-
-// Matching by canonical mailbox is safe only for a proven address: an account
-// whose email is unverified cannot accept, even with the invited address.
-func TestAcceptTenantInvitation_RequiresVerifiedEmail(t *testing.T) {
-	f := newMembershipFixtureNoMail()
-	rawToken := f.seedInvite(t)
-	f.users.byID[mInviteeID] = &User{ID: mInviteeID, Email: mInvitee}
-	_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, rawToken)
-	require.ErrorIs(t, err, ErrEmailVerificationRequired)
-	require.NotErrorIs(t, err, ErrPermissionDenied, "an unverified caller is told to verify, not that the invitation is not theirs")
-	stored, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mInviteeID)
-	require.Nil(t, stored, "no membership for an unverified caller")
-	invs, _ := f.invitations.ListInvitationsForTenant(context.Background(), mTestProject, mTestTenant)
-	require.Equal(t, InvitationStatusPending, invs[0].Status, "the invitation stays redeemable once verified")
-}
-
-// An unverified caller is refused before its address is compared, so a leaked
-// token does not tell it whether the invitation was issued to its address.
-func TestAcceptTenantInvitation_UnverifiedRefusedBeforeAddressMatch(t *testing.T) {
-	f := newMembershipFixtureNoMail()
-	rawToken := f.seedInvite(t)
-	f.users.byID["user-eve"] = &User{ID: "user-eve", Email: "eve@evil.com"}
-	_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), "user-eve", rawToken)
-	require.ErrorIs(t, err, ErrEmailVerificationRequired)
-	require.NotErrorIs(t, err, ErrPermissionDenied)
 }
 
 func TestAcceptTenantInvitation_UnknownTokenNotFound(t *testing.T) {

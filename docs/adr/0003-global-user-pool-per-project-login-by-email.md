@@ -22,11 +22,12 @@ column does not apply.
 The trade-off, stated plainly: canonicalization drops a `+tag` on every
 domain, not only where the mail provider is known to deliver sub-addresses,
 so `bob+x@corp.com` and `bob@corp.com` are one account on every domain, and
-a provider that treats them as different mailboxes cannot have both. Every
-path that pairs an address with an account relies on the address's owner
-having proved it (a verified email for invitation acceptance and for the
-directory lookup by default). An address is how an account is found, never
-what authorizes it: anything downstream that grants access must key on the
+a provider that treats them as different mailboxes cannot have both. So
+another spelling of an address reaches the same account wherever an address
+is paired with one, including tenant-invitation acceptance; whether the
+address was proved is a separate question each path answers (the directory
+lookup returns only verified accounts by default). An address is how an
+account is found, never what authorizes it: anything downstream that grants access must key on the
 account's user id, not on its email.
 
 **Supersedes** the per-tenant-user portions of decision-log entries §2

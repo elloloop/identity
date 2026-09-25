@@ -30,7 +30,7 @@ func TestRedesign_Membership_InviteAcceptList(t *testing.T) {
 	// The user to be invited signs up first (the redeemer must be an
 	// authenticated account whose email matches the invitation).
 	inviteeEmail := fmt.Sprintf("mem-invitee-%d@example-corp.com", time.Now().UnixNano())
-	invitee := signupVerifiedMembershipUser(t, h, inviteeEmail)
+	invitee := signupMembershipUser(t, h, inviteeEmail)
 
 	// Owner invites the user as an admin.
 	created, err := owner.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
@@ -120,7 +120,7 @@ func TestRedesign_Membership_WrongEmailDenied(t *testing.T) {
 	rawToken := extractMailedToken(t, h, inviteeEmail)
 
 	// A DIFFERENT user (different email) tries to redeem the token.
-	eve := signupVerifiedMembershipUser(t, h, fmt.Sprintf("eve-%d@example-corp.com", time.Now().UnixNano()))
+	eve := signupMembershipUser(t, h, fmt.Sprintf("eve-%d@example-corp.com", time.Now().UnixNano()))
 	_, err = eve.client.AcceptTenantInvitation(ctx, connect.NewRequest(&identitypb.AcceptTenantInvitationRequest{
 		Token: rawToken,
 	}))
@@ -192,20 +192,6 @@ func signupMembershipUser(t *testing.T, h *RedesignHarness, emailAddr string) me
 		client: h.AuthedClient(signup.Msg.GetAccessToken()),
 		userID: signup.Msg.GetUser().GetId(),
 	}
-}
-
-// signupVerifiedMembershipUser signs up a plain user and verifies its address
-// the way the user would, through the mailed link: accepting a tenant
-// invitation needs a verified address.
-func signupVerifiedMembershipUser(t *testing.T, h *RedesignHarness, emailAddr string) membershipUser {
-	t.Helper()
-	u := signupMembershipUser(t, h, emailAddr)
-	if _, err := h.Client.VerifyEmail(context.Background(), connect.NewRequest(&identitypb.VerifyEmailRequest{
-		Token: extractMailedToken(t, h, emailAddr),
-	})); err != nil {
-		t.Fatalf("signupVerifiedMembershipUser VerifyEmail(%s): %v", emailAddr, err)
-	}
-	return u
 }
 
 // extractMailedToken pulls the raw token out of the most recent recorded email

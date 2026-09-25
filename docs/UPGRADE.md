@@ -397,12 +397,7 @@ same addresses could match on one deployment and not on another.
 - **Tenant invitations** are stored in canonical form. Accepting one compares
   the caller's address and the invited address in canonical form, so a `+tag`
   variant of the invited mailbox may accept, and an address differing in a
-  non-ASCII letter may not. **Accepting now requires the caller's email to be
-  verified**, since another spelling of the invited address can accept: an
-  unverified caller gets `FAILED_PRECONDITION`, checked before the address is
-  compared (a verified caller whose address is not the invited one still
-  gets `PERMISSION_DENIED`), and the invitation stays redeemable once they
-  verify. A new invitation revokes the pending one for the same mailbox, and
+  non-ASCII letter may not (`PERMISSION_DENIED`). A new invitation revokes the pending one for the same mailbox, and
   concurrent invitations to one mailbox leave one pending instead of failing.
   That holds for every invitation created from this release on, and for the
   pending all-ASCII ones 0034 canonicalized. A pending invitation with a
