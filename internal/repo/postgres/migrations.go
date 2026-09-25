@@ -45,16 +45,25 @@ func runMigrations(dsn string) error {
 
 // forceMigrationVersion records version as the schema's migration version
 // and clears the dirty flag, without running any migration, and returns the
-// state it replaced. version must be one of the embedded migrations.
-func forceMigrationVersion(dsn string, version int) (MigrationState, error) {
+// state it replaced. version must be one of the embedded migrations. Unless
+// override is set it refuses a database that is not dirty — force clears a
+// failed migration and nothing else — and one recorded at a version this build
+// does not ship, which a newer release migrated.
+func forceMigrationVersion(dsn string, version int, override bool) (MigrationState, error) {
+	if version < 1 {
+		return MigrationState{}, fmt.Errorf("postgres: migration version must be positive, got %d", version)
+	}
 	src, err := iofs.New(migrationFS, migrationsDir)
 	if err != nil {
 		return MigrationState{}, fmt.Errorf("postgres: open migrations source: %w", err)
 	}
-	err = requireKnownVersion(src, version)
+	versions, err := embeddedVersions(src)
 	_ = src.Close()
 	if err != nil {
 		return MigrationState{}, err
+	}
+	if !slices.Contains(versions, uint(version)) {
+		return MigrationState{}, fmt.Errorf("postgres: no migration has version %d", version)
 	}
 	m, err := newMigrator(dsn)
 	if err != nil {
@@ -69,11 +78,24 @@ func forceMigrationVersion(dsn string, version int) (MigrationState, error) {
 	default:
 		replaced = MigrationState{Version: int(v), Dirty: dirty}
 	}
+	if !override {
+		if !replaced.Dirty {
+			return MigrationState{}, fmt.Errorf("%w: schema version %d is not dirty", ErrForceRefused, replaced.Version)
+		}
+		if !slices.Contains(versions, uint(replaced.Version)) {
+			return MigrationState{}, fmt.Errorf("%w: schema version %d is newer than this build's migrations (latest %d); recover with the release that applied it",
+				ErrForceRefused, replaced.Version, versions[len(versions)-1])
+		}
+	}
 	if err := m.Force(version); err != nil {
 		return MigrationState{}, fmt.Errorf("postgres: force migration version %d: %w", version, err)
 	}
 	return replaced, nil
 }
+
+// ErrForceRefused is returned when a force would overwrite a migration state
+// it is not meant for: a clean database, or one a newer release migrated.
+var ErrForceRefused = errors.New("postgres: refusing to force the migration version")
 
 // MigrationState is a database's recorded schema migration version. Version
 // is 0 when no migration has been recorded.
@@ -213,22 +235,6 @@ func newMigrator(dsn string) (*migrate.Migrate, error) {
 // closed elsewhere and there is no useful recovery action.
 func closeMigrator(m *migrate.Migrate) {
 	_, _ = m.Close()
-}
-
-// requireKnownVersion refuses a version no embedded migration has, so a typo
-// cannot record a schema version that does not exist.
-func requireKnownVersion(src source.Driver, version int) error {
-	if version < 1 {
-		return fmt.Errorf("postgres: migration version must be positive, got %d", version)
-	}
-	versions, err := embeddedVersions(src)
-	if err != nil {
-		return err
-	}
-	if !slices.Contains(versions, uint(version)) {
-		return fmt.Errorf("postgres: no migration has version %d", version)
-	}
-	return nil
 }
 
 // pgx5 driver registration sentinel — keeps the import alive even

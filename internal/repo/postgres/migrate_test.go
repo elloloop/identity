@@ -65,12 +65,12 @@ func TestMigrate_AppliesAndIdempotent(t *testing.T) {
 // DSN, and a version no embedded migration has, are refused before any
 // connection is attempted.
 func TestForceMigrationVersion_RefusesBadInput(t *testing.T) {
-	if _, err := ForceMigrationVersion(" ", 1); err == nil {
+	if _, err := ForceMigrationVersion(" ", 1, false); err == nil {
 		t.Fatal("ForceMigrationVersion with a blank DSN: want error, got nil")
 	}
 	const unreachable = "postgres://nobody@127.0.0.1:1/none?sslmode=disable"
 	for _, version := range []int{0, -1, 9999} {
-		_, err := ForceMigrationVersion(unreachable, version)
+		_, err := ForceMigrationVersion(unreachable, version, false)
 		if err == nil || !strings.Contains(err.Error(), "version") {
 			t.Fatalf("ForceMigrationVersion(%d) = %v, want a version error before connecting", version, err)
 		}
@@ -165,12 +165,46 @@ func TestMigrate_FailedMigrationIsForcedAndRerun(t *testing.T) {
 	require.ErrorAs(t, err, &dirty)
 	require.Equal(t, emailFoldMigrationVersion, dirty.Version)
 
-	replaced, err := ForceMigrationVersion(scratch, emailFoldMigrationVersion-1)
+	replaced, err := ForceMigrationVersion(scratch, emailFoldMigrationVersion-1, false)
 	require.NoError(t, err)
 	require.Equal(t, MigrationState{Version: emailFoldMigrationVersion, Dirty: true}, replaced,
 		"force reports the dirty version it overwrote")
 	require.NoError(t, Migrate(scratch))
 	require.True(t, hasColumn(ctx, t, holder, "users", "email_fold"))
+}
+
+// TestForceMigrationVersion_RefusesWhatItIsNotFor: force clears a failed
+// migration's dirty flag and nothing else. On a clean database, and on one a
+// newer release migrated, it refuses unless overridden.
+func TestForceMigrationVersion_RefusesWhatItIsNotFor(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping real-postgres force refusal test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	scratch := createScratchDatabase(ctx, t, dsn)
+	require.NoError(t, Migrate(scratch))
+	latest := latestEmbeddedVersion(t)
+
+	_, err := ForceMigrationVersion(scratch, latest-1, false)
+	require.ErrorIs(t, err, ErrForceRefused, "a clean database is refused")
+
+	conn, err := pgx.Connect(ctx, scratch)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close(ctx) }()
+	newer := latest + 1
+	_, err = conn.Exec(ctx, `UPDATE schema_migrations SET version = $1, dirty = true`, newer)
+	require.NoError(t, err)
+	_, err = ForceMigrationVersion(scratch, latest, false)
+	require.ErrorIs(t, err, ErrForceRefused, "a database a newer release migrated is refused")
+
+	replaced, err := ForceMigrationVersion(scratch, latest, true)
+	require.NoError(t, err, "the override forces anyway")
+	require.Equal(t, MigrationState{Version: newer, Dirty: true}, replaced)
+	replaced, err = ForceMigrationVersion(scratch, latest, true)
+	require.NoError(t, err)
+	require.Equal(t, MigrationState{Version: latest}, replaced, "and on a clean database")
 }
 
 // createScratchDatabase creates an empty database next to the one dsn names,

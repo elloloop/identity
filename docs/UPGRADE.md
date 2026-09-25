@@ -242,8 +242,8 @@ rolls back as one transaction and changes nothing. The migration runner
 still records schema version 34 as *dirty*. Every later `identity migrate`,
 and every boot with `GATEWAY_POSTGRES_AUTO_MIGRATE`, then refuses to run, and
 replicas that auto-migrate fail to boot until it is cleared. The error says
-which version to record ("record version 33"); `identity migrate` also logs
-the exact commands in its `recovery` field. To recover:
+which version to record ("record version 33"), and `identity migrate` logs
+the command that records it (`record_version_with`). To recover:
 
 1. Confirm the migration did not apply. The column is absent unless you
    added it by hand:
@@ -269,7 +269,8 @@ that release, never with this one.
 
 #### `identity migrate` refuses other arguments
 
-`identity migrate` now accepts no argument except `force <version>`.
+`identity migrate` now accepts no argument except
+`force [--override] <version>`.
 Anything else — a flag such as `--verbose`, a stray word — exits with status 2
 instead of being ignored. Check any migrate Job or script that passes extra
 `args` before upgrading, or the step will fail.
