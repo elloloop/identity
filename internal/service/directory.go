@@ -35,12 +35,12 @@ const (
 // ProjectStore satisfies it; drivers without a control plane have no
 // credentials, and the app wires no DirectoryService for them.
 type DirectoryCredentialStore interface {
-	// ActiveProjectCredentialByPublicID returns the credential whose public
+	// CredentialByPublicIDInActiveProject returns the credential whose public
 	// id is publicID — revoked or not, with Revoked set accordingly — when
 	// its project is ACTIVE. It returns (nil, nil) when no credential has
 	// that public id or its project is suspended; only an infrastructure
 	// failure is an error.
-	ActiveProjectCredentialByPublicID(ctx context.Context, publicID string) (*AdminProjectCredential, error)
+	CredentialByPublicIDInActiveProject(ctx context.Context, publicID string) (*AdminProjectCredential, error)
 }
 
 // DirectoryUser is the minimal profile a directory lookup discloses: the
@@ -84,24 +84,31 @@ func NewDirectoryService(credentials DirectoryCredentialStore, users Repository,
 }
 
 // LookupUsers resolves emails to the ACTIVE accounts they name in the project
-// presentedKey belongs to, in request order. Addresses match exactly,
-// ignoring case; an address naming no active account — or, when verified
-// email is required, only an unverified one — is simply absent.
+// presentedKey belongs to, in request order. Addresses match exactly, up to
+// ASCII case (FoldEmail); an address naming no active account — or, when
+// verified email is required, only an unverified one — is simply absent.
 //
 // The request's own project scope (Host, X-Project-Key) is ignored: the
 // credential selects the project, so it can never read another project's
 // users, whichever auth-domain it is presented against.
 func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string, emails []string) ([]DirectoryUser, error) {
-	cred, err := s.authenticate(ctx, presentedKey)
+	publicID, secret, ok := strings.Cut(presentedKey, rawKeySeparator)
+	if !ok || publicID == "" || secret == "" {
+		return nil, errInvalidDirectoryKey
+	}
+	// The batch is checked before the credential is read, so a malformed
+	// request costs no control-plane query. Its bounds are public, so a
+	// caller without a valid key learns nothing from them.
+	wanted, err := directoryLookupEmails(emails)
+	if err != nil {
+		return nil, err
+	}
+	cred, err := s.authenticate(ctx, publicID, secret)
 	if err != nil {
 		return nil, err
 	}
 	ctx = WithProjectScope(ctx, &ProjectScope{ProjectID: cred.ProjectID})
 
-	wanted, err := directoryLookupEmails(emails)
-	if err != nil {
-		return nil, err
-	}
 	found, err := s.users.WithProject(cred.ProjectID).FindUsersByEmails(ctx, wanted)
 	if err != nil {
 		return nil, err
@@ -119,29 +126,31 @@ func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string,
 	return out, nil
 }
 
-// authenticate resolves presentedKey ("<public id>.<secret>") to an active
-// directory_reader credential. Every refusal is the same ErrUnauthenticated,
-// so a caller learns nothing about which part was wrong. A refusal against a
-// directory_reader credential that exists is audited under its project with
-// the reason; any other kind's public id is public by design (a publishable
-// key ships in clients), so presenting one records nothing.
-func (s *DirectoryService) authenticate(ctx context.Context, presentedKey string) (*AdminProjectCredential, error) {
-	refused := fmt.Errorf("%w: invalid directory key", ErrUnauthenticated)
-	publicID, secret, ok := strings.Cut(presentedKey, rawKeySeparator)
-	if !ok || publicID == "" || secret == "" {
-		return nil, refused
-	}
-	cred, err := s.credentials.ActiveProjectCredentialByPublicID(ctx, publicID)
+// errInvalidDirectoryKey is every refusal of a presented directory key, so a
+// caller learns nothing about which part was wrong.
+var errInvalidDirectoryKey = fmt.Errorf("%w: invalid directory key", ErrUnauthenticated)
+
+// authenticate resolves a presented "<public id>.<secret>" key to an active
+// directory_reader credential. A refusal against a directory_reader
+// credential that exists is audited under its project with the reason; any
+// other kind's public id is public by design (a publishable key ships in
+// clients), so presenting one records nothing.
+func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret string) (*AdminProjectCredential, error) {
+	// Hashed before the read, so a public id that names no credential costs
+	// the same hash as one that does and the refusal's timing does not tell
+	// them apart.
+	presentedHash := sha256Hex(secret)
+	cred, err := s.credentials.CredentialByPublicIDInActiveProject(ctx, publicID)
 	if err != nil {
 		return nil, err
 	}
 	if cred == nil || cred.Kind != CredentialKindDirectoryReader {
-		return nil, refused
+		return nil, errInvalidDirectoryKey
 	}
 
 	reason := ""
 	switch {
-	case subtle.ConstantTimeCompare([]byte(sha256Hex(secret)), []byte(cred.SecretHash)) != 1:
+	case subtle.ConstantTimeCompare([]byte(presentedHash), []byte(cred.SecretHash)) != 1:
 		reason = directoryRefusedSecretMismatch
 	case cred.Revoked:
 		reason = directoryRefusedRevoked
@@ -154,11 +163,11 @@ func (s *DirectoryService) authenticate(ctx context.Context, presentedKey string
 		audit.WithSuccess(false),
 		audit.WithDetails(map[string]any{"reason": reason}),
 	)
-	return nil, refused
+	return nil, errInvalidDirectoryKey
 }
 
 // directoryLookupEmails validates a lookup batch and returns its addresses
-// trimmed and de-duplicated (ignoring case), first occurrence first.
+// trimmed and de-duplicated under FoldEmail, first occurrence first.
 func directoryLookupEmails(emails []string) ([]string, error) {
 	if len(emails) == 0 {
 		return nil, fmt.Errorf("%w: at least one email is required", ErrInvalidArgument)
@@ -178,7 +187,7 @@ func directoryLookupEmails(emails []string) ([]string, error) {
 			return nil, fmt.Errorf("%w: an email in the lookup is longer than %d bytes",
 				ErrInvalidArgument, MaxDirectoryLookupEmailLength)
 		}
-		key := strings.ToLower(e)
+		key := FoldEmail(e)
 		if seen[key] {
 			continue
 		}
@@ -189,17 +198,19 @@ func directoryLookupEmails(emails []string) ([]string, error) {
 }
 
 // directoryUsersInOrder keeps the accounts among found a lookup may return and
-// orders them by the address that requested them.
+// orders them by the address that requested them. It pairs them under
+// FoldEmail, the rule the repository matched them by, so no account the
+// repository returned for a requested address can fail to pair with it.
 func (s *DirectoryService) directoryUsersInOrder(wanted []string, found []*User) []DirectoryUser {
 	byEmail := make(map[string]*User, len(found))
 	for _, u := range found {
 		if isActiveDirectoryAccount(u) && (u.EmailVerified || !s.requireVerifiedEmail) {
-			byEmail[strings.ToLower(u.Email)] = u
+			byEmail[FoldEmail(u.Email)] = u
 		}
 	}
 	out := make([]DirectoryUser, 0, len(byEmail))
 	for _, e := range wanted {
-		u, ok := byEmail[strings.ToLower(e)]
+		u, ok := byEmail[FoldEmail(e)]
 		if !ok {
 			continue
 		}

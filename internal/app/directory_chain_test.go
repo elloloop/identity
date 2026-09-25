@@ -36,7 +36,7 @@ type chainCredentials struct {
 	cred *service.AdminProjectCredential
 }
 
-func (c chainCredentials) ActiveProjectCredentialByPublicID(_ context.Context, publicID string) (*service.AdminProjectCredential, error) {
+func (c chainCredentials) CredentialByPublicIDInActiveProject(_ context.Context, publicID string) (*service.AdminProjectCredential, error) {
 	if publicID != c.cred.PublicID {
 		return nil, nil
 	}

@@ -109,15 +109,28 @@ func scanUser(row pgx.Row) (*service.User, error) {
 	return &u, nil
 }
 
+// Account-email lookups compare the stored email_fold column (0034) with a
+// parameter folded by service.FoldEmail, using plain `=`. That operator is
+// leakproof, so under FORCE row-level security the planner can still make it
+// an index condition on users_project_email_fold_uidx; lower(email) is not
+// leakproof and made every lookup scan the whole project. The non-empty email
+// guard proves that partial index's predicate.
+const (
+	findUserByEmailQuery = `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND email <> '' AND email_fold = $2
+		LIMIT 1`
+	findUsersByEmailsQuery = `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND email <> '' AND email_fold = ANY($2::text[])
+		ORDER BY id ASC`
+)
+
 func (r *pgRepository) FindUserByEmail(ctx context.Context, email string) (*service.User, error) {
 	if email == "" {
 		return nil, nil
 	}
-	const q = `SELECT ` + userColumns + `
-		FROM users
-		WHERE project_id = $1 AND email <> '' AND lower(email) = lower($2)
-		LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.projectID, email)
+	row := r.pool.QueryRow(ctx, findUserByEmailQuery, r.projectID, service.FoldEmail(email))
 	u, err := scanUser(row)
 	if noRows(err) {
 		return nil, nil
@@ -231,10 +244,8 @@ func (r *pgRepository) userFilterWhere(filter service.UserListFilter) (where []s
 	where = []string{"project_id = $1"}
 	args = []any{r.projectID}
 	if filter.Email != "" {
-		args = append(args, filter.Email)
-		// email <> '' keeps the partial unique index (0028/0013) usable;
-		// without it the planner cannot prove the index covers this filter.
-		where = append(where, fmt.Sprintf("email <> '' AND lower(email) = lower($%d)", len(args)))
+		args = append(args, service.FoldEmail(filter.Email))
+		where = append(where, fmt.Sprintf("email <> '' AND email_fold = $%d", len(args)))
 	}
 	if filter.ExternalID != "" {
 		args = append(args, filter.ExternalID)
@@ -495,16 +506,7 @@ func (r *pgRepository) FindUsersByEmails(ctx context.Context, emails []string) (
 	if len(emails) == 0 {
 		return nil, nil
 	}
-	// lower() on both sides is FindUserByEmail's comparison. Under FORCE
-	// row-level security lower() is not leakproof, so the planner cannot use
-	// the (project_id, lower(email)) index as an index condition here and the
-	// project's rows are scanned — the same as FindUserByEmail today.
-	const q = `SELECT ` + userColumns + `
-		FROM users
-		WHERE project_id = $1 AND email <> ''
-		  AND lower(email) IN (SELECT lower(e) FROM unnest($2::text[]) AS e)
-		ORDER BY id ASC`
-	rows, err := r.pool.Query(ctx, q, r.projectID, emails)
+	rows, err := r.pool.Query(ctx, findUsersByEmailsQuery, r.projectID, foldEmails(emails))
 	if err != nil {
 		return nil, wrapPgErr("FindUsersByEmails", err)
 	}
@@ -522,6 +524,14 @@ func (r *pgRepository) FindUsersByEmails(ctx context.Context, emails []string) (
 		return nil, wrapPgErr("FindUsersByEmails", err)
 	}
 	return out, nil
+}
+
+func foldEmails(emails []string) []string {
+	folded := make([]string, len(emails))
+	for i, e := range emails {
+		folded[i] = service.FoldEmail(e)
+	}
+	return folded
 }
 
 func (r *pgRepository) SetDateOfBirthOnce(

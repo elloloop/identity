@@ -40,7 +40,7 @@ type fakeControlPlaneStore struct {
 	updateErr error
 	createErr error
 	credErr   error
-	// lookupErr makes ActiveProjectCredentialByPublicID fail (an infrastructure
+	// lookupErr makes CredentialByPublicIDInActiveProject fail (an infrastructure
 	// error on the directory-credential read).
 	lookupErr error
 	// suspended marks projects whose credentials no longer resolve.
@@ -113,9 +113,9 @@ func (f *fakeControlPlaneStore) RevokeProjectCredential(_ context.Context, proje
 	return nil
 }
 
-// ActiveProjectCredentialByPublicID mirrors the postgres DirectoryCredentialStore
+// CredentialByPublicIDInActiveProject mirrors the postgres DirectoryCredentialStore
 // read: any credential with that public id, unless its project is suspended.
-func (f *fakeControlPlaneStore) ActiveProjectCredentialByPublicID(_ context.Context, publicID string) (*AdminProjectCredential, error) {
+func (f *fakeControlPlaneStore) CredentialByPublicIDInActiveProject(_ context.Context, publicID string) (*AdminProjectCredential, error) {
 	if f.lookupErr != nil {
 		return nil, f.lookupErr
 	}

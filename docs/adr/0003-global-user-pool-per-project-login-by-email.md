@@ -4,6 +4,16 @@
 
 Accepted (2026-06-11).
 
+**Amended** (2026-09-25): uniqueness and lookup key on `users.email_fold`, a
+stored generated column `lower(email COLLATE "C")` (Postgres migration 0034),
+instead of on `lower(email)`. The canonical email is still stored only in
+`email`, and a generated column cannot drift from it, so decision 3's objection
+to a second column does not apply. The fold is ASCII-only
+(`service.FoldEmail`), the rule the SQLite and memory drivers apply too: the
+database-default `lower()` folds by locale, so the same addresses matched
+differently from one deployment to another, and under FORCE row-level security
+it kept the lookup from using the index.
+
 **Supersedes** the per-tenant-user portions of decision-log entries §2
 ("Identity tenant ↔ tenant-shard-db tenant is 1:1" — the part that made a
 user belong to exactly one storage tenant) and §13 (the "resolve-or-create by

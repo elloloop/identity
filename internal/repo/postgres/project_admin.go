@@ -89,11 +89,12 @@ func (s *ProjectStore) CreateProjectCredential(ctx context.Context, c *service.A
 	return id, nil
 }
 
-// ActiveProjectCredentialByPublicID is the postgres driver's
+// CredentialByPublicIDInActiveProject is the postgres driver's
 // service.DirectoryCredentialStore read: the credential with publicID, revoked
-// or not, provided its project is ACTIVE. An unknown public id or a suspended
-// project is a clean miss (nil, nil) — a suspended project serves nothing.
-func (s *ProjectStore) ActiveProjectCredentialByPublicID(ctx context.Context, publicID string) (*service.AdminProjectCredential, error) {
+// or not (Revoked says which), provided its project is ACTIVE. An unknown
+// public id or a suspended project is a clean miss (nil, nil) — a suspended
+// project serves nothing.
+func (s *ProjectStore) CredentialByPublicIDInActiveProject(ctx context.Context, publicID string) (*service.AdminProjectCredential, error) {
 	c, err := s.GetProjectCredentialByPublicID(ctx, publicID)
 	if err != nil || c == nil {
 		return nil, err

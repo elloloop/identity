@@ -299,7 +299,11 @@ func TestDirectoryLookup_RefusesEveryOtherPresentation(t *testing.T) {
 	}
 }
 
-func TestDirectoryLookup_ValidatesTheBatchAfterAuthenticating(t *testing.T) {
+// The batch is checked before the credential store is read, so a malformed
+// batch costs no control-plane query. A key that is not even shaped like one
+// is refused first; the batch bounds are public, so a caller whose key is
+// merely wrong learns nothing from them.
+func TestDirectoryLookup_ValidatesTheBatchBeforeReadingTheCredential(t *testing.T) {
 	f := newDirectoryFixture(t)
 	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
 
@@ -318,10 +322,15 @@ func TestDirectoryLookup_ValidatesTheBatchAfterAuthenticating(t *testing.T) {
 		if _, err := f.svc.LookupUsers(context.Background(), key, emails); !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("%s: err = %v, want ErrInvalidArgument", name, err)
 		}
-		// An unauthenticated caller learns nothing about input validation.
 		if _, err := f.svc.LookupUsers(context.Background(), "", emails); !errors.Is(err, ErrUnauthenticated) {
 			t.Fatalf("%s without a key: err = %v, want ErrUnauthenticated", name, err)
 		}
+		// A store that fails every read proves the batch was refused first.
+		f.store.lookupErr = errors.New("credential store must not be read")
+		if _, err := f.svc.LookupUsers(context.Background(), key, emails); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("%s with the store failing: err = %v, want ErrInvalidArgument before any read", name, err)
+		}
+		f.store.lookupErr = nil
 	}
 
 	// An address of exactly the maximum length is accepted.
@@ -340,6 +349,34 @@ func TestDirectoryLookup_ValidatesTheBatchAfterAuthenticating(t *testing.T) {
 	}
 	if ids := directoryIDs(got); len(ids) != 1 || ids[0] != alice {
 		t.Fatalf("batch at the limit = %v, want [%s] once", ids, alice)
+	}
+}
+
+// Addresses pair with accounts under FoldEmail, the rule every driver matches
+// by: ASCII case is ignored and nothing else is, so a KELVIN SIGN or a
+// different non-ASCII case names a different address.
+func TestDirectoryLookup_FoldsASCIICaseOnly(t *testing.T) {
+	f := newDirectoryFixture(t)
+	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
+	kate := f.seed(t, dirTestProjectA, &User{Email: "kate@corp.test", Status: StatusActive, EmailVerified: true})
+	emile := f.seed(t, dirTestProjectA, &User{Email: "Émile@corp.test", Status: StatusActive, EmailVerified: true})
+
+	for _, tc := range []struct {
+		emails []string
+		want   []string
+	}{
+		{[]string{"ÉMILE@CORP.TEST", "Émile@corp.test"}, []string{emile}}, // one address, asked twice
+		{[]string{"KATE@corp.test"}, []string{kate}},
+		{[]string{"émile@corp.test"}, nil},
+		{[]string{"\u212aate@corp.test"}, nil},
+	} {
+		got, err := f.svc.LookupUsers(context.Background(), key, tc.emails)
+		if err != nil {
+			t.Fatalf("LookupUsers(%q): %v", tc.emails, err)
+		}
+		if ids := directoryIDs(got); fmt.Sprint(ids) != fmt.Sprint(tc.want) {
+			t.Fatalf("LookupUsers(%q) = %v, want %v", tc.emails, ids, tc.want)
+		}
 	}
 }
 

@@ -105,15 +105,19 @@ func scanUser(s scanner) (*service.User, error) {
 	return &u, nil
 }
 
+// FindUserByEmail, like every account-email comparison in this driver,
+// compares lower(email) — the expression users_project_email_partial_uidx is built on
+// — with a parameter folded by service.FoldEmail. SQLite's built-in lower()
+// folds ASCII letters only, which is exactly FoldEmail's rule.
 func (r *sqliteRepository) FindUserByEmail(ctx context.Context, email string) (*service.User, error) {
 	if email == "" {
 		return nil, nil
 	}
 	const q = `SELECT ` + userColumns + `
 		FROM users
-		WHERE project_id = $1 AND email <> '' AND lower(email) = lower($2)
+		WHERE project_id = $1 AND email <> '' AND lower(email) = $2
 		LIMIT 1`
-	u, err := scanUser(r.db.QueryRow(ctx, q, r.projectID, email))
+	u, err := scanUser(r.db.QueryRow(ctx, q, r.projectID, service.FoldEmail(email)))
 	if noRows(err) {
 		return nil, nil
 	}
@@ -225,10 +229,10 @@ func (r *sqliteRepository) userFilterWhere(filter service.UserListFilter) (where
 	where = []string{"project_id = $1"}
 	args = []any{r.projectID}
 	if filter.Email != "" {
-		args = append(args, filter.Email)
-		// email <> '' keeps the partial unique index (0028/0013) usable;
-		// without it the planner cannot prove the index covers this filter.
-		where = append(where, fmt.Sprintf("email <> '' AND lower(email) = lower($%d)", len(args)))
+		args = append(args, service.FoldEmail(filter.Email))
+		// email <> '' keeps the partial unique index (0013) usable; without
+		// it the planner cannot prove the index covers this filter.
+		where = append(where, fmt.Sprintf("email <> '' AND lower(email) = $%d", len(args)))
 	}
 	if filter.ExternalID != "" {
 		args = append(args, filter.ExternalID)
@@ -486,8 +490,8 @@ func (r *sqliteRepository) FindUsersByEmails(ctx context.Context, emails []strin
 	args = append(args, r.projectID)
 	placeholders := make([]string, 0, len(emails))
 	for i, e := range emails {
-		placeholders = append(placeholders, fmt.Sprintf("lower($%d)", i+2))
-		args = append(args, e)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+		args = append(args, service.FoldEmail(e))
 	}
 	q := `SELECT ` + userColumns + `
 		FROM users
