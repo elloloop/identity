@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/elloloop/identity/internal/middleware"
+	"go.uber.org/zap"
+
+	"github.com/elloloop/identity/internal/origin"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -55,7 +57,7 @@ func (s *ProjectStore) ResolveByHostname(ctx context.Context, hostname string) (
 
 // resolved maps an active project to a ResolvedProject, loading its primary
 // auth-domain (for branded link building) and its per-project CORS allow-list
-// (for the CORS middleware). It returns nil for a nil or suspended project —
+// (for the CORS middleware, see projectCORSOrigins). It returns nil for a nil or suspended project —
 // a resolution miss; a suspended project must never resolve a request.
 func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.ResolvedProject, error) {
 	if p == nil || p.Status != projectStatusActive {
@@ -69,15 +71,11 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 	if err != nil {
 		return nil, fmt.Errorf("project %q: %w", p.ID, err)
 	}
-	origins, err := projectCORSOrigins(p.ID, cfg)
-	if err != nil {
-		return nil, err
-	}
 	return &service.ResolvedProject{
 		ID:                 p.ID,
 		StorageScopeID:     p.StorageScopeID,
 		PrimaryAuthDomain:  primary,
-		CORSAllowedOrigins: origins,
+		CORSAllowedOrigins: s.projectCORSOrigins(p.ID, cfg.CORS),
 		Branding:           cfg.Branding,
 		Passkey:            cfg.Passkey,
 		LoginDefaults:      cfg.Login,
@@ -90,22 +88,21 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 	}, nil
 }
 
-// projectCORSOrigins returns a project's validated per-project CORS allow-list,
-// or nil when it configures none. Origins are validated with the same rule the
-// global allow-list uses (middleware.ParseAllowedOrigins, credentials-mode):
-// the CORS middleware always sets Access-Control-Allow-Credentials, so a
-// wildcard/"null"/malformed per-project origin is rejected here rather than
-// served to the browser. A bad config is a configuration error surfaced to the
-// caller, not silently dropped.
-func projectCORSOrigins(projectID string, cfg service.ProjectConfig) ([]string, error) {
-	if len(cfg.CORS.AllowedOrigins) == 0 {
-		return nil, nil
-	}
-	origins, err := middleware.ValidateAllowedOrigins(cfg.CORS.AllowedOrigins, true)
+// projectCORSOrigins returns a project's per-project CORS allow-list, or the
+// empty allow-list when it configures none. A stored list that fails
+// validation (written before the admin API checked it, or under older rules)
+// fails closed to the empty allow-list, so only the global floor applies to
+// the project's browser requests; the rest of the project keeps serving. The
+// failure is logged on every resolution (resolutions are cached) so an
+// operator can find and fix the config.
+func (s *ProjectStore) projectCORSOrigins(projectID string, cfg service.ProjectCORSConfig) origin.Allowlist {
+	a, err := cfg.Allowlist()
 	if err != nil {
-		return nil, fmt.Errorf("project %q cors: %w", projectID, err)
+		s.logger.Warn("project_cors_config_invalid_failing_closed",
+			zap.String("project_id", projectID), zap.Error(err))
+		return origin.Allowlist{}
 	}
-	return origins, nil
+	return a
 }
 
 // primaryAuthHostname returns the project's primary serving hostname, or ""

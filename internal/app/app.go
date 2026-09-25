@@ -28,6 +28,7 @@ import (
 	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/observability"
+	"github.com/elloloop/identity/internal/origin"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/audit"
@@ -487,11 +488,27 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.DefaultProjectID = config.DefaultProjectIDFallback
 	}
 
-	allowedOrigins, err := middleware.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
+	allowedOrigins, err := origin.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
 	if err != nil {
 		return nil, fmt.Errorf("cors config invalid: %w", err)
 	}
-	logger.Info("cors_allowed_origins", zap.Strings("origins", allowedOrigins))
+	logger.Info("cors_allowed_origins",
+		zap.Strings("origins", allowedOrigins.Exact()),
+		zap.Strings("origin_patterns", allowedOrigins.Patterns()))
+
+	// Browser-facing hosted OAuth routes are registered only when
+	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS has a usable entry; the headless
+	// BeginOAuthLogin / OAuthLogin RPCs work regardless. A malformed wildcard
+	// entry fails startup here, as a malformed CORS origin does above.
+	returnAllow, err := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
+	if err != nil {
+		return nil, fmt.Errorf("GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: %w", err)
+	}
+	for _, entry := range returnAllow.Ignored() {
+		logger.Warn("oauth_allowed_return_url_ignored",
+			zap.String("entry", entry),
+			zap.String("hint", "not an absolute http(s) URL without userinfo, query or fragment; it admits no return_to"))
+	}
 
 	trustedProxies, err := middleware.ParseTrustedProxies(deps.Config.TrustedProxies)
 	if err != nil {
@@ -626,7 +643,8 @@ func New(deps Deps) (*Built, error) {
 		WithLoginGovernance(deps.LoginGovernance).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
-		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger)
+		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
+		WithReturnAllowlist(returnAllow)
 	// Dispatch credential emails asynchronously in the served deployment so SMTP
 	// latency cannot time the gated send/no-send decision. Tests that read the
 	// mailer synchronously opt out via Deps.SynchronousEmailSend.
@@ -696,19 +714,19 @@ func New(deps Deps) (*Built, error) {
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)
 
-	// Browser-facing hosted OAuth routes (#126). Registered only when
-	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS is non-empty; the headless
-	// BeginOAuthLogin / OAuthLogin RPCs work regardless.
-	returnAllow := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
-
 	// Default auth UI (login/signup). Rendered per request so it offers
 	// exactly the sign-in options the resolved project enables server-side.
 	mux.Handle("/auth/", ui.Handler(deps.Config, authSvc, returnAllow.Enabled()))
 	if returnAllow.Enabled() {
-		logger.Info("oauth_hosted_flow_enabled", zap.Strings("allowed_return_urls", returnAllow.Entries()))
+		logger.Info("oauth_hosted_flow_enabled",
+			zap.Strings("allowed_return_urls", returnAllow.Entries()),
+			zap.Strings("allowed_return_url_patterns", returnAllow.Patterns()))
 	} else {
-		logger.Info("oauth_hosted_flow_disabled",
-			zap.String("hint", "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"))
+		hint := "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"
+		if len(returnAllow.Ignored()) > 0 {
+			hint = "every GATEWAY_OAUTH_ALLOWED_RETURN_URLS entry was ignored (see oauth_allowed_return_url_ignored); fix them to enable GET /oauth/start + /oauth/callback"
+		}
+		logger.Info("oauth_hosted_flow_disabled", zap.String("hint", hint))
 	}
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 

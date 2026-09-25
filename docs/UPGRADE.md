@@ -1,8 +1,8 @@
 # Upgrade guide
 
-## v4.8 → next — SCIM throttling and audit; directory limit on every transport
+## v4.8 → next — SCIM throttling and audit; directory limit on every transport; wildcard origins
 
-No schema change and no migration. Two groups of deployments see a change in
+No schema change and no migration. Four groups of deployments see a change in
 behaviour:
 
 - **`GATEWAY_SCIM_ENABLED` deployments.** Every request under `/scim/v2/` now
@@ -31,6 +31,58 @@ behaviour:
   connection's peer address, or the first untrusted `x-forwarded-for` hop
   when the peer is in `GATEWAY_TRUSTED_PROXIES`. A host that already throttles
   `LookupUsers` in its own interceptor can keep doing so; both limits apply.
+- **Deployments with a `*` inside an origin or return-URL allowlist entry**
+  (`GATEWAY_ALLOWED_ORIGINS`, a project's `cors.allowed_origins`,
+  `GATEWAY_OAUTH_ALLOWED_RETURN_URLS`). Such an entry is now a one-label
+  wildcard pattern (below). Before, such a return-URL entry was silently
+  ignored and such a CORS entry was compared literally, so it never matched.
+  Now:
+  - A valid pattern admits every single-label subdomain of its parent. Check
+    each one before upgrading.
+  - An entry that is not a valid pattern — including one whose parent is a
+    public suffix, such as `https://*.co.uk`, `https://*.vercel.app`,
+    `https://*.netlify.app`, `https://*.pages.dev` or `https://*.github.io`,
+    or one directly under a wildcard suffix rule such as
+    `https://*.compute.amazonaws.com` —
+    makes the server **refuse to start** (`cors config invalid: …` /
+    `GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: …`). Scope a preview pattern
+    to your own project instead: `https://*.<project>.pages.dev`.
+  - A pattern whose parent ends in a numeric label (`https://*.0.0.1`) or
+    whose port is outside 1–65535 is refused the same way. A zero-padded
+    port is read as the number (`:0443` means 443).
+  - A **project** whose stored `cors.allowed_origins` fails these rules keeps
+    serving — native login, SCIM, sessions and admin writes are unaffected —
+    but its **whole per-project CORS list is dropped**: browser requests from
+    its origins get no CORS grant unless `GATEWAY_ALLOWED_ORIGINS` admits
+    them, and each resolution logs `project_cors_config_invalid_failing_closed`
+    with the project id. This also covers malformed non-wildcard entries (a
+    path, no scheme, `null`, an empty string, userinfo, an upper-case scheme,
+    a trailing `?`) that the admin API used to accept; before this release
+    such a project answered **503** on every request instead. The admin
+    API's whole-config write (`UpsertProjectConfig`) now refuses any such
+    entry. Find affected projects before upgrading (Postgres):
+
+    ```sql
+    SELECT p.id, o.entry
+    FROM projects p,
+         jsonb_array_elements_text(
+           CASE WHEN jsonb_typeof(p.config_json -> 'cors' -> 'allowed_origins') = 'array'
+                THEN p.config_json -> 'cors' -> 'allowed_origins' ELSE '[]'::jsonb END
+         ) AS o(entry)
+    WHERE o.entry LIKE '%*%'
+       OR o.entry !~ '^https?://[^/?#@[:space:]\\]+$';
+    ```
+
+    Every row is an entry to review: a `*` entry must be a valid pattern
+    under a parent you control, and any other row is malformed. Replace the
+    project's config with `UpsertProjectConfig` to fix it.
+- **Deployments with a malformed exact `GATEWAY_OAUTH_ALLOWED_RETURN_URLS`
+  entry** (no `*`; not an absolute http(s) URL, or carrying a query or
+  fragment). Such an entry still admits nothing and still does not stop the
+  server, but it is now logged at startup as `oauth_allowed_return_url_ignored`.
+  If the list holds no usable entry at all, the hosted OAuth routes are no
+  longer registered (404, logged as `oauth_hosted_flow_disabled`) instead of
+  answering every `return_to` with 400, and magic-link sign-in is off.
 
 Also changed:
 
@@ -46,6 +98,26 @@ Also changed:
   per-IP limit, window and verified-email rule) or `directory_lookup_disabled`,
   as it already does for SCIM.
 - **New audit event:** `scim_auth_failed`.
+- **One-label wildcard origins.** The three allowlists above accept
+  `https://*.previews.example.app`, for per-branch preview deployments: the
+  `*` matches exactly one DNS label under the fixed parent, `https` only, on
+  a fixed port. Return-URL patterns keep the path-prefix rule
+  (`https://*.previews.example.app/auth`). CORS echoes the concrete request
+  `Origin`, never the pattern. Startup logs patterns next to the exact entries
+  (`origin_patterns`, `allowed_return_url_patterns`). A pattern admits every
+  host under its parent, so use one only for a parent whose every subdomain
+  you control; parents on the public suffix list are refused. See
+  [Wildcard origin patterns](../docs-site/src/pages/docs/installation/configuration.astro).
+- **Stricter `GATEWAY_ALLOWED_ORIGINS` parsing.** An entry with a trailing
+  empty query (`https://app.example.app?`) is now refused at startup, like
+  one with a query.
+- **`return_to` with a backslash is refused.** Browsers read `\` as `/` in
+  an http(s) URL, so `https://app.example.app/auth/..\x` passed a `/auth`
+  entry and then landed outside it. A hosted-OAuth or magic-link `return_to`
+  containing a backslash is now rejected like any other disallowed one.
+- **`Vary: Origin`** is sent on every response that passes through the CORS
+  middleware, so a shared cache never serves one origin's CORS headers to
+  another.
 
 ## v4.7 → v4.8 — directory lookup for services (additive); session-mode and SCIM fixes (behaviour changes)
 

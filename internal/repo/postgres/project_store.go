@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -85,6 +86,7 @@ type ProjectStore struct {
 	// that drives branded link URLs) to DNS-verified hostnames. See
 	// primaryAuthHostname.
 	requireVerifiedAuthDomain bool
+	logger                    *zap.Logger
 }
 
 // NewProjectStore builds a control-plane store that shares the given
@@ -92,9 +94,12 @@ type ProjectStore struct {
 // independently — closing the owning *pgRepository releases the pool for
 // every derived store. requireVerifiedAuthDomain, when true, restricts the
 // resolved primary auth-domain to DNS-verified hostnames (see
-// primaryAuthHostname).
-func NewProjectStore(r *pgRepository, requireVerifiedAuthDomain bool) *ProjectStore {
-	return &ProjectStore{pool: r.pool, requireVerifiedAuthDomain: requireVerifiedAuthDomain}
+// primaryAuthHostname). logger may be nil (no logging).
+func NewProjectStore(r *pgRepository, requireVerifiedAuthDomain bool, logger *zap.Logger) *ProjectStore {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &ProjectStore{pool: r.pool, requireVerifiedAuthDomain: requireVerifiedAuthDomain, logger: logger}
 }
 
 // columnsPrefixed qualifies every comma-separated column in cols with the

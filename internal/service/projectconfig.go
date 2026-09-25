@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/internal/origin"
 )
 
 // ProjectConfig is the typed view of a project's config_json blob. It is the
@@ -1195,12 +1196,33 @@ func (j ProjectJurisdictionsConfig) canonicalized() ProjectJurisdictionsConfig {
 
 // ProjectCORSConfig is the per-project CORS policy. AllowedOrigins is layered
 // on top of the global GATEWAY_ALLOWED_ORIGINS floor: a browser origin is
-// accepted when it is in either set. Each entry must be a bare scheme+host(+port)
-// origin (no path/query/fragment, lower-case http:// or https:// scheme); the
-// project resolver validates them with middleware.ParseAllowedOrigins before
-// they reach a request.
+// accepted when either set admits it. Each entry must be a bare
+// scheme+host(+port) origin (no path/query/fragment, lower-case http:// or
+// https:// scheme) or a one-label wildcard pattern (https://*.parent.example);
+// ProjectCORSConfig.Allowlist validates them, refusing a bad entry on the admin
+// write path and failing the project's own allow-list closed at resolution.
 type ProjectCORSConfig struct {
 	AllowedOrigins []string `json:"allowed_origins"`
+}
+
+// Allowlist validates the project's origins under the same rule as the global
+// GATEWAY_ALLOWED_ORIGINS floor (origin.ValidateAllowedOrigins in credentials
+// mode, since the CORS middleware always allows credentials) and returns the
+// allow-list the middleware matches against; the zero allow-list when none is
+// configured. It is deliberately not part of ProjectConfig.Validate: CORS is a
+// browser-only concern, so a stored entry that fails it must not break the
+// project's native login, SCIM or other admin writes. The admin whole-config
+// write refuses it (UpsertProjectConfig) and the resolver fails the project's
+// own CORS allow-list closed.
+func (c ProjectCORSConfig) Allowlist() (origin.Allowlist, error) {
+	if len(c.AllowedOrigins) == 0 {
+		return origin.Allowlist{}, nil
+	}
+	a, err := origin.ValidateAllowedOrigins(c.AllowedOrigins, true)
+	if err != nil {
+		return origin.Allowlist{}, fmt.Errorf("cors.allowed_origins: %w", err)
+	}
+	return a, nil
 }
 
 // ParseProjectConfig decodes a project's config_json into the typed

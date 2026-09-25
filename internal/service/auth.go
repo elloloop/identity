@@ -1285,7 +1285,8 @@ type AuthService struct {
 	phoneThrottle     *emailSendThrottle
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
-	// OAuth flow uses. Parsed once at construction.
+	// OAuth flow uses. Injected with WithReturnAllowlist; the zero value
+	// disables magic-link sign-in.
 	returnAllow ReturnAllowlist
 	nowFunc     func() time.Time // overridable for testing
 
@@ -1515,7 +1516,6 @@ func NewAuthServiceWithOAuth(
 		emailThrottle:        newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
 		signupThrottle:       newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		phoneThrottle:        newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
-		returnAllow:          ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
 		nowFunc:              time.Now,
 		// Default to synchronous sends; app.New opts into async via
 		// WithAsyncEmailDispatch. A synchronous default keeps every
@@ -1532,6 +1532,16 @@ func NewAuthServiceWithOAuth(
 // because the per-IP rate limiter and captcha upstream already bound this path.
 func (s *AuthService) WithAsyncEmailDispatch() *AuthService {
 	s.runEmailSend = func(fn func()) { go fn() }
+	return s
+}
+
+// WithReturnAllowlist sets the return_to allowlist the magic-link flow checks.
+// app.New parses GATEWAY_OAUTH_ALLOWED_RETURN_URLS once, refuses to start on
+// an invalid list, and injects the result here and into the hosted OAuth
+// handler, so both flows enforce the same parsed allowlist. It is a set-once
+// construction option that returns the receiver for chaining.
+func (s *AuthService) WithReturnAllowlist(a ReturnAllowlist) *AuthService {
+	s.returnAllow = a
 	return s
 }
 

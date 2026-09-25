@@ -60,7 +60,7 @@ func newProductAgeSvc(t *testing.T) (*AuthService, *fakeRepo, *recordingTranspor
 	// return allowlist; both are needed here because one service drives every
 	// issuing path, OAuth and magic-link included.
 	svc.oauthResolver = newOAuthResolver(svc.cfg.DefaultProjectID, defaultTestOAuthRegistry(), svc.cfg.OAuthHubSharing, zap.NewNop())
-	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
 	return svc, repo, rec
 }
 

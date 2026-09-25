@@ -1,6 +1,10 @@
 package service
 
-import "context"
+import (
+	"context"
+
+	"github.com/elloloop/identity/internal/origin"
+)
 
 // ProjectScope is the per-request project binding carried in the request
 // context by the project-resolution middleware. A Project is the redesign's
@@ -30,9 +34,10 @@ type ProjectScope struct {
 	// CORSAllowedOrigins is the project's own browser CORS allow-list,
 	// parsed and validated from its config_json. It is layered on top of
 	// the global GATEWAY_ALLOWED_ORIGINS floor by the CORS middleware: a
-	// request whose Origin is in either set is allowed. Empty when the
-	// project configures none, in which case only the global floor applies.
-	CORSAllowedOrigins []string
+	// request whose Origin either allow-list admits is allowed. The zero
+	// value when the project configures none or its stored list is invalid
+	// (it fails closed), in which case only the global floor applies.
+	CORSAllowedOrigins origin.Allowlist
 
 	// Branding is the project's transactional-email branding, parsed from
 	// its config_json. Empty fields fall back to the global
@@ -123,7 +128,7 @@ type ResolvedProject struct {
 	ID                 string
 	StorageScopeID     string
 	PrimaryAuthDomain  string
-	CORSAllowedOrigins []string
+	CORSAllowedOrigins origin.Allowlist
 	Branding           ProjectBrandingConfig
 	Passkey            ProjectPasskeyConfig
 	LoginDefaults      ProjectLoginConfig

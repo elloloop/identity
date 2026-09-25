@@ -568,7 +568,7 @@ func TestProjectAccess_RequestMagicLink_SendGatedByMode(t *testing.T) {
 	send := func(t *testing.T, cfgJSON string) int {
 		t.Helper()
 		svc, _, rec := newAuthSvcWithMailer(t)
-		svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+		svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
 		ctx := accessScope(t, cfgJSON)
 		require.NoError(t, svc.RequestMagicLink(ctx, "x@any.com", "https://app.test/cb"))
 		return len(rec.Sent())
@@ -799,7 +799,7 @@ func TestProjectAccess_NonCanonical_PasswordlessOTP_CrossVariant(t *testing.T) {
 
 func TestProjectAccess_NonCanonical_MagicLink(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
-	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
 	ctx := accessScope(t, gmailAllowlistJSON)
 
 	require.NoError(t, svc.RequestMagicLink(ctx, nonCanonSignup, "https://app.test/cb"))

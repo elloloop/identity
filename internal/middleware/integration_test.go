@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elloloop/identity/internal/origin"
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
 )
 
@@ -18,7 +19,7 @@ import (
 // chainHandler wraps the middleware stack: CORS -> Health -> JWKS -> Auth -> handler.
 func chainHandler(t *testing.T, kr jwtpkg.Signer, allowedOrigins string, inner http.Handler) http.Handler {
 	t.Helper()
-	parsed, err := ParseAllowedOrigins(allowedOrigins, true)
+	parsed, err := origin.ParseAllowedOrigins(allowedOrigins, true)
 	if err != nil {
 		t.Fatalf("ParseAllowedOrigins: %v", err)
 	}
