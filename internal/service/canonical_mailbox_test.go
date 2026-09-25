@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -62,6 +64,83 @@ func TestTagOnlyAddressIsRefusedOnEveryAccountPath(t *testing.T) {
 	t.Run("first platform admin bootstrap", func(t *testing.T) {
 		f := newAdminFixture("")
 		_, err := f.svc.CreateFirstPlatformAdmin(ctx, "", tagOnlyAddress, "")
+		require.ErrorIs(t, err, ErrInvalidArgument)
+	})
+
+	// requireNoTagOnlyAccount checks nothing was created under the address a
+	// tag-only one canonicalizes to.
+	requireNoTagOnlyAccount := func(t *testing.T, repo *fakeRepo) {
+		t.Helper()
+		got, err := repo.FindUserByEmail(ctx, "@corp.com")
+		require.NoError(t, err)
+		require.Nil(t, got, "no account under @corp.com")
+	}
+
+	t.Run("oauth login", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		_, err := svc.OAuthLogin(ctx, OAuthLoginParams{
+			Code: fakeOAuthCode(tagOnlyAddress, "X", "", "google"), Provider: "google", RedirectURI: "https://app/cb",
+		})
+		require.ErrorIs(t, err, ErrUnauthenticated)
+		requireNoTagOnlyAccount(t, repo)
+	})
+
+	t.Run("native oauth login", func(t *testing.T) {
+		repo := newFakeRepo()
+		signer := newNativeTokenSigner(t)
+		svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), nil)
+		_, err := svc.NativeOAuthLogin(ctx, NativeOAuthLoginParams{
+			Provider: "google", IDToken: signer.googleToken(t, "g-sub-tag", tagOnlyAddress, nativeGoogleAud), Product: "easyloops",
+		})
+		require.ErrorIs(t, err, ErrUnauthenticated)
+		requireNoTagOnlyAccount(t, repo)
+	})
+
+	t.Run("anonymous oauth upgrade", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		actx := anonCtx(true, AccessModeOpen)
+		anon, err := svc.SignInAnonymously(actx, "1.2.3.4", "ua")
+		require.NoError(t, err)
+		_, err = svc.UpgradeAnonymousWithOAuth(actx, anon.User.ID, AnonymousOAuthCredential{
+			Provider:    testOAuthProvider,
+			Code:        fakeOAuthCode(tagOnlyAddress, "X", "", testOAuthProvider),
+			RedirectURI: testOAuthRedirect,
+		})
+		require.ErrorIs(t, err, errNoUsableMailbox)
+		requireNoTagOnlyAccount(t, repo)
+	})
+
+	t.Run("passkey login", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		seedCredential := func(email, rawID string) string {
+			t.Helper()
+			u := seedUser(repo, email, "", "active")
+			id := base64.RawURLEncoding.EncodeToString([]byte(rawID))
+			_, err := repo.CreatePasskeyCredential(ctx, &PasskeyCredRecord{CredentialID: id, UserID: u.ID})
+			require.NoError(t, err)
+			return id
+		}
+		alice := seedCredential("alicesmith@gmail.com", "alice-key")
+		// An account stored under "@corp.com" (by a release that did not check)
+		// must not be reachable by a tag-only address.
+		stray := seedCredential("@corp.com", "stray-key")
+
+		opts, _, err := svc.BeginPasskeyLogin(ctx, "Alice.Smith+x@googlemail.com")
+		require.NoError(t, err)
+		require.Contains(t, opts, alice, "a dotted/tagged spelling finds the account's credentials")
+
+		opts, _, err = svc.BeginPasskeyLogin(ctx, tagOnlyAddress)
+		require.NoError(t, err)
+		require.False(t, strings.Contains(opts, stray), "a tag-only address names no account: empty allow list")
+	})
+
+	t.Run("tenant invitation", func(t *testing.T) {
+		f := newMembershipFixtureNoMail()
+		f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+		_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, "+x@acme.com", RoleMember)
 		require.ErrorIs(t, err, ErrInvalidArgument)
 	})
 
