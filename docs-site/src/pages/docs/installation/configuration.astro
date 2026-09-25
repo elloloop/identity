@@ -148,6 +148,94 @@ const renderDefault = (v: ConfigVar): string => {
     ))
   }
 
+  <h2 id="wildcard-origin-patterns">Wildcard origin patterns</h2>
+  <p>
+    Two allowlists name browser origins: <code>GATEWAY_ALLOWED_ORIGINS</code>
+    (CORS, together with a project's <code>cors.allowed_origins</code>) and
+    <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code> (the hosted OAuth and
+    magic-link <code>return_to</code>). Besides exact entries, both accept one
+    narrowly scoped pattern form for per-branch preview deployments: a single
+    leading wildcard label under a fixed parent domain.
+  </p>
+  <pre><code>{`GATEWAY_ALLOWED_ORIGINS=https://app.example.app,https://*.previews.example.app
+GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.previews.example.app/auth`}</code></pre>
+  <ul>
+    <li>
+      <strong>One DNS label.</strong> <code>*</code> matches exactly one
+      non-empty label of letters, digits and hyphens, compared
+      case-insensitively: <code>feature-1.previews.example.app</code> matches;
+      <code>a.b.previews.example.app</code> and <code>previews.example.app</code>
+      do not.
+    </li>
+    <li>
+      <strong>Nothing else varies.</strong> The scheme is <code>https</code>
+      only, and the port is fixed (443 unless the pattern names one). For
+      return URLs the path-prefix rule is unchanged.
+    </li>
+    <li>
+      <strong>CORS echoes the concrete origin.</strong> A matching request gets
+      <code>Access-Control-Allow-Origin: &lt;its own Origin&gt;</code> with
+      credentials, never the pattern, and every response carries
+      <code>Vary: Origin</code>.
+    </li>
+    <li>
+      <strong>Refused at startup:</strong> a bare <code>*</code>,
+      <code>https://*</code>, <code>*.com</code>, an <code>http</code> pattern,
+      a wildcard anywhere but the leftmost label
+      (<code>https://a.*.example.app</code>) or inside a label
+      (<code>https://pr-*.example.app</code>), a parent with fewer than two
+      labels (<code>https://*.app</code>), and a parent that is itself a
+      <a href="https://publicsuffix.org/">public suffix</a> — an ICANN suffix
+      such as <code>co.uk</code> or a shared hosting domain such as
+      <code>vercel.app</code>, <code>netlify.app</code>, <code>pages.dev</code>
+      or <code>github.io</code>, or whose every one-label child is one (a
+      wildcard rule such as <code>*.compute.amazonaws.com</code>). Also refused: a parent whose last label is
+      numeric (<code>https://*.0.0.1</code>, which would match IP addresses)
+      and a port outside 1–65535; a zero-padded port is read as the number.
+    </li>
+    <li>
+      <strong>Per-project lists fail closed.</strong> The admin API refuses an
+      invalid entry in a project's <code>cors.allowed_origins</code>. If a
+      project's stored list still holds one, the project keeps serving, but
+      its whole per-project CORS list is dropped (only
+      <code>GATEWAY_ALLOWED_ORIGINS</code> applies to its browser requests)
+      and each resolution logs
+      <code>project_cors_config_invalid_failing_closed</code>.
+    </li>
+    <li>
+      <strong>Malformed exact return URLs are skipped, not fatal.</strong> A
+      <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code> entry without
+      <code>*</code> that is not an absolute http(s) URL, or that carries a
+      query or fragment, admits nothing and is logged at startup as
+      <code>oauth_allowed_return_url_ignored</code>. If no usable entry is
+      left, the hosted flow stays off. A <code>return_to</code> containing a
+      backslash is always refused, since browsers read it as <code>/</code>
+      and it could otherwise step outside a path prefix.
+    </li>
+  </ul>
+  <p>
+    The active patterns are logged at startup, in canonical form (lower case,
+    default port dropped), next to the exact entries
+    (<code>cors_allowed_origins</code> → <code>origin_patterns</code>,
+    <code>oauth_hosted_flow_enabled</code> →
+    <code>allowed_return_url_patterns</code>).
+  </p>
+  <aside class="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
+    <strong>Security:</strong> a pattern admits <em>every</em> host under its
+    parent. Anything that can publish a site under that parent can make
+    credentialed calls to identity from the browser and, through the
+    return-URL allowlist, receive a user's one-time OAuth code and redeem it.
+    Use a pattern only for a parent domain whose every subdomain you control.
+    On a shared preview host, scope the pattern to your own project —
+    <code>https://*.&lt;project&gt;.pages.dev</code>, never
+    <code>https://*.pages.dev</code>, <code>https://*.vercel.app</code>,
+    <code>https://*.netlify.app</code> or <code>https://*.github.io</code>,
+    which every other tenant of that host can publish under. Identity refuses
+    parents on the public suffix list compiled into the release you run; that
+    check is a backstop, not the boundary — a shared parent that is not on the
+    list is your responsibility.
+  </aside>
+
   <h2>Password reset &amp; signup toggles</h2>
   <p>
     When <code>GATEWAY_PASSWORD_RESET_ENABLED=false</code>,

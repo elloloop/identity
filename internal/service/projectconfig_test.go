@@ -25,6 +25,37 @@ func TestParseProjectConfig_CORSOrigins(t *testing.T) {
 	assert.Equal(t, []string{"https://a.example.com", "http://localhost:3000"}, cfg.CORS.AllowedOrigins)
 }
 
+func TestProjectCORSConfig_Allowlist(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"cors":{"allowed_origins":["https://app.example.app","https://*.myproj.pages.dev"]}}`)
+	require.NoError(t, err)
+	a, err := cfg.CORS.Allowlist()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://app.example.app"}, a.Exact())
+	assert.Equal(t, []string{"https://*.myproj.pages.dev"}, a.Patterns())
+
+	empty, err := ProjectCORSConfig{}.Allowlist()
+	require.NoError(t, err)
+	assert.Zero(t, empty)
+}
+
+// TestParseProjectConfig_InvalidCORSDoesNotFailParse pins that CORS, a
+// browser-only concern, is not part of ProjectConfig.Validate: a stored entry
+// the CORS rule refuses must not break native login, SCIM or targeted admin
+// writes, all of which parse the config. Allowlist() reports it instead.
+func TestParseProjectConfig_InvalidCORSDoesNotFailParse(t *testing.T) {
+	t.Parallel()
+
+	for _, entry := range []string{"*", "null", "", "app.example.app", "https://*.app", "https://*.vercel.app", "http://*.previews.example.app"} {
+		cfg, err := ParseProjectConfig(`{"cors":{"allowed_origins":["` + entry + `"]}}`)
+		require.NoError(t, err, entry)
+		_, err = cfg.CORS.Allowlist()
+		require.Error(t, err, entry)
+		assert.Contains(t, err.Error(), "cors.allowed_origins", entry)
+	}
+}
+
 func TestParseProjectConfig_LoginDefaults(t *testing.T) {
 	t.Parallel()
 

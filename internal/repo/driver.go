@@ -304,7 +304,7 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		return &Built{
 			Repository:         pgRepo,
 			DB:                 pgRepo,
-			ProjectStore:       pgrepo.NewProjectStore(pgRepo, cfg.RequireVerifiedAuthDomain),
+			ProjectStore:       pgrepo.NewProjectStore(pgRepo, cfg.RequireVerifiedAuthDomain, logger),
 			AutoFormStore:      pgrepo.NewAutoFormStore(pgRepo),
 			DomainStore:        pgrepo.NewDomainStore(pgRepo),
 			TenantStore:        pgrepo.NewTenantStore(pgRepo),

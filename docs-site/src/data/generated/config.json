@@ -58,7 +58,7 @@
     "type": "string",
     "default": "http://localhost:9002,http://localhost:3000",
     "required": false,
-    "description": "is the comma-separated list of CORS allowed origins.",
+    "description": "is the comma-separated list of CORS allowed origins: exact origins, or one-label wildcard patterns such as https://*.previews.example.app.",
     "category": "HTTP, CORS \u0026 cookies",
     "anchor": "http-cors-and-cookies"
   },
@@ -832,7 +832,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "is the comma-separated allowlist of app URLs the hosted OAuth flow may redirect back to (the `return_to` param of GET /oauth/start/{provider}).",
+    "description": "is the comma-separated allowlist of app URLs (exact origins, path prefixes, or one-label wildcard origins such as https://*.previews.example.app) the hosted OAuth flow may redirect back to (the `return_to` param of GET /oauth/start/{provider}).",
     "category": "OAuth",
     "anchor": "oauth"
   },

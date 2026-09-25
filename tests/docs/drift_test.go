@@ -346,13 +346,18 @@ func TestGeneratedConfigDescriptionsNonEmpty(t *testing.T) {
 // e.g. `configuration#passkeys-webauthn`, capturing the fragment.
 var configAnchorRefRe = regexp.MustCompile(`configuration#([a-z0-9-]+)`)
 
+// configPageIDRe matches a literal id attribute written into the configuration
+// page's hand-written prose sections (e.g. `<h2 id="wildcard-origin-patterns">`).
+var configPageIDRe = regexp.MustCompile(`\bid="([a-z0-9-]+)"`)
+
 // TestDocsConfigurationAnchorsResolve is an anti-drift guard for deep links into
 // the configuration reference: every `configuration#<fragment>` referenced
 // anywhere in the docs must match an id the configuration page actually emits
-// (one per category section, using the generator-emitted `anchor`). This catches
-// both a renamed category and a hand-edited href that no longer points at a live
-// anchor. The anchor is consumed directly from the generated config so the slug
-// rule lives only in cmd/docsgen.
+// — one per category section, using the generator-emitted `anchor`, or a
+// literal id on one of the page's hand-written sections. This catches both a
+// renamed category and a hand-edited href that no longer points at a live
+// anchor. The category anchor is consumed directly from the generated config so
+// the slug rule lives only in cmd/docsgen.
 func TestDocsConfigurationAnchorsResolve(t *testing.T) {
 	root := repoRoot(t)
 
@@ -365,6 +370,13 @@ func TestDocsConfigurationAnchorsResolve(t *testing.T) {
 	}
 	if len(emitted) == 0 {
 		t.Fatal("derived zero category anchors from the generated config; extraction is broken")
+	}
+	page, err := os.ReadFile(filepath.Join(root, "docs-site", "src", "pages", "docs", "installation", "configuration.astro"))
+	if err != nil {
+		t.Fatalf("read configuration page: %v", err)
+	}
+	for _, m := range configPageIDRe.FindAllSubmatch(page, -1) {
+		emitted[string(m[1])] = true
 	}
 
 	var violations []string
@@ -381,7 +393,7 @@ func TestDocsConfigurationAnchorsResolve(t *testing.T) {
 			if !emitted[frag] {
 				violations = append(violations,
 					df.relPath+": link to configuration#"+frag+
-						" does not resolve to any category anchor emitted by configuration.astro")
+						" does not resolve to any anchor emitted by configuration.astro")
 			}
 		}
 	}
