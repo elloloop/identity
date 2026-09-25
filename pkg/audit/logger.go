@@ -180,8 +180,8 @@ const (
 	// "credential:<id>"; the details carry the number of addresses asked for
 	// and matched — never the addresses themselves, so the trail records who
 	// read the directory and how much without copying it. A refused
-	// presentation of a real credential (revoked, wrong secret, wrong kind) is
-	// logged with success=false and a `reason`.
+	// presentation of a real directory_reader credential (revoked, or the
+	// wrong secret) is logged with success=false and a `reason`.
 	EventDirectoryLookup EventType = "directory_lookup"
 
 	// EventParentalConsentGranted records an adult granting verifiable

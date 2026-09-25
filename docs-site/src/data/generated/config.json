@@ -337,7 +337,7 @@
     "type": "boolean",
     "default": "true",
     "required": false,
-    "description": "blocks authentication until the account's email is verified.",
+    "description": "blocks authentication until the account's email is verified, and keeps accounts with an unverified email out of LookupUsers results.",
     "category": "Authentication",
     "anchor": "authentication"
   },
@@ -1372,7 +1372,7 @@
     "type": "integer",
     "default": "120",
     "required": false,
-    "description": "is the per-IP cap per window on LookupUsers, the service-to-service directory lookup (each call resolves up to service.MaxDirectoryLookupEmails addresses).",
+    "description": "is the per-IP cap per window on LookupUsers, each call of which resolves up to 100 addresses; it must be positive, and a zero, negative or malformed value is refused at boot.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },

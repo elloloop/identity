@@ -14402,9 +14402,10 @@ func (x *AdminListProjectOAuthProvidersResponse) GetProviders() []*ProjectOAuthP
 // presented directory_reader credential belongs to.
 type LookupUsersRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// emails to resolve, 1..100 entries. Each is compared with an account's
-	// primary email exactly, ignoring case (the comparison sign-in uses): there
-	// is no prefix, substring or domain matching.
+	// emails to resolve, 1..100 entries of at most 320 bytes each. Each is
+	// compared with an account's primary email exactly, ignoring case (the
+	// comparison sign-in uses): there is no prefix, substring or domain
+	// matching. Entries that differ only in case are one address.
 	Emails        []string `protobuf:"bytes,1,rep,name=emails,proto3" json:"emails,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -14458,8 +14459,8 @@ type DirectoryUser struct {
 	Name      string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	AvatarUrl string `protobuf:"bytes,4,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
 	// email_verified says whether the account's owner proved the address.
-	// Consumers that treat presence as identity (e.g. a staff directory)
-	// should require it.
+	// Always true when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the
+	// default), because unverified accounts are then not returned.
 	EmailVerified bool `protobuf:"varint,5,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -14532,12 +14533,14 @@ func (x *DirectoryUser) GetEmailVerified() bool {
 
 type LookupUsersResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// users holds one entry per requested address that names an ACTIVE account,
-	// in request order. An address with no account, or whose account is not
+	// users holds one entry per distinct requested address that names an
+	// ACTIVE account. An address with no account, or whose account is not
 	// active (invited, deactivated, suspended, pending consent or deletion), is
-	// omitted. Every entry is an active member of the key's project;
-	// email_verified says whether the address was proven — consumers that
-	// treat presence as identity (e.g. a staff directory) should require it.
+	// omitted, as is one whose account's email is unverified while
+	// GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default). Addresses that
+	// differ only in case yield a single entry. Entries follow request order,
+	// but omissions shift positions: match each entry to a request by its
+	// email, never by index.
 	Users         []*DirectoryUser `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -365,7 +365,7 @@ func (s *ControlPlaneAdminService) AdminCreateProjectCredential(ctx context.Cont
 		return nil, err
 	}
 	out.ID = id
-	s.audit.Log(ctx, audit.EventProjectCredentialCreated, audit.WithSuccess(true), audit.WithDetails(map[string]any{
+	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventProjectCredentialCreated, audit.WithSuccess(true), audit.WithDetails(map[string]any{
 		"project_id":    projectID,
 		"credential_id": id,
 		"kind":          kind,
@@ -392,7 +392,7 @@ func (s *ControlPlaneAdminService) AdminRevokeProjectCredential(ctx context.Cont
 	if err := s.projects.RevokeProjectCredential(ctx, projectID, credentialID, s.nowFunc()); err != nil {
 		return err
 	}
-	s.audit.Log(ctx, audit.EventProjectCredentialRevoked, audit.WithSuccess(true), audit.WithDetails(map[string]any{
+	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventProjectCredentialRevoked, audit.WithSuccess(true), audit.WithDetails(map[string]any{
 		"project_id":    projectID,
 		"credential_id": credentialID,
 	}))

@@ -22,7 +22,7 @@ func startDirectoryServer(t *testing.T, repo *fakeRepo, withDirectory bool) iden
 	admin, store, _ := newAdminControlSvc(handlerAdminSecret)
 	var directory *service.DirectoryService
 	if withDirectory {
-		directory = service.NewDirectoryService(store, repo, nil)
+		directory = service.NewDirectoryService(store, repo, true, nil)
 	}
 	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, admin, directory, testConfig())
 	mux := http.NewServeMux()
@@ -61,7 +61,7 @@ func TestLookupUsers_MintLookupRevoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := repo.CreateUser(ctx, &service.User{Email: "gone@corp.test", Status: service.StatusDeactivated}); err != nil {
+	if _, err := repo.CreateUser(ctx, &service.User{Email: "gone@corp.test", Status: service.StatusDeactivated, EmailVerified: true}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	client := startDirectoryServer(t, repo, true)

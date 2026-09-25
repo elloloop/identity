@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -33,8 +34,8 @@ func TestRateLimitDirectoryPerIP_RejectsNonPositiveOrMalformed(t *testing.T) {
 		t.Run("env="+raw, func(t *testing.T) {
 			t.Setenv(directoryRateLimitEnv, raw)
 			err := Load().Validate()
-			if err == nil || !strings.Contains(err.Error(), directoryRateLimitEnv) {
-				t.Fatalf("Validate = %v, want an error naming %s", err, directoryRateLimitEnv)
+			if err == nil || !strings.Contains(err.Error(), directoryRateLimitEnv+"="+strconv.Quote(raw)) {
+				t.Fatalf("Validate = %v, want an error naming %s and quoting %q", err, directoryRateLimitEnv, raw)
 			}
 		})
 	}
@@ -53,7 +54,7 @@ func TestRateLimitDirectoryPerIP_BuiltInCode(t *testing.T) {
 	}
 
 	cfg.RateLimitDirectoryPerIP = -3
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate accepted a negative cap")
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), `="-3"`) {
+		t.Fatalf("Validate = %v, want the negative cap refused and quoted", err)
 	}
 }

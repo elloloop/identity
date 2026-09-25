@@ -6,11 +6,10 @@ import { Code } from "astro-expressive-code/components";
 <DocsLayout title="Directory Lookup for Services">
   <h1>Directory Lookup for Services</h1>
   <p>
-    A backend service often has to turn a list of email addresses into
-    accounts — a chat service adding colleagues to a room, say — including
-    people who have never used that service. <code>LookupUsers</code> answers
-    exactly that and nothing more, for a machine credential that can do
-    nothing else: a <strong>directory reader</strong> key.
+    <code>LookupUsers</code> resolves a batch of email addresses to the
+    accounts they name in one project, whether or not those accounts have
+    ever used the calling service. It is authorized by a machine credential
+    that can do nothing else: a <strong>directory reader</strong> key.
   </p>
   <p>
     Use it instead of giving a service an admin account. An admin session can
@@ -52,10 +51,17 @@ import { Code } from "astro-expressive-code/components";
       Only <strong>active</strong> accounts are returned. Invited,
       deactivated, suspended, and pending-consent or pending-deletion accounts
       are omitted, as are addresses with no account; an address is absent
-      rather than an error. Every entry is an active member of the key's
-      project; <code>email_verified</code> says whether the address was
-      proven — consumers that treat presence as identity (e.g. a staff
-      directory) should require it.
+      rather than an error.
+    </li>
+    <li>
+      Only accounts whose owner has <strong>verified</strong> the address are
+      returned while <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> is on,
+      which is the default. Anyone can sign up with an address they do not
+      own, so without this rule the lookup would return whoever registered it
+      first. With the setting off, unverified accounts are returned too, with
+      <code>email_verified: false</code>; with it on, every entry has
+      <code>email_verified: true</code>. See
+      <a href="#verified-email">Verified email</a> below.
     </li>
     <li>
       Each entry carries <code>id</code> (the account's <code>sub</code>),
@@ -64,7 +70,8 @@ import { Code } from "astro-expressive-code/components";
       Phone numbers, roles, MFA and login state are never returned.
     </li>
     <li>
-      A batch holds 1–100 addresses. Calls are rate-limited per client IP by
+      A batch holds 1–100 addresses of at most 320 bytes each. Calls are
+      rate-limited per client IP by
       <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code> (default 120) per
       <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window (default 60 s).
     </li>
@@ -80,6 +87,19 @@ import { Code } from "astro-expressive-code/components";
     up to 100 addresses, so batch before you raise it. It must be a positive
     integer: zero, a negative or a malformed value fails the boot, so the
     lookup cannot be left unthrottled.
+  </p>
+  <p>
+    A throttled call is refused before it reaches the lookup, with HTTP
+    <code>429 Too Many Requests</code>, a <code>Retry-After: 60</code> header
+    and a plain-text body. A Connect client reports it as
+    <code>UNAVAILABLE</code>. Back off and retry; the count resets when the
+    window rolls over.
+  </p>
+  <p>
+    The limit is enforced by the HTTP handler. A host that serves identity on
+    its own gRPC server through <code>RegisterGRPC</code> (see
+    <a href="https://github.com/elloloop/identity/blob/main/docs/embedding.md"><code>docs/embedding.md</code></a>)
+    bypasses it and must apply its own limit there.
   </p>
 
   <h2>Mint a key</h2>
@@ -122,9 +142,32 @@ import { Code } from "astro-expressive-code/components";
 # {"users":[{"id":"u_31…","email":"alice@corp.com","name":"Alice","avatarUrl":"https://…","emailVerified":true}]}`}
   />
   <p>
-    Results come back in request order. A missing, wrong, revoked or
-    non-directory key is <code>UNAUTHENTICATED</code>; an empty batch, a blank
-    address or more than 100 addresses is <code>INVALID_ARGUMENT</code>.
+    Results come back in request order, one entry per distinct address that
+    names an account the lookup may return. Addresses that differ only in case
+    are the same address and produce one entry. Because omitted addresses
+    leave no gap, match each entry to your request by its <code>email</code>,
+    never by position.
+  </p>
+  <p>
+    A missing, wrong, revoked or non-directory key is
+    <code>UNAUTHENTICATED</code>; an empty batch, a blank address, an address
+    longer than 320 bytes or more than 100 addresses is
+    <code>INVALID_ARGUMENT</code>.
+  </p>
+
+  <h2 id="verified-email">Verified email</h2>
+  <p>
+    <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> (default
+    <code>true</code>) is the deployment-wide rule that an unverified address
+    cannot be used: password sign-up issues no session until the address is
+    verified, and password sign-in is refused. The directory lookup follows
+    the same rule, so an account created by signing up with an address is not
+    returned until its owner confirms the verification link.
+  </p>
+  <p>
+    Set it to <code>false</code> only if your deployment accepts unverified
+    addresses everywhere. The lookup then returns those accounts as well, and
+    <code>email_verified</code> tells the two apart.
   </p>
 
   <h2>Revoke a key</h2>
@@ -154,16 +197,16 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>Audit</h2>
   <p>
-    Minting and revoking record <code>project_credential_created</code> and
-    <code>project_credential_revoked</code>, with the credential's project in
-    the event's details. Those two rows are written in the project of the host
-    the admin call was sent to — the project its <code>Host</code> resolves
-    to — not in the credential's project, so read them there. Every lookup
-    records <code>directory_lookup</code> in the key's project, with the actor
+    Every event is recorded in the credential's project. Minting and revoking
+    record <code>project_credential_created</code> and
+    <code>project_credential_revoked</code>. Every lookup records
+    <code>directory_lookup</code>, with the actor
     <code>credential:&lt;credential-id&gt;</code> and the number of addresses
     requested and matched — never the addresses themselves. A refused
-    presentation of a real key (wrong secret, wrong kind, revoked) is recorded
-    with <code>success=false</code> and a <code>reason</code>. The raw key and
-    its hash are never logged.
+    presentation of a real directory key (wrong secret, or revoked) is
+    recorded with <code>success=false</code> and a <code>reason</code>.
+    Presenting the public id of another kind of credential, such as a
+    publishable key, is refused without an audit row. The raw key and its
+    hash are never logged.
   </p>
 </DocsLayout>

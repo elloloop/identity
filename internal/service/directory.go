@@ -11,10 +11,14 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 )
 
-// MaxDirectoryLookupEmails bounds one LookupUsers batch. A consumer resolving
-// a larger roster pages through it; the bound keeps one call to one indexed
-// query of bounded size.
+// MaxDirectoryLookupEmails bounds one LookupUsers batch. More addresses take
+// more calls; the bound keeps one call to one indexed query of bounded size.
 const MaxDirectoryLookupEmails = 100
+
+// MaxDirectoryLookupEmailLength bounds one address in a lookup batch, in
+// bytes: a 64-octet local part, "@" and a 255-octet domain, the most RFC 5321
+// allows each part.
+const MaxDirectoryLookupEmailLength = 320
 
 // directoryAuditActorPrefix prefixes the credential id recorded as the actor
 // of a directory lookup: the caller is a machine credential, not a user.
@@ -23,7 +27,6 @@ const directoryAuditActorPrefix = "credential:"
 // Reasons recorded on a refused directory-credential presentation.
 const (
 	directoryRefusedSecretMismatch = "secret_mismatch"
-	directoryRefusedWrongKind      = "wrong_kind"
 	directoryRefusedRevoked        = "revoked"
 )
 
@@ -40,14 +43,17 @@ type DirectoryCredentialStore interface {
 	ActiveProjectCredentialByPublicID(ctx context.Context, publicID string) (*AdminProjectCredential, error)
 }
 
-// DirectoryUser is the minimal profile a directory lookup discloses: enough to
-// address and render a colleague, nothing about how they sign in.
+// DirectoryUser is the minimal profile a directory lookup discloses: the
+// account's id, address, display name and avatar, nothing about how it signs
+// in.
 type DirectoryUser struct {
 	ID        string
 	Email     string
 	Name      string
 	AvatarURL string
 	// EmailVerified reports whether the account's owner proved the address.
+	// Always true when the deployment requires verified email, since an
+	// unverified account is then not returned at all.
 	EmailVerified bool
 }
 
@@ -59,22 +65,28 @@ type DirectoryUser struct {
 type DirectoryService struct {
 	credentials DirectoryCredentialStore
 	users       Repository
-	audit       *audit.Logger
+	// requireVerifiedEmail is GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL. When set,
+	// an account whose owner has not proven its address is not returned:
+	// without that, whoever signed up with an address first would be
+	// returned as its owner.
+	requireVerifiedEmail bool
+	audit                *audit.Logger
 }
 
 // NewDirectoryService wires the lookup over the control-plane credential
 // store and the boot-default user repository, which every lookup rebinds to
 // the credential's project. A nil auditLog defaults to a no-op logger.
-func NewDirectoryService(credentials DirectoryCredentialStore, users Repository, auditLog *audit.Logger) *DirectoryService {
+func NewDirectoryService(credentials DirectoryCredentialStore, users Repository, requireVerifiedEmail bool, auditLog *audit.Logger) *DirectoryService {
 	if auditLog == nil {
 		auditLog = audit.NewLogger(nil, "", zap.NewNop())
 	}
-	return &DirectoryService{credentials: credentials, users: users, audit: auditLog}
+	return &DirectoryService{credentials: credentials, users: users, requireVerifiedEmail: requireVerifiedEmail, audit: auditLog}
 }
 
 // LookupUsers resolves emails to the ACTIVE accounts they name in the project
 // presentedKey belongs to, in request order. Addresses match exactly,
-// ignoring case; an address naming no active account is simply absent.
+// ignoring case; an address naming no active account — or, when verified
+// email is required, only an unverified one — is simply absent.
 //
 // The request's own project scope (Host, X-Project-Key) is ignored: the
 // credential selects the project, so it can never read another project's
@@ -94,7 +106,7 @@ func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string,
 	if err != nil {
 		return nil, err
 	}
-	out := activeDirectoryUsersInOrder(wanted, found)
+	out := s.directoryUsersInOrder(wanted, found)
 
 	s.audit.Log(ctx, audit.EventDirectoryLookup,
 		audit.WithActor(directoryAuditActorPrefix+cred.ID),
@@ -109,8 +121,10 @@ func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string,
 
 // authenticate resolves presentedKey ("<public id>.<secret>") to an active
 // directory_reader credential. Every refusal is the same ErrUnauthenticated,
-// so a caller learns nothing about which part was wrong; a refusal against a
-// credential that exists is audited under its project with the reason.
+// so a caller learns nothing about which part was wrong. A refusal against a
+// directory_reader credential that exists is audited under its project with
+// the reason; any other kind's public id is public by design (a publishable
+// key ships in clients), so presenting one records nothing.
 func (s *DirectoryService) authenticate(ctx context.Context, presentedKey string) (*AdminProjectCredential, error) {
 	refused := fmt.Errorf("%w: invalid directory key", ErrUnauthenticated)
 	publicID, secret, ok := strings.Cut(presentedKey, rawKeySeparator)
@@ -121,7 +135,7 @@ func (s *DirectoryService) authenticate(ctx context.Context, presentedKey string
 	if err != nil {
 		return nil, err
 	}
-	if cred == nil {
+	if cred == nil || cred.Kind != CredentialKindDirectoryReader {
 		return nil, refused
 	}
 
@@ -129,20 +143,18 @@ func (s *DirectoryService) authenticate(ctx context.Context, presentedKey string
 	switch {
 	case subtle.ConstantTimeCompare([]byte(sha256Hex(secret)), []byte(cred.SecretHash)) != 1:
 		reason = directoryRefusedSecretMismatch
-	case cred.Kind != CredentialKindDirectoryReader:
-		reason = directoryRefusedWrongKind
 	case cred.Revoked:
 		reason = directoryRefusedRevoked
 	}
-	if reason != "" {
-		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: cred.ProjectID}), audit.EventDirectoryLookup,
-			audit.WithActor(directoryAuditActorPrefix+cred.ID),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": reason}),
-		)
-		return nil, refused
+	if reason == "" {
+		return cred, nil
 	}
-	return cred, nil
+	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: cred.ProjectID}), audit.EventDirectoryLookup,
+		audit.WithActor(directoryAuditActorPrefix+cred.ID),
+		audit.WithSuccess(false),
+		audit.WithDetails(map[string]any{"reason": reason}),
+	)
+	return nil, refused
 }
 
 // directoryLookupEmails validates a lookup batch and returns its addresses
@@ -162,6 +174,10 @@ func directoryLookupEmails(emails []string) ([]string, error) {
 		if e == "" {
 			return nil, fmt.Errorf("%w: empty email in lookup", ErrInvalidArgument)
 		}
+		if len(e) > MaxDirectoryLookupEmailLength {
+			return nil, fmt.Errorf("%w: an email in the lookup is longer than %d bytes",
+				ErrInvalidArgument, MaxDirectoryLookupEmailLength)
+		}
 		key := strings.ToLower(e)
 		if seen[key] {
 			continue
@@ -172,12 +188,12 @@ func directoryLookupEmails(emails []string) ([]string, error) {
 	return out, nil
 }
 
-// activeDirectoryUsersInOrder keeps the active accounts among found and orders
-// them by the address that requested them.
-func activeDirectoryUsersInOrder(wanted []string, found []*User) []DirectoryUser {
+// directoryUsersInOrder keeps the accounts among found a lookup may return and
+// orders them by the address that requested them.
+func (s *DirectoryService) directoryUsersInOrder(wanted []string, found []*User) []DirectoryUser {
 	byEmail := make(map[string]*User, len(found))
 	for _, u := range found {
-		if isActiveDirectoryAccount(u) {
+		if isActiveDirectoryAccount(u) && (u.EmailVerified || !s.requireVerifiedEmail) {
 			byEmail[strings.ToLower(u.Email)] = u
 		}
 	}

@@ -217,26 +217,27 @@ func RunConformance(t *testing.T, driver Driver) {
 		})
 
 		t.Run("FindUsersByEmails_BatchFetch", func(t *testing.T) {
-			// The directory lookup resolves a whole roster through this in ONE
-			// query, so every driver has to agree on the comparison (exact,
-			// ignoring case), on ordering, and on what it leaves out.
+			// The directory lookup resolves a whole batch of addresses
+			// through this in ONE query, so every driver has to agree on the
+			// comparison (exact, ignoring case), on ordering, and on what it
+			// leaves out.
 			ctx := context.Background()
 			r := driver.NewRepo(t)
-			a := createTestUser(t, r, "roster-a@example.com")
-			b := createTestUser(t, r, "Roster-B@Example.com")
-			inactive, err := r.CreateUser(ctx, &service.User{Email: "roster-off@example.com", Status: "deactivated", Role: "member"})
+			a := createTestUser(t, r, "batch-a@example.com")
+			b := createTestUser(t, r, "Batch-B@Example.com")
+			inactive, err := r.CreateUser(ctx, &service.User{Email: "batch-off@example.com", Status: "deactivated", Role: "member"})
 			if err != nil {
 				t.Fatalf("CreateUser deactivated: %v", err)
 			}
-			createTestUser(t, r, "roster-a@example.com.evil")
-			createTestUser(t, r, "xroster-a@example.com")
+			createTestUser(t, r, "batch-a@example.com.evil")
+			createTestUser(t, r, "xbatch-a@example.com")
 			if _, err := r.CreateUser(ctx, &service.User{IsAnonymous: true, Status: "active", Role: "member"}); err != nil {
 				t.Fatalf("CreateUser anonymous: %v", err)
 			}
 
 			got, err := r.FindUsersByEmails(ctx, []string{
-				"ROSTER-A@example.com", "roster-b@example.com", "roster-off@example.com",
-				"roster-a", "example.com", "nobody@example.com", "",
+				"BATCH-A@example.com", "batch-b@example.com", "batch-off@example.com",
+				"batch-a", "example.com", "nobody@example.com", "",
 			})
 			if err != nil {
 				t.Fatalf("FindUsersByEmails: %v", err)
@@ -265,7 +266,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err := r.SetUserEmailVerified(ctx, a, 1_700_000_000_000); err != nil {
 				t.Fatalf("SetUserEmailVerified: %v", err)
 			}
-			got, err = r.FindUsersByEmails(ctx, []string{"roster-a@example.com", "roster-b@example.com"})
+			got, err = r.FindUsersByEmails(ctx, []string{"batch-a@example.com", "batch-b@example.com"})
 			if err != nil {
 				t.Fatalf("FindUsersByEmails after verify: %v", err)
 			}

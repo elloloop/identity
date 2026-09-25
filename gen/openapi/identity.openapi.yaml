@@ -2685,8 +2685,10 @@ paths:
          to that credential's project whatever the request Host. The credential
          authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
          wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
-         more than 100 addresses, or a blank address; UNIMPLEMENTED on a build
-         with no control plane.
+         more than 100 addresses, or a blank or over-320-byte address;
+         UNIMPLEMENTED on a build with no control plane. Over the rate limit the
+         server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
+         which Connect clients surface as UNAVAILABLE.
       operationId: identity.v1.IdentityService.LookupUsers
       parameters:
         - name: Connect-Protocol-Version
@@ -6016,8 +6018,8 @@ components:
           title: email_verified
           description: |-
             email_verified says whether the account's owner proved the address.
-             Consumers that treat presence as identity (e.g. a staff directory)
-             should require it.
+             Always true when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the
+             default), because unverified accounts are then not returned.
       title: DirectoryUser
       additionalProperties: false
       description: |-
@@ -7077,9 +7079,10 @@ components:
             type: string
           title: emails
           description: |-
-            emails to resolve, 1..100 entries. Each is compared with an account's
-             primary email exactly, ignoring case (the comparison sign-in uses): there
-             is no prefix, substring or domain matching.
+            emails to resolve, 1..100 entries of at most 320 bytes each. Each is
+             compared with an account's primary email exactly, ignoring case (the
+             comparison sign-in uses): there is no prefix, substring or domain
+             matching. Entries that differ only in case are one address.
       title: LookupUsersRequest
       additionalProperties: false
       description: |-
@@ -7094,12 +7097,14 @@ components:
             $ref: '#/components/schemas/identity.v1.DirectoryUser'
           title: users
           description: |-
-            users holds one entry per requested address that names an ACTIVE account,
-             in request order. An address with no account, or whose account is not
+            users holds one entry per distinct requested address that names an
+             ACTIVE account. An address with no account, or whose account is not
              active (invited, deactivated, suspended, pending consent or deletion), is
-             omitted. Every entry is an active member of the key's project;
-             email_verified says whether the address was proven — consumers that
-             treat presence as identity (e.g. a staff directory) should require it.
+             omitted, as is one whose account's email is unverified while
+             GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default). Addresses that
+             differ only in case yield a single entry. Entries follow request order,
+             but omissions shift positions: match each entry to a request by its
+             email, never by index.
       title: LookupUsersResponse
       additionalProperties: false
     identity.v1.NativeOAuthLoginRequest:

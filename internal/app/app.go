@@ -991,7 +991,7 @@ func buildDirectoryService(deps Deps, users service.Repository, auditLog *audit.
 	if deps.DirectoryCredentials == nil {
 		return nil
 	}
-	return service.NewDirectoryService(deps.DirectoryCredentials, users, auditLog)
+	return service.NewDirectoryService(deps.DirectoryCredentials, users, deps.Config.AuthRequireVerifiedEmail, auditLog)
 }
 
 // mailDeliveryConfigured reports whether outbound mail actually delivers, as

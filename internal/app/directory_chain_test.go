@@ -113,16 +113,16 @@ func assertDirectoryLookupServed(t *testing.T, cfg *config.Config) {
 	h, repo := newDirectoryChainApp(t, cfg)
 	ctx := context.Background()
 	if _, err := repo.WithProject(chainDirectoryProject).CreateUser(ctx, &service.User{
-		Email: "staff@corp.test", Name: "Staff", Status: service.StatusActive, PhoneNumber: "+15550100",
+		Email: "member@corp.test", Name: "Member", Status: service.StatusActive, PhoneNumber: "+15550100",
 	}); err != nil {
 		t.Fatalf("seed directory project: %v", err)
 	}
 	// Same address in the default project the request's Host resolves to.
-	if _, err := repo.CreateUser(ctx, &service.User{Email: "staff@corp.test", Name: "Other", Status: service.StatusActive}); err != nil {
+	if _, err := repo.CreateUser(ctx, &service.User{Email: "member@corp.test", Name: "Other", Status: service.StatusActive}); err != nil {
 		t.Fatalf("seed default project: %v", err)
 	}
 
-	rec := postRPC(t, h, lookupUsersPath, `{"emails":["staff@corp.test"]}`,
+	rec := postRPC(t, h, lookupUsersPath, `{"emails":["member@corp.test"]}`,
 		map[string]string{middleware.DirectoryKeyHeader: chainDirectoryKey})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("LookupUsers: status = %d body=%s", rec.Code, rec.Body.String())
@@ -136,8 +136,8 @@ func assertDirectoryLookupServed(t *testing.T, cfg *config.Config) {
 	// The two projects' memory stores both number their first user mem-1, so
 	// the name is what tells the credential project's account from the
 	// default project's.
-	if len(resp.Users) != 1 || resp.Users[0]["name"] != "Staff" {
-		t.Fatalf("users = %v, want only the credential project's account (name Staff)", resp.Users)
+	if len(resp.Users) != 1 || resp.Users[0]["name"] != "Member" {
+		t.Fatalf("users = %v, want only the credential project's account (name Member)", resp.Users)
 	}
 	for field := range resp.Users[0] {
 		switch field {
@@ -153,9 +153,41 @@ func assertDirectoryLookupServed(t *testing.T, cfg *config.Config) {
 		"wrong secret": {middleware.DirectoryKeyHeader: chainDirectoryPublic + ".nope"},
 		"as bearer":    {"Authorization": "Bearer " + chainDirectoryKey},
 	} {
-		if rec := postRPC(t, h, lookupUsersPath, `{"emails":["staff@corp.test"]}`, hdr); rec.Code != http.StatusUnauthorized {
+		if rec := postRPC(t, h, lookupUsersPath, `{"emails":["member@corp.test"]}`, hdr); rec.Code != http.StatusUnauthorized {
 			t.Fatalf("%s: status = %d body=%s, want 401", name, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// TestDirectoryLookup_ServedWithVerifiedEmailRequired proves the served
+// lookup honours GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL: an account whose email is
+// unverified is not returned, a verified one is.
+func TestDirectoryLookup_ServedWithVerifiedEmailRequired(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.AuthRequireVerifiedEmail = true
+	h, repo := newDirectoryChainApp(t, cfg)
+	users := repo.WithProject(chainDirectoryProject)
+	ctx := context.Background()
+	if _, err := users.CreateUser(ctx, &service.User{Email: "unproven@corp.test", Status: service.StatusActive}); err != nil {
+		t.Fatalf("seed unverified: %v", err)
+	}
+	if _, err := users.CreateUser(ctx, &service.User{Email: "proven@corp.test", Status: service.StatusActive, EmailVerified: true}); err != nil {
+		t.Fatalf("seed verified: %v", err)
+	}
+
+	rec := postRPC(t, h, lookupUsersPath, `{"emails":["unproven@corp.test","proven@corp.test"]}`,
+		map[string]string{middleware.DirectoryKeyHeader: chainDirectoryKey})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("LookupUsers: status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Users []map[string]any `json:"users"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Users) != 1 || resp.Users[0]["email"] != "proven@corp.test" || resp.Users[0]["emailVerified"] != true {
+		t.Fatalf("users = %v, want only the verified account", resp.Users)
 	}
 }
 

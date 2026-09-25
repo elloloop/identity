@@ -97,7 +97,14 @@ type directoryFixture struct {
 	svc   *DirectoryService
 }
 
+// newDirectoryFixture wires the lookup as a deployment with verified email
+// required (the default) does.
 func newDirectoryFixture(t *testing.T) *directoryFixture {
+	t.Helper()
+	return newDirectoryFixtureWith(t, true)
+}
+
+func newDirectoryFixtureWith(t *testing.T, requireVerifiedEmail bool) *directoryFixture {
 	t.Helper()
 	store := newFakeControlPlaneStore()
 	writer := &projectAuditWriter{}
@@ -115,7 +122,7 @@ func newDirectoryFixture(t *testing.T) *directoryFixture {
 		store: store,
 		repos: repos,
 		audit: writer,
-		svc:   NewDirectoryService(store, repos, auditLog),
+		svc:   NewDirectoryService(store, repos, requireVerifiedEmail, auditLog),
 	}
 }
 
@@ -153,12 +160,12 @@ func TestDirectoryLookup_ReturnsActiveAccountsInRequestOrder(t *testing.T) {
 		Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png", Status: StatusActive,
 		PhoneNumber: "+15550100", PasswordHash: "hash", TotpRequired: true, Role: "admin", EmailVerified: true,
 	})
-	bob := f.seed(t, dirTestProjectA, &User{Email: "bob@corp.test", Name: "Bob", Status: StatusActive})
-	legacy := f.seed(t, dirTestProjectA, &User{Email: "legacy@corp.test", Name: "Legacy"}) // blank status = legacy active
+	bob := f.seed(t, dirTestProjectA, &User{Email: "bob@corp.test", Name: "Bob", Status: StatusActive, EmailVerified: true})
+	legacy := f.seed(t, dirTestProjectA, &User{Email: "legacy@corp.test", Name: "Legacy", EmailVerified: true}) // blank status = legacy active
 	for _, status := range []string{StatusDeactivated, "suspended", "invited", StatusPendingDeletion, StatusPendingParentalConsent} {
-		f.seed(t, dirTestProjectA, &User{Email: status + "@corp.test", Status: status})
+		f.seed(t, dirTestProjectA, &User{Email: status + "@corp.test", Status: status, EmailVerified: true})
 	}
-	f.seed(t, dirTestProjectA, &User{IsAnonymous: true, Status: StatusActive})
+	f.seed(t, dirTestProjectA, &User{IsAnonymous: true, Status: StatusActive, EmailVerified: true})
 
 	got, err := f.svc.LookupUsers(context.Background(), key, []string{
 		"bob@corp.test", "ALICE@corp.test", "legacy@corp.test", "nobody@corp.test",
@@ -169,9 +176,9 @@ func TestDirectoryLookup_ReturnsActiveAccountsInRequestOrder(t *testing.T) {
 		t.Fatalf("LookupUsers: %v", err)
 	}
 	want := []DirectoryUser{
-		{ID: bob, Email: "bob@corp.test", Name: "Bob"},
+		{ID: bob, Email: "bob@corp.test", Name: "Bob", EmailVerified: true},
 		{ID: alice, Email: "alice@corp.test", Name: "Alice", AvatarURL: "https://cdn.test/a.png", EmailVerified: true},
-		{ID: legacy, Email: "legacy@corp.test", Name: "Legacy"},
+		{ID: legacy, Email: "legacy@corp.test", Name: "Legacy", EmailVerified: true},
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("LookupUsers =\n  %+v\nwant\n  %+v", got, want)
@@ -181,7 +188,7 @@ func TestDirectoryLookup_ReturnsActiveAccountsInRequestOrder(t *testing.T) {
 func TestDirectoryLookup_ExactMatchOnly(t *testing.T) {
 	f := newDirectoryFixture(t)
 	key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
-	f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive})
+	f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive, EmailVerified: true})
 
 	for _, probe := range []string{"alice", "corp.test", "@corp.test", "lice@corp.test", "alice@corp", "alice@corp.test.", "%", "*"} {
 		got, err := f.svc.LookupUsers(context.Background(), key, []string{probe})
@@ -203,9 +210,9 @@ func TestDirectoryLookup_ScopedToTheCredentialsProject(t *testing.T) {
 	f := newDirectoryFixture(t)
 	keyA := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
 	keyB := f.mint(t, dirTestProjectB, CredentialKindDirectoryReader).RawKey
-	inA := f.seed(t, dirTestProjectA, &User{Email: "shared@corp.test", Status: StatusActive})
-	inB := f.seed(t, dirTestProjectB, &User{Email: "shared@corp.test", Status: StatusActive})
-	f.seed(t, dirTestProjectB, &User{Email: "only-b@corp.test", Status: StatusActive})
+	inA := f.seed(t, dirTestProjectA, &User{Email: "shared@corp.test", Status: StatusActive, EmailVerified: true})
+	inB := f.seed(t, dirTestProjectB, &User{Email: "shared@corp.test", Status: StatusActive, EmailVerified: true})
+	f.seed(t, dirTestProjectB, &User{Email: "only-b@corp.test", Status: StatusActive, EmailVerified: true})
 
 	// The request arrived resolved to project B (its Host / X-Project-Key),
 	// yet credential A still reads only project A.
@@ -245,12 +252,12 @@ func TestDirectoryLookup_RefusesEveryOtherPresentation(t *testing.T) {
 	}
 	suspended := f.mint(t, "proj-suspended", CredentialKindDirectoryReader)
 	f.store.suspended["proj-suspended"] = true
-	f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive})
+	f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive, EmailVerified: true})
 
 	cases := []struct {
 		name   string
 		key    string
-		reason string // the audited refusal reason; "" = nothing to attribute it to
+		reason string // the audited refusal reason; "" = not audited
 	}{
 		{"missing", "", ""},
 		{"no separator", publicID, ""},
@@ -258,8 +265,10 @@ func TestDirectoryLookup_RefusesEveryOtherPresentation(t *testing.T) {
 		{"empty public id", rawKeySeparator + "secret", ""},
 		{"unknown public id", "dk_unknown" + rawKeySeparator + "secret", ""},
 		{"wrong secret", publicID + rawKeySeparator + "not-the-secret", directoryRefusedSecretMismatch},
-		{"secret-kind credential", secretKind.RawKey, directoryRefusedWrongKind},
-		{"publishable credential", publishable.PublicID + rawKeySeparator + "anything", directoryRefusedSecretMismatch},
+		// Other kinds' public ids are public by design; presenting one must
+		// not let anyone write audit rows.
+		{"secret-kind credential", secretKind.RawKey, ""},
+		{"publishable credential", publishable.PublicID + rawKeySeparator + "anything", ""},
 		{"revoked credential", revoked.RawKey, directoryRefusedRevoked},
 		{"suspended project", suspended.RawKey, ""},
 		{"a user JWT", "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1In0.sig", ""},
@@ -274,7 +283,7 @@ func TestDirectoryLookup_RefusesEveryOtherPresentation(t *testing.T) {
 			after := f.audit.byEvent(string(audit.EventDirectoryLookup))
 			if tc.reason == "" {
 				if len(after) != before {
-					t.Fatalf("refusal with nothing to attribute it to was audited: %+v", after[before:])
+					t.Fatalf("refusal that must not be audited was: %+v", after[before:])
 				}
 				return
 			}
@@ -298,10 +307,13 @@ func TestDirectoryLookup_ValidatesTheBatchAfterAuthenticating(t *testing.T) {
 	for i := range tooMany {
 		tooMany[i] = fmt.Sprintf("u%d@corp.test", i)
 	}
+	const domain = "@corp.test"
+	longest := strings.Repeat("a", MaxDirectoryLookupEmailLength-len(domain)) + domain
 	for name, emails := range map[string][]string{
-		"empty":       nil,
-		"blank entry": {"alice@corp.test", "   "},
-		"over limit":  tooMany,
+		"empty":          nil,
+		"blank entry":    {"alice@corp.test", "   "},
+		"over limit":     tooMany,
+		"overlong entry": {"alice@corp.test", "a" + longest},
 	} {
 		if _, err := f.svc.LookupUsers(context.Background(), key, emails); !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("%s: err = %v, want ErrInvalidArgument", name, err)
@@ -312,8 +324,13 @@ func TestDirectoryLookup_ValidatesTheBatchAfterAuthenticating(t *testing.T) {
 		}
 	}
 
+	// An address of exactly the maximum length is accepted.
+	if _, err := f.svc.LookupUsers(context.Background(), key, []string{longest}); err != nil {
+		t.Fatalf("address of the maximum length: %v", err)
+	}
+
 	// Exactly the limit is accepted, and case-duplicates collapse to one.
-	alice := f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive})
+	alice := f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive, EmailVerified: true})
 	atLimit := make([]string, 0, MaxDirectoryLookupEmails)
 	atLimit = append(atLimit, tooMany[:MaxDirectoryLookupEmails-2]...)
 	atLimit = append(atLimit, "alice@corp.test", "Alice@Corp.Test")
@@ -329,7 +346,7 @@ func TestDirectoryLookup_ValidatesTheBatchAfterAuthenticating(t *testing.T) {
 func TestDirectoryLookup_AuditsCountsNotAddresses(t *testing.T) {
 	f := newDirectoryFixture(t)
 	minted := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader)
-	f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive})
+	f.seed(t, dirTestProjectA, &User{Email: "alice@corp.test", Status: StatusActive, EmailVerified: true})
 
 	if _, err := f.svc.LookupUsers(context.Background(), minted.RawKey, []string{"alice@corp.test", "ghost@corp.test"}); err != nil {
 		t.Fatalf("LookupUsers: %v", err)
@@ -364,6 +381,69 @@ func TestDirectoryLookup_SurfacesStoreFailures(t *testing.T) {
 	f.store.lookupErr = boom
 	if _, err := f.svc.LookupUsers(context.Background(), key, []string{"a@corp.test"}); !errors.Is(err, boom) {
 		t.Fatalf("credential-store failure: err = %v, want it surfaced", err)
+	}
+}
+
+// Whoever signs up with an address first holds an unverified account for it.
+// While verified email is required (the default) the lookup must not present
+// that account as the address's owner; once the owner proves the address it
+// is returned. With the requirement off, both are returned and flagged.
+func TestDirectoryLookup_RequireVerifiedEmail(t *testing.T) {
+	for _, required := range []bool{true, false} {
+		t.Run(fmt.Sprintf("required=%t", required), func(t *testing.T) {
+			f := newDirectoryFixtureWith(t, required)
+			key := f.mint(t, dirTestProjectA, CredentialKindDirectoryReader).RawKey
+			claimed := f.seed(t, dirTestProjectA, &User{Email: "claimed@corp.test", Name: "Claimed", Status: StatusActive})
+			proven := f.seed(t, dirTestProjectA, &User{Email: "proven@corp.test", Name: "Proven", Status: StatusActive, EmailVerified: true})
+			lookup := func() []DirectoryUser {
+				t.Helper()
+				got, err := f.svc.LookupUsers(context.Background(), key, []string{"claimed@corp.test", "proven@corp.test"})
+				if err != nil {
+					t.Fatalf("LookupUsers: %v", err)
+				}
+				return got
+			}
+
+			want := []DirectoryUser{{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true}}
+			if !required {
+				want = append([]DirectoryUser{{ID: claimed, Email: "claimed@corp.test", Name: "Claimed"}}, want...)
+			}
+			if got := lookup(); fmt.Sprint(got) != fmt.Sprint(want) {
+				t.Fatalf("before verification: LookupUsers = %+v, want %+v", got, want)
+			}
+
+			if err := f.repos.project(dirTestProjectA).SetUserEmailVerified(context.Background(), claimed, 1); err != nil {
+				t.Fatalf("verify: %v", err)
+			}
+			want = []DirectoryUser{
+				{ID: claimed, Email: "claimed@corp.test", Name: "Claimed", EmailVerified: true},
+				{ID: proven, Email: "proven@corp.test", Name: "Proven", EmailVerified: true},
+			}
+			if got := lookup(); fmt.Sprint(got) != fmt.Sprint(want) {
+				t.Fatalf("after verification: LookupUsers = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// Minting and revoking are recorded in the credential's project, where its
+// lookups are recorded, whatever project the admin call's Host resolved to.
+func TestDirectoryCredentialAdminAudit_LoggedInTheCredentialsProject(t *testing.T) {
+	f := newDirectoryFixture(t)
+	hostCtx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: dirTestProjectB})
+
+	minted, err := f.admin.AdminCreateProjectCredential(hostCtx, dirTestSecret, dirTestProjectA, CredentialKindDirectoryReader)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if err := f.admin.AdminRevokeProjectCredential(hostCtx, dirTestSecret, dirTestProjectA, minted.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	for _, event := range []audit.EventType{audit.EventProjectCredentialCreated, audit.EventProjectCredentialRevoked} {
+		entries := f.audit.byEvent(string(event))
+		if len(entries) != 1 || entries[0].project != dirTestProjectA {
+			t.Fatalf("%s audit = %+v, want one row in %s", event, entries, dirTestProjectA)
+		}
 	}
 }
 

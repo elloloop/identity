@@ -670,8 +670,10 @@ type IdentityServiceClient interface {
 	// to that credential's project whatever the request Host. The credential
 	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
 	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
-	// more than 100 addresses, or a blank address; UNIMPLEMENTED on a build
-	// with no control plane.
+	// more than 100 addresses, or a blank or over-320-byte address;
+	// UNIMPLEMENTED on a build with no control plane. Over the rate limit the
+	// server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
+	// which Connect clients surface as UNAVAILABLE.
 	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
 }
 
@@ -2438,8 +2440,10 @@ type IdentityServiceHandler interface {
 	// to that credential's project whatever the request Host. The credential
 	// authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
 	// wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
-	// more than 100 addresses, or a blank address; UNIMPLEMENTED on a build
-	// with no control plane.
+	// more than 100 addresses, or a blank or over-320-byte address;
+	// UNIMPLEMENTED on a build with no control plane. Over the rate limit the
+	// server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
+	// which Connect clients surface as UNAVAILABLE.
 	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
 }
 

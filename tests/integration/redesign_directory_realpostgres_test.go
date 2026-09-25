@@ -154,3 +154,54 @@ func directoryLookupFlow(t *testing.T, h *RedesignHarness) {
 	}))
 	requireConnectCode(t, "revoke another project's credential", err, connect.CodeNotFound)
 }
+
+// TestRedesign_DirectoryLookup_VerifiedEmail drives GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
+// through the directory lookup on an open-signup project. Anyone can sign up
+// with an address they do not own; while verified email is required that
+// account is not returned, and it is once the owner confirms the mailed link.
+// With the requirement off it is returned throughout, flagged unverified until
+// then.
+func TestRedesign_DirectoryLookup_VerifiedEmail(t *testing.T) {
+	for _, required := range []bool{true, false} {
+		t.Run(fmt.Sprintf("required=%t", required), func(t *testing.T) {
+			h := startRedesignHarnessWith(t, func(cfg *config.Config) { cfg.AuthRequireVerifiedEmail = required })
+			ctx := context.Background()
+			addr := fmt.Sprintf("claimed-%d@corp-example.com", time.Now().UnixNano())
+
+			signup, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+				Email: addr, Password: validPassword,
+			}))
+			if err != nil {
+				t.Fatalf("PasswordSignup: %v", err)
+			}
+			userID := signup.Msg.GetUser().GetId()
+
+			directory := h.directoryClient(mintDirectoryKey(t, h, h.ProjectID).GetRawKey())
+			lookup := func() []*identitypb.DirectoryUser {
+				t.Helper()
+				resp, err := directory.LookupUsers(ctx, connect.NewRequest(&identitypb.LookupUsersRequest{Emails: []string{addr}}))
+				if err != nil {
+					t.Fatalf("LookupUsers: %v", err)
+				}
+				return resp.Msg.GetUsers()
+			}
+
+			got := lookup()
+			switch {
+			case required && len(got) != 0:
+				t.Fatalf("unverified sign-up returned while verified email is required: %v", got)
+			case !required && (len(got) != 1 || got[0].GetId() != userID || got[0].GetEmailVerified()):
+				t.Fatalf("LookupUsers = %v, want %s flagged unverified", got, userID)
+			}
+
+			if _, err := h.Client.VerifyEmail(ctx, connect.NewRequest(&identitypb.VerifyEmailRequest{
+				Token: extractMailedToken(t, h, addr),
+			})); err != nil {
+				t.Fatalf("VerifyEmail: %v", err)
+			}
+			if got := lookup(); len(got) != 1 || got[0].GetId() != userID || !got[0].GetEmailVerified() {
+				t.Fatalf("after verification LookupUsers = %v, want %s verified", got, userID)
+			}
+		})
+	}
+}

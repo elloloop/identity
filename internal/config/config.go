@@ -895,9 +895,11 @@ type Config struct {
 	AuthAllowLocal bool
 
 	// AuthRequireVerifiedEmail blocks authentication until the account's email
-	// is verified. Default ON. Closes an account pre-hijacking vector: an
-	// attacker who plants a password account for an unverified address cannot
-	// use it, and a session is never issued for an unverified account.
+	// is verified, and keeps accounts with an unverified email out of
+	// LookupUsers results. Default ON. Closes an account pre-hijacking vector:
+	// an attacker who plants a password account for an unverified address
+	// cannot use it, a session is never issued for an unverified account, and
+	// a directory lookup never presents the account as the address's owner.
 	AuthRequireVerifiedEmail bool
 
 	// SMTP single-provider config (simple form); SMTPProviders, if set, takes precedence.
@@ -1013,11 +1015,12 @@ type Config struct {
 	RateLimitIDVPerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
 	RateLimitBootstrapPerIP int
-	// RateLimitDirectoryPerIP is the per-IP cap per window on LookupUsers, the
-	// service-to-service directory lookup (each call resolves up to
-	// service.MaxDirectoryLookupEmails addresses). Unlike the other per-IP
-	// caps it cannot be switched off: a zero, negative or malformed value is
-	// refused at boot.
+	// RateLimitDirectoryPerIP is the per-IP cap per window on LookupUsers,
+	// each call of which resolves up to 100 addresses; it must be positive, and
+	// a zero, negative or malformed value is refused at boot. Unlike the other
+	// per-IP caps it cannot be switched off. It applies to the HTTP handler
+	// only: a host that serves identity on its own gRPC server through
+	// RegisterGRPC applies its own limits there.
 	RateLimitDirectoryPerIP int
 
 	// Postgres (the primary persistence driver).
@@ -1147,6 +1150,11 @@ type Config struct {
 	// removed in a breaking release. Nil for a Config built in code, which
 	// is the point — see the comment on detectRemovedEnvVars.
 	removedEnvVarErr error
+
+	// rejectedRateLimitDirectory is the GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP
+	// value Load read when it was not a positive integer, so Validate can
+	// quote it. Load reads it for the reason it detects removed variables.
+	rejectedRateLimitDirectory string
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -1156,6 +1164,9 @@ func Load() *Config {
 	// Stamped here so Validate stays a pure receiver check; see
 	// removedEnvVarErr.
 	c.removedEnvVarErr = detectRemovedEnvVars()
+	if c.RateLimitDirectoryPerIP == invalidPositiveInt {
+		c.rejectedRateLimitDirectory = os.Getenv("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP")
+	}
 
 	// The anonymous retention window must outlive the refresh lifetime, or
 	// the sweep reaps accounts whose only credential is still valid. That
@@ -1923,7 +1934,11 @@ func (c *Config) Validate() error {
 	case c.RateLimitDirectoryPerIP == 0:
 		c.RateLimitDirectoryPerIP = DefaultRateLimitDirectoryPerIP
 	case c.RateLimitDirectoryPerIP < 0:
-		return errors.New("config: GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP must be a positive integer")
+		rejected := c.rejectedRateLimitDirectory
+		if rejected == "" {
+			rejected = strconv.Itoa(c.RateLimitDirectoryPerIP)
+		}
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP=%q must be a positive integer", rejected)
 	}
 
 	if err := c.validateSMS(); err != nil {

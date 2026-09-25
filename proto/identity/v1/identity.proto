@@ -2085,9 +2085,10 @@ message AdminListProjectOAuthProvidersResponse {
 // LookupUsersRequest resolves email addresses to accounts in the project the
 // presented directory_reader credential belongs to.
 message LookupUsersRequest {
-  // emails to resolve, 1..100 entries. Each is compared with an account's
-  // primary email exactly, ignoring case (the comparison sign-in uses): there
-  // is no prefix, substring or domain matching.
+  // emails to resolve, 1..100 entries of at most 320 bytes each. Each is
+  // compared with an account's primary email exactly, ignoring case (the
+  // comparison sign-in uses): there is no prefix, substring or domain
+  // matching. Entries that differ only in case are one address.
   repeated string emails = 1;
 }
 
@@ -2101,18 +2102,20 @@ message DirectoryUser {
   string name = 3;
   string avatar_url = 4;
   // email_verified says whether the account's owner proved the address.
-  // Consumers that treat presence as identity (e.g. a staff directory)
-  // should require it.
+  // Always true when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the
+  // default), because unverified accounts are then not returned.
   bool email_verified = 5;
 }
 
 message LookupUsersResponse {
-  // users holds one entry per requested address that names an ACTIVE account,
-  // in request order. An address with no account, or whose account is not
+  // users holds one entry per distinct requested address that names an
+  // ACTIVE account. An address with no account, or whose account is not
   // active (invited, deactivated, suspended, pending consent or deletion), is
-  // omitted. Every entry is an active member of the key's project;
-  // email_verified says whether the address was proven — consumers that
-  // treat presence as identity (e.g. a staff directory) should require it.
+  // omitted, as is one whose account's email is unverified while
+  // GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default). Addresses that
+  // differ only in case yield a single entry. Entries follow request order,
+  // but omissions shift positions: match each entry to a request by its
+  // email, never by index.
   repeated DirectoryUser users = 1;
 }
 
@@ -2621,7 +2624,9 @@ service IdentityService {
   // to that credential's project whatever the request Host. The credential
   // authorizes this RPC and nothing else. UNAUTHENTICATED for a missing,
   // wrong, revoked or non-directory key; INVALID_ARGUMENT for an empty batch,
-  // more than 100 addresses, or a blank address; UNIMPLEMENTED on a build
-  // with no control plane.
+  // more than 100 addresses, or a blank or over-320-byte address;
+  // UNIMPLEMENTED on a build with no control plane. Over the rate limit the
+  // server answers HTTP 429 with "Retry-After: 60" before the RPC runs,
+  // which Connect clients surface as UNAVAILABLE.
   rpc LookupUsers(LookupUsersRequest) returns (LookupUsersResponse);
 }

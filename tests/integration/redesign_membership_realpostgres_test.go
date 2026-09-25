@@ -54,7 +54,7 @@ func TestRedesign_Membership_InviteAcceptList(t *testing.T) {
 	if created.Msg.GetRawToken() != "" {
 		t.Fatalf("raw token must not be returned when a mailer is configured")
 	}
-	rawToken := extractInvitationToken(t, h, inviteeEmail)
+	rawToken := extractMailedToken(t, h, inviteeEmail)
 
 	// The invitee redeems the token and becomes a member.
 	accepted, err := invitee.client.AcceptTenantInvitation(ctx, connect.NewRequest(&identitypb.AcceptTenantInvitationRequest{
@@ -117,7 +117,7 @@ func TestRedesign_Membership_WrongEmailDenied(t *testing.T) {
 		t.Fatalf("CreateTenantInvitation: %v", err)
 	}
 	_ = created
-	rawToken := extractInvitationToken(t, h, inviteeEmail)
+	rawToken := extractMailedToken(t, h, inviteeEmail)
 
 	// A DIFFERENT user (different email) tries to redeem the token.
 	eve := signupMembershipUser(t, h, fmt.Sprintf("eve-%d@example-corp.com", time.Now().UnixNano()))
@@ -194,18 +194,19 @@ func signupMembershipUser(t *testing.T, h *RedesignHarness, emailAddr string) me
 	}
 }
 
-// extractInvitationToken pulls the raw token out of the most recent recorded
-// invitation email sent to addr. The token is the value of the ?token= query
-// parameter in the acceptance link the template embeds — how a real recipient
-// obtains it, proving the token travels by email, not in the RPC response.
-func extractInvitationToken(t *testing.T, h *RedesignHarness, addr string) string {
+// extractMailedToken pulls the raw token out of the most recent recorded email
+// sent to addr (an invitation, a verification link). The token is the value of
+// the ?token= query parameter in the link the template embeds — how a real
+// recipient obtains it, proving the token travels by email, not in the RPC
+// response.
+func extractMailedToken(t *testing.T, h *RedesignHarness, addr string) string {
 	t.Helper()
 	for _, msg := range reversedMessages(h.Mailer.Sent()) {
 		if msg.To == addr {
 			return extractToken(t, msg.Text)
 		}
 	}
-	t.Fatalf("no invitation email recorded for %s", addr)
+	t.Fatalf("no email recorded for %s", addr)
 	return ""
 }
 
