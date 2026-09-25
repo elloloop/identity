@@ -2263,6 +2263,13 @@ func newHarnessWith(
 	// Mirror app.New: guardian-initiated erasure runs the admin service's
 	// hard-delete cascade, so the handler tests exercise the wired path.
 	authSvc = authSvc.WithAccountPurger(adminSvc)
+	// Mirror app.New: the return_to allowlist is parsed once from config and
+	// injected.
+	returnAllow, err := service.ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs)
+	if err != nil {
+		t.Fatalf("return allowlist: %v", err)
+	}
+	authSvc = authSvc.WithReturnAllowlist(returnAllow)
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())

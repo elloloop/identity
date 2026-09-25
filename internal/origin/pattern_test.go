@@ -63,6 +63,15 @@ func TestParsePattern_Rejections(t *testing.T) {
 		{"https://*.example-.app", ErrPatternParentLabel},
 		{"https://*.exa_mple.app", ErrPatternParentLabel},
 		{"https://*." + strings.Repeat("a", maxLabelLen+1) + ".app", ErrPatternParentLabel},
+		{"https://*.previews.example.app/%2A", ErrPatternLabel},
+		// Parents that are themselves public suffixes: ICANN multi-label
+		// suffixes and shared hosting domains on the private PSL section.
+		{"https://*.co.uk", ErrPatternParentPublicSuffix},
+		{"https://*.vercel.app", ErrPatternParentPublicSuffix},
+		{"https://*.netlify.app", ErrPatternParentPublicSuffix},
+		{"https://*.pages.dev", ErrPatternParentPublicSuffix},
+		{"https://*.github.io", ErrPatternParentPublicSuffix},
+		{"https://*.Pages.Dev", ErrPatternParentPublicSuffix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.raw, func(t *testing.T) {
@@ -84,6 +93,8 @@ func TestParsePattern_Canonical(t *testing.T) {
 		"https://*.previews.example.app:443":  "https://*.previews.example.app",
 		"https://*.previews.example.app:8443": "https://*.previews.example.app:8443",
 		"https://*.xn--bcher-kva.example":     "https://*.xn--bcher-kva.example",
+		"https://*.myproj.pages.dev":          "https://*.myproj.pages.dev",
+		"https://*.example.co.uk":             "https://*.example.co.uk",
 	}
 	for raw, want := range tests {
 		if got := mustPattern(t, raw).String(); got != want {
@@ -120,6 +131,8 @@ func TestPattern_Matches(t *testing.T) {
 		{"underscore", "https://*.previews.example.app", "https://a_b.previews.example.app", false},
 		{"trailing_hyphen", "https://*.previews.example.app", "https://a-.previews.example.app", false},
 		{"wildcard_literal", "https://*.previews.example.app", "https://*.previews.example.app", false},
+		{"project_scoped_shared_host", "https://*.myproj.pages.dev", "https://feature-1.myproj.pages.dev", true},
+		{"project_scoped_shared_host_other_project", "https://*.myproj.pages.dev", "https://feature-1.otherproj.pages.dev", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

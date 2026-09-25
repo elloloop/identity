@@ -291,6 +291,29 @@ func TestUpsertProjectConfig_RejectsMalformed(t *testing.T) {
 	}
 }
 
+// TestUpsertProjectConfig_RejectsInvalidCORSOrigin pins that a CORS entry the
+// resolver would refuse is refused at write time, instead of being stored and
+// then failing every request resolved to the project.
+func TestUpsertProjectConfig_RejectsInvalidCORSOrigin(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(policyAdminSecret)
+	ctx := context.Background()
+	projectID, err := f.svc.AdminCreateProject(ctx, policyAdminSecret, "P", "scope-p")
+	if err != nil {
+		t.Fatalf("AdminCreateProject: %v", err)
+	}
+	for _, entry := range []string{"*", "https://*.app", "https://*.pages.dev", "https://pr-*.example.app", "https://app.example.app/x"} {
+		cfg := `{"cors":{"allowed_origins":["https://app.example.app","` + entry + `"]}}`
+		if _, err := f.svc.UpsertProjectConfig(ctx, policyAdminSecret, projectID, cfg); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("entry %q: err = %v, want ErrInvalidArgument", entry, err)
+		}
+	}
+	valid := `{"cors":{"allowed_origins":["https://app.example.app","https://*.previews.example.app"]}}`
+	if _, err := f.svc.UpsertProjectConfig(ctx, policyAdminSecret, projectID, valid); err != nil {
+		t.Fatalf("valid pattern rejected: %v", err)
+	}
+}
+
 func TestUpsertProjectConfig_UnknownProject(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(policyAdminSecret)

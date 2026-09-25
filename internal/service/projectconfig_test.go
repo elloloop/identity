@@ -25,6 +25,20 @@ func TestParseProjectConfig_CORSOrigins(t *testing.T) {
 	assert.Equal(t, []string{"https://a.example.com", "http://localhost:3000"}, cfg.CORS.AllowedOrigins)
 }
 
+func TestParseProjectConfig_CORSOrigins_Validated(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"cors":{"allowed_origins":["https://*.previews.example.app","https://*.myproj.pages.dev"]}}`)
+	require.NoError(t, err)
+	assert.Len(t, cfg.CORS.AllowedOrigins, 2)
+
+	for _, entry := range []string{"*", "null", "", "app.example.app", "https://*.app", "https://*.vercel.app", "http://*.previews.example.app"} {
+		_, err := ParseProjectConfig(`{"cors":{"allowed_origins":["` + entry + `"]}}`)
+		require.Error(t, err, entry)
+		assert.Contains(t, err.Error(), "cors.allowed_origins", entry)
+	}
+}
+
 func TestParseProjectConfig_LoginDefaults(t *testing.T) {
 	t.Parallel()
 

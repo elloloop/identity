@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/origin"
 	"github.com/elloloop/identity/internal/service"
 )
@@ -93,7 +92,7 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 
 // projectCORSOrigins returns a project's validated per-project CORS allow-list,
 // or the empty allow-list when it configures none. Origins are validated with
-// the same rule the global allow-list uses (middleware.ValidateAllowedOrigins,
+// the same rule the global allow-list uses (origin.ValidateAllowedOrigins,
 // credentials-mode): the CORS middleware always sets
 // Access-Control-Allow-Credentials, so a bare "*", "null", a malformed origin
 // or an invalid wildcard pattern is rejected here rather than served to the
@@ -103,7 +102,7 @@ func projectCORSOrigins(projectID string, cfg service.ProjectConfig) (origin.All
 	if len(cfg.CORS.AllowedOrigins) == 0 {
 		return origin.Allowlist{}, nil
 	}
-	origins, err := middleware.ValidateAllowedOrigins(cfg.CORS.AllowedOrigins, true)
+	origins, err := origin.ValidateAllowedOrigins(cfg.CORS.AllowedOrigins, true)
 	if err != nil {
 		return origin.Allowlist{}, fmt.Errorf("project %q cors: %w", projectID, err)
 	}

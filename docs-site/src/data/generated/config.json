@@ -832,7 +832,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "is the comma-separated allowlist of app URLs the hosted OAuth flow may redirect back to (the `return_to` param of GET /oauth/start/{provider}).",
+    "description": "is the comma-separated allowlist of app URLs (exact origins, path prefixes, or one-label wildcard origins such as https://*.previews.example.app) the hosted OAuth flow may redirect back to (the `return_to` param of GET /oauth/start/{provider}).",
     "category": "OAuth",
     "anchor": "oauth"
   },

@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,7 +16,7 @@ import (
 // with the given per-project CORS allow-list, as the project resolver would.
 func withProjectOrigins(t *testing.T, req *http.Request, origins ...string) *http.Request {
 	t.Helper()
-	allow, err := ValidateAllowedOrigins(origins, true)
+	allow, err := origin.ValidateAllowedOrigins(origins, true)
 	require.NoError(t, err)
 	ctx := service.WithProjectScope(req.Context(), &service.ProjectScope{
 		ProjectID:          "proj-A",
@@ -34,7 +33,7 @@ func nopHandler() http.Handler {
 
 func mustParse(t *testing.T, raw string) origin.Allowlist {
 	t.Helper()
-	out, err := ParseAllowedOrigins(raw, true)
+	out, err := origin.ParseAllowedOrigins(raw, true)
 	require.NoError(t, err)
 	return out
 }
@@ -266,99 +265,6 @@ func TestCORS_ProjectOrigin_Preflight_Returns204WithHeaders(t *testing.T) {
 	assert.Equal(t, "POST, OPTIONS", rec.Header().Get("Access-Control-Allow-Methods"))
 }
 
-func TestValidateAllowedOrigins_StructuredInput(t *testing.T) {
-	out, err := ValidateAllowedOrigins([]string{"https://A.example.com", " http://localhost:9002 "}, true)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"https://A.example.com", "http://localhost:9002"}, out.Exact())
-
-	_, err = ValidateAllowedOrigins([]string{"*"}, true)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "wildcard")
-
-	_, err = ValidateAllowedOrigins(nil, true)
-	require.ErrorIs(t, err, ErrAllowedOriginsEmpty)
-}
-
-func TestParseAllowedOrigins_WildcardWithCredentials_Rejected(t *testing.T) {
-	cases := []string{"*", "http://localhost:9002,*", "*,http://localhost:9002", " * "}
-	for _, raw := range cases {
-		t.Run(raw, func(t *testing.T) {
-			_, err := ParseAllowedOrigins(raw, true)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "wildcard")
-		})
-	}
-}
-
-func TestParseAllowedOrigins_NullOriginWithCredentials_Rejected(t *testing.T) {
-	_, err := ParseAllowedOrigins("http://localhost:9002,null", true)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "null")
-}
-
-func TestParseAllowedOrigins_EmptyEntryWithCredentials_Rejected(t *testing.T) {
-	_, err := ParseAllowedOrigins("http://localhost:9002,", true)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "empty origin entry")
-}
-
-func TestParseAllowedOrigins_EmptyList_Rejected(t *testing.T) {
-	_, err := ParseAllowedOrigins("", true)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAllowedOriginsEmpty))
-}
-
-func TestParseAllowedOrigins_MalformedOrigin_Rejected(t *testing.T) {
-	cases := []string{
-		"localhost:9002",            // missing scheme
-		"ftp://localhost:9002",      // wrong scheme
-		"http://localhost:9002/",    // trailing slash
-		"http://localhost:9002/x",   // path
-		"http://localhost:9002?q=1", // query
-		"http://localhost:9002#f",   // fragment
-		"http://user@localhost",     // userinfo
-		"HTTP://localhost:9002",     // uppercase scheme
-	}
-	for _, raw := range cases {
-		t.Run(raw, func(t *testing.T) {
-			_, err := ParseAllowedOrigins(raw, true)
-			require.Error(t, err)
-		})
-	}
-}
-
-func TestParseAllowedOrigins_ValidList_PreservesOrderAndCase(t *testing.T) {
-	out, err := ParseAllowedOrigins("https://A.example.com,http://localhost:9002 , https://b.example.com", true)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"https://A.example.com", "http://localhost:9002", "https://b.example.com"}, out.Exact())
-}
-
-// ── Coverage for non-credentialed and edge paths ───────────────────────
-
-func TestParseAllowedOrigins_NoCredentials_AllowsEmptyEntries(t *testing.T) {
-	out, err := ParseAllowedOrigins("http://a.example.com,,http://b.example.com", false)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"http://a.example.com", "http://b.example.com"}, out.Exact())
-}
-
-func TestParseAllowedOrigins_NoCredentials_OnlyEmpty_ReturnsErr(t *testing.T) {
-	_, err := ParseAllowedOrigins(",,,", false)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAllowedOriginsEmpty))
-}
-
-func TestParseAllowedOrigins_WhitespaceInsideOrigin_Rejected(t *testing.T) {
-	_, err := ParseAllowedOrigins("http://bad host:9002", true)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "whitespace")
-}
-
-func TestParseAllowedOrigins_HostEmpty_Rejected(t *testing.T) {
-	_, err := ParseAllowedOrigins("http://", true)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "host")
-}
-
 func TestCORS_PreflightWithoutOrigin_Returns204(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 	req := httptest.NewRequest(http.MethodOptions, "/", nil)
@@ -433,44 +339,5 @@ func TestCORS_PatternOrigin(t *testing.T) {
 				})
 			}
 		}
-	}
-}
-
-func TestValidateAllowedOrigins_Patterns(t *testing.T) {
-	out, err := ValidateAllowedOrigins([]string{"https://app.example.app", "https://*.previews.example.app"}, true)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"https://app.example.app"}, out.Exact())
-	assert.Equal(t, []string{"https://*.previews.example.app"}, out.Patterns())
-
-	out, err = ValidateAllowedOrigins([]string{"https://*.previews.example.app"}, true)
-	require.NoError(t, err, "a pattern alone is a non-empty allow-list")
-	assert.Empty(t, out.Exact())
-}
-
-func TestParseAllowedOrigins_InvalidPattern_Rejected(t *testing.T) {
-	cases := []struct {
-		raw     string
-		wantErr error
-		wantMsg string
-	}{
-		{raw: "*", wantMsg: "wildcard"},
-		{raw: "https://*", wantErr: origin.ErrPatternParentShort},
-		{raw: "*.com", wantMsg: "scheme"},
-		{raw: "http://*.previews.example.app", wantErr: origin.ErrPatternScheme},
-		{raw: "https://a.*.example.app", wantErr: origin.ErrPatternLabel},
-		{raw: "https://*.app", wantErr: origin.ErrPatternParentShort},
-		{raw: "https://pr-*.example.app", wantErr: origin.ErrPatternLabel},
-		{raw: "https://*.*.example.app", wantErr: origin.ErrPatternParentLabel},
-		{raw: "https://*.previews.example.app/", wantMsg: "path not allowed"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.raw, func(t *testing.T) {
-			_, err := ParseAllowedOrigins("http://localhost:9002,"+tc.raw, true)
-			require.Error(t, err)
-			if tc.wantErr != nil {
-				require.ErrorIs(t, err, tc.wantErr)
-			}
-			assert.Contains(t, err.Error(), tc.wantMsg)
-		})
 	}
 }

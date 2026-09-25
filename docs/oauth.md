@@ -73,10 +73,16 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com/,https://admin.example
 - An entry may be a one-label wildcard origin for preview deployments,
   `https://*.previews.example.app` (optionally with a path prefix). The `*`
   matches exactly one DNS label; the scheme (`https` only), parent and port
-  are fixed, and a malformed pattern fails startup. **A pattern admits every
-  host under its parent**, and anything published there can receive a user's
-  one-time OAuth code — use one only for a parent whose every subdomain you
-  control. `GATEWAY_ALLOWED_ORIGINS` accepts the same pattern form for CORS.
+  are fixed, and a malformed pattern fails startup — including one whose
+  parent is a public suffix (`*.co.uk`, or a shared host such as
+  `*.vercel.app`, `*.netlify.app`, `*.pages.dev`, `*.github.io`). **A pattern
+  admits every host under its parent**, and anything published there can
+  receive a user's one-time OAuth code — use one only for a parent whose every
+  subdomain you control, such as `https://*.<project>.pages.dev`.
+  `GATEWAY_ALLOWED_ORIGINS` accepts the same pattern form for CORS.
+- A malformed entry without `*` (not an absolute http(s) URL, or with a query
+  or fragment) admits nothing and is logged at startup as
+  `oauth_allowed_return_url_ignored`.
 - **Empty disables the hosted flow** — `GET /oauth/start/*` and
   `GET/POST /oauth/callback/*` return `404`, and only the headless RPCs work.
 

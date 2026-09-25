@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/elloloop/identity/internal/origin"
@@ -20,97 +21,111 @@ import (
 // origin (or match the pattern) and, for path entries, match the configured
 // path or one of its descendants.
 //
-// An empty allowlist disables both flows that depend on it: Enabled()
-// reports false and Allows() rejects everything.
+// An allowlist with no usable entry disables both flows that depend on it:
+// Enabled() reports false and Allows() rejects everything.
 type ReturnAllowlist struct {
-	entries  []string
-	patterns []returnPattern
+	entries []returnEntry
+	ignored []string
 }
 
-type returnPattern struct {
-	raw    string
-	origin origin.Pattern
-	entry  *url.URL
+// returnEntry is one usable allowlist entry, parsed once. pattern is nil for
+// an exact origin or path-prefix entry.
+type returnEntry struct {
+	raw     string
+	url     *url.URL
+	pattern *origin.Pattern
 }
 
-// ParseReturnAllowlist splits the comma-separated config value into
-// trimmed, non-empty entries. Whitespace-only entries are dropped. A
-// wildcard entry that is not a valid one-label https pattern is an error, so
-// a mistyped pattern fails startup instead of silently admitting nothing (or
-// too much).
+func (e returnEntry) originMatches(u *url.URL) bool {
+	if e.pattern != nil {
+		return e.pattern.Matches(u)
+	}
+	return sameReturnOrigin(e.url, u)
+}
+
+// ParseReturnAllowlist splits the comma-separated config value into trimmed,
+// non-empty entries. A wildcard entry that is not a valid one-label https
+// pattern is an error, so a mistyped pattern fails startup instead of
+// silently admitting nothing (or too much). A malformed non-wildcard entry
+// (not an absolute http(s) URL, or carrying a query or fragment) has never
+// been fatal; it is kept out of the allowlist and reported by Ignored() so
+// the caller can warn about it.
 func ParseReturnAllowlist(csv string) (ReturnAllowlist, error) {
 	var a ReturnAllowlist
 	for _, part := range strings.Split(csv, ",") {
-		e := strings.TrimSpace(part)
-		if e == "" {
+		raw := strings.TrimSpace(part)
+		if raw == "" {
 			continue
 		}
-		if !origin.IsPattern(e) {
+		if origin.IsPattern(raw) {
+			e, err := parseReturnPattern(raw)
+			if err != nil {
+				return ReturnAllowlist{}, fmt.Errorf("return URL pattern %q: %w", raw, err)
+			}
 			a.entries = append(a.entries, e)
 			continue
 		}
-		p, err := parseReturnPattern(e)
-		if err != nil {
-			return ReturnAllowlist{}, fmt.Errorf("return URL pattern %q: %w", e, err)
+		u, ok := parseReturnURL(raw)
+		if !ok || u.RawQuery != "" || u.Fragment != "" {
+			a.ignored = append(a.ignored, raw)
+			continue
 		}
-		a.patterns = append(a.patterns, p)
+		a.entries = append(a.entries, returnEntry{raw: raw, url: u})
 	}
 	return a, nil
 }
 
-func parseReturnPattern(raw string) (returnPattern, error) {
+func parseReturnPattern(raw string) (returnEntry, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return returnPattern{}, err
+		return returnEntry{}, err
 	}
 	if u.User != nil {
-		return returnPattern{}, errors.New("userinfo not allowed")
+		return returnEntry{}, errors.New("userinfo not allowed")
 	}
 	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-		return returnPattern{}, errors.New("query and fragment not allowed")
+		return returnEntry{}, errors.New("query and fragment not allowed")
 	}
 	p, err := origin.ParsePattern(u)
 	if err != nil {
-		return returnPattern{}, err
+		return returnEntry{}, err
 	}
-	return returnPattern{raw: raw, origin: p, entry: u}, nil
+	return returnEntry{raw: raw, url: u, pattern: &p}, nil
 }
 
-// Enabled reports whether any allowlist entry is configured.
-func (a ReturnAllowlist) Enabled() bool { return len(a.entries) > 0 || len(a.patterns) > 0 }
+// Enabled reports whether any usable allowlist entry is configured.
+func (a ReturnAllowlist) Enabled() bool { return len(a.entries) > 0 }
 
-// Entries returns the configured exact and path-prefix entries (for startup
+// Entries returns the usable exact and path-prefix entries (for startup
 // logging).
-func (a ReturnAllowlist) Entries() []string { return a.entries }
+func (a ReturnAllowlist) Entries() []string { return a.raws(false) }
 
-// Patterns returns the configured wildcard entries (for startup logging).
-func (a ReturnAllowlist) Patterns() []string {
-	out := make([]string, len(a.patterns))
-	for i, p := range a.patterns {
-		out[i] = p.raw
+// Patterns returns the wildcard entries (for startup logging).
+func (a ReturnAllowlist) Patterns() []string { return a.raws(true) }
+
+// Ignored returns the malformed non-wildcard entries that admit nothing (for
+// a startup warning).
+func (a ReturnAllowlist) Ignored() []string { return slices.Clone(a.ignored) }
+
+func (a ReturnAllowlist) raws(patterns bool) []string {
+	var out []string
+	for _, e := range a.entries {
+		if (e.pattern != nil) == patterns {
+			out = append(out, e.raw)
+		}
 	}
 	return out
 }
 
 // Allows reports whether returnTo is permitted by an exact origin, a
 // path-bound prefix, or a wildcard pattern (with its path prefix, if any).
-// Allowlist entries may not contain a query or fragment.
 func (a ReturnAllowlist) Allows(returnTo string) bool {
 	returnURL, ok := parseReturnURL(returnTo)
 	if !ok {
 		return false
 	}
 	for _, e := range a.entries {
-		entryURL, ok := parseReturnURL(e)
-		if !ok || entryURL.RawQuery != "" || entryURL.Fragment != "" {
-			continue
-		}
-		if sameReturnOrigin(entryURL, returnURL) && returnPathAllowed(entryURL, returnURL) {
-			return true
-		}
-	}
-	for _, p := range a.patterns {
-		if p.origin.Matches(returnURL) && returnPathAllowed(p.entry, returnURL) {
+		if e.originMatches(returnURL) && returnPathAllowed(e.url, returnURL) {
 			return true
 		}
 	}

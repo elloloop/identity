@@ -4,8 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"github.com/elloloop/identity/internal/origin"
 )
 
@@ -80,6 +78,9 @@ func TestParseReturnAllowlist_RejectsInvalidPatterns(t *testing.T) {
 		{"https://*.previews.example.app/auth/*", origin.ErrPatternLabel},
 		{"https://*.*.example.app", origin.ErrPatternParentLabel},
 		{"https://*.-bad.example.app", origin.ErrPatternParentLabel},
+		{"https://*.vercel.app/auth", origin.ErrPatternParentPublicSuffix},
+		{"https://*.pages.dev/auth", origin.ErrPatternParentPublicSuffix},
+		{"https://*.co.uk", origin.ErrPatternParentPublicSuffix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.entry, func(t *testing.T) {
@@ -175,17 +176,40 @@ func TestReturnAllowlist_AllowsPattern(t *testing.T) {
 	}
 }
 
-func TestReturnAllowlist_RejectsEntriesWithQueryOrFragment(t *testing.T) {
+func TestReturnAllowlist_IgnoresMalformedExactEntries(t *testing.T) {
 	t.Parallel()
 
 	for _, entry := range []string{
 		"https://app.example.com/callback?source=oauth",
 		"https://app.example.com/callback#fragment",
+		"app.example.com/callback",
+		"ftp://app.example.com/callback",
 	} {
 		a := mustReturnAllowlist(t, entry)
 		if a.Allows("https://app.example.com/callback") {
 			t.Fatalf("entry %q allowed a return_to", entry)
 		}
+		if a.Enabled() {
+			t.Errorf("entry %q: a list with no usable entry reports Enabled", entry)
+		}
+		if got := a.Ignored(); len(got) != 1 || got[0] != entry {
+			t.Errorf("entry %q: Ignored() = %v", entry, got)
+		}
+	}
+}
+
+func TestReturnAllowlist_IgnoredEntriesDoNotHideUsableOnes(t *testing.T) {
+	t.Parallel()
+
+	a := mustReturnAllowlist(t, "app.example.app, https://app.example.app/auth")
+	if !a.Enabled() || !a.Allows("https://app.example.app/auth/complete") {
+		t.Fatal("usable entry not honoured next to an ignored one")
+	}
+	if got := a.Entries(); len(got) != 1 || got[0] != "https://app.example.app/auth" {
+		t.Errorf("Entries() = %v", got)
+	}
+	if got := a.Ignored(); len(got) != 1 || got[0] != "app.example.app" {
+		t.Errorf("Ignored() = %v", got)
 	}
 }
 
@@ -194,15 +218,5 @@ func TestReturnAllowlist_EmptyDeniesAll(t *testing.T) {
 	a := mustReturnAllowlist(t, "")
 	if a.Allows("https://anything.test/") {
 		t.Error("empty allowlist allowed a return_to")
-	}
-}
-
-func TestBuildReturnAllowlist_InvalidFailsClosed(t *testing.T) {
-	t.Parallel()
-
-	cfg := testConfig()
-	cfg.OAuthAllowedReturnURLs = "https://app.example.app,https://*.app"
-	if a := buildReturnAllowlist(cfg, zap.NewNop()); a.Enabled() {
-		t.Fatalf("invalid allowlist built an enabled allowlist: %v %v", a.Entries(), a.Patterns())
 	}
 }

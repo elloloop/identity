@@ -468,18 +468,20 @@ type Config struct {
 	OIDCScopes string
 
 	// OAuthAllowedReturnURLs is the comma-separated allowlist of app URLs
-	// the hosted OAuth flow may redirect back to (the `return_to` param of
-	// GET /oauth/start/{provider}). Each entry is an exact origin or a path
-	// prefix. A return_to must match the configured origin and, for path
-	// entries, the configured path or one of its descendants. Validation is
-	// fail-closed: a return_to that matches no entry is rejected with 400.
+	// (exact origins, path prefixes, or one-label wildcard origins such as
+	// https://*.previews.example.app) the hosted OAuth flow may redirect back
+	// to (the `return_to` param of GET /oauth/start/{provider}). A return_to
+	// must match the configured origin and, for path entries, the configured
+	// path or one of its descendants. Validation is fail-closed: a return_to
+	// that matches no entry is rejected with 400.
 	//
-	// An entry may also be a one-label wildcard origin,
-	// https://*.parent.example (optionally with a path prefix): the wildcard
-	// matches exactly one DNS label, and the scheme (https only), parent and
-	// port are fixed. A malformed wildcard entry fails startup. A pattern
-	// admits every host under its parent, so use one only for a parent whose
-	// every subdomain the operator controls.
+	// A wildcard entry, https://*.parent.example (optionally with a path
+	// prefix), matches exactly one DNS label, and the scheme (https only), parent and
+	// port are fixed. A malformed wildcard entry, or one whose parent is a
+	// public suffix, fails startup; a malformed exact entry admits nothing
+	// and is logged as ignored. A pattern admits every host under its parent,
+	// so use one only for a parent whose every subdomain the operator
+	// controls.
 	//
 	// Empty disables the hosted flow entirely — GET /oauth/start and
 	// GET/POST /oauth/callback return 404. The headless BeginOAuthLogin / OAuthLogin
@@ -894,8 +896,9 @@ type Config struct {
 	// exact origins, or one-label wildcard patterns such as
 	// https://*.previews.example.app. A pattern matches exactly one DNS
 	// label under a fixed parent, https only, on a fixed port; the response
-	// echoes the concrete request Origin. A bare "*", "null" or a malformed
-	// pattern fails startup, since credentials are always allowed.
+	// echoes the concrete request Origin. A bare "*", "null", a malformed
+	// pattern or one whose parent is a public suffix fails startup, since
+	// credentials are always allowed.
 	AllowedOrigins string
 
 	// Cookie settings.

@@ -447,6 +447,16 @@ func TestConfigSetupMatrix(t *testing.T) {
 			"wildcard parent domain must have at least two labels",
 		})
 	})
+	t.Run("public_suffix_wildcard_return_url_pattern_fails", func(t *testing.T) {
+		t.Parallel()
+		env, _ := cfgEnv(t, map[string]string{
+			"GATEWAY_OAUTH_ALLOWED_RETURN_URLS": "https://*.pages.dev/auth",
+		})
+		cfgExpectBootFailure(t, env, []string{
+			"GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid",
+			"wildcard parent domain is a public suffix",
+		})
+	})
 	t.Run("invalid_wildcard_cors_origin_pattern_fails", func(t *testing.T) {
 		t.Parallel()
 		env, _ := cfgEnv(t, map[string]string{
@@ -459,15 +469,19 @@ func TestConfigSetupMatrix(t *testing.T) {
 	})
 
 	// Case 8 — POSITIVE: valid wildcard patterns boot clean and are logged
-	// next to the exact entries, so an operator can see what is admitted.
+	// next to the exact entries, so an operator can see what is admitted; a
+	// malformed exact return-URL entry stays non-fatal but is warned about.
 	t.Run("wildcard_patterns_boot_and_are_logged", func(t *testing.T) {
 		t.Parallel()
 		env, port := cfgEnv(t, map[string]string{
 			"GATEWAY_ALLOWED_ORIGINS":           "http://localhost:9002,https://*.previews.example.app",
-			"GATEWAY_OAUTH_ALLOWED_RETURN_URLS": "https://app.example.app/auth,https://*.previews.example.app/auth",
+			"GATEWAY_OAUTH_ALLOWED_RETURN_URLS": "https://app.example.app/auth,https://*.previews.example.app/auth,app.example.app/no-scheme",
 		})
 		cfgExpectBootClean(t, env, port,
-			[]string{"origin_patterns", "https://*.previews.example.app", "allowed_return_url_patterns"},
+			[]string{
+				"origin_patterns", "https://*.previews.example.app", "allowed_return_url_patterns",
+				"oauth_allowed_return_url_ignored", "app.example.app/no-scheme",
+			},
 			nil)
 	})
 }

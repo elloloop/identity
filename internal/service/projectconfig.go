@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/internal/origin"
 )
 
 // ProjectConfig is the typed view of a project's config_json blob. It is the
@@ -298,7 +299,7 @@ func (c ProjectConfig) Validate() error {
 	if err := c.Jurisdictions.validate(); err != nil {
 		return err
 	}
-	return nil
+	return c.CORS.validate()
 }
 
 // validate rejects a present-but-incomplete provider block. A provider block
@@ -1198,10 +1199,24 @@ func (j ProjectJurisdictionsConfig) canonicalized() ProjectJurisdictionsConfig {
 // accepted when either set admits it. Each entry must be a bare
 // scheme+host(+port) origin (no path/query/fragment, lower-case http:// or
 // https:// scheme) or a one-label wildcard pattern (https://*.parent.example);
-// the project resolver validates them with middleware.ValidateAllowedOrigins
-// before they reach a request.
+// they are validated with origin.ValidateAllowedOrigins when written
+// (ProjectConfig.Validate) and again by the project resolver before they reach
+// a request.
 type ProjectCORSConfig struct {
 	AllowedOrigins []string `json:"allowed_origins"`
+}
+
+// validate applies the resolver's rule at write time, so a malformed origin or
+// wildcard pattern is refused by the admin API instead of being stored and
+// then failing every request resolved to the project.
+func (c ProjectCORSConfig) validate() error {
+	if len(c.AllowedOrigins) == 0 {
+		return nil
+	}
+	if _, err := origin.ValidateAllowedOrigins(c.AllowedOrigins, true); err != nil {
+		return fmt.Errorf("cors.allowed_origins: %w", err)
+	}
+	return nil
 }
 
 // ParseProjectConfig decodes a project's config_json into the typed

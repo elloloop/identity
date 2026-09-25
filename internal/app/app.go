@@ -28,6 +28,7 @@ import (
 	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/observability"
+	"github.com/elloloop/identity/internal/origin"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/audit"
@@ -487,7 +488,7 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.DefaultProjectID = config.DefaultProjectIDFallback
 	}
 
-	allowedOrigins, err := middleware.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
+	allowedOrigins, err := origin.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
 	if err != nil {
 		return nil, fmt.Errorf("cors config invalid: %w", err)
 	}
@@ -496,12 +497,17 @@ func New(deps Deps) (*Built, error) {
 		zap.Strings("origin_patterns", allowedOrigins.Patterns()))
 
 	// Browser-facing hosted OAuth routes are registered only when
-	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS is non-empty; the headless
+	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS has a usable entry; the headless
 	// BeginOAuthLogin / OAuthLogin RPCs work regardless. A malformed wildcard
 	// entry fails startup here, as a malformed CORS origin does above.
 	returnAllow, err := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
 	if err != nil {
 		return nil, fmt.Errorf("GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: %w", err)
+	}
+	for _, entry := range returnAllow.Ignored() {
+		logger.Warn("oauth_allowed_return_url_ignored",
+			zap.String("entry", entry),
+			zap.String("hint", "not an absolute http(s) URL without query or fragment; it admits no return_to"))
 	}
 
 	trustedProxies, err := middleware.ParseTrustedProxies(deps.Config.TrustedProxies)
@@ -637,7 +643,8 @@ func New(deps Deps) (*Built, error) {
 		WithLoginGovernance(deps.LoginGovernance).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
-		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger)
+		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
+		WithReturnAllowlist(returnAllow)
 	// Dispatch credential emails asynchronously in the served deployment so SMTP
 	// latency cannot time the gated send/no-send decision. Tests that read the
 	// mailer synchronously opt out via Deps.SynchronousEmailSend.
