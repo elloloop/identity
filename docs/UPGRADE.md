@@ -240,10 +240,10 @@ Resolve them before migrating down.
 When the lock timeout fires or the index build fails, the migration's SQL
 rolls back as one transaction and changes nothing. The migration runner
 still records schema version 34 as *dirty*. Every later `identity migrate`,
-and every boot with
-`GATEWAY_POSTGRES_AUTO_MIGRATE`, then refuses to run with an error naming the
-recovery command, and replicas that auto-migrate fail to boot until it is
-cleared. To recover:
+and every boot with `GATEWAY_POSTGRES_AUTO_MIGRATE`, then refuses to run, and
+replicas that auto-migrate fail to boot until it is cleared. The error says
+which version to record ("record version 33"); `identity migrate` also logs
+the exact commands in its `recovery` field. To recover:
 
 1. Confirm the migration did not apply. The column is absent unless you
    added it by hand:
@@ -262,8 +262,10 @@ cleared. To recover:
 Because every statement in 0034 is guarded with `IF [NOT] EXISTS`, forcing 33
 and re-running is also right when you added the column or the new indexes by
 hand: the re-run skips what exists and finishes the rest. Any failed migration
-leaves the same dirty state, and the refusal names the version to force for a
-failed apply and for a failed rollback.
+leaves the same dirty state, and the refusal names the version to record for a
+failed apply and for a failed rollback. If it says the dirty version is newer
+than this build, a newer identity release migrated the database: recover with
+that release, never with this one.
 
 #### `identity migrate` refuses other arguments
 
@@ -412,6 +414,14 @@ same addresses could match on one deployment and not on another.
   refuses it as a duplicate when an account already holds that canonical
   form. An account stored in a non-canonical form (see above) is not
   recognised by that check.
+- **Addresses that are nothing but a `+tag`** (`+x@corp.com`) pass the
+  address format check but have no mailbox left once canonical. Every path
+  that stores or looks up an account's address now refuses them: sign-up and
+  sign-in (`INVALID_ARGUMENT`), passkey sign-up, the anonymous upgrade, admin
+  `InviteUser`, email change, tenant invitations, SCIM (`invalidValue`) and
+  the first-admin bootstrap. OAuth sign-in refuses such a provider address as
+  unauthenticated. Passwordless requests and password resets still answer as
+  before but send nothing, and `LookupUsers` returns no entry for them.
 - **Email change** stores the new address in canonical form, and refuses one
   whose canonical form equals the current address, for example
   `me+x@corp.com` for `me@corp.com`, because sign-in already resolves it to

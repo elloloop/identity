@@ -104,7 +104,10 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	// @googlemail.com local parts, universal '+' tag stripping,
 	// googlemail.com → gmail.com. One human ↔ one account. Canonicalized ONCE
 	// here and reused for both the access gate (cemail) and every DB op (email).
-	cemail := canonicalize(email)
+	cemail, usable := canonicalMailbox(email)
+	if !usable {
+		return nil, errNoUsableMailbox
+	}
 	email = string(cemail)
 	// Before any password work, so a restricted project never mints a disallowed
 	// account. Placed before the duplicate-email handling so the denial is
@@ -431,7 +434,10 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		// under the canonical form. PasswordSignup writes the canonical
 		// form, so lookup must use the same. Canonicalized ONCE here and reused for
 		// both the access gate (cemail) and the DB lookup (email).
-		cemail := canonicalize(email)
+		cemail, usable := canonicalMailbox(email)
+		if !usable {
+			return nil, errNoUsableMailbox
+		}
 		email = string(cemail)
 
 		// Enforce the project access mode (login context) BEFORE the user lookup and
@@ -750,10 +756,13 @@ func (s *AuthService) OAuthLogin(
 	// CanonicalizeEmail already trims + lowercases, so the empty-email guard holds.
 	// Canonicalized ONCE here; carried as cemail into upsert/resolve (gate) and as
 	// email (string) for the DB link/profile writes and logging.
-	cemail := canonicalize(identity.Email)
+	cemail, usable := canonicalMailbox(identity.Email)
 	email := string(cemail)
 	if email == "" {
 		return nil, fmt.Errorf("%w: provider returned no email", ErrUnauthenticated)
+	}
+	if !usable {
+		return nil, fmt.Errorf("%w: provider returned an email with no usable mailbox", ErrUnauthenticated)
 	}
 
 	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail)

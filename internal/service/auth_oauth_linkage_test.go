@@ -21,14 +21,14 @@ func TestOAuthLogin_ReturningUserViaProviderID(t *testing.T) {
 	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
 		UserID:          seed.ID,
 		Provider:        "google",
-		ProviderUserID:  "sub-stable-123",
+		ProviderUserID:  "sub-stable-123@example.com",
 		EmailAtLinkTime: "first@example.com",
 		CreatedAt:       1,
 	}))
 
 	// fakeOAuthExchanger encodes ProviderUserID as "sub-<email>", so we
 	// drive a login whose sub deterministically matches the seeded link.
-	code := fakeOAuthCode("stable-123", "Stable", "", "google")
+	code := fakeOAuthCode("stable-123@example.com", "Stable", "", "google")
 	res, err := svc.OAuthLogin(ctx, OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -141,11 +141,11 @@ func TestOAuthLogin_ProviderEmailChangedStaysLinked(t *testing.T) {
 	ctx := context.Background()
 
 	// First login: creates user@old.com and links sub-stableid.
-	first := fakeOAuthCode("stableid", "User", "", "google")
+	first := fakeOAuthCode("stableid@example.com", "User", "", "google")
 	res1, err := svc.OAuthLogin(ctx, OAuthLoginParams{Code: first, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.NoError(t, err)
 	originalID := res1.User.ID
-	assert.Equal(t, "stableid", res1.User.Email)
+	assert.Equal(t, "stableid@example.com", res1.User.Email)
 
 	// fakeOAuthExchanger derives both Email and ProviderUserID from the
 	// code's second token. To keep ProviderUserID stable across an email

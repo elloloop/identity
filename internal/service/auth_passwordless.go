@@ -62,13 +62,6 @@ func generateEmailLoginCode() string {
 	return fmt.Sprintf("%0*d", emailLoginCodeDigits, n.Int64())
 }
 
-// normalizeEmail lowercases and trims an email and reports whether it is
-// minimally well-formed (contains an "@").
-func normalizeEmail(raw string) (string, bool) {
-	e := strings.TrimSpace(strings.ToLower(raw))
-	return e, strings.Contains(e, "@")
-}
-
 // ── RequestEmailLoginCode ──────────────────────────────────────────────
 
 // RequestEmailLoginCode mints a 6-digit OTP for the email and dispatches
@@ -76,19 +69,16 @@ func normalizeEmail(raw string) (string, bool) {
 // difference between a known and an unknown address. The account is NOT
 // created here — only VerifyEmailLoginCode resolves or creates the user.
 func (s *AuthService) RequestEmailLoginCode(ctx context.Context, emailAddr string) error {
-	normalized, ok := normalizeEmail(emailAddr)
+	// Canonicalize ONCE and use the canonical form for the access gate, the OTP
+	// storage key, and the send. VerifyEmailLoginCode canonicalizes identically,
+	// so a dotted/tagged variant keys and later looks up the SAME OTP record.
+	cemail, ok := canonicalMailbox(emailAddr)
 	if !ok {
 		// Silent: the proto guarantees no enumeration even for malformed
 		// input. Log so operators can spot obvious client bugs.
 		s.logger.Info("email_login_code_requested_invalid_email")
 		return nil
 	}
-	// Canonicalize ONCE and use the canonical form for the access gate, the OTP
-	// storage key, and the send. VerifyEmailLoginCode canonicalizes identically,
-	// so a dotted/tagged variant keys and later looks up the SAME OTP record —
-	// fixing the prior inconsistency where the send keyed on the non-canonical
-	// address while the gate canonicalized internally.
-	cemail := canonicalize(normalized)
 	// A closed or off-list project must not emit an OTP to an arbitrary address.
 	// The response is unchanged (nil) whether or not we send, preserving
 	// anti-enumeration; the authoritative deny is at VerifyEmailLoginCode.
@@ -178,14 +168,13 @@ func (s *AuthService) sendEmailLoginCodeNow(ctx context.Context, emailAddr strin
 // cap captured at mint time the code is consumed (invalidated) to stop a
 // brute-force walk of the 6-digit space.
 func (s *AuthService) VerifyEmailLoginCode(ctx context.Context, emailAddr, code string, ipAddr, userAgent string) (*LoginResult, error) {
-	normalized, ok := normalizeEmail(emailAddr)
-	if !ok || strings.TrimSpace(code) == "" {
-		return nil, ErrEmailLoginCodeInvalid
-	}
 	// Canonicalize ONCE: the OTP was stored under the canonical key by
 	// RequestEmailLoginCode, and the resolve/gate downstream require the canonical
 	// form. Reused for both the lookup (string) and completion (canonicalEmail).
-	cemail := canonicalize(normalized)
+	cemail, ok := canonicalMailbox(emailAddr)
+	if !ok || strings.TrimSpace(code) == "" {
+		return nil, ErrEmailLoginCodeInvalid
+	}
 
 	if err := s.verifyAndConsumeEmailLoginCode(ctx, string(cemail), code, "email_code", ipAddr, userAgent); err != nil {
 		return nil, err
@@ -265,15 +254,14 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 		return fmt.Errorf("%w: return_to is not allowed", ErrInvalidArgument)
 	}
 
-	normalized, ok := normalizeEmail(emailAddr)
+	// Canonicalize ONCE and use the canonical form for the access gate and the
+	// magic-link token's bound email, so RedeemMagicLink resolves the account
+	// under the same canonical key.
+	cemail, ok := canonicalMailbox(emailAddr)
 	if !ok {
 		s.logger.Info("magic_link_requested_invalid_email")
 		return nil
 	}
-	// Canonicalize ONCE and use the canonical form for the access gate and the
-	// magic-link token's bound email, so RedeemMagicLink resolves the account
-	// under the same canonical key (fixing the prior non-canonical inconsistency).
-	cemail := canonicalize(normalized)
 
 	// A closed or off-list project must not email a sign-in link to an arbitrary
 	// address. Response is unchanged (nil) either way, preserving

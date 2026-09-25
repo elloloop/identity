@@ -397,12 +397,15 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 
 	fields := map[string]any{}
 	// userName and email both map to the host email column; an explicit email
-	// wins when both are present.
-	for _, value := range []*string{patch.UserName, patch.Email} {
-		if value == nil {
-			continue
-		}
-		email, err := scimEmail(*value)
+	// wins when both are present, and only the value that is stored is
+	// validated, so an IdP whose userName is not an address can still send
+	// one alongside it.
+	address := patch.UserName
+	if patch.Email != nil {
+		address = patch.Email
+	}
+	if address != nil {
+		email, err := scimEmail(*address)
 		if err != nil {
 			return scim.User{}, err
 		}

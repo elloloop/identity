@@ -714,7 +714,10 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 	if err := validateEmailFormat(email); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
-	canonicalEmail := CanonicalizeEmail(email)
+	canonicalEmail, usable := CanonicalMailbox(email)
+	if !usable {
+		return nil, errNoUsableMailbox
+	}
 
 	// Unlocked fast-path: on a provisioned deployment the bootstrap is
 	// permanently closed, and that closed state is the overwhelmingly common

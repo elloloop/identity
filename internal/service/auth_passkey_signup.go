@@ -62,7 +62,10 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 	// human maps to one account regardless of gmail dot/+tag variants.
 	// Canonicalized ONCE here and reused for the gate (cemail), the WebAuthn
 	// options, the stored challenge email, and the in-flow OTP send (email).
-	cemail := canonicalize(email)
+	cemail, usable := canonicalMailbox(email)
+	if !usable {
+		return "", "", errNoUsableMailbox
+	}
 	email = string(cemail)
 
 	// Fail fast on a project that forbids self-signup, before building the

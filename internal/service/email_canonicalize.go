@@ -103,12 +103,24 @@ func CanonicalizeEmail(addr string) string {
 // CanonicalMailbox canonicalizes addr (CanonicalizeEmail) and reports whether
 // the result is a mailbox an account can hold: a non-empty local part, a
 // domain containing a dot, and no whitespace. Every path that stores or looks
-// up a canonical address checks it: canonicalizing drops a "+tag", so an
-// address that was nothing but one ("+x@corp.com") has no local part left.
+// up an account's address from caller or provider input checks it:
+// canonicalizing drops a "+tag", so an address that was nothing but one
+// ("+x@corp.com") has no local part left, whatever the raw address's own
+// validation said.
 func CanonicalMailbox(addr string) (string, bool) {
 	c := CanonicalizeEmail(addr)
 	return c, isUsableMailbox(c)
 }
+
+// canonicalMailbox is CanonicalMailbox for the paths that go on to the access
+// gate, which takes the canonicalEmail type.
+func canonicalMailbox(addr string) (canonicalEmail, bool) {
+	c, usable := CanonicalMailbox(addr)
+	return canonicalEmail(c), usable
+}
+
+// errNoUsableMailbox refuses an address with no mailbox left once canonical.
+var errNoUsableMailbox = fmt.Errorf("%w: email has no mailbox once its +tag is removed", ErrInvalidArgument)
 
 // isUsableMailbox is CanonicalMailbox's check on an already-canonical
 // address: a minimal syntactic one, since the mailbox itself is proven only

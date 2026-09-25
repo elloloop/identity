@@ -138,9 +138,10 @@ spec:
     runner still marks that schema version <strong>dirty</strong>, and every
     later run refuses to start: <code>identity migrate</code> exits non-zero
     and a server with <code>GATEWAY_POSTGRES_AUTO_MIGRATE</code> fails to boot.
-    The error names the version to record. Confirm the failed migration left
-    no change behind, fix the cause, then record the version before it and run
-    again:
+    The error names the version to record, and <code>identity migrate</code>
+    logs the commands in its <code>recovery</code> field. Confirm the failed
+    migration left no change behind, fix the cause, then record the version
+    before it and run again:
   </p>
   <Code code={`identity migrate force 33   # records version 33, clears the dirty flag, runs nothing
 identity migrate            # applies 34 again`} lang="bash" title="recover from a failed migration" />

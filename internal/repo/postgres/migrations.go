@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -28,8 +29,8 @@ const migrationsDir = "migrations"
 // separately.
 //
 // A migration that fails leaves the schema version marked dirty, and every
-// later run refuses to start until an operator says which version the schema
-// is at; the error then names the command that does (see dirtyVersionError).
+// later run refuses to start until an operator records which version the
+// schema is at; the error then wraps a *DirtyMigrationError saying which.
 func runMigrations(dsn string) error {
 	m, err := newMigrator(dsn)
 	if err != nil {
@@ -102,36 +103,43 @@ func withDirtyVersionHint(m *migrate.Migrate, err error) error {
 
 // describeDirtyVersion places a dirty version among the embedded migrations.
 func describeDirtyVersion(src source.Driver, version uint) (*DirtyMigrationError, error) {
-	e := &DirtyMigrationError{Version: int(version)}
-	first, err := src.First()
+	versions, err := embeddedVersions(src)
 	if err != nil {
 		return nil, err
 	}
-	for v := first; ; {
-		e.Latest = int(v)
-		if v == version {
-			e.Known = true
-		}
-		next, nerr := src.Next(v)
-		if errors.Is(nerr, fs.ErrNotExist) {
-			break
-		}
-		if nerr != nil {
-			return nil, nerr
-		}
-		v = next
-	}
-	if !e.Known {
+	e := &DirtyMigrationError{Version: int(version), Latest: int(versions[len(versions)-1])}
+	i := slices.Index(versions, version)
+	if i < 0 {
 		return e, nil
 	}
-	e.First = version == first
-	if prev, perr := src.Prev(version); perr == nil {
-		e.Previous = int(prev)
+	e.Known = true
+	e.First = i == 0
+	if i > 0 {
+		e.Previous = int(versions[i-1])
 	}
-	if next, nerr := src.Next(version); nerr == nil {
-		e.Next = int(next)
+	if i+1 < len(versions) {
+		e.Next = int(versions[i+1])
 	}
 	return e, nil
+}
+
+// embeddedVersions lists the versions of the embedded migrations, ascending.
+func embeddedVersions(src source.Driver) ([]uint, error) {
+	v, err := src.First()
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list migrations: %w", err)
+	}
+	versions := []uint{v}
+	for {
+		v, err = src.Next(v)
+		if errors.Is(err, fs.ErrNotExist) {
+			return versions, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("postgres: list migrations: %w", err)
+		}
+		versions = append(versions, v)
+	}
 }
 
 // DirtyMigrationError reports a schema version golang-migrate left marked
@@ -213,17 +221,14 @@ func requireKnownVersion(src source.Driver, version int) error {
 	if version < 1 {
 		return fmt.Errorf("postgres: migration version must be positive, got %d", version)
 	}
-	v, err := src.First()
-	for err == nil {
-		if int(v) == version {
-			return nil
-		}
-		v, err = src.Next(v)
+	versions, err := embeddedVersions(src)
+	if err != nil {
+		return err
 	}
-	if errors.Is(err, fs.ErrNotExist) {
+	if !slices.Contains(versions, uint(version)) {
 		return fmt.Errorf("postgres: no migration has version %d", version)
 	}
-	return fmt.Errorf("postgres: list migrations: %w", err)
+	return nil
 }
 
 // pgx5 driver registration sentinel — keeps the import alive even

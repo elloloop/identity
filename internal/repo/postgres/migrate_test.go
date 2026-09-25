@@ -114,15 +114,9 @@ func latestEmbeddedVersion(t *testing.T) int {
 	src, err := iofs.New(migrationFS, migrationsDir)
 	require.NoError(t, err)
 	defer func() { _ = src.Close() }()
-	v, err := src.First()
+	versions, err := embeddedVersions(src)
 	require.NoError(t, err)
-	for {
-		next, err := src.Next(v)
-		if err != nil {
-			return int(v)
-		}
-		v = next
-	}
+	return int(versions[len(versions)-1])
 }
 
 // emailFoldMigrationVersion is 0034, whose lock_timeout the dirty-state test

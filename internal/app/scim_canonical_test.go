@@ -204,3 +204,29 @@ func TestSCIM_PatchStoresCanonicalAndRefusesUnusableAddresses(t *testing.T) {
 		t.Fatalf("a refused write changed the stored user: %+v", u)
 	}
 }
+
+// When a PATCH sets both userName and an explicit email, the email is what is
+// stored, so only the email must be a usable address: an IdP whose userName
+// is not an address still provisions the user.
+func TestSCIM_PatchValidatesOnlyTheValueThatBecomesTheEmail(t *testing.T) {
+	h, repo, token := newSCIMLoginApp(t)
+	create := scimReq(t, h, http.MethodPost, "/scim/v2/Users", token,
+		`{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"first@example.com","active":true}`)
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("create: status = %d body=%s", create.Code, create.Body.String())
+	}
+
+	patch := scimReq(t, h, http.MethodPatch, "/scim/v2/Users/"+created.ID, token,
+		`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[`+
+			`{"op":"replace","path":"userName","value":"jdoe"},`+
+			`{"op":"replace","path":"emails[type eq \"work\"].value","value":"J.Doe@Example.com"}]}`)
+	if patch.Code != http.StatusOK {
+		t.Fatalf("patch: status = %d body=%s, want 200", patch.Code, patch.Body.String())
+	}
+	if u, err := repo.GetUser(context.Background(), created.ID); err != nil || u == nil || u.Email != "j.doe@example.com" {
+		t.Fatalf("stored user = %+v, %v; want the explicit email, canonical", u, err)
+	}
+}
