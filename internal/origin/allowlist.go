@@ -47,7 +47,7 @@ func ValidateAllowedOrigins(origins []string, allowCredentials bool) (Allowlist,
 			continue
 		}
 		if allowCredentials {
-			if entry == wildcardChar {
+			if entry == wildcard {
 				return Allowlist{}, errors.New(`cors: wildcard "*" origin not allowed with credentials`)
 			}
 			if entry == "null" {

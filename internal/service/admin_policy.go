@@ -240,7 +240,11 @@ func (s *ControlPlaneAdminService) UpsertProjectConfig(ctx context.Context, secr
 	// Validate the blob decodes to the typed config before persisting it, so a
 	// malformed config is a caller error rather than a write the login/resolver
 	// path later trips over.
-	if _, err := ParseProjectConfig(configJSON); err != nil {
+	cfg, err := ParseProjectConfig(configJSON)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+	}
+	if _, err := cfg.CORS.Allowlist(); err != nil {
 		return "", fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
 	// A whole-blob replace still routes through the optimistic-concurrency helper

@@ -45,11 +45,20 @@ behaviour:
     makes the server **refuse to start** (`cors config invalid: …` /
     `GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: …`). Scope a preview pattern
     to your own project instead: `https://*.<project>.pages.dev`.
-  - A **project** whose stored `cors.allowed_origins` holds such an entry
-    fails to resolve, so every request for it answers **503** until its
-    config is corrected (a whole-config `UpsertProjectConfig` replaces it).
-    The admin API now refuses such an entry at write time. Find affected
-    projects before upgrading (Postgres):
+  - A pattern whose parent ends in a numeric label (`https://*.0.0.1`) or
+    whose port is outside 1–65535 is refused the same way. A zero-padded
+    port is read as the number (`:0443` means 443).
+  - A **project** whose stored `cors.allowed_origins` fails these rules keeps
+    serving — native login, SCIM, sessions and admin writes are unaffected —
+    but its **whole per-project CORS list is dropped**: browser requests from
+    its origins get no CORS grant unless `GATEWAY_ALLOWED_ORIGINS` admits
+    them, and each resolution logs `project_cors_config_invalid_failing_closed`
+    with the project id. This also covers malformed non-wildcard entries (a
+    path, no scheme, `null`, an empty string, userinfo, an upper-case scheme,
+    a trailing `?`) that the admin API used to accept; before this release
+    such a project answered **503** on every request instead. The admin
+    API's whole-config write (`UpsertProjectConfig`) now refuses any such
+    entry. Find affected projects before upgrading (Postgres):
 
     ```sql
     SELECT p.id, o.entry
@@ -58,11 +67,13 @@ behaviour:
            CASE WHEN jsonb_typeof(p.config_json -> 'cors' -> 'allowed_origins') = 'array'
                 THEN p.config_json -> 'cors' -> 'allowed_origins' ELSE '[]'::jsonb END
          ) AS o(entry)
-    WHERE o.entry LIKE '%*%';
+    WHERE o.entry LIKE '%*%'
+       OR o.entry !~ '^https?://[^/?#@[:space:]\\]+$';
     ```
 
-    Every row is an entry the new rules will parse as a pattern; keep it only
-    if it is a valid one under a parent you control.
+    Every row is an entry to review: a `*` entry must be a valid pattern
+    under a parent you control, and any other row is malformed. Replace the
+    project's config with `UpsertProjectConfig` to fix it.
 - **Deployments with a malformed exact `GATEWAY_OAUTH_ALLOWED_RETURN_URLS`
   entry** (no `*`; not an absolute http(s) URL, or carrying a query or
   fragment). Such an entry still admits nothing and still does not stop the
@@ -95,6 +106,13 @@ Also changed:
   host under its parent, so use one only for a parent whose every subdomain
   you control; parents on the public suffix list are refused. See
   [Wildcard origin patterns](../docs-site/src/pages/docs/installation/configuration.astro).
+- **Stricter `GATEWAY_ALLOWED_ORIGINS` parsing.** An entry with a trailing
+  empty query (`https://app.example.app?`) is now refused at startup, like
+  one with a query.
+- **`return_to` with a backslash is refused.** Browsers read `\` as `/` in
+  an http(s) URL, so `https://app.example.app/auth/..\x` passed a `/auth`
+  entry and then landed outside it. A hosted-OAuth or magic-link `return_to`
+  containing a backslash is now rejected like any other disallowed one.
 - **`Vary: Origin`** is sent on every response that passes through the CORS
   middleware, so a shared cache never serves one origin's CORS headers to
   another.

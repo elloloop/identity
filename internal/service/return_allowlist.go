@@ -44,12 +44,12 @@ func (e returnEntry) originMatches(u *url.URL) bool {
 }
 
 // ParseReturnAllowlist splits the comma-separated config value into trimmed,
-// non-empty entries. A wildcard entry that is not a valid one-label https
-// pattern is an error, so a mistyped pattern fails startup instead of
-// silently admitting nothing (or too much). A malformed non-wildcard entry
-// (not an absolute http(s) URL, or carrying a query or fragment) has never
-// been fatal; it is kept out of the allowlist and reported by Ignored() so
-// the caller can warn about it.
+// non-empty entries. A wildcard entry must be a valid one-label https pattern
+// (optionally with a path prefix, no query or fragment); one that is not is an
+// error, so a mistyped pattern fails startup instead of admitting nothing or
+// too much. A non-wildcard entry that is not an absolute http(s) URL without
+// query or fragment admits nothing but is not an error: it is left out of the
+// allowlist and reported by Ignored() so the caller can warn about it.
 func ParseReturnAllowlist(csv string) (ReturnAllowlist, error) {
 	var a ReturnAllowlist
 	for _, part := range strings.Split(csv, ",") {
@@ -96,26 +96,34 @@ func parseReturnPattern(raw string) (returnEntry, error) {
 // Enabled reports whether any usable allowlist entry is configured.
 func (a ReturnAllowlist) Enabled() bool { return len(a.entries) > 0 }
 
-// Entries returns the usable exact and path-prefix entries (for startup
-// logging).
-func (a ReturnAllowlist) Entries() []string { return a.raws(false) }
-
-// Patterns returns the wildcard entries (for startup logging).
-func (a ReturnAllowlist) Patterns() []string { return a.raws(true) }
-
-// Ignored returns the malformed non-wildcard entries that admit nothing (for
-// a startup warning).
-func (a ReturnAllowlist) Ignored() []string { return slices.Clone(a.ignored) }
-
-func (a ReturnAllowlist) raws(patterns bool) []string {
+// Entries returns the usable exact and path-prefix entries as configured (for
+// startup logging).
+func (a ReturnAllowlist) Entries() []string {
 	var out []string
 	for _, e := range a.entries {
-		if (e.pattern != nil) == patterns {
+		if e.pattern == nil {
 			out = append(out, e.raw)
 		}
 	}
 	return out
 }
+
+// Patterns returns the wildcard entries in canonical form — the pattern as
+// origin.Pattern.String renders it (the same form the CORS allow-list logs)
+// followed by the entry's path prefix — for startup logging.
+func (a ReturnAllowlist) Patterns() []string {
+	var out []string
+	for _, e := range a.entries {
+		if e.pattern != nil {
+			out = append(out, e.pattern.String()+e.url.EscapedPath())
+		}
+	}
+	return out
+}
+
+// Ignored returns the malformed non-wildcard entries that admit nothing (for
+// a startup warning).
+func (a ReturnAllowlist) Ignored() []string { return slices.Clone(a.ignored) }
 
 // Allows reports whether returnTo is permitted by an exact origin, a
 // path-bound prefix, or a wildcard pattern (with its path prefix, if any).
@@ -132,8 +140,18 @@ func (a ReturnAllowlist) Allows(returnTo string) bool {
 	return false
 }
 
+// parseReturnURL parses an absolute http(s) URL without userinfo. A URL
+// containing a backslash is refused outright: browsers treat "\" as "/" in an
+// http(s) URL, so "/auth/..\x" would pass a "/auth" prefix check here and
+// then be normalised by the browser to "/x". Control characters are refused by
+// url.Parse, and "." / ".." segments (literal or percent-encoded) are resolved
+// by path.Clean before the prefix check, as a browser resolves them.
 func parseReturnURL(raw string) (*url.URL, bool) {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	raw = strings.TrimSpace(raw)
+	if strings.Contains(raw, `\`) {
+		return nil, false
+	}
+	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.Hostname() == "" {
 		return nil, false
 	}

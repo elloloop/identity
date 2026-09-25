@@ -72,6 +72,11 @@ func TestParsePattern_Rejections(t *testing.T) {
 		{"https://*.pages.dev", ErrPatternParentPublicSuffix},
 		{"https://*.github.io", ErrPatternParentPublicSuffix},
 		{"https://*.Pages.Dev", ErrPatternParentPublicSuffix},
+		// A numeric last label would let the pattern match IPv4 literals.
+		{"https://*.0.0.1", ErrPatternParentNumeric},
+		{"https://*.example.123", ErrPatternParentNumeric},
+		{"https://*.previews.example.app:0", ErrPatternPort},
+		{"https://*.previews.example.app:65536", ErrPatternPort},
 	}
 	for _, tt := range tests {
 		t.Run(tt.raw, func(t *testing.T) {
@@ -87,14 +92,17 @@ func TestParsePattern_Canonical(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"https://*.previews.example.app":      "https://*.previews.example.app",
-		"https://*.previews.example.app/":     "https://*.previews.example.app",
-		"HTTPS://*.Previews.Example.APP":      "https://*.previews.example.app",
-		"https://*.previews.example.app:443":  "https://*.previews.example.app",
-		"https://*.previews.example.app:8443": "https://*.previews.example.app:8443",
-		"https://*.xn--bcher-kva.example":     "https://*.xn--bcher-kva.example",
-		"https://*.myproj.pages.dev":          "https://*.myproj.pages.dev",
-		"https://*.example.co.uk":             "https://*.example.co.uk",
+		"https://*.previews.example.app":       "https://*.previews.example.app",
+		"https://*.previews.example.app/":      "https://*.previews.example.app",
+		"HTTPS://*.Previews.Example.APP":       "https://*.previews.example.app",
+		"https://*.previews.example.app:443":   "https://*.previews.example.app",
+		"https://*.previews.example.app:8443":  "https://*.previews.example.app:8443",
+		"https://*.xn--bcher-kva.example":      "https://*.xn--bcher-kva.example",
+		"https://*.myproj.pages.dev":           "https://*.myproj.pages.dev",
+		"https://*.example.co.uk":              "https://*.example.co.uk",
+		"https://*.previews.example.app:0443":  "https://*.previews.example.app",
+		"https://*.previews.example.app:08443": "https://*.previews.example.app:8443",
+		"https://*.123.example.app":            "https://*.123.example.app",
 	}
 	for raw, want := range tests {
 		if got := mustPattern(t, raw).String(); got != want {
@@ -131,6 +139,8 @@ func TestPattern_Matches(t *testing.T) {
 		{"underscore", "https://*.previews.example.app", "https://a_b.previews.example.app", false},
 		{"trailing_hyphen", "https://*.previews.example.app", "https://a-.previews.example.app", false},
 		{"wildcard_literal", "https://*.previews.example.app", "https://*.previews.example.app", false},
+		{"zero_padded_pattern_port", "https://*.previews.example.app:0443", "https://a.previews.example.app", true},
+		{"ipv4_literal_never_matches", "https://*.previews.example.app", "https://10.0.0.1", false},
 		{"project_scoped_shared_host", "https://*.myproj.pages.dev", "https://feature-1.myproj.pages.dev", true},
 		{"project_scoped_shared_host_other_project", "https://*.myproj.pages.dev", "https://feature-1.otherproj.pages.dev", false},
 	}

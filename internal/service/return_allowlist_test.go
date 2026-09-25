@@ -49,7 +49,7 @@ func TestParseReturnAllowlist(t *testing.T) {
 	}
 }
 
-func TestParseReturnAllowlist_PatternsKeepConfiguredText(t *testing.T) {
+func TestParseReturnAllowlist_EntriesAndCanonicalPatterns(t *testing.T) {
 	t.Parallel()
 
 	a := mustReturnAllowlist(t, "https://app.example.app, https://*.previews.example.app/auth")
@@ -58,6 +58,11 @@ func TestParseReturnAllowlist_PatternsKeepConfiguredText(t *testing.T) {
 	}
 	if got := a.Patterns(); len(got) != 1 || got[0] != "https://*.previews.example.app/auth" {
 		t.Errorf("Patterns() = %v", got)
+	}
+
+	canonical := mustReturnAllowlist(t, "HTTPS://*.Previews.Example.app:443/auth")
+	if got := canonical.Patterns(); len(got) != 1 || got[0] != "https://*.previews.example.app/auth" {
+		t.Errorf("Patterns() is not canonical: %v", got)
 	}
 }
 
@@ -81,6 +86,7 @@ func TestParseReturnAllowlist_RejectsInvalidPatterns(t *testing.T) {
 		{"https://*.vercel.app/auth", origin.ErrPatternParentPublicSuffix},
 		{"https://*.pages.dev/auth", origin.ErrPatternParentPublicSuffix},
 		{"https://*.co.uk", origin.ErrPatternParentPublicSuffix},
+		{"https://*.0.0.1/auth", origin.ErrPatternParentNumeric},
 	}
 	for _, tt := range tests {
 		t.Run(tt.entry, func(t *testing.T) {
@@ -126,6 +132,13 @@ func TestReturnAllowlist_Allows(t *testing.T) {
 		{"https://app.example.com.attacker.tld/", false},
 		{"https://app.example.com@evil.example.net/", false},
 		{"http://app.example.com/", false},
+		{`https://other.example.org/auth/..\evil`, false},
+		{`https://other.example.org/auth\..\evil`, false},
+		{`https://app.example.com\@evil.example.net/`, false},
+		{"https://other.example.org/auth/%2e%2e/unrelated", false},
+		{"https://other.example.org/auth/%2E%2E/unrelated", false},
+		{"https://other.example.org/auth/\tx", false},
+		{"https://other.example.org/auth/\nx", false},
 		{"", false},
 		{"   ", false},
 	}
@@ -165,6 +178,9 @@ func TestReturnAllowlist_AllowsPattern(t *testing.T) {
 		{"leading_hyphen_rejected", "https://*.previews.example.app", "https://-a.previews.example.app/", false},
 		{"userinfo_rejected", "https://*.previews.example.app", "https://a.previews.example.app@evil.example/", false},
 		{"trailing_dot_rejected", "https://*.previews.example.app", "https://a.previews.example.app./", false},
+		{"backslash_escape_rejected", "https://*.previews.example.app/auth", `https://a.previews.example.app/auth/..\x`, false},
+		{"dot_segment_escape_rejected", "https://*.previews.example.app/auth", "https://a.previews.example.app/auth/../x", false},
+		{"encoded_dot_segment_escape_rejected", "https://*.previews.example.app/auth", "https://a.previews.example.app/auth/%2e%2e/x", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

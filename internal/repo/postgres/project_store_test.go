@@ -42,7 +42,7 @@ func newProjectStoreWith(ctx context.Context, t *testing.T, dsn string, requireV
 	})
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)
-	return NewProjectStore(repo, requireVerifiedAuthDomain)
+	return NewProjectStore(repo, requireVerifiedAuthDomain, nil)
 }
 
 // TestProjectStore_Smoke runs the control-plane store round-trip against a

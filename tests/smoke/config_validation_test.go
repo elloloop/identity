@@ -484,4 +484,17 @@ func TestConfigSetupMatrix(t *testing.T) {
 			},
 			nil)
 	})
+
+	// Case 9 — POSITIVE: a return-URL list whose every entry is malformed
+	// boots with the hosted flow off, and the hint says the entries were
+	// ignored rather than that the variable is unset.
+	t.Run("all_return_urls_ignored_disables_hosted_flow_with_hint", func(t *testing.T) {
+		t.Parallel()
+		env, port := cfgEnv(t, map[string]string{
+			"GATEWAY_OAUTH_ALLOWED_RETURN_URLS": "app.example.app/no-scheme",
+		})
+		cfgExpectBootClean(t, env, port,
+			[]string{"oauth_allowed_return_url_ignored", "oauth_hosted_flow_disabled", "was ignored"},
+			nil)
+	})
 }

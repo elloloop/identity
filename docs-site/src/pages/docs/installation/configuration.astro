@@ -188,10 +188,18 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       <a href="https://publicsuffix.org/">public suffix</a> — an ICANN suffix
       such as <code>co.uk</code> or a shared hosting domain such as
       <code>vercel.app</code>, <code>netlify.app</code>, <code>pages.dev</code>
-      or <code>github.io</code>. The admin API refuses such an entry in a
-      project's <code>cors.allowed_origins</code>; a project whose stored
-      config already holds one fails to resolve (its requests answer 503)
-      until the config is corrected.
+      or <code>github.io</code>. Also refused: a parent whose last label is
+      numeric (<code>https://*.0.0.1</code>, which would match IP addresses)
+      and a port outside 1–65535; a zero-padded port is read as the number.
+    </li>
+    <li>
+      <strong>Per-project lists fail closed.</strong> The admin API refuses an
+      invalid entry in a project's <code>cors.allowed_origins</code>. If a
+      project's stored list still holds one, the project keeps serving, but
+      its whole per-project CORS list is dropped (only
+      <code>GATEWAY_ALLOWED_ORIGINS</code> applies to its browser requests)
+      and each resolution logs
+      <code>project_cors_config_invalid_failing_closed</code>.
     </li>
     <li>
       <strong>Malformed exact return URLs are skipped, not fatal.</strong> A
@@ -199,11 +207,14 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       <code>*</code> that is not an absolute http(s) URL, or that carries a
       query or fragment, admits nothing and is logged at startup as
       <code>oauth_allowed_return_url_ignored</code>. If no usable entry is
-      left, the hosted flow stays off.
+      left, the hosted flow stays off. A <code>return_to</code> containing a
+      backslash is always refused, since browsers read it as <code>/</code>
+      and it could otherwise step outside a path prefix.
     </li>
   </ul>
   <p>
-    The active patterns are logged at startup next to the exact entries
+    The active patterns are logged at startup, in canonical form (lower case,
+    default port dropped), next to the exact entries
     (<code>cors_allowed_origins</code> → <code>origin_patterns</code>,
     <code>oauth_hosted_flow_enabled</code> →
     <code>allowed_return_url_patterns</code>).
@@ -219,8 +230,9 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     <code>https://*.pages.dev</code>, <code>https://*.vercel.app</code>,
     <code>https://*.netlify.app</code> or <code>https://*.github.io</code>,
     which every other tenant of that host can publish under. Identity refuses
-    parents on the public suffix list, but a shared parent that is not on it
-    is your responsibility.
+    parents on the public suffix list compiled into the release you run; that
+    check is a backstop, not the boundary — a shared parent that is not on the
+    list is your responsibility.
   </aside>
 
   <h2>Password reset &amp; signup toggles</h2>

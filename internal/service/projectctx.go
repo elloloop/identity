@@ -35,8 +35,8 @@ type ProjectScope struct {
 	// parsed and validated from its config_json. It is layered on top of
 	// the global GATEWAY_ALLOWED_ORIGINS floor by the CORS middleware: a
 	// request whose Origin either allow-list admits is allowed. The zero
-	// value when the project configures none, in which case only the global
-	// floor applies.
+	// value when the project configures none or its stored list is invalid
+	// (it fails closed), in which case only the global floor applies.
 	CORSAllowedOrigins origin.Allowlist
 
 	// Branding is the project's transactional-email branding, parsed from

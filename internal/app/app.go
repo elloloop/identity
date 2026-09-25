@@ -722,8 +722,11 @@ func New(deps Deps) (*Built, error) {
 			zap.Strings("allowed_return_urls", returnAllow.Entries()),
 			zap.Strings("allowed_return_url_patterns", returnAllow.Patterns()))
 	} else {
-		logger.Info("oauth_hosted_flow_disabled",
-			zap.String("hint", "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"))
+		hint := "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"
+		if len(returnAllow.Ignored()) > 0 {
+			hint = "every GATEWAY_OAUTH_ALLOWED_RETURN_URLS entry was ignored (see oauth_allowed_return_url_ignored); fix them to enable GET /oauth/start + /oauth/callback"
+		}
+		logger.Info("oauth_hosted_flow_disabled", zap.String("hint", hint))
 	}
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
