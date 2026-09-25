@@ -416,7 +416,7 @@ func TestAcceptTenantInvitation_ComparesCanonicalAddresses(t *testing.T) {
 		callerEmail string
 		wantErr     error
 	}{
-		{"INVITEE+team@acme.com", nil}, // a +tag is dropped on every domain, not only Gmail
+		{"INVITEE+team@acme.com", nil},             // a +tag is dropped on every domain, not only Gmail
 		{"inv.itee@acme.com", ErrPermissionDenied}, // dots are dropped only at Gmail
 		{"invitée@acme.com", ErrPermissionDenied},
 		{"invitee@acme.co", ErrPermissionDenied},
