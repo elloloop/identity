@@ -95,7 +95,8 @@ func (h *scimHandler) scimProvider() http.Handler {
 }
 
 // authenticate enforces the SCIM bearer token using a constant-time compare.
-// A missing or wrong token is a 401 with a SCIM-shaped JSON error.
+// A missing or wrong token is a 401 with a SCIM-shaped JSON error, and is
+// logged and audited (see refuse).
 //
 // On success it pins the request to the configured project by OVERWRITING any
 // ProjectScope the upstream project-resolution middleware injected from the
@@ -106,19 +107,60 @@ func (h *scimHandler) scimProvider() http.Handler {
 // constrained to exactly one project across BOTH the data write and its audit.
 func (h *scimHandler) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		const prefix = "Bearer "
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, prefix) ||
-			subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, prefix)), []byte(h.bearerToken)) != 1 {
-			w.Header().Set("Content-Type", "application/scim+json")
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"schemas":["urn:ietf:params:scim:api:messages:2.0:Error"],"detail":"invalid or missing bearer token","status":"401"}`))
+		ctx := service.WithProjectScope(r.Context(), &service.ProjectScope{ProjectID: h.projectID})
+		if reason := h.bearerRefusal(r.Header.Get("Authorization")); reason != "" {
+			h.refuse(ctx, w, r, reason)
 			return
 		}
-		ctx := service.WithProjectScope(r.Context(), &service.ProjectScope{ProjectID: h.projectID})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// Reasons a SCIM request is refused, recorded on the scim_auth_failed audit
+// entry and log line.
+const (
+	scimRefusedMissingToken = "missing_token"
+	scimRefusedInvalidToken = "invalid_token"
+)
+
+// bearerRefusal returns why the Authorization header does not authenticate
+// the SCIM surface, or "" when it carries the configured bearer token.
+func (h *scimHandler) bearerRefusal(authorization string) string {
+	const prefix = "Bearer "
+	token, ok := strings.CutPrefix(authorization, prefix)
+	if !ok || token == "" {
+		return scimRefusedMissingToken
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(h.bearerToken)) != 1 {
+		return scimRefusedInvalidToken
+	}
+	return ""
+}
+
+// refuse answers an unauthenticated SCIM request with a 401 and leaves a
+// trace of it: a warning log line for operators watching the process and a
+// scim_auth_failed audit entry under the SCIM project, so a stream of guesses
+// at the deployment-wide token is visible rather than silent. The per-IP
+// limit on the SCIM path bounds how many of either one source can cause.
+func (h *scimHandler) refuse(ctx context.Context, w http.ResponseWriter, r *http.Request, reason string) {
+	clientIP := r.Header.Get(middleware.ClientIPHeader)
+	h.logger.Warn("scim_auth_failed",
+		zap.String("reason", reason),
+		zap.String("path", r.URL.Path),
+		zap.String("client_ip", clientIP))
+	if h.audit != nil {
+		h.audit.Log(ctx, audit.EventSCIMAuthFailed,
+			audit.WithActor(scimAuditActor),
+			audit.WithIP(clientIP),
+			audit.WithUserAgent(r.UserAgent()),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{"reason": reason}),
+		)
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(`{"schemas":["urn:ietf:params:scim:api:messages:2.0:Error"],"detail":"invalid or missing bearer token","status":"401"}`))
 }
 
 // repoSCIMStore adapts service.Repository to scim.Store. It maps the SCIM

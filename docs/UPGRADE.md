@@ -1,37 +1,74 @@
 # Upgrade guide
 
-## v4.8 → next — wildcard origins for preview deployments (additive)
+## v4.8 → next — SCIM throttling and audit; directory limit on every transport; wildcard origins
 
-### Additions
+No schema change and no migration. Three groups of deployments see a change in
+behaviour:
 
-- **One-label wildcard origins.** `GATEWAY_ALLOWED_ORIGINS`, a project's
-  `cors.allowed_origins`, and `GATEWAY_OAUTH_ALLOWED_RETURN_URLS` (hosted
-  OAuth and magic-link `return_to`) accept `https://*.previews.example.app`:
-  the `*` matches exactly one DNS label under the fixed parent, `https`
-  only, on a fixed port. Return-URL patterns keep the path-prefix rule
+- **`GATEWAY_SCIM_ENABLED` deployments.** Every request under `/scim/v2/` now
+  counts against a per-client-IP limit, **`GATEWAY_RATE_LIMIT_SCIM_PER_IP`**
+  (default 300 per `GATEWAY_RATE_LIMIT_WINDOW_SECONDS` window; `0` turns it
+  off). The limit is checked before the bearer token, so it also holds a
+  caller trying tokens. Over it a request gets HTTP 429 with a `Retry-After`
+  header. If your IdP pushes faster than that from one address — a first full
+  import is the burstiest — raise the limit before upgrading. A request with
+  a missing or wrong bearer token is now logged (`scim_auth_failed`, warning)
+  and audited (`scim_auth_failed`, `success=false`, with the client IP, user
+  agent and a `reason` of `missing_token` or `invalid_token`; never the token)
+  under `GATEWAY_SCIM_PROJECT_ID`.
+
+  **Consider rotating `GATEWAY_SCIM_BEARER_TOKEN`.** v4.8 made the SCIM surface
+  reachable, and until this release a request carrying a wrong token was
+  neither throttled nor audited; only the request log recorded its 401. Check
+  any request logs you retain for 401s under `/scim/v2/` before deciding, and
+  rotate if you cannot rule out guessing. Generate a new token of at least 32 characters, set it in your
+  IdP's SCIM connector, then restart identity with it.
+- **Hosts that serve identity through `RegisterGRPC`.** `LookupUsers` is now
+  rate-limited on the native gRPC surface too, drawing on the same per-IP
+  budget (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`) as the HTTP handler. A
+  throttled call fails with `RESOURCE_EXHAUSTED` and carries the wait, in
+  seconds, in its `retry-after` response metadata. The caller is the
+  connection's peer address, or the first untrusted `x-forwarded-for` hop
+  when the peer is in `GATEWAY_TRUSTED_PROXIES`. A host that already throttles
+  `LookupUsers` in its own interceptor can keep doing so; both limits apply.
+- **Deployments with a `*` inside an origin or return-URL allowlist entry**
+  (`GATEWAY_ALLOWED_ORIGINS`, a project's `cors.allowed_origins`,
+  `GATEWAY_OAUTH_ALLOWED_RETURN_URLS`). Such an entry is now a one-label
+  wildcard pattern (below). One that is not a valid pattern makes the server
+  **refuse to start** (`cors config invalid: …` /
+  `GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: …`), and a project whose
+  `cors.allowed_origins` holds one fails to resolve. Before, such a
+  return-URL entry was silently ignored and such a CORS entry was compared
+  literally, so it never matched. One that is a valid pattern now admits
+  every single-label subdomain of its parent: check it before upgrading.
+
+Also changed:
+
+- **`Retry-After` follows the window.** Every per-IP limit's 429 now carries
+  `Retry-After` equal to `GATEWAY_RATE_LIMIT_WINDOW_SECONDS` (rounded up to a
+  whole second) instead of a fixed `60`. Deployments on the default 60-second
+  window see no difference.
+- **`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` is parsed like the other limits.**
+  A value that is not an integer, or `0`, now leaves the default (120) in
+  force instead of failing the boot; a negative value still fails it. The
+  limit still cannot be switched off.
+- **Boot log.** Startup logs `directory_lookup_enabled` (with the effective
+  per-IP limit, window and verified-email rule) or `directory_lookup_disabled`,
+  as it already does for SCIM.
+- **New audit event:** `scim_auth_failed`.
+- **One-label wildcard origins.** The three allowlists above accept
+  `https://*.previews.example.app`, for per-branch preview deployments: the
+  `*` matches exactly one DNS label under the fixed parent, `https` only, on
+  a fixed port. Return-URL patterns keep the path-prefix rule
   (`https://*.previews.example.app/auth`). CORS echoes the concrete request
-  `Origin`, never the pattern. Patterns are logged at startup
+  `Origin`, never the pattern. Startup logs patterns next to the exact entries
   (`origin_patterns`, `allowed_return_url_patterns`). A pattern admits every
   host under its parent, so use one only for a parent whose every subdomain
   you control. See
   [Wildcard origin patterns](../docs-site/src/pages/docs/installation/configuration.astro).
-- **`Vary: Origin`** is now sent on every response that passes through the
-  CORS middleware, so a shared cache never serves one origin's CORS headers
-  to another.
-
-### Behaviour changes
-
-Only deployments with a `*` inside an allowlist entry are affected:
-
-- An entry containing `*` must now be a valid one-label https pattern, or the
-  server **refuses to start** (`cors config invalid: …` /
-  `GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: …`). Before, such a return-URL
-  entry was silently ignored and a CORS entry like `https://*.example.app`
-  was compared literally, so it never matched. A project whose
-  `cors.allowed_origins` holds an invalid pattern fails to resolve.
-- A CORS or return-URL entry that is already a valid pattern now admits
-  every single-label subdomain of its parent. Check any such entry before
-  upgrading.
+- **`Vary: Origin`** is sent on every response that passes through the CORS
+  middleware, so a shared cache never serves one origin's CORS headers to
+  another.
 
 ## v4.7 → v4.8 — directory lookup for services (additive); session-mode and SCIM fixes (behaviour changes)
 

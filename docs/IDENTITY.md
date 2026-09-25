@@ -1043,7 +1043,9 @@ before you ship.
       own server interceptor that verifies the bearer token and forwards
       identity's expected metadata (`x-authenticated-user-id`). This keeps
       the bridge a pure transport adapter rather than re-implementing the
-      middleware twice.
+      middleware twice. The one exception is `LookupUsers`: the bridge
+      charges it against the same per-IP limiter the HTTP chain uses, so
+      the directory budget holds whichever transport a caller picks.
 
     - **Background workers are consumer-controlled.** `New` does no I/O
       beyond construction-time setup (datastore dial, AWS config, OTel init)

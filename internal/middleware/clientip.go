@@ -59,7 +59,7 @@ func ParseTrustedProxies(raw string) ([]*net.IPNet, error) {
 func ClientIPMiddleware(trusted []*net.IPNet) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := resolveClientIP(r, trusted)
+			ip := ResolveClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"), trusted)
 			r.Header.Set(ClientIPHeader, ip)
 			ctx := context.WithValue(r.Context(), clientIPCtxKey{}, ip)
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -74,14 +74,18 @@ func ClientIPFromContext(ctx context.Context) string {
 	return v
 }
 
-func resolveClientIP(r *http.Request, trusted []*net.IPNet) string {
-	peer := stripPort(r.RemoteAddr)
+// ResolveClientIP returns the client address for a connection from peerAddr
+// ("host" or "host:port") carrying the X-Forwarded-For value xff: the peer
+// itself unless it is a trusted proxy, and otherwise the first untrusted hop
+// of xff read right-to-left. It is transport-neutral so the HTTP chain and
+// the native gRPC surface attribute a caller identically.
+func ResolveClientIP(peerAddr, xff string, trusted []*net.IPNet) string {
+	peer := stripPort(peerAddr)
 	if len(trusted) == 0 || !ipIn(peer, trusted) {
 		return peer
 	}
 	// Peer is a trusted proxy; honour X-Forwarded-For. Walk
 	// right-to-left, stopping at the first untrusted hop.
-	xff := r.Header.Get("X-Forwarded-For")
 	if xff == "" {
 		return peer
 	}
