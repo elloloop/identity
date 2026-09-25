@@ -42,17 +42,24 @@ func main() {
 	opts.Logger = logger
 
 	// `identity migrate` runs pending Postgres migrations and exits,
-	// without starting the server (the deploy-step path). It flushes the
+	// without starting the server (the deploy-step path); `identity migrate
+	// force <version>` clears a failed migration's dirty flag. It flushes the
 	// logger explicitly because os.Exit skips deferred calls.
 	if migrateRequested(os.Args) {
-		code := runMigrate(opts, logger)
+		cmd, err := parseMigrateCommand(os.Args)
+		if err != nil {
+			logger.Error("identity_migrate_bad_arguments", zap.Error(err), zap.String("usage", migrateUsage))
+			syncLogger(logger)
+			os.Exit(2)
+		}
+		code := runMigrate(opts, cmd, logger)
 		syncLogger(logger)
 		os.Exit(code)
 	}
 	if unknownSubcommand(os.Args) {
 		logger.Error("identity_unknown_subcommand",
 			zap.String("arg", os.Args[1]),
-			zap.String("usage", "identity [migrate]"))
+			zap.String("usage", "identity [migrate [force <version>]]"))
 		syncLogger(logger)
 		os.Exit(2)
 	}

@@ -131,6 +131,25 @@ spec:
     rather than starting the server, so a one-shot migrate Job never hangs.
   </blockquote>
 
+  <h2 id="failed-migration">When a migration fails</h2>
+  <p>
+    Each migration runs as one transaction, so a migration that fails — a lock
+    timeout, a unique index that existing rows violate — changes nothing. The
+    runner still marks that schema version <strong>dirty</strong>, and every
+    later run refuses to start: <code>identity migrate</code> exits non-zero
+    and a server with <code>GATEWAY_POSTGRES_AUTO_MIGRATE</code> fails to boot.
+    The error names the version to record. Confirm the failed migration left
+    no change behind, fix the cause, then record the version before it and run
+    again:
+  </p>
+  <Code code={`identity migrate force 33   # records version 33, clears the dirty flag, runs nothing
+identity migrate            # applies 34 again`} lang="bash" title="recover from a failed migration" />
+  <p>
+    <code>force</code> accepts only a version the binary ships. It does not
+    change the schema, so use it only once you know which version the schema is
+    really at.
+  </p>
+
   <h2>Upgrading to a new release</h2>
   <ul>
     <li>

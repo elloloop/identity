@@ -17,3 +17,12 @@ func TestMigrate_RequiresPostgresDSN(t *testing.T) {
 		t.Fatalf("error should name the missing DSN env var, got: %v", err)
 	}
 }
+
+// TestForceMigrationVersion_RequiresPostgresDSN: forcing a version needs a
+// database as much as migrating does.
+func TestForceMigrationVersion_RequiresPostgresDSN(t *testing.T) {
+	err := ForceMigrationVersion(Options{}, 33)
+	if err == nil || !strings.Contains(err.Error(), "POSTGRES_DSN") {
+		t.Fatalf("ForceMigrationVersion with no PostgresDSN: err = %v, want one naming the DSN env var", err)
+	}
+}

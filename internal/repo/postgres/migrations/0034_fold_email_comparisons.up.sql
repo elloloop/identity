@@ -20,9 +20,12 @@
 -- then built in the same transaction; sign-in, refresh and SCIM wait for both.
 -- lock_timeout bounds only the wait to ACQUIRE that lock: queued behind a
 -- long-running transaction, the ALTER would otherwise stall every later query
--- on `users` until it got the lock. On timeout the file rolls back unapplied
--- and can simply be re-run. It does not bound the rewrite itself — size the
--- maintenance window from the table (docs/UPGRADE.md). The IF [NOT] EXISTS
+-- on `users` until it got the lock. On timeout — or on any failure below —
+-- the file's changes roll back, but the migration runner leaves schema
+-- version 34 marked dirty and refuses every later run: confirm email_fold is
+-- absent, then `identity migrate force 33` and `identity migrate` again
+-- (docs/UPGRADE.md). It does not bound the rewrite itself — size the
+-- maintenance window from the table. The IF [NOT] EXISTS
 -- guards let an operator run these statements by hand in that window (or
 -- pre-build the index with CREATE UNIQUE INDEX CONCURRENTLY once the column
 -- exists) and have the migration no-op over them. Neither the rewrite nor the
@@ -39,7 +42,7 @@ ALTER TABLE users
 -- were equal under the old lower() in every locale that lowers ASCII letters
 -- to ASCII, so existing rows satisfy it; under a Turkic locale ("I" lowers
 -- to a dotless "ı") a pair can collide, and the build then fails and this
--- file rolls back unapplied. Built before the drop so uniqueness is never
+-- file rolls back, leaving version 34 dirty as above. Built before the drop so uniqueness is never
 -- unenforced.
 CREATE UNIQUE INDEX IF NOT EXISTS users_project_email_fold_uidx
     ON users (project_id, email_fold)

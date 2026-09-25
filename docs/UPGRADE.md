@@ -85,9 +85,9 @@ SELECT pg_size_pretty(pg_total_relation_size('users'));
 `identity migrate` in a maintenance window instead. The migration sets
 `lock_timeout = '10s'`. That bounds only the wait to *acquire* the lock:
 queued behind a long-running transaction, the `ALTER` would otherwise stall
-every later query on `users`. If the timeout fires, the migration rolls back
-unapplied and can be re-run; under auto-migrate the boot fails. The timeout
-does not bound the rewrite itself.
+every later query on `users`. The timeout does not bound the rewrite itself.
+If it fires, the migration fails; see
+[If 0034 fails](#if-0034-fails-the-version-is-left-dirty).
 
 Every statement is guarded with `IF [NOT] EXISTS`, so you can shorten the
 exclusive window by applying the pieces yourself, as a role that owns the
@@ -110,7 +110,8 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS tenant_invitations_open_email_fol
 under the ASCII fold were already equal under the old `lower()` in every
 locale that lowers ASCII letters to ASCII. A Turkic locale does not (`I`
 lowers to a dotless `ı`), so a colliding pair can exist there. If one does,
-the index build fails and the migration rolls back. `users` has
+the index build fails and so does the migration
+([If 0034 fails](#if-0034-fails-the-version-is-left-dirty)). `users` has
 `FORCE ROW LEVEL SECURITY`, so run this as a role with `BYPASSRLS` or as a
 superuser. `SET row_security = off` makes any other role fail instead of
 reporting an empty result:
@@ -129,9 +130,11 @@ Resolve any rows these return (merge the accounts, or change one address, and
 revoke the extra invitation) before upgrading.
 
 **Rolling back.** The down migration restores the locale `lower()` indexes. It
-fails, and rolls back unapplied, if accounts or open invitations created after
-the upgrade differ only in the case of a non-ASCII letter (`é` and `É`) and the
-database locale folds them. Find them first, as a `BYPASSRLS` role:
+fails if accounts or open invitations created after the upgrade differ only in
+the case of a non-ASCII letter (`é` and `É`) and the database locale folds
+them. Its SQL then rolls back and version 34 is left dirty with its changes
+still present; clear that with `identity migrate force 34`. Find such rows
+before migrating down, as a `BYPASSRLS` role:
 
 ```sql
 SET row_security = off;
@@ -141,6 +144,34 @@ GROUP BY 1, 2 HAVING count(*) > 1;
 ```
 
 Resolve them before migrating down.
+
+#### If 0034 fails, the version is left dirty
+
+When the lock timeout fires or the index build fails, the migration's SQL
+rolls back as one transaction and changes nothing. The migration runner
+still records schema version 34 as *dirty*. Every later `identity migrate`, and every boot with
+`GATEWAY_POSTGRES_AUTO_MIGRATE`, then refuses to run with an error naming the
+recovery command, and replicas that auto-migrate fail to boot until it is
+cleared. To recover:
+
+1. Confirm the migration did not apply. The column is absent unless you
+   added it by hand:
+
+   ```sql
+   SELECT count(*) FROM information_schema.columns
+   WHERE table_name = 'users' AND column_name = 'email_fold';  -- 0
+   SELECT version, dirty FROM schema_migrations;               -- 34, true
+   ```
+
+2. Remove the cause (end the long-running transaction, or resolve the
+   collisions the pre-flight queries list).
+3. Run `identity migrate force 33`, which records version 33, clears the flag
+   and runs nothing. Then run `identity migrate`, which applies 0034 again.
+
+Because every statement in 0034 is guarded with `IF [NOT] EXISTS`, forcing 33
+and re-running is also right when you added the column or the new indexes by
+hand: the re-run skips what exists and finishes the rest. Any failed migration
+leaves the same dirty state, and the refusal names the version to force.
 
 ### One email comparison rule
 

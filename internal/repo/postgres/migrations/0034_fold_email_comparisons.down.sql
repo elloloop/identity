@@ -3,8 +3,8 @@
 -- Restores the locale lower() unique indexes. Addresses that 0034 let coexist
 -- because they differ only in non-ASCII case ("é" and "É") collide under them
 -- wherever the database locale folds them; the build then fails and this
--- file rolls back unapplied until those duplicates are resolved
--- (docs/UPGRADE.md). lock_timeout as in the up migration.
+-- file rolls back, leaving version 34 marked dirty, until those duplicates
+-- are resolved (docs/UPGRADE.md). lock_timeout as in the up migration.
 SET LOCAL lock_timeout = '10s';
 
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_invitations_open_email_uidx

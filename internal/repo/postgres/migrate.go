@@ -18,3 +18,16 @@ func Migrate(dsn string) error {
 	}
 	return runMigrations(dsn)
 }
+
+// ForceMigrationVersion records version as the database's schema migration
+// version and clears the dirty flag a failed migration leaves, without running
+// any migration. It is the entry point behind `identity migrate force
+// <version>`: after a failed migration, every later Migrate refuses to run
+// until an operator has confirmed which version the schema is really at.
+// version must be one of the embedded migrations.
+func ForceMigrationVersion(dsn string, version int) error {
+	if strings.TrimSpace(dsn) == "" {
+		return errors.New("postgres: ForceMigrationVersion: empty DSN")
+	}
+	return forceMigrationVersion(dsn, version)
+}

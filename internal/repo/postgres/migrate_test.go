@@ -2,8 +2,15 @@ package postgres
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/stretchr/testify/require"
 )
 
 // TestMigrate_EmptyDSN_Errors runs without a database: an empty DSN must
@@ -49,4 +56,110 @@ func TestMigrate_AppliesAndIdempotent(t *testing.T) {
 	} else if u != nil {
 		t.Fatalf("want nil user on empty schema, got %#v", u)
 	}
+}
+
+// TestForceMigrationVersion_RefusesBadInput runs without a database: an empty
+// DSN, and a version no embedded migration has, are refused before any
+// connection is attempted.
+func TestForceMigrationVersion_RefusesBadInput(t *testing.T) {
+	if err := ForceMigrationVersion(" ", 1); err == nil {
+		t.Fatal("ForceMigrationVersion with a blank DSN: want error, got nil")
+	}
+	const unreachable = "postgres://nobody@127.0.0.1:1/none?sslmode=disable"
+	for _, version := range []int{0, -1, 9999} {
+		err := ForceMigrationVersion(unreachable, version)
+		if err == nil || !strings.Contains(err.Error(), "version") {
+			t.Fatalf("ForceMigrationVersion(%d) = %v, want a version error before connecting", version, err)
+		}
+	}
+}
+
+// emailFoldMigrationVersion is 0034, whose lock_timeout the dirty-state test
+// trips.
+const emailFoldMigrationVersion = 34
+
+// TestMigrate_FailedMigrationIsForcedAndRerun reproduces the recovery path
+// against real Postgres. A migration that fails (here 0034's lock_timeout,
+// tripped by a transaction holding a lock on users) rolls its SQL back but
+// leaves the schema version dirty, and every later run refuses until an
+// operator forces the version; the error names the command. After forcing the
+// version before the failed one, migrating again applies it.
+func TestMigrate_FailedMigrationIsForcedAndRerun(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping real-postgres dirty-migration test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	scratch := createScratchDatabase(ctx, t, dsn)
+
+	m, err := newMigrator(scratch)
+	require.NoError(t, err)
+	require.NoError(t, m.Migrate(uint(emailFoldMigrationVersion-1)))
+	closeMigrator(m)
+
+	holder, err := pgx.Connect(ctx, scratch)
+	require.NoError(t, err)
+	defer func() { _ = holder.Close(ctx) }()
+	tx, err := holder.Begin(ctx)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, `LOCK TABLE users IN ACCESS SHARE MODE`)
+	require.NoError(t, err)
+
+	forcePrevious := fmt.Sprintf("identity migrate force %d", emailFoldMigrationVersion-1)
+	err = Migrate(scratch)
+	require.Error(t, err, "0034 must fail while another transaction holds a lock on users")
+	var dirty dirtyVersionError
+	require.ErrorAs(t, err, &dirty)
+	require.Equal(t, emailFoldMigrationVersion, dirty.version)
+	require.Contains(t, err.Error(), forcePrevious)
+	require.False(t, hasColumn(ctx, t, holder, "users", "email_fold"), "the failed migration must leave no change behind")
+	require.NoError(t, tx.Rollback(ctx))
+
+	// With the lock gone the run still refuses: the version is dirty.
+	err = Migrate(scratch)
+	require.ErrorAs(t, err, &dirty)
+	require.Contains(t, err.Error(), forcePrevious)
+
+	require.NoError(t, ForceMigrationVersion(scratch, emailFoldMigrationVersion-1))
+	require.NoError(t, Migrate(scratch))
+	require.True(t, hasColumn(ctx, t, holder, "users", "email_fold"))
+}
+
+// createScratchDatabase creates an empty database next to the one dsn names,
+// drops it when the test ends, and returns its DSN.
+func createScratchDatabase(ctx context.Context, t *testing.T, dsn string) string {
+	t.Helper()
+	admin, err := pgx.Connect(ctx, dsn)
+	require.NoError(t, err)
+	defer func() { _ = admin.Close(ctx) }()
+	name := fmt.Sprintf("migrate_scratch_%d", time.Now().UnixNano())
+	_, err = admin.Exec(ctx, `CREATE DATABASE `+name)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		dropCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		c, err := pgx.Connect(dropCtx, dsn)
+		if err != nil {
+			t.Logf("drop scratch database %s: %v", name, err)
+			return
+		}
+		defer func() { _ = c.Close(dropCtx) }()
+		if _, err := c.Exec(dropCtx, `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`); err != nil {
+			t.Logf("drop scratch database %s: %v", name, err)
+		}
+	})
+	u, err := url.Parse(dsn)
+	require.NoError(t, err)
+	u.Path = "/" + name
+	return u.String()
+}
+
+func hasColumn(ctx context.Context, t *testing.T, conn *pgx.Conn, table, column string) bool {
+	t.Helper()
+	var n int
+	require.NoError(t, conn.QueryRow(ctx,
+		`SELECT count(*) FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+		table, column).Scan(&n))
+	return n == 1
 }
