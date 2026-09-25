@@ -70,10 +70,17 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com/,https://admin.example
 - A `return_to` must have the configured origin. A path entry permits that
   path and its descendants, never a lookalike host or path. Validation is
   **fail-closed**: anything else is rejected with `400`.
+- An entry may be a one-label wildcard origin for preview deployments,
+  `https://*.previews.example.app` (optionally with a path prefix). The `*`
+  matches exactly one DNS label; the scheme (`https` only), parent and port
+  are fixed, and a malformed pattern fails startup. **A pattern admits every
+  host under its parent**, and anything published there can receive a user's
+  one-time OAuth code — use one only for a parent whose every subdomain you
+  control. `GATEWAY_ALLOWED_ORIGINS` accepts the same pattern form for CORS.
 - **Empty disables the hosted flow** — `GET /oauth/start/*` and
   `GET/POST /oauth/callback/*` return `404`, and only the headless RPCs work.
 
-The active allowlist is logged at startup
+The active allowlist, patterns included, is logged at startup
 (`oauth_hosted_flow_enabled` / `oauth_hosted_flow_disabled`).
 
 ### Account chooser (`prompt`)

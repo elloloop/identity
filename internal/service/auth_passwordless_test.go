@@ -40,7 +40,7 @@ func passwordlessSvc(t *testing.T) (*AuthService, *fakeRepo, *recordingTransport
 	t.Helper()
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	// Magic-link return_to is validated against this allowlist.
-	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
 	return svc, repo, rec
 }
 
@@ -453,7 +453,7 @@ var errTransportFailure = errors.New("transport failure")
 func TestVerifyEmailLoginCode_LookupErrorPropagates(t *testing.T) {
 	repo := newErrorRepo()
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
-	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
 	svc.cfg.PasswordlessSignupEnabled = false
 	ctx := context.Background()
 
@@ -469,7 +469,7 @@ func TestVerifyEmailLoginCode_LookupErrorPropagates(t *testing.T) {
 func TestVerifyEmailLoginCode_CreateUserErrorPropagates(t *testing.T) {
 	repo := newErrorRepo()
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
-	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
 	ctx := context.Background()
 
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "createfail@test.com"))
@@ -496,7 +496,7 @@ func TestRequestMagicLink_StorageFailureSwallowed(t *testing.T) {
 	repo := newErrorRepo()
 	repo.failCreateMagicLinkToken = true
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
-	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
 	require.NoError(t, svc.RequestMagicLink(context.Background(), "store@test.com", "https://app.test/cb"))
 	assert.Empty(t, rec.Sent())
 }
@@ -538,7 +538,7 @@ func TestVerifyEmailLoginCode_AlreadyAtCapRejected(t *testing.T) {
 func TestVerifyEmailLoginCode_ConsumeRaceLoserRejected(t *testing.T) {
 	repo := newErrorRepo()
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
-	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
 	ctx := context.Background()
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "consumerace@test.com"))
 	code := extractCodeFromEmail(t, rec.Sent()[0].Text)
@@ -553,7 +553,7 @@ func TestVerifyEmailLoginCode_ConsumeRaceLoserRejected(t *testing.T) {
 func TestRedeemMagicLink_NonSentinelConsumeErrorPropagates(t *testing.T) {
 	repo := newErrorRepo()
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
-	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
 	ctx := context.Background()
 	require.NoError(t, svc.RequestMagicLink(ctx, "consumeerr@test.com", "https://app.test/cb"))
 	_ = extractTokenFromLink(t, rec.Sent()[0].Text)

@@ -469,6 +469,13 @@ type Config struct {
 	// entries, the configured path or one of its descendants. Validation is
 	// fail-closed: a return_to that matches no entry is rejected with 400.
 	//
+	// An entry may also be a one-label wildcard origin,
+	// https://*.parent.example (optionally with a path prefix): the wildcard
+	// matches exactly one DNS label, and the scheme (https only), parent and
+	// port are fixed. A malformed wildcard entry fails startup. A pattern
+	// admits every host under its parent, so use one only for a parent whose
+	// every subdomain the operator controls.
+	//
 	// Empty disables the hosted flow entirely — GET /oauth/start and
 	// GET/POST /oauth/callback return 404. The headless BeginOAuthLogin / OAuthLogin
 	// RPCs are unaffected. Driven by GATEWAY_OAUTH_ALLOWED_RETURN_URLS.
@@ -878,7 +885,12 @@ type Config struct {
 	// work-email-only project, not just out of tenant auto-formation.
 	PublicEmailDomains string
 
-	// AllowedOrigins is the comma-separated list of CORS allowed origins.
+	// AllowedOrigins is the comma-separated list of CORS allowed origins:
+	// exact origins, or one-label wildcard patterns such as
+	// https://*.previews.example.app. A pattern matches exactly one DNS
+	// label under a fixed parent, https only, on a fixed port; the response
+	// echoes the concrete request Origin. A bare "*", "null" or a malformed
+	// pattern fails startup, since credentials are always allowed.
 	AllowedOrigins string
 
 	// Cookie settings.

@@ -411,7 +411,7 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	require.Equal(
 		t,
 		[]string{"https://app.live.test", "http://localhost:5173"},
-		got.CORSAllowedOrigins,
+		got.CORSAllowedOrigins.Exact(),
 		"resolver parses+validates the per-project CORS allow-list from config_json",
 	)
 

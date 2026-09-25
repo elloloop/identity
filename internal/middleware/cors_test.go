@@ -9,15 +9,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elloloop/identity/internal/origin"
 	"github.com/elloloop/identity/internal/service"
 )
 
 // withProjectOrigins returns a request whose context carries a ProjectScope
 // with the given per-project CORS allow-list, as the project resolver would.
-func withProjectOrigins(req *http.Request, origins ...string) *http.Request {
+func withProjectOrigins(t *testing.T, req *http.Request, origins ...string) *http.Request {
+	t.Helper()
+	allow, err := ValidateAllowedOrigins(origins, true)
+	require.NoError(t, err)
 	ctx := service.WithProjectScope(req.Context(), &service.ProjectScope{
 		ProjectID:          "proj-A",
-		CORSAllowedOrigins: origins,
+		CORSAllowedOrigins: allow,
 	})
 	return req.WithContext(ctx)
 }
@@ -28,7 +32,7 @@ func nopHandler() http.Handler {
 	})
 }
 
-func mustParse(t *testing.T, raw string) []string {
+func mustParse(t *testing.T, raw string) origin.Allowlist {
 	t.Helper()
 	out, err := ParseAllowedOrigins(raw, true)
 	require.NoError(t, err)
@@ -208,7 +212,7 @@ func TestCORS_ProjectOrigin_Allowed_GlobalFloorPreserved(t *testing.T) {
 	for _, origin := range []string{"http://localhost:9002", "https://app-a.example.com"} {
 		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 		req.Header.Set("Origin", origin)
-		req = withProjectOrigins(req, "https://app-a.example.com")
+		req = withProjectOrigins(t, req, "https://app-a.example.com")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		assert.Equal(t, origin, rec.Header().Get("Access-Control-Allow-Origin"), origin)
@@ -223,7 +227,7 @@ func TestCORS_ProjectOrigin_OtherProjectOrigin_Rejected(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Origin", "https://app-b.example.com")
-	req = withProjectOrigins(req, "https://app-a.example.com")
+	req = withProjectOrigins(t, req, "https://app-a.example.com")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
@@ -254,7 +258,7 @@ func TestCORS_ProjectOrigin_Preflight_Returns204WithHeaders(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodOptions, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Origin", "https://app-a.example.com")
-	req = withProjectOrigins(req, "https://app-a.example.com")
+	req = withProjectOrigins(t, req, "https://app-a.example.com")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -265,7 +269,7 @@ func TestCORS_ProjectOrigin_Preflight_Returns204WithHeaders(t *testing.T) {
 func TestValidateAllowedOrigins_StructuredInput(t *testing.T) {
 	out, err := ValidateAllowedOrigins([]string{"https://A.example.com", " http://localhost:9002 "}, true)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"https://A.example.com", "http://localhost:9002"}, out)
+	assert.Equal(t, []string{"https://A.example.com", "http://localhost:9002"}, out.Exact())
 
 	_, err = ValidateAllowedOrigins([]string{"*"}, true)
 	require.Error(t, err)
@@ -326,7 +330,7 @@ func TestParseAllowedOrigins_MalformedOrigin_Rejected(t *testing.T) {
 func TestParseAllowedOrigins_ValidList_PreservesOrderAndCase(t *testing.T) {
 	out, err := ParseAllowedOrigins("https://A.example.com,http://localhost:9002 , https://b.example.com", true)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"https://A.example.com", "http://localhost:9002", "https://b.example.com"}, out)
+	assert.Equal(t, []string{"https://A.example.com", "http://localhost:9002", "https://b.example.com"}, out.Exact())
 }
 
 // ── Coverage for non-credentialed and edge paths ───────────────────────
@@ -334,7 +338,7 @@ func TestParseAllowedOrigins_ValidList_PreservesOrderAndCase(t *testing.T) {
 func TestParseAllowedOrigins_NoCredentials_AllowsEmptyEntries(t *testing.T) {
 	out, err := ParseAllowedOrigins("http://a.example.com,,http://b.example.com", false)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"http://a.example.com", "http://b.example.com"}, out)
+	assert.Equal(t, []string{"http://a.example.com", "http://b.example.com"}, out.Exact())
 }
 
 func TestParseAllowedOrigins_NoCredentials_OnlyEmpty_ReturnsErr(t *testing.T) {
@@ -361,4 +365,112 @@ func TestCORS_PreflightWithoutOrigin_Returns204(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+// ── Vary and one-label wildcard patterns ───────────────────────────────
+
+func TestCORS_VaryOrigin_OnEveryResponse(t *testing.T) {
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+	for _, tc := range []struct{ name, method, origin string }{
+		{"allowed", http.MethodPost, "http://localhost:9002"},
+		{"disallowed", http.MethodPost, "https://evil.example.app"},
+		{"preflight", http.MethodOptions, "http://localhost:9002"},
+		{"no_origin", http.MethodPost, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, "/", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			assert.Equal(t, []string{"Origin"}, rec.Header().Values("Vary"))
+		})
+	}
+}
+
+func TestCORS_PatternOrigin(t *testing.T) {
+	const pattern = "https://*.previews.example.app"
+	cases := []struct {
+		name, origin string
+		want         bool
+	}{
+		{"one_label", "https://feature-1.previews.example.app", true},
+		{"two_labels", "https://a.b.previews.example.app", false},
+		{"bare_parent", "https://previews.example.app", false},
+		{"http", "http://feature-1.previews.example.app", false},
+		{"port_mismatch", "https://feature-1.previews.example.app:8443", false},
+		{"sibling_domain", "https://feature-1.previews.example.net", false},
+		{"mixed_case_host", "https://Feature-1.Previews.example.app", true},
+	}
+	scopes := map[string]func(*testing.T, *http.Request) (*http.Request, http.Handler){
+		"global": func(t *testing.T, r *http.Request) (*http.Request, http.Handler) {
+			t.Helper()
+			return r, CORSMiddleware(mustParse(t, "http://localhost:9002,"+pattern))(nopHandler())
+		},
+		"project": func(t *testing.T, r *http.Request) (*http.Request, http.Handler) {
+			t.Helper()
+			return withProjectOrigins(t, r, pattern), CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+		},
+	}
+	for scopeName, build := range scopes {
+		for _, method := range []string{http.MethodOptions, http.MethodPost} {
+			for _, tc := range cases {
+				t.Run(scopeName+"/"+method+"/"+tc.name, func(t *testing.T) {
+					req := httptest.NewRequest(method, "/identity.v1.IdentityService/RedeemOAuthCode", nil)
+					req.Header.Set("Origin", tc.origin)
+					req, handler := build(t, req)
+					rec := httptest.NewRecorder()
+					handler.ServeHTTP(rec, req)
+					if !tc.want {
+						assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+						assert.Empty(t, rec.Header().Get("Access-Control-Allow-Credentials"))
+						return
+					}
+					assert.Equal(t, tc.origin, rec.Header().Get("Access-Control-Allow-Origin"), "echoes the concrete origin, never the pattern")
+					assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
+					assert.Equal(t, []string{"Origin"}, rec.Header().Values("Vary"))
+				})
+			}
+		}
+	}
+}
+
+func TestValidateAllowedOrigins_Patterns(t *testing.T) {
+	out, err := ValidateAllowedOrigins([]string{"https://app.example.app", "https://*.previews.example.app"}, true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://app.example.app"}, out.Exact())
+	assert.Equal(t, []string{"https://*.previews.example.app"}, out.Patterns())
+
+	out, err = ValidateAllowedOrigins([]string{"https://*.previews.example.app"}, true)
+	require.NoError(t, err, "a pattern alone is a non-empty allow-list")
+	assert.Empty(t, out.Exact())
+}
+
+func TestParseAllowedOrigins_InvalidPattern_Rejected(t *testing.T) {
+	cases := []struct {
+		raw     string
+		wantErr error
+		wantMsg string
+	}{
+		{raw: "*", wantMsg: "wildcard"},
+		{raw: "https://*", wantErr: origin.ErrPatternParentShort},
+		{raw: "*.com", wantMsg: "scheme"},
+		{raw: "http://*.previews.example.app", wantErr: origin.ErrPatternScheme},
+		{raw: "https://a.*.example.app", wantErr: origin.ErrPatternLabel},
+		{raw: "https://*.app", wantErr: origin.ErrPatternParentShort},
+		{raw: "https://pr-*.example.app", wantErr: origin.ErrPatternLabel},
+		{raw: "https://*.*.example.app", wantErr: origin.ErrPatternParentLabel},
+		{raw: "https://*.previews.example.app/", wantMsg: "path not allowed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			_, err := ParseAllowedOrigins("http://localhost:9002,"+tc.raw, true)
+			require.Error(t, err)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			}
+			assert.Contains(t, err.Error(), tc.wantMsg)
+		})
+	}
 }

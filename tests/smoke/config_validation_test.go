@@ -434,4 +434,40 @@ func TestConfigSetupMatrix(t *testing.T) {
 			[]string{"oauth_disabled_no_providers_configured"},
 			nil)
 	})
+
+	// Case 7 — NEGATIVE: a malformed wildcard pattern in either allowlist
+	// fails boot rather than silently admitting nothing (or too much).
+	t.Run("invalid_wildcard_return_url_pattern_fails", func(t *testing.T) {
+		t.Parallel()
+		env, _ := cfgEnv(t, map[string]string{
+			"GATEWAY_OAUTH_ALLOWED_RETURN_URLS": "https://*.app/auth",
+		})
+		cfgExpectBootFailure(t, env, []string{
+			"GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid",
+			"wildcard parent domain must have at least two labels",
+		})
+	})
+	t.Run("invalid_wildcard_cors_origin_pattern_fails", func(t *testing.T) {
+		t.Parallel()
+		env, _ := cfgEnv(t, map[string]string{
+			"GATEWAY_ALLOWED_ORIGINS": "http://localhost:9002,https://pr-*.example.app",
+		})
+		cfgExpectBootFailure(t, env, []string{
+			"cors config invalid",
+			"wildcard must be the entire leftmost host label",
+		})
+	})
+
+	// Case 8 — POSITIVE: valid wildcard patterns boot clean and are logged
+	// next to the exact entries, so an operator can see what is admitted.
+	t.Run("wildcard_patterns_boot_and_are_logged", func(t *testing.T) {
+		t.Parallel()
+		env, port := cfgEnv(t, map[string]string{
+			"GATEWAY_ALLOWED_ORIGINS":           "http://localhost:9002,https://*.previews.example.app",
+			"GATEWAY_OAUTH_ALLOWED_RETURN_URLS": "https://app.example.app/auth,https://*.previews.example.app/auth",
+		})
+		cfgExpectBootClean(t, env, port,
+			[]string{"origin_patterns", "https://*.previews.example.app", "allowed_return_url_patterns"},
+			nil)
+	})
 }

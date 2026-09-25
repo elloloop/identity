@@ -216,3 +216,40 @@ func TestHostedOAuth_DisabledWhenAllowlistEmpty(t *testing.T) {
 		t.Fatal("headless OAuthLogin returned no token")
 	}
 }
+
+// TestHostedOAuth_WildcardReturnTo verifies a one-label wildcard entry in
+// GATEWAY_OAUTH_ALLOWED_RETURN_URLS: /oauth/start admits a return_to on any
+// single subdomain of the parent (under the entry's path prefix) and still
+// refuses a sibling domain, a deeper subdomain and the bare parent.
+func TestHostedOAuth_WildcardReturnTo(t *testing.T) {
+	t.Parallel()
+
+	h := StartServer(
+		t,
+		WithOAuthRegistry(newHostedRegistry()),
+		WithConfig(func(c *config.Config) { c.OAuthAllowedReturnURLs = "https://*.previews.example.app/auth" }),
+	)
+	client := noRedirectClient(h)
+
+	cases := []struct {
+		returnTo string
+		want     int
+	}{
+		{"https://feature-1.previews.example.app/auth/complete", http.StatusFound},
+		{"https://feature-1.previews.example.net/auth/complete", http.StatusBadRequest},
+		{"https://a.feature-1.previews.example.app/auth/complete", http.StatusBadRequest},
+		{"https://previews.example.app/auth/complete", http.StatusBadRequest},
+		{"https://feature-1.previews.example.app/other", http.StatusBadRequest},
+		{"http://feature-1.previews.example.app/auth/complete", http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		resp, err := client.Get(h.BaseURL + "/oauth/start/google?return_to=" + url.QueryEscape(tc.returnTo))
+		if err != nil {
+			t.Fatalf("GET /oauth/start: %v", err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != tc.want {
+			t.Errorf("return_to %q status = %d, want %d", tc.returnTo, resp.StatusCode, tc.want)
+		}
+	}
+}

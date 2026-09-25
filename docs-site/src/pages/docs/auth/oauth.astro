@@ -502,6 +502,33 @@ message NativeOAuthLoginResponse {
     SPA origins (which appear only in the <code>return_to</code>
     allowlist, not at the provider).
   </p>
+  <h4>Preview deployments: one-label wildcard entries</h4>
+  <p>
+    A host that issues one subdomain per branch cannot be listed ahead of
+    time. For those, an entry may be a one-label wildcard origin under a
+    fixed parent domain, optionally with a path prefix:
+  </p>
+  <Code code={`-e GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app,https://*.previews.example.app/auth`} lang="bash" />
+  <p>
+    The <code>*</code> matches exactly one DNS label, so
+    <code>https://feature-1.previews.example.app/auth/complete</code> is
+    admitted while <code>https://a.b.previews.example.app/…</code> and the bare
+    <code>https://previews.example.app/…</code> are not. The scheme is fixed to
+    <code>https</code>, the port is fixed (443 unless the entry names one), and
+    the path-prefix rule applies unchanged. A malformed pattern fails startup;
+    see <em>Wildcard origin patterns</em> in the
+    <a href="/identity/docs/installation/configuration">configuration
+    reference</a> for the full rules. The same allowlist gates the
+    magic-link <code>return_to</code>.
+  </p>
+  <aside class="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
+    <strong>Security:</strong> a pattern admits <em>every</em> host under its
+    parent. Anything that can publish a site under that parent can receive a
+    user's one-time OAuth code at <code>return_to</code> and redeem it. Use a
+    pattern only for a parent domain whose every subdomain you control, such as
+    your own preview-hosting project, never a shared parent other tenants can
+    publish under.
+  </aside>
 
   <h3>End-to-end browser walkthrough</h3>
   <Code code={`// 1. SPA kicks off the flow by sending the user to /oauth/start.

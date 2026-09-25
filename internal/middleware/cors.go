@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/elloloop/identity/internal/origin"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -16,15 +17,17 @@ var ErrAllowedOriginsEmpty = errors.New("cors: no allowed origins configured")
 
 // ParseAllowedOrigins splits a comma-separated origin list and validates each
 // entry. When allowCredentials is true the function refuses dangerous values:
-// the wildcard "*", literal "null", empty entries, and malformed URLs. The
-// returned slice preserves input order and case.
+// the wildcard "*", literal "null", empty entries, and malformed URLs. An entry
+// containing "*" must be a one-label wildcard pattern (https://*.parent.example,
+// see origin.ParsePattern). The returned allow-list preserves input order and
+// case.
 //
 // Why: this middleware unconditionally sets Access-Control-Allow-Credentials,
 // so a wildcard origin in the allowlist would expose authenticated state to
 // any origin. Failing fast at startup is the only safe behaviour.
-func ParseAllowedOrigins(raw string, allowCredentials bool) ([]string, error) {
+func ParseAllowedOrigins(raw string, allowCredentials bool) (origin.Allowlist, error) {
 	if strings.TrimSpace(raw) == "" {
-		return nil, ErrAllowedOriginsEmpty
+		return origin.Allowlist{}, ErrAllowedOriginsEmpty
 	}
 	return ValidateAllowedOrigins(strings.Split(raw, ","), allowCredentials)
 }
@@ -34,68 +37,82 @@ func ParseAllowedOrigins(raw string, allowCredentials bool) ([]string, error) {
 // from a structured source (a project's config_json array) rather than a
 // comma-separated env var, so they need not round-trip through a join/split.
 // Order and case are preserved; an all-empty input is ErrAllowedOriginsEmpty.
-func ValidateAllowedOrigins(origins []string, allowCredentials bool) ([]string, error) {
-	out := make([]string, 0, len(origins))
+func ValidateAllowedOrigins(origins []string, allowCredentials bool) (origin.Allowlist, error) {
+	exact := make([]string, 0, len(origins))
+	var patterns []origin.Pattern
 	for _, p := range origins {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			if allowCredentials {
-				return nil, errors.New("cors: empty origin entry not allowed with credentials")
+				return origin.Allowlist{}, errors.New("cors: empty origin entry not allowed with credentials")
 			}
 			continue
 		}
 		if allowCredentials {
 			if p == "*" {
-				return nil, errors.New(`cors: wildcard "*" origin not allowed with credentials`)
+				return origin.Allowlist{}, errors.New(`cors: wildcard "*" origin not allowed with credentials`)
 			}
 			if p == "null" {
-				return nil, errors.New(`cors: literal "null" origin not allowed with credentials`)
+				return origin.Allowlist{}, errors.New(`cors: literal "null" origin not allowed with credentials`)
 			}
 		}
-		if err := validateOrigin(p); err != nil {
-			return nil, fmt.Errorf("cors: origin %q invalid: %w", p, err)
+		u, err := validateOrigin(p)
+		if err != nil {
+			return origin.Allowlist{}, fmt.Errorf("cors: origin %q invalid: %w", p, err)
 		}
-		out = append(out, p)
+		if !origin.IsPattern(p) {
+			exact = append(exact, p)
+			continue
+		}
+		pattern, err := origin.ParsePattern(u)
+		if err != nil {
+			return origin.Allowlist{}, fmt.Errorf("cors: origin %q invalid: %w", p, err)
+		}
+		patterns = append(patterns, pattern)
 	}
-	if len(out) == 0 {
-		return nil, ErrAllowedOriginsEmpty
+	if len(exact) == 0 && len(patterns) == 0 {
+		return origin.Allowlist{}, ErrAllowedOriginsEmpty
 	}
-	return out, nil
+	return origin.NewAllowlist(exact, patterns), nil
 }
 
-func validateOrigin(s string) error {
+func validateOrigin(s string) (*url.URL, error) {
 	if strings.ContainsAny(s, " \t\r\n") {
-		return errors.New("contains whitespace")
+		return nil, errors.New("contains whitespace")
 	}
 	if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
-		return errors.New("scheme must be lower-case http:// or https://")
+		return nil, errors.New("scheme must be lower-case http:// or https://")
 	}
 	u, err := url.Parse(s)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if u.Host == "" {
-		return errors.New("host is empty")
+		return nil, errors.New("host is empty")
 	}
 	if u.Path != "" {
-		return errors.New("path not allowed")
+		return nil, errors.New("path not allowed")
 	}
 	if u.RawQuery != "" {
-		return errors.New("query not allowed")
+		return nil, errors.New("query not allowed")
 	}
 	if u.Fragment != "" {
-		return errors.New("fragment not allowed")
+		return nil, errors.New("fragment not allowed")
 	}
 	if u.User != nil {
-		return errors.New("userinfo not allowed")
+		return nil, errors.New("userinfo not allowed")
 	}
-	return nil
+	return u, nil
 }
 
 // CORSMiddleware handles CORS preflight requests and injects response headers
 // for allowed origins. globalOrigins must be the validated output of
 // ParseAllowedOrigins — the deployment-wide floor from GATEWAY_ALLOWED_ORIGINS.
-// Match is exact case-sensitive on scheme+host+port.
+// An exact entry matches case-sensitively on scheme+host+port; a wildcard
+// pattern matches one DNS label under its parent (origin.Pattern). The
+// response always echoes the concrete request Origin, never a pattern, and
+// carries Vary: Origin so a shared cache never serves one origin's CORS
+// headers to another.
 //
 // On top of that floor, a request is matched against the resolved project's
 // own allow-list (service.ProjectScope.CORSAllowedOrigins, set by the project
@@ -105,14 +122,12 @@ func validateOrigin(s string) error {
 // run INSIDE the project resolver so the scope is present — including on the
 // OPTIONS preflight, which carries no credentials and so relies on Host →
 // project resolution (the resolver runs ahead of auth).
-func CORSMiddleware(globalOrigins []string) func(http.Handler) http.Handler {
-	origins := make([]string, len(globalOrigins))
-	copy(origins, globalOrigins)
-
+func CORSMiddleware(globalOrigins origin.Allowlist) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-			if origin == "" {
+			w.Header().Add("Vary", "Origin")
+			requestOrigin := r.Header.Get("Origin")
+			if requestOrigin == "" {
 				if r.Method == http.MethodOptions {
 					w.WriteHeader(http.StatusNoContent)
 					return
@@ -121,10 +136,10 @@ func CORSMiddleware(globalOrigins []string) func(http.Handler) http.Handler {
 				return
 			}
 
-			allowed := originAllowed(origin, origins) || originAllowed(origin, projectOrigins(r))
+			allowed := globalOrigins.Allows(requestOrigin) || projectOrigins(r).Allows(requestOrigin)
 
 			if allowed {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Origin", requestOrigin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Access-Control-Expose-Headers", "grpc-status,grpc-message")
 			}
@@ -151,25 +166,13 @@ func CORSMiddleware(globalOrigins []string) func(http.Handler) http.Handler {
 	}
 }
 
-// originAllowed reports whether origin exactly matches an entry in list
-// (case-sensitive on scheme+host+port, matching the CORS spec's serialized
-// origin comparison).
-func originAllowed(origin string, list []string) bool {
-	for _, o := range list {
-		if o == origin {
-			return true
-		}
-	}
-	return false
-}
-
 // projectOrigins returns the resolved project's per-request CORS allow-list,
-// or nil when no project is in scope. The slice is the resolver's
+// or the empty allow-list when no project is in scope. It is the resolver's
 // already-validated output, so the middleware adds it to the global floor
 // without re-validating.
-func projectOrigins(r *http.Request) []string {
+func projectOrigins(r *http.Request) origin.Allowlist {
 	if scope := service.ProjectScopeFromContext(r.Context()); scope != nil {
 		return scope.CORSAllowedOrigins
 	}
-	return nil
+	return origin.Allowlist{}
 }

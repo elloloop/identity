@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/elloloop/identity/internal/middleware"
+	"github.com/elloloop/identity/internal/origin"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -91,19 +92,20 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 }
 
 // projectCORSOrigins returns a project's validated per-project CORS allow-list,
-// or nil when it configures none. Origins are validated with the same rule the
-// global allow-list uses (middleware.ParseAllowedOrigins, credentials-mode):
-// the CORS middleware always sets Access-Control-Allow-Credentials, so a
-// wildcard/"null"/malformed per-project origin is rejected here rather than
-// served to the browser. A bad config is a configuration error surfaced to the
+// or the empty allow-list when it configures none. Origins are validated with
+// the same rule the global allow-list uses (middleware.ValidateAllowedOrigins,
+// credentials-mode): the CORS middleware always sets
+// Access-Control-Allow-Credentials, so a bare "*", "null", a malformed origin
+// or an invalid wildcard pattern is rejected here rather than served to the
+// browser. A bad config is a configuration error surfaced to the
 // caller, not silently dropped.
-func projectCORSOrigins(projectID string, cfg service.ProjectConfig) ([]string, error) {
+func projectCORSOrigins(projectID string, cfg service.ProjectConfig) (origin.Allowlist, error) {
 	if len(cfg.CORS.AllowedOrigins) == 0 {
-		return nil, nil
+		return origin.Allowlist{}, nil
 	}
 	origins, err := middleware.ValidateAllowedOrigins(cfg.CORS.AllowedOrigins, true)
 	if err != nil {
-		return nil, fmt.Errorf("project %q cors: %w", projectID, err)
+		return origin.Allowlist{}, fmt.Errorf("project %q cors: %w", projectID, err)
 	}
 	return origins, nil
 }

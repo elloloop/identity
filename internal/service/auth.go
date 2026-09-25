@@ -1285,7 +1285,7 @@ type AuthService struct {
 	phoneThrottle     *emailSendThrottle
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
-	// OAuth flow uses. Parsed once at construction.
+	// OAuth flow uses. Parsed once at construction (buildReturnAllowlist).
 	returnAllow ReturnAllowlist
 	nowFunc     func() time.Time // overridable for testing
 
@@ -1515,7 +1515,7 @@ func NewAuthServiceWithOAuth(
 		emailThrottle:        newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
 		signupThrottle:       newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		phoneThrottle:        newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
-		returnAllow:          ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
+		returnAllow:          buildReturnAllowlist(cfg, logger),
 		nowFunc:              time.Now,
 		// Default to synchronous sends; app.New opts into async via
 		// WithAsyncEmailDispatch. A synchronous default keeps every
@@ -1572,6 +1572,19 @@ func buildDefaultProjectAccess(cfg *config.Config, logger *zap.Logger) ProjectAc
 		return ProjectAccessConfig{Mode: AccessModeClosed}
 	}
 	return access
+}
+
+// buildReturnAllowlist parses GATEWAY_OAUTH_ALLOWED_RETURN_URLS for the
+// magic-link flow. app.New refuses to start on an invalid list; a caller that
+// constructs the service directly with one gets an empty allowlist, which
+// disables magic-link sign-in rather than admitting an unintended return_to.
+func buildReturnAllowlist(cfg *config.Config, logger *zap.Logger) ReturnAllowlist {
+	allow, err := ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs)
+	if err != nil {
+		logger.Error("oauth_allowed_return_urls_invalid_failing_closed", zap.Error(err))
+		return ReturnAllowlist{}
+	}
+	return allow
 }
 
 // BuildAgeGate selects the age-determination provider from config. When

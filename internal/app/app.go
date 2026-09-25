@@ -467,7 +467,18 @@ func New(deps Deps) (*Built, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cors config invalid: %w", err)
 	}
-	logger.Info("cors_allowed_origins", zap.Strings("origins", allowedOrigins))
+	logger.Info("cors_allowed_origins",
+		zap.Strings("origins", allowedOrigins.Exact()),
+		zap.Strings("origin_patterns", allowedOrigins.Patterns()))
+
+	// Browser-facing hosted OAuth routes are registered only when
+	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS is non-empty; the headless
+	// BeginOAuthLogin / OAuthLogin RPCs work regardless. A malformed wildcard
+	// entry fails startup here, as a malformed CORS origin does above.
+	returnAllow, err := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
+	if err != nil {
+		return nil, fmt.Errorf("GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: %w", err)
+	}
 
 	trustedProxies, err := middleware.ParseTrustedProxies(deps.Config.TrustedProxies)
 	if err != nil {
@@ -672,16 +683,13 @@ func New(deps Deps) (*Built, error) {
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)
 
-	// Browser-facing hosted OAuth routes (#126). Registered only when
-	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS is non-empty; the headless
-	// BeginOAuthLogin / OAuthLogin RPCs work regardless.
-	returnAllow := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
-
 	// Default auth UI (login/signup). Rendered per request so it offers
 	// exactly the sign-in options the resolved project enables server-side.
 	mux.Handle("/auth/", ui.Handler(deps.Config, authSvc, returnAllow.Enabled()))
 	if returnAllow.Enabled() {
-		logger.Info("oauth_hosted_flow_enabled", zap.Strings("allowed_return_urls", returnAllow.Entries()))
+		logger.Info("oauth_hosted_flow_enabled",
+			zap.Strings("allowed_return_urls", returnAllow.Entries()),
+			zap.Strings("allowed_return_url_patterns", returnAllow.Patterns()))
 	} else {
 		logger.Info("oauth_hosted_flow_disabled",
 			zap.String("hint", "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"))

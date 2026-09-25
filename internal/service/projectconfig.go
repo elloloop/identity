@@ -1195,10 +1195,11 @@ func (j ProjectJurisdictionsConfig) canonicalized() ProjectJurisdictionsConfig {
 
 // ProjectCORSConfig is the per-project CORS policy. AllowedOrigins is layered
 // on top of the global GATEWAY_ALLOWED_ORIGINS floor: a browser origin is
-// accepted when it is in either set. Each entry must be a bare scheme+host(+port)
-// origin (no path/query/fragment, lower-case http:// or https:// scheme); the
-// project resolver validates them with middleware.ParseAllowedOrigins before
-// they reach a request.
+// accepted when either set admits it. Each entry must be a bare
+// scheme+host(+port) origin (no path/query/fragment, lower-case http:// or
+// https:// scheme) or a one-label wildcard pattern (https://*.parent.example);
+// the project resolver validates them with middleware.ValidateAllowedOrigins
+// before they reach a request.
 type ProjectCORSConfig struct {
 	AllowedOrigins []string `json:"allowed_origins"`
 }

@@ -1,5 +1,38 @@
 # Upgrade guide
 
+## v4.8 → next — wildcard origins for preview deployments (additive)
+
+### Additions
+
+- **One-label wildcard origins.** `GATEWAY_ALLOWED_ORIGINS`, a project's
+  `cors.allowed_origins`, and `GATEWAY_OAUTH_ALLOWED_RETURN_URLS` (hosted
+  OAuth and magic-link `return_to`) accept `https://*.previews.example.app`:
+  the `*` matches exactly one DNS label under the fixed parent, `https`
+  only, on a fixed port. Return-URL patterns keep the path-prefix rule
+  (`https://*.previews.example.app/auth`). CORS echoes the concrete request
+  `Origin`, never the pattern. Patterns are logged at startup
+  (`origin_patterns`, `allowed_return_url_patterns`). A pattern admits every
+  host under its parent, so use one only for a parent whose every subdomain
+  you control. See
+  [Wildcard origin patterns](../docs-site/src/pages/docs/installation/configuration.astro).
+- **`Vary: Origin`** is now sent on every response that passes through the
+  CORS middleware, so a shared cache never serves one origin's CORS headers
+  to another.
+
+### Behaviour changes
+
+Only deployments with a `*` inside an allowlist entry are affected:
+
+- An entry containing `*` must now be a valid one-label https pattern, or the
+  server **refuses to start** (`cors config invalid: …` /
+  `GATEWAY_OAUTH_ALLOWED_RETURN_URLS invalid: …`). Before, such a return-URL
+  entry was silently ignored and a CORS entry like `https://*.example.app`
+  was compared literally, so it never matched. A project whose
+  `cors.allowed_origins` holds an invalid pattern fails to resolve.
+- A CORS or return-URL entry that is already a valid pattern now admits
+  every single-label subdomain of its parent. Check any such entry before
+  upgrading.
+
 ## v4.7 → v4.8 — directory lookup for services (additive); session-mode and SCIM fixes (behaviour changes)
 
 This release adds a read-only lookup RPC and the credential kind that
