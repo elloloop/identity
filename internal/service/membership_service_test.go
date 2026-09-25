@@ -463,6 +463,17 @@ func TestAcceptTenantInvitation_RequiresVerifiedEmail(t *testing.T) {
 	require.Equal(t, InvitationStatusPending, invs[0].Status, "the invitation stays redeemable once verified")
 }
 
+// An unverified caller is refused before its address is compared, so a leaked
+// token does not tell it whether the invitation was issued to its address.
+func TestAcceptTenantInvitation_UnverifiedRefusedBeforeAddressMatch(t *testing.T) {
+	f := newMembershipFixtureNoMail()
+	rawToken := f.seedInvite(t)
+	f.users.byID["user-eve"] = &User{ID: "user-eve", Email: "eve@evil.com"}
+	_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), "user-eve", rawToken)
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	require.NotErrorIs(t, err, ErrPermissionDenied)
+}
+
 func TestAcceptTenantInvitation_UnknownTokenNotFound(t *testing.T) {
 	f := newMembershipFixtureNoMail()
 	f.users.put(mInviteeID, mInvitee)

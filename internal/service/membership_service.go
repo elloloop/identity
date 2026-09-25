@@ -221,15 +221,16 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
-	if CanonicalizeEmail(caller.Email) != CanonicalizeEmail(inv.Email) {
-		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
-	}
-	// The match is by canonical mailbox, so another spelling of the invited
-	// address (a "+tag", Gmail dots) can accept. That holds only for an
-	// address its holder has proved: an unverified account could have been
-	// registered by anyone.
+	// The match below is by canonical mailbox, so another spelling of the
+	// invited address (a "+tag", Gmail dots) can accept. That holds only for
+	// an address its holder has proved: an unverified account could have been
+	// registered by anyone. Checked first, so an unverified caller holding a
+	// leaked token learns nothing about the address it was issued to.
 	if !caller.EmailVerified {
 		return nil, fmt.Errorf("%w: verify your email address before accepting the invitation", ErrEmailVerificationRequired)
+	}
+	if CanonicalizeEmail(caller.Email) != CanonicalizeEmail(inv.Email) {
+		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
 	}
 
 	m := &TenantMembership{

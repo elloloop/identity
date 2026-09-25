@@ -265,6 +265,13 @@ hand: the re-run skips what exists and finishes the rest. Any failed migration
 leaves the same dirty state, and the refusal names the version to force for a
 failed apply and for a failed rollback.
 
+#### `identity migrate` refuses other arguments
+
+`identity migrate` now accepts no argument except `force <version>`.
+Anything else — a flag such as `--verbose`, a stray word — exits with status 2
+instead of being ignored. Check any migrate Job or script that passes extra
+`args` before upgrading, or the step will fail.
+
 ### One email comparison rule
 
 The service canonicalizes every address it is given before any store sees it.
@@ -390,12 +397,17 @@ same addresses could match on one deployment and not on another.
   variant of the invited mailbox may accept, and an address differing in a
   non-ASCII letter may not. **Accepting now requires the caller's email to be
   verified**, since another spelling of the invited address can accept: an
-  unverified caller gets `FAILED_PRECONDITION` (a caller whose address is not
-  the invited one still gets `PERMISSION_DENIED`), and the invitation stays
-  redeemable once they verify. A new invitation revokes the pending one for the
-  same mailbox; 0034 canonicalized the pending all-ASCII invitations stored
-  before this release, so that covers them too. Concurrent invitations to one
-  mailbox now leave exactly one pending instead of failing.
+  unverified caller gets `FAILED_PRECONDITION`, checked before the address is
+  compared (a verified caller whose address is not the invited one still
+  gets `PERMISSION_DENIED`), and the invitation stays redeemable once they
+  verify. A new invitation revokes the pending one for the same mailbox, and
+  concurrent invitations to one mailbox leave one pending instead of failing.
+  That holds for every invitation created from this release on, and for the
+  pending all-ASCII ones 0034 canonicalized. A pending invitation with a
+  non-ASCII address stored before this release keeps its spelling: if that
+  spelling is not canonical (a `+tag`, a Gmail variant), a new invitation to
+  the same mailbox leaves it pending beside the new one until it expires or
+  is revoked.
 - **Admin `InviteUser`** stores the invited address in canonical form, and
   refuses it as a duplicate when an account already holds that canonical
   form. An account stored in a non-canonical form (see above) is not
