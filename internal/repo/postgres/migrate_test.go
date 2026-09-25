@@ -210,23 +210,34 @@ func TestMigrate_0034CanonicalizesPendingInvitations(t *testing.T) {
 	defer func() { _ = conn.Close(ctx) }()
 	_, err = conn.Exec(ctx, `
 		INSERT INTO projects (id, storage_scope_id, created_at_ms, updated_at_ms) VALUES ('p', 'scope-p', 0, 0);
-		INSERT INTO tenants (id, project_id, created_at_ms, updated_at_ms) VALUES ('t', 'p', 0, 0)`)
+		INSERT INTO tenants (id, project_id, created_at_ms, updated_at_ms)
+		VALUES ('t', 'p', 0, 0), ('t-tag', 'p', 0, 0), ('t-dot', 'p', 0, 0), ('t-googlemail', 'p', 0, 0)`)
 	require.NoError(t, err)
 	seed := []struct {
-		id, email, status string
+		id, tenant, email, status string
 	}{
-		{"old-tag", "zoe+old@gmail.com", "pending"},
-		{"new-dots", "z.o.e@googlemail.com", "pending"}, // same mailbox, newer: survives
-		{"tagged", "bob+jira@corp.com", "pending"},
-		{"trailing-dot", "carol@corp.com.", "pending"},
-		{"dots-kept", "d.ave@corp.com", "pending"},
-		{"non-ascii", "zoé+x@corp.com", "pending"},
-		{"settled", "eve+x@corp.com", "accepted"},
+		{"old-tag", "t", "zoe+old@gmail.com", "pending"},
+		{"new-dots", "t", "z.o.e@googlemail.com", "pending"}, // same mailbox, newer: survives
+		{"tagged", "t", "bob+jira@corp.com", "pending"},
+		{"trailing-dot", "t", "carol@corp.com.", "pending"},
+		{"dots-kept", "t", "d.ave@corp.com", "pending"},
+		{"non-ascii", "t", "zoé+x@corp.com", "pending"},
+		{"kelvin", "t", "\u212aate@corp.com", "pending"}, // lowers to kate@ under en_US; not the same mailbox
+		{"kate", "t", "KATE+x@corp.com", "pending"},
+		{"settled", "t", "eve+x@corp.com", "accepted"},
+		// The older invitation is already canonical and the newer one is not:
+		// the older must be revoked before the newer takes its address.
+		{"canonical-older-1", "t-tag", "zoe@gmail.com", "pending"},
+		{"tagged-newer", "t-tag", "zoe+team@gmail.com", "pending"},
+		{"canonical-older-2", "t-dot", "zoe@gmail.com", "pending"},
+		{"dotted-newer", "t-dot", "z.oe@gmail.com", "pending"},
+		{"canonical-older-3", "t-googlemail", "zoe@gmail.com", "pending"},
+		{"googlemail-newer", "t-googlemail", "z.o.e@googlemail.com", "pending"},
 	}
 	for i, s := range seed {
 		_, err := conn.Exec(ctx, `
 			INSERT INTO tenant_invitations (id, project_id, tenant_id, token_hash, email, status, expires_at_ms, created_at_ms)
-			VALUES ($1, 'p', 't', $1, $2, $3, 9999999999999, $4)`, s.id, s.email, s.status, i)
+			VALUES ($1, 'p', $2, $1, $3, $4, 9999999999999, $5)`, s.id, s.tenant, s.email, s.status, i)
 		require.NoError(t, err)
 	}
 
@@ -243,7 +254,7 @@ func TestMigrate_0034CanonicalizesPendingInvitations(t *testing.T) {
 	require.NoError(t, rows.Err())
 
 	require.Equal(t, "revoked", got["old-tag"][1], "the older of two invitations to one mailbox is revoked")
-	for _, id := range []string{"new-dots", "tagged", "trailing-dot", "dots-kept"} {
+	for _, id := range []string{"new-dots", "tagged", "trailing-dot", "dots-kept", "kate"} {
 		var original string
 		for _, s := range seed {
 			if s.id == id {
@@ -254,5 +265,15 @@ func TestMigrate_0034CanonicalizesPendingInvitations(t *testing.T) {
 			"%s: the migration's canonical form must be CanonicalizeEmail's", id)
 	}
 	require.Equal(t, [2]string{"zoé+x@corp.com", "pending"}, got["non-ascii"])
+	require.Equal(t, [2]string{"\u212aate@corp.com", "pending"}, got["kelvin"])
+	require.Equal(t, [2]string{"kate@corp.com", "pending"}, got["kate"])
 	require.Equal(t, [2]string{"eve+x@corp.com", "accepted"}, got["settled"])
+	for _, pair := range [][2]string{
+		{"canonical-older-1", "tagged-newer"},
+		{"canonical-older-2", "dotted-newer"},
+		{"canonical-older-3", "googlemail-newer"},
+	} {
+		require.Equal(t, [2]string{"zoe@gmail.com", "revoked"}, got[pair[0]], pair[0])
+		require.Equal(t, [2]string{"zoe@gmail.com", "pending"}, got[pair[1]], pair[1])
+	}
 }

@@ -49,6 +49,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_project_email_fold_uidx
     WHERE email <> '';
 DROP INDEX IF EXISTS users_project_email_partial_uidx;
 
+-- The one-open-invite index moves to the same rule as the revoke-then-insert
+-- that enforces it. The old locale-lower() index goes first: the rewrite
+-- below gives pending rows new spellings, and the old index could see two of
+-- them as one where the fold does not (a KELVIN SIGN lowers to "k" under
+-- en_US.UTF-8). DROP INDEX locks the table until this transaction commits,
+-- so no invitation is created while neither index holds.
+DROP INDEX IF EXISTS tenant_invitations_open_email_uidx;
+
 -- Pending invitations stored before the service canonicalized carry the
 -- address as typed (trimmed and lower-cased). Rewrite them in the canonical
 -- form the service now stores (service.CanonicalizeEmail) so that the fold of
@@ -58,8 +66,11 @@ DROP INDEX IF EXISTS users_project_email_partial_uidx;
 -- googlemail.com read as gmail.com; the local part cut at its first "+"; and,
 -- at gmail.com, its dots removed. Non-ASCII addresses (whose canonical form
 -- punycodes the domain) are left as they are. Where several pending
--- invitations canonicalize to one mailbox, all but the newest are revoked
--- first — what creating the newest would have done.
+-- invitations canonicalize to one mailbox, every one but the newest is
+-- revoked — what creating the newest would have done — and only then is the
+-- newest renamed, in a separate statement, so no two pending rows ever share
+-- a canonical address.
+CREATE TEMP TABLE canonical_pending_invitations ON COMMIT DROP AS
 WITH parts AS (
     SELECT id, project_id, tenant_id, created_at_ms,
            substring(lower(email COLLATE "C") FROM '^(.*)@') AS local_part,
@@ -75,25 +86,21 @@ WITH parts AS (
                 ELSE split_part(local_part, '+', 1)
            END || '@' || domain AS email
     FROM domains
-), ranked AS (
-    SELECT id, email,
-           row_number() OVER (PARTITION BY project_id, tenant_id, email
-                              ORDER BY created_at_ms DESC, id DESC) AS newest_first
-    FROM canonical
-), superseded AS (
-    UPDATE tenant_invitations t SET status = 'revoked'
-    FROM ranked r
-    WHERE t.id = r.id AND r.newest_first > 1
-    RETURNING t.id
 )
-UPDATE tenant_invitations t SET email = r.email
-FROM ranked r
-WHERE t.id = r.id AND r.newest_first = 1 AND t.email <> r.email;
+SELECT id, email,
+       row_number() OVER (PARTITION BY project_id, tenant_id, email
+                          ORDER BY created_at_ms DESC, id DESC) AS newest_first
+FROM canonical;
 
--- The one-open-invite index follows the same rule as the revoke-then-insert
--- that enforces it. tenant_invitations has no RLS, so an expression index is
--- usable here.
+UPDATE tenant_invitations t SET status = 'revoked'
+FROM canonical_pending_invitations c
+WHERE t.id = c.id AND c.newest_first > 1;
+
+UPDATE tenant_invitations t SET email = c.email
+FROM canonical_pending_invitations c
+WHERE t.id = c.id AND c.newest_first = 1 AND t.email <> c.email;
+
+-- tenant_invitations has no RLS, so an expression index is usable here.
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_invitations_open_email_fold_uidx
     ON tenant_invitations (project_id, tenant_id, lower(email COLLATE "C"))
     WHERE status = 'pending';
-DROP INDEX IF EXISTS tenant_invitations_open_email_uidx;

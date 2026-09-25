@@ -1,5 +1,9 @@
 -- 0034_fold_email_comparisons.down.sql
 --
+-- The pending invitations 0034 rewrote in canonical form, and the ones it
+-- revoked as superseded, stay as they are: the spelling each was created
+-- with is not kept, and a canonical address is a valid spelling of it.
+--
 -- Restores the locale lower() unique indexes. Addresses that 0034 let coexist
 -- because they differ only in non-ASCII case ("é" and "É") collide under them
 -- wherever the database locale folds them; the build then fails and this

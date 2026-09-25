@@ -62,17 +62,22 @@ every other character kept. It replaces the unique index
 and `tenant_invitations_open_email_uidx` with
 `tenant_invitations_open_email_fold_uidx`. It also rewrites each *pending*
 tenant invitation with an all-ASCII address in the canonical form the
-service now stores (see below), and revokes all but the newest of any that
-then name one mailbox. Pending invitations with a non-ASCII address keep
-their spelling. Email lookups, the `ListUsers` and
+service now stores (see below). Where several pending invitations of a
+tenant name one mailbox, it first revokes all but the newest and then
+renames the newest, so it resolves those collisions itself. Pending
+invitations with a non-ASCII address keep their spelling. Email lookups, the `ListUsers` and
 SCIM email filters and the admin user query compare `email_fold` with `=`.
 Under `FORCE ROW LEVEL SECURITY` only such a leakproof comparison can use the
 index. The old `lower(email)` comparison read every row of the project on
 every lookup.
 
-**How it is applied.** Run `identity migrate`, or let
-`GATEWAY_POSTGRES_AUTO_MIGRATE` apply it when the first new replica boots.
-The SQLite driver needs no migration: its `lower()` already folds ASCII only.
+**How it is applied.** Run `identity migrate` **before any replica of the new
+version serves traffic**: the new version queries `users.email_fold`, and
+until 0034 has run every email lookup fails with
+`column "email_fold" does not exist`. The alternative is
+`GATEWAY_POSTGRES_AUTO_MIGRATE`, which applies it when the first new replica
+boots, before that replica serves. The SQLite driver needs no migration: its
+`lower()` already folds ASCII only.
 
 **Locking and sizing.** Adding a stored generated column rewrites the whole
 `users` table under an `ACCESS EXCLUSIVE` lock. The unique index is then
@@ -85,8 +90,13 @@ production, or at least check the table's size:
 SELECT pg_size_pretty(pg_total_relation_size('users'));
 ```
 
-**Do not rely on auto-migrate for a large `users` table.** Run
-`identity migrate` in a maintenance window instead. The migration sets
+**Do not rely on auto-migrate for a large `users` table.** Under auto-migrate
+the rewrite runs inside the booting replica, and a startup or liveness probe
+that gives up first restarts the container, killing the rewrite part-way
+(the transaction rolls back and the version is left dirty; see below). Run
+`identity migrate` as a separate job in a maintenance window instead, or at
+least give the first new replica a startup probe longer than the rewrite
+takes. The migration sets
 `lock_timeout = '10s'`. That bounds only the wait to *acquire* the lock:
 queued behind a long-running transaction, the `ALTER` would otherwise stall
 every later query on `users`. The timeout does not bound the rewrite itself.
@@ -107,7 +117,8 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS users_project_email_fold_uidx
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS tenant_invitations_open_email_fold_uidx
     ON tenant_invitations (project_id, tenant_id, lower(email COLLATE "C"))
     WHERE status = 'pending';
--- 3. Then `identity migrate`: it only drops the two old indexes.
+-- 3. Then `identity migrate`: it rewrites the pending invitations and drops
+--    the two old indexes, skipping what exists.
 ```
 
 **Pre-flight: no two rows may collide under the new indexes.** Addresses equal
@@ -125,16 +136,17 @@ SET row_security = off;
 SELECT project_id, lower(email COLLATE "C") AS email_fold, array_agg(id) AS ids
 FROM users WHERE email <> ''
 GROUP BY 1, 2 HAVING count(*) > 1;
-SELECT project_id, tenant_id, lower(email COLLATE "C") AS email_fold, array_agg(id) AS ids
-FROM tenant_invitations WHERE status = 'pending'
-GROUP BY 1, 2, 3 HAVING count(*) > 1;
 ```
 
-Resolve any rows these return (merge the accounts, or change one address, and
-revoke the extra invitation) before upgrading.
+Resolve any rows this returns (merge the accounts, or change one address)
+before upgrading. Pending tenant invitations need no pre-flight: the
+migration revokes all but the newest invitation per canonical mailbox before
+it builds their index.
 
-**Rolling back.** The down migration restores the locale `lower()` indexes. It
-fails if accounts or open invitations created after the upgrade differ only in
+**Rolling back.** The down migration restores the locale `lower()` indexes and
+drops `users.email_fold`. It does not undo the invitation rewrite: pending
+invitations keep their canonical addresses, and the ones it revoked stay
+revoked. It fails if accounts or open invitations created after the upgrade differ only in
 the case of a non-ASCII letter (`é` and `É`) and the database locale folds
 them. Its SQL then rolls back, leaving 0034 in place, but the runner records
 version **33** as dirty (it marks the version a migration moves to). Clear
@@ -155,7 +167,8 @@ Resolve them before migrating down.
 
 When the lock timeout fires or the index build fails, the migration's SQL
 rolls back as one transaction and changes nothing. The migration runner
-still records schema version 34 as *dirty*. Every later `identity migrate`, and every boot with
+still records schema version 34 as *dirty*. Every later `identity migrate`,
+and every boot with
 `GATEWAY_POSTGRES_AUTO_MIGRATE`, then refuses to run with an error naming the
 recovery command, and replicas that auto-migrate fail to boot until it is
 cleared. To recover:
@@ -170,7 +183,7 @@ cleared. To recover:
    ```
 
 2. Remove the cause (end the long-running transaction, or resolve the
-   collisions the pre-flight queries list).
+   collisions the pre-flight query lists).
 3. Run `identity migrate force 33`, which records version 33, clears the flag
    and runs nothing. Then run `identity migrate`, which applies 0034 again.
 
