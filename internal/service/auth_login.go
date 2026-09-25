@@ -157,7 +157,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	// before.
 	gate := s.determinerForUser(ctx, &User{Market: market})
 	ageDec := gate.Determine(dateOfBirthMs, s.nowFunc())
-	status := "active"
+	status := StatusActive
 	if gate.Enabled() && ageDec.Band == agegate.BandChild {
 		status = StatusPendingParentalConsent
 	}
@@ -336,7 +336,7 @@ func (s *AuthService) newDuplicateSignupUser(email, displayName string) *User {
 		Email:     email,
 		Name:      displayName,
 		Role:      "member",
-		Status:    "active",
+		Status:    StatusActive,
 		CreatedAt: msToTime(now),
 		UpdatedAt: msToTime(now),
 	}
@@ -1019,7 +1019,7 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 		Name:            displayName,
 		AvatarURL:       opts.avatarURL,
 		Role:            "member",
-		Status:          "active",
+		Status:          StatusActive,
 		EmailVerified:   opts.emailVerified,
 		EmailVerifiedAt: emailVerifiedAt,
 		CreatedAt:       msToTime(now),
@@ -1250,7 +1250,7 @@ func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr
 		// DEACTIVATED/SUSPENDED): a successful login is exactly the signal that
 		// cancels the pending deletion, which issueTokens does before minting
 		// tokens.
-	case status == "invited":
+	case status == StatusInvited:
 		return fmt.Errorf("%w: accept your invitation first", ErrInvitationPending)
 	default:
 		return fmt.Errorf("%w: account is %s", ErrAccountNotActive, status)
@@ -1335,7 +1335,7 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	now := s.nowMs()
 	patch := map[string]any{
 		"password_hash": pwHash,
-		"status":        "active",
+		"status":        StatusActive,
 		"updated_at":    now,
 	}
 	if name != "" {
@@ -1349,7 +1349,7 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	// Mark invitation as accepted.
 	_ = s.repo(ctx).UpdateInvitation(ctx, inv.NodeID, map[string]any{"accepted_at": now})
 
-	user.Status = "active"
+	user.Status = StatusActive
 	user.UpdatedAt = msToTime(now)
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)

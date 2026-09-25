@@ -62,14 +62,22 @@ const (
 	// tokens, and is reversible by whoever suspended it (an admin via
 	// ReactivateUser, a guardian via ReactivateManagedChildAccount).
 	StatusDeactivated = "deactivated"
+	// StatusInvited is an admin-issued account whose invitation has not been
+	// accepted yet: it cannot sign in until AcceptInvitation sets a password.
+	StatusInvited = "invited"
 )
 
 // isActiveStatus reports whether a user status is a normal, fully-usable
 // account. A blank status is a legacy row written before the column carried a
 // default, and counts as active; every other status (invited, deactivated,
 // suspended, pending consent or deletion) does not.
+//
+// Surrounding whitespace is deliberately NOT trimmed: every writer stores one
+// of the exact status values and both SQL drivers CHECK the column against
+// them, so a padded status is a corrupt row, and a check that gates sign-in,
+// self-deletion and consent must fail closed on it.
 func isActiveStatus(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
+	switch strings.ToLower(status) {
 	case "", StatusActive:
 		return true
 	default:
@@ -87,7 +95,7 @@ type User struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	TotpRequired     bool
-	Status           string // "active", "invited", "deactivated", "suspended"
+	Status           string // a Status* constant, or "suspended"
 	RecoveryEmail    string
 	QuotaBytes       int64
 	LastLoginAtMs    int64
