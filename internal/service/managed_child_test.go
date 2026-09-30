@@ -32,14 +32,16 @@ func newManagedChildFixture(t *testing.T, ageGate bool) *managedChildFixture {
 	return &managedChildFixture{svc: svc, repo: repo, writer: writer, adult: adult}
 }
 
+// req is a complete, valid create request. It carries NO step-up password:
+// the create path asks for none, and ManagedChildAccountRequest has no field
+// to put one in.
 func (f *managedChildFixture) req() ManagedChildAccountRequest {
 	return ManagedChildAccountRequest{
-		Username:       "kid.one",
-		DisplayName:    "Kid One",
-		DateOfBirthMs:  dobAgeMs(8),
-		Password:       strongPW,
-		PolicyVersion:  consentPolicyVersion,
-		StepUpPassword: strongPW,
+		Username:      "kid.one",
+		DisplayName:   "Kid One",
+		DateOfBirthMs: dobAgeMs(8),
+		Password:      strongPW,
+		PolicyVersion: consentPolicyVersion,
 	}
 }
 
@@ -85,11 +87,17 @@ func TestCreateManagedChildAccount_Password_HappyPath(t *testing.T) {
 	if err != nil || consent == nil {
 		t.Fatalf("consent record missing: %v %#v", err, consent)
 	}
-	if consent.ConsentingUserID != f.adult.ID || !consent.SteppedUp || consent.PolicyVersion != consentPolicyVersion {
+	if consent.ConsentingUserID != f.adult.ID || consent.PolicyVersion != consentPolicyVersion {
 		t.Fatalf("consent record mismatch: %+v", consent)
 	}
 	if consent.Factors != "verified_phone" {
 		t.Fatalf("consent factors = %q, want verified_phone", consent.Factors)
+	}
+	// The record is honest about which control admitted it: the factor did,
+	// not a password re-entry. A create-path record claiming stepped_up=true
+	// would be evidence of something that never happened.
+	if consent.SteppedUp {
+		t.Fatal("create-path consent must record stepped_up=false: no password was proved")
 	}
 
 	// Audit: one success event, actor the guardian, target the child.
@@ -99,63 +107,220 @@ func TestCreateManagedChildAccount_Password_HappyPath(t *testing.T) {
 	if n := f.writer.countByEventTypeAndDetail(string(audit.EventManagedChildAccountCreated), "credential", "password"); n != 1 {
 		t.Fatalf("credential detail = %d, want 1", n)
 	}
+	// The audit trail records what actually happened, and agrees with the
+	// consent record it describes: no password was re-entered.
+	if n := f.writer.countByEventTypeAndBoolDetail(
+		string(audit.EventManagedChildAccountCreated), "stepped_up", false,
+	); n != 1 {
+		t.Fatalf("stepped_up=false detail = %d, want 1", n)
+	}
+	// And no refusal was recorded at all — a success must not also log a
+	// failing step.
+	if n := f.writer.countByEventTypeAndDetail(
+		string(audit.EventManagedChildAccountCreated), "step", "step_up",
+	); n != 0 {
+		t.Fatalf("step_up refusals = %d, want 0: the create path has no step-up check", n)
+	}
 }
 
-// TestCreateManagedChildAccount_AllowNoPassword mirrors the GrantParentalConsent
-// case for the create path, which mints its own consent record.
-func TestCreateManagedChildAccount_AllowNoPassword(t *testing.T) {
+// TestCreateManagedChildAccount_AsksForNoStepUpPassword is the bug this change
+// fixes: a parent whose account HOLDS a password hash was being asked to
+// re-type it to add a child. Creating a child now requires only the mandatory
+// strong verified factor, so the create succeeds with no password supplied —
+// and the config flag that governs the step-up rule is irrelevant to this path
+// in either position, which is what proves stepUp is no longer consulted here
+// at all rather than merely being satisfied by accident.
+func TestCreateManagedChildAccount_AsksForNoStepUpPassword(t *testing.T) {
 	ctx := context.Background()
-	federated := func(t *testing.T) *managedChildFixture {
-		t.Helper()
-		f := newManagedChildFixture(t, true)
-		f.repo.mu.Lock()
-		f.adult.PasswordHash = ""
-		f.repo.mu.Unlock()
-		return f
-	}
 
-	t.Run("flag off refuses passwordless adult", func(t *testing.T) {
-		f := federated(t)
-		req := f.req()
-		req.StepUpPassword = ""
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
-			t.Fatalf("err = %v, want ErrParentalConsentStepUpFailed", err)
+	for _, allowNoPassword := range []bool{false, true} {
+		t.Run(fmt.Sprintf("allow_no_password=%v", allowNoPassword), func(t *testing.T) {
+			t.Run("adult who holds a password", func(t *testing.T) {
+				f := newManagedChildFixture(t, true)
+				f.svc.cfg.GuardianStepUpAllowNoPassword = allowNoPassword
+				// The precondition that used to make this fail: the account
+				// really does carry a hash, so the old stepUp("") would have
+				// refused it.
+				if f.adult.PasswordHash == "" {
+					t.Fatal("fixture adult must hold a password hash for this test to mean anything")
+				}
+
+				res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "1.2.3.4", "agent/1.0")
+				if err != nil {
+					t.Fatalf("CreateManagedChildAccount with no step-up password: %v", err)
+				}
+				if res.Child.Status != StatusActive {
+					t.Fatalf("child status = %q, want active", res.Child.Status)
+				}
+				// The factor is what admitted the call, and the record says so.
+				if res.Consent.Factors != "verified_phone" || res.Consent.SteppedUp {
+					t.Fatalf("consent = factors %q stepped_up %v, want verified_phone / false",
+						res.Consent.Factors, res.Consent.SteppedUp)
+				}
+			})
+
+			t.Run("federated adult who holds no password", func(t *testing.T) {
+				// The GuardianStepUpAllowNoPassword flag exists only because a
+				// passwordless parent cannot satisfy step-up at all. With
+				// step-up off this path, such a parent creates children with
+				// the flag OFF too — the lockout is gone, not merely opt-out.
+				f := newManagedChildFixture(t, true)
+				f.svc.cfg.GuardianStepUpAllowNoPassword = allowNoPassword
+				f.repo.mu.Lock()
+				f.adult.PasswordHash = ""
+				f.repo.mu.Unlock()
+
+				res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+				if err != nil {
+					t.Fatalf("CreateManagedChildAccount (federated parent): %v", err)
+				}
+				if res.Consent.SteppedUp {
+					t.Fatal("consent record must say stepped_up=false: no password was proved")
+				}
+				active, _ := f.repo.GetActiveParentalConsentForChild(ctx, res.Child.ID)
+				if active == nil || active.SteppedUp {
+					t.Fatalf("persisted record = %#v, want stepped_up=false", active)
+				}
+			})
+		})
+	}
+}
+
+// TestCreateManagedChildAccount_StrongFactorStaysMandatory pins the control
+// that REMAINS. It is the only identity check on this path now, so a parent
+// holding no strong verified factor must still be refused — whatever their
+// password situation — and each single factor must be enough on its own.
+func TestCreateManagedChildAccount_StrongFactorStaysMandatory(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no factor is refused", func(t *testing.T) {
+		for _, tc := range []struct {
+			name        string
+			hasPassword bool
+		}{
+			{"adult holds a password", true},
+			{"federated adult holds none", false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				f := newManagedChildFixture(t, true)
+				f.repo.mu.Lock()
+				f.adult.PhoneVerified = false // the fixture's only factor
+				if !tc.hasPassword {
+					f.adult.PasswordHash = ""
+				}
+				f.repo.mu.Unlock()
+
+				res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "1.2.3.4", "agent/1.0")
+				if !errors.Is(err, ErrParentalConsentFactorMissing) {
+					t.Fatalf("err = %v, want ErrParentalConsentFactorMissing", err)
+				}
+				if res != nil {
+					t.Fatalf("no result on refusal, got %#v", res)
+				}
+				// A refusal creates nothing.
+				if u, _ := f.repo.FindUserByUsername(ctx, "kid.one"); u != nil {
+					t.Fatalf("refusal leaked an account: %#v", u)
+				}
+				if n := f.writer.countByEventTypeAndDetail(
+					string(audit.EventManagedChildAccountCreated), "step", "verified_factor",
+				); n != 1 {
+					t.Fatalf("verified_factor audit refusals = %d, want 1", n)
+				}
+			})
 		}
 	})
 
-	t.Run("flag on admits passwordless adult and records stepped_up=false", func(t *testing.T) {
-		f := federated(t)
-		f.svc.cfg.GuardianStepUpAllowNoPassword = true
-		req := f.req()
-		req.StepUpPassword = ""
-		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
-		if err != nil {
+	t.Run("each single factor admits", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			factors adultFactors
+			want    string
+		}{
+			{"verified phone only", adultFactors{phoneVerified: true}, "verified_phone"},
+			{"passkey only", adultFactors{passkey: true}, "passkey"},
+			{"identity verification only", adultFactors{idvVerified: true}, "identity_verification"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				f := newManagedChildFixture(t, true)
+				// A second adult carrying exactly the one factor under test,
+				// and no password at all — so nothing but the factor can be
+				// what admits the call.
+				adult := seedConsentingAdult(t, f.repo, "solo@example.com", "", tc.factors)
+
+				res, err := f.svc.CreateManagedChildAccount(ctx, adult.ID, f.req(), "", "")
+				if err != nil {
+					t.Fatalf("CreateManagedChildAccount: %v", err)
+				}
+				if res.Consent.Factors != tc.want {
+					t.Fatalf("consent factors = %q, want %q", res.Consent.Factors, tc.want)
+				}
+			})
+		}
+	})
+}
+
+// TestCreateManagedChildAccount_StepUpRemovalIsScopedToCreate is the blast
+// radius. The step-up requirement came off ONE path; every other guardian
+// surface still demands it, and this fails loudly if a later refactor lets the
+// removal leak sideways into the operations that act on an account that
+// already exists.
+func TestCreateManagedChildAccount_StepUpRemovalIsScopedToCreate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("create needs none", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		req := ManagedChildAccountRequest{
+			Username:      "kid.new",
+			DisplayName:   "Kid New",
+			DateOfBirthMs: dobAgeMs(8),
+			Password:      strongPW,
+			PolicyVersion: consentPolicyVersion,
+		}
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.guardian.ID, req, "", ""); err != nil {
 			t.Fatalf("CreateManagedChildAccount: %v", err)
 		}
-		if res.Consent.SteppedUp {
-			t.Fatal("consent record must say stepped_up=false: no password was proved")
-		}
-		active, _ := f.repo.GetActiveParentalConsentForChild(ctx, res.Child.ID)
-		if active == nil || active.SteppedUp {
-			t.Fatalf("persisted record = %#v, want stepped_up=false", active)
-		}
 	})
 
-	t.Run("flag on still requires the password an adult holds", func(t *testing.T) {
-		f := newManagedChildFixture(t, true)
-		f.svc.cfg.GuardianStepUpAllowNoPassword = true
+	t.Run("GrantParentalConsent still demands it", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		pending := seedChildPendingConsent(f.repo, "pending@example.com")
+
 		for _, stepUp := range []string{"", "not-the-password"} {
-			req := f.req()
-			req.StepUpPassword = stepUp
-			if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+			_, err := f.svc.GrantParentalConsent(ctx, f.guardian.ID, pending.ID, consentPolicyVersion, stepUp, "", "")
+			if !errors.Is(err, ErrParentalConsentStepUpFailed) {
 				t.Fatalf("stepUp=%q: err = %v, want ErrParentalConsentStepUpFailed", stepUp, err)
 			}
 		}
-		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
-		if err != nil || !res.Consent.SteppedUp {
+		rec, err := f.svc.GrantParentalConsent(ctx, f.guardian.ID, pending.ID, consentPolicyVersion, strongPW, "", "")
+		if err != nil || !rec.SteppedUp {
 			t.Fatalf("correct password: err = %v, want nil and stepped_up=true", err)
 		}
 	})
+}
+
+// TestGuardianManagementOps_StillDemandStepUpAfterCreateChange is the other
+// half of the blast radius, and the one that would be catastrophic to break
+// silently: the step-up came off CreateManagedChildAccount only. Every
+// guardian management operation acts on an account that already exists — a
+// stolen session clearing one of them takes a child over, locks them out or
+// erases them — so each still refuses without the password, and still works
+// with it.
+func TestGuardianManagementOps_StillDemandStepUpAfterCreateChange(t *testing.T) {
+	ctx := context.Background()
+	for _, op := range allGuardianOps() {
+		t.Run(op.name, func(t *testing.T) {
+			for _, stepUp := range []string{"", "not-the-password"} {
+				f := newGuardianFixture(ctx, t)
+				if err := op.call(f, f.guardian.ID, f.child.ID, stepUp); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+					t.Fatalf("stepUp=%q: err = %v, want ErrParentalConsentStepUpFailed", stepUp, err)
+				}
+			}
+			f := newGuardianFixture(ctx, t)
+			if err := op.call(f, f.guardian.ID, f.child.ID, strongPW); err != nil {
+				t.Fatalf("correct password: err = %v, want nil", err)
+			}
+		})
+	}
 }
 
 func TestCreateManagedChildAccount_PasskeyEnrolment_HappyPath(t *testing.T) {
@@ -221,22 +386,6 @@ func TestCreateManagedChildAccount_Refusals(t *testing.T) {
 			mutateReq:    func(r *ManagedChildAccountRequest) {},
 			wantErr:      ErrPermissionDenied,
 			wantFailStep: "caller_minor",
-		},
-		{
-			name: "step-up password wrong",
-			mutateReq: func(r *ManagedChildAccountRequest) {
-				r.StepUpPassword = "wrong-password"
-			},
-			wantErr:      ErrParentalConsentStepUpFailed,
-			wantFailStep: "step_up",
-		},
-		{
-			name: "step-up password missing",
-			mutateReq: func(r *ManagedChildAccountRequest) {
-				r.StepUpPassword = ""
-			},
-			wantErr:      ErrParentalConsentStepUpFailed,
-			wantFailStep: "step_up",
 		},
 		{
 			name: "no strong verified factor",
@@ -353,6 +502,14 @@ func TestCreateManagedChildAccount_Refusals(t *testing.T) {
 				if n := f.writer.countByEventTypeAndDetail(string(audit.EventManagedChildAccountCreated), "step", tc.wantFailStep); n != 1 {
 					t.Fatalf("failure audit step %q count = %d, want 1", tc.wantFailStep, n)
 				}
+			}
+			// No refusal on this path can be attributed to a step-up any
+			// more — the check is gone, so an audit record naming it would be
+			// describing a control that never ran.
+			if n := f.writer.countByEventTypeAndDetail(
+				string(audit.EventManagedChildAccountCreated), "step", "step_up",
+			); n != 0 {
+				t.Fatalf("create recorded %d step_up refusals; that check no longer exists here", n)
 			}
 		})
 	}

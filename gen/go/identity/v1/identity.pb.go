@@ -5294,9 +5294,15 @@ type ConsentRecord struct {
 	// consenting adult's account at the moment of consent. Always >= 1.
 	VerificationFactors []ParentalConsentVerificationFactor `protobuf:"varint,6,rep,packed,name=verification_factors,json=verificationFactors,proto3,enum=identity.v1.ParentalConsentVerificationFactor" json:"verification_factors,omitempty"`
 	// stepped_up records whether the consenting adult re-authenticated with a
-	// password at the moment of consent. False only when the deployment enabled
+	// password at the moment of consent. It is evidence of what happened, not a
+	// pass/fail summary: false never means the consent was unverified, only that
+	// something other than a password re-entry admitted it. It is false on every
+	// CreateManagedChildAccount record — that RPC asks for no password, because
+	// the mandatory strong verified factor is its re-authentication control — and
+	// on a GrantParentalConsent record only when the deployment enabled
 	// GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD and the adult's account holds no
-	// password. Recorded explicitly so the artifact is self-describing.
+	// password. verification_factors is the field that is never empty on either
+	// path. Recorded explicitly so the artifact is self-describing.
 	SteppedUp bool `protobuf:"varint,7,opt,name=stepped_up,json=steppedUp,proto3" json:"stepped_up,omitempty"`
 	// consent_ip / consent_user_agent capture where the consenting action came
 	// from, for the audit trail.
@@ -6025,9 +6031,14 @@ type CreateManagedChildAccountRequest struct {
 	// policy_version identifies the direct-notice/privacy policy the adult was
 	// shown before consenting, exactly as in GrantParentalConsent. Required.
 	PolicyVersion string `protobuf:"bytes,8,opt,name=policy_version,json=policyVersion,proto3" json:"policy_version,omitempty"`
-	// step_up_password re-authenticates the CALLING ADULT at the moment of
-	// creation (verified against the adult's stored password hash), exactly as
-	// in GrantParentalConsent.
+	// step_up_password is IGNORED and reserved. This RPC no longer
+	// re-authenticates the calling adult with a password — the mandatory strong
+	// verified factor is the re-authentication control on the create path — so
+	// whatever is sent here changes no outcome: right, wrong, present or absent.
+	// The field is retained rather than removed because removing it would break
+	// existing clients on the wire; send nothing. The step-up on
+	// GrantParentalConsent and on every guardian management RPC is unchanged and
+	// still enforced.
 	StepUpPassword string `protobuf:"bytes,9,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache

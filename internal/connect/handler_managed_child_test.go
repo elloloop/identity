@@ -15,14 +15,17 @@ import (
 // the tests configure.
 func childDOB() int64 { return time.Now().AddDate(-8, 0, 0).UnixMilli() }
 
+// managedChildRequest is a valid create request as a well-behaved client now
+// sends it: no step_up_password at all. The wire field still exists — removing
+// a request field would break existing clients — but the server ignores it,
+// which TestHandler_CreateManagedChildAccount_StepUpPasswordIsIgnored proves.
 func managedChildRequest(username string) *identitypb.CreateManagedChildAccountRequest {
 	return &identitypb.CreateManagedChildAccountRequest{
-		Username:       username,
-		DisplayName:    "Kid One",
-		DateOfBirthMs:  childDOB(),
-		Password:       consentTestPassword,
-		PolicyVersion:  consentTestPolicy,
-		StepUpPassword: consentTestPassword,
+		Username:      username,
+		DisplayName:   "Kid One",
+		DateOfBirthMs: childDOB(),
+		Password:      consentTestPassword,
+		PolicyVersion: consentTestPolicy,
 	}
 }
 
@@ -95,22 +98,51 @@ func TestHandler_CreateManagedChildAccount_Unauthenticated(t *testing.T) {
 	}
 }
 
-// TestHandler_CreateManagedChildAccount_StepUpAndFactorMapping pins that both
-// mandatory service-side checks surface as distinct, correct Connect codes.
-func TestHandler_CreateManagedChildAccount_StepUpAndFactorMapping(t *testing.T) {
+// TestHandler_CreateManagedChildAccount_StepUpPasswordIsIgnored is the wire
+// half of the decision: the request field survives for compatibility, and the
+// server does nothing with it. Whatever a client puts there — the right
+// password, the wrong one, or nothing — the outcome is the same create, so no
+// caller is broken by the change and none is misled into thinking the value is
+// still checked.
+func TestHandler_CreateManagedChildAccount_StepUpPasswordIsIgnored(t *testing.T) {
 	ctx := context.Background()
-	t.Run("wrong step-up password", func(t *testing.T) {
-		h := newHarness(t)
-		adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
-		msg := managedChildRequest("kid.one")
-		msg.StepUpPassword = "not-the-password"
+	for _, tc := range []struct {
+		name     string
+		stepUp   string
+		username string
+	}{
+		{"absent", "", "kid.absent"},
+		{"correct password", consentTestPassword, "kid.correct"},
+		{"wrong password", "not-the-password", "kid.wrong"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+			msg := managedChildRequest(tc.username)
+			msg.StepUpPassword = tc.stepUp
 
-		_, err := h.client.CreateManagedChildAccount(ctx,
-			authedReq(connect.NewRequest(msg), adult))
-		if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
-			t.Fatalf("code = %v, want Unauthenticated", got)
-		}
-	})
+			res, err := h.client.CreateManagedChildAccount(ctx,
+				authedReq(withClientHeaders(connect.NewRequest(msg)), adult))
+			if err != nil {
+				t.Fatalf("CreateManagedChildAccount: %v", err)
+			}
+			if res.Msg.GetChild().GetStatus() != identitypb.UserStatus_USER_STATUS_ACTIVE {
+				t.Fatalf("child status = %v, want ACTIVE", res.Msg.GetChild().GetStatus())
+			}
+			// The consent record never claims a step-up the call did not do,
+			// whatever the client sent.
+			if res.Msg.GetConsent().GetSteppedUp() {
+				t.Fatal("consent must record stepped_up=false: the create path proves no password")
+			}
+		})
+	}
+}
+
+// TestHandler_CreateManagedChildAccount_FactorMapping pins that the one
+// mandatory service-side check on this path surfaces as the correct Connect
+// code.
+func TestHandler_CreateManagedChildAccount_FactorMapping(t *testing.T) {
+	ctx := context.Background()
 
 	t.Run("no strong verified factor", func(t *testing.T) {
 		h := newHarness(t)
