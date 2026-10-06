@@ -540,6 +540,15 @@
     "anchor": "email-and-branding"
   },
   {
+    "name": "GATEWAY_EMAIL_LINK_BASE_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the base URL of the pages that redeem password-reset and email-verification links, for deployments that serve those pages outside identity (e.g. a sign-in hub).",
+    "category": "Email \u0026 branding",
+    "anchor": "email-and-branding"
+  },
+  {
     "name": "GATEWAY_EMAIL_LIST_UNSUBSCRIBE",
     "type": "string",
     "default": "",

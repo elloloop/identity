@@ -401,12 +401,12 @@ func TestAccessDenyLayer_SuppressesPasswordResetMail(t *testing.T) {
 	ctx := accessScope(t, workEmailOnlyJSON)
 
 	rec.Reset()
-	require.NoError(t, svc.RequestPasswordReset(ctx, "legacy@gmail.com"),
+	require.NoError(t, svc.RequestPasswordReset(ctx, "legacy@gmail.com", EmailLinkParams{}),
 		"refusal stays silent — a fail-fast here would leak account existence")
 	require.Empty(t, rec.Sent(), "no reset mail to a refused address")
 
 	rec.Reset()
-	require.NoError(t, svc.RequestPasswordReset(ctx, "dev@corp.example"))
+	require.NoError(t, svc.RequestPasswordReset(ctx, "dev@corp.example", EmailLinkParams{}))
 	require.NotEmpty(t, rec.Sent(), "a permitted address still gets its reset mail")
 }
 
@@ -422,7 +422,7 @@ func TestAccessDenyLayer_RefreshDenialDoesNotBurnTheToken(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	// Signed up before the project switched to work-email-only.
-	result, err := svc.PasswordSignup(context.Background(), "legacy@gmail.com", strongPW, "", "", 0, "")
+	result, err := svc.PasswordSignup(context.Background(), "legacy@gmail.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 
 	ctx := accessScope(t, workEmailOnlyJSON)

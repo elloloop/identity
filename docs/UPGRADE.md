@@ -1,5 +1,44 @@
 # Upgrade guide
 
+## v4.8.0 → v4.8.1 — reset and verification links can point at a sign-in hub (additive)
+
+No schema change and no migration. A deployment that sets nothing new sends
+exactly the same emails as before.
+
+- **`GATEWAY_EMAIL_LINK_BASE_URL`** (default empty) is where the
+  password-reset and email-verification pages live. Identity does not serve
+  those pages: by default the links go to `/auth/reset-password` and
+  `/auth/verify-email` on the project's primary auth domain, else on
+  `GATEWAY_APP_BASE_URL`. **If you serve these pages somewhere else, set the
+  variable to that base URL** — for example a sign-in hub at
+  `https://signin.example.com`, which serves `/reset-password` and
+  `/verify-email`. The links then become `<base>/reset-password?token=…`
+  and `<base>/verify-email?token=…` for every project, and take precedence
+  over any project's primary auth domain. The value must be an absolute
+  `https` URL (`http` only for a loopback host) with no userinfo, query or
+  fragment. A path prefix is kept, and a trailing slash is ignored. Any other
+  value stops the server from starting
+  (`config: GATEWAY_EMAIL_LINK_BASE_URL …`). Magic-link, email-change and
+  invitation links are not affected.
+- **`product` and `return_to` on `RequestPasswordReset`, `PasswordSignup`
+  and `SendEmailVerification`.** Both are optional. When set, they are added
+  to the emailed reset or verification link, URL-encoded after the token, as
+  `&product=<slug>` and `&redirect=<return_to>`, so the page can show the
+  right product and send the user back where they started. `product` is
+  trimmed and lower-cased and must then be 1–64 characters of `a-z`, `0-9`,
+  `-` and `_`, starting with a letter or digit. `return_to` must match
+  `GATEWAY_OAUTH_ALLOWED_RETURN_URLS`, the allowlist hosted OAuth and magic
+  links already use; with that allowlist empty, every `return_to` is refused.
+  A refused value fails the call with `INVALID_ARGUMENT` before anything is
+  created or sent. `RequestPasswordReset` used to succeed for every request;
+  it now returns this one error, and only for a request that sets one of the
+  new fields wrongly. The check reads only the request, so the answer is the
+  same for every address and reveals nothing about which accounts exist.
+  Clients that send neither field see no change.
+- **Webhook URL errors no longer echo credentials.** A
+  `GATEWAY_WEBHOOK_SUBSCRIPTIONS` URL that fails validation is now reported
+  with any userinfo redacted.
+
 ## v4.7 → v4.8 — directory lookup for services (additive); session-mode and SCIM fixes (behaviour changes)
 
 This release adds a read-only lookup RPC and the credential kind that

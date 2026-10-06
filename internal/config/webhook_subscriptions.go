@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"strings"
 
 	"github.com/elloloop/identity/pkg/events"
@@ -62,7 +60,7 @@ func (c *Config) WebhookSubscriptionList() ([]WebhookSubscription, error) {
 // validate enforces one subscription's invariants: an HTTPS URL (HTTP only
 // for a loopback host), a non-empty secret, and only known event types.
 func (s WebhookSubscription) validate() error {
-	if err := validateWebhookURL(s.URL); err != nil {
+	if _, err := parseHTTPSOrLoopbackURL(s.URL); err != nil {
 		return err
 	}
 	if s.Secret == "" {
@@ -74,44 +72,4 @@ func (s WebhookSubscription) validate() error {
 		}
 	}
 	return nil
-}
-
-// validateWebhookURL requires an absolute HTTPS URL. Plain HTTP is accepted
-// only when the host is loopback, matching the repo's localhost-dev
-// convention for base URLs (GATEWAY_APP_BASE_URL etc.).
-func validateWebhookURL(raw string) error {
-	if raw == "" {
-		return errors.New("url must not be empty")
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("url %q is not a valid URL: %w", raw, err)
-	}
-	if u.Host == "" {
-		return fmt.Errorf("url %q must be absolute (scheme and host)", raw)
-	}
-	switch u.Scheme {
-	case "https":
-		return nil
-	case "http":
-		if isLoopbackHost(u.Hostname()) {
-			return nil
-		}
-		return fmt.Errorf("url %q must use https (http is accepted only for a loopback host)", raw)
-	default:
-		return fmt.Errorf("url %q must use https", raw)
-	}
-}
-
-// isLoopbackHost reports whether host is a loopback name or address
-// (localhost, 127.0.0.0/8, or ::1) — the only case a plaintext webhook URL is
-// accepted.
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
 }

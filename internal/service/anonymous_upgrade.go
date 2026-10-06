@@ -130,7 +130,7 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 	// asserts someone else's address, with no verification mail and so no
 	// signal to its owner. Same shape as signup: promoted account, no tokens.
 	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail {
-		if err := s.SendEmailVerification(ctx, userID); err != nil {
+		if err := s.sendEmailVerification(ctx, userID, emailLink{}); err != nil {
 			s.logger.Warn("anonymous_upgrade_verification_send_failed",
 				zap.String("user_id", userID), zap.Error(err))
 		}
@@ -158,7 +158,7 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 		return &LoginResult{User: u}, nil
 	}
 
-	if err := s.SendEmailVerification(ctx, userID); err != nil {
+	if err := s.sendEmailVerification(ctx, userID, emailLink{}); err != nil {
 		s.logger.Warn("anonymous_upgrade_verification_send_failed",
 			zap.String("user_id", userID), zap.Error(err))
 	}

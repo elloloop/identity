@@ -144,7 +144,8 @@ func (h *IdentityHandler) ChangePassword(
 
 // RequestPasswordReset sends a password reset link to the user's primary
 // verified email (the address on file for the account).
-// Always returns success to prevent email enumeration.
+// Returns success whether or not the email matches an account, to prevent
+// email enumeration.
 func (h *IdentityHandler) RequestPasswordReset(
 	ctx context.Context,
 	req *connect.Request[identitypb.RequestPasswordResetRequest],
@@ -155,11 +156,16 @@ func (h *IdentityHandler) RequestPasswordReset(
 	if err := h.requireAssurance(ctx, h.assuranceEnforcePasswordReset(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
-	// RequestPasswordReset is intentionally enumeration-safe: even if
-	// the service layer reports an error (unknown email, transport
-	// failure, etc.), we always return success so the response cannot
-	// be used to confirm whether an account exists.
-	_ = h.auth.RequestPasswordReset(ctx, req.Msg.Email)
+	// The service returns nil for every account-dependent outcome (unknown
+	// email, transport failure, …). Its only error is a refused return_to
+	// or product, decided from the request alone and so the same for every
+	// email — not an account-existence oracle either.
+	if err := h.auth.RequestPasswordReset(ctx, req.Msg.Email, service.EmailLinkParams{
+		Product:  req.Msg.Product,
+		ReturnTo: req.Msg.ReturnTo,
+	}); err != nil {
+		return nil, toConnectError(err)
+	}
 	return connect.NewResponse(&identitypb.RequestPasswordResetResponse{}), nil
 }
 
@@ -483,7 +489,10 @@ func (h *IdentityHandler) SendEmailVerification(
 	if userID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
-	if err := h.auth.SendEmailVerification(ctx, userID); err != nil {
+	if err := h.auth.SendEmailVerification(ctx, userID, service.EmailLinkParams{
+		Product:  req.Msg.Product,
+		ReturnTo: req.Msg.ReturnTo,
+	}); err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.SendEmailVerificationResponse{}), nil

@@ -946,6 +946,17 @@ type Config struct {
 	// Public app URLs used in email links.
 	AppBaseURL string // GATEWAY_APP_BASE_URL — e.g. "https://app.example.com"
 
+	// EmailLinkBaseURL is the base URL of the pages that redeem password-reset
+	// and email-verification links, for deployments that serve those pages
+	// outside identity (e.g. a sign-in hub). When set, the links are
+	// <base>/reset-password?token=… and <base>/verify-email?token=… for every
+	// project, ahead of a project's primary auth domain. When empty they stay
+	// on <primary auth domain or GATEWAY_APP_BASE_URL>/auth/…. Magic-link,
+	// email-change and invitation links are unaffected. Must be an absolute
+	// https URL (http only for a loopback host) without userinfo, query or
+	// fragment; a path prefix is kept. Driven by GATEWAY_EMAIL_LINK_BASE_URL.
+	EmailLinkBaseURL string
+
 	// How long an email-verification or password-reset token is valid for.
 	EmailTokenExpirySeconds int // GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS (default 86400)
 
@@ -1412,6 +1423,7 @@ func loadFromEnv() *Config {
 		EmailListUnsubscribe:   envStr("GATEWAY_EMAIL_LIST_UNSUBSCRIBE", ""),
 
 		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
+		EmailLinkBaseURL:        envStr("GATEWAY_EMAIL_LINK_BASE_URL", ""),
 		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
 		// 604800 = 7 days; team invitations are less time-sensitive than
 		// password resets.
@@ -1984,6 +1996,30 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateEmailLinkBaseURL(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateEmailLinkBaseURL fails boot on a GATEWAY_EMAIL_LINK_BASE_URL that
+// would put a broken or downgradeable link into every reset and verification
+// email: it must be an absolute https URL (http only for a loopback host), and
+// carry no userinfo, query or fragment, since the link appends its own
+// "/<page>?token=…" to it. Empty is valid and keeps the links on the app base.
+func (c *Config) validateEmailLinkBaseURL() error {
+	if c.EmailLinkBaseURL == "" {
+		return nil
+	}
+	u, err := parseHTTPSOrLoopbackURL(c.EmailLinkBaseURL)
+	if err != nil {
+		return fmt.Errorf("config: GATEWAY_EMAIL_LINK_BASE_URL: %w", err)
+	}
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return fmt.Errorf("config: GATEWAY_EMAIL_LINK_BASE_URL %q must not carry userinfo, a query or a fragment",
+			redactURL(c.EmailLinkBaseURL))
+	}
 	return nil
 }
 
