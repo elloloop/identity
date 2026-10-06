@@ -38,6 +38,7 @@ exactly the same emails as before.
 - **Webhook URL errors no longer echo credentials.** A
   `GATEWAY_WEBHOOK_SUBSCRIPTIONS` URL that fails validation is now reported
   with any userinfo redacted.
+- **Dependencies**: `go.opentelemetry.io/otel` v1.45.0 (GO-2026-6505).
 
 ## v4.7 → v4.8 — directory lookup for services (additive); session-mode and SCIM fixes (behaviour changes)
 
