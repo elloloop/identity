@@ -2611,7 +2611,15 @@ type PasswordSignupRequest struct {
 	// created under. Optional; when the project configures per-jurisdiction age
 	// thresholds it must name one of them. Canonicalized (trimmed, upper-cased)
 	// before storage.
-	Market        string `protobuf:"bytes,6,opt,name=market,proto3" json:"market,omitempty"`
+	Market string `protobuf:"bytes,6,opt,name=market,proto3" json:"market,omitempty"`
+	// return_to is the app URL the verification page returns the user to.
+	// Optional; validated and carried on the link exactly as on
+	// RequestPasswordResetRequest, and checked before the account is created.
+	ReturnTo string `protobuf:"bytes,7,opt,name=return_to,json=returnTo,proto3" json:"return_to,omitempty"`
+	// product is the slug of the product the sign-up is for. Optional;
+	// validated and carried on the link exactly as on
+	// RequestPasswordResetRequest, and checked before the account is created.
+	Product       string `protobuf:"bytes,8,opt,name=product,proto3" json:"product,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2677,6 +2685,20 @@ func (x *PasswordSignupRequest) GetDateOfBirthMs() int64 {
 func (x *PasswordSignupRequest) GetMarket() string {
 	if x != nil {
 		return x.Market
+	}
+	return ""
+}
+
+func (x *PasswordSignupRequest) GetReturnTo() string {
+	if x != nil {
+		return x.ReturnTo
+	}
+	return ""
+}
+
+func (x *PasswordSignupRequest) GetProduct() string {
+	if x != nil {
+		return x.Product
 	}
 	return ""
 }
@@ -4457,9 +4479,29 @@ func (x *ExportMyDataResponse) GetAuditEvents() []*AuditEvent {
 // The reset link is sent to the account's PRIMARY verified email — the
 // address matching the supplied `email`. If no account matches, the
 // request silently succeeds (no enumeration).
+//
+// The emailed link is <page>?token=<token>, where <page> is
+// GATEWAY_EMAIL_LINK_BASE_URL + "/reset-password" when that is set, else
+// "/auth/reset-password" on the project's primary auth domain (or
+// GATEWAY_APP_BASE_URL). The link also carries `&product=<product>` and
+// `&redirect=<return_to>`, URL-encoded, when the request sets them, so the
+// page can present the right product and send the user back afterwards.
+// The same rule builds the verification link of PasswordSignup and
+// SendEmailVerification ("/verify-email").
 type RequestPasswordResetRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Email string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	// return_to is the app URL the reset page returns the user to. Optional;
+	// when set it must match the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist
+	// (shared with hosted OAuth and magic links) or the request fails with
+	// InvalidArgument — for any email, so it reveals nothing about accounts.
+	ReturnTo string `protobuf:"bytes,3,opt,name=return_to,json=returnTo,proto3" json:"return_to,omitempty"`
+	// product is the slug of the product the request is for (e.g.
+	// "easyloops"), with the same semantics as the hosted hub's ?product=
+	// query. Optional; trimmed and lower-cased, and it must be 1–64 of
+	// [a-z0-9_-] starting with a letter or digit, or the request fails with
+	// InvalidArgument.
+	Product       string `protobuf:"bytes,4,opt,name=product,proto3" json:"product,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4497,6 +4539,20 @@ func (*RequestPasswordResetRequest) Descriptor() ([]byte, []int) {
 func (x *RequestPasswordResetRequest) GetEmail() string {
 	if x != nil {
 		return x.Email
+	}
+	return ""
+}
+
+func (x *RequestPasswordResetRequest) GetReturnTo() string {
+	if x != nil {
+		return x.ReturnTo
+	}
+	return ""
+}
+
+func (x *RequestPasswordResetRequest) GetProduct() string {
+	if x != nil {
+		return x.Product
 	}
 	return ""
 }
@@ -4625,8 +4681,18 @@ func (*ConfirmPasswordResetResponse) Descriptor() ([]byte, []int) {
 	return file_identity_v1_identity_proto_rawDescGZIP(), []int{72}
 }
 
+// SendEmailVerification emails the authenticated caller a verification
+// link, built as described on RequestPasswordResetRequest.
 type SendEmailVerificationRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// return_to is the app URL the verification page returns the user to.
+	// Optional; validated and carried on the link exactly as on
+	// RequestPasswordResetRequest.
+	ReturnTo string `protobuf:"bytes,1,opt,name=return_to,json=returnTo,proto3" json:"return_to,omitempty"`
+	// product is the slug of the product the request is for. Optional;
+	// validated and carried on the link exactly as on
+	// RequestPasswordResetRequest.
+	Product       string `protobuf:"bytes,2,opt,name=product,proto3" json:"product,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4659,6 +4725,20 @@ func (x *SendEmailVerificationRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SendEmailVerificationRequest.ProtoReflect.Descriptor instead.
 func (*SendEmailVerificationRequest) Descriptor() ([]byte, []int) {
 	return file_identity_v1_identity_proto_rawDescGZIP(), []int{73}
+}
+
+func (x *SendEmailVerificationRequest) GetReturnTo() string {
+	if x != nil {
+		return x.ReturnTo
+	}
+	return ""
+}
+
+func (x *SendEmailVerificationRequest) GetProduct() string {
+	if x != nil {
+		return x.Product
+	}
+	return ""
 }
 
 type SendEmailVerificationResponse struct {
@@ -15972,13 +16052,15 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"\xc6\x01\n" +
+	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"\xfd\x01\n" +
 	"\x15PasswordSignupRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12%\n" +
 	"\x0erecovery_email\x18\x03 \x01(\tR\rrecoveryEmail\x12'\n" +
 	"\x10date_of_birth_ms\x18\x05 \x01(\x03R\rdateOfBirthMs\x12\x16\n" +
-	"\x06market\x18\x06 \x01(\tR\x06marketJ\x04\b\x04\x10\x05R\rcaptcha_token\"\xc1\x01\n" +
+	"\x06market\x18\x06 \x01(\tR\x06market\x12\x1b\n" +
+	"\treturn_to\x18\a \x01(\tR\breturnTo\x12\x18\n" +
+	"\aproduct\x18\b \x01(\tR\aproductJ\x04\b\x04\x10\x05R\rcaptcha_token\"\xc1\x01\n" +
 	"\x16PasswordSignupResponse\x12\x19\n" +
 	"\bid_token\x18\x01 \x01(\tR\aidToken\x12%\n" +
 	"\x04user\x18\x02 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
@@ -16080,15 +16162,19 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\bpasskeys\x18\x05 \x03(\v2\".identity.v1.PasskeyCredentialInfoR\bpasskeys\x12H\n" +
 	"\x11linked_identities\x18\x06 \x03(\v2\x1b.identity.v1.LinkedIdentityR\x10linkedIdentities\x12!\n" +
 	"\ftotp_enabled\x18\a \x01(\bR\vtotpEnabled\x12:\n" +
-	"\faudit_events\x18\b \x03(\v2\x17.identity.v1.AuditEventR\vauditEvents\"H\n" +
+	"\faudit_events\x18\b \x03(\v2\x17.identity.v1.AuditEventR\vauditEvents\"\x7f\n" +
 	"\x1bRequestPasswordResetRequest\x12\x14\n" +
-	"\x05email\x18\x01 \x01(\tR\x05emailJ\x04\b\x02\x10\x03R\rcaptcha_token\"\x1e\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1b\n" +
+	"\treturn_to\x18\x03 \x01(\tR\breturnTo\x12\x18\n" +
+	"\aproduct\x18\x04 \x01(\tR\aproductJ\x04\b\x02\x10\x03R\rcaptcha_token\"\x1e\n" +
 	"\x1cRequestPasswordResetResponse\"V\n" +
 	"\x1bConfirmPasswordResetRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12!\n" +
 	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\"\x1e\n" +
-	"\x1cConfirmPasswordResetResponse\"\x1e\n" +
-	"\x1cSendEmailVerificationRequest\"\x1f\n" +
+	"\x1cConfirmPasswordResetResponse\"U\n" +
+	"\x1cSendEmailVerificationRequest\x12\x1b\n" +
+	"\treturn_to\x18\x01 \x01(\tR\breturnTo\x12\x18\n" +
+	"\aproduct\x18\x02 \x01(\tR\aproduct\"\x1f\n" +
 	"\x1dSendEmailVerificationResponse\"*\n" +
 	"\x12VerifyEmailRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\"<\n" +

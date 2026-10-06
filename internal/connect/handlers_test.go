@@ -442,6 +442,69 @@ func TestRequestPasswordReset_DisabledStillSucceeds(t *testing.T) {
 	}
 }
 
+// TestRequestPasswordReset_RefusedReturnToIsInvalidArgument: a return_to off
+// the allowlist surfaces as InvalidArgument — identically for an account and
+// for an unknown address, so it is no enumeration oracle — and mints nothing.
+func TestRequestPasswordReset_RefusedReturnToIsInvalidArgument(t *testing.T) {
+	h := newHarness(t)
+	u := h.repo.seedUser(&service.User{Email: "u@e.com", Status: "active", Role: "member"})
+
+	for _, addr := range []string{u.Email, "nobody@e.com"} {
+		_, err := h.client.RequestPasswordReset(context.Background(), connect.NewRequest(&identitypb.RequestPasswordResetRequest{
+			Email: addr, ReturnTo: "https://evil.test/", Product: "easyloops",
+		}))
+		if connectCodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("%s: code = %v (%v), want InvalidArgument", addr, connectCodeOf(err), err)
+		}
+	}
+	if got := len(h.repo.passwordResets); got != 0 {
+		t.Fatalf("expected 0 reset tokens, got %d", got)
+	}
+}
+
+func TestRequestPasswordReset_AllowedLinkParamsSucceed(t *testing.T) {
+	h := newHarness(t)
+	u := h.repo.seedUser(&service.User{Email: "u@e.com", Status: "active", Role: "member"})
+
+	if _, err := h.client.RequestPasswordReset(context.Background(), connect.NewRequest(&identitypb.RequestPasswordResetRequest{
+		Email: u.Email, ReturnTo: "https://app.test/courses", Product: "Easyloops",
+	})); err != nil {
+		t.Fatalf("RequestPasswordReset: %v", err)
+	}
+	if got := len(h.repo.passwordResets); got != 1 {
+		t.Fatalf("expected 1 reset token, got %d", got)
+	}
+}
+
+func TestSendEmailVerification_RefusedProductIsInvalidArgument(t *testing.T) {
+	h := newHarness(t)
+	u := h.repo.seedUser(&service.User{Email: "u@e.com", Status: "active", Role: "member"})
+
+	_, err := h.client.SendEmailVerification(context.Background(), authedReq(connect.NewRequest(&identitypb.SendEmailVerificationRequest{
+		Product: "not a slug",
+	}), u.ID))
+	if connectCodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v (%v), want InvalidArgument", connectCodeOf(err), err)
+	}
+	if got := len(h.repo.emailVerifications); got != 0 {
+		t.Fatalf("expected 0 verification tokens, got %d", got)
+	}
+}
+
+func TestPasswordSignup_RefusedReturnToIsInvalidArgument(t *testing.T) {
+	h := newHarness(t)
+
+	_, err := h.client.PasswordSignup(context.Background(), connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email: "new@e.com", Password: strongPW, ReturnTo: "https://evil.test/",
+	}))
+	if connectCodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v (%v), want InvalidArgument", connectCodeOf(err), err)
+	}
+	if u, _ := h.repo.FindUserByEmail(context.Background(), "new@e.com"); u != nil {
+		t.Fatalf("refused signup created account %q", u.ID)
+	}
+}
+
 func TestOAuthLogin_LocalDisabled(t *testing.T) {
 	h := newHarness(t)
 	// OAuthLogin with empty email triggers ErrInvalidArgument inside service

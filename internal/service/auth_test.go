@@ -48,7 +48,7 @@ func TestPasswordSignup_CreatesUserAndIssuesTokens(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "")
+	result, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "alice@example.com", result.User.Email)
@@ -63,11 +63,11 @@ func TestPasswordSignup_CreatesUserAndIssuesTokens(t *testing.T) {
 func TestPasswordSignup_DuplicateEmail_NoEnumeration(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 
-	fresh, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "")
+	fresh, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	rec.Reset()
 
-	dup, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "")
+	dup, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.NotNil(t, dup)
 
@@ -90,11 +90,11 @@ func TestPasswordSignup_DuplicateEmail_NoEnumeration(t *testing.T) {
 func TestPasswordSignup_DuplicateEmail_SendsNoticeEmail(t *testing.T) {
 	svc, _, rec := newAuthSvcWithMailer(t)
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "")
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	rec.Reset()
 
-	_, err = svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "")
+	_, err = svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 
 	sent := rec.Sent()
@@ -113,7 +113,7 @@ func TestPasswordSignup_DuplicateCreateRaceReturnsDecoy(t *testing.T) {
 	repo.failCreateUser = true
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "race@example.com", strongPW, "Racer", "", 0, "")
+	result, err := svc.PasswordSignup(context.Background(), "race@example.com", strongPW, "Racer", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.NotEqual(t, winner.ID, result.User.ID)
@@ -135,7 +135,7 @@ func TestPasswordSignup_WeakPasswordFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", "short", "", "", 0, "")
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", "short", "", "", 0, "", EmailLinkParams{})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrWeakPassword))
 }
@@ -144,7 +144,7 @@ func TestPasswordSignup_InvalidEmailFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.PasswordSignup(context.Background(), "notanemail", strongPW, "", "", 0, "")
+	_, err := svc.PasswordSignup(context.Background(), "notanemail", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -154,7 +154,7 @@ func TestPasswordSignup_LocalAuthDisabledFails(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	svc.cfg.AuthAllowLocal = false
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "", 0, "")
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrLocalAuthDisabled))
 }
@@ -164,7 +164,7 @@ func TestPasswordSignup_DisabledFails(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	svc.cfg.PasswordSignupEnabled = false
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "", 0, "")
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrSignupDisabled))
 }
@@ -332,7 +332,7 @@ func TestRefreshToken_RotatesToken(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	// Sign up to get initial tokens.
-	result, err := svc.PasswordSignup(context.Background(), "refresh@example.com", strongPW, "", "", 0, "")
+	result, err := svc.PasswordSignup(context.Background(), "refresh@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	originalRefresh := result.RefreshToken
 
@@ -356,7 +356,7 @@ func TestRefreshToken_ExpiredTokenFails(t *testing.T) {
 	futureTime := time.Now().Add(365 * 24 * time.Hour)
 	svc := newTestAuthServiceWithTime(t, repo, time.Now)
 
-	result, err := svc.PasswordSignup(context.Background(), "expire@example.com", strongPW, "", "", 0, "")
+	result, err := svc.PasswordSignup(context.Background(), "expire@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 
 	// Advance the clock past the refresh token expiry.
@@ -388,7 +388,7 @@ func TestRefreshToken_LookupErrorFailsClosed(t *testing.T) {
 func TestRefreshToken_ConsumeFailureDoesNotMintReplacement(t *testing.T) {
 	repo := newErrorRepo()
 	svc := newTestAuthServiceErr(t, repo)
-	result, err := svc.PasswordSignup(context.Background(), "consume@example.com", strongPW, "", "", 0, "")
+	result, err := svc.PasswordSignup(context.Background(), "consume@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 
 	repo.failConsumeRefreshToken = true
@@ -406,7 +406,7 @@ func TestRefreshToken_ConsumeFailureDoesNotMintReplacement(t *testing.T) {
 func TestRefreshToken_ReplayRevokeFailureStillRejectsReplay(t *testing.T) {
 	repo := newErrorRepo()
 	svc := newTestAuthServiceErr(t, repo)
-	result, err := svc.PasswordSignup(context.Background(), "replay-delete@example.com", strongPW, "", "", 0, "")
+	result, err := svc.PasswordSignup(context.Background(), "replay-delete@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 
 	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
@@ -424,7 +424,7 @@ func TestLogout_DeletesRefreshToken(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "logout@example.com", strongPW, "", "", 0, "")
+	result, err := svc.PasswordSignup(context.Background(), "logout@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 
 	err = svc.Logout(context.Background(), result.RefreshToken)
@@ -1007,7 +1007,7 @@ func TestPasswordSignup_PerEmailThrottle_ReturnsDecoy(t *testing.T) {
 	svc.signupThrottle = newEmailSendThrottle(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
 
 	// First call: succeeds, user created.
-	res1, err := svc.PasswordSignup(context.Background(), "throttle@example.com", strongPW, "T", "", 0, "")
+	res1, err := svc.PasswordSignup(context.Background(), "throttle@example.com", strongPW, "T", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.NotNil(t, res1)
 	assert.NotContains(t, res1.User.ID, "signup-pending-")
@@ -1015,7 +1015,7 @@ func TestPasswordSignup_PerEmailThrottle_ReturnsDecoy(t *testing.T) {
 	// Second call within cooldown: must return an anti-enumeration
 	// decoy that LOOKS LIKE success but does not create a second user
 	// and does not mint a valid refresh token.
-	res2, err := svc.PasswordSignup(context.Background(), "throttle@example.com", strongPW, "T", "", 0, "")
+	res2, err := svc.PasswordSignup(context.Background(), "throttle@example.com", strongPW, "T", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.NotNil(t, res2)
 	assert.Contains(t, res2.User.ID, "signup-pending-",
@@ -1040,11 +1040,11 @@ func TestPasswordSignup_PerEmailThrottle_DifferentEmails_Independent(t *testing.
 	svc.cfg.SignupEmailCooldownSeconds = 60
 	svc.signupThrottle = newEmailSendThrottle(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
 
-	res1, err := svc.PasswordSignup(context.Background(), "a@example.com", strongPW, "", "", 0, "")
+	res1, err := svc.PasswordSignup(context.Background(), "a@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	assert.NotContains(t, res1.User.ID, "signup-pending-")
 
-	res2, err := svc.PasswordSignup(context.Background(), "b@example.com", strongPW, "", "", 0, "")
+	res2, err := svc.PasswordSignup(context.Background(), "b@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	assert.NotContains(t, res2.User.ID, "signup-pending-",
 		"different email must not share throttle state")

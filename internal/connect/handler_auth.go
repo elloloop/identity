@@ -150,6 +150,7 @@ func (h *IdentityHandler) PasswordSignup(
 		req.Msg.RecoveryEmail,
 		req.Msg.DateOfBirthMs,
 		req.Msg.Market,
+		service.EmailLinkParams{Product: req.Msg.Product, ReturnTo: req.Msg.ReturnTo},
 	)
 	if err != nil {
 		return nil, toConnectError(err)

@@ -40,3 +40,39 @@ func TestAppBaseURL_BrandedFromProjectScope(t *testing.T) {
 		t.Errorf("empty cfg: got %q, want http://localhost:9002", got)
 	}
 }
+
+// TestRequestPasswordReset_EmailLinkBaseBeatsBrandedDomain is the production
+// shape the setting exists for: the request resolves to a project whose
+// primary auth domain is identity's own host, which serves no reset page.
+// With GATEWAY_EMAIL_LINK_BASE_URL set the link goes to the hub instead;
+// without it, to the branded domain as before.
+func TestRequestPasswordReset_EmailLinkBaseBeatsBrandedDomain(t *testing.T) {
+	branded := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "hub", PrimaryAuthDomain: "auth.acme.example",
+		Access: ProjectAccessConfig{Mode: AccessModeOpen},
+	})
+	for _, tc := range []struct {
+		name, base, wantPrefix string
+	}{
+		{"no base", "", "https://auth.acme.example/auth/reset-password?token="},
+		{"hub base", "https://accounts.acme.example", "https://accounts.acme.example/reset-password?token="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, rec := newAuthSvcWithMailer(t)
+			svc.cfg.EmailLinkBaseURL = tc.base
+			seedUser(repo, "alice@test.com", "x", "active")
+
+			if err := svc.RequestPasswordReset(branded, "alice@test.com", EmailLinkParams{}); err != nil {
+				t.Fatalf("RequestPasswordReset: %v", err)
+			}
+			sent := rec.Sent()
+			if len(sent) != 1 {
+				t.Fatalf("expected 1 email, got %d", len(sent))
+			}
+			text := sent[0].Text
+			if got, want := linkInBody(t, text, "https://"), tc.wantPrefix+extractTokenFromLink(t, text); got != want {
+				t.Fatalf("reset link = %q, want %q", got, want)
+			}
+		})
+	}
+}

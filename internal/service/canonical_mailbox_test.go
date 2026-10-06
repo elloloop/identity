@@ -31,7 +31,7 @@ func TestTagOnlyAddressIsRefusedOnEveryAccountPath(t *testing.T) {
 	t.Run("password signup", func(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
-		_, err := svc.PasswordSignup(ctx, tagOnlyAddress, "Str0ng!Pass1-x", "X", "", 0, "")
+		_, err := svc.PasswordSignup(ctx, tagOnlyAddress, "Str0ng!Pass1-x", "X", "", 0, "", EmailLinkParams{})
 		require.ErrorIs(t, err, ErrInvalidArgument)
 		got, _ := repo.FindUserByEmail(ctx, "@corp.com")
 		require.Nil(t, got, "no account stored under @corp.com")
@@ -150,7 +150,7 @@ func TestTagOnlyAddressIsRefusedOnEveryAccountPath(t *testing.T) {
 		// Anti-enumeration: the requests still answer nil, but nothing is sent.
 		require.NoError(t, svc.RequestEmailLoginCode(ctx, tagOnlyAddress))
 		require.NoError(t, svc.RequestMagicLink(ctx, tagOnlyAddress, "https://app.test/cb"))
-		require.NoError(t, svc.RequestPasswordReset(ctx, tagOnlyAddress))
+		require.NoError(t, svc.RequestPasswordReset(ctx, tagOnlyAddress, EmailLinkParams{}))
 		require.Empty(t, rec.Sent(), "no code or link is mailed to @corp.com")
 		_, err := svc.VerifyEmailLoginCode(ctx, tagOnlyAddress, "123456", "1.2.3.4", "ua")
 		require.True(t, errors.Is(err, ErrEmailLoginCodeInvalid), "err = %v", err)

@@ -304,6 +304,63 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     domain needs its own SPF/DKIM/DMARC records.
   </p>
 
+  <h2 id="reset-and-verification-links">Reset and verification links</h2>
+  <p>
+    Password-reset and email-verification emails link to a page that redeems
+    the token through <code>ConfirmPasswordReset</code> or
+    <code>VerifyEmail</code>. Identity does not serve that page. By default
+    the link is <code>/auth/reset-password?token=…</code> or
+    <code>/auth/verify-email?token=…</code> on the request's project primary
+    auth domain, else on <code>GATEWAY_APP_BASE_URL</code>, so your app must
+    serve those paths.
+  </p>
+  <p>
+    When the pages live somewhere else, such as a sign-in hub that serves
+    several products, set <code>GATEWAY_EMAIL_LINK_BASE_URL</code>. The links
+    become <code>&lt;base&gt;/reset-password?token=…</code> and
+    <code>&lt;base&gt;/verify-email?token=…</code> for every project, and
+    take precedence over a project's primary auth domain. The value must be an
+    absolute <code>https</code> URL (<code>http</code> only for a loopback
+    host) with no userinfo, query or fragment; a path prefix is kept, and a
+    trailing slash is ignored. Identity refuses to start with any other value.
+    Magic-link, email-change and invitation links are not affected.
+  </p>
+  <p>
+    The three calls that send these emails, <code>RequestPasswordReset</code>,
+    <code>PasswordSignup</code> and <code>SendEmailVerification</code>, take
+    two optional fields for the page. Each is appended to the link after the
+    token, URL-encoded, and only when it is set:
+  </p>
+  <ul>
+    <li>
+      <code>product</code> becomes <code>&amp;product=&lt;slug&gt;</code>: the
+      product the request is for, as in the hub's own
+      <code>?product=</code>. It is trimmed and lower-cased, and must then be
+      1–64 characters of <code>a-z</code>, <code>0-9</code>, <code>-</code>
+      and <code>_</code>, starting with a letter or digit.
+    </li>
+    <li>
+      <code>return_to</code> becomes <code>&amp;redirect=&lt;url&gt;</code>:
+      where the page sends the user afterwards. It must match
+      <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>, the allowlist hosted
+      OAuth and magic links use, so an email never carries a redirect you do
+      not trust. With that allowlist empty, every <code>return_to</code> is
+      refused.
+    </li>
+  </ul>
+  <p>
+    A refused <code>product</code> or <code>return_to</code> fails the call
+    with <code>invalid_argument</code> before anything is created or sent.
+    The check reads only the request, so <code>RequestPasswordReset</code>
+    gives the same answer for every address and still reveals nothing about
+    which accounts exist.
+  </p>
+  <pre><code>{`GATEWAY_EMAIL_LINK_BASE_URL=https://accounts.example.com
+GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://kids.example.com
+
+# RequestPasswordReset {"email": "…", "product": "kids", "returnTo": "https://kids.example.com/home"}
+https://accounts.example.com/reset-password?token=…&product=kids&redirect=https%3A%2F%2Fkids.example.com%2Fhome`}</code></pre>
+
   <h2>Boolean parsing</h2>
   <p>
     <code>GATEWAY_*</code> boolean variables accept (case-insensitive)

@@ -152,7 +152,7 @@ func TestPasswordSignup_Jurisdiction_MarketStoredAndGated(t *testing.T) {
 			enableAgeGate(t, svc, false)
 			ctx := jurisdictionScope(t, tc.configJSON)
 
-			res, err := svc.PasswordSignup(ctx, "user@example.com", strongPW, "User", "", dobAgeMs(tc.ageYears), tc.market)
+			res, err := svc.PasswordSignup(ctx, "user@example.com", strongPW, "User", "", dobAgeMs(tc.ageYears), tc.market, EmailLinkParams{})
 			if tc.wantSignErr != nil {
 				require.ErrorIs(t, err, tc.wantSignErr)
 				stored, lerr := repo.FindUserByEmail(context.Background(), "user@example.com")
@@ -186,7 +186,7 @@ func TestPasswordSignup_MarketStored_GateOff(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "", dobAgeMs(8), "us")
+	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "", dobAgeMs(8), "us", EmailLinkParams{})
 	require.NoError(t, err)
 	assert.Equal(t, StatusActive, res.User.Status)
 	assert.Empty(t, res.User.AgeBand)
@@ -219,14 +219,14 @@ func TestProductAgeGate_IndependentOfJurisdiction(t *testing.T) {
 	t.Run("US teen at 16 is below an adult-minimum product", func(t *testing.T) {
 		svc, _ := newSvc(t)
 		ctx := WithProduct(jurisdictionScope(t, combinedJSON), "product-b")
-		_, err := svc.PasswordSignup(ctx, "teen@example.com", strongPW, "Teen", "", dobAgeMs(16), "US")
+		_, err := svc.PasswordSignup(ctx, "teen@example.com", strongPW, "Teen", "", dobAgeMs(16), "US", EmailLinkParams{})
 		require.ErrorIs(t, err, ErrProductAgeRestricted)
 	})
 
 	t.Run("US teen at 16 enters an unrestricted product", func(t *testing.T) {
 		svc, _ := newSvc(t)
 		ctx := WithProduct(jurisdictionScope(t, combinedJSON), "product-a")
-		res, err := svc.PasswordSignup(ctx, "teen@example.com", strongPW, "Teen", "", dobAgeMs(16), "US")
+		res, err := svc.PasswordSignup(ctx, "teen@example.com", strongPW, "Teen", "", dobAgeMs(16), "US", EmailLinkParams{})
 		require.NoError(t, err)
 		assert.Equal(t, "TEEN", res.User.AgeBand)
 		assert.NotEmpty(t, res.AccessToken)
@@ -237,7 +237,7 @@ func TestProductAgeGate_IndependentOfJurisdiction(t *testing.T) {
 		// product-a imposes no minimum; the jurisdiction classification alone
 		// (CHILD under IN) puts the account in PENDING_PARENTAL_CONSENT.
 		ctx := WithProduct(jurisdictionScope(t, combinedJSON), "product-a")
-		res, err := svc.PasswordSignup(ctx, "kid@example.com", strongPW, "Kid", "", dobAgeMs(16), "IN")
+		res, err := svc.PasswordSignup(ctx, "kid@example.com", strongPW, "Kid", "", dobAgeMs(16), "IN", EmailLinkParams{})
 		require.NoError(t, err)
 		assert.Equal(t, StatusPendingParentalConsent, res.User.Status)
 		assert.Empty(t, res.AccessToken)

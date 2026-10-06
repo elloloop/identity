@@ -82,12 +82,18 @@ func fallbackDisplayName(email, preferred string) string {
 // market is the optional jurisdiction/market code the account is created
 // under; it is canonicalized (trimmed, upper-cased) and, when the resolved
 // project configures per-jurisdiction thresholds, must name one of them.
-func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string, dateOfBirthMs int64, market string) (*LoginResult, error) {
+// linkParams go on the verification email's link; refused ones are
+// ErrInvalidArgument before any account work (see checkEmailLinkParams).
+func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string, dateOfBirthMs int64, market string, linkParams EmailLinkParams) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
 	}
 	if !s.cfg.PasswordSignupEnabled {
 		return nil, ErrSignupDisabled
+	}
+	link, err := s.checkEmailLinkParams(linkParams)
+	if err != nil {
+		return nil, err
 	}
 	if s.ageGate.Enabled() && s.cfg.AgeGateRequireDOB && dateOfBirthMs <= 0 {
 		return nil, fmt.Errorf("%w: date of birth is required", ErrInvalidArgument)
@@ -231,7 +237,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 
 	// Best-effort: fire a verification email. Failures are logged but
 	// must never fail signup itself.
-	if err := s.SendEmailVerification(ctx, userID); err != nil {
+	if err := s.sendEmailVerification(ctx, userID, link); err != nil {
 		s.logger.Warn("signup_verification_email_failed",
 			zap.String("user_id", userID), zap.Error(err))
 	}
@@ -584,7 +590,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		// Best-effort: resend the verification email so the user can complete
 		// verification and retry. Failures (throttle, transport) must not change
 		// the response — the gate result is the same either way.
-		if sendErr := s.SendEmailVerification(ctx, user.ID); sendErr != nil {
+		if sendErr := s.sendEmailVerification(ctx, user.ID, emailLink{}); sendErr != nil {
 			s.logger.Warn("login_verification_resend_failed",
 				zap.String("user_id", user.ID), zap.Error(sendErr))
 		}

@@ -76,7 +76,8 @@ func newAuthSvcWithMailerForRepo(t *testing.T, repo Repository) (*AuthService, *
 
 // extractTokenFromLink pulls the ?token=... query value from a URL.
 // We don't bother with full URL parsing — the templates always produce
-// the literal "?token=" prefix.
+// the literal "?token=" prefix, and the token is hex, so it ends at the
+// next parameter, whitespace, or quote.
 func extractTokenFromLink(t *testing.T, body string) string {
 	t.Helper()
 	idx := strings.Index(body, "token=")
@@ -84,15 +85,29 @@ func extractTokenFromLink(t *testing.T, body string) string {
 		t.Fatalf("token= not found in body: %q", body)
 	}
 	rest := body[idx+len("token="):]
-	// Trim at first whitespace or quote.
 	end := len(rest)
 	for i, ch := range rest {
-		if ch == ' ' || ch == '\n' || ch == '\r' || ch == '"' || ch == '<' {
+		if ch == '&' || ch == ' ' || ch == '\n' || ch == '\r' || ch == '"' || ch == '<' {
 			end = i
 			break
 		}
 	}
 	return rest[:end]
+}
+
+// linkInBody returns the whole link in a plain-text email body that starts
+// with prefix, up to the next whitespace.
+func linkInBody(t *testing.T, body, prefix string) string {
+	t.Helper()
+	idx := strings.Index(body, prefix)
+	if idx == -1 {
+		t.Fatalf("no link starting %q in body: %q", prefix, body)
+	}
+	link := body[idx:]
+	if end := strings.IndexAny(link, " \r\n"); end != -1 {
+		link = link[:end]
+	}
+	return link
 }
 
 // ── RequestPasswordReset ───────────────────────────────────────────────
@@ -102,7 +117,7 @@ func TestRequestPasswordReset_Success(t *testing.T) {
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
 	user := seedUser(repo, "alice@test.com", pwHash, "active")
 
-	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com"); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com", EmailLinkParams{}); err != nil {
 		t.Fatalf("RequestPasswordReset err: %v", err)
 	}
 	sent := rec.Sent()
@@ -140,7 +155,7 @@ func TestRequestPasswordReset_CanonicalizesEmail(t *testing.T) {
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
 	user := seedUser(repo, "alicesmith@gmail.com", pwHash, "active")
 
-	if err := svc.RequestPasswordReset(context.Background(), "Alice.Smith+promo@gmail.com"); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), "Alice.Smith+promo@gmail.com", EmailLinkParams{}); err != nil {
 		t.Fatalf("RequestPasswordReset err: %v", err)
 	}
 	sent := rec.Sent()
@@ -162,7 +177,7 @@ func TestRequestPasswordReset_CanonicalizesEmail(t *testing.T) {
 
 func TestRequestPasswordReset_UnknownEmail_NoEnumeration(t *testing.T) {
 	svc, _, rec := newAuthSvcWithMailer(t)
-	if err := svc.RequestPasswordReset(context.Background(), "nobody@test.com"); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), "nobody@test.com", EmailLinkParams{}); err != nil {
 		t.Fatalf("expected nil error for unknown email, got %v", err)
 	}
 	if len(rec.Sent()) != 0 {
@@ -175,7 +190,7 @@ func TestRequestPasswordReset_TransportFailureSwallowed(t *testing.T) {
 	rec.fail = errors.New("smtp down")
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
 	seedUser(repo, "alice@test.com", pwHash, "active")
-	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com"); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com", EmailLinkParams{}); err != nil {
 		t.Fatalf("expected nil despite transport failure, got %v", err)
 	}
 }
@@ -186,7 +201,7 @@ func TestRequestPasswordReset_DisabledNoOps(t *testing.T) {
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
 	seedUser(repo, "alice@test.com", pwHash, "active")
 
-	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com"); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com", EmailLinkParams{}); err != nil {
 		t.Fatalf("expected nil when reset is disabled, got %v", err)
 	}
 	if len(rec.Sent()) != 0 {
@@ -204,7 +219,7 @@ func TestRequestPasswordReset_DisabledNoOps(t *testing.T) {
 func requestAndExtractResetToken(t *testing.T, svc *AuthService, rec *recordingTransport, emailAddr string) string {
 	t.Helper()
 	rec.Reset()
-	if err := svc.RequestPasswordReset(context.Background(), emailAddr); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), emailAddr, EmailLinkParams{}); err != nil {
 		t.Fatalf("request reset: %v", err)
 	}
 	sent := rec.Sent()
@@ -341,7 +356,7 @@ func TestConfirmPasswordReset_WeakPasswordRejected(t *testing.T) {
 func TestSendEmailVerification_Success(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	user := seedUser(repo, "bob@test.com", "x", "active")
-	if err := svc.SendEmailVerification(context.Background(), user.ID); err != nil {
+	if err := svc.SendEmailVerification(context.Background(), user.ID, EmailLinkParams{}); err != nil {
 		t.Fatalf("SendEmailVerification: %v", err)
 	}
 	sent := rec.Sent()
@@ -360,7 +375,7 @@ func TestSendEmailVerification_Success(t *testing.T) {
 
 func TestSendEmailVerification_UnknownUser(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
-	err := svc.SendEmailVerification(context.Background(), "no-such-user")
+	err := svc.SendEmailVerification(context.Background(), "no-such-user", EmailLinkParams{})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("want ErrNotFound, got %v", err)
 	}
@@ -370,7 +385,7 @@ func TestSendEmailVerification_IdempotentMultipleTokens(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	user := seedUser(repo, "bob@test.com", "x", "active")
 	for i := 0; i < 3; i++ {
-		if err := svc.SendEmailVerification(context.Background(), user.ID); err != nil {
+		if err := svc.SendEmailVerification(context.Background(), user.ID, EmailLinkParams{}); err != nil {
 			t.Fatalf("send %d: %v", i, err)
 		}
 	}
@@ -391,7 +406,7 @@ func TestSendEmailVerification_IdempotentMultipleTokens(t *testing.T) {
 func TestVerifyEmail_Success(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	user := seedUser(repo, "bob@test.com", "x", "active")
-	if err := svc.SendEmailVerification(context.Background(), user.ID); err != nil {
+	if err := svc.SendEmailVerification(context.Background(), user.ID, EmailLinkParams{}); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	tok := extractTokenFromLink(t, rec.Sent()[0].Text)
@@ -439,7 +454,7 @@ func TestVerifyEmail_ExpiredToken(t *testing.T) {
 func TestVerifyEmail_ReplayedToken(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	user := seedUser(repo, "bob@test.com", "x", "active")
-	if err := svc.SendEmailVerification(context.Background(), user.ID); err != nil {
+	if err := svc.SendEmailVerification(context.Background(), user.ID, EmailLinkParams{}); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	tok := extractTokenFromLink(t, rec.Sent()[0].Text)
@@ -457,7 +472,7 @@ func TestVerifyEmail_AlreadyVerifiedIsIdempotent(t *testing.T) {
 	user := seedUser(repo, "bob@test.com", "x", "active")
 
 	// Verify once.
-	if err := svc.SendEmailVerification(context.Background(), user.ID); err != nil {
+	if err := svc.SendEmailVerification(context.Background(), user.ID, EmailLinkParams{}); err != nil {
 		t.Fatalf("send 1: %v", err)
 	}
 	tok1 := extractTokenFromLink(t, rec.Sent()[0].Text)
@@ -469,7 +484,7 @@ func TestVerifyEmail_AlreadyVerifiedIsIdempotent(t *testing.T) {
 	// it. The call must succeed and the token must still be marked
 	// consumed (preventing re-use).
 	rec.Reset()
-	if err := svc.SendEmailVerification(context.Background(), user.ID); err != nil {
+	if err := svc.SendEmailVerification(context.Background(), user.ID, EmailLinkParams{}); err != nil {
 		t.Fatalf("send 2: %v", err)
 	}
 	tok2 := extractTokenFromLink(t, rec.Sent()[0].Text)
@@ -490,7 +505,7 @@ func TestVerifyEmail_AlreadyVerifiedIsIdempotent(t *testing.T) {
 
 func TestPasswordSignup_FiresVerificationEmail(t *testing.T) {
 	svc, _, rec := newAuthSvcWithMailer(t)
-	res, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", 0, "")
+	res, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", 0, "", EmailLinkParams{})
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -591,10 +606,10 @@ func TestRequestPasswordReset_PerRecipientThrottle(t *testing.T) {
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
 	seedUser(repo, "alice@test.com", pwHash, "active")
 
-	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com"); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com", EmailLinkParams{}); err != nil {
 		t.Fatalf("first reset: %v", err)
 	}
-	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com"); err != nil {
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com", EmailLinkParams{}); err != nil {
 		t.Fatalf("second reset: %v", err)
 	}
 	if got := len(rec.Sent()); got != 1 {
@@ -609,13 +624,181 @@ func TestSendEmailVerification_PerRecipientThrottle(t *testing.T) {
 
 	u := seedUser(repo, "bob@test.com", "x", "active")
 
-	if err := svc.SendEmailVerification(context.Background(), u.ID); err != nil {
+	if err := svc.SendEmailVerification(context.Background(), u.ID, EmailLinkParams{}); err != nil {
 		t.Fatalf("first verify: %v", err)
 	}
-	if err := svc.SendEmailVerification(context.Background(), u.ID); err != nil {
+	if err := svc.SendEmailVerification(context.Background(), u.ID, EmailLinkParams{}); err != nil {
 		t.Fatalf("second verify: %v", err)
 	}
 	if got := len(rec.Sent()); got != 1 {
 		t.Fatalf("expected throttle to drop second send (1 email), got %d", got)
+	}
+}
+
+// ── Email link base and link params ────────────────────────────────────
+
+const (
+	hubLinkBase      = "https://accounts.test"
+	hubReturnTo      = "https://tortoise.test/after?step=2"
+	hubReturnToQuery = "https%3A%2F%2Ftortoise.test%2Fafter%3Fstep%3D2"
+)
+
+// hubLinkParams is what a sign-in hub sends: a product named as the hub's
+// ?product= names it (any case) and an allowlisted return URL.
+var hubLinkParams = EmailLinkParams{Product: "Tortoise", ReturnTo: hubReturnTo}
+
+// newHubLinkAuthSvc is newAuthSvcWithMailer for a deployment whose reset and
+// verification pages live on a hub (GATEWAY_EMAIL_LINK_BASE_URL, configured
+// with a trailing slash) and that trusts the tortoise app as a return URL.
+func newHubLinkAuthSvc(t *testing.T) (*AuthService, *fakeRepo, *recordingTransport) {
+	t.Helper()
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.cfg.EmailLinkBaseURL = hubLinkBase + "/"
+	svc.returnAllow = mustReturnAllowlist(t, "https://tortoise.test")
+	return svc, repo, rec
+}
+
+func TestRequestPasswordReset_LinkOnEmailLinkBaseCarriesParams(t *testing.T) {
+	svc, repo, rec := newHubLinkAuthSvc(t)
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	seedUser(repo, "alice@test.com", pwHash, "active")
+
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com", hubLinkParams); err != nil {
+		t.Fatalf("RequestPasswordReset: %v", err)
+	}
+	sent := rec.Sent()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 email, got %d", len(sent))
+	}
+	tok := extractTokenFromLink(t, sent[0].Text)
+	want := hubLinkBase + "/reset-password?token=" + tok + "&product=tortoise&redirect=" + hubReturnToQuery
+	if got := linkInBody(t, sent[0].Text, hubLinkBase); got != want {
+		t.Fatalf("reset link:\n got  %s\n want %s", got, want)
+	}
+	if !strings.Contains(sent[0].HTML, hubLinkBase+"/reset-password?token="+tok) {
+		t.Errorf("HTML body missing hub reset link: %q", sent[0].HTML)
+	}
+	// The token on the hub link redeems like any other.
+	if err := svc.ConfirmPasswordReset(context.Background(), tok, "NewStr0ng!Pass1"); err != nil {
+		t.Fatalf("ConfirmPasswordReset with the hub link's token: %v", err)
+	}
+}
+
+// TestRequestPasswordReset_NoLinkBaseKeepsAppLink pins backward
+// compatibility: with no GATEWAY_EMAIL_LINK_BASE_URL and no link params the
+// link is exactly today's.
+func TestRequestPasswordReset_NoLinkBaseKeepsAppLink(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	seedUser(repo, "alice@test.com", pwHash, "active")
+
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com", EmailLinkParams{}); err != nil {
+		t.Fatalf("RequestPasswordReset: %v", err)
+	}
+	text := rec.Sent()[0].Text
+	tok := extractTokenFromLink(t, text)
+	if got, want := linkInBody(t, text, "https://app.test/"), "https://app.test/auth/reset-password?token="+tok; got != want {
+		t.Fatalf("reset link = %q, want %q", got, want)
+	}
+}
+
+// TestRequestPasswordReset_RefusedLinkParamsSendNothing: a return_to off the
+// allowlist is the one error RequestPasswordReset reports, and it is the
+// same whether or not the email has an account — no enumeration — with no
+// token minted and nothing sent.
+func TestRequestPasswordReset_RefusedLinkParamsSendNothing(t *testing.T) {
+	svc, repo, rec := newHubLinkAuthSvc(t)
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	seedUser(repo, "alice@test.com", pwHash, "active")
+
+	for _, addr := range []string{"alice@test.com", "nobody@test.com"} {
+		err := svc.RequestPasswordReset(context.Background(), addr,
+			EmailLinkParams{Product: "tortoise", ReturnTo: "https://evil.test/"})
+		if !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("%s: err = %v, want ErrInvalidArgument", addr, err)
+		}
+	}
+	if got := len(rec.Sent()); got != 0 {
+		t.Fatalf("refused request sent %d emails", got)
+	}
+	repo.mu.Lock()
+	minted := len(repo.passwordResets)
+	repo.mu.Unlock()
+	if minted != 0 {
+		t.Fatalf("refused request minted %d reset tokens", minted)
+	}
+}
+
+func TestSendEmailVerification_LinkOnEmailLinkBaseCarriesParams(t *testing.T) {
+	svc, repo, rec := newHubLinkAuthSvc(t)
+	user := seedUser(repo, "bob@test.com", "x", "active")
+
+	if err := svc.SendEmailVerification(context.Background(), user.ID, hubLinkParams); err != nil {
+		t.Fatalf("SendEmailVerification: %v", err)
+	}
+	text := rec.Sent()[0].Text
+	tok := extractTokenFromLink(t, text)
+	want := hubLinkBase + "/verify-email?token=" + tok + "&product=tortoise&redirect=" + hubReturnToQuery
+	if got := linkInBody(t, text, hubLinkBase); got != want {
+		t.Fatalf("verify link:\n got  %s\n want %s", got, want)
+	}
+	if _, err := svc.VerifyEmail(context.Background(), tok); err != nil {
+		t.Fatalf("VerifyEmail with the hub link's token: %v", err)
+	}
+}
+
+func TestSendEmailVerification_RefusedLinkParamsSendNothing(t *testing.T) {
+	svc, repo, rec := newHubLinkAuthSvc(t)
+	user := seedUser(repo, "bob@test.com", "x", "active")
+
+	for _, params := range []EmailLinkParams{
+		{ReturnTo: "https://evil.test/"},
+		{Product: "not a slug"},
+	} {
+		if err := svc.SendEmailVerification(context.Background(), user.ID, params); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("%+v: err = %v, want ErrInvalidArgument", params, err)
+		}
+	}
+	if got := len(rec.Sent()); got != 0 {
+		t.Fatalf("refused request sent %d emails", got)
+	}
+	repo.mu.Lock()
+	minted := len(repo.emailVerifications)
+	repo.mu.Unlock()
+	if minted != 0 {
+		t.Fatalf("refused request minted %d verification tokens", minted)
+	}
+}
+
+func TestPasswordSignup_VerificationLinkCarriesParams(t *testing.T) {
+	svc, _, rec := newHubLinkAuthSvc(t)
+
+	if _, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", 0, "", hubLinkParams); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	text := rec.Sent()[0].Text
+	tok := extractTokenFromLink(t, text)
+	want := hubLinkBase + "/verify-email?token=" + tok + "&product=tortoise&redirect=" + hubReturnToQuery
+	if got := linkInBody(t, text, hubLinkBase); got != want {
+		t.Fatalf("signup verify link:\n got  %s\n want %s", got, want)
+	}
+}
+
+// TestPasswordSignup_RefusedLinkParamsCreateNoAccount: the link params are
+// checked before any account work, so a refused return_to leaves nothing
+// behind — no account, no email.
+func TestPasswordSignup_RefusedLinkParamsCreateNoAccount(t *testing.T) {
+	svc, repo, rec := newHubLinkAuthSvc(t)
+
+	_, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", 0, "",
+		EmailLinkParams{ReturnTo: "https://evil.test/"})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("err = %v, want ErrInvalidArgument", err)
+	}
+	if u, _ := repo.FindUserByEmail(context.Background(), "carol@test.com"); u != nil {
+		t.Fatalf("refused signup created account %q", u.ID)
+	}
+	if got := len(rec.Sent()); got != 0 {
+		t.Fatalf("refused signup sent %d emails", got)
 	}
 }

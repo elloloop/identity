@@ -121,10 +121,10 @@ func TestDOBRequired_PasswordSignup(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, true)
 
-	_, err := svc.PasswordSignup(context.Background(), "nodob@example.com", strongPW, "NoDOB", "", 0, "")
+	_, err := svc.PasswordSignup(context.Background(), "nodob@example.com", strongPW, "NoDOB", "", 0, "", EmailLinkParams{})
 	require.ErrorIs(t, err, ErrInvalidArgument)
 
-	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "", dobAgeMs(30), "")
+	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "", dobAgeMs(30), "", EmailLinkParams{})
 	require.NoError(t, err)
 	assert.NotEmpty(t, res.AccessToken)
 }
@@ -342,7 +342,7 @@ func TestDOBRequired_RefreshToken(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	res, err := svc.PasswordSignup(context.Background(), "preflag@example.com", strongPW, "Pre", "", 0, "")
+	res, err := svc.PasswordSignup(context.Background(), "preflag@example.com", strongPW, "Pre", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.NotEmpty(t, res.RefreshToken)
 
@@ -665,7 +665,7 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 
 	// Sign up BEFORE the flag so the account is dob-less, then turn the gate
 	// on — the pre-flag account the completion step exists for.
-	res, err := svc.PasswordSignup(ctx, "dob@example.com", strongPW, "D", "", 0, "")
+	res, err := svc.PasswordSignup(ctx, "dob@example.com", strongPW, "D", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	user := res.User
 	enableAgeGate(t, svc, true)
@@ -719,7 +719,7 @@ func TestSubmitDateOfBirth_IsSetOnce(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	res, err := svc.PasswordSignup(ctx, "race@example.com", strongPW, "R", "", 0, "")
+	res, err := svc.PasswordSignup(ctx, "race@example.com", strongPW, "R", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 	enableAgeGate(t, svc, true)
 
