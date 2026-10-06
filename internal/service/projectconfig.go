@@ -59,11 +59,12 @@ type ProjectConfig struct {
 	// See ProjectAccessConfig.
 	Access ProjectAccessConfig `json:"access"`
 
-	// Products holds the per-product guardrails applied to the products this
-	// project's account pool signs into, keyed by the product slug a client
-	// sends in the X-Product header. One account authenticates everywhere, but
-	// each product's door checks the account's age band before a session is
-	// issued for it. A product absent here is unrestricted.
+	// Products holds the per-product settings for the products this project's
+	// account pool signs into, keyed by product slug. Guardrails key on the
+	// slug a client sends in the X-Product header: one account authenticates
+	// everywhere, but each product's door checks the account's age band before
+	// a session is issued for it, and a product absent here is unrestricted.
+	// Branding keys on the product a reset or verification request names.
 	// See ProjectProductsConfig.
 	Products ProjectProductsConfig `json:"products"`
 	// Assurance holds the project's client-attestation identity — the mobile
@@ -969,19 +970,26 @@ const (
 	MinimumAgeBandAdult = "adult"
 )
 
-// ProjectProductConfig is one product's guardrail policy.
+// ProjectProductConfig is one product's guardrail policy and email branding.
 type ProjectProductConfig struct {
 	// MinimumAgeBand is the lowest age band this product issues a session for,
 	// one of MinimumAgeBand{Child,Teen,Adult}. Empty means the product imposes
 	// no age restriction.
 	MinimumAgeBand string `json:"minimum_age_band"`
+
+	// Branding overrides the project's branding block, field by field, on the
+	// password-reset and email-verification emails a request names this
+	// product for (their `product` field). An empty field falls back to the
+	// project's branding, then the GATEWAY_EMAIL_BRAND_* defaults.
+	Branding ProjectBrandingConfig `json:"branding"`
 }
 
-// ProjectProductsConfig maps a product slug (the value of the X-Product header)
-// to that product's guardrail policy. It is the enforcement half of "one
-// account, many products": the account pool is shared, so a product's audience
-// rating has to be enforced at the door rather than assumed from store listing
-// copy.
+// ProjectProductsConfig maps a product slug to that product's guardrail policy
+// (looked up by the X-Product header) and email branding (looked up by the
+// product a reset or verification request names). The guardrail is the
+// enforcement half of "one account, many products": the account pool is
+// shared, so a product's audience rating has to be enforced at the door rather
+// than assumed from store listing copy.
 //
 // Fail direction — FAIL OPEN, the opposite of ProjectAccessConfig. An absent
 // products block, an absent slug, and an absent minimum_age_band all mean "no
@@ -1007,11 +1015,15 @@ var minimumAgeBandRank = map[string]int{
 // operator believes is in force. A blank slug is rejected because it can never
 // match a header; an unrecognized band is rejected because "chid" would
 // otherwise read as "unrestricted" — exactly the guardrail the operator asked
-// for, silently absent.
+// for, silently absent. A product's branding is held to the project branding
+// block's rules.
 func (p ProjectProductsConfig) validate() error {
 	for slug, product := range p {
 		if strings.TrimSpace(slug) == "" {
 			return errors.New("products: product slugs must not be empty")
+		}
+		if err := product.Branding.validate(); err != nil {
+			return fmt.Errorf("products.%s.%w", slug, err)
 		}
 		band := normalizeProductSlug(product.MinimumAgeBand)
 		if band == "" {
@@ -1036,6 +1048,7 @@ func (p ProjectProductsConfig) canonicalized() ProjectProductsConfig {
 	for slug, product := range p {
 		out[normalizeProductSlug(slug)] = ProjectProductConfig{
 			MinimumAgeBand: normalizeProductSlug(product.MinimumAgeBand),
+			Branding:       product.Branding,
 		}
 	}
 	return out

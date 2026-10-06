@@ -61,14 +61,22 @@ func formatExpiresIn(d time.Duration) string {
 // ── RequestPasswordReset ───────────────────────────────────────────────
 
 // RequestPasswordReset creates a password-reset token for the user
-// matching the supplied email and dispatches a reset email.
+// matching the supplied email and dispatches a reset email whose link
+// carries the admitted params (see checkEmailLinkParams).
 //
-// Per OWASP guidance and the proto contract, this method always
-// returns nil even when the email is unknown — the response time is
-// also kept roughly equivalent so the endpoint cannot be used as an
+// Per OWASP guidance and the proto contract, every account-dependent
+// outcome returns nil — an unknown email included — and the response
+// time is kept roughly equivalent, so the endpoint cannot be used as an
 // email-enumeration oracle. Errors during token persistence or email
-// dispatch are logged internally; the caller is told nothing.
-func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string) error {
+// dispatch are logged internally; the caller is told nothing. The one
+// error it returns is ErrInvalidArgument for refused link params, which
+// are checked first and from the request alone, so that answer is the
+// same for every email.
+func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string, params EmailLinkParams) error {
+	link, err := s.checkEmailLinkParams(params)
+	if err != nil {
+		return err
+	}
 	if !s.cfg.PasswordResetEnabled {
 		s.logger.Info("password_reset_requested_while_disabled")
 		return nil
@@ -132,11 +140,10 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
-	link := fmt.Sprintf("%s/auth/reset-password?token=%s", s.appBaseURL(ctx), rawToken)
-	brand := resolveBranding(ctx, s.cfg)
+	brand := resolveBranding(ctx, s.cfg, link.product)
 	html, text, err := email.Render(email.TemplatePasswordReset, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
-		"Link":      link,
+		"Link":      s.emailLinkURL(ctx, emailLinkPageResetPassword, rawToken, link),
 		"ExpiresIn": formatExpiresIn(expiry),
 	}))
 	if err != nil {
@@ -255,11 +262,22 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 // ── SendEmailVerification ──────────────────────────────────────────────
 
 // SendEmailVerification creates a verification token for the user and
-// dispatches a verification email. Idempotent — calling it repeatedly
-// just creates additional valid tokens (older tokens remain valid
-// until their own expiry, on the principle that we should never
-// invalidate a token a user might have already clicked).
-func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) error {
+// dispatches a verification email whose link carries the admitted params
+// (see checkEmailLinkParams; refused params are ErrInvalidArgument).
+// Idempotent — calling it repeatedly just creates additional valid tokens
+// (older tokens remain valid until their own expiry, on the principle that
+// we should never invalidate a token a user might have already clicked).
+func (s *AuthService) SendEmailVerification(ctx context.Context, userID string, params EmailLinkParams) error {
+	link, err := s.checkEmailLinkParams(params)
+	if err != nil {
+		return err
+	}
+	return s.sendEmailVerification(ctx, userID, link)
+}
+
+// sendEmailVerification is SendEmailVerification for a link that has already
+// been checked; a resend the server initiates itself passes the zero link.
+func (s *AuthService) sendEmailVerification(ctx context.Context, userID string, link emailLink) error {
 	if userID == "" {
 		return fmt.Errorf("%w: user id is required", ErrInvalidArgument)
 	}
@@ -291,11 +309,10 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 		return fmt.Errorf("creating verification token: %w", err)
 	}
 
-	link := fmt.Sprintf("%s/auth/verify-email?token=%s", s.appBaseURL(ctx), rawToken)
-	brand := resolveBranding(ctx, s.cfg)
+	brand := resolveBranding(ctx, s.cfg, link.product)
 	html, text, err := email.Render(email.TemplateEmailVerification, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
-		"Link":      link,
+		"Link":      s.emailLinkURL(ctx, emailLinkPageVerifyEmail, rawToken, link),
 		"ExpiresIn": formatExpiresIn(expiry),
 	}))
 	if err != nil {

@@ -76,6 +76,7 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"SMTPTLS", cfg.SMTPTLS, true},
 		{"SMTPProviders", cfg.SMTPProviders, ""},
 		{"AppBaseURL", cfg.AppBaseURL, "http://localhost:9002"},
+		{"EmailLinkBaseURL", cfg.EmailLinkBaseURL, ""},
 		{"EmailTokenExpirySeconds", cfg.EmailTokenExpirySeconds, 86400},
 		{"RevocationMode", cfg.RevocationMode, RevocationModeTTL},
 		{"SessionCacheTTLSeconds", cfg.SessionCacheTTLSeconds, 60},
@@ -226,6 +227,18 @@ func TestEnvTest_OverrideAppBaseURL(t *testing.T) {
 	cfg := Load()
 	if cfg.AppBaseURL != "https://identity.test" {
 		t.Errorf("AppBaseURL: got %q, want https://identity.test", cfg.AppBaseURL)
+	}
+}
+
+func TestEnvTest_OverrideEmailLinkBaseURL(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_EMAIL_LINK_BASE_URL", "https://accounts.example.com")
+	cfg := Load()
+	if cfg.EmailLinkBaseURL != "https://accounts.example.com" {
+		t.Errorf("EmailLinkBaseURL: got %q, want https://accounts.example.com", cfg.EmailLinkBaseURL)
+	}
+	if err := cfg.validateEmailLinkBaseURL(); err != nil {
+		t.Errorf("a loaded https base must validate: %v", err)
 	}
 }
 

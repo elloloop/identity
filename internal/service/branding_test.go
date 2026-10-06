@@ -14,7 +14,7 @@ func TestResolveBranding_ZeroConfig_LegacyFromOnly(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{SMTPFrom: "legacy@example.com"}
-	b := resolveBranding(context.Background(), cfg)
+	b := resolveBranding(context.Background(), cfg, "")
 
 	// Nothing branded: From falls back to GATEWAY_SMTP_FROM and everything
 	// else is empty so email output stays byte-compatible with today.
@@ -35,7 +35,7 @@ func TestResolveBranding_GlobalDefaults(t *testing.T) {
 		EmailBrandSupportEmail: "support@example.com",
 		EmailListUnsubscribe:   "<mailto:unsub@example.com>",
 	}
-	b := resolveBranding(context.Background(), cfg)
+	b := resolveBranding(context.Background(), cfg, "")
 
 	assert.Equal(t, "Global Product", b.productName)
 	assert.Equal(t, "brand@example.com", b.from)
@@ -60,7 +60,7 @@ func TestResolveBranding_ProjectOverridesGlobal(t *testing.T) {
 			SupportEmail:  "help@kids.example.com",
 		},
 	})
-	b := resolveBranding(ctx, cfg)
+	b := resolveBranding(ctx, cfg, "")
 
 	// Per-project beats global default.
 	assert.Equal(t, "Kids", b.productName)
@@ -79,11 +79,60 @@ func TestResolveBranding_PartialProject_FallsBackPerField(t *testing.T) {
 	ctx := WithProjectScope(context.Background(), &ProjectScope{
 		Branding: ProjectBrandingConfig{EmailFrom: "p@example.com"},
 	})
-	b := resolveBranding(ctx, cfg)
+	b := resolveBranding(ctx, cfg, "")
 
 	// EmailFrom is per-project; ProductName falls back to the global default.
 	assert.Equal(t, "p@example.com", b.from)
 	assert.Equal(t, "Global Product", b.productName)
+}
+
+// kidsProductScope is a project with its own branding whose "kids" product
+// overrides part of it, so each tier of the precedence is observable.
+func kidsProductScope() context.Context {
+	return WithProjectScope(context.Background(), &ProjectScope{
+		Branding: ProjectBrandingConfig{
+			ProductName:   "Acme",
+			EmailFrom:     "no-reply@acme.example.com",
+			EmailFromName: "Acme",
+		},
+		Products: ProjectProductsConfig{
+			"kids": {Branding: ProjectBrandingConfig{
+				ProductName:   "Acme Kids",
+				EmailFromName: "Acme Kids",
+				LogoURL:       "https://kids.acme.example.com/logo.png",
+			}},
+			"teens": {MinimumAgeBand: MinimumAgeBandTeen},
+		},
+	})
+}
+
+func TestResolveBranding_ProductOverridesProjectPerField(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{SMTPFrom: "legacy@example.com", EmailBrandSupportEmail: "support@example.com"}
+	b := resolveBranding(kidsProductScope(), cfg, "kids")
+
+	// The product's fields win; each field it leaves empty falls back to the
+	// project, then to the global default.
+	assert.Equal(t, "Acme Kids", b.productName)
+	assert.Equal(t, "https://kids.acme.example.com/logo.png", b.logoURL)
+	assert.Equal(t, `"Acme Kids" <no-reply@acme.example.com>`, b.fromHeader())
+	assert.Equal(t, "support@example.com", b.supportEmail)
+}
+
+func TestResolveBranding_ProductWithoutBrandingIsProjectBranding(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{SMTPFrom: "legacy@example.com"}
+	project := resolveBranding(kidsProductScope(), cfg, "")
+	assert.Equal(t, "Acme", project.productName)
+	assert.Equal(t, `"Acme" <no-reply@acme.example.com>`, project.fromHeader())
+
+	// A product with only a guardrail, and a product the project does not
+	// know, both brand as the project.
+	for _, product := range []string{"teens", "unknown"} {
+		assert.Equal(t, project, resolveBranding(kidsProductScope(), cfg, product), product)
+	}
 }
 
 func TestBranding_ApplyTo_SetsHeadersOnlyWhenConfigured(t *testing.T) {

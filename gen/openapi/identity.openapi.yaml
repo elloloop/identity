@@ -7423,6 +7423,20 @@ components:
              created under. Optional; when the project configures per-jurisdiction age
              thresholds it must name one of them. Canonicalized (trimmed, upper-cased)
              before storage.
+        returnTo:
+          type: string
+          title: return_to
+          description: |-
+            return_to is the app URL the verification page returns the user to.
+             Optional; validated and carried on the link exactly as on
+             RequestPasswordResetRequest, and checked before the account is created.
+        product:
+          type: string
+          title: product
+          description: |-
+            product is the slug of the product the sign-up is for. Optional;
+             validated and carried on the link exactly as on
+             RequestPasswordResetRequest, and checked before the account is created.
       title: PasswordSignupRequest
       additionalProperties: false
     identity.v1.PasswordSignupResponse:
@@ -7985,6 +7999,23 @@ components:
         email:
           type: string
           title: email
+        returnTo:
+          type: string
+          title: return_to
+          description: |-
+            return_to is the app URL the reset page returns the user to. Optional;
+             when set it must match the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist
+             (shared with hosted OAuth and magic links) or the request fails with
+             InvalidArgument — for any email, so it reveals nothing about accounts.
+        product:
+          type: string
+          title: product
+          description: |-
+            product is the slug of the product the request is for (e.g.
+             "easyloops"), with the same semantics as the hosted hub's ?product=
+             query. Optional; trimmed and lower-cased, and it must be 1–64 of
+             [a-z0-9_-] starting with a letter or digit, or the request fails with
+             InvalidArgument.
       title: RequestPasswordResetRequest
       additionalProperties: false
       description: |-
@@ -7992,6 +8023,15 @@ components:
          The reset link is sent to the account's PRIMARY verified email — the
          address matching the supplied `email`. If no account matches, the
          request silently succeeds (no enumeration).
+
+         The emailed link is <page>?token=<token>, where <page> is
+         GATEWAY_EMAIL_LINK_BASE_URL + "/reset-password" when that is set, else
+         "/auth/reset-password" on the project's primary auth domain (or
+         GATEWAY_APP_BASE_URL). The link also carries `&product=<product>` and
+         `&redirect=<return_to>`, URL-encoded, when the request sets them, so the
+         page can present the right product and send the user back afterwards.
+         The same rule builds the verification link of PasswordSignup and
+         SendEmailVerification ("/verify-email").
     identity.v1.RequestPasswordResetResponse:
       type: object
       title: RequestPasswordResetResponse
@@ -8139,8 +8179,26 @@ components:
       additionalProperties: false
     identity.v1.SendEmailVerificationRequest:
       type: object
+      properties:
+        returnTo:
+          type: string
+          title: return_to
+          description: |-
+            return_to is the app URL the verification page returns the user to.
+             Optional; validated and carried on the link exactly as on
+             RequestPasswordResetRequest.
+        product:
+          type: string
+          title: product
+          description: |-
+            product is the slug of the product the request is for. Optional;
+             validated and carried on the link exactly as on
+             RequestPasswordResetRequest.
       title: SendEmailVerificationRequest
       additionalProperties: false
+      description: |-
+        SendEmailVerification emails the authenticated caller a verification
+         link, built as described on RequestPasswordResetRequest.
     identity.v1.SendEmailVerificationResponse:
       type: object
       title: SendEmailVerificationResponse

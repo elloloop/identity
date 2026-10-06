@@ -168,6 +168,38 @@ func TestParseProjectConfig_Products_Validation(t *testing.T) {
 	}
 }
 
+func TestParseProjectConfig_Products_Branding(t *testing.T) {
+	t.Parallel()
+	cfg, err := ParseProjectConfig(`{"products":{"Kids":{"minimum_age_band":"child","branding":` +
+		`{"product_name":"Acme Kids","email_from":"no-reply@kids.example.com","logo_url":"https://kids.example.com/l.png"}}}}`)
+	require.NoError(t, err)
+	// The slug is canonicalized like a guardrail slug; the branding survives
+	// canonicalization untouched.
+	assert.Equal(t, ProjectBrandingConfig{
+		ProductName: "Acme Kids",
+		EmailFrom:   "no-reply@kids.example.com",
+		LogoURL:     "https://kids.example.com/l.png",
+	}, cfg.Products["kids"].Branding)
+	assert.Equal(t, MinimumAgeBandChild, cfg.Products.minimumAgeBand("kids"))
+}
+
+// A product's branding is held to the project branding block's rules, and the
+// error names the product it belongs to.
+func TestParseProjectConfig_Products_BrandingValidation(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ blob, want string }{
+		"email_from":    {`{"products":{"kids":{"branding":{"email_from":"not an address"}}}}`, "products.kids.branding.email_from"},
+		"support_email": {`{"products":{"kids":{"branding":{"support_email":"@"}}}}`, "products.kids.branding.support_email"},
+		"logo_url_http": {`{"products":{"kids":{"branding":{"logo_url":"http://kids.example.com/l.png"}}}}`, "products.kids.branding.logo_url"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseProjectConfig(tc.blob)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 func TestParseProjectConfig_Products_AcceptsEveryBand(t *testing.T) {
 	t.Parallel()
 	for _, band := range []string{MinimumAgeBandChild, MinimumAgeBandTeen, MinimumAgeBandAdult} {
@@ -436,14 +468,14 @@ func TestProductAgeGate_PasswordSignup(t *testing.T) {
 	t.Run("teen_refused_by_adult_minimum", func(t *testing.T) {
 		svc, _, _ := newProductAgeSvc(t)
 		ctx := productScope(t, adultMinimumJSON, restrictedProduct)
-		_, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15), "")
+		_, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15), "", EmailLinkParams{})
 		require.ErrorIs(t, err, ErrProductAgeRestricted)
 	})
 
 	t.Run("teen_admitted_by_teen_minimum", func(t *testing.T) {
 		svc, _, _ := newProductAgeSvc(t)
 		ctx := productScope(t, teenMinimumJSON, restrictedProduct)
-		res, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15), "")
+		res, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15), "", EmailLinkParams{})
 		require.NoError(t, err)
 		assert.NotEmpty(t, res.AccessToken)
 	})
@@ -451,7 +483,7 @@ func TestProductAgeGate_PasswordSignup(t *testing.T) {
 	t.Run("child_parked_for_consent_before_the_gate", func(t *testing.T) {
 		svc, _, _ := newProductAgeSvc(t)
 		ctx := productScope(t, adultMinimumJSON, restrictedProduct)
-		res, err := svc.PasswordSignup(ctx, "kid@example.com", productAgePassword, "Kid", "", dobAgeMs(8), "")
+		res, err := svc.PasswordSignup(ctx, "kid@example.com", productAgePassword, "Kid", "", dobAgeMs(8), "", EmailLinkParams{})
 		require.NoError(t, err)
 		assert.Empty(t, res.AccessToken, "a child signup issues no session to gate")
 		assert.Equal(t, StatusPendingParentalConsent, res.User.Status)

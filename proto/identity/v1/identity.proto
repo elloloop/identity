@@ -332,6 +332,14 @@ message PasswordSignupRequest {
   // thresholds it must name one of them. Canonicalized (trimmed, upper-cased)
   // before storage.
   string market = 6;
+  // return_to is the app URL the verification page returns the user to.
+  // Optional; validated and carried on the link exactly as on
+  // RequestPasswordResetRequest, and checked before the account is created.
+  string return_to = 7;
+  // product is the slug of the product the sign-up is for. Optional;
+  // validated and carried on the link exactly as on
+  // RequestPasswordResetRequest, and checked before the account is created.
+  string product = 8;
 }
 
 message PasswordSignupResponse {
@@ -615,10 +623,30 @@ message ExportMyDataResponse {
 // The reset link is sent to the account's PRIMARY verified email — the
 // address matching the supplied `email`. If no account matches, the
 // request silently succeeds (no enumeration).
+//
+// The emailed link is <page>?token=<token>, where <page> is
+// GATEWAY_EMAIL_LINK_BASE_URL + "/reset-password" when that is set, else
+// "/auth/reset-password" on the project's primary auth domain (or
+// GATEWAY_APP_BASE_URL). The link also carries `&product=<product>` and
+// `&redirect=<return_to>`, URL-encoded, when the request sets them, so the
+// page can present the right product and send the user back afterwards.
+// The same rule builds the verification link of PasswordSignup and
+// SendEmailVerification ("/verify-email").
 message RequestPasswordResetRequest {
   string email = 1;
   reserved 2;
   reserved "captcha_token"; // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
+  // return_to is the app URL the reset page returns the user to. Optional;
+  // when set it must match the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist
+  // (shared with hosted OAuth and magic links) or the request fails with
+  // InvalidArgument — for any email, so it reveals nothing about accounts.
+  string return_to = 3;
+  // product is the slug of the product the request is for (e.g.
+  // "easyloops"), with the same semantics as the hosted hub's ?product=
+  // query. Optional; trimmed and lower-cased, and it must be 1–64 of
+  // [a-z0-9_-] starting with a letter or digit, or the request fails with
+  // InvalidArgument.
+  string product = 4;
 }
 
 message RequestPasswordResetResponse {
@@ -634,7 +662,18 @@ message ConfirmPasswordResetResponse {}
 
 // ─── Email Verification ─────────────────────────────────────────────
 
-message SendEmailVerificationRequest {}
+// SendEmailVerification emails the authenticated caller a verification
+// link, built as described on RequestPasswordResetRequest.
+message SendEmailVerificationRequest {
+  // return_to is the app URL the verification page returns the user to.
+  // Optional; validated and carried on the link exactly as on
+  // RequestPasswordResetRequest.
+  string return_to = 1;
+  // product is the slug of the product the request is for. Optional;
+  // validated and carried on the link exactly as on
+  // RequestPasswordResetRequest.
+  string product = 2;
+}
 
 message SendEmailVerificationResponse {}
 

@@ -106,7 +106,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 
 	link := fmt.Sprintf("%s/auth/confirm-email-change?token=%s", s.appBaseURL(ctx), rawToken)
 	expiresStr := formatExpiresIn(expiry)
-	brand := resolveBranding(ctx, s.cfg)
+	brand := resolveBranding(ctx, s.cfg, "")
 
 	// Verification email to the NEW address — only here is the token
 	// disclosed.

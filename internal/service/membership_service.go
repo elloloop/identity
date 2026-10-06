@@ -365,7 +365,7 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	link := fmt.Sprintf("%s/auth/accept-invitation?token=%s", s.appBaseURL(ctx), rawToken)
 	var brand resolvedBranding
 	if s.cfg != nil {
-		brand = resolveBranding(ctx, s.cfg)
+		brand = resolveBranding(ctx, s.cfg, "")
 	}
 	html, text, err := email.Render(email.TemplateTenantInvitation, brand.templateData(map[string]any{
 		"UserName":    invitationGreeting(inv.Email),

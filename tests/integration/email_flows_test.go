@@ -18,7 +18,8 @@ import (
 )
 
 // extractToken pulls the value of ?token=... out of a body string.
-// Tests rely on the email templates always emitting that exact prefix.
+// Tests rely on the email templates always emitting that exact prefix; the
+// token is hex, so it ends at the next parameter, whitespace, or quote.
 func extractToken(t *testing.T, body string) string {
 	t.Helper()
 	idx := strings.Index(body, "token=")
@@ -28,7 +29,7 @@ func extractToken(t *testing.T, body string) string {
 	rest := body[idx+len("token="):]
 	end := len(rest)
 	for i, ch := range rest {
-		if ch == ' ' || ch == '\n' || ch == '\r' || ch == '"' || ch == '<' {
+		if ch == '&' || ch == ' ' || ch == '\n' || ch == '\r' || ch == '"' || ch == '<' {
 			end = i
 			break
 		}
