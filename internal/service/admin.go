@@ -432,7 +432,7 @@ func (s *AdminService) ResetUserPassword(
 // invitation token back in the RPC response, so an email outage cannot
 // strand a user.
 func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, link string) {
-	brand := resolveBranding(ctx, s.cfg)
+	brand := resolveBranding(ctx, s.cfg, "")
 	html, text, err := email.Render(email.TemplateInvitation, brand.templateData(map[string]any{
 		"UserName":    name,
 		"InviterName": "An administrator",

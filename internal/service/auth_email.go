@@ -140,7 +140,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
-	brand := resolveBranding(ctx, s.cfg)
+	brand := resolveBranding(ctx, s.cfg, link.product)
 	html, text, err := email.Render(email.TemplatePasswordReset, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
 		"Link":      s.emailLinkURL(ctx, emailLinkPageResetPassword, rawToken, link),
@@ -309,7 +309,7 @@ func (s *AuthService) sendEmailVerification(ctx context.Context, userID string, 
 		return fmt.Errorf("creating verification token: %w", err)
 	}
 
-	brand := resolveBranding(ctx, s.cfg)
+	brand := resolveBranding(ctx, s.cfg, link.product)
 	html, text, err := email.Render(email.TemplateEmailVerification, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
 		"Link":      s.emailLinkURL(ctx, emailLinkPageVerifyEmail, rawToken, link),

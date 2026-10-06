@@ -132,7 +132,7 @@ func (s *AuthService) sendEmailLoginCodeNow(ctx context.Context, emailAddr strin
 		return
 	}
 
-	brand := resolveBranding(ctx, s.cfg)
+	brand := resolveBranding(ctx, s.cfg, "")
 	html, text, err := email.Render(email.TemplateEmailLoginCode, brand.templateData(map[string]any{
 		"Code":      code,
 		"ExpiresIn": formatExpiresIn(ttl),
@@ -307,7 +307,7 @@ func (s *AuthService) sendMagicLinkNow(ctx context.Context, emailAddr, returnTo 
 	}
 
 	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.appBaseURL(ctx), rawToken)
-	brand := resolveBranding(ctx, s.cfg)
+	brand := resolveBranding(ctx, s.cfg, "")
 	html, text, err := email.Render(email.TemplateMagicLink, brand.templateData(map[string]any{
 		"Link":      link,
 		"ExpiresIn": formatExpiresIn(ttl),

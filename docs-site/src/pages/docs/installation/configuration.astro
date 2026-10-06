@@ -284,6 +284,33 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     "origin": "https://kids.example.com"
   }
 }`}</code></pre>
+  <h3>Per-product branding (one project, several products)</h3>
+  <p>
+    A project whose account pool signs into several products can brand the
+    password-reset and email-verification emails per product. Put a
+    <code>branding</code> block, with the same fields, under the product in
+    the project's <code>products</code> block. It applies when the request
+    names that product in its <code>product</code> field (see
+    <a href="#reset-and-verification-links">reset and verification links</a>).
+    Per-field precedence becomes <em>product value → per-project value →
+    global default → unbranded/legacy</em>. A request that names no product,
+    or a product without a <code>branding</code> block, gets the project's
+    branding. Other emails do not use it.
+  </p>
+  <pre><code>{`{
+  "branding": { "product_name": "Glassa", "email_from_name": "Glassa" },
+  "products": {
+    "kids": {
+      "minimum_age_band": "child",
+      "branding": {
+        "product_name": "Glassa Kids",
+        "email_from": "no-reply@kids.example.com",
+        "email_from_name": "Glassa Kids",
+        "logo_url": "https://kids.example.com/logo.png"
+      }
+    }
+  }
+}`}</code></pre>
   <h3>Deliverability (DKIM / SPF / DMARC)</h3>
   <p>
     Branding the From address only helps if the receiving mail server trusts

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/elloloop/identity/internal/config"
@@ -72,6 +73,46 @@ func TestRequestPasswordReset_EmailLinkBaseBeatsBrandedDomain(t *testing.T) {
 			text := sent[0].Text
 			if got, want := linkInBody(t, text, "https://"), tc.wantPrefix+extractTokenFromLink(t, text); got != want {
 				t.Fatalf("reset link = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestRequestPasswordReset_BrandedByNamedProduct: the reset email for a
+// request that names a product carries that product's branding from the
+// project's products block; the same request without a product carries the
+// project's.
+func TestRequestPasswordReset_BrandedByNamedProduct(t *testing.T) {
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "hub",
+		Access:    ProjectAccessConfig{Mode: AccessModeOpen},
+		Branding:  ProjectBrandingConfig{ProductName: "Acme", EmailFromName: "Acme"},
+		Products: ProjectProductsConfig{"kids": {Branding: ProjectBrandingConfig{
+			ProductName: "Acme Kids", EmailFrom: "no-reply@kids.acme.example", EmailFromName: "Acme Kids",
+		}}},
+	})
+	for _, tc := range []struct {
+		name, product, wantFrom, wantName string
+	}{
+		{"named product", "Kids", `"Acme Kids" <no-reply@kids.acme.example>`, "Acme Kids"},
+		{"no product", "", `"Acme" <no-reply@test.local>`, "Acme"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, rec := newAuthSvcWithMailer(t)
+			seedUser(repo, "alice@test.com", "x", "active")
+
+			if err := svc.RequestPasswordReset(ctx, "alice@test.com", EmailLinkParams{Product: tc.product}); err != nil {
+				t.Fatalf("RequestPasswordReset: %v", err)
+			}
+			sent := rec.Sent()
+			if len(sent) != 1 {
+				t.Fatalf("expected 1 email, got %d", len(sent))
+			}
+			if sent[0].From != tc.wantFrom {
+				t.Errorf("From = %q, want %q", sent[0].From, tc.wantFrom)
+			}
+			if !strings.HasPrefix(sent[0].Text, tc.wantName+"\n") {
+				t.Errorf("text body should open with %q: %q", tc.wantName, sent[0].Text)
 			}
 		})
 	}

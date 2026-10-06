@@ -9,11 +9,12 @@ import (
 )
 
 // resolvedBranding is the effective transactional-email branding for a single
-// send: the request's per-project branding (config_json branding.*) layered on
-// top of the global GATEWAY_EMAIL_BRAND_* defaults, which themselves fall back
-// to today's byte-compatible behaviour. It is the single place the "per-project
-// first, global default next, legacy last" precedence is decided so every email
-// send path stays consistent.
+// send: the branding of the product the email is for (config_json
+// products.<slug>.branding), over the request's per-project branding
+// (config_json branding.*), over the global GATEWAY_EMAIL_BRAND_* defaults,
+// which themselves fall back to today's byte-compatible behaviour. It is the
+// single place the "per-product, per-project, global default, legacy"
+// precedence is decided so every email send path stays consistent.
 type resolvedBranding struct {
 	productName     string
 	from            string
@@ -24,33 +25,41 @@ type resolvedBranding struct {
 	listUnsubscribe string
 }
 
-// resolveBranding computes the effective branding for the request in ctx.
+// resolveBranding computes the effective branding for an email sent for
+// product (a normalized slug, or "" when the email names no product) in the
+// request in ctx.
 //
-// Precedence per field: per-project value (when set) > global default
-// (GATEWAY_EMAIL_BRAND_*) > legacy. For the From address the legacy fallback is
-// GATEWAY_SMTP_FROM, preserving today's output for a zero-config deployment.
-func resolveBranding(ctx context.Context, cfg *config.Config) resolvedBranding {
-	var p ProjectBrandingConfig
+// Precedence per field: the project's value for product (when set) >
+// per-project value > global default (GATEWAY_EMAIL_BRAND_*) > legacy. For the
+// From address the legacy fallback is GATEWAY_SMTP_FROM, preserving today's
+// output for a zero-config deployment.
+func resolveBranding(ctx context.Context, cfg *config.Config, product string) resolvedBranding {
+	var p, prod ProjectBrandingConfig
 	if scope := ProjectScopeFromContext(ctx); scope != nil {
 		p = scope.Branding
+		prod = scope.Products[product].Branding
 	}
-	pick := func(project, global string) string {
-		if strings.TrimSpace(project) != "" {
-			return project
+	// pick returns the product value, else the project value, when one is
+	// set; otherwise the global value exactly as configured.
+	pick := func(product, project, global string) string {
+		for _, v := range []string{product, project} {
+			if strings.TrimSpace(v) != "" {
+				return v
+			}
 		}
 		return global
 	}
-	from := pick(p.EmailFrom, cfg.EmailBrandFrom)
+	from := pick(prod.EmailFrom, p.EmailFrom, cfg.EmailBrandFrom)
 	if strings.TrimSpace(from) == "" {
 		from = cfg.SMTPFrom
 	}
 	return resolvedBranding{
-		productName:     pick(p.ProductName, cfg.EmailBrandProductName),
+		productName:     pick(prod.ProductName, p.ProductName, cfg.EmailBrandProductName),
 		from:            from,
-		fromName:        pick(p.EmailFromName, cfg.EmailBrandFromName),
-		logoURL:         pick(p.LogoURL, cfg.EmailBrandLogoURL),
-		primaryColor:    pick(p.PrimaryColor, cfg.EmailBrandPrimaryColor),
-		supportEmail:    pick(p.SupportEmail, cfg.EmailBrandSupportEmail),
+		fromName:        pick(prod.EmailFromName, p.EmailFromName, cfg.EmailBrandFromName),
+		logoURL:         pick(prod.LogoURL, p.LogoURL, cfg.EmailBrandLogoURL),
+		primaryColor:    pick(prod.PrimaryColor, p.PrimaryColor, cfg.EmailBrandPrimaryColor),
+		supportEmail:    pick(prod.SupportEmail, p.SupportEmail, cfg.EmailBrandSupportEmail),
 		listUnsubscribe: cfg.EmailListUnsubscribe,
 	}
 }

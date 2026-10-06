@@ -274,6 +274,12 @@ admin surface, and no deploy is needed to add a product or change a rating:
 }
 ```
 
+A product may also carry a `branding` block with the fields of the
+project's `branding` block. It brands the password-reset and
+email-verification emails whose request names that product in its
+`product` field, field by field over the project's branding; it plays no
+part in the guardrail.
+
 `minimum_age_band` is `child`, `teen`, or `adult` — the lower-cased
 `AgeBand` spellings. It **fails OPEN**, the inverse of `access.mode`: an
 absent `products` block, an absent slug, and an absent `minimum_age_band`

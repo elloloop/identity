@@ -35,6 +35,16 @@ exactly the same emails as before.
   new fields wrongly. The check reads only the request, so the answer is the
   same for every address and reveals nothing about which accounts exist.
   Clients that send neither field see no change.
+- **Per-product email branding.** A product in a project's `products`
+  block may carry a `branding` block with the same fields as the project's
+  `branding`. It brands the reset and verification emails of a request that
+  names that product in `product`, field by field over the project's
+  branding, which still applies when no product is named or the product has
+  no `branding`. Write it with `UpsertProjectConfig`; a malformed address
+  or a non-`https` logo URL in it is refused like one in the project's
+  `branding`. It needs a project resolved from the control plane (by
+  credential key or auth domain) — the env-pinned default project has no
+  `products` block.
 - **Webhook URL errors no longer echo credentials.** A
   `GATEWAY_WEBHOOK_SUBSCRIPTIONS` URL that fails validation is now reported
   with any userinfo redacted.
