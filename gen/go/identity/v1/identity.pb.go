@@ -4494,10 +4494,10 @@ type RequestPasswordResetRequest struct {
 	// return_to is the app URL the reset page returns the user to. Optional;
 	// when set it must match the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist
 	// (shared with hosted OAuth and magic links) or the request fails with
-	// InvalidArgument — for any email, so it reveals nothing about accounts.
+	// InvalidArgument — for any email, so it reveals nothing about any account.
 	ReturnTo string `protobuf:"bytes,3,opt,name=return_to,json=returnTo,proto3" json:"return_to,omitempty"`
 	// product is the slug of the product the request is for (e.g.
-	// "easyloops"), with the same semantics as the hosted hub's ?product=
+	// "acme"), with the same semantics as the hosted hub's ?product=
 	// query. Optional; trimmed and lower-cased, and it must be 1–64 of
 	// [a-z0-9_-] starting with a letter or digit, or the request fails with
 	// InvalidArgument.

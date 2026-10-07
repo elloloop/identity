@@ -35,7 +35,7 @@ var productSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 // untrusted until checkEmailLinkParams admits them.
 type EmailLinkParams struct {
 	// Product is the slug of the product the request is for (e.g.
-	// "easyloops"), with the semantics of the hosted hub's ?product= query.
+	// "acme"), with the semantics of the hosted hub's ?product= query.
 	Product string
 	// ReturnTo is the app URL the landing page sends the user back to.
 	ReturnTo string
@@ -55,7 +55,7 @@ type emailLink struct {
 // — the allowlist hosted OAuth and magic links share — so an email can never
 // carry an attacker's redirect. The check reads only the request and the
 // deployment's allowlist, so its answer is the same for every email address
-// and cannot be used to probe for accounts.
+// and cannot be used to probe for an account.
 func (s *AuthService) checkEmailLinkParams(p EmailLinkParams) (emailLink, error) {
 	product := normalizeProductSlug(p.Product)
 	if product != "" && !productSlugPattern.MatchString(product) {

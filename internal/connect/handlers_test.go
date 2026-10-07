@@ -451,7 +451,7 @@ func TestRequestPasswordReset_RefusedReturnToIsInvalidArgument(t *testing.T) {
 
 	for _, addr := range []string{u.Email, "nobody@e.com"} {
 		_, err := h.client.RequestPasswordReset(context.Background(), connect.NewRequest(&identitypb.RequestPasswordResetRequest{
-			Email: addr, ReturnTo: "https://evil.test/", Product: "easyloops",
+			Email: addr, ReturnTo: "https://evil.test/", Product: "acme",
 		}))
 		if connectCodeOf(err) != connect.CodeInvalidArgument {
 			t.Fatalf("%s: code = %v (%v), want InvalidArgument", addr, connectCodeOf(err), err)
@@ -467,7 +467,7 @@ func TestRequestPasswordReset_AllowedLinkParamsSucceed(t *testing.T) {
 	u := h.repo.seedUser(&service.User{Email: "u@e.com", Status: "active", Role: "member"})
 
 	if _, err := h.client.RequestPasswordReset(context.Background(), connect.NewRequest(&identitypb.RequestPasswordResetRequest{
-		Email: u.Email, ReturnTo: "https://app.test/courses", Product: "Easyloops",
+		Email: u.Email, ReturnTo: "https://app.test/courses", Product: "Acme",
 	})); err != nil {
 		t.Fatalf("RequestPasswordReset: %v", err)
 	}

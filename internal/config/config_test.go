@@ -375,10 +375,10 @@ func TestValidate_GenericOIDC_Invariants(t *testing.T) {
 func TestValidate_EmailLinkBaseURL(t *testing.T) {
 	for _, base := range []string{
 		"",
-		"https://accounts.example.com",
-		"https://accounts.example.com/",
+		"https://signin.example.com",
+		"https://signin.example.com/",
 		"https://example.com/account",
-		"https://accounts.example.com:8443",
+		"https://signin.example.com:8443",
 		"http://localhost:3000",
 		"http://127.0.0.1:3000/hub",
 		"http://[::1]:3000",
@@ -390,16 +390,16 @@ func TestValidate_EmailLinkBaseURL(t *testing.T) {
 	}
 
 	for _, tc := range []struct{ base, want string }{
-		{"http://accounts.example.com", "must use https"},
-		{"ftp://accounts.example.com", "must use https"},
-		{"accounts.example.com", "must be absolute"},
+		{"http://signin.example.com", "must use https"},
+		{"ftp://signin.example.com", "must use https"},
+		{"signin.example.com", "must be absolute"},
 		{"/reset", "must be absolute"},
-		{"https://accounts.example.com?product=x", "must not carry"},
-		{"https://accounts.example.com?", "must not carry"},
-		{"https://accounts.example.com#top", "must not carry"},
-		{"https://admin:hunter2@accounts.example.com", "must not carry"},
-		{"http://admin:hunter2@accounts.example.com", "must use https"},
-		{"https://accounts.example.com/%zz", "not a valid URL"},
+		{"https://signin.example.com?product=x", "must not carry"},
+		{"https://signin.example.com?", "must not carry"},
+		{"https://signin.example.com#top", "must not carry"},
+		{"https://admin:hunter2@signin.example.com", "must not carry"},
+		{"http://admin:hunter2@signin.example.com", "must use https"},
+		{"https://signin.example.com/%zz", "not a valid URL"},
 	} {
 		c := &Config{EmailLinkBaseURL: tc.base}
 		err := c.Validate()

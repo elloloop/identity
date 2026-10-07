@@ -11,7 +11,7 @@ exactly the same emails as before.
   `/auth/verify-email` on the project's primary auth domain, else on
   `GATEWAY_APP_BASE_URL`. **If you serve these pages somewhere else, set the
   variable to that base URL** — for example a sign-in hub at
-  `https://accounts.example.com`, which serves `/reset-password` and
+  `https://signin.example.com`, which serves `/reset-password` and
   `/verify-email`. The links then become `<base>/reset-password?token=…`
   and `<base>/verify-email?token=…` for every project, and take precedence
   over any project's primary auth domain. The value must be an absolute

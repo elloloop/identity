@@ -638,23 +638,23 @@ func TestSendEmailVerification_PerRecipientThrottle(t *testing.T) {
 // ── Email link base and link params ────────────────────────────────────
 
 const (
-	hubLinkBase      = "https://accounts.test"
-	hubReturnTo      = "https://tortoise.test/after?step=2"
-	hubReturnToQuery = "https%3A%2F%2Ftortoise.test%2Fafter%3Fstep%3D2"
+	hubLinkBase      = "https://signin.example.test"
+	hubReturnTo      = "https://acme.example.test/after?step=2"
+	hubReturnToQuery = "https%3A%2F%2Facme.example.test%2Fafter%3Fstep%3D2"
 )
 
 // hubLinkParams is what a sign-in hub sends: a product named as the hub's
 // ?product= names it (any case) and an allowlisted return URL.
-var hubLinkParams = EmailLinkParams{Product: "Tortoise", ReturnTo: hubReturnTo}
+var hubLinkParams = EmailLinkParams{Product: "Acme", ReturnTo: hubReturnTo}
 
 // newHubLinkAuthSvc is newAuthSvcWithMailer for a deployment whose reset and
 // verification pages live on a hub (GATEWAY_EMAIL_LINK_BASE_URL, configured
-// with a trailing slash) and that trusts the tortoise app as a return URL.
+// with a trailing slash) and that trusts the acme app as a return URL.
 func newHubLinkAuthSvc(t *testing.T) (*AuthService, *fakeRepo, *recordingTransport) {
 	t.Helper()
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	svc.cfg.EmailLinkBaseURL = hubLinkBase + "/"
-	svc.returnAllow = mustReturnAllowlist(t, "https://tortoise.test")
+	svc.returnAllow = mustReturnAllowlist(t, "https://acme.example.test")
 	return svc, repo, rec
 }
 
@@ -671,7 +671,7 @@ func TestRequestPasswordReset_LinkOnEmailLinkBaseCarriesParams(t *testing.T) {
 		t.Fatalf("expected 1 email, got %d", len(sent))
 	}
 	tok := extractTokenFromLink(t, sent[0].Text)
-	want := hubLinkBase + "/reset-password?token=" + tok + "&product=tortoise&redirect=" + hubReturnToQuery
+	want := hubLinkBase + "/reset-password?token=" + tok + "&product=acme&redirect=" + hubReturnToQuery
 	if got := linkInBody(t, sent[0].Text, hubLinkBase); got != want {
 		t.Fatalf("reset link:\n got  %s\n want %s", got, want)
 	}
@@ -713,7 +713,7 @@ func TestRequestPasswordReset_RefusedLinkParamsSendNothing(t *testing.T) {
 
 	for _, addr := range []string{"alice@test.com", "nobody@test.com"} {
 		err := svc.RequestPasswordReset(context.Background(), addr,
-			EmailLinkParams{Product: "tortoise", ReturnTo: "https://evil.test/"})
+			EmailLinkParams{Product: "acme", ReturnTo: "https://evil.test/"})
 		if !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("%s: err = %v, want ErrInvalidArgument", addr, err)
 		}
@@ -738,7 +738,7 @@ func TestSendEmailVerification_LinkOnEmailLinkBaseCarriesParams(t *testing.T) {
 	}
 	text := rec.Sent()[0].Text
 	tok := extractTokenFromLink(t, text)
-	want := hubLinkBase + "/verify-email?token=" + tok + "&product=tortoise&redirect=" + hubReturnToQuery
+	want := hubLinkBase + "/verify-email?token=" + tok + "&product=acme&redirect=" + hubReturnToQuery
 	if got := linkInBody(t, text, hubLinkBase); got != want {
 		t.Fatalf("verify link:\n got  %s\n want %s", got, want)
 	}
@@ -778,7 +778,7 @@ func TestPasswordSignup_VerificationLinkCarriesParams(t *testing.T) {
 	}
 	text := rec.Sent()[0].Text
 	tok := extractTokenFromLink(t, text)
-	want := hubLinkBase + "/verify-email?token=" + tok + "&product=tortoise&redirect=" + hubReturnToQuery
+	want := hubLinkBase + "/verify-email?token=" + tok + "&product=acme&redirect=" + hubReturnToQuery
 	if got := linkInBody(t, text, hubLinkBase); got != want {
 		t.Fatalf("signup verify link:\n got  %s\n want %s", got, want)
 	}

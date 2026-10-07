@@ -232,10 +232,10 @@ func TestEnvTest_OverrideAppBaseURL(t *testing.T) {
 
 func TestEnvTest_OverrideEmailLinkBaseURL(t *testing.T) {
 	clearGatewayEnv(t)
-	t.Setenv("GATEWAY_EMAIL_LINK_BASE_URL", "https://accounts.example.com")
+	t.Setenv("GATEWAY_EMAIL_LINK_BASE_URL", "https://signin.example.com")
 	cfg := Load()
-	if cfg.EmailLinkBaseURL != "https://accounts.example.com" {
-		t.Errorf("EmailLinkBaseURL: got %q, want https://accounts.example.com", cfg.EmailLinkBaseURL)
+	if cfg.EmailLinkBaseURL != "https://signin.example.com" {
+		t.Errorf("EmailLinkBaseURL: got %q, want https://signin.example.com", cfg.EmailLinkBaseURL)
 	}
 	if err := cfg.validateEmailLinkBaseURL(); err != nil {
 		t.Errorf("a loaded https base must validate: %v", err)
