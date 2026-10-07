@@ -8,10 +8,13 @@ name: Disclosure
 # Issues, comments and reviews are checked by disclosure-discussion.yml.
 #
 # This workflow triggers only on pull_request_target and merge_group, so
-# its one job reports the "Disclosure" check exactly once per PR head and
-# per merge group, and can be made required: a run from another event
-# would attach a skipped "Disclosure" job to the PR head, which GitHub
-# counts as success.
+# its one job is the only thing that reports the "Disclosure" check, and it
+# can be made required: a run from another event would attach a skipped
+# "Disclosure" job to the PR head, which GitHub counts as success. Every
+# event on a PR (a push, a reopen, an edit of the title) runs it again on
+# the same head, and the latest run is the one that counts, so every run
+# reads every commit: a run that read less would replace a failing result
+# with a passing one.
 #
 # scripts/disclosure-collect.sh decides what text an event carries and
 # whose it is; scripts/disclosure-check.sh matches it. Both are tested in

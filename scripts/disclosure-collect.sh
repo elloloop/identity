@@ -24,23 +24,22 @@
 # patch for (binary, or too large to diff) is read whole at that commit
 # instead of being skipped.
 #
-# Only text from people with write access to the repository (admin,
-# maintain or write) is collected: the item's author, or the event's sender
-# (a maintainer editing an outsider's issue, or pushing to an outsider's
-# PR). The threat is our own accidental leak; checking anyone else's text
-# would let them confirm guesses against the secret term list one public
-# check at a time. Write access is read from the repository permission API,
-# because an event's author_association shows org membership only when it is
-# public. A lookup that fails, or answers anything but a known permission,
-# fails the check (exit 2, nothing printed): it never matches the text. An
-# app's bot account is checked like a writer, since only an installed app
-# can post as one.
+# Only items whose author has write access to the repository (admin,
+# maintain or write) are collected: the PR's, issue's, comment's or
+# review's author, whoever triggered the event. So a writer's PR is read in
+# full on every event, and an outsider's never is, even when a maintainer
+# pushes to it or edits it. The threat is our own accidental leak; matching
+# anyone else's text would let them confirm guesses against the secret term
+# list one public check at a time. Write access is read from the repository
+# permission API, because an event's author_association shows org
+# membership only when it is public. A lookup that fails, or answers
+# anything but a known permission, fails the check (exit 2, nothing
+# printed): it never matches the text. An app's bot account is checked like
+# a writer, since only an installed app can post as one.
 #
-# Outside contributions are covered by the maintainer-run review gate
-# (§11). The merge queue squashes, so its run sees one squash commit per
-# queued PR: it checks what lands on main (each PR's squash commit message
-# and net diff), not an outside PR's description, branch name or
-# intermediate commits.
+# AGENTS.md §13 says what covers the rest: an outside PR's text and a
+# maintainer's commits pushed onto it are left to the review gate and to
+# the merge queue's run, which reads each PR's squash commit.
 #
 # A review on a fork PR is never checked, whoever wrote it: GitHub gives a
 # run triggered from a fork no secrets, so there is no term list to match.
@@ -51,7 +50,7 @@
 #   0   the text is on stdout
 #   2   bad usage, or a read failed (the check must fail, not pass)
 #   10  not collected: no writer wrote or sent it (stdout empty)
-#   11  not collected: past what the API lists (stdout empty)
+#   11  past what the API lists; part of it may have been printed
 #   12  not collected: a review on a fork PR, which gets no secrets
 #
 # The statuses past 2 are ones jq and gh never return, so a tool failure
@@ -102,22 +101,24 @@ permission_of() {
 }
 
 # require_writer exits $outside unless the author of the item at $1 (an
-# event object with .user) or the event's sender can write to the
-# repository. It runs before anything is printed.
+# event object with .user) can write to the repository. It runs before
+# anything is printed, and only the author counts: the event's sender
+# never does, so another person's action cannot turn an outsider's text
+# into matched text, nor a writer's into unchecked text.
 require_writer() {
-  local author sender permission
-  [[ "$(ev "$1.user.type // \"\"")" != Bot ]] || return 0
+  local type author permission
+  type="$(ev "$1.user.type // \"\"")"
+  [[ "$type" != Bot ]] || return 0
   author="$(ev "$1.user.login // \"\"")"
   [[ -n "$author" ]] || die "the event names no author"
   permission="$(permission_of "$author")"
-  case "$permission" in admin | maintain | write) return 0 ;; esac
-  sender="$(ev '.sender.login // ""')"
-  if [[ -n "$sender" && "$sender" != "$author" ]]; then
-    permission="$(permission_of "$sender")"
-    case "$permission" in admin | maintain | write) return 0 ;; esac
-  fi
-  echo "disclosure-collect: not checked, neither the author nor the sender has write access" >&2
-  exit "$outside"
+  case "$permission" in
+    admin | maintain | write) ;;
+    *)
+      echo "disclosure-collect: not checked, the author has no write access" >&2
+      exit "$outside"
+      ;;
+  esac
 }
 
 # commits_text prints, for the commits listed (as {sha, message, parents}
@@ -129,8 +130,8 @@ require_writer() {
 # first parent, so merging the base branch in would read all of the base
 # branch's changes as this PR's; and what it brings is either the branch's
 # own commits, read one by one here, or the base branch's, checked when they
-# landed. The one thing it can add itself, a conflict resolution, is read by
-# the merge queue's run, which sees the squashed net diff.
+# landed. What it adds itself (a conflict resolution) is read only if it
+# survives into the net diff the merge queue's run sees; §13 lists that gap.
 commits_text() {
   local commits shas files count patchless sha path n
   commits="$(cat)"
@@ -176,14 +177,10 @@ case "$kind" in
       echo "disclosure-collect: the PR has $commits commits; the API lists at most $max_commits" >&2
       exit "$too_big"
     fi
+    # Every run reads every commit, an edit of the title included: each run
+    # reports the Disclosure check on the head anew, so one that read less
+    # would replace a failing result with a passing one.
     ev '.pull_request | .title, (.body // ""), .head.ref'
-    # An edit of only the title or description changes no commit, and the
-    # commits were read when they were pushed: spare the API calls, which
-    # come out of an hourly budget the repository's workflows share.
-    if [[ "$(ev '.action // ""')" == edited &&
-      "$(ev '(.changes // {}) | keys - ["title", "body"] | length')" == 0 ]]; then
-      exit 0
-    fi
     number="$(ev '.pull_request.number')"
     listed="$(gh api "repos/$repo/pulls/$number/commits" --paginate --jq ".[] | $listing")" ||
       die "could not list the commits of PR $number"
@@ -222,7 +219,8 @@ case "$kind" in
     # A fork's run gets no secrets. Its head repository is another
     # repository, or none once the fork is deleted; .fork alone reads false
     # for a deleted fork.
-    if [[ "$(ev '.pull_request.head.repo.full_name // ""')" != "$repo" ]]; then
+    head_repo="$(ev '.pull_request.head.repo.full_name // ""')"
+    if [[ "$head_repo" != "$repo" ]]; then
       echo "disclosure-collect: not checked, reviews on fork PRs get no secrets" >&2
       exit "$fork_review"
     fi
