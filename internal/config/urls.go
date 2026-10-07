@@ -27,6 +27,14 @@ func parseHTTPSOrLoopbackURL(raw string) (*url.URL, error) {
 	if u.Host == "" {
 		return nil, fmt.Errorf("url %q must be absolute (scheme and host)", shown)
 	}
+	// "https://:443" has a Host but no host name to call.
+	if u.Hostname() == "" {
+		return nil, fmt.Errorf("url %q has no host name", shown)
+	}
+	// url.Parse checks a port is digits, not that it is one a socket can use.
+	if p := u.Port(); p != "" && !origin.ValidPort(p) {
+		return nil, fmt.Errorf("url %q port must be a number from 1 to 65535", shown)
+	}
 	switch u.Scheme {
 	case "https":
 		return u, nil

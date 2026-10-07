@@ -1,9 +1,19 @@
 # Upgrade guide
 
-## v4.9 → next — reset and verification links can point at a sign-in hub (additive)
+## v4.9 → next — reset and verification links can point at a sign-in hub (additive); stricter URL boot checks
 
 No schema change and no migration. A deployment that sets nothing new sends
 exactly the same emails as before.
+
+<a id="from-v481"></a>**On v4.8.1 and using `GATEWAY_EMAIL_LINK_BASE_URL`,
+`product` or `return_to`, upgrade straight to this release, not to v4.9.0.**
+v4.8.1 carried the variable and the two fields below as a patch. v4.9.0 has
+none of them and ignores them without an error, so its reset and
+verification links go back to `/auth/…` and lose the product and redirect.
+Skipping the v4.9.0 release does not skip its notes: read
+[v4.8 → v4.9](#v48--v49--scim-throttling-and-audit-directory-limit-on-every-transport-wildcard-origins-one-email-comparison-rule-migration-0034)
+first, including migration 0034, which rewrites `users` under an exclusive
+lock.
 
 - **`GATEWAY_EMAIL_LINK_BASE_URL`** (default empty) is where the
   password-reset and email-verification pages live. Identity does not serve
@@ -48,8 +58,17 @@ exactly the same emails as before.
 - **Webhook URL errors no longer echo credentials.** A
   `GATEWAY_WEBHOOK_SUBSCRIPTIONS` URL that fails validation is now reported
   with any userinfo redacted.
+- **A URL no request could reach stops the server from starting.** A
+  `GATEWAY_WEBHOOK_SUBSCRIPTIONS` URL or `GATEWAY_EMAIL_LINK_BASE_URL` with
+  no host name (`https://:443`) or a port outside 1–65535 is now refused at
+  boot, as is an email link base ending in a bare `#`.
+- **Dependencies**: `go.opentelemetry.io/otel` v1.45.0 (GO-2026-6505).
 
 ## v4.8 → v4.9 — SCIM throttling and audit; directory limit on every transport; wildcard origins; one email comparison rule (migration 0034)
+
+On v4.8.1 and using `GATEWAY_EMAIL_LINK_BASE_URL`, `product` or
+`return_to`, skip v4.9.0 and go to the release after it: see
+[upgrading from v4.8.1](#from-v481).
 
 **Postgres deployments get migration 0034, which rewrites the `users` table
 under an exclusive lock.** Read

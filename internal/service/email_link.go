@@ -79,7 +79,7 @@ func (s *AuthService) emailLinkURL(ctx context.Context, page, token string, link
 // emailLinkPageURL locates page. GATEWAY_EMAIL_LINK_BASE_URL, when set, wins
 // over everything — including a project's primary auth domain, because the
 // deployment serves these pages from that one place; otherwise the page is
-// under /auth/ on the request's app base URL, as it always was.
+// under /auth/ on the request's app base URL.
 func (s *AuthService) emailLinkPageURL(ctx context.Context, page string) string {
 	if base := strings.TrimRight(s.cfg.EmailLinkBaseURL, "/"); base != "" {
 		return base + "/" + page
@@ -89,8 +89,8 @@ func (s *AuthService) emailLinkPageURL(ctx context.Context, page string) string 
 
 // buildEmailLink appends the token, then the product and the return_to (as
 // "redirect") when present, each query-escaped. The order is fixed with the
-// token first, so a link without either optional parameter is exactly the
-// historical "<page>?token=<token>".
+// token first, so a link without either optional parameter is exactly
+// "<page>?token=<token>".
 func buildEmailLink(pageURL, token string, link emailLink) string {
 	var b strings.Builder
 	b.WriteString(pageURL)

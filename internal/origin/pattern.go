@@ -99,13 +99,21 @@ func ParsePattern(u *url.URL) (Pattern, error) {
 	return Pattern{parent: parent, port: port}, nil
 }
 
+// ValidPort reports whether p, a URL's port digits, is a port a socket can
+// use: a number from 1 to 65535 (leading zeros allowed).
+func ValidPort(p string) bool {
+	n, err := strconv.Atoi(p)
+	return err == nil && n >= 1 && n <= maxPort
+}
+
 // canonicalPort is the pattern's effective port without leading zeros, so an
 // entry written ":0443" means 443 rather than a port no browser ever sends.
 func canonicalPort(u *url.URL) (string, error) {
-	n, err := strconv.Atoi(EffectivePort(u))
-	if err != nil || n < 1 || n > maxPort {
+	p := EffectivePort(u)
+	if !ValidPort(p) {
 		return "", ErrPatternPort
 	}
+	n, _ := strconv.Atoi(p) // ValidPort has parsed it
 	return strconv.Itoa(n), nil
 }
 

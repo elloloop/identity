@@ -27,7 +27,7 @@ func TestBuildEmailLink(t *testing.T) {
 		want string
 	}{
 		{
-			name: "token only is the historical link",
+			name: "token only",
 			want: page + "?token=" + emailLinkTestToken,
 		},
 		{
@@ -189,7 +189,7 @@ func TestCheckEmailLinkParams_Refuses(t *testing.T) {
 		{"product with a space", EmailLinkParams{Product: "acme kids"}},
 		{"product with a slash", EmailLinkParams{Product: "a/b"}},
 		{"product starting with a dash", EmailLinkParams{Product: "-acme"}},
-		{"product not ASCII", EmailLinkParams{Product: "tørtoise"}},
+		{"product not ASCII", EmailLinkParams{Product: "äcme"}},
 		{"product over the length limit", EmailLinkParams{Product: strings.Repeat("a", 65)}},
 		{"good product, bad return_to", EmailLinkParams{Product: "acme", ReturnTo: "https://evil.example/"}},
 	}
