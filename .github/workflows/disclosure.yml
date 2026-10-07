@@ -5,7 +5,8 @@ name: Disclosure
 # maintainer having to remember to look (AGENTS.md §13). The term list
 # lives only in the CONFIDENTIAL_TERMS repository secret, one term per
 # line; nothing here ever prints, comments or labels with a matched term.
-# Issues, comments and reviews are checked by disclosure-discussion.yml.
+# Issues and comments are checked by disclosure-discussion.yml. No workflow
+# checks reviews; the review gate reads them (AGENTS.md §13).
 #
 # This workflow triggers only on pull_request_target and merge_group, so
 # its one job is the only thing that reports the "Disclosure" check, and it
@@ -21,9 +22,10 @@ name: Disclosure
 # tests/policy.
 #
 # pull_request_target runs this file from the BASE branch with the base
-# repository's token and secrets, so fork PRs are checked too. That is safe
-# only because no PR code is ever checked out or run: the PR's text, commit
-# messages and added lines are read through the API as data, and the only
+# repository's token and secrets, so a fork PR whose author has write access
+# is checked too. That is safe only because no PR code is ever checked out or
+# run: the PR's text, commit messages and added lines are read through the
+# API as data, and the only
 # checkout is the base branch's own copy of the scripts. A merge_group run
 # takes this file and the scripts from the queued commit, so it runs only
 # reviewed code as long as code-owner review is required to queue a PR:

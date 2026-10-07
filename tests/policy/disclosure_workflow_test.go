@@ -148,9 +148,9 @@ func TestDisclosureDiscussionWorkflow(t *testing.T) {
 // assertCollectOutcomes pins how a workflow acts on what the collect script
 // returns: each event maps to its kind, collected text (0) is checked, a
 // failed read (2) fails the job with a re-run hint, no writer (10) is a
-// notice, and every other status fails the job. extra is the one more
-// status the workflow knows: 11 (too big) fails the job, 12 (a fork's
-// review) is a notice. The check step runs only on collected text.
+// notice, and every other status fails the job. extra lists the statuses a
+// workflow handles beyond those: disclosure.yml passes 11 (too big), which
+// fails the job. The check step runs only on collected text.
 func assertCollectOutcomes(t *testing.T, name, wf string, kinds map[string]string, extra ...string) {
 	t.Helper()
 	collect := ""
