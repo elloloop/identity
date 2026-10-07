@@ -1,12 +1,12 @@
 # Upgrade guide
 
-## v4.9 → next — reset and verification links can point at a sign-in hub (additive); stricter URL boot checks
+## v4.9 → v4.10 — reset and verification links can point at a sign-in hub (additive); stricter URL boot checks
 
 No schema change and no migration. A deployment that sets nothing new sends
 exactly the same emails as before.
 
 <a id="from-v481"></a>**On v4.8.1 and using `GATEWAY_EMAIL_LINK_BASE_URL`,
-`product` or `return_to`, upgrade straight to this release, not to v4.9.0.**
+`product` or `return_to`, upgrade straight to v4.10.0, not to v4.9.0.**
 v4.8.1 carried the variable and the two fields below as a patch. v4.9.0 has
 none of them and ignores them without an error, so its reset and
 verification links go back to `/auth/…` and lose the product and redirect.
@@ -44,7 +44,11 @@ lock.
   it now returns this one error, and only for a request that sets one of the
   new fields wrongly. The check reads only the request, so the answer is the
   same for every address and reveals nothing about which accounts exist.
-  Clients that send neither field see no change.
+  Clients that send neither field see no change. The check covers only the
+  links Identity sends: anyone can put `redirect` on a link by hand next to
+  a token of their own, so the page must check `redirect` against its own
+  allowlist before following it (see the configuration docs' "Reset and
+  verification links").
 - **Per-product email branding.** A product in a project's `products`
   block may carry a `branding` block with the same fields as the project's
   `branding`. It brands the reset and verification emails of a request that
@@ -55,7 +59,7 @@ lock.
   `branding`. It needs a project resolved from the control plane (by
   credential key or auth domain) — the env-pinned default project has no
   `products` block.
-- **Webhook URL errors no longer echo credentials.** A
+- **Webhook URL errors no longer echo userinfo.** A
   `GATEWAY_WEBHOOK_SUBSCRIPTIONS` URL that fails validation is now reported
   with any userinfo redacted.
 - **A URL no request could reach stops the server from starting.** A
@@ -67,7 +71,7 @@ lock.
 ## v4.8 → v4.9 — SCIM throttling and audit; directory limit on every transport; wildcard origins; one email comparison rule (migration 0034)
 
 On v4.8.1 and using `GATEWAY_EMAIL_LINK_BASE_URL`, `product` or
-`return_to`, skip v4.9.0 and go to the release after it: see
+`return_to`, skip v4.9.0 and go to v4.10.0: see
 [upgrading from v4.8.1](#from-v481).
 
 **Postgres deployments get migration 0034, which rewrites the `users` table
