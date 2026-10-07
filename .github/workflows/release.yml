@@ -305,16 +305,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # This is the release/4.8 maintenance line: a newer minor already
+      # owns `latest` and the major tag, so a patch release cut from here
+      # publishes only its own version, its minor line and its commit, and
+      # never moves `latest` or `4` back to an older release.
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
             type=sha,prefix=sha-
 
       - name: Build and push
@@ -469,8 +473,11 @@ jobs:
             echo "Verify integrity using the accompanying \`identity-protos-${VER}.sha256\` file."
           } > "$notes_file"
 
+          # --latest=false: a maintenance release must not take GitHub's
+          # "Latest release" from the newer minor line.
           gh release create "$VERSION" \
             --title "$VERSION" \
+            --latest=false \
             --notes-file "$notes_file" \
             "dist/identity-protos-${VER}.tar.gz" \
             "dist/identity-protos-${VER}.zip" \
