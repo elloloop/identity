@@ -9,7 +9,9 @@
 # repository secret of the same name, so the list never lives in the
 # repository (AGENTS.md §13). Matching is a case-insensitive, literal
 # substring match after the text and each term are folded the same way:
-# zero-width characters (U+200B-U+200D, U+FEFF) are dropped, '-', '_' and
+# invisible characters (soft hyphen U+00AD, Mongolian vowel separator
+# U+180E, zero-width space, non-joiner and joiner U+200B-U+200D, word joiner
+# U+2060, byte order mark U+FEFF) are dropped, '-', '_' and
 # '.' count as whitespace, and every run of whitespace becomes one space.
 # So "acme-widgets", "ACME_Widgets", "acme.widgets" and "acme\n widgets"
 # all match the term "acme widgets", and a term split across lines, spelled
@@ -36,10 +38,11 @@ masks="$(mktemp)"
 text="$(mktemp)"
 trap 'rm -f "$terms" "$masks" "$text"' EXIT
 
-# fold drops zero-width characters, turns the separators into spaces and
+# fold drops the invisible characters, turns the separators into spaces and
 # collapses whitespace. It works on bytes (LC_ALL=C) so the octal escapes
-# name the UTF-8 encodings of U+200B-U+200D and U+FEFF on any awk.
-fold='{ gsub(/\342\200[\213\214\215]|\357\273\277/, ""); gsub(/[-_.]/, " "); gsub(/[[:space:]]+/, " ") }'
+# name the UTF-8 encodings on any awk: U+00AD, U+180E, U+200B-U+200D,
+# U+2060 and U+FEFF, in that order.
+fold='{ gsub(/\302\255|\341\240\216|\342\200[\213\214\215]|\342\201\240|\357\273\277/, ""); gsub(/[-_.]/, " "); gsub(/[[:space:]]+/, " ") }'
 
 # One folded term per line, ends trimmed, blank lines dropped (an empty
 # pattern would match every text). The masks get each term as written too:

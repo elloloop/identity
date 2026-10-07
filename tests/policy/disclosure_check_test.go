@@ -3,10 +3,12 @@ package policy
 import (
 	"bytes"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -21,7 +23,7 @@ const (
 
 // The terms below are made up for the tests; the real list lives only in
 // the CONFIDENTIAL_TERMS repository secret.
-const testTerms = "acme widgets\nsecret.example.test\nproject-falcon\n"
+const testTerms = "acme widgets\nsecret.example.test\nacme-labs\n"
 
 func TestDisclosureCheckFindsTerms(t *testing.T) {
 	for name, text := range map[string]string{
@@ -30,8 +32,8 @@ func TestDisclosureCheckFindsTerms(t *testing.T) {
 		"split across lines":     "acme\nwidgets",
 		"extra whitespace":       "acme \t  widgets",
 		"hostname in a URL":      "see https://login.secret.example.test/reset",
-		"substring of a word":    "the project-falcons repo",
-		"term in a later line":   "line one\nline two\nPROJECT-FALCON",
+		"substring of a word":    "the acme-labs2 repo",
+		"term in a later line":   "line one\nline two\nACME-LABS",
 		"added diff line marker": "+\tbase := \"https://secret.example.test\"",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -46,11 +48,11 @@ func TestDisclosureCheckFindsTerms(t *testing.T) {
 
 func TestDisclosureCheckPassesCleanText(t *testing.T) {
 	for name, text := range map[string]string{
-		"neutral examples":        "Use acme, example.com and example.test.",
-		"words apart":             "acme ships widgets",
-		"dot is literal":          "secretXexampleXtest",
-		"empty text":              "",
-		"term with a word inside": "project-big-falcon",
+		"neutral examples":         "Use acme, example.com and example.test.",
+		"words apart":              "acme ships widgets",
+		"separator not a wildcard": "secretXexampleXtest",
+		"empty text":               "",
+		"term with a word inside":  "acme-big-labs",
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, code := runDisclosureCheck(t, testTerms, text, nil)
@@ -69,14 +71,17 @@ func TestDisclosureCheckFoldsSeparatorsAndInvisibleCharacters(t *testing.T) {
 		"hyphen for a space":       "acme-widgets",
 		"underscore for a space":   "ACME_Widgets",
 		"dot for a space":          "acme.widgets",
-		"space for a hyphen":       "project falcon",
-		"underscore for a hyphen":  "PROJECT_FALCON",
+		"space for a hyphen":       "acme labs",
+		"underscore for a hyphen":  "ACME_LABS",
 		"hyphens for dots":         "secret-example-test",
-		"zero-width space":         "proj\u200bect-falcon",
+		"zero-width space":         "ac\u200bme-labs",
 		"zero-width non-joiner":    "acme \u200cwidgets",
 		"zero-width joiner":        "acme\u200d widgets",
 		"byte order mark":          "\ufeffsecret.example.test",
-		"separators and invisible": "project\u200b_\u200bfalcon",
+		"soft hyphen":              "ac\u00adme widgets",
+		"word joiner":              "acme\u2060 widgets",
+		"Mongolian vowel sep":      "acme \u180ewidgets",
+		"separators and invisible": "acme\u200b_\u200blabs",
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, code := runDisclosureCheck(t, testTerms, text, nil)
@@ -87,8 +92,8 @@ func TestDisclosureCheckFoldsSeparatorsAndInvisibleCharacters(t *testing.T) {
 		})
 	}
 	for name, text := range map[string]string{
-		"no separator at all":   "projectfalcon",
-		"slash is not folded":   "project/falcon",
+		"no separator at all":   "acmelabs",
+		"slash is not folded":   "acme/labs",
 		"invisible joins words": "acme\u200bwidgets",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -114,12 +119,14 @@ func TestDisclosureCheckIgnoresBlankAndCRLFLines(t *testing.T) {
 // Terms are literal strings, never patterns: regex metacharacters neither
 // widen a match nor break the matcher.
 func TestDisclosureCheckTreatsTermsLiterally(t *testing.T) {
-	terms := "a.b\n[unclosed\n(x|y)\n"
-	if out, code := runDisclosureCheck(t, terms, "axb x y", nil); code != disclosureClean {
+	terms := "a*b\na+b\n[unclosed\n(x|y)\n"
+	if out, code := runDisclosureCheck(t, terms, "b ab aab x y", nil); code != disclosureClean {
 		t.Fatalf("metacharacters widened the match: exit = %d; output:\n%s", code, out)
 	}
-	if out, code := runDisclosureCheck(t, terms, "a [unclosed bracket", nil); code != disclosureMatch {
-		t.Fatalf("literal bracket term: exit = %d, want %d; output:\n%s", code, disclosureMatch, out)
+	for _, text := range []string{"a [unclosed bracket", "1 a+b 2", "A*B"} {
+		if out, code := runDisclosureCheck(t, terms, text, nil); code != disclosureMatch {
+			t.Fatalf("literal term in %q: exit = %d, want %d; output:\n%s", text, code, disclosureMatch, out)
+		}
 	}
 }
 
@@ -143,7 +150,7 @@ func TestDisclosureCheckWithoutTermsReportsUnconfigured(t *testing.T) {
 // term appears: the runner consumes ::add-mask:: lines instead of printing
 // them.
 func TestDisclosureCheckMasksTermsUnderGitHubActions(t *testing.T) {
-	out, code := runDisclosureCheck(t, "acme  widgets\nproject-falcon\n", "Acme Widgets", []string{"GITHUB_ACTIONS=true"})
+	out, code := runDisclosureCheck(t, "acme  widgets\nacme-labs\n", "Acme Widgets", []string{"GITHUB_ACTIONS=true"})
 	if code != disclosureMatch {
 		t.Fatalf("exit = %d, want %d; output:\n%s", code, disclosureMatch, out)
 	}
@@ -155,7 +162,7 @@ func TestDisclosureCheckMasksTermsUnderGitHubActions(t *testing.T) {
 		}
 		rest = append(rest, line)
 	}
-	if strings.Join(masks, "|") != "acme widgets|project-falcon|project falcon" {
+	if strings.Join(masks, "|") != "acme widgets|acme-labs|acme labs" {
 		t.Fatalf("masks = %q, want each term as written and, where it differs, folded", masks)
 	}
 	assertNoTermIn(t, strings.Join(rest, "\n"))
@@ -164,7 +171,7 @@ func TestDisclosureCheckMasksTermsUnderGitHubActions(t *testing.T) {
 func assertNoTermIn(t *testing.T, out string) {
 	t.Helper()
 	lower := strings.ToLower(out)
-	for _, term := range []string{"acme", "widgets", "secret.example", "falcon"} {
+	for _, term := range []string{"acme", "widgets", "secret.example", "labs"} {
 		if strings.Contains(lower, term) {
 			t.Fatalf("output echoes part of a confidential term (%q):\n%s", term, out)
 		}
@@ -227,67 +234,103 @@ func withoutEnv(env []string, names ...string) []string {
 
 func ptr(s string) *string { return &s }
 
+var (
+	jobLine        = regexp.MustCompile(`^  ([A-Za-z0-9_-]+):$`)
+	permissionLine = regexp.MustCompile(`^ {6}([a-z-]+): ([a-z]+)$`)
+	runLine        = regexp.MustCompile(`^( *)(?:- )?run:(.*)$`)
+	checkoutRef    = regexp.MustCompile(`(?m)^\s+ref:`)
+	termsName      = regexp.MustCompile(`(?i)confidential_terms`)
+	termsBinding   = regexp.MustCompile(`^ {10}CONFIDENTIAL_TERMS: \$\{\{ secrets\.CONFIDENTIAL_TERMS \}\}$`)
+)
+
+func disclosureWorkflow(t *testing.T, name string) string {
+	t.Helper()
+	return readFile(t, filepath.Join(repoRoot(t), ".github", "workflows", name))
+}
+
 // The Disclosure workflow runs with secrets on pull_request_target, so the
-// guarantees that make that safe are pinned here: it starts from no
-// permissions and each job holds only what it needs, it never checks out
-// anything but the base branch's scripts, it never reads the PR head or any
-// event text by expression, and the term list never enters its own shell.
+// guarantees that make that safe are pinned here: it triggers only where
+// its one job reports the required check, it starts from no permissions and
+// the job holds only what it needs, it never checks out anything but the
+// base branch's scripts, it never reads the PR head or any event text by
+// expression, and the term list never enters its own shell.
 func TestDisclosureWorkflowNeverRunsPullRequestCode(t *testing.T) {
-	wf := readFile(t, filepath.Join(repoRoot(t), ".github", "workflows", "disclosure.yml"))
+	wf := disclosureWorkflow(t, "disclosure.yml")
 
-	for _, want := range []string{
-		"pull_request_target:\n    types: [opened, edited, synchronize, reopened]",
-		"merge_group:\n    types: [checks_requested]",
-		"issues:\n    types: [opened, edited]",
-		"issue_comment:\n    types: [created, edited]",
-		"pull_request_review:\n    types: [submitted, edited]",
-		"pull_request_review_comment:\n    types: [created, edited]",
-		"\npermissions: {}\n",
-	} {
-		if !strings.Contains(wf, want) {
-			t.Errorf("disclosure.yml is missing %q", want)
-		}
+	// Any other trigger would attach a skipped "Disclosure" job to the PR
+	// head, which GitHub counts as a pass for the required check.
+	if got, want := workflowTriggers(wf), map[string]string{
+		"pull_request_target": "[opened, edited, synchronize, reopened]",
+		"merge_group":         "[checks_requested]",
+	}; !maps.Equal(got, want) {
+		t.Errorf("disclosure.yml triggers = %v, want exactly %v", got, want)
 	}
-
 	jobs := workflowJobs(t, wf)
-	if got := len(jobs); got != 2 {
-		t.Fatalf("disclosure.yml has %d jobs, want the pull-request and issue jobs", got)
+	if got := slices.Sorted(maps.Keys(jobs)); !slices.Equal(got, []string{"pull-request"}) {
+		t.Fatalf("disclosure.yml jobs = %v, want only pull-request", got)
 	}
-	for job, want := range map[string]map[string]string{
-		"pull-request": {"contents": "read", "pull-requests": "read"},
-		"issue":        {"contents": "read", "issues": "write"},
-	} {
-		if got := jobPermissions(jobs[job]); !equalMaps(got, want) {
-			t.Errorf("job %s permissions = %v, want exactly %v", job, got, want)
-		}
+	if got, want := jobPermissions(jobs["pull-request"]), map[string]string{"contents": "read", "pull-requests": "read"}; !maps.Equal(got, want) {
+		t.Errorf("pull-request permissions = %v, want exactly %v", got, want)
 	}
-	// One check context on the PR and in the merge queue, so the check can
-	// be required without stalling the queue.
-	pr := jobs["pull-request"]
-	for _, want := range []string{
-		"    name: Disclosure\n",
-		"github.event_name == 'pull_request_target' || github.event_name == 'merge_group'",
-	} {
-		if !strings.Contains(pr, want) {
-			t.Errorf("the pull-request job is missing %q", want)
-		}
+	if !strings.Contains(jobs["pull-request"], "    name: Disclosure\n") {
+		t.Error("the pull-request job must report the Disclosure check")
+	}
+	if strings.Contains(jobs["pull-request"], "\n    if:") {
+		t.Error("the Disclosure job must run on every event of its workflow, never skip")
+	}
+	assertDisclosureWorkflowBasics(t, "disclosure.yml", wf)
+}
+
+// Issues, comments and reviews are checked by a workflow of their own, under
+// another check name, so none of their runs touches the required check.
+func TestDisclosureDiscussionWorkflow(t *testing.T) {
+	wf := disclosureWorkflow(t, "disclosure-discussion.yml")
+
+	if got, want := workflowTriggers(wf), map[string]string{
+		"issues":                      "[opened, edited]",
+		"issue_comment":               "[created, edited]",
+		"pull_request_review":         "[submitted, edited]",
+		"pull_request_review_comment": "[created, edited]",
+	}; !maps.Equal(got, want) {
+		t.Errorf("disclosure-discussion.yml triggers = %v, want exactly %v", got, want)
+	}
+	jobs := workflowJobs(t, wf)
+	if got := slices.Sorted(maps.Keys(jobs)); !slices.Equal(got, []string{"discussion"}) {
+		t.Fatalf("disclosure-discussion.yml jobs = %v, want only discussion", got)
+	}
+	if got, want := jobPermissions(jobs["discussion"]), map[string]string{"contents": "read", "issues": "write"}; !maps.Equal(got, want) {
+		t.Errorf("discussion permissions = %v, want exactly %v", got, want)
+	}
+	if strings.Contains(jobs["discussion"], "    name: Disclosure\n") {
+		t.Error("the discussion job must not report the required Disclosure check")
+	}
+	assertDisclosureWorkflowBasics(t, "disclosure-discussion.yml", wf)
+}
+
+// assertDisclosureWorkflowBasics pins what both Disclosure workflows share:
+// no permissions by default, a checkout of only the two scripts with no ref
+// and no credentials, no event text read by expression, and the term list
+// confined to one env binding per check step.
+func assertDisclosureWorkflowBasics(t *testing.T, name, wf string) {
+	t.Helper()
+	if !strings.Contains(wf, "\npermissions: {}\n") {
+		t.Errorf("%s must start from no permissions", name)
 	}
 
 	checkouts := strings.Count(wf, "uses: actions/checkout@")
 	if checkouts == 0 {
-		t.Fatal("disclosure.yml has no checkout of the scripts")
+		t.Fatalf("%s has no checkout of the scripts", name)
 	}
 	for _, want := range []string{
 		"persist-credentials: false",
 		"sparse-checkout: |\n            scripts/disclosure-collect.sh\n            scripts/disclosure-check.sh\n",
 	} {
 		if got := strings.Count(wf, want); got != checkouts {
-			t.Errorf("%d checkout(s) but %q appears %d time(s)", checkouts, want, got)
+			t.Errorf("%s: %d checkout(s) but %q appears %d time(s)", name, checkouts, want, got)
 		}
 	}
-	// A checkout pointed anywhere but the base branch.
-	if regexp.MustCompile(`(?m)^\s+ref:`).MatchString(wf) {
-		t.Error("disclosure.yml must not set a checkout ref")
+	if checkoutRef.MatchString(wf) {
+		t.Errorf("%s must not set a checkout ref", name)
 	}
 	for _, forbidden := range []string{
 		"github.event.pull_request.head",  // the PR head by expression
@@ -302,33 +345,54 @@ func TestDisclosureWorkflowNeverRunsPullRequestCode(t *testing.T) {
 		"contents: write",
 	} {
 		if strings.Contains(wf, forbidden) {
-			t.Errorf("disclosure.yml must not contain %q", forbidden)
+			t.Errorf("%s must not contain %q", name, forbidden)
 		}
 	}
 
 	// The term list reaches only the matcher, through one env binding per
 	// check step: it is never named in a run block, in any spelling.
-	termsName := regexp.MustCompile(`(?i)confidential_terms`)
 	for _, run := range runBlocks(wf) {
 		if termsName.MatchString(run) {
-			t.Errorf("a run block names the term list:\n%s", run)
+			t.Errorf("%s: a run block names the term list:\n%s", name, run)
 		}
 	}
-	binding := regexp.MustCompile(`^ {10}CONFIDENTIAL_TERMS: \$\{\{ secrets\.CONFIDENTIAL_TERMS \}\}$`)
 	bindings := 0
 	for _, line := range strings.Split(wf, "\n") {
 		trimmed := strings.TrimSpace(line)
 		switch {
 		case !termsName.MatchString(line), strings.HasPrefix(trimmed, "#"):
-		case binding.MatchString(line):
+		case termsBinding.MatchString(line):
 			bindings++
 		default:
-			t.Errorf("the term list appears outside its env binding: %q", trimmed)
+			t.Errorf("%s: the term list appears outside its env binding: %q", name, trimmed)
 		}
 	}
-	if checks := strings.Count(wf, "- name: Check for confidential terms\n"); bindings != checks || checks != 2 {
-		t.Errorf("%d env binding(s) of the term list for %d check step(s), want one per check step in each job", bindings, checks)
+	if checks := strings.Count(wf, "- name: Check for confidential terms\n"); bindings != 1 || checks != 1 {
+		t.Errorf("%s: %d env binding(s) of the term list for %d check step(s), want one of each", name, bindings, checks)
 	}
+}
+
+// workflowTriggers reads a workflow's `on:` block as event -> types.
+func workflowTriggers(wf string) map[string]string {
+	_, block, ok := strings.Cut(wf, "\non:\n")
+	if !ok {
+		return nil
+	}
+	triggers := map[string]string{}
+	event := ""
+	for _, line := range strings.Split(block, "\n") {
+		switch {
+		case line == "":
+		case !strings.HasPrefix(line, " "):
+			return triggers
+		case strings.HasPrefix(line, "    types: "):
+			triggers[event] = strings.TrimPrefix(line, "    types: ")
+		default:
+			event = strings.TrimSuffix(strings.TrimSpace(line), ":")
+			triggers[event] = ""
+		}
+	}
+	return triggers
 }
 
 // workflowJobs splits a workflow's jobs block into each job's text, keyed by
@@ -342,7 +406,7 @@ func workflowJobs(t *testing.T, wf string) map[string]string {
 	jobs := map[string]string{}
 	id := ""
 	for _, line := range strings.Split(body, "\n") {
-		if m := regexp.MustCompile(`^  ([A-Za-z0-9_-]+):$`).FindStringSubmatch(line); m != nil {
+		if m := jobLine.FindStringSubmatch(line); m != nil {
 			id = m[1]
 		}
 		if id != "" {
@@ -360,7 +424,7 @@ func jobPermissions(job string) map[string]string {
 	}
 	perms := map[string]string{}
 	for _, line := range strings.Split(block, "\n") {
-		m := regexp.MustCompile(`^ {6}([a-z-]+): ([a-z]+)$`).FindStringSubmatch(line)
+		m := permissionLine.FindStringSubmatch(line)
 		if m == nil {
 			break
 		}
@@ -375,7 +439,7 @@ func runBlocks(wf string) []string {
 	var blocks []string
 	lines := strings.Split(wf, "\n")
 	for i := 0; i < len(lines); i++ {
-		m := regexp.MustCompile(`^( *)(?:- )?run:(.*)$`).FindStringSubmatch(lines[i])
+		m := runLine.FindStringSubmatch(lines[i])
 		if m == nil {
 			continue
 		}
@@ -394,15 +458,3 @@ func runBlocks(wf string) []string {
 }
 
 func indent(line string) int { return len(line) - len(strings.TrimLeft(line, " ")) }
-
-func equalMaps(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
-}

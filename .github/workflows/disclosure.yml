@@ -1,10 +1,17 @@
 name: Disclosure
 
 # Catches confidential terms (a client's names, private hosts, internal
-# infrastructure) in PRs, issues and comments, without a maintainer having
-# to remember to look (AGENTS.md §13). The term list lives only in the
-# CONFIDENTIAL_TERMS repository secret, one term per line; nothing here
-# ever prints, comments or labels with a matched term.
+# infrastructure) in PRs and in what the merge queue lands, without a
+# maintainer having to remember to look (AGENTS.md §13). The term list
+# lives only in the CONFIDENTIAL_TERMS repository secret, one term per
+# line; nothing here ever prints, comments or labels with a matched term.
+# Issues, comments and reviews are checked by disclosure-discussion.yml.
+#
+# This workflow triggers only on pull_request_target and merge_group, so
+# its one job reports the "Disclosure" check exactly once per PR head and
+# per merge group, and can be made required: a run from another event
+# would attach a skipped "Disclosure" job to the PR head, which GitHub
+# counts as success.
 #
 # scripts/disclosure-collect.sh decides what text an event carries and
 # whose it is; scripts/disclosure-check.sh matches it. Both are tested in
@@ -23,14 +30,6 @@ on:
     types: [opened, edited, synchronize, reopened]
   merge_group:
     types: [checks_requested]
-  issues:
-    types: [opened, edited]
-  issue_comment:
-    types: [created, edited]
-  pull_request_review:
-    types: [submitted, edited]
-  pull_request_review_comment:
-    types: [created, edited]
 
 permissions: {}
 
@@ -38,7 +37,6 @@ jobs:
   # One check name on the PR and in the merge queue, so it can be required.
   pull-request:
     name: Disclosure
-    if: github.event_name == 'pull_request_target' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -49,7 +47,7 @@ jobs:
       cancel-in-progress: true
     steps:
       # No ref: under pull_request_target the default is the base branch,
-      # never the PR head.
+      # never the PR head; under merge_group, the queued commit.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
@@ -58,6 +56,8 @@ jobs:
             scripts/disclosure-check.sh
           sparse-checkout-cone-mode: false
 
+      # The token reads the commits, files and the author's repository
+      # permission (metadata: read, which every job token holds).
       - name: Collect the text, commit messages and added lines
         id: collect
         env:
@@ -71,9 +71,9 @@ jobs:
           bash scripts/disclosure-collect.sh "$kind" > "$RUNNER_TEMP/disclosure-text" || status=$?
           case "$status" in
             0) echo "check=true" >> "$GITHUB_OUTPUT" ;;
-            4) echo "::notice::Not checked: the author is outside the project. The review gate's Neutrality & Disclosure reviewer covers outside contributions, and the merge queue's run checks every commit. See AGENTS.md §13." ;;
-            5)
-              echo "::error::This PR has more commits or changed files than the GitHub API lists, so it cannot all be checked. Split it into smaller PRs."
+            10) echo "::notice::Not checked: the author has no write access. The review gate's Neutrality & Disclosure reviewer covers outside contributions; the merge queue checks only what lands on main (each PR's squash commit message and net diff), not this PR's description, branch name or intermediate commits. See AGENTS.md §13." ;;
+            11)
+              echo "::error::This PR, or a commit in it, has more commits or files than the GitHub API lists, so it cannot all be checked. Split it into smaller PRs or commits."
               exit 1
               ;;
             *) exit "$status" ;;
@@ -95,97 +95,3 @@ jobs:
               ;;
             *) exit "$status" ;;
           esac
-
-  issue:
-    name: Disclosure (issue)
-    if: github.event_name != 'pull_request_target' && github.event_name != 'merge_group'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # Labels and comments go through the issues API, which takes a PR number
-    # too, so issues: write covers a review on a PR as well.
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-          sparse-checkout: |
-            scripts/disclosure-collect.sh
-            scripts/disclosure-check.sh
-          sparse-checkout-cone-mode: false
-
-      - name: Collect the text
-        id: collect
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          case "$EVENT_NAME" in
-            issues) kind=issue ;;
-            issue_comment) kind=comment ;;
-            pull_request_review) kind=review ;;
-            pull_request_review_comment) kind=review-comment ;;
-            *) echo "::error::Unexpected event $EVENT_NAME."; exit 1 ;;
-          esac
-          echo "kind=$kind" >> "$GITHUB_OUTPUT"
-          status=0
-          bash scripts/disclosure-collect.sh "$kind" > "$RUNNER_TEMP/disclosure-text" || status=$?
-          case "$status" in
-            0) echo "check=true" >> "$GITHUB_OUTPUT" ;;
-            4) echo "::notice::Not checked: the author is outside the project. See AGENTS.md §13." ;;
-            *) exit "$status" ;;
-          esac
-
-      # A review from a fork gets no secrets, so the list reads as unset and
-      # the check passes with a notice; the review gate covers it.
-      - name: Check for confidential terms
-        id: check
-        if: steps.collect.outputs.check == 'true'
-        env:
-          CONFIDENTIAL_TERMS: ${{ secrets.CONFIDENTIAL_TERMS }}
-        run: |
-          status=0
-          bash scripts/disclosure-check.sh < "$RUNNER_TEMP/disclosure-text" || status=$?
-          case "$status" in
-            0) echo "No confidential terms found." ;;
-            3) echo "::notice::The confidential-terms secret is not set; the disclosure check was skipped." ;;
-            1) echo "found=true" >> "$GITHUB_OUTPUT" ;;
-            *) exit "$status" ;;
-          esac
-
-      - name: Label and ask the author to redact
-        if: steps.check.outputs.found == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
-          KIND: ${{ steps.collect.outputs.kind }}
-          ITEM_ID: ${{ github.event.comment.id || github.event.review.id }}
-          AUTHOR: ${{ github.event.comment.user.login || github.event.review.user.login || github.event.issue.user.login }}
-        run: |
-          set -euo pipefail
-          label=needs-redaction
-          if ! gh label list --search "$label" --json name --jq '.[].name' | grep -qx "$label"; then
-            gh label create "$label" --color B60205 \
-              --description "Contains details that must be removed before this can stay public"
-          fi
-          gh api --method POST "repos/$GH_REPO/issues/$NUMBER/labels" -f "labels[]=$label" > /dev/null
-
-          # One request per offending item: an edit that still matches does
-          # not post again.
-          case "$KIND" in
-            comment) item="comment-$ITEM_ID"; what="Your comment" ;;
-            review) item="review-$ITEM_ID"; what="Your review" ;;
-            review-comment) item="review-comment-$ITEM_ID"; what="Your review comment" ;;
-            *) item="issue"; what="This issue's title or description" ;;
-          esac
-          marker="<!-- disclosure-check:$item -->"
-          posted="$(gh api "repos/$GH_REPO/issues/$NUMBER/comments" --paginate \
-            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\")))] | length" \
-            | awk '{n += $1} END {print n + 0}')"
-          if [ "$posted" -eq 0 ]; then
-            body="$(printf '%s\n%s\n' "$marker" \
-              "@$AUTHOR $what appears to contain something that should not be public here, such as a private product, host or domain name. Please edit it to remove that, and use neutral examples (\`acme\`, \`example.com\`, \`example.test\`) instead. A maintainer will clear the \`$label\` label, and the earlier revision from the edit history, once it is clean.")"
-            gh api --method POST "repos/$GH_REPO/issues/$NUMBER/comments" -f "body=$body" > /dev/null
-          fi
-          echo "Labelled $label and asked the author to redact."

@@ -36,9 +36,10 @@ Highlights for quick recall:
 - **Keep the repo general and public-safe (AGENTS.md §13).** General
   capabilities, not one client's features; neutral examples (`acme`,
   `example.com`, `example.test`); nothing private in code, docs, commits,
-  or PR/issue text. The `Disclosure` workflow enforces a term list kept
-  in the `CONFIDENTIAL_TERMS` secret on our own people's PRs, commits,
-  issues, comments and reviews, and in the merge queue.
+  or PR/issue text. The `Disclosure` workflows enforce a term list kept
+  in the `CONFIDENTIAL_TERMS` secret on the PRs, commits, issues, comments
+  and reviews of people with write access, and on what the merge queue
+  lands; §13 says exactly what each covers.
 
 If existing code violates these rules and your change touches it, fix
 the violation as part of your change. Do not preserve the wrong pattern.
