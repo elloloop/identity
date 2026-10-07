@@ -8,14 +8,18 @@
 # The terms come from CONFIDENTIAL_TERMS, one per line. In CI that is the
 # repository secret of the same name, so the list never lives in the
 # repository (AGENTS.md §13). Matching is a case-insensitive, literal
-# substring match after every run of whitespace — in the text and in each
-# term — is collapsed to one space, so a term split across lines or spaced
-# differently still matches. Blank lines and CR line endings in the list
-# are ignored.
+# substring match after the text and each term are folded the same way:
+# zero-width characters (U+200B-U+200D, U+FEFF) are dropped, '-', '_' and
+# '.' count as whitespace, and every run of whitespace becomes one space.
+# So "acme-widgets", "ACME_Widgets", "acme.widgets" and "acme\n widgets"
+# all match the term "acme widgets", and a term split across lines, spelled
+# with another separator, or broken by an invisible character still
+# matches. Blank lines and CR line endings in the list are ignored.
 #
 # The script never prints a term, nor the text that matched one. Under
 # GitHub Actions (GITHUB_ACTIONS=true) it first registers every term with
-# ::add-mask::, so no later output in the job can show one either.
+# ::add-mask::, as written and as folded, so no later output in the job can
+# show one either.
 #
 # Exit status:
 #   0  no term found (or empty text)
@@ -28,15 +32,28 @@
 set -euo pipefail
 
 terms="$(mktemp)"
+masks="$(mktemp)"
 text="$(mktemp)"
-trap 'rm -f "$terms" "$text"' EXIT
+trap 'rm -f "$terms" "$masks" "$text"' EXIT
 
-# One normalized term per line: whitespace runs collapsed, ends trimmed,
-# blank lines dropped (an empty pattern would match every text).
-printf '%s\n' "${CONFIDENTIAL_TERMS-}" | awk '
-  { gsub(/[[:space:]]+/, " "); sub(/^ /, ""); sub(/ $/, "") }
-  length($0) > 0 { print }
-' > "$terms"
+# fold drops zero-width characters, turns the separators into spaces and
+# collapses whitespace. It works on bytes (LC_ALL=C) so the octal escapes
+# name the UTF-8 encodings of U+200B-U+200D and U+FEFF on any awk.
+fold='{ gsub(/\342\200[\213\214\215]|\357\273\277/, ""); gsub(/[-_.]/, " "); gsub(/[[:space:]]+/, " ") }'
+
+# One folded term per line, ends trimmed, blank lines dropped (an empty
+# pattern would match every text). The masks get each term as written too:
+# that is the spelling a log line would carry.
+printf '%s\n' "${CONFIDENTIAL_TERMS-}" | LC_ALL=C awk -v terms="$terms" -v masks="$masks" '
+  { written = $0; gsub(/[[:space:]]+/, " ", written); sub(/^ /, "", written); sub(/ $/, "", written) }
+  '"$fold"'
+  { sub(/^ /, ""); sub(/ $/, "") }
+  length($0) > 0 {
+    print > terms
+    if (!seen[written]++) print written > masks
+    if (!seen[$0]++) print > masks
+  }
+'
 
 if [[ ! -s "$terms" ]]; then
   echo "disclosure-check: no confidential terms configured" >&2
@@ -46,13 +63,13 @@ fi
 if [[ "${GITHUB_ACTIONS-}" == "true" ]]; then
   while IFS= read -r term; do
     echo "::add-mask::${term}"
-  done < "$terms"
+  done < "$masks"
 fi
 
-# The whole text on one line, whitespace collapsed like the terms. It goes
-# through a file rather than a pipe: grep -q stops reading at the first
-# match, and under pipefail the writer's SIGPIPE would mask that match.
-tr -s '[:space:]' ' ' > "$text"
+# The whole text on one line, folded like the terms. It goes through a
+# file rather than a pipe: grep -q stops reading at the first match, and
+# under pipefail the writer's SIGPIPE would mask that match.
+LC_ALL=C awk "$fold"' { print }' | tr -s '[:space:]' ' ' > "$text"
 status=0
 grep -qiF -f "$terms" "$text" || status=$?
 

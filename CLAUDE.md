@@ -26,7 +26,8 @@ Highlights for quick recall:
   Neutrality & Disclosure, which are non-skippable — then does its
   complete review single-handed: no triage stage, no verification stage,
   no sub-agents. Neutrality & Disclosure alone also reviews the PR text,
-  commit messages and linked issues; `args: 'issue:<n>'` runs it alone
+  commit messages, linked issues, edit history and force-pushed commits;
+  `args: 'issue:<n>'` runs it alone
   over an issue. It fails closed on a dropped or self-contradictory
   reviewer. A maintainer step that runs inside the Claude Code harness;
   advisory (posts a comment, never blocks merge), runs alongside CI.
@@ -36,7 +37,8 @@ Highlights for quick recall:
   capabilities, not one client's features; neutral examples (`acme`,
   `example.com`, `example.test`); nothing private in code, docs, commits,
   or PR/issue text. The `Disclosure` workflow enforces a term list kept
-  in the `CONFIDENTIAL_TERMS` secret.
+  in the `CONFIDENTIAL_TERMS` secret on our own people's PRs, commits,
+  issues, comments and reviews, and in the merge queue.
 
 If existing code violates these rules and your change touches it, fix
 the violation as part of your change. Do not preserve the wrong pattern.

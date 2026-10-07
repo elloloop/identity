@@ -276,22 +276,49 @@ docs, proto comments, commit messages, and PR and issue text.
 
 Two checks hold this line. The review gate's **Neutrality & Disclosure**
 reviewer (§11) judges both questions on every PR, and on an issue in
-issue mode. The **Disclosure** workflow (`.github/workflows/disclosure.yml`)
-runs on its own, without a maintainer:
+issue mode, including what GitHub keeps public after a fix: the edit
+history of descriptions and comments, and commits a force-push replaced.
+The **Disclosure** workflow (`.github/workflows/disclosure.yml`) runs on
+its own, without a maintainer:
 
 - On every PR (`pull_request_target`, opened/edited/synchronize/reopened)
-  it matches the title, body, branch name, commit messages, changed file
-  names and the PR's added diff lines against a confidential-terms list,
-  case-insensitively, and a match fails the **Disclosure** check. It reads
-  all of that through the API and never checks out or runs PR code.
-- On every issue (opened/edited) and comment (created/edited) a match adds
-  the `needs-redaction` label and asks the author to redact, in one
-  comment per offending issue or comment (an edit does not post again). A maintainer removes the label once the text is clean, and
-  deletes the offending revision from the edit history, which GitHub
-  keeps public.
+  it matches the title, body, branch name, and every commit's message,
+  changed file names and added lines against a confidential-terms list,
+  and a match fails the **Disclosure** check. It reads commit by commit,
+  so a term a later commit removes is still caught, and it reads a file
+  the API gives no diff for (binary or too large) whole. A PR past what the
+  API lists (250 commits, 3000 files) fails rather than pass unread. It
+  reads all of that through the API and never checks out or runs PR code.
+- In the merge queue (`merge_group`) the same job, under the same
+  **Disclosure** name, checks every commit about to land, so the check can
+  be required.
+- On every issue (opened/edited), comment (created/edited), PR review
+  (submitted/edited) and inline review comment (created/edited) a match
+  adds the `needs-redaction` label and asks the author to redact, in one
+  comment per offending item (an edit does not post again). A maintainer
+  removes the label once the text is clean, and deletes the offending
+  revision from the edit history, which GitHub keeps public, for a PR
+  description or comment as for an issue.
+- **Only the project's own people are checked** (author association
+  OWNER, MEMBER or COLLABORATOR); anyone else's PR, issue or comment passes
+  with a notice. The threat is our own accidental leak, and a public check
+  on outsiders' text would let anyone confirm guesses against the list one
+  edit at a time. Outside contributions are covered by the review gate,
+  and by the merge-queue run, which a maintainer triggers and which checks
+  every commit whoever wrote it.
+- Matching is case-insensitive and folds the text and the terms alike:
+  `-`, `_` and `.` count as spaces, whitespace runs collapse, and
+  zero-width characters are dropped, so `acme-widgets`, `ACME_Widgets`
+  and `acme.widgets` all match the term `acme widgets`.
 - The list lives **only** in the repository secret `CONFIDENTIAL_TERMS`,
   one term per line, so it is never in the repository itself. The check
   never prints, comments or labels with a matched term. With the secret
-  unset it passes with a notice.
+  unset it passes with a notice, as it does for a review from a fork,
+  which gets no secrets.
+- `pull_request_target` runs the workflow from the PR's **base** branch.
+  Cut a release branch from a `main` that carries this workflow, or PRs
+  into it go unchecked.
 
-The matcher is `scripts/disclosure-check.sh`, tested in `tests/policy`.
+`scripts/disclosure-collect.sh` decides what an event carries and whose it
+is; `scripts/disclosure-check.sh` matches it. Both are tested in
+`tests/policy`.
