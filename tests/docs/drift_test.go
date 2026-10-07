@@ -76,7 +76,7 @@ var allowedGatewayTokens = map[string]string{
 	// Removed after v4.10: declared but never read; the upgrade guide tells
 	// operators it is ignored.
 	"GATEWAY_DEFAULT_EMAIL_DOMAIN": "removed after v4.10; never read; documented in docs/UPGRADE.md as ignored",
-	"GATEWAY_CAPTCHA_":                          "prefix fragment of the removed v3.x captcha family named in ADR-0012 and the UPGRADE rename table",
+	"GATEWAY_CAPTCHA_":             "prefix fragment of the removed v3.x captcha family named in ADR-0012 and the UPGRADE rename table",
 
 	// (2) Test-harness only: read by internal/repo/postgres/*_test.go and the
 	// CI postgres legs, referenced in ops/testing docs (postgres-rls, redesign).
