@@ -241,7 +241,11 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     When <code>GATEWAY_PASSWORD_RESET_ENABLED=false</code>,
     <code>RequestPasswordReset</code> still returns success so callers cannot
     use it to enumerate accounts, but Identity does not create a reset token
-    or send recovery email. Likewise <code>GATEWAY_PASSWORD_SIGNUP_ENABLED=false</code>
+    or send recovery email. The one exception is a refused
+    <code>product</code> or <code>return_to</code> (see
+    <a href="#reset-and-verification-links">Reset and verification links</a>),
+    which fails the call with <code>invalid_argument</code> whether or not
+    reset is enabled. Likewise <code>GATEWAY_PASSWORD_SIGNUP_ENABLED=false</code>
     rejects self-serve <code>PasswordSignup</code> while leaving admin- and
     invitation-driven account creation intact. See the
     <a href="/identity/docs/operations/password-toggle-rollout">password-toggle
@@ -381,6 +385,19 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     The check reads only the request, so <code>RequestPasswordReset</code>
     gives the same answer for every address and still reveals nothing about
     which accounts exist.
+  </p>
+  <p>
+    The check covers only the links Identity sends. The page receives
+    <code>redirect</code> and <code>product</code> as ordinary query
+    parameters, which anyone can put on a link by hand next to a token of
+    their own, so the page must check <code>redirect</code> against its own
+    allowlist before following it.
+  </p>
+  <p>
+    Two other emails use the same base with neither field: the verification
+    sent when <code>UpgradeAnonymousAccount</code> adds a password, and the one
+    <code>PasswordLogin</code> resends under
+    <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code>.
   </p>
   <pre><code>{`GATEWAY_EMAIL_LINK_BASE_URL=https://signin.example.com
 GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://kids.example.com

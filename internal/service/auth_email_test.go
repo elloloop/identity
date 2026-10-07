@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"html"
 	"strings"
 	"sync"
 	"testing"
@@ -675,8 +676,8 @@ func TestRequestPasswordReset_LinkOnEmailLinkBaseCarriesParams(t *testing.T) {
 	if got := linkInBody(t, sent[0].Text, hubLinkBase); got != want {
 		t.Fatalf("reset link:\n got  %s\n want %s", got, want)
 	}
-	if !strings.Contains(sent[0].HTML, hubLinkBase+"/reset-password?token="+tok) {
-		t.Errorf("HTML body missing hub reset link: %q", sent[0].HTML)
+	if href := `href="` + html.EscapeString(want) + `"`; !strings.Contains(sent[0].HTML, href) {
+		t.Errorf("HTML body missing %s: %q", href, sent[0].HTML)
 	}
 	// The token on the hub link redeems like any other.
 	if err := svc.ConfirmPasswordReset(context.Background(), tok, "NewStr0ng!Pass1"); err != nil {
@@ -726,6 +727,23 @@ func TestRequestPasswordReset_RefusedLinkParamsSendNothing(t *testing.T) {
 	repo.mu.Unlock()
 	if minted != 0 {
 		t.Fatalf("refused request minted %d reset tokens", minted)
+	}
+}
+
+// TestRequestPasswordReset_RefusedLinkParamsWhileDisabled: the link params
+// are checked before the reset toggle, so a refused return_to is refused the
+// same way whether or not reset is enabled — and still sends nothing.
+func TestRequestPasswordReset_RefusedLinkParamsWhileDisabled(t *testing.T) {
+	svc, repo, rec := newHubLinkAuthSvc(t)
+	svc.cfg.PasswordResetEnabled = false
+	seedUser(repo, "alice@test.com", "x", "active")
+
+	err := svc.RequestPasswordReset(context.Background(), "alice@test.com", EmailLinkParams{ReturnTo: "https://evil.test/"})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("err = %v, want ErrInvalidArgument", err)
+	}
+	if got := len(rec.Sent()); got != 0 {
+		t.Fatalf("refused request sent %d emails", got)
 	}
 }
 

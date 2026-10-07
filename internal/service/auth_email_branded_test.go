@@ -78,11 +78,11 @@ func TestRequestPasswordReset_EmailLinkBaseBeatsBrandedDomain(t *testing.T) {
 	}
 }
 
-// TestRequestPasswordReset_BrandedByNamedProduct: the reset email for a
-// request that names a product carries that product's branding from the
-// project's products block; the same request without a product carries the
-// project's.
-func TestRequestPasswordReset_BrandedByNamedProduct(t *testing.T) {
+// TestEmails_BrandedByNamedProduct: each email that takes link params — the
+// reset, the verification resend, and the verification sent at signup —
+// carries the named product's branding from the project's products block;
+// the same request without a product carries the project's.
+func TestEmails_BrandedByNamedProduct(t *testing.T) {
 	ctx := WithProjectScope(context.Background(), &ProjectScope{
 		ProjectID: "hub",
 		Access:    ProjectAccessConfig{Mode: AccessModeOpen},
@@ -91,29 +91,47 @@ func TestRequestPasswordReset_BrandedByNamedProduct(t *testing.T) {
 			ProductName: "Acme Kids", EmailFrom: "no-reply@kids.acme.example", EmailFromName: "Acme Kids",
 		}}},
 	})
-	for _, tc := range []struct {
-		name, product, wantFrom, wantName string
+	senders := []struct {
+		name string
+		send func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error
 	}{
-		{"named product", "Kids", `"Acme Kids" <no-reply@kids.acme.example>`, "Acme Kids"},
-		{"no product", "", `"Acme" <no-reply@test.local>`, "Acme"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			svc, repo, rec := newAuthSvcWithMailer(t)
+		{"RequestPasswordReset", func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
 			seedUser(repo, "alice@test.com", "x", "active")
+			return svc.RequestPasswordReset(ctx, "alice@test.com", params)
+		}},
+		{"SendEmailVerification", func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
+			user := seedUser(repo, "alice@test.com", "x", "active")
+			return svc.SendEmailVerification(ctx, user.ID, params)
+		}},
+		{"PasswordSignup", func(svc *AuthService, _ *fakeRepo, params EmailLinkParams) error {
+			_, err := svc.PasswordSignup(ctx, "alice@test.com", "Str0ng!Pass1", "Alice", "", 0, "", params)
+			return err
+		}},
+	}
+	for _, sender := range senders {
+		for _, tc := range []struct {
+			name, product, wantFrom, wantName string
+		}{
+			{"named product", "Kids", `"Acme Kids" <no-reply@kids.acme.example>`, "Acme Kids"},
+			{"no product", "", `"Acme" <no-reply@test.local>`, "Acme"},
+		} {
+			t.Run(sender.name+"/"+tc.name, func(t *testing.T) {
+				svc, repo, rec := newAuthSvcWithMailer(t)
 
-			if err := svc.RequestPasswordReset(ctx, "alice@test.com", EmailLinkParams{Product: tc.product}); err != nil {
-				t.Fatalf("RequestPasswordReset: %v", err)
-			}
-			sent := rec.Sent()
-			if len(sent) != 1 {
-				t.Fatalf("expected 1 email, got %d", len(sent))
-			}
-			if sent[0].From != tc.wantFrom {
-				t.Errorf("From = %q, want %q", sent[0].From, tc.wantFrom)
-			}
-			if !strings.HasPrefix(sent[0].Text, tc.wantName+"\n") {
-				t.Errorf("text body should open with %q: %q", tc.wantName, sent[0].Text)
-			}
-		})
+				if err := sender.send(svc, repo, EmailLinkParams{Product: tc.product}); err != nil {
+					t.Fatalf("%s: %v", sender.name, err)
+				}
+				sent := rec.Sent()
+				if len(sent) != 1 {
+					t.Fatalf("expected 1 email, got %d", len(sent))
+				}
+				if sent[0].From != tc.wantFrom {
+					t.Errorf("From = %q, want %q", sent[0].From, tc.wantFrom)
+				}
+				if !strings.HasPrefix(sent[0].Text, tc.wantName+"\n") {
+					t.Errorf("text body should open with %q: %q", tc.wantName, sent[0].Text)
+				}
+			})
+		}
 	}
 }
