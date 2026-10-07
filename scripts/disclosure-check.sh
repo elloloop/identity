@@ -18,9 +18,11 @@
 # and CR line endings in the list are ignored.
 #
 # A term's leading and trailing separators fold away with its edge spaces:
-# ".internal" is matched as "internal", wherever that word appears. The
-# script warns on stderr when that happens, naming the term by its place in
-# the list, never by its text.
+# ".internal" is matched as the substring "internal", inside any word or
+# path, which a domain-suffix term would hit all over a codebase. The script
+# warns when folding changed a term's edges (an ASCII or Unicode separator
+# or space), on stderr and, under GitHub Actions, as a ::warning::, naming
+# the term by its place in the list, never by its text.
 #
 # The script never prints a term, nor the text that matched one. Under
 # GitHub Actions (GITHUB_ACTIONS=true) it first registers every term with
@@ -57,14 +59,18 @@ fold='{ gsub(/'"$invisible"'/, ""); gsub(/'"$spacing"'/, " "); gsub(/[-_.]/, " "
 # One folded term per line, ends trimmed, blank lines dropped (an empty
 # pattern would match every text). The masks get each term as written too:
 # that is the spelling a log line would carry.
-printf '%s\n' "${CONFIDENTIAL_TERMS-}" | LC_ALL=C awk -v terms="$terms" -v masks="$masks" '
+printf '%s\n' "${CONFIDENTIAL_TERMS-}" | LC_ALL=C awk -v terms="$terms" -v masks="$masks" -v actions="${GITHUB_ACTIONS-}" '
   { written = $0; gsub(/[[:space:]]+/, " ", written); sub(/^ /, "", written); sub(/ $/, "", written) }
   '"$fold"'
-  { sub(/^ /, ""); sub(/ $/, "") }
+  # written has no edge whitespace, so an edge space now came from a
+  # separator the fold turned into one.
+  { edged = ($0 ~ /^ | $/); sub(/^ /, ""); sub(/ $/, "") }
   length($0) > 0 {
     n++
-    if (written ~ /^[-_.]|[-_.]$/) {
-      print "disclosure-check: term " n " starts or ends with a separator, which folding drops" > "/dev/stderr"
+    if (edged) {
+      msg = "term " n " starts or ends with a separator, which folding drops: it matches as a substring without it"
+      print "disclosure-check: " msg > "/dev/stderr"
+      if (actions == "true") print "::warning::" msg
     }
     print > terms
     if (!seen[written]++) print written > masks
