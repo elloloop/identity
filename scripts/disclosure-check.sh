@@ -60,10 +60,10 @@ fold='{ gsub(/'"$invisible"'/, ""); gsub(/'"$spacing"'/, " "); gsub(/[-_.]/, " "
 # pattern would match every text). The masks get each term as written too:
 # that is the spelling a log line would carry.
 printf '%s\n' "${CONFIDENTIAL_TERMS-}" | LC_ALL=C awk -v terms="$terms" -v masks="$masks" -v actions="${GITHUB_ACTIONS-}" '
-  { written = $0; gsub(/[[:space:]]+/, " ", written); sub(/^ /, "", written); sub(/ $/, "", written) }
+  { sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); written = $0; gsub(/[[:space:]]+/, " ", written) }
   '"$fold"'
-  # written has no edge whitespace, so an edge space now came from a
-  # separator the fold turned into one.
+  # The term had no edge whitespace (a CR included) before the fold, so an
+  # edge space now came from a separator the fold turned into one.
   { edged = ($0 ~ /^ | $/); sub(/^ /, ""); sub(/ $/, "") }
   length($0) > 0 {
     n++

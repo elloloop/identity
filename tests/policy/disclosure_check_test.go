@@ -144,8 +144,13 @@ func TestDisclosureCheckWarnsWhenATermsEdgesFoldAway(t *testing.T) {
 // match every text.
 func TestDisclosureCheckIgnoresBlankAndCRLFLines(t *testing.T) {
 	terms := "\r\n\n  \nacme widgets\r\n\n"
-	if out, code := runDisclosureCheck(t, terms, "nothing to see here", nil); code != disclosureClean {
+	out, code := runDisclosureCheck(t, terms, "nothing to see here", nil)
+	if code != disclosureClean {
 		t.Fatalf("clean text: exit = %d, want %d; output:\n%s", code, disclosureClean, out)
+	}
+	// A CR or edge whitespace is not a separator: no edge warning.
+	if out != "" {
+		t.Fatalf("output on a clean match with a CRLF list:\n%s", out)
 	}
 	if out, code := runDisclosureCheck(t, terms, "ACME WIDGETS", nil); code != disclosureMatch {
 		t.Fatalf("term with CRLF list: exit = %d, want %d; output:\n%s", code, disclosureMatch, out)
