@@ -1,6 +1,7 @@
 package identityserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -121,7 +122,7 @@ var (
 func decodeTOTPKey(cfg *config.Config, logger *zap.Logger) ([]byte, error) {
 	if cfg.TOTPEncryptionKey == "" {
 		logger.Warn("using_dev_totp_encryption_key")
-		return devTOTPEncryptionKey, nil
+		return bytes.Clone(devTOTPEncryptionKey), nil
 	}
 	key, err := base64.StdEncoding.DecodeString(cfg.TOTPEncryptionKey)
 	if err != nil {
@@ -173,7 +174,7 @@ func decodeTOTPRecoveryPepper(cfg *config.Config, logger *zap.Logger) ([]byte, e
 		return nil, errors.New("GATEWAY_TOTP_RECOVERY_PEPPER is required when GATEWAY_TOTP_ENCRYPTION_KEY is set")
 	default:
 		logger.Warn("using_dev_totp_recovery_pepper")
-		return devTOTPRecoveryPepper, nil
+		return bytes.Clone(devTOTPRecoveryPepper), nil
 	}
 }
 
