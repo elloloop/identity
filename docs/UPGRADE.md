@@ -44,7 +44,11 @@ lock.
   it now returns this one error, and only for a request that sets one of the
   new fields wrongly. The check reads only the request, so the answer is the
   same for every address and reveals nothing about which accounts exist.
-  Clients that send neither field see no change.
+  Clients that send neither field see no change. The check covers only the
+  links Identity sends: anyone can put `redirect` on a link by hand next to
+  a token of their own, so the page must check `redirect` against its own
+  allowlist before following it (see the configuration docs' "Reset and
+  verification links").
 - **Per-product email branding.** A product in a project's `products`
   block may carry a `branding` block with the same fields as the project's
   `branding`. It brands the reset and verification emails of a request that
@@ -55,7 +59,7 @@ lock.
   `branding`. It needs a project resolved from the control plane (by
   credential key or auth domain) — the env-pinned default project has no
   `products` block.
-- **Webhook URL errors no longer echo credentials.** A
+- **Webhook URL errors no longer echo userinfo.** A
   `GATEWAY_WEBHOOK_SUBSCRIPTIONS` URL that fails validation is now reported
   with any userinfo redacted.
 - **A URL no request could reach stops the server from starting.** A
