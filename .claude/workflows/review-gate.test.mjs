@@ -184,6 +184,12 @@ const tests = {
     assert.match(neutrality, /--json commits/)
     assert.match(neutrality, /closingIssuesReferences/)
     assert.match(neutrality, /never repeat a sensitive value verbatim/i)
+    // What GitHub keeps public after a fix is material too: the edit
+    // history of the description and comments, and force-pushed commits.
+    assert.match(neutrality, /pullRequest\(number:\$n\)\{userContentEdits/)
+    assert.match(neutrality, /comments\(first:100\)\{nodes\{userContentEdits/)
+    assert.match(neutrality, /HEAD_REF_FORCE_PUSHED_EVENT[^`]*beforeCommit/)
+    assert.match(neutrality, /-F n=154 /)
     assert.doesNotMatch(neutrality, /MUST NOT influence this decision/)
     // Every self-gating lens still decides relevance from the file list
     // alone, with the submitter-authored text kept out of that decision.
@@ -211,6 +217,8 @@ const tests = {
     assert.equal(r.posted, true)
     assert.deepEqual(Object.keys(r.prompts).sort(), ['neutrality-disclosure', 'synthesize:issue-42'])
     assert.match(r.prompts['neutrality-disclosure'], /gh issue view 42 --comments/)
+    assert.match(r.prompts['neutrality-disclosure'], /issue\(number:\$n\)\{userContentEdits[^`]*comments\(first:100\)\{nodes\{userContentEdits/)
+    assert.match(r.prompts['neutrality-disclosure'], /-F n=42 /)
     assert.doesNotMatch(r.prompts['neutrality-disclosure'], /gh pr /)
     const synth = r.prompts['synthesize:issue-42']
     assert.match(synth, /gh issue comment 42 --body-file/)
