@@ -28,11 +28,29 @@ import (
 // via a passkey bootstrapped on the child's device with the enrolment ticket
 // this call returns when no password is set.
 //
-// The same two server-enforced checks as GrantParentalConsent apply to the
-// calling adult: a strong verified factor on the adult's account AND a
-// step-up password re-entry. Both are mandatory; a modified client cannot
-// bypass either (the caller's identity comes from the verified session,
-// never from the request).
+// ONE server-enforced identity check applies to the calling adult on this
+// path: a STRONG VERIFIED FACTOR on their own account (verified phone, a
+// registered passkey, or an approved identity verification). It is mandatory —
+// an adult holding none is refused outright — and on THIS path it is also the
+// re-authentication control, so no step-up password re-entry is asked for.
+//
+// Why that is sufficient here, when GrantParentalConsent still asks for both:
+// the two RPCs face different risks. GrantParentalConsent and the guardian
+// management operations act on an EXISTING account someone else may already
+// depend on — a stolen session that clears them takes over, locks out, or
+// erases a child who is already using the product, so those paths re-prove the
+// human at the moment of action. Creating a child creates a brand-new account
+// out of nothing: it takes nothing over, reads nothing, and destroys nothing,
+// and the attacker's reward for a session theft is an extra empty account
+// under the victim's guardianship. Against that, the strong verified factor
+// already binds the consenting adult to a real, server-verified identity, which
+// is what makes the consent record evidence; the second password prompt was
+// buying re-authentication the create path does not need, at the cost of asking
+// every parent for their own password to add a child.
+//
+// A modified client cannot bypass the factor check: the caller's identity comes
+// from the verified session, never from the request, and the factor set is read
+// from server-side account state.
 
 // usernamePattern is the managed-child username alphabet: lowercase
 // alphanumerics plus `_`/`-`/`.`. Length is bounded separately (3..32) so the
@@ -74,7 +92,6 @@ type ManagedChildAccountRequest struct {
 	Password         string // parent-chosen password credential
 	PasskeyEnrolment bool   // bootstrap passkey enrolment instead of a password
 	PolicyVersion    string // consent policy version, as in GrantParentalConsent
-	StepUpPassword   string // the calling adult's password re-entry
 }
 
 // ManagedChildAccountResult is the outcome of a successful creation: the
@@ -163,14 +180,17 @@ func (s *AuthService) CreateManagedChildAccount(
 		return nil, fmt.Errorf("%w: a minor cannot create managed child accounts", ErrPermissionDenied)
 	}
 
-	// 2. Step-up re-authentication + strong verified factor — the same two
-	// mandatory checks as GrantParentalConsent, verified before any state
-	// change so a caller holding only a session token cannot create accounts.
-	admitted, reauthenticated := s.stepUp(caller, req.StepUpPassword)
-	if !admitted {
-		s.auditManagedChildFailure(ctx, callerUserID, "step_up", ip, userAgent)
-		return nil, ErrParentalConsentStepUpFailed
-	}
+	// 2. Strong verified factor — the ONE identity control on this path, and
+	// the whole of it. It is mandatory: an adult holding none is refused, so
+	// the consent record this call writes always names at least one
+	// server-verified factor binding it to a real identity. No step-up
+	// password is asked for here (see the file header for why the factor is
+	// the re-authentication control on create); GrantParentalConsent and the
+	// guardian management operations, which act on accounts that already
+	// exist, still demand both.
+	//
+	// Verified before any state change, so a caller with no factor creates
+	// nothing.
 	factors, err := s.strongVerifiedFactors(ctx, caller)
 	if err != nil {
 		return nil, fmt.Errorf("check verified factors: %w", err)
@@ -260,7 +280,12 @@ func (s *AuthService) CreateManagedChildAccount(
 		ConsentingUserID: callerUserID,
 		PolicyVersion:    req.PolicyVersion,
 		Factors:          encodeConsentFactors(factors),
-		SteppedUp:        reauthenticated,
+		// No password was re-entered on this path, so the record says so.
+		// SteppedUp is evidence of what actually happened, never a claim
+		// inferred from the call having succeeded: a create-path record is
+		// backed by its Factors, and a reader comparing two records must be
+		// able to tell which control admitted each one.
+		SteppedUp:        false,
 		ConsentIP:        ip,
 		ConsentUserAgent: userAgent,
 		GrantedAt:        now,
