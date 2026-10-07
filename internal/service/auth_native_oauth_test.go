@@ -133,7 +133,7 @@ func (f *fakeNativeProjects) ActiveProjectByID(_ context.Context, id string) (*A
 
 const (
 	nativeGoogleAud = "web-client.apps.googleusercontent.com"
-	nativeAppleAud  = "dev.easyloops.app"
+	nativeAppleAud  = "dev.acme.example"
 )
 
 // nativeProjWithAuds is a non-default project carrying the default Google+Apple
@@ -154,9 +154,9 @@ func nativeProjWithAuds(id, scope string) *AdminProject {
 // the env-seed fallback; the non-default products carry their own audiences.
 func defaultNativeProjects() *fakeNativeProjects {
 	return &fakeNativeProjects{active: map[string]*AdminProject{
-		"proj-default":   {ID: "proj-default", StorageScopeID: "scope-default", Name: "proj-default"},
-		"proj-easyloops": nativeProjWithAuds("proj-easyloops", "scope-easyloops"),
-		"proj-tortoise":  nativeProjWithAuds("proj-tortoise", "scope-tortoise"),
+		"proj-default": {ID: "proj-default", StorageScopeID: "scope-default", Name: "proj-default"},
+		"proj-acme":    nativeProjWithAuds("proj-acme", "scope-acme"),
+		"proj-kids":    nativeProjWithAuds("proj-kids", "scope-kids"),
 	}}
 }
 
@@ -185,7 +185,7 @@ func newNativeTestAuthServiceWith(t *testing.T, repo Repository, verifier Native
 	cfg.NativeOAuthEnabled = true
 	cfg.NativeOAuthGoogleAudiences = nativeGoogleAud
 	cfg.NativeOAuthAppleAudiences = nativeAppleAud
-	cfg.NativeOAuthProductProjects = "easyloops=proj-easyloops,tortoise=proj-tortoise"
+	cfg.NativeOAuthProductProjects = "acme=proj-acme,kids=proj-kids"
 	if mutate != nil {
 		mutate(cfg)
 	}
@@ -234,7 +234,7 @@ func TestNativeOAuthLogin_Google_NewUser(t *testing.T) {
 
 	tok := signer.googleToken(t, "g-sub-1", "newuser@example.com", nativeGoogleAud)
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
+		Provider: "google", IDToken: tok, Product: "acme",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -256,7 +256,7 @@ func TestNativeOAuthLogin_Google_LinksExistingEmail(t *testing.T) {
 
 	tok := signer.googleToken(t, "g-sub-existing", "existing@example.com", nativeGoogleAud)
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "tortoise",
+		Provider: "google", IDToken: tok, Product: "kids",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res.User)
@@ -281,7 +281,7 @@ func TestNativeOAuthLogin_CanonicalizesProviderEmail(t *testing.T) {
 	// Provider token carries a dotted, mixed-case variant of the same address.
 	tok := signer.googleToken(t, "g-sub-canon", "Alice.Smith@gmail.com", nativeGoogleAud)
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "tortoise",
+		Provider: "google", IDToken: tok, Product: "kids",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res.User)
@@ -298,17 +298,17 @@ func TestNativeOAuthLogin_Allowlist_NonCanonical(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)
 
-	proj := nativeProjWithAuds("proj-tortoise", "scope-tortoise")
+	proj := nativeProjWithAuds("proj-kids", "scope-kids")
 	access, err := NewProjectAccessConfig(ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"alicesmith@gmail.com"}})
 	require.NoError(t, err)
 	proj.Access = access
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-tortoise": proj}}
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-kids": proj}}
 	svc := newNativeTestAuthService(t, repo, signer, projects, nil)
 
 	// A dotted/+tagged/mixed-case token variant is JIT-provisioned under canonical.
 	tok := signer.googleToken(t, "g-sub-nc", "Alice.Smith+promo@GMAIL.com", nativeGoogleAud)
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "tortoise",
+		Provider: "google", IDToken: tok, Product: "kids",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res.User)
@@ -317,7 +317,7 @@ func TestNativeOAuthLogin_Allowlist_NonCanonical(t *testing.T) {
 	// An off-list variant is denied and no account is created.
 	offTok := signer.googleToken(t, "g-sub-off", "Bob.Jones+x@GMAIL.com", nativeGoogleAud)
 	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: offTok, Product: "tortoise",
+		Provider: "google", IDToken: offTok, Product: "kids",
 	})
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 	got, _ := repo.FindUserByEmail(context.Background(), "bobjones@gmail.com")
@@ -337,7 +337,7 @@ func TestNativeOAuthLogin_Apple_WithNonce(t *testing.T) {
 		"nonce": nativeNonceHex(rawNonce),
 	})
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "apple", IDToken: tok, Product: "easyloops", Nonce: rawNonce,
+		Provider: "apple", IDToken: tok, Product: "acme", Nonce: rawNonce,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "apple@icloud.com", res.User.Email)
@@ -355,7 +355,7 @@ func TestNativeOAuthLogin_Apple_NonceMismatch_Unauthenticated(t *testing.T) {
 		"nonce": nativeNonceHex("a-different-nonce"),
 	})
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "apple", IDToken: tok, Product: "easyloops", Nonce: "expected-nonce",
+		Provider: "apple", IDToken: tok, Product: "acme", Nonce: "expected-nonce",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated), "got %v", err)
@@ -368,7 +368,7 @@ func TestNativeOAuthLogin_WrongAud_Unauthenticated(t *testing.T) {
 
 	tok := signer.googleToken(t, "g-sub-x", "u@example.com", "some-other-client")
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
+		Provider: "google", IDToken: tok, Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated), "got %v", err)
@@ -634,7 +634,7 @@ func TestNativeOAuthLogin_Disabled_FailedPrecondition(t *testing.T) {
 
 	tok := signer.googleToken(t, "g", "u@example.com", nativeGoogleAud)
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
+		Provider: "google", IDToken: tok, Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNativeOAuthDisabled), "got %v", err)
@@ -646,7 +646,7 @@ func TestNativeOAuthLogin_UnsupportedProvider_InvalidArgument(t *testing.T) {
 	svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), nil)
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "github", IDToken: "x", Product: "easyloops",
+		Provider: "github", IDToken: "x", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument), "got %v", err)
@@ -658,7 +658,7 @@ func TestNativeOAuthLogin_MissingIDToken_InvalidArgument(t *testing.T) {
 	svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), nil)
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: "  ", Product: "easyloops",
+		Provider: "google", IDToken: "  ", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument), "got %v", err)
@@ -680,13 +680,13 @@ func TestNativeOAuthLogin_UnknownProduct_InvalidArgument(t *testing.T) {
 func TestNativeOAuthLogin_ProductFallsBackToProjectID(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)
-	// "proj-tortoise" is not a mapped product key, but it is a real project id;
+	// "proj-kids" is not a mapped product key, but it is a real project id;
 	// the resolver should fall back to treating the product string as the id.
 	svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), nil)
 
 	tok := signer.googleToken(t, "g-fb", "fb@example.com", nativeGoogleAud)
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "proj-tortoise",
+		Provider: "google", IDToken: tok, Product: "proj-kids",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "fb@example.com", res.User.Email)
@@ -705,7 +705,7 @@ func TestNativeOAuthLogin_TotpRequired_ReturnsSecondFactorChallenge(t *testing.T
 
 	tok := signer.googleToken(t, "g-totp", "totp@example.com", nativeGoogleAud)
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
+		Provider: "google", IDToken: tok, Product: "acme",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -735,7 +735,7 @@ func TestNativeOAuthLogin_ProjectStoreError_NotInvalidArgument(t *testing.T) {
 
 	tok := signer.googleToken(t, "g", "u@example.com", nativeGoogleAud)
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
+		Provider: "google", IDToken: tok, Product: "acme",
 	})
 	require.Error(t, err)
 	// An infra failure must NOT be reported as a client InvalidArgument.
@@ -769,12 +769,12 @@ func TestNativeOAuthLogin_NoControlPlane_OnlyDefaultProject(t *testing.T) {
 	// project id so it resolves; any other product is rejected. The default
 	// project uses the env audience seed.
 	svc := newNativeTestAuthService(t, repo, signer, nil, func(c *config.Config) {
-		c.NativeOAuthProductProjects = "easyloops=proj-default"
+		c.NativeOAuthProductProjects = "acme=proj-default"
 	})
 
 	tok := signer.googleToken(t, "g-cp", "cp@example.com", nativeGoogleAud)
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
+		Provider: "google", IDToken: tok, Product: "acme",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "cp@example.com", res.User.Email)
@@ -782,7 +782,7 @@ func TestNativeOAuthLogin_NoControlPlane_OnlyDefaultProject(t *testing.T) {
 	// A product that resolves to a NON-default id is rejected without a control plane.
 	tok2 := signer.googleToken(t, "g-cp2", "cp2@example.com", nativeGoogleAud)
 	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok2, Product: "tortoise",
+		Provider: "google", IDToken: tok2, Product: "kids",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument), "got %v", err)
@@ -807,7 +807,7 @@ func TestNativeOAuthLogin_VerifierReturnsNoEmail_Unauthenticated(t *testing.T) {
 	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: "tok", Product: "easyloops",
+		Provider: "google", IDToken: "tok", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated), "got %v", err)
@@ -821,7 +821,7 @@ func TestNativeOAuthLogin_ProviderEmailNotVerified_Unauthenticated(t *testing.T)
 	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: "tok", Product: "easyloops",
+		Provider: "google", IDToken: "tok", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated), "got %v", err)
@@ -839,7 +839,7 @@ func TestNativeOAuthLogin_UpsertUserError_Propagates(t *testing.T) {
 	svc := newNativeTestAuthServiceWith(t, er, verifier, defaultNativeProjects(), nil)
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: "tok", Product: "easyloops",
+		Provider: "google", IDToken: "tok", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errInjected), "got %v", err)
@@ -863,7 +863,7 @@ func TestNativeOAuthLogin_SuspendedAccount_NotActive(t *testing.T) {
 	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
 
 	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: "tok", Product: "easyloops",
+		Provider: "google", IDToken: "tok", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrAccountNotActive), "got %v", err)
@@ -880,11 +880,11 @@ func TestNativeOAuthLogin_SSORequiredPolicy_Blocked(t *testing.T) {
 	// the resolved ProjectScope matches the tenant/domain/policy fixtures.
 	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-1": {ID: "proj-1", StorageScopeID: "scope-1", Name: "proj-1"}}}
 	svc := newNativeTestAuthServiceWith(t, repo, verifier, projects, func(c *config.Config) {
-		c.NativeOAuthProductProjects = "easyloops=proj-1"
+		c.NativeOAuthProductProjects = "acme=proj-1"
 	}).WithLoginGovernance(withSSORequired())
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: "tok", Product: "easyloops",
+		Provider: "google", IDToken: "tok", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrSSORequired), "got %v", err)
@@ -901,7 +901,7 @@ func TestNativeOAuthLogin_IssueTokensError_Propagates(t *testing.T) {
 	svc := newNativeTestAuthServiceWith(t, er, verifier, defaultNativeProjects(), nil)
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: "tok", Product: "easyloops",
+		Provider: "google", IDToken: "tok", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errInjected), "got %v", err)
@@ -921,7 +921,7 @@ func TestNativeOAuthLogin_ReplayedToken_Rejected(t *testing.T) {
 
 	// First redemption succeeds and issues a session.
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
+		Provider: "google", IDToken: tok, Product: "acme",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -929,7 +929,7 @@ func TestNativeOAuthLogin_ReplayedToken_Rejected(t *testing.T) {
 
 	// Replaying the identical token is rejected — no second session.
 	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
+		Provider: "google", IDToken: tok, Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated), "replay must be Unauthenticated, got %v", err)
@@ -946,7 +946,7 @@ func TestNativeOAuthLogin_DistinctTokens_SameUser_BothAccepted(t *testing.T) {
 
 	tok1 := signer.googleToken(t, "g-multi", "multi@example.com", nativeGoogleAud)
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok1, Product: "easyloops",
+		Provider: "google", IDToken: tok1, Product: "acme",
 	})
 	require.NoError(t, err)
 
@@ -955,7 +955,7 @@ func TestNativeOAuthLogin_DistinctTokens_SameUser_BothAccepted(t *testing.T) {
 	signer.now = signer.now.Add(time.Minute)
 	tok2 := signer.googleToken(t, "g-multi", "multi@example.com", nativeGoogleAud)
 	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok2, Product: "easyloops",
+		Provider: "google", IDToken: tok2, Product: "acme",
 	})
 	require.NoError(t, err, "a distinct token for the same user must be accepted")
 }
@@ -972,7 +972,7 @@ func TestNativeOAuthLogin_RecordRedemptionError_Propagates(t *testing.T) {
 	svc := newNativeTestAuthServiceWith(t, er, verifier, defaultNativeProjects(), nil)
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: "tok", Product: "easyloops",
+		Provider: "google", IDToken: "tok", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errInjected), "got %v", err)
@@ -990,11 +990,11 @@ func TestNativeOAuthLogin_PolicyRequires2FA_NoFactorEnrolled(t *testing.T) {
 	}}
 	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-1": {ID: "proj-1", StorageScopeID: "scope-1", Name: "proj-1"}}}
 	svc := newNativeTestAuthServiceWith(t, repo, verifier, projects, func(c *config.Config) {
-		c.NativeOAuthProductProjects = "easyloops=proj-1"
+		c.NativeOAuthProductProjects = "acme=proj-1"
 	}).WithLoginGovernance(withRequire2FA())
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: "tok", Product: "easyloops",
+		Provider: "google", IDToken: "tok", Product: "acme",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTotpRequired), "got %v", err)

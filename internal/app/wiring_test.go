@@ -70,7 +70,7 @@ func TestBuildNativeOAuthVerifier(t *testing.T) {
 	cfg := &config.Config{
 		NativeOAuthEnabled:            true,
 		NativeOAuthGoogleAudiences:    "web-client",
-		NativeOAuthAppleAudiences:     "dev.easyloops.app",
+		NativeOAuthAppleAudiences:     "dev.acme.example",
 		NativeOAuthMicrosoftAudiences: "ms-client",
 	}
 	if v := buildNativeOAuthVerifier(cfg, zap.NewNop()); v == nil {

@@ -158,7 +158,7 @@ func TestDOBRequired_NativeOAuthLogin(t *testing.T) {
 
 	tok := signer.googleToken(t, "g-sub-nodob", "native-nodob@example.com", nativeGoogleAud)
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
+		Provider: "google", IDToken: tok, Product: "acme",
 	})
 	requireDOBRefusal(t, svc, err)
 }

@@ -81,8 +81,7 @@ project, not a boot-time mode.
 
 ### Shape 1 — B2C, one project, consumer signups
 
-**Example:** [easyloops.app](https://easyloops.app) (coursera-/
-pluralsight-style learning product).
+**Example:** a coursera-/pluralsight-style learning product.
 
 - The product is **one Project.** Every end-user signing up joins that
   project's global user pool, keyed by email (ADR-0003).
@@ -141,7 +140,7 @@ precedence:
    key's `public_id`); an explicit key that does not resolve is rejected
    (`Unauthenticated`), never silently downgraded;
 2. the request **`Host`**, matched against a `project_auth_domains`
-   hostname (a serving hostname like `auth.easyloops.app` — NOT a tenant
+   hostname (a serving hostname like `auth.acme.example` — NOT a tenant
    email domain);
 3. the **default project** (the zero-config pin: `GATEWAY_DEFAULT_PROJECT_ID`,
    default `"default"`, mapped onto the `GATEWAY_DEFAULT_TENANT_ID`
@@ -756,10 +755,10 @@ control when they run — `New` starts nothing):
 
 ## Deployment topology
 
-- **One identity deployment per product.** glassa.work runs its own
-  identity; easyloops.app runs its own. They share zero infrastructure
+- **One identity deployment per product.** Each product runs its own
+  identity. Deployments share zero infrastructure
   beyond what they happen to colocate. There is no "one identity serves
-  both products" mode — one deployment can host many **Projects**, but a
+  several products" mode — one deployment can host many **Projects**, but a
   deployment is still per-product, not cross-product.
 - Each deployment has its own datastore — **Postgres** (which carries the
   Project/Tenant/Domain control plane) or **SQLite** (the single-file,

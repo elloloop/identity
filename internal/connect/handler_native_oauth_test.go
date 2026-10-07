@@ -92,7 +92,7 @@ func newNativeHarness(t *testing.T, signer *nativeHandlerSigner, enabled bool) *
 	cfg.DefaultProjectAccessMode = service.AccessModeOpen
 	cfg.NativeOAuthEnabled = enabled
 	cfg.NativeOAuthGoogleAudiences = nativeHandlerGoogleAud
-	cfg.NativeOAuthProductProjects = "easyloops=proj-default"
+	cfg.NativeOAuthProductProjects = "acme=proj-default"
 	kr := testKeyRing(t)
 
 	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: cfg.PasskeyRPID, RPName: cfg.PasskeyRPName, Origin: cfg.PasskeyOrigin})
@@ -139,7 +139,7 @@ func TestHandler_NativeOAuthLogin_Google_Success(t *testing.T) {
 	resp, err := h.client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
 		Provider: "google",
 		IdToken:  tok,
-		Product:  "easyloops",
+		Product:  "acme",
 	}))
 	require.NoError(t, err)
 	require.NotNil(t, resp.Msg)
@@ -156,7 +156,7 @@ func TestHandler_NativeOAuthLogin_Disabled_FailedPrecondition(t *testing.T) {
 
 	tok := signer.googleToken(t, "s", "u@example.com")
 	_, err := h.client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
-		Provider: "google", IdToken: tok, Product: "easyloops",
+		Provider: "google", IdToken: tok, Product: "acme",
 	}))
 	require.Error(t, err)
 	assert.Equal(t, connect.CodeFailedPrecondition, connectCodeOf(err))
@@ -167,7 +167,7 @@ func TestHandler_NativeOAuthLogin_BadToken_Unauthenticated(t *testing.T) {
 	h := newNativeHarness(t, signer, true)
 
 	_, err := h.client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
-		Provider: "google", IdToken: "not-a-jwt", Product: "easyloops",
+		Provider: "google", IdToken: "not-a-jwt", Product: "acme",
 	}))
 	require.Error(t, err)
 	assert.Equal(t, connect.CodeUnauthenticated, connectCodeOf(err))

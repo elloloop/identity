@@ -2333,7 +2333,7 @@ type NativeOAuthLoginRequest struct {
 	// GoogleSignInAuthentication.idToken; for Apple it is
 	// credential.identityToken from sign_in_with_apple. Required.
 	IdToken string `protobuf:"bytes,2,opt,name=id_token,json=idToken,proto3" json:"id_token,omitempty"`
-	// Product/project selector (e.g. "easyloops" | "tortoise"), with the same
+	// Product/project selector (e.g. "acme" | "kids"), with the same
 	// semantics as the hosted hub's ?product= query. The server maps it to an
 	// identity Project (see GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS) and scopes
 	// token issuance to that project. An unknown/unresolvable product is

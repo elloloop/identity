@@ -531,18 +531,18 @@ func TestProductAgeGate_NativeOAuthLogin(t *testing.T) {
 			repo.users[userID].DateOfBirthMs = tc.dobMs
 			repo.mu.Unlock()
 
-			proj := nativeProjWithAuds("proj-tortoise", "scope-tortoise")
-			proj.Products = ProjectProductsConfig{"tortoise": {MinimumAgeBand: MinimumAgeBandTeen}}
-			projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-tortoise": proj}}
+			proj := nativeProjWithAuds("proj-kids", "scope-kids")
+			proj.Products = ProjectProductsConfig{"kids": {MinimumAgeBand: MinimumAgeBandTeen}}
+			projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-kids": proj}}
 
 			signer := newNativeTokenSigner(t)
 			svc := newNativeTestAuthService(t, repo, signer, projects, nil)
 			enableAgeGate(t, svc, false)
 
-			ctx := WithProduct(context.Background(), "tortoise")
+			ctx := WithProduct(context.Background(), "kids")
 			tok := signer.googleToken(t, "g-sub-native", "native@example.com", nativeGoogleAud)
 			_, err = svc.NativeOAuthLogin(ctx, NativeOAuthLoginParams{
-				Provider: "google", IDToken: tok, Product: "tortoise",
+				Provider: "google", IDToken: tok, Product: "kids",
 			})
 			if tc.wantRefused {
 				require.ErrorIs(t, err, ErrProductAgeRestricted)
