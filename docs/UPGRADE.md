@@ -20,10 +20,9 @@ No schema change and no migration.
   `AppBaseURL` used to point them at a fixed external host. The invitation
   email names the product from the project's `branding.product_name`, else
   `GATEWAY_EMAIL_BRAND_PRODUCT_NAME`, else `GATEWAY_TOTP_ISSUER`.
-- **Branding names are one line.** `UpsertProjectConfig` refuses a control
-  character in a `branding.product_name` or `branding.email_from_name`
-  (project or product), since both reach email headers, and no email is
-  sent with a line break in its subject.
+- **No email is sent with a line break in its subject.** A product name
+  now reaches the invitation subject, so the email layer refuses a
+  multi-line subject instead of writing it into the header.
 
 ## v4.9 → v4.10 — reset and verification links can point at a sign-in hub (additive); stricter URL boot checks
 

@@ -109,8 +109,8 @@ func buildKMSAWSSigner(ctx context.Context, cfg *config.Config, logger *zap.Logg
 // fallbacks used, with a warning, while the real keys are unset. They are
 // frozen: a deployment that never set the real keys encrypted its two-step
 // secrets and hashed its recovery codes under these bytes, and new values
-// would lock those users out. They are written as escapes so the source
-// carries no name; tests pin their SHA-256.
+// would lock those users out. They are kept byte for byte (the key is 32
+// bytes) and TestDevTOTPKeyMaterialIsFrozen pins their SHA-256.
 var (
 	devTOTPEncryptionKey  = []byte("\x67\x6c\x61\x73\x73\x61\x2d\x64\x65\x76\x2d\x74\x6f\x74\x70\x2d\x65\x6e\x63\x72\x79\x70\x74\x69\x6f\x6e\x2d\x6b\x65\x79\x21\x21")
 	devTOTPRecoveryPepper = []byte("\x67\x6c\x61\x73\x73\x61\x2d\x64\x65\x76\x2d\x74\x6f\x74\x70\x2d\x72\x65\x63\x6f\x76\x65\x72\x79\x2d\x70\x65\x70\x70\x65\x72\x2d\x64\x6f\x2d\x6e\x6f\x74\x2d\x75\x73\x65\x2d\x69\x6e\x2d\x70\x72\x6f\x64")
