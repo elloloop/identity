@@ -56,7 +56,7 @@ func TestRequestPasswordReset_EmailLinkBaseBeatsBrandedDomain(t *testing.T) {
 		name, base, wantPrefix string
 	}{
 		{"no base", "", "https://auth.acme.example/auth/reset-password?token="},
-		{"hub base", "https://accounts.acme.example", "https://accounts.acme.example/reset-password?token="},
+		{"hub base", "https://signin.acme.example", "https://signin.acme.example/reset-password?token="},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, repo, rec := newAuthSvcWithMailer(t)

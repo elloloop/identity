@@ -298,14 +298,14 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     branding. Other emails do not use it.
   </p>
   <pre><code>{`{
-  "branding": { "product_name": "Glassa", "email_from_name": "Glassa" },
+  "branding": { "product_name": "Acme", "email_from_name": "Acme" },
   "products": {
     "kids": {
       "minimum_age_band": "child",
       "branding": {
-        "product_name": "Glassa Kids",
+        "product_name": "Acme Kids",
         "email_from": "no-reply@kids.example.com",
-        "email_from_name": "Glassa Kids",
+        "email_from_name": "Acme Kids",
         "logo_url": "https://kids.example.com/logo.png"
       }
     }
@@ -382,11 +382,11 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     gives the same answer for every address and still reveals nothing about
     which accounts exist.
   </p>
-  <pre><code>{`GATEWAY_EMAIL_LINK_BASE_URL=https://accounts.example.com
+  <pre><code>{`GATEWAY_EMAIL_LINK_BASE_URL=https://signin.example.com
 GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://kids.example.com
 
 # RequestPasswordReset {"email": "…", "product": "kids", "returnTo": "https://kids.example.com/home"}
-https://accounts.example.com/reset-password?token=…&product=kids&redirect=https%3A%2F%2Fkids.example.com%2Fhome`}</code></pre>
+https://signin.example.com/reset-password?token=…&product=kids&redirect=https%3A%2F%2Fkids.example.com%2Fhome`}</code></pre>
 
   <h2>Boolean parsing</h2>
   <p>

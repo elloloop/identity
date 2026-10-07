@@ -20,7 +20,7 @@ const emailLinkTestToken = "0a1b2c3d4e5f"
 func TestBuildEmailLink(t *testing.T) {
 	t.Parallel()
 
-	const page = "https://accounts.example/reset-password"
+	const page = "https://signin.example/reset-password"
 	cases := []struct {
 		name string
 		link emailLink
@@ -32,19 +32,19 @@ func TestBuildEmailLink(t *testing.T) {
 		},
 		{
 			name: "product",
-			link: emailLink{product: "tortoise"},
-			want: page + "?token=" + emailLinkTestToken + "&product=tortoise",
+			link: emailLink{product: "acme"},
+			want: page + "?token=" + emailLinkTestToken + "&product=acme",
 		},
 		{
 			name: "return_to",
-			link: emailLink{returnTo: "https://tortoise.example/home"},
-			want: page + "?token=" + emailLinkTestToken + "&redirect=https%3A%2F%2Ftortoise.example%2Fhome",
+			link: emailLink{returnTo: "https://acme.example/home"},
+			want: page + "?token=" + emailLinkTestToken + "&redirect=https%3A%2F%2Facme.example%2Fhome",
 		},
 		{
 			name: "both, return_to with its own query and fragment",
-			link: emailLink{product: "tortoise", returnTo: "https://tortoise.example/a b?x=1&y=2#top"},
+			link: emailLink{product: "acme", returnTo: "https://acme.example/a b?x=1&y=2#top"},
 			want: page + "?token=" + emailLinkTestToken +
-				"&product=tortoise&redirect=https%3A%2F%2Ftortoise.example%2Fa+b%3Fx%3D1%26y%3D2%23top",
+				"&product=acme&redirect=https%3A%2F%2Facme.example%2Fa+b%3Fx%3D1%26y%3D2%23top",
 		},
 	}
 	for _, tc := range cases {
@@ -86,10 +86,10 @@ func TestEmailLinkPageURL(t *testing.T) {
 	}{
 		{"no base, no project", "", context.Background(), "https://app.example/auth/verify-email"},
 		{"no base, branded project", "", branded, "https://auth.acme.example/auth/verify-email"},
-		{"base", "https://accounts.example", context.Background(), "https://accounts.example/verify-email"},
-		{"base with trailing slash", "https://accounts.example/", context.Background(), "https://accounts.example/verify-email"},
+		{"base", "https://signin.example", context.Background(), "https://signin.example/verify-email"},
+		{"base with trailing slash", "https://signin.example/", context.Background(), "https://signin.example/verify-email"},
 		{"base with path prefix", "https://acme.example/account", context.Background(), "https://acme.example/account/verify-email"},
-		{"base beats branded project", "https://accounts.example", branded, "https://accounts.example/verify-email"},
+		{"base beats branded project", "https://signin.example", branded, "https://signin.example/verify-email"},
 		{"loopback base", "http://localhost:3000", context.Background(), "http://localhost:3000/verify-email"},
 	}
 	for _, tc := range cases {
@@ -111,7 +111,7 @@ func newEmailLinkCheckService(t *testing.T, allowlist string) *AuthService {
 func TestCheckEmailLinkParams_Accepts(t *testing.T) {
 	t.Parallel()
 
-	s := newEmailLinkCheckService(t, "https://tortoise.example,https://app.example/learn,https://*.previews.example")
+	s := newEmailLinkCheckService(t, "https://acme.example,https://app.example/learn,https://*.previews.example")
 	cases := []struct {
 		name string
 		in   EmailLinkParams
@@ -120,8 +120,8 @@ func TestCheckEmailLinkParams_Accepts(t *testing.T) {
 		{"nothing", EmailLinkParams{}, emailLink{}},
 		{
 			"exact origin",
-			EmailLinkParams{ReturnTo: "https://tortoise.example/home?x=1"},
-			emailLink{returnTo: "https://tortoise.example/home?x=1"},
+			EmailLinkParams{ReturnTo: "https://acme.example/home?x=1"},
+			emailLink{returnTo: "https://acme.example/home?x=1"},
 		},
 		{
 			"path prefix descendant",
@@ -135,14 +135,14 @@ func TestCheckEmailLinkParams_Accepts(t *testing.T) {
 		},
 		{
 			"return_to trimmed",
-			EmailLinkParams{ReturnTo: "  https://tortoise.example/  "},
-			emailLink{returnTo: "https://tortoise.example/"},
+			EmailLinkParams{ReturnTo: "  https://acme.example/  "},
+			emailLink{returnTo: "https://acme.example/"},
 		},
-		{"product normalized", EmailLinkParams{Product: " Tortoise "}, emailLink{product: "tortoise"}},
+		{"product normalized", EmailLinkParams{Product: " Acme "}, emailLink{product: "acme"}},
 		{
 			"product with digits, dash, underscore",
-			EmailLinkParams{Product: "loop-wyse_2"},
-			emailLink{product: "loop-wyse_2"},
+			EmailLinkParams{Product: "acme-kids_2"},
+			emailLink{product: "acme-kids_2"},
 		},
 		{
 			"product at the length limit",
@@ -151,8 +151,8 @@ func TestCheckEmailLinkParams_Accepts(t *testing.T) {
 		},
 		{
 			"both",
-			EmailLinkParams{Product: "tortoise", ReturnTo: "https://tortoise.example"},
-			emailLink{product: "tortoise", returnTo: "https://tortoise.example"},
+			EmailLinkParams{Product: "acme", ReturnTo: "https://acme.example"},
+			emailLink{product: "acme", returnTo: "https://acme.example"},
 		},
 	}
 	for _, tc := range cases {
@@ -172,26 +172,26 @@ func TestCheckEmailLinkParams_Accepts(t *testing.T) {
 func TestCheckEmailLinkParams_Refuses(t *testing.T) {
 	t.Parallel()
 
-	s := newEmailLinkCheckService(t, "https://tortoise.example,https://app.example/learn")
+	s := newEmailLinkCheckService(t, "https://acme.example,https://app.example/learn")
 	cases := []struct {
 		name string
 		in   EmailLinkParams
 	}{
 		{"unlisted origin", EmailLinkParams{ReturnTo: "https://evil.example/"}},
-		{"look-alike host", EmailLinkParams{ReturnTo: "https://tortoise.example.evil.example/"}},
-		{"http downgrade of a listed origin", EmailLinkParams{ReturnTo: "http://tortoise.example/"}},
+		{"look-alike host", EmailLinkParams{ReturnTo: "https://acme.example.evil.example/"}},
+		{"http downgrade of a listed origin", EmailLinkParams{ReturnTo: "http://acme.example/"}},
 		{"outside the path prefix", EmailLinkParams{ReturnTo: "https://app.example/admin"}},
 		{"dot-dot out of the path prefix", EmailLinkParams{ReturnTo: "https://app.example/learn/../admin"}},
 		{"backslash", EmailLinkParams{ReturnTo: `https://app.example/learn\..\admin`}},
-		{"userinfo", EmailLinkParams{ReturnTo: "https://user@tortoise.example/"}},
+		{"userinfo", EmailLinkParams{ReturnTo: "https://user@acme.example/"}},
 		{"relative", EmailLinkParams{ReturnTo: "/home"}},
 		{"javascript scheme", EmailLinkParams{ReturnTo: "javascript:alert(1)"}},
-		{"product with a space", EmailLinkParams{Product: "tortoise learning"}},
+		{"product with a space", EmailLinkParams{Product: "acme kids"}},
 		{"product with a slash", EmailLinkParams{Product: "a/b"}},
-		{"product starting with a dash", EmailLinkParams{Product: "-tortoise"}},
+		{"product starting with a dash", EmailLinkParams{Product: "-acme"}},
 		{"product not ASCII", EmailLinkParams{Product: "tørtoise"}},
 		{"product over the length limit", EmailLinkParams{Product: strings.Repeat("a", 65)}},
-		{"good product, bad return_to", EmailLinkParams{Product: "tortoise", ReturnTo: "https://evil.example/"}},
+		{"good product, bad return_to", EmailLinkParams{Product: "acme", ReturnTo: "https://evil.example/"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -210,10 +210,10 @@ func TestCheckEmailLinkParams_EmptyAllowlistRefusesEveryReturnTo(t *testing.T) {
 	t.Parallel()
 
 	s := newEmailLinkCheckService(t, "")
-	if _, err := s.checkEmailLinkParams(EmailLinkParams{ReturnTo: "https://tortoise.example/"}); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := s.checkEmailLinkParams(EmailLinkParams{ReturnTo: "https://acme.example/"}); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("return_to with an empty allowlist: err = %v, want ErrInvalidArgument", err)
 	}
-	if got, err := s.checkEmailLinkParams(EmailLinkParams{Product: "tortoise"}); err != nil || got.product != "tortoise" {
+	if got, err := s.checkEmailLinkParams(EmailLinkParams{Product: "acme"}); err != nil || got.product != "acme" {
 		t.Fatalf("product alone with an empty allowlist = %+v, %v", got, err)
 	}
 }

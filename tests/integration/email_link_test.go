@@ -14,19 +14,19 @@ import (
 )
 
 const (
-	hubBase          = "https://accounts.test"
-	hubReturnTo      = "https://tortoise.test/after?step=2"
-	hubReturnToQuery = "https%3A%2F%2Ftortoise.test%2Fafter%3Fstep%3D2"
+	hubBase          = "https://signin.example.test"
+	hubReturnTo      = "https://acme.example.test/after?step=2"
+	hubReturnToQuery = "https%3A%2F%2Facme.example.test%2Fafter%3Fstep%3D2"
 )
 
 // startHubServer serves a deployment whose reset and verification pages live
-// on a sign-in hub (GATEWAY_EMAIL_LINK_BASE_URL) and that trusts the tortoise
+// on a sign-in hub (GATEWAY_EMAIL_LINK_BASE_URL) and that trusts the acme
 // app as a return URL (GATEWAY_OAUTH_ALLOWED_RETURN_URLS).
 func startHubServer(t *testing.T) *Harness {
 	t.Helper()
 	return StartServer(t, WithConfig(func(cfg *config.Config) {
 		cfg.EmailLinkBaseURL = hubBase
-		cfg.OAuthAllowedReturnURLs = "https://tortoise.test"
+		cfg.OAuthAllowedReturnURLs = "https://acme.example.test"
 	}))
 }
 
@@ -57,7 +57,7 @@ func TestEmailLink_HubBase_LinksCarryProductAndRedirect(t *testing.T) {
 	const addr = "parent@test.com"
 	const newPW = "Newp@ssw0rd!99"
 	signup, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
-		Email: addr, Password: "Sw0rdfish!42", Product: "Tortoise", ReturnTo: hubReturnTo,
+		Email: addr, Password: "Sw0rdfish!42", Product: "Acme", ReturnTo: hubReturnTo,
 	}))
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
@@ -65,7 +65,7 @@ func TestEmailLink_HubBase_LinksCarryProductAndRedirect(t *testing.T) {
 	assertHubLink(t, h, "verify-email")
 
 	if _, err := h.AuthedClient(signup.Msg.AccessToken).SendEmailVerification(ctx,
-		connect.NewRequest(&identitypb.SendEmailVerificationRequest{Product: "tortoise", ReturnTo: hubReturnTo})); err != nil {
+		connect.NewRequest(&identitypb.SendEmailVerificationRequest{Product: "acme", ReturnTo: hubReturnTo})); err != nil {
 		t.Fatalf("SendEmailVerification: %v", err)
 	}
 	tok := assertHubLink(t, h, "verify-email")
@@ -74,7 +74,7 @@ func TestEmailLink_HubBase_LinksCarryProductAndRedirect(t *testing.T) {
 	}
 
 	if _, err := h.Client.RequestPasswordReset(ctx, connect.NewRequest(&identitypb.RequestPasswordResetRequest{
-		Email: addr, Product: "tortoise", ReturnTo: hubReturnTo,
+		Email: addr, Product: "acme", ReturnTo: hubReturnTo,
 	})); err != nil {
 		t.Fatalf("RequestPasswordReset: %v", err)
 	}
@@ -101,7 +101,7 @@ func assertHubLink(t *testing.T, h *Harness, page string) string {
 	}
 	h.Mailer.Reset()
 	tok := extractToken(t, sent[0].Text)
-	want := hubBase + "/" + page + "?token=" + tok + "&product=tortoise&redirect=" + hubReturnToQuery
+	want := hubBase + "/" + page + "?token=" + tok + "&product=acme&redirect=" + hubReturnToQuery
 	if got := linkIn(t, sent[0].Text, hubBase); got != want {
 		t.Fatalf("%s link:\n got  %s\n want %s", page, got, want)
 	}
