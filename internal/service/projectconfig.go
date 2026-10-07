@@ -226,7 +226,7 @@ func (c ProjectOAuthConfig) nativeAudiences(provider string) []string {
 // From header; SupportEmail also drives the Reply-To header.
 type ProjectBrandingConfig struct {
 	// ProductName is the human-facing product name shown in email bodies
-	// (e.g. "Glassa Kids"). Empty falls back to the global default.
+	// (e.g. "Acme Kids"). Empty falls back to the global default.
 	ProductName string `json:"product_name"`
 
 	// EmailFrom is the bare From address for this project's mail
@@ -235,7 +235,7 @@ type ProjectBrandingConfig struct {
 	EmailFrom string `json:"email_from"`
 
 	// EmailFromName is the display name shown in the From header
-	// (e.g. "Glassa Kids"). Empty falls back to the global default.
+	// (e.g. "Acme Kids"). Empty falls back to the global default.
 	EmailFromName string `json:"email_from_name"`
 
 	// LogoURL is an absolute https URL to the product logo, shown in HTML

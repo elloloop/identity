@@ -36,29 +36,29 @@ func TestGenerateSecret_Base32(t *testing.T) {
 }
 
 func TestGenerateQRURI_Format(t *testing.T) {
-	uri := GenerateQRURI("JBSWY3DPEHPK3PXP", "user@example.com", "Glassa")
+	uri := GenerateQRURI("JBSWY3DPEHPK3PXP", "user@example.com", "Acme")
 	if !strings.HasPrefix(uri, "otpauth://totp/") {
 		t.Errorf("expected URI to start with 'otpauth://totp/', got %q", uri)
 	}
 }
 
 func TestGenerateQRURI_ContainsIssuer(t *testing.T) {
-	uri := GenerateQRURI("JBSWY3DPEHPK3PXP", "user@example.com", "Glassa")
-	if !strings.Contains(uri, "issuer=Glassa") {
-		t.Errorf("expected URI to contain 'issuer=Glassa', got %q", uri)
+	uri := GenerateQRURI("JBSWY3DPEHPK3PXP", "user@example.com", "Acme")
+	if !strings.Contains(uri, "issuer=Acme") {
+		t.Errorf("expected URI to contain 'issuer=Acme', got %q", uri)
 	}
 }
 
 func TestGenerateQRURI_ContainsSecret(t *testing.T) {
 	secret := "JBSWY3DPEHPK3PXP" // #nosec G101 -- deterministic TOTP test vector.
-	uri := GenerateQRURI(secret, "user@example.com", "Glassa")
+	uri := GenerateQRURI(secret, "user@example.com", "Acme")
 	if !strings.Contains(uri, "secret="+secret) {
 		t.Errorf("expected URI to contain 'secret=%s', got %q", secret, uri)
 	}
 }
 
 func TestGenerateQRURI_ContainsEmail(t *testing.T) {
-	uri := GenerateQRURI("JBSWY3DPEHPK3PXP", "user@example.com", "Glassa")
+	uri := GenerateQRURI("JBSWY3DPEHPK3PXP", "user@example.com", "Acme")
 	if !strings.Contains(uri, "user%40example.com") && !strings.Contains(uri, "user@example.com") {
 		t.Errorf("expected URI to contain email, got %q", uri)
 	}

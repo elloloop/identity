@@ -5294,7 +5294,7 @@ components:
         qrCodeUri:
           type: string
           title: qr_code_uri
-          description: otpauth://totp/Glassa:user@example.com?secret=...&issuer=Glassa
+          description: otpauth://totp/Acme:user@example.com?secret=...&issuer=Acme
         recoveryCodes:
           type: array
           items:

@@ -1269,7 +1269,7 @@ func testConfig() *config.Config {
 		PasskeySignupEnabled:            true,
 		QRLoginBaseURL:                  "http://localhost:9002",
 		QRLoginExpirySeconds:            300,
-		TOTPIssuer:                      "Glassa Test",
+		TOTPIssuer:                      "Acme Test",
 	}
 }
 

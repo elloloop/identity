@@ -8853,7 +8853,7 @@ func (*BeginTotpSetupRequest) Descriptor() ([]byte, []int) {
 type BeginTotpSetupResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Secret        string                 `protobuf:"bytes,1,opt,name=secret,proto3" json:"secret,omitempty"`                                    // Base32 (shown to user once)
-	QrCodeUri     string                 `protobuf:"bytes,2,opt,name=qr_code_uri,json=qrCodeUri,proto3" json:"qr_code_uri,omitempty"`           // otpauth://totp/Glassa:user@example.com?secret=...&issuer=Glassa
+	QrCodeUri     string                 `protobuf:"bytes,2,opt,name=qr_code_uri,json=qrCodeUri,proto3" json:"qr_code_uri,omitempty"`           // otpauth://totp/Acme:user@example.com?secret=...&issuer=Acme
 	RecoveryCodes []string               `protobuf:"bytes,3,rep,name=recovery_codes,json=recoveryCodes,proto3" json:"recovery_codes,omitempty"` // 10 one-time recovery codes (shown once)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

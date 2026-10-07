@@ -150,7 +150,7 @@ func TestRender_Branded_IncludesProductLogoAndSupport(t *testing.T) {
 	html, text, err := Render(TemplateMagicLink, map[string]any{
 		"Link":         "https://app.example.com/x",
 		"ExpiresIn":    "1 hour",
-		"ProductName":  "Glassa Kids",
+		"ProductName":  "Acme Kids",
 		"LogoURL":      "https://kids.example.com/logo.png",
 		"PrimaryColor": "#1a73e8",
 		"SupportEmail": "help@kids.example.com",
@@ -161,13 +161,13 @@ func TestRender_Branded_IncludesProductLogoAndSupport(t *testing.T) {
 	if !strings.Contains(html, "https://kids.example.com/logo.png") {
 		t.Fatalf("branded html missing logo:\n%s", html)
 	}
-	if !strings.Contains(html, "Glassa Kids") || !strings.Contains(html, "#1a73e8") {
+	if !strings.Contains(html, "Acme Kids") || !strings.Contains(html, "#1a73e8") {
 		t.Fatalf("branded html missing product name/colour:\n%s", html)
 	}
 	if !strings.Contains(html, "help@kids.example.com") {
 		t.Fatalf("branded html missing support footer:\n%s", html)
 	}
-	if !strings.Contains(text, "Glassa Kids") || !strings.Contains(text, "help@kids.example.com") {
+	if !strings.Contains(text, "Acme Kids") || !strings.Contains(text, "help@kids.example.com") {
 		t.Fatalf("branded text missing product name/support:\n%s", text)
 	}
 }

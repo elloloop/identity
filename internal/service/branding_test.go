@@ -56,7 +56,7 @@ func TestResolveBranding_ProjectOverridesGlobal(t *testing.T) {
 		Branding: ProjectBrandingConfig{
 			ProductName:   "Kids",
 			EmailFrom:     "no-reply@kids.example.com",
-			EmailFromName: "Glassa Kids",
+			EmailFromName: "Acme Kids",
 			SupportEmail:  "help@kids.example.com",
 		},
 	})
@@ -65,7 +65,7 @@ func TestResolveBranding_ProjectOverridesGlobal(t *testing.T) {
 	// Per-project beats global default.
 	assert.Equal(t, "Kids", b.productName)
 	assert.Equal(t, "no-reply@kids.example.com", b.from)
-	assert.Equal(t, `"Glassa Kids" <no-reply@kids.example.com>`, b.fromHeader())
+	assert.Equal(t, `"Acme Kids" <no-reply@kids.example.com>`, b.fromHeader())
 	assert.Equal(t, "help@kids.example.com", b.supportEmail)
 }
 
