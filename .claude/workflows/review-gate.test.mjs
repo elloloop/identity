@@ -190,9 +190,11 @@ const tests = {
     const history = /`(gh api graphql [^`]*)`/.exec(neutrality)?.[1] ?? ''
     assert.match(history, /-F n=154 /)
     assert.match(history, /pullRequest\(number:\$n\)\{userContentEdits\(first:100\)/)
-    assert.match(history, /comments\(first:100\)\{pageInfo\{hasNextPage\} nodes\{userContentEdits/)
-    assert.match(history, /reviews\(first:100\)\{pageInfo\{hasNextPage\} nodes\{userContentEdits/)
-    assert.match(history, /reviewThreads\(first:100\)\{pageInfo\{hasNextPage\} nodes\{comments\([^)]*\)\{pageInfo\{hasNextPage\} nodes\{userContentEdits/)
+    // The current text of every comment, review body and inline review
+    // comment, not only its earlier revisions.
+    assert.match(history, /comments\(first:100\)\{pageInfo\{hasNextPage\} nodes\{author\{login\} body userContentEdits/)
+    assert.match(history, /reviews\(first:100\)\{pageInfo\{hasNextPage\} nodes\{author\{login\} body userContentEdits/)
+    assert.match(history, /reviewThreads\(first:100\)\{pageInfo\{hasNextPage\} nodes\{comments\([^)]*\)\{pageInfo\{hasNextPage\} nodes\{author\{login\} path body userContentEdits/)
     assert.match(history, /HEAD_REF_FORCE_PUSHED_EVENT[^']*beforeCommit\{oid\} afterCommit\{oid\}/)
     assert.match(history, /RENAMED_TITLE_EVENT[^']*RenamedTitleEvent\{previousTitle\}/)
     assert.match(neutrality, /compare\/<afterCommit>\.\.\.<beforeCommit>/)
@@ -228,7 +230,7 @@ const tests = {
     assert.match(r.prompts['neutrality-disclosure'], /gh issue view 42 --comments/)
     const history = /`(gh api graphql [^`]*)`/.exec(r.prompts['neutrality-disclosure'])?.[1] ?? ''
     assert.match(history, /-F n=42 /)
-    assert.match(history, /issue\(number:\$n\)\{userContentEdits\(first:100\)[^']*comments\(first:100\)\{pageInfo\{hasNextPage\} nodes\{userContentEdits/)
+    assert.match(history, /issue\(number:\$n\)\{userContentEdits\(first:100\)[^']*comments\(first:100\)\{pageInfo\{hasNextPage\} nodes\{author\{login\} body userContentEdits/)
     assert.match(history, /timelineItems\(itemTypes:RENAMED_TITLE_EVENT,[^']*RenamedTitleEvent\{previousTitle\}/)
     assert.doesNotMatch(history, /reviews|reviewThreads|HEAD_REF_FORCE_PUSHED_EVENT/)
     assert.match(r.prompts['neutrality-disclosure'], /an unread list is never clean/)

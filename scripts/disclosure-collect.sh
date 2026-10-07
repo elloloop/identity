@@ -184,8 +184,9 @@ case "$kind" in
     commits_text <<<"$listed"
     ;;
   merge-group)
-    # Only a maintainer can queue a PR, so the queue's run is never an
-    # outsider's oracle. The queue squashes: each queued PR is one commit.
+    # Only someone with write access queues a PR (nothing auto-merges), so
+    # the queue's run is never an outsider's oracle. The queue squashes:
+    # each queued PR is one commit.
     range="$(ev '.merge_group | "\(.base_sha)...\(.head_sha)"')"
     compared="$(gh api "repos/$repo/compare/$range" --paginate \
       --jq "{total: .total_commits, commits: [.commits[] | $listing]}")" ||

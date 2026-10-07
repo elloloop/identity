@@ -312,9 +312,12 @@ without a maintainer, against a confidential-terms list:
     intermediate commits. A merge-queue failure stops the merge only once
     `Disclosure` is a required status check on `main`, a repository
     setting this file does not change. The run uses the queued commit's
-    copy of the workflow and scripts, so it runs only reviewed code while
-    code-owner review is required to queue a PR; an auto-merge rule that
-    queues a dependency bot's PR unreviewed would run that PR's copy.
+    copy of the workflow and scripts. Nothing queues a PR automatically:
+    Dependabot's PRs are not auto-merged, and every PR, Dependabot's
+    included, runs the review gate (§11) and is queued by someone with
+    write access. Branch protection does not itself require a review, so
+    that process is what keeps unreviewed code out of this run; an
+    auto-merge rule would put a bot's unreviewed copy of the workflow here.
 - **Disclosure (discussion)** (`.github/workflows/disclosure-discussion.yml`)
   checks issues (opened/edited) and comments on issues and PRs
   (created/edited) whose author has write access, running the default

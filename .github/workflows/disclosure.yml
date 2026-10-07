@@ -25,12 +25,12 @@ name: Disclosure
 # repository's token and secrets, so a fork PR whose author has write access
 # is checked too. That is safe only because no PR code is ever checked out or
 # run: the PR's text, commit messages and added lines are read through the
-# API as data, and the only
-# checkout is the base branch's own copy of the scripts. A merge_group run
-# takes this file and the scripts from the queued commit, so it runs only
-# reviewed code as long as code-owner review is required to queue a PR:
-# an auto-merge rule that queues a dependency bot's PR unreviewed would
-# run that PR's copy here.
+# API as data, and the only checkout is the base branch's own copy of the
+# scripts. A merge_group run takes this file and the scripts from the queued
+# commit. Nothing queues a PR automatically (no auto-merge; every PR runs the
+# review gate and is queued by someone with write access), and that is what
+# keeps unreviewed code out of this run: branch protection does not require a
+# review. Never add an auto-merge rule while this job holds the secret.
 
 on:
   pull_request_target:

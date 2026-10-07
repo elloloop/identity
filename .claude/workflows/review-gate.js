@@ -143,11 +143,13 @@ const VERDICT_RULES = `There is NO verification pass after you: mark a finding \
 // pageInfo, so a list cut short is visible rather than read as clean.
 function editHistoryCommand(kind, n) {
   const edits = (first) => `userContentEdits(first:${first}){pageInfo{hasNextPage} nodes{editedAt diff}}`
-  const comments = (first) => `comments(first:${first}){pageInfo{hasNextPage} nodes{${edits(50)}}}`
+  // The current text too: GitHub records userContentEdits only once a
+  // comment is edited, and gh pr view --comments omits inline review comments.
+  const comments = (first, extra = '') => `comments(first:${first}){pageInfo{hasNextPage} nodes{author{login} ${extra}body ${edits(50)}}}`
   const titles = '... on RenamedTitleEvent{previousTitle}'
   const fields = kind === 'issue'
     ? `${edits(100)} ${comments(100)} timelineItems(itemTypes:RENAMED_TITLE_EVENT,first:100){pageInfo{hasNextPage} nodes{${titles}}}`
-    : `${edits(100)} ${comments(100)} reviews(first:100){pageInfo{hasNextPage} nodes{${edits(50)}}} reviewThreads(first:100){pageInfo{hasNextPage} nodes{${comments(50)}}} timelineItems(itemTypes:[RENAMED_TITLE_EVENT,HEAD_REF_FORCE_PUSHED_EVENT],first:100){pageInfo{hasNextPage} nodes{${titles} ... on HeadRefForcePushedEvent{beforeCommit{oid} afterCommit{oid}}}}`
+    : `${edits(100)} ${comments(100)} reviews(first:100){pageInfo{hasNextPage} nodes{author{login} body ${edits(50)}}} reviewThreads(first:100){pageInfo{hasNextPage} nodes{${comments(50, 'path ')}}} timelineItems(itemTypes:[RENAMED_TITLE_EVENT,HEAD_REF_FORCE_PUSHED_EVENT],first:100){pageInfo{hasNextPage} nodes{${titles} ... on HeadRefForcePushedEvent{beforeCommit{oid} afterCommit{oid}}}}`
   const node = kind === 'issue' ? 'issue' : 'pullRequest'
   return `gh api graphql -F owner='{owner}' -F name='{repo}' -F n=${n} -f query='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){${node}(number:$n){${fields}}}}'`
 }
