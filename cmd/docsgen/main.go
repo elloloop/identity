@@ -521,6 +521,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_PROJECT_SECRETS_KEY", "Projects & tenancy"},
 	{"GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", "Projects & tenancy"},
 	{"GATEWAY_PROJECT_RESOLUTION_", "Projects & tenancy"},
+	{"GATEWAY_DEFAULT_EMAIL_DOMAIN", "Email & branding"},
 	{"GATEWAY_PUBLIC_EMAIL_DOMAINS", "Projects & tenancy"},
 	{"GATEWAY_COOKIE_", "HTTP, CORS & cookies"},
 	{"GATEWAY_ALLOWED_ORIGINS", "HTTP, CORS & cookies"},

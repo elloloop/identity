@@ -878,6 +878,10 @@ type Config struct {
 	// LoginLockoutSeconds is how long (seconds) an account stays locked after the threshold is hit.
 	LoginLockoutSeconds int
 
+	// DefaultEmailDomain is the email domain this deployment assigns to the
+	// accounts it creates on its own domain. Empty (the default) assigns none.
+	DefaultEmailDomain string
+
 	// PublicEmailDomains extends the built-in set of consumer/public email
 	// providers (gmail, outlook, yahoo, …) used by IsPublicEmailDomain. A
 	// verified email under a public domain does NOT imply company
@@ -1411,6 +1415,7 @@ func loadFromEnv() *Config {
 		LoginMaxFailedAttempts: envInt("GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS", 5),
 		LoginLockoutSeconds:    envInt("GATEWAY_LOGIN_LOCKOUT_SECONDS", 900),
 
+		DefaultEmailDomain: envStr("GATEWAY_DEFAULT_EMAIL_DOMAIN", ""),
 		PublicEmailDomains: envStr("GATEWAY_PUBLIC_EMAIL_DOMAINS", ""),
 
 		AllowedOrigins: envStr("GATEWAY_ALLOWED_ORIGINS", "http://localhost:9002,http://localhost:3000"),

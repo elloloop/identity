@@ -9,10 +9,9 @@ No schema change and no migration.
   product. If you never set them, new authenticator-app enrolments and new
   passkeys now show `Identity`: set both to your product's name. Existing
   enrolments and passkeys keep the name they were created with.
-- **`GATEWAY_DEFAULT_EMAIL_DOMAIN` is removed.** Nothing ever read it; a
-  value left in your environment is ignored. **Embedders:** the
-  `DefaultEmailDomain` field is gone from `identityserver.Config`; delete
-  any assignment to it.
+- **`GATEWAY_DEFAULT_EMAIL_DOMAIN` defaults to empty.** Its built-in
+  default named one deployment's domain; set it to your own domain if you
+  use it.
 - **Admin invitation links (`InviteUser`) follow the request's project**,
   like magic-link, email-change and tenant-invitation links: the project's
   primary auth domain, else `GATEWAY_APP_BASE_URL`, else the localhost
