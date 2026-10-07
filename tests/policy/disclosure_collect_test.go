@@ -27,7 +27,8 @@ const (
 // logs every path it is asked for. A fixture may hold several JSON documents,
 // one per page: `--jq` runs over each, as gh's --paginate does. With the raw
 // Accept header the fixture is returned as is. A path with no fixture fails,
-// as an API error would.
+// as an API error would, and so does the first call to a path whose fixture
+// has a ".fail-once" twin.
 const fakeGH = `#!/usr/bin/env bash
 set -euo pipefail
 [ "$1" = api ] || { echo "fake gh: unexpected: $*" >&2; exit 64; }
@@ -43,6 +44,7 @@ while [ $# -gt 0 ]; do
 done
 echo "$path" >> "$FAKE_GH_DIR/calls"
 fixture="$FAKE_GH_DIR/fixtures/$(printf '%s' "$path" | sed -e 's#/#__#g' -e 's#?#@@#g')"
+if [ -e "$fixture.fail-once" ]; then rm "$fixture.fail-once"; echo "fake gh: HTTP 502 for $path" >&2; exit 1; fi
 [ -e "$fixture" ] || { echo "fake gh: HTTP 404 for $path" >&2; exit 1; }
 if [ -n "$raw" ]; then cat "$fixture"; exit 0; fi
 jq -r "$filter" "$fixture"
@@ -333,6 +335,15 @@ func TestDisclosureCollectFailsWhenAPermissionIsUnknown(t *testing.T) {
 			})
 		}
 	}
+	// One failed lookup is retried before the check fails.
+	t.Run("lookup fails once", func(t *testing.T) {
+		run := runCollect(t, "issue", ptr(fmt.Sprintf(authorEvents["issue"], "NONE")),
+			fixtures("admin", map[string]string{permissionPath + ".fail-once": ""}))
+		run.expect(t, collectOK)
+		if !slices.Equal(run.calls, []string{permissionPath, permissionPath}) {
+			t.Fatalf("calls = %q, want the lookup and one retry", run.calls)
+		}
+	})
 	// The sender's lookup fails the same way.
 	t.Run("sender lookup fails", func(t *testing.T) {
 		run := runCollect(t, "issue", ptr(fmt.Sprintf(authorEvents["issue"], "NONE")), fixtures("read", nil))
