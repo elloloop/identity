@@ -14,9 +14,9 @@ import (
 
 func TestNewWebAuthnService(t *testing.T) {
 	svc, err := NewWebAuthnService(Config{
-		RPID:   "glassa.work",
-		RPName: "Glassa Work",
-		Origin: "https://glassa.work",
+		RPID:   "acme.example",
+		RPName: "Acme",
+		Origin: "https://acme.example",
 	})
 	if err != nil {
 		t.Fatalf("NewWebAuthnService returned error: %v", err)
@@ -45,7 +45,7 @@ func TestNewWebAuthnService_InvalidConfig(t *testing.T) {
 func TestConfig_LocalhostDefaults(t *testing.T) {
 	svc, err := NewWebAuthnService(Config{
 		RPID:   "localhost",
-		RPName: "Glassa Work (dev)",
+		RPName: "Acme (dev)",
 		Origin: "http://localhost:9002",
 	})
 	if err != nil {
@@ -65,7 +65,7 @@ func TestBeginRegistration_ReturnsValidJSON(t *testing.T) {
 
 	optJSON, challenge, err := svc.BeginRegistration(
 		"user-123",
-		"alice@glassa.work",
+		"alice@acme.example",
 		"Alice",
 		nil,
 	)
@@ -107,8 +107,8 @@ func TestBeginRegistration_ReturnsValidJSON(t *testing.T) {
 	if opts.PublicKey.RP.ID != "localhost" {
 		t.Errorf("RP ID = %q, want %q", opts.PublicKey.RP.ID, "localhost")
 	}
-	if opts.PublicKey.User.Name != "alice@glassa.work" {
-		t.Errorf("user.name = %q, want %q", opts.PublicKey.User.Name, "alice@glassa.work")
+	if opts.PublicKey.User.Name != "alice@acme.example" {
+		t.Errorf("user.name = %q, want %q", opts.PublicKey.User.Name, "alice@acme.example")
 	}
 	if opts.PublicKey.Challenge == "" {
 		t.Error("challenge in JSON is empty")
@@ -120,7 +120,7 @@ func TestBeginRegistration_EmptyDisplayName(t *testing.T) {
 
 	optJSON, _, err := svc.BeginRegistration(
 		"user-456",
-		"bob@glassa.work",
+		"bob@acme.example",
 		"", // empty display name — should fall back to email
 		nil,
 	)
@@ -138,9 +138,9 @@ func TestBeginRegistration_EmptyDisplayName(t *testing.T) {
 	if err := json.Unmarshal([]byte(optJSON), &opts); err != nil {
 		t.Fatalf("failed to unmarshal options: %v", err)
 	}
-	if opts.PublicKey.User.DisplayName != "bob@glassa.work" {
+	if opts.PublicKey.User.DisplayName != "bob@acme.example" {
 		t.Errorf("displayName = %q, want %q (should fall back to email)",
-			opts.PublicKey.User.DisplayName, "bob@glassa.work")
+			opts.PublicKey.User.DisplayName, "bob@acme.example")
 	}
 }
 
@@ -155,7 +155,7 @@ func TestBeginRegistration_ExcludesExistingCreds(t *testing.T) {
 
 	optJSON, _, err := svc.BeginRegistration(
 		"user-789",
-		"carol@glassa.work",
+		"carol@acme.example",
 		"Carol",
 		existing,
 	)

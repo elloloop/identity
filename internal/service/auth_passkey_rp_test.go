@@ -33,7 +33,7 @@ func TestPasskeysFor_ProjectOverride_ReturnsDistinctCachedInstance(t *testing.T)
 		ProjectID: "kids",
 		Passkey: ProjectPasskeyConfig{
 			RPID:   "kids.example.com",
-			RPName: "Glassa Kids",
+			RPName: "Acme Kids",
 			Origin: "https://kids.example.com",
 		},
 	})
@@ -41,7 +41,7 @@ func TestPasskeysFor_ProjectOverride_ReturnsDistinctCachedInstance(t *testing.T)
 		ProjectID: "pros",
 		Passkey: ProjectPasskeyConfig{
 			RPID:   "pros.example.com",
-			RPName: "Glassa Pros",
+			RPName: "Acme Pros",
 			Origin: "https://pros.example.com",
 		},
 	})

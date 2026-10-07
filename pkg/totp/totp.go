@@ -42,9 +42,11 @@ const MinRecoveryPepperBytes = 32
 // GenerateSecret returns a fresh base32 TOTP secret (160-bit / 32-char).
 func GenerateSecret() (string, error) {
 	// 20 random bytes = 160 bits. Encode as base32 = 32 chars.
-	// This matches Google Authenticator's default key strength.
+	// This matches Google Authenticator's default key strength. Only the
+	// secret is used; the issuer and account are placeholders the library
+	// requires (GenerateQRURI takes the real ones).
 	key, err := totp.Generate(totp.GenerateOpts{
-		Issuer:      "Glassa",
+		Issuer:      "placeholder",
 		AccountName: "placeholder",
 		SecretSize:  20,
 	})

@@ -832,7 +832,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "maps a native client's product selector to an identity project id, as comma-separated product=projectID pairs (e.g. \"easyloops=proj_abc,tortoise=proj_def\").",
+    "description": "maps a native client's product selector to an identity project id, as comma-separated product=projectID pairs (e.g. \"acme=proj_abc,kids=proj_def\").",
     "category": "OAuth",
     "anchor": "oauth"
   },

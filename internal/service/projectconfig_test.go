@@ -95,17 +95,17 @@ func TestParseProjectConfig_Branding(t *testing.T) {
 	t.Parallel()
 
 	cfg, err := ParseProjectConfig(`{"branding":{
-		"product_name":"Glassa Kids",
+		"product_name":"Acme Kids",
 		"email_from":"no-reply@kids.example.com",
-		"email_from_name":"Glassa Kids",
+		"email_from_name":"Acme Kids",
 		"logo_url":"https://kids.example.com/logo.png",
 		"primary_color":"#1a73e8",
 		"support_email":"help@kids.example.com"
 	}}`)
 	require.NoError(t, err)
-	assert.Equal(t, "Glassa Kids", cfg.Branding.ProductName)
+	assert.Equal(t, "Acme Kids", cfg.Branding.ProductName)
 	assert.Equal(t, "no-reply@kids.example.com", cfg.Branding.EmailFrom)
-	assert.Equal(t, "Glassa Kids", cfg.Branding.EmailFromName)
+	assert.Equal(t, "Acme Kids", cfg.Branding.EmailFromName)
 	assert.Equal(t, "https://kids.example.com/logo.png", cfg.Branding.LogoURL)
 	assert.Equal(t, "#1a73e8", cfg.Branding.PrimaryColor)
 	assert.Equal(t, "help@kids.example.com", cfg.Branding.SupportEmail)
@@ -116,12 +116,12 @@ func TestParseProjectConfig_Passkey(t *testing.T) {
 
 	cfg, err := ParseProjectConfig(`{"passkey":{
 		"rp_id":"kids.example.com",
-		"rp_name":"Glassa Kids",
+		"rp_name":"Acme Kids",
 		"origin":"https://kids.example.com"
 	}}`)
 	require.NoError(t, err)
 	assert.Equal(t, "kids.example.com", cfg.Passkey.RPID)
-	assert.Equal(t, "Glassa Kids", cfg.Passkey.RPName)
+	assert.Equal(t, "Acme Kids", cfg.Passkey.RPName)
 	assert.Equal(t, "https://kids.example.com", cfg.Passkey.Origin)
 }
 

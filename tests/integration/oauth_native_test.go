@@ -28,7 +28,7 @@ import (
 
 const (
 	nativeITGoogleAud = "web-client.apps.googleusercontent.com"
-	nativeITAppleAud  = "dev.easyloops.app"
+	nativeITAppleAud  = "dev.acme.example"
 	nativeITProject   = "test-project"
 	nativeITAppleIss  = "https://appleid.apple.com"
 )
@@ -144,7 +144,7 @@ func nativeITHarness(t *testing.T, signer *nativeITSigner, enabled bool) *Harnes
 		// Pin the default project's accepted Microsoft tenant via the env
 		// allow-list so a multi-tenant token's email is trusted (nOAuth guard).
 		c.MicrosoftAllowedTenants = nativeITMSTenant
-		c.NativeOAuthProductProjects = "easyloops=" + nativeITProject
+		c.NativeOAuthProductProjects = "acme=" + nativeITProject
 	})
 	if !enabled {
 		return StartServer(t, cfgFn)
@@ -242,7 +242,7 @@ func TestNativeOAuth_Google_HappyPath(t *testing.T) {
 
 	tok := signer.googleToken(t, "it-google-sub", "it-google@example.com", nativeITGoogleAud, signer.now.Add(time.Hour))
 	resp, err := h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
-		Provider: "google", IdToken: tok, Product: "easyloops",
+		Provider: "google", IdToken: tok, Product: "acme",
 	}))
 	if err != nil {
 		t.Fatalf("NativeOAuthLogin: %v", err)
@@ -273,7 +273,7 @@ func TestNativeOAuth_Apple_HappyPathWithNonce(t *testing.T) {
 		"email": "it-apple@icloud.com", "email_verified": "true", "nonce": nativeITHash(rawNonce),
 	})
 	resp, err := h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
-		Provider: "apple", IdToken: tok, Product: "easyloops", Nonce: rawNonce,
+		Provider: "apple", IdToken: tok, Product: "acme", Nonce: rawNonce,
 	}))
 	if err != nil {
 		t.Fatalf("NativeOAuthLogin apple: %v", err)
@@ -289,7 +289,7 @@ func TestNativeOAuth_WrongAudience_Unauthenticated(t *testing.T) {
 
 	tok := signer.googleToken(t, "it-aud", "it-aud@example.com", "some-other-client", signer.now.Add(time.Hour))
 	_, err := h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
-		Provider: "google", IdToken: tok, Product: "easyloops",
+		Provider: "google", IdToken: tok, Product: "acme",
 	}))
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Fatalf("wrong aud: code = %v, want Unauthenticated (err=%v)", connect.CodeOf(err), err)
@@ -302,7 +302,7 @@ func TestNativeOAuth_Expired_Unauthenticated(t *testing.T) {
 
 	tok := signer.googleToken(t, "it-exp", "it-exp@example.com", nativeITGoogleAud, signer.now.Add(-time.Hour))
 	_, err := h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
-		Provider: "google", IdToken: tok, Product: "easyloops",
+		Provider: "google", IdToken: tok, Product: "acme",
 	}))
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Fatalf("expired: code = %v, want Unauthenticated (err=%v)", connect.CodeOf(err), err)
@@ -328,7 +328,7 @@ func TestNativeOAuth_Disabled_FailedPrecondition(t *testing.T) {
 
 	tok := signer.googleToken(t, "it-off", "it-off@example.com", nativeITGoogleAud, signer.now.Add(time.Hour))
 	_, err := h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
-		Provider: "google", IdToken: tok, Product: "easyloops",
+		Provider: "google", IdToken: tok, Product: "acme",
 	}))
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("disabled: code = %v, want FailedPrecondition (err=%v)", connect.CodeOf(err), err)
@@ -344,7 +344,7 @@ func TestNativeOAuth_Microsoft_DefaultProject_HappyPath(t *testing.T) {
 
 	tok := signer.microsoftToken(t, "it-ms-oid", "it-ms@contoso.com", nativeITMicrosoftAud, nativeITMSTenant)
 	resp, err := h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
-		Provider: "microsoft", IdToken: tok, Product: "easyloops",
+		Provider: "microsoft", IdToken: tok, Product: "acme",
 	}))
 	if err != nil {
 		t.Fatalf("NativeOAuthLogin microsoft: %v", err)

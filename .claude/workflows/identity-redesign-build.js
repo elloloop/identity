@@ -33,7 +33,7 @@ CONTROL PLANE (platform-global; the registry of projects):
   id, project_id, hostname (UNIQUE across the whole deployment — one host -> one project), is_primary (bool; the
   hostname used to build email/oauth links), verified_at (0 until DNS/ownership verified), created_at. The request
   resolves its Project by publishable/secret key OR by the Host header -> ProjectAuthDomain.hostname. NOTE: this
-  "auth domain" (a HOSTNAME identity is served on, e.g. auth.easyloops.app) is a DIFFERENT concept from the Tenant
+  "auth domain" (a HOSTNAME identity is served on, e.g. auth.acme.example) is a DIFFERENT concept from the Tenant
   email Domain (e.g. acme.com); never conflate them.
 - PlatformAdmin: id, email (UNIQUE global), password_hash, totp_required, status, created_at, last_login_at.
 

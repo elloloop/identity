@@ -2333,7 +2333,7 @@ type NativeOAuthLoginRequest struct {
 	// GoogleSignInAuthentication.idToken; for Apple it is
 	// credential.identityToken from sign_in_with_apple. Required.
 	IdToken string `protobuf:"bytes,2,opt,name=id_token,json=idToken,proto3" json:"id_token,omitempty"`
-	// Product/project selector (e.g. "easyloops" | "tortoise"), with the same
+	// Product/project selector (e.g. "acme" | "kids"), with the same
 	// semantics as the hosted hub's ?product= query. The server maps it to an
 	// identity Project (see GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS) and scopes
 	// token issuance to that project. An unknown/unresolvable product is
@@ -8853,7 +8853,7 @@ func (*BeginTotpSetupRequest) Descriptor() ([]byte, []int) {
 type BeginTotpSetupResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Secret        string                 `protobuf:"bytes,1,opt,name=secret,proto3" json:"secret,omitempty"`                                    // Base32 (shown to user once)
-	QrCodeUri     string                 `protobuf:"bytes,2,opt,name=qr_code_uri,json=qrCodeUri,proto3" json:"qr_code_uri,omitempty"`           // otpauth://totp/Glassa:user@example.com?secret=...&issuer=Glassa
+	QrCodeUri     string                 `protobuf:"bytes,2,opt,name=qr_code_uri,json=qrCodeUri,proto3" json:"qr_code_uri,omitempty"`           // otpauth://totp/Acme:user@example.com?secret=...&issuer=Acme
 	RecoveryCodes []string               `protobuf:"bytes,3,rep,name=recovery_codes,json=recoveryCodes,proto3" json:"recovery_codes,omitempty"` // 10 one-time recovery codes (shown once)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

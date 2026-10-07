@@ -91,7 +91,7 @@ func TestTagOnlyAddressIsRefusedOnEveryAccountPath(t *testing.T) {
 		signer := newNativeTokenSigner(t)
 		svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), nil)
 		_, err := svc.NativeOAuthLogin(ctx, NativeOAuthLoginParams{
-			Provider: "google", IDToken: signer.googleToken(t, "g-sub-tag", tagOnlyAddress, nativeGoogleAud), Product: "easyloops",
+			Provider: "google", IDToken: signer.googleToken(t, "g-sub-tag", tagOnlyAddress, nativeGoogleAud), Product: "acme",
 		})
 		require.ErrorIs(t, err, ErrUnauthenticated)
 		requireNoTagOnlyAccount(t, repo)

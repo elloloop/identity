@@ -711,7 +711,7 @@ func newTestConfig() *config.Config {
 		PasskeyChallengeExpirySeconds:   300,
 		QRLoginBaseURL:                  "http://localhost:9002",
 		QRLoginExpirySeconds:            300,
-		TOTPIssuer:                      "Glassa Test",
+		TOTPIssuer:                      "Acme Test",
 		AllowedOrigins:                  "http://localhost:9002",
 		AppBaseURL:                      "https://app.test",
 		EmailTokenExpirySeconds:         3600,

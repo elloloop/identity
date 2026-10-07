@@ -158,9 +158,9 @@ func TestNativeVerifier_MissingExpRejected(t *testing.T) {
 		}
 	})
 	t.Run("apple", func(t *testing.T) {
-		f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+		f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 		tok := f.key.signIDToken(t, map[string]any{
-			"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+			"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 			"iat": f.now, "email": "a@b.com", "email_verified": true,
 			// no exp claim
 		})
@@ -189,11 +189,11 @@ func TestNativeVerifier_Google_BadSignature(t *testing.T) {
 
 func TestNativeVerifier_Apple_ValidWithNonce(t *testing.T) {
 	const rawNonce = "raw-nonce-value"
-	f := newNativeFixture(t, nil, []string{"app.easyloops.auth.web", "dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"app.acme.auth.web", "dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
 		"iss":            appleIssuer,
 		"sub":            "apple-sub-1",
-		"aud":            "dev.easyloops.app",
+		"aud":            "dev.acme.example",
 		"exp":            f.now.Add(time.Hour),
 		"iat":            f.now,
 		"email":          "user@icloud.com",
@@ -212,9 +212,9 @@ func TestNativeVerifier_Apple_ValidWithNonce(t *testing.T) {
 
 func TestNativeVerifier_Apple_NonceBase64Accepted(t *testing.T) {
 	const rawNonce = "another-nonce"
-	f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+		"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
 		"email_verified": true, "nonce": appleNonceHashB64(rawNonce),
 	})
@@ -224,9 +224,9 @@ func TestNativeVerifier_Apple_NonceBase64Accepted(t *testing.T) {
 }
 
 func TestNativeVerifier_Apple_NonceMismatch(t *testing.T) {
-	f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+		"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
 		"email_verified": true, "nonce": appleNonceHashHex("a-different-raw-nonce"),
 	})
@@ -236,9 +236,9 @@ func TestNativeVerifier_Apple_NonceMismatch(t *testing.T) {
 }
 
 func TestNativeVerifier_Apple_MissingNonceClaimWhenExpected(t *testing.T) {
-	f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+		"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
 		"email_verified": true,
 		// no nonce claim at all
@@ -250,9 +250,9 @@ func TestNativeVerifier_Apple_MissingNonceClaimWhenExpected(t *testing.T) {
 
 func TestNativeVerifier_Apple_NoNonceProvided_Skipped(t *testing.T) {
 	// When the client supplies no raw nonce, the claim is not checked.
-	f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+		"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
 		"email_verified": true,
 	})
@@ -262,9 +262,9 @@ func TestNativeVerifier_Apple_NoNonceProvided_Skipped(t *testing.T) {
 }
 
 func TestNativeVerifier_Apple_HideMyEmailRelay(t *testing.T) {
-	f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "relay-sub", "aud": "dev.easyloops.app",
+		"iss": appleIssuer, "sub": "relay-sub", "aud": "dev.acme.example",
 		"exp": f.now.Add(time.Hour), "iat": f.now,
 		"email":            "abc123@privaterelay.appleid.com",
 		"email_verified":   true,
@@ -281,9 +281,9 @@ func TestNativeVerifier_Apple_HideMyEmailRelay(t *testing.T) {
 
 func TestNativeVerifier_Apple_EmailVerifiedBoolAndString(t *testing.T) {
 	for _, ev := range []any{true, "true"} {
-		f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+		f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 		tok := f.key.signIDToken(t, map[string]any{
-			"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+			"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 			"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
 			"email_verified": ev,
 		})
@@ -292,9 +292,9 @@ func TestNativeVerifier_Apple_EmailVerifiedBoolAndString(t *testing.T) {
 		}
 	}
 	// Unverified (string "false") must reject.
-	f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+		"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
 		"email_verified": "false",
 	})
@@ -304,7 +304,7 @@ func TestNativeVerifier_Apple_EmailVerifiedBoolAndString(t *testing.T) {
 }
 
 func TestNativeVerifier_Apple_WrongAud(t *testing.T) {
-	f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
 		"iss": appleIssuer, "sub": "s", "aud": "com.someone.else",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
@@ -329,7 +329,7 @@ func TestNativeVerifier_ProviderNotConfigured(t *testing.T) {
 	// rejected because no audience set is supplied for it.
 	f := newNativeFixture(t, []string{"web-client"}, nil)
 	tok := f.key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+		"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
 		"email_verified": true,
 	})
@@ -380,11 +380,11 @@ func TestNativeVerifier_JWKSFetchFailure(t *testing.T) {
 		Now:          nowFunc(now),
 	})
 	tok := key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+		"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 		"exp": now.Add(time.Hour), "iat": now, "email": "a@b.com", "email_verified": true,
 	})
 	if _, err := v.Verify(context.Background(), NativeVerifyParams{
-		Provider: "apple", IDToken: tok, Audiences: []string{"dev.easyloops.app"},
+		Provider: "apple", IDToken: tok, Audiences: []string{"dev.acme.example"},
 	}); !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification on jwks fetch failure, got %v", err)
 	}
@@ -410,7 +410,7 @@ func TestNewNativeVerifier_DefaultsAndIssuerOverrides(t *testing.T) {
 
 func TestNativeVerifier_Google_NotConfigured(t *testing.T) {
 	// Apple-only fixture rejects a google token (no google audiences supplied).
-	f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
 		"iss": "https://accounts.google.com", "sub": "s", "aud": "web-client",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com", "email_verified": true,
@@ -422,9 +422,9 @@ func TestNativeVerifier_Google_NotConfigured(t *testing.T) {
 
 func TestNativeVerifier_Apple_EmailVerifiedUnexpectedType(t *testing.T) {
 	// A numeric email_verified is treated as unverified (default branch).
-	f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+	f := newNativeFixture(t, nil, []string{"dev.acme.example"})
 	tok := f.key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+		"iss": appleIssuer, "sub": "s", "aud": "dev.acme.example",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
 		"email_verified": 1,
 	})

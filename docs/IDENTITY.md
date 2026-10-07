@@ -74,15 +74,14 @@ It is **not**:
 
 ## The products it's designed for
 
-Two concrete shapes today, both pre-launch. The Project/Tenant model is
-designed so any new product fits into one of these shapes. Both run the
+Two shapes. The Project/Tenant model is designed so any new product fits
+into one of them. Both run the
 **same** code path — the difference is how many tenants form inside a
 project, not a boot-time mode.
 
 ### Shape 1 — B2C, one project, consumer signups
 
-**Example:** [easyloops.app](https://easyloops.app) (coursera-/
-pluralsight-style learning product).
+**Example:** a coursera-/pluralsight-style learning product.
 
 - The product is **one Project.** Every end-user signing up joins that
   project's global user pool, keyed by email (ADR-0003).
@@ -94,8 +93,8 @@ pluralsight-style learning product).
 
 ### Shape 2 — B2B, tenants auto-form from email domains
 
-**Example:** [glassa.work](https://glassa.work) (Microsoft-Workspace /
-Google-Workspace-style productivity suite — email, productivity tools).
+**Example:** a Microsoft-Workspace- / Google-Workspace-style productivity
+suite (email, productivity tools).
 
 - The product is **one Project per customer-shard** (or a single project
   serving many companies). **Tenants** form automatically: the first user
@@ -141,7 +140,7 @@ precedence:
    key's `public_id`); an explicit key that does not resolve is rejected
    (`Unauthenticated`), never silently downgraded;
 2. the request **`Host`**, matched against a `project_auth_domains`
-   hostname (a serving hostname like `auth.easyloops.app` — NOT a tenant
+   hostname (a serving hostname like `auth.acme.example` — NOT a tenant
    email domain);
 3. the **default project** (the zero-config pin: `GATEWAY_DEFAULT_PROJECT_ID`,
    default `"default"`, mapped onto the `GATEWAY_DEFAULT_TENANT_ID`
@@ -756,10 +755,10 @@ control when they run — `New` starts nothing):
 
 ## Deployment topology
 
-- **One identity deployment per product.** glassa.work runs its own
-  identity; easyloops.app runs its own. They share zero infrastructure
-  beyond what they happen to colocate. There is no "one identity serves
-  both products" mode — one deployment can host many **Projects**, but a
+- **One identity deployment per product.** Each product runs its own
+  identity, and deployments share zero infrastructure beyond what they
+  happen to colocate. There is no "one identity serves two unrelated
+  products" mode — one deployment can host many **Projects**, but a
   deployment is still per-product, not cross-product.
 - Each deployment has its own datastore — **Postgres** (which carries the
   Project/Tenant/Domain control plane) or **SQLite** (the single-file,

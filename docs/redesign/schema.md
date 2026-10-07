@@ -31,7 +31,7 @@ and the `MEMBER_OF` edge entirely (relocated to the workspace service).
 | **Tenant** | data plane | A *logical* data-plane company entity, auto-formed per verified non-public email domain. | many per Project |
 
 The "auth domain" in `ProjectAuthDomain` (a **hostname** identity is served on,
-e.g. `auth.easyloops.app`) is a DIFFERENT concept from the Tenant email
+e.g. `auth.acme.example`) is a DIFFERENT concept from the Tenant email
 **Domain** (e.g. `acme.com`). Never conflate them.
 
 ---
@@ -169,7 +169,7 @@ Lookup keys used to resolve a project on a request.
 
 Per-project serving hostname. One host → one project, so the `Host` header
 alone resolves a project. This is the HOSTNAME identity is served on
-(`auth.easyloops.app`), NOT a tenant email domain.
+(`auth.acme.example`), NOT a tenant email domain.
 
 | Column | Type | Null | Notes |
 |---|---|---|---|

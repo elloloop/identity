@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/secretcrypto"
 	"github.com/elloloop/identity/pkg/totp"
 )
@@ -531,18 +532,21 @@ func TestProductAgeGate_NativeOAuthLogin(t *testing.T) {
 			repo.users[userID].DateOfBirthMs = tc.dobMs
 			repo.mu.Unlock()
 
-			proj := nativeProjWithAuds("proj-tortoise", "scope-tortoise")
-			proj.Products = ProjectProductsConfig{"tortoise": {MinimumAgeBand: MinimumAgeBandTeen}}
-			projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-tortoise": proj}}
+			const restrictedProject = "proj-restricted"
+			proj := nativeProjWithAuds(restrictedProject, "scope-restricted")
+			proj.Products = ProjectProductsConfig{restrictedProduct: {MinimumAgeBand: MinimumAgeBandTeen}}
+			projects := &fakeNativeProjects{active: map[string]*AdminProject{restrictedProject: proj}}
 
 			signer := newNativeTokenSigner(t)
-			svc := newNativeTestAuthService(t, repo, signer, projects, nil)
+			svc := newNativeTestAuthService(t, repo, signer, projects, func(c *config.Config) {
+				c.NativeOAuthProductProjects = restrictedProduct + "=" + restrictedProject
+			})
 			enableAgeGate(t, svc, false)
 
-			ctx := WithProduct(context.Background(), "tortoise")
+			ctx := WithProduct(context.Background(), restrictedProduct)
 			tok := signer.googleToken(t, "g-sub-native", "native@example.com", nativeGoogleAud)
 			_, err = svc.NativeOAuthLogin(ctx, NativeOAuthLoginParams{
-				Provider: "google", IDToken: tok, Product: "tortoise",
+				Provider: "google", IDToken: tok, Product: restrictedProduct,
 			})
 			if tc.wantRefused {
 				require.ErrorIs(t, err, ErrProductAgeRestricted)

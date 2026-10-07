@@ -540,7 +540,7 @@ type Config struct {
 	NativeOAuthMicrosoftAudiences string
 	// NativeOAuthProductProjects maps a native client's product selector to an
 	// identity project id, as comma-separated product=projectID pairs (e.g.
-	// "easyloops=proj_abc,tortoise=proj_def"). A product not listed falls back
+	// "acme=proj_abc,kids=proj_def"). A product not listed falls back
 	// to being treated as a project id directly. Token issuance is scoped to
 	// the resolved project.
 	NativeOAuthProductProjects string

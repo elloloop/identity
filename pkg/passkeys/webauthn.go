@@ -23,9 +23,9 @@ var defaultCredParams = []protocol.CredentialParameter{
 
 // Config for the WebAuthn relying party.
 type Config struct {
-	RPID   string // e.g. "localhost" or "glassa.work"
-	RPName string // e.g. "Glassa Work"
-	Origin string // e.g. "https://glassa.work" or "http://localhost:9002"
+	RPID   string // e.g. "localhost" or "acme.example"
+	RPName string // e.g. "Acme"
+	Origin string // e.g. "https://acme.example" or "http://localhost:9002"
 }
 
 // RegistrationResult holds the verified credential data after a successful

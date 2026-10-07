@@ -273,7 +273,7 @@ message NativeOAuthLoginRequest {
   // credential.identityToken from sign_in_with_apple. Required.
   string id_token = 2;
 
-  // Product/project selector (e.g. "easyloops" | "tortoise"), with the same
+  // Product/project selector (e.g. "acme" | "kids"), with the same
   // semantics as the hosted hub's ?product= query. The server maps it to an
   // identity Project (see GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS) and scopes
   // token issuance to that project. An unknown/unresolvable product is
@@ -1369,7 +1369,7 @@ message BeginTotpSetupRequest {}
 
 message BeginTotpSetupResponse {
   string secret = 1; // Base32 (shown to user once)
-  string qr_code_uri = 2; // otpauth://totp/Glassa:user@example.com?secret=...&issuer=Glassa
+  string qr_code_uri = 2; // otpauth://totp/Acme:user@example.com?secret=...&issuer=Acme
   repeated string recovery_codes = 3; // 10 one-time recovery codes (shown once)
 }
 

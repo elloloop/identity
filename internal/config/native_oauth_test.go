@@ -18,7 +18,7 @@ func TestValidateNativeOAuth(t *testing.T) {
 		},
 		{
 			name: "enabled with apple audiences",
-			cfg:  Config{NativeOAuthEnabled: true, NativeOAuthAppleAudiences: "dev.easyloops.app"},
+			cfg:  Config{NativeOAuthEnabled: true, NativeOAuthAppleAudiences: "dev.acme.example"},
 		},
 		{
 			name: "enabled with microsoft audiences",
@@ -36,7 +36,7 @@ func TestValidateNativeOAuth(t *testing.T) {
 			cfg: Config{
 				NativeOAuthEnabled:         true,
 				NativeOAuthGoogleAudiences: "web-client",
-				NativeOAuthProductProjects: "easyloops=proj_a, tortoise=proj_b",
+				NativeOAuthProductProjects: "acme=proj_a, kids=proj_b",
 			},
 		},
 		{
@@ -44,7 +44,7 @@ func TestValidateNativeOAuth(t *testing.T) {
 			cfg: Config{
 				NativeOAuthEnabled:         true,
 				NativeOAuthGoogleAudiences: "web-client",
-				NativeOAuthProductProjects: "easyloops",
+				NativeOAuthProductProjects: "acme",
 			},
 			wantErr: true,
 		},
@@ -53,7 +53,7 @@ func TestValidateNativeOAuth(t *testing.T) {
 			cfg: Config{
 				NativeOAuthEnabled:         true,
 				NativeOAuthGoogleAudiences: "web-client",
-				NativeOAuthProductProjects: "easyloops=",
+				NativeOAuthProductProjects: "acme=",
 			},
 			wantErr: true,
 		},
@@ -62,7 +62,7 @@ func TestValidateNativeOAuth(t *testing.T) {
 			cfg: Config{
 				NativeOAuthEnabled:         true,
 				NativeOAuthGoogleAudiences: "web-client",
-				NativeOAuthProductProjects: " , easyloops=proj_a , ",
+				NativeOAuthProductProjects: " , acme=proj_a , ",
 			},
 		},
 	}
@@ -99,15 +99,15 @@ func TestNativeOAuthDefaultEnabled(t *testing.T) {
 }
 
 func TestNativeOAuthProductProjectMap(t *testing.T) {
-	c := Config{NativeOAuthProductProjects: "EasyLoops=proj_a, tortoise = proj_b , junk, k=, =v, "}
+	c := Config{NativeOAuthProductProjects: "Acme=proj_a, kids = proj_b , junk, k=, =v, "}
 	m := c.NativeOAuthProductProjectMap()
 	if len(m) != 2 {
 		t.Fatalf("want 2 valid entries, got %d: %v", len(m), m)
 	}
-	if m["easyloops"] != "proj_a" {
+	if m["acme"] != "proj_a" {
 		t.Fatalf("product key not lower-cased/trimmed: %v", m)
 	}
-	if m["tortoise"] != "proj_b" {
+	if m["kids"] != "proj_b" {
 		t.Fatalf("value not trimmed: %v", m)
 	}
 }
