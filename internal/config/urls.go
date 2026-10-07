@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/elloloop/identity/internal/origin"
@@ -25,15 +24,16 @@ func parseHTTPSOrLoopbackURL(raw string) (*url.URL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("url %q is not a valid URL", shown)
 	}
-	// Hostname, not Host: "https://:443" has a Host but no host to call.
-	if u.Hostname() == "" {
+	if u.Host == "" {
 		return nil, fmt.Errorf("url %q must be absolute (scheme and host)", shown)
 	}
+	// "https://:443" has a Host but no host name to call.
+	if u.Hostname() == "" {
+		return nil, fmt.Errorf("url %q has no host name", shown)
+	}
 	// url.Parse checks a port is digits, not that it is one a socket can use.
-	if p := u.Port(); p != "" {
-		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
-			return nil, fmt.Errorf("url %q has an invalid port", shown)
-		}
+	if p := u.Port(); p != "" && !origin.ValidPort(p) {
+		return nil, fmt.Errorf("url %q port must be a number from 1 to 65535", shown)
 	}
 	switch u.Scheme {
 	case "https":

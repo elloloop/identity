@@ -1,15 +1,19 @@
 # Upgrade guide
 
-## v4.9 → next — reset and verification links can point at a sign-in hub (additive)
+## v4.9 → next — reset and verification links can point at a sign-in hub (additive); stricter URL boot checks
 
 No schema change and no migration. A deployment that sets nothing new sends
 exactly the same emails as before.
 
-**From v4.8.1, upgrade straight to this release, not to v4.9.0.** v4.8.1
-carried `GATEWAY_EMAIL_LINK_BASE_URL` and the `product` and `return_to`
-fields below as a patch. v4.9.0 has neither and ignores both without an
-error, so its reset and verification links go back to `/auth/…` and lose
-the product and redirect.
+<a id="from-v481"></a>**On v4.8.1 and using `GATEWAY_EMAIL_LINK_BASE_URL`,
+`product` or `return_to`, upgrade straight to this release, not to v4.9.0.**
+v4.8.1 carried the variable and the two fields below as a patch. v4.9.0 has
+none of them and ignores them without an error, so its reset and
+verification links go back to `/auth/…` and lose the product and redirect.
+Skipping the v4.9.0 release does not skip its notes: read
+[v4.8 → v4.9](#v48--v49--scim-throttling-and-audit-directory-limit-on-every-transport-wildcard-origins-one-email-comparison-rule-migration-0034)
+first, including migration 0034, which rewrites `users` under an exclusive
+lock.
 
 - **`GATEWAY_EMAIL_LINK_BASE_URL`** (default empty) is where the
   password-reset and email-verification pages live. Identity does not serve
@@ -62,8 +66,9 @@ the product and redirect.
 
 ## v4.8 → v4.9 — SCIM throttling and audit; directory limit on every transport; wildcard origins; one email comparison rule (migration 0034)
 
-On v4.8.1 with `GATEWAY_EMAIL_LINK_BASE_URL` set, skip v4.9.0: see
-[v4.9 → next](#v49--next--reset-and-verification-links-can-point-at-a-sign-in-hub-additive).
+On v4.8.1 and using `GATEWAY_EMAIL_LINK_BASE_URL`, `product` or
+`return_to`, skip v4.9.0 and go to the release after it: see
+[upgrading from v4.8.1](#from-v481).
 
 **Postgres deployments get migration 0034, which rewrites the `users` table
 under an exclusive lock.** Read

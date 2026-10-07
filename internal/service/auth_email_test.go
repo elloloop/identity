@@ -685,9 +685,9 @@ func TestRequestPasswordReset_LinkOnEmailLinkBaseCarriesParams(t *testing.T) {
 	}
 }
 
-// TestRequestPasswordReset_NoLinkBaseKeepsAppLink pins backward
-// compatibility: with no GATEWAY_EMAIL_LINK_BASE_URL and no link params the
-// link is exactly today's.
+// TestRequestPasswordReset_NoLinkBaseKeepsAppLink: with no
+// GATEWAY_EMAIL_LINK_BASE_URL and no link params the link is
+// <app base>/auth/reset-password?token=<token>.
 func TestRequestPasswordReset_NoLinkBaseKeepsAppLink(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")

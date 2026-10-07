@@ -241,10 +241,10 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     When <code>GATEWAY_PASSWORD_RESET_ENABLED=false</code>,
     <code>RequestPasswordReset</code> still returns success so callers cannot
     use it to enumerate accounts, but Identity does not create a reset token
-    or send recovery email. The one exception is a refused
+    or send recovery email. A refused
     <code>product</code> or <code>return_to</code> (see
-    <a href="#reset-and-verification-links">Reset and verification links</a>),
-    which fails the call with <code>invalid_argument</code> whether or not
+    <a href="#reset-and-verification-links">Reset and verification links</a>)
+    still fails the call with <code>invalid_argument</code>, whether or not
     reset is enabled. Likewise <code>GATEWAY_PASSWORD_SIGNUP_ENABLED=false</code>
     rejects self-serve <code>PasswordSignup</code> while leaving admin- and
     invitation-driven account creation intact. See the

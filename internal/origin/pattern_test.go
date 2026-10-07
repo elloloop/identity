@@ -159,6 +159,19 @@ func TestPattern_Matches(t *testing.T) {
 	}
 }
 
+func TestValidPort(t *testing.T) {
+	t.Parallel()
+
+	for p, want := range map[string]bool{
+		"1": true, "443": true, "0443": true, "65535": true,
+		"": false, "0": false, "65536": false, "99999": false, "x": false, "-1": false,
+	} {
+		if got := ValidPort(p); got != want {
+			t.Errorf("ValidPort(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
 func TestEffectivePort(t *testing.T) {
 	t.Parallel()
 

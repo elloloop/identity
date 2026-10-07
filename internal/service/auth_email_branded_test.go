@@ -46,7 +46,7 @@ func TestAppBaseURL_BrandedFromProjectScope(t *testing.T) {
 // shape the setting exists for: the request resolves to a project whose
 // primary auth domain is identity's own host, which serves no reset page.
 // With GATEWAY_EMAIL_LINK_BASE_URL set the link goes to the hub instead;
-// without it, to the branded domain as before.
+// without it, to the branded domain.
 func TestRequestPasswordReset_EmailLinkBaseBeatsBrandedDomain(t *testing.T) {
 	branded := WithProjectScope(context.Background(), &ProjectScope{
 		ProjectID: "hub", PrimaryAuthDomain: "auth.acme.example",
@@ -78,8 +78,7 @@ func TestRequestPasswordReset_EmailLinkBaseBeatsBrandedDomain(t *testing.T) {
 	}
 }
 
-// TestEmails_BrandedByNamedProduct: each email that takes link params — the
-// reset, the verification resend, and the verification sent at signup —
+// TestEmails_BrandedByNamedProduct: every email that takes link params
 // carries the named product's branding from the project's products block;
 // the same request without a product carries the project's.
 func TestEmails_BrandedByNamedProduct(t *testing.T) {
