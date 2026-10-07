@@ -17,18 +17,26 @@ Highlights for quick recall:
 - **Clean commit messages.** Imperative mood, no AI attribution, no
   references to inaccessible context.
 - **PR review gate on every PR.** A fixed-roster multi-agent gate via
-  `Workflow({name: 'review-gate', args: <pr-number>})`: eight specialist
-  reviewers (Correctness, Security & Auth, API Contract, Data &
-  Migrations, Config & Operability, Maintainability & Tests, Performance
-  & Concurrency, Product & Docs) all launch on every run; each first
-  decides whether its lens applies — from the changed-file list alone,
-  and never for Correctness or Security & Auth, which are
-  non-skippable — then does its complete review single-handed: no triage
-  stage, no verification stage, no sub-agents. It fails closed on a
-  dropped or self-contradictory reviewer. A maintainer step that runs
-  inside the Claude Code harness; advisory (posts a comment, never
-  blocks merge), runs alongside CI. Clear its blocking findings before
-  merging, or record on the PR why one is being dismissed.
+  `Workflow({name: 'review-gate', args: <pr-number>})`: nine specialist
+  reviewers (Correctness, Security & Auth, Neutrality & Disclosure, API
+  Contract, Data & Migrations, Config & Operability, Maintainability &
+  Tests, Performance & Concurrency, Product & Docs) all launch on every
+  run; each first decides whether its lens applies — from the
+  changed-file list alone, and never for Correctness, Security & Auth or
+  Neutrality & Disclosure, which are non-skippable — then does its
+  complete review single-handed: no triage stage, no verification stage,
+  no sub-agents. Neutrality & Disclosure alone also reviews the PR text,
+  commit messages and linked issues; `args: 'issue:<n>'` runs it alone
+  over an issue. It fails closed on a dropped or self-contradictory
+  reviewer. A maintainer step that runs inside the Claude Code harness;
+  advisory (posts a comment, never blocks merge), runs alongside CI.
+  Clear its blocking findings before merging, or record on the PR why
+  one is being dismissed.
+- **Keep the repo general and public-safe (AGENTS.md §13).** General
+  capabilities, not one client's features; neutral examples (`acme`,
+  `example.com`, `example.test`); nothing private in code, docs, commits,
+  or PR/issue text. The `Disclosure` workflow enforces a term list kept
+  in the `CONFIDENTIAL_TERMS` secret.
 
 If existing code violates these rules and your change touches it, fix
 the violation as part of your change. Do not preserve the wrong pattern.

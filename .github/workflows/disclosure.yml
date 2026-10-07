@@ -1,0 +1,159 @@
+name: Disclosure
+
+# Catches confidential terms (a client's names, private hosts, internal
+# infrastructure) in PRs, issues and comments, without a maintainer having
+# to remember to look (AGENTS.md §13). The term list lives only in the
+# CONFIDENTIAL_TERMS repository secret, one term per line; nothing here
+# ever prints, comments or labels with a matched term.
+#
+# pull_request_target runs this file from the BASE branch with the base
+# repository's token and secrets, so fork PRs are checked too. That is safe
+# only because no PR code is ever checked out or run: the PR's text, commit
+# messages and added lines are read through the API as data, and the only
+# checkout is the base branch's own copy of the matcher.
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+
+permissions: {}
+
+jobs:
+  pull-request:
+    name: Disclosure
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    concurrency:
+      group: disclosure-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      # No ref: under pull_request_target the default is the base branch,
+      # never the PR head.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/disclosure-check.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Collect the PR's text and added lines
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          text="$RUNNER_TEMP/disclosure-text"
+          {
+            # Title, description and branch name straight from the event
+            # file: as data, never interpolated into this script.
+            jq -r '.pull_request | .title, (.body // ""), .head.ref' "$GITHUB_EVENT_PATH"
+            gh api "repos/$GH_REPO/pulls/$PR_NUMBER/commits" --paginate --jq '.[].commit.message'
+            gh api "repos/$GH_REPO/pulls/$PR_NUMBER/files" --paginate --jq '
+              .[] | .filename,
+                ((.patch // "") | split("\n")[]
+                  | select(startswith("+") and (startswith("+++") | not)) | .[1:])'
+          } > "$text"
+          # The API omits the patch of a binary or very large file; say how
+          # many went unread rather than pass them silently.
+          unread="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER/files" --paginate \
+            --jq '[.[] | select(.patch == null and .status != "removed")] | length' | awk '{n += $1} END {print n + 0}')"
+          if [ "$unread" -gt 0 ]; then
+            echo "::notice::$unread changed file(s) have no diff in the API (binary or too large); their content was not checked."
+          fi
+
+      - name: Check for confidential terms
+        env:
+          CONFIDENTIAL_TERMS: ${{ secrets.CONFIDENTIAL_TERMS }}
+        run: |
+          status=0
+          bash scripts/disclosure-check.sh < "$RUNNER_TEMP/disclosure-text" || status=$?
+          case "$status" in
+            0) echo "No confidential terms found." ;;
+            3) echo "::notice::CONFIDENTIAL_TERMS is not set; the disclosure check was skipped." ;;
+            1)
+              echo "::error::This PR's title, description, branch name, commit messages, file names or added lines contain a confidential term. Remove it, and use neutral examples (acme, example.com, example.test) instead. See AGENTS.md §13."
+              exit 1
+              ;;
+            *) exit "$status" ;;
+          esac
+
+  issue:
+    name: Disclosure (issue)
+    if: github.event_name != 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/disclosure-check.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Check for confidential terms
+        id: check
+        env:
+          CONFIDENTIAL_TERMS: ${{ secrets.CONFIDENTIAL_TERMS }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # The comment, or the issue's title and description, straight from
+          # the event file: as data, never interpolated into this script.
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            filter='.comment.body // ""'
+          else
+            filter='.issue.title, (.issue.body // "")'
+          fi
+          status=0
+          jq -r "$filter" "$GITHUB_EVENT_PATH" | bash scripts/disclosure-check.sh || status=$?
+          case "$status" in
+            0) echo "No confidential terms found." ;;
+            3) echo "::notice::CONFIDENTIAL_TERMS is not set; the disclosure check was skipped." ;;
+            1) echo "found=true" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$status" ;;
+          esac
+
+      - name: Label and ask the author to redact
+        if: steps.check.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          AUTHOR: ${{ github.event_name == 'issue_comment' && github.event.comment.user.login || github.event.issue.user.login }}
+        run: |
+          set -euo pipefail
+          label=needs-redaction
+          if ! gh label list --search "$label" --json name --jq '.[].name' | grep -qx "$label"; then
+            gh label create "$label" --color B60205 \
+              --description "Contains details that must be removed before this can stay public"
+          fi
+          gh api --method POST "repos/$GH_REPO/issues/$NUMBER/labels" -f "labels[]=$label" > /dev/null
+
+          # One request per offending item: an edit that still matches does
+          # not post again.
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            item="comment-$COMMENT_ID"; what="Your comment"
+          else
+            item="issue"; what="This issue's title or description"
+          fi
+          marker="<!-- disclosure-check:$item -->"
+          posted="$(gh api "repos/$GH_REPO/issues/$NUMBER/comments" --paginate \
+            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\")))] | length" \
+            | awk '{n += $1} END {print n + 0}')"
+          if [ "$posted" -eq 0 ]; then
+            body="$(printf '%s\n%s\n' "$marker" \
+              "@$AUTHOR $what appears to contain something that should not be public here, such as a private product, host or domain name. Please edit it to remove that, and use neutral examples (\`acme\`, \`example.com\`, \`example.test\`) instead. A maintainer will clear the \`$label\` label, and the earlier revision from the edit history, once it is clean.")"
+            gh api --method POST "repos/$GH_REPO/issues/$NUMBER/comments" -f "body=$body" > /dev/null
+          fi
+          echo "Labelled $label and asked the author to redact."
