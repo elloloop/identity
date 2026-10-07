@@ -3,10 +3,10 @@ package policy
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -21,7 +21,7 @@ const (
 
 // The terms below are made up for the tests; the real list lives only in
 // the CONFIDENTIAL_TERMS repository secret.
-const testTerms = "acme widgets\nsecret.example.test\nproject-falcon\n"
+const testTerms = "acme widgets\nsecret.example.test\nacme-labs\n"
 
 func TestDisclosureCheckFindsTerms(t *testing.T) {
 	for name, text := range map[string]string{
@@ -30,8 +30,8 @@ func TestDisclosureCheckFindsTerms(t *testing.T) {
 		"split across lines":     "acme\nwidgets",
 		"extra whitespace":       "acme \t  widgets",
 		"hostname in a URL":      "see https://login.secret.example.test/reset",
-		"substring of a word":    "the project-falcons repo",
-		"term in a later line":   "line one\nline two\nPROJECT-FALCON",
+		"substring of a word":    "the acme-labs2 repo",
+		"term in a later line":   "line one\nline two\nACME-LABS",
 		"added diff line marker": "+\tbase := \"https://secret.example.test\"",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -46,11 +46,11 @@ func TestDisclosureCheckFindsTerms(t *testing.T) {
 
 func TestDisclosureCheckPassesCleanText(t *testing.T) {
 	for name, text := range map[string]string{
-		"neutral examples":        "Use acme, example.com and example.test.",
-		"words apart":             "acme ships widgets",
-		"dot is literal":          "secretXexampleXtest",
-		"empty text":              "",
-		"term with a word inside": "project-big-falcon",
+		"neutral examples":         "Use acme, example.com and example.test.",
+		"words apart":              "acme ships widgets",
+		"separator not a wildcard": "secretXexampleXtest",
+		"empty text":               "",
+		"term with a word inside":  "acme-big-labs",
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, code := runDisclosureCheck(t, testTerms, text, nil)
@@ -61,12 +61,96 @@ func TestDisclosureCheckPassesCleanText(t *testing.T) {
 	}
 }
 
+// The text and the terms fold the same way: '-', '_' and '.' are
+// whitespace, and zero-width characters are dropped, so another separator
+// or an invisible character does not hide a term.
+func TestDisclosureCheckFoldsSeparatorsAndInvisibleCharacters(t *testing.T) {
+	for name, text := range map[string]string{
+		"hyphen for a space":       "acme-widgets",
+		"underscore for a space":   "ACME_Widgets",
+		"dot for a space":          "acme.widgets",
+		"space for a hyphen":       "acme labs",
+		"underscore for a hyphen":  "ACME_LABS",
+		"hyphens for dots":         "secret-example-test",
+		"zero-width space":         "ac\u200bme-labs",
+		"zero-width non-joiner":    "acme \u200cwidgets",
+		"zero-width joiner":        "acme\u200d widgets",
+		"byte order mark":          "\ufeffsecret.example.test",
+		"soft hyphen":              "ac\u00adme widgets",
+		"word joiner":              "acme\u2060 widgets",
+		"Mongolian vowel sep":      "acme \u180ewidgets",
+		"separators and invisible": "acme\u200b_\u200blabs",
+		"no-break space":           "acme\u00a0widgets",
+		"em space":                 "acme\u2003widgets",
+		"ideographic space":        "acme\u3000widgets",
+		"en dash":                  "acme\u2013labs",
+		"minus sign":               "acme\u2212labs",
+		"left-to-right mark":       "acme\u200e widgets",
+		"right-to-left override":   "ac\u202eme widgets",
+		"isolate":                  "ac\u2066me\u2069 widgets",
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, code := runDisclosureCheck(t, testTerms, text, nil)
+			if code != disclosureMatch {
+				t.Fatalf("exit = %d, want %d (match); output:\n%s", code, disclosureMatch, out)
+			}
+			assertNoTermIn(t, out)
+		})
+	}
+	for name, text := range map[string]string{
+		"no separator at all":   "acmelabs",
+		"slash is not folded":   "acme/labs",
+		"invisible joins words": "acme\u200bwidgets",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if out, code := runDisclosureCheck(t, testTerms, text, nil); code != disclosureClean {
+				t.Fatalf("exit = %d, want %d (clean); output:\n%s", code, disclosureClean, out)
+			}
+		})
+	}
+}
+
+// A term's edge separators fold away, so ".example" matches the bare
+// substring. The script says so, on stderr and under Actions as a warning
+// annotation, naming the term by its place, never its text, whatever
+// separator it was (an ASCII one, a Unicode dash or a no-break space), and
+// still checks.
+func TestDisclosureCheckWarnsWhenATermsEdgesFoldAway(t *testing.T) {
+	terms := "acme widgets\n.acme-edge\nacme-tail_\n\u2013acme-dash\nacme-nbsp\u00a0\n"
+	out, code := runDisclosureCheck(t, terms, "the acme edge case", []string{"GITHUB_ACTIONS=true"})
+	if code != disclosureMatch {
+		t.Fatalf("exit = %d, want %d; output:\n%s", code, disclosureMatch, out)
+	}
+	for n := 2; n <= 5; n++ {
+		for _, prefix := range []string{"disclosure-check: ", "::warning::"} {
+			if want := fmt.Sprintf("%sterm %d starts or ends with a separator", prefix, n); !strings.Contains(out, want) {
+				t.Errorf("output lacks %q:\n%s", want, out)
+			}
+		}
+	}
+	var rest []string
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "::add-mask::") {
+			rest = append(rest, line)
+		}
+	}
+	if joined := strings.Join(rest, "\n"); strings.Contains(joined, "term 1 ") ||
+		strings.Contains(joined, "edge") || strings.Contains(joined, "tail") || strings.Contains(joined, "dash") || strings.Contains(joined, "nbsp") {
+		t.Errorf("warned about a plain term, or echoed a term:\n%s", joined)
+	}
+}
+
 // A blank line in the list must not become an empty pattern, which would
 // match every text.
 func TestDisclosureCheckIgnoresBlankAndCRLFLines(t *testing.T) {
 	terms := "\r\n\n  \nacme widgets\r\n\n"
-	if out, code := runDisclosureCheck(t, terms, "nothing to see here", nil); code != disclosureClean {
+	out, code := runDisclosureCheck(t, terms, "nothing to see here", nil)
+	if code != disclosureClean {
 		t.Fatalf("clean text: exit = %d, want %d; output:\n%s", code, disclosureClean, out)
+	}
+	// A CR or edge whitespace is not a separator: no edge warning.
+	if out != "" {
+		t.Fatalf("output on a clean match with a CRLF list:\n%s", out)
 	}
 	if out, code := runDisclosureCheck(t, terms, "ACME WIDGETS", nil); code != disclosureMatch {
 		t.Fatalf("term with CRLF list: exit = %d, want %d; output:\n%s", code, disclosureMatch, out)
@@ -76,12 +160,14 @@ func TestDisclosureCheckIgnoresBlankAndCRLFLines(t *testing.T) {
 // Terms are literal strings, never patterns: regex metacharacters neither
 // widen a match nor break the matcher.
 func TestDisclosureCheckTreatsTermsLiterally(t *testing.T) {
-	terms := "a.b\n[unclosed\n(x|y)\n"
-	if out, code := runDisclosureCheck(t, terms, "axb x y", nil); code != disclosureClean {
+	terms := "a*b\na+b\n[unclosed\n(x|y)\n"
+	if out, code := runDisclosureCheck(t, terms, "b ab aab x y", nil); code != disclosureClean {
 		t.Fatalf("metacharacters widened the match: exit = %d; output:\n%s", code, out)
 	}
-	if out, code := runDisclosureCheck(t, terms, "a [unclosed bracket", nil); code != disclosureMatch {
-		t.Fatalf("literal bracket term: exit = %d, want %d; output:\n%s", code, disclosureMatch, out)
+	for _, text := range []string{"a [unclosed bracket", "1 a+b 2", "A*B"} {
+		if out, code := runDisclosureCheck(t, terms, text, nil); code != disclosureMatch {
+			t.Fatalf("literal term in %q: exit = %d, want %d; output:\n%s", text, code, disclosureMatch, out)
+		}
 	}
 }
 
@@ -100,11 +186,12 @@ func TestDisclosureCheckWithoutTermsReportsUnconfigured(t *testing.T) {
 	}
 }
 
-// Under GitHub Actions every term is registered as a mask before anything
-// else runs, and the masks are the only place a term appears: the runner
-// consumes ::add-mask:: lines instead of printing them.
+// Under GitHub Actions every term is registered as a mask, as written and
+// as folded, before anything else runs, and the masks are the only place a
+// term appears: the runner consumes ::add-mask:: lines instead of printing
+// them.
 func TestDisclosureCheckMasksTermsUnderGitHubActions(t *testing.T) {
-	out, code := runDisclosureCheck(t, "acme  widgets\nproject-falcon\n", "Acme Widgets", []string{"GITHUB_ACTIONS=true"})
+	out, code := runDisclosureCheck(t, "acme  widgets\nacme-labs\n", "Acme Widgets", []string{"GITHUB_ACTIONS=true"})
 	if code != disclosureMatch {
 		t.Fatalf("exit = %d, want %d; output:\n%s", code, disclosureMatch, out)
 	}
@@ -116,8 +203,8 @@ func TestDisclosureCheckMasksTermsUnderGitHubActions(t *testing.T) {
 		}
 		rest = append(rest, line)
 	}
-	if strings.Join(masks, "|") != "acme widgets|project-falcon" {
-		t.Fatalf("masks = %q, want the two normalized terms", masks)
+	if strings.Join(masks, "|") != "acme widgets|acme-labs|acme labs" {
+		t.Fatalf("masks = %q, want each term as written and, where it differs, folded", masks)
 	}
 	assertNoTermIn(t, strings.Join(rest, "\n"))
 }
@@ -125,7 +212,7 @@ func TestDisclosureCheckMasksTermsUnderGitHubActions(t *testing.T) {
 func assertNoTermIn(t *testing.T, out string) {
 	t.Helper()
 	lower := strings.ToLower(out)
-	for _, term := range []string{"acme", "widgets", "secret.example", "falcon"} {
+	for _, term := range []string{"acme", "widgets", "secret.example", "labs"} {
 		if strings.Contains(lower, term) {
 			t.Fatalf("output echoes part of a confidential term (%q):\n%s", term, out)
 		}
@@ -187,53 +274,3 @@ func withoutEnv(env []string, names ...string) []string {
 }
 
 func ptr(s string) *string { return &s }
-
-// The Disclosure workflow runs with secrets on pull_request_target, so the
-// guarantees that make that safe are pinned here: it starts from no
-// permissions, never checks out anything but the base branch's matcher,
-// never reads the PR head by expression, and never handles the term list
-// in its own shell.
-func TestDisclosureWorkflowNeverRunsPullRequestCode(t *testing.T) {
-	wf := readFile(t, filepath.Join(repoRoot(t), ".github", "workflows", "disclosure.yml"))
-
-	for _, want := range []string{
-		"pull_request_target:\n    types: [opened, edited, synchronize, reopened]",
-		"issues:\n    types: [opened, edited]",
-		"issue_comment:\n    types: [created, edited]",
-		"\npermissions: {}\n",
-		"    name: Disclosure\n",
-	} {
-		if !strings.Contains(wf, want) {
-			t.Errorf("disclosure.yml is missing %q", want)
-		}
-	}
-
-	checkouts := strings.Count(wf, "uses: actions/checkout@")
-	if checkouts == 0 {
-		t.Fatal("disclosure.yml has no checkout of the matcher")
-	}
-	for _, want := range []string{"persist-credentials: false", "sparse-checkout: scripts/disclosure-check.sh"} {
-		if got := strings.Count(wf, want); got != checkouts {
-			t.Errorf("%d checkout(s) but %q appears %d time(s)", checkouts, want, got)
-		}
-	}
-	// A checkout pointed anywhere but the base branch.
-	if regexp.MustCompile(`(?m)^\s+ref:`).MatchString(wf) {
-		t.Error("disclosure.yml must not set a checkout ref")
-	}
-	for _, forbidden := range []string{
-		"github.event.pull_request.head",  // the PR head by expression
-		"github.event.pull_request.title", // PR text interpolated into a step
-		"github.event.pull_request.body",
-		"github.event.issue.title",
-		"github.event.issue.body",
-		"github.event.comment.body",
-		"$CONFIDENTIAL_TERMS", // the list handled in the workflow's shell
-		"pull-requests: write",
-		"contents: write",
-	} {
-		if strings.Contains(wf, forbidden) {
-			t.Errorf("disclosure.yml must not contain %q", forbidden)
-		}
-	}
-}

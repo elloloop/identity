@@ -26,17 +26,20 @@ Highlights for quick recall:
   Neutrality & Disclosure, which are non-skippable — then does its
   complete review single-handed: no triage stage, no verification stage,
   no sub-agents. Neutrality & Disclosure alone also reviews the PR text,
-  commit messages and linked issues; `args: 'issue:<n>'` runs it alone
-  over an issue. It fails closed on a dropped or self-contradictory
-  reviewer. A maintainer step that runs inside the Claude Code harness;
-  advisory (posts a comment, never blocks merge), runs alongside CI.
-  Clear its blocking findings before merging, or record on the PR why
-  one is being dismissed.
+  commit messages, linked issues, edit history and force-pushed commits;
+  `args: 'issue:<n>'` runs it alone over an issue. It fails closed on a
+  dropped or self-contradictory reviewer. A maintainer step that runs
+  inside the Claude Code harness; advisory (posts a comment, never blocks
+  merge), runs alongside CI. Clear its blocking findings before merging,
+  or record on the PR why one is being dismissed.
 - **Keep the repo general and public-safe (AGENTS.md §13).** General
   capabilities, not one client's features; neutral examples (`acme`,
   `example.com`, `example.test`); nothing private in code, docs, commits,
-  or PR/issue text. The `Disclosure` workflow enforces a term list kept
-  in the `CONFIDENTIAL_TERMS` secret.
+  or PR/issue text. The `Disclosure` workflows check what people with
+  write access write (PRs, commits, issues, comments), and what the merge
+  queue lands, against a term list kept in the `CONFIDENTIAL_TERMS`
+  secret; a permission lookup that fails fails the check. Reviews are left
+  to the review gate. §13 says exactly what each covers.
 
 If existing code violates these rules and your change touches it, fix
 the violation as part of your change. Do not preserve the wrong pattern.

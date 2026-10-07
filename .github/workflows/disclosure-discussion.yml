@@ -1,0 +1,121 @@
+name: Disclosure (discussion)
+
+# Catches confidential terms in issues and in comments on issues and PRs
+# (AGENTS.md §13); disclosure.yml checks the PRs themselves. These triggers
+# live apart from that workflow so that no run from them ever attaches a
+# skipped "Disclosure" check to a PR head, which GitHub would count as
+# success for the required check. Both run the default branch's copy of this
+# file and the scripts. The term list lives only in the CONFIDENTIAL_TERMS
+# repository secret; nothing here ever prints, comments or labels with a
+# matched term.
+#
+# Review bodies and inline review comments are not checked here, on
+# purpose: a pull_request_review or pull_request_review_comment run executes
+# the PR branch's copy of the workflow with this repository's secrets, and a
+# branch nobody else has reviewed (a dependency bot's action bump, say)
+# would then run next to the term list. The review gate's Neutrality &
+# Disclosure lens reads reviews and their edit history instead.
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+
+permissions: {}
+
+jobs:
+  discussion:
+    name: Disclosure (discussion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Labels and comments go through the issues API, which takes a PR number
+    # too, so issues: write covers a comment on a PR as well.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/disclosure-collect.sh
+            scripts/disclosure-check.sh
+          sparse-checkout-cone-mode: false
+
+      # The token reads the author's repository permission (metadata: read,
+      # which every job token holds).
+      - name: Collect the text
+        id: collect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          case "$EVENT_NAME" in
+            issues) kind=issue ;;
+            issue_comment) kind=comment ;;
+            *) echo "::error::Unexpected event $EVENT_NAME."; exit 1 ;;
+          esac
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          status=0
+          bash scripts/disclosure-collect.sh "$kind" > "$RUNNER_TEMP/disclosure-text" || status=$?
+          case "$status" in
+            0) echo "check=true" >> "$GITHUB_OUTPUT" ;;
+            10) echo "::notice::Not checked: the item's author has no write access. See AGENTS.md §13." ;;
+            2)
+              echo "::error::A GitHub API read failed (often the hourly request limit), so nothing was checked. Re-run this check."
+              exit 1
+              ;;
+            *) exit "$status" ;;
+          esac
+
+      - name: Check for confidential terms
+        id: check
+        if: steps.collect.outputs.check == 'true'
+        env:
+          CONFIDENTIAL_TERMS: ${{ secrets.CONFIDENTIAL_TERMS }}
+        run: |
+          status=0
+          bash scripts/disclosure-check.sh < "$RUNNER_TEMP/disclosure-text" || status=$?
+          case "$status" in
+            0) echo "No confidential terms found." ;;
+            3) echo "::notice::The confidential-terms secret is not set; the disclosure check was skipped." ;;
+            1) echo "found=true" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$status" ;;
+          esac
+
+      - name: Label and ask the author to redact
+        if: steps.check.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          KIND: ${{ steps.collect.outputs.kind }}
+          ITEM_ID: ${{ github.event.comment.id }}
+          AUTHOR: ${{ github.event.comment.user.login || github.event.issue.user.login }}
+        run: |
+          set -euo pipefail
+          label=needs-redaction
+          # --force makes this idempotent: concurrent runs may all create it.
+          gh label create "$label" --force --color B60205 \
+            --description "Contains details that must be removed before this can stay public"
+          gh api --method POST "repos/$GH_REPO/issues/$NUMBER/labels" -f "labels[]=$label" > /dev/null
+
+          # One request per offending item: an edit that still matches does
+          # not post again.
+          case "$KIND" in
+            issue) item="issue"; what="This issue's title or description" ;;
+            comment) item="comment-$ITEM_ID"; what="Your comment" ;;
+            *) echo "::error::Unexpected kind $KIND."; exit 1 ;;
+          esac
+          marker="<!-- disclosure-check:$item -->"
+          posted="$(gh api "repos/$GH_REPO/issues/$NUMBER/comments" --paginate \
+            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\")))] | length" \
+            | awk '{n += $1} END {print n + 0}')"
+          if [ "$posted" -eq 0 ]; then
+            body="$(printf '%s\n%s\n' "$marker" \
+              "@$AUTHOR $what appears to contain something that should not be public here, such as a private product, host or domain name. Please edit it to remove that, and use neutral examples (\`acme\`, \`example.com\`, \`example.test\`) instead. A maintainer will clear the \`$label\` label, and the earlier revision from the edit history, once it is clean.")"
+            gh api --method POST "repos/$GH_REPO/issues/$NUMBER/comments" -f "body=$body" > /dev/null
+          fi
+          echo "Labelled $label and asked the author to redact."

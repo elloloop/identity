@@ -54,8 +54,8 @@ updates:
       actions:
         patterns:
           - "*"
-        # Major action bumps get deliberate review (AGENTS.md §10); keeping
-        # them out of the group also keeps them out of auto-merge.
+        # Major action bumps get a PR of their own for deliberate review
+        # (AGENTS.md §10).
         update-types:
           - minor
           - patch
