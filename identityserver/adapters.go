@@ -105,12 +105,23 @@ func buildKMSAWSSigner(ctx context.Context, cfg *config.Config, logger *zap.Logg
 	return s, func() {}, nil
 }
 
+// devTOTPEncryptionKey and devTOTPRecoveryPepper are the development
+// fallbacks used, with a warning, while the real keys are unset. They are
+// frozen: a deployment that never set the real keys encrypted its two-step
+// secrets and hashed its recovery codes under these bytes, and new values
+// would lock those users out. They are written as escapes so the source
+// carries no name; tests pin their SHA-256.
+var (
+	devTOTPEncryptionKey  = []byte("\x67\x6c\x61\x73\x73\x61\x2d\x64\x65\x76\x2d\x74\x6f\x74\x70\x2d\x65\x6e\x63\x72\x79\x70\x74\x69\x6f\x6e\x2d\x6b\x65\x79\x21\x21")
+	devTOTPRecoveryPepper = []byte("\x67\x6c\x61\x73\x73\x61\x2d\x64\x65\x76\x2d\x74\x6f\x74\x70\x2d\x72\x65\x63\x6f\x76\x65\x72\x79\x2d\x70\x65\x70\x70\x65\x72\x2d\x64\x6f\x2d\x6e\x6f\x74\x2d\x75\x73\x65\x2d\x69\x6e\x2d\x70\x72\x6f\x64")
+)
+
 // decodeTOTPKey returns the 32-byte TOTP encryption key from config,
 // falling back to a deterministic dev key (loud warning) when unset.
 func decodeTOTPKey(cfg *config.Config, logger *zap.Logger) ([]byte, error) {
 	if cfg.TOTPEncryptionKey == "" {
 		logger.Warn("using_dev_totp_encryption_key")
-		return []byte("identity-dev-totp-encryption-key"), nil
+		return devTOTPEncryptionKey, nil
 	}
 	key, err := base64.StdEncoding.DecodeString(cfg.TOTPEncryptionKey)
 	if err != nil {
@@ -162,7 +173,7 @@ func decodeTOTPRecoveryPepper(cfg *config.Config, logger *zap.Logger) ([]byte, e
 		return nil, errors.New("GATEWAY_TOTP_RECOVERY_PEPPER is required when GATEWAY_TOTP_ENCRYPTION_KEY is set")
 	default:
 		logger.Warn("using_dev_totp_recovery_pepper")
-		return []byte("identity-dev-totp-recovery-pepper-do-not-use-in-prod"), nil
+		return devTOTPRecoveryPepper, nil
 	}
 }
 

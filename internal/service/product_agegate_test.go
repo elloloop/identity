@@ -189,9 +189,12 @@ func TestParseProjectConfig_Products_Branding(t *testing.T) {
 func TestParseProjectConfig_Products_BrandingValidation(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct{ blob, want string }{
-		"email_from":    {`{"products":{"kids":{"branding":{"email_from":"not an address"}}}}`, "products.kids.branding.email_from"},
-		"support_email": {`{"products":{"kids":{"branding":{"support_email":"@"}}}}`, "products.kids.branding.support_email"},
-		"logo_url_http": {`{"products":{"kids":{"branding":{"logo_url":"http://kids.example.com/l.png"}}}}`, "products.kids.branding.logo_url"},
+		"email_from":           {`{"products":{"kids":{"branding":{"email_from":"not an address"}}}}`, "products.kids.branding.email_from"},
+		"support_email":        {`{"products":{"kids":{"branding":{"support_email":"@"}}}}`, "products.kids.branding.support_email"},
+		"logo_url_http":        {`{"products":{"kids":{"branding":{"logo_url":"http://kids.example.com/l.png"}}}}`, "products.kids.branding.logo_url"},
+		"product_name_newline": {`{"products":{"kids":{"branding":{"product_name":"Acme\r\nBcc: x@example.com"}}}}`, "products.kids.branding.product_name"},
+		"email_from_name_ctrl": {`{"products":{"kids":{"branding":{"email_from_name":"Acme\u0000"}}}}`, "products.kids.branding.email_from_name"},
+		"project_product_name": {`{"branding":{"product_name":"Acme\nX"}}`, "branding.product_name"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseProjectConfig(tc.blob)

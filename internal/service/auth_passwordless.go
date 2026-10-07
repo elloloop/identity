@@ -306,7 +306,7 @@ func (s *AuthService) sendMagicLinkNow(ctx context.Context, emailAddr, returnTo 
 		return
 	}
 
-	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.appBaseURL(ctx), rawToken)
+	link := fmt.Sprintf("%s/auth/magic-link?token=%s", appBaseURL(ctx, s.cfg), rawToken)
 	brand := resolveBranding(ctx, s.cfg, "")
 	html, text, err := email.Render(email.TemplateMagicLink, brand.templateData(map[string]any{
 		"Link":      link,

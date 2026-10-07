@@ -30,20 +30,19 @@ func (s *AuthService) emailTokenExpiry() time.Duration {
 // auth-domain, links are built on that branded hostname
 // (https://<primary-auth-domain>) so a user sees a URL on the product's
 // own domain. Otherwise it falls back to the configured GATEWAY_APP_BASE_URL
-// (or a localhost dev default).
+// (or a localhost dev default). Every emailed link that is not a reset or
+// verification link (those honour GATEWAY_EMAIL_LINK_BASE_URL first) is built
+// on it: magic links, email-change confirmations and both kinds of invitation.
 func appBaseURL(ctx context.Context, cfg *config.Config) string {
 	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.PrimaryAuthDomain != "" {
 		return "https://" + scope.PrimaryAuthDomain
 	}
-	u := strings.TrimRight(cfg.AppBaseURL, "/")
-	if u == "" {
-		u = "http://localhost:9002"
+	if cfg != nil {
+		if u := strings.TrimRight(cfg.AppBaseURL, "/"); u != "" {
+			return u
+		}
 	}
-	return u
-}
-
-func (s *AuthService) appBaseURL(ctx context.Context) string {
-	return appBaseURL(ctx, s.cfg)
+	return "http://localhost:9002"
 }
 
 // formatExpiresIn renders a human-friendly "X hours" / "X minutes"

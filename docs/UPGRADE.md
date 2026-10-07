@@ -10,19 +10,20 @@ No schema change and no migration.
   passkeys now show `Identity`: set both to your product's name. Existing
   enrolments and passkeys keep the name they were created with.
 - **`GATEWAY_DEFAULT_EMAIL_DOMAIN` is removed.** Nothing ever read it; a
-  value left in your environment is ignored.
+  value left in your environment is ignored. **Embedders:** the
+  `DefaultEmailDomain` field is gone from `identityserver.Config`; delete
+  any assignment to it.
 - **Admin invitation links (`InviteUser`) follow the request's project**,
-  like reset and verification links: the project's primary auth domain,
-  else `GATEWAY_APP_BASE_URL`, else the localhost development default. With
-  `GATEWAY_APP_BASE_URL` set to empty they used to point at a fixed external
-  host. The invitation email names the project's email-branding product
-  name, else `GATEWAY_TOTP_ISSUER`.
-- **The built-in development TOTP key and recovery pepper changed.** They
-  apply only while `GATEWAY_TOTP_ENCRYPTION_KEY` and
-  `GATEWAY_TOTP_RECOVERY_PEPPER` are unset, which is logged as a warning at
-  boot and must never be the case in production. Two-step enrolments and
-  recovery codes made under the old development values no longer verify;
-  those users enrol again. Set real keys.
+  like magic-link, email-change and tenant-invitation links: the project's
+  primary auth domain, else `GATEWAY_APP_BASE_URL`, else the localhost
+  development default. A configuration built in code with an empty
+  `AppBaseURL` used to point them at a fixed external host. The invitation
+  email names the product from the project's `branding.product_name`, else
+  `GATEWAY_EMAIL_BRAND_PRODUCT_NAME`, else `GATEWAY_TOTP_ISSUER`.
+- **Branding names are one line.** `UpsertProjectConfig` refuses a control
+  character in a `branding.product_name` or `branding.email_from_name`
+  (project or product), since both reach email headers, and no email is
+  sent with a line break in its subject.
 
 ## v4.9 → v4.10 — reset and verification links can point at a sign-in hub (additive); stricter URL boot checks
 

@@ -52,6 +52,11 @@ func TestMessageValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "subject with a line break",
+			msg:     Message{To: "u@example.com", Subject: "Hi\r\nBcc: x@example.com", Text: "x"},
+			wantErr: true,
+		},
+		{
 			name:    "blank to",
 			msg:     Message{To: "   ", Subject: "x", Text: "x"},
 			wantErr: true,

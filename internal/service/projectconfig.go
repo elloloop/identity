@@ -7,6 +7,7 @@ import (
 	"net/mail"
 	"net/url"
 	"strings"
+	"unicode"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/origin"
@@ -457,6 +458,15 @@ func (o *ProjectOAuthOIDC) validate() error {
 }
 
 func (b ProjectBrandingConfig) validate() error {
+	// Both names reach email headers (Subject, the From display name).
+	for _, f := range []struct{ name, value string }{
+		{"product_name", b.ProductName},
+		{"email_from_name", b.EmailFromName},
+	} {
+		if strings.ContainsFunc(f.value, unicode.IsControl) {
+			return fmt.Errorf("branding.%s must not contain control characters", f.name)
+		}
+	}
 	if b.EmailFrom != "" {
 		if _, err := mail.ParseAddress(b.EmailFrom); err != nil {
 			return fmt.Errorf("branding.email_from %q is not a valid address: %w", b.EmailFrom, err)
