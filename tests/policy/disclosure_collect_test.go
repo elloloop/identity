@@ -421,7 +421,9 @@ func TestDisclosureCollectFailsClosedOnAFailedRead(t *testing.T) {
 		})},
 		"compare fails": {"merge-group", ptr(`{"merge_group": {"base_sha": "b0", "head_sha": "h1"}}`), nil},
 		"unknown kind":  {"wiki", ptr(`{}`), nil},
-		"a review kind": {"review", ptr(`{"review": {"body": "R", "user": {"login": "alice"}}}`), nil},
+		// No workflow sends review events any more: the kind is refused
+		// even from a writer.
+		"a review kind": {"review", ptr(`{"review": {"body": "R", "user": {"login": "alice"}}}`), fixtures("admin", nil)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			run := runCollect(t, tc.kind, tc.event, tc.answers)

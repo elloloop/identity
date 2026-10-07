@@ -17,6 +17,8 @@ var (
 	termsName      = regexp.MustCompile(`(?i)confidential_terms`)
 	termsBinding   = regexp.MustCompile(`^ {10}CONFIDENTIAL_TERMS: \$\{\{ secrets\.CONFIDENTIAL_TERMS \}\}$`)
 
+	labelArm = regexp.MustCompile(`\n {12}([a-z-]+)\) item=`)
+
 	// collectArms are the case arms a workflow's collect step must have, by
 	// the collect script's exit status.
 	collectArms = map[string]*regexp.Regexp{
@@ -127,10 +129,12 @@ func TestDisclosureDiscussionWorkflow(t *testing.T) {
 			label = run
 		}
 	}
-	for _, kind := range []string{"issue", "comment"} {
-		if !strings.Contains(label, "\n            "+kind+") item=") {
-			t.Errorf("the label step has no arm for kind %s", kind)
-		}
+	var arms []string
+	for _, m := range labelArm.FindAllStringSubmatch(label, -1) {
+		arms = append(arms, m[1])
+	}
+	if !slices.Equal(arms, []string{"issue", "comment"}) {
+		t.Errorf("the label step's kinds = %v, want exactly issue and comment", arms)
 	}
 	if !strings.Contains(label, "\n            *) echo \"::error::Unexpected kind $KIND.\"; exit 1 ;;\n") {
 		t.Error("the label step must fail on a kind it does not know")
