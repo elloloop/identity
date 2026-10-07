@@ -75,6 +75,8 @@ func TestWebhookSubscriptionList_Rejects(t *testing.T) {
 		{"http non-loopback", `[{"url":"http://a.example.com","secret":"k","event_types":["user.deleted"]}]`, "must use https"},
 		{"relative url", `[{"url":"/webhooks","secret":"k","event_types":["user.deleted"]}]`, "must be absolute"},
 		{"non-http scheme", `[{"url":"ftp://a.example.com","secret":"k"}]`, "must use https"},
+		{"no hostname", `[{"url":"https://:443/hooks","secret":"k"}]`, "must be absolute"},
+		{"port out of range", `[{"url":"https://a.example.com:70000/hooks","secret":"k"}]`, "invalid port"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

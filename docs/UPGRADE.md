@@ -5,6 +5,12 @@
 No schema change and no migration. A deployment that sets nothing new sends
 exactly the same emails as before.
 
+**From v4.8.1, upgrade straight to this release, not to v4.9.0.** v4.8.1
+carried `GATEWAY_EMAIL_LINK_BASE_URL` and the `product` and `return_to`
+fields below as a patch. v4.9.0 has neither and ignores both without an
+error, so its reset and verification links go back to `/auth/…` and lose
+the product and redirect.
+
 - **`GATEWAY_EMAIL_LINK_BASE_URL`** (default empty) is where the
   password-reset and email-verification pages live. Identity does not serve
   those pages: by default the links go to `/auth/reset-password` and
@@ -48,8 +54,16 @@ exactly the same emails as before.
 - **Webhook URL errors no longer echo credentials.** A
   `GATEWAY_WEBHOOK_SUBSCRIPTIONS` URL that fails validation is now reported
   with any userinfo redacted.
+- **A URL no request could reach stops the server from starting.** A
+  `GATEWAY_WEBHOOK_SUBSCRIPTIONS` URL or `GATEWAY_EMAIL_LINK_BASE_URL` with
+  no host name (`https://:443`) or a port outside 1–65535 is now refused at
+  boot, as is an email link base ending in a bare `#`.
+- **Dependencies**: `go.opentelemetry.io/otel` v1.45.0 (GO-2026-6505).
 
 ## v4.8 → v4.9 — SCIM throttling and audit; directory limit on every transport; wildcard origins; one email comparison rule (migration 0034)
+
+On v4.8.1 with `GATEWAY_EMAIL_LINK_BASE_URL` set, skip v4.9.0: see
+[v4.9 → next](#v49--next--reset-and-verification-links-can-point-at-a-sign-in-hub-additive).
 
 **Postgres deployments get migration 0034, which rewrites the `users` table
 under an exclusive lock.** Read

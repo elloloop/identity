@@ -2017,7 +2017,9 @@ func (c *Config) validateEmailLinkBaseURL() error {
 	if err != nil {
 		return fmt.Errorf("config: GATEWAY_EMAIL_LINK_BASE_URL: %w", err)
 	}
-	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+	// url.Parse records a bare trailing "?" (ForceQuery) but drops a bare
+	// trailing "#", which would still put the page and token in the fragment.
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(c.EmailLinkBaseURL, "#") {
 		return fmt.Errorf("config: GATEWAY_EMAIL_LINK_BASE_URL %q must not carry userinfo, a query or a fragment",
 			origin.Redact(c.EmailLinkBaseURL))
 	}
