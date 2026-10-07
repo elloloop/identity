@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -123,15 +125,26 @@ func writeFile(t *testing.T, path, body string, mode os.FileMode) {
 	}
 }
 
-const prEvent = `{"pull_request": {"number": 7, "title": "Title line", "body": "Body line",
-  "head": {"ref": "topic/branch"}, "commits": 2, "user": {"login": "alice"}, "author_association": "MEMBER"}}`
+const permissionPath = "repos/acme/widgets/collaborators/alice/permission"
 
-// A PR of two commits. The first adds a line the second removes, a line
+// fixtures returns the given API answers plus alice's permission.
+func fixtures(permission string, more map[string]string) map[string]string {
+	all := map[string]string{permissionPath: `{"permission": "` + permission + `"}`}
+	maps.Copy(all, more)
+	return all
+}
+
+const prEvent = `{"action": "synchronize", "pull_request": {"number": 7, "title": "Title line", "body": "Body line",
+  "head": {"ref": "topic/branch"}, "commits": 3, "user": {"login": "alice"}}}`
+
+// A PR of three commits. The first adds a line the second removes, a line
 // that itself starts with "++", and a file the API gives no patch for; the
-// second deletes a file.
-var prFixtures = map[string]string{
-	"repos/acme/widgets/pulls/7/commits": `[{"sha": "c1", "commit": {"message": "first message"}}]
-[{"sha": "c2", "commit": {"message": "second message"}}]`,
+// second deletes a file; the third merges the base branch in, and the
+// commits API has nothing for it (reading it would fail the test).
+var prFixtures = fixtures("admin", map[string]string{
+	"repos/acme/widgets/pulls/7/commits": `[{"sha": "c1", "commit": {"message": "first message"}, "parents": [{"sha": "p0"}]}]
+[{"sha": "c2", "commit": {"message": "second message"}, "parents": [{"sha": "c1"}]},
+ {"sha": "c3", "commit": {"message": "Merge main"}, "parents": [{"sha": "c2"}, {"sha": "m9"}]}]`,
 	"repos/acme/widgets/commits/c1": `{"files": [{"filename": "main.go", "status": "added",
   "patch": "@@ -0,0 +1,3 @@\n+added in c1\n+++doubled plus\n+tail"}]}
 {"files": [{"filename": "assets/big file.bin", "status": "added"}]}`,
@@ -139,14 +152,14 @@ var prFixtures = map[string]string{
 	"repos/acme/widgets/commits/c2": `{"files": [
   {"filename": "main.go", "status": "modified", "patch": "@@ -1,3 +1,2 @@\n-added in c1\n context line\n+replaced"},
   {"filename": "old.bin", "status": "removed"}]}`,
-}
+})
 
 func TestDisclosureCollectPullRequest(t *testing.T) {
 	run := runCollect(t, "pr", ptr(prEvent), prFixtures)
 	run.expect(t, collectOK)
 	want := strings.Join([]string{
 		"Title line", "Body line", "topic/branch",
-		"first message", "second message",
+		"first message", "second message", "Merge main",
 		// Commit c1, page by page: its added lines (one of them starts with
 		// "++"), then the whole patchless file, NULs dropped.
 		"main.go", "added in c1", "++doubled plus", "tail",
@@ -156,14 +169,37 @@ func TestDisclosureCollectPullRequest(t *testing.T) {
 		// from c1 above. Removed and context lines are not added lines.
 		"main.go", "replaced",
 		"old.bin",
+		// Commit c3, a merge: its message only.
 	}, "\n") + "\n"
 	if run.out != want {
 		t.Fatalf("collected:\n%s\nwant:\n%s", run.out, want)
 	}
 	for _, call := range run.calls {
-		if strings.Contains(call, "old.bin") {
-			t.Errorf("read the content of a removed file: %s", call)
+		if strings.Contains(call, "old.bin") || strings.HasSuffix(call, "/commits/c3") {
+			t.Errorf("read what it must not: %s", call)
 		}
+	}
+}
+
+// An edit of only the title or description reads no commits; an edit that
+// moves the base branch reads them all.
+func TestDisclosureCollectDescriptionOnlyEdit(t *testing.T) {
+	edited := func(changes string) *string {
+		return ptr(strings.Replace(prEvent, `"action": "synchronize"`, `"action": "edited", "changes": `+changes, 1))
+	}
+	run := runCollect(t, "pr", edited(`{"title": {"from": "old"}, "body": {"from": "old"}}`), prFixtures)
+	run.expect(t, collectOK)
+	if want := "Title line\nBody line\ntopic/branch\n"; run.out != want {
+		t.Fatalf("collected %q, want %q", run.out, want)
+	}
+	if !slices.Equal(run.calls, []string{permissionPath}) {
+		t.Fatalf("calls = %q, want only the permission lookup", run.calls)
+	}
+
+	run = runCollect(t, "pr", edited(`{"base": {"ref": {"from": "old"}}}`), prFixtures)
+	run.expect(t, collectOK)
+	if !strings.Contains(run.out, "added in c1") {
+		t.Fatalf("a base change read no commits:\n%s", run.out)
 	}
 }
 
@@ -172,8 +208,8 @@ func TestDisclosureCollectPullRequest(t *testing.T) {
 func TestDisclosureCollectMergeGroup(t *testing.T) {
 	event := `{"merge_group": {"base_sha": "b0", "head_sha": "h1", "head_ref": "gh-readonly-queue/main/pr-7-h1"}}`
 	run := runCollect(t, "merge-group", &event, map[string]string{
-		"repos/acme/widgets/compare/b0...h1": `{"total_commits": 2, "commits": [{"sha": "m1", "commit": {"message": "queued message (#7)"}}]}
-{"total_commits": 2, "commits": [{"sha": "m2", "commit": {"message": "second queued (#8)"}}]}`,
+		"repos/acme/widgets/compare/b0...h1": `{"total_commits": 2, "commits": [{"sha": "m1", "commit": {"message": "queued message (#7)"}, "parents": [{"sha": "b0"}]}]}
+{"total_commits": 2, "commits": [{"sha": "m2", "commit": {"message": "second queued (#8)"}, "parents": [{"sha": "m1"}]}]}`,
 		"repos/acme/widgets/commits/m1": `{"files": [{"filename": "x.go", "status": "modified", "patch": "@@ -1 +1 @@\n-old\n+new line"}]}`,
 		"repos/acme/widgets/commits/m2": `{"files": []}`,
 	})
@@ -183,19 +219,22 @@ func TestDisclosureCollectMergeGroup(t *testing.T) {
 	}
 }
 
+// sameRepoPR is the pull_request of a review event on a PR from a branch of
+// this repository.
+const sameRepoPR = `"pull_request": {"head": {"repo": {"full_name": "acme/widgets"}}}`
+
 func TestDisclosureCollectTextEvents(t *testing.T) {
 	for name, tc := range map[string]struct{ kind, event, want string }{
-		"issue":   {"issue", `{"issue": {"title": "T", "body": "B", "author_association": "OWNER"}}`, "T\nB\n"},
-		"comment": {"comment", `{"comment": {"body": "C", "author_association": "COLLABORATOR"}}`, "C\n"},
-		"review": {"review", `{"pull_request": {"head": {"repo": {"fork": false}}},
-			"review": {"body": "R", "author_association": "MEMBER"}}`, "R\n"},
-		"review comment": {"review-comment", `{"pull_request": {"head": {"repo": {"fork": false}}},
-			"comment": {"body": "RC", "author_association": "MEMBER"}}`, "RC\n"},
+		"issue":   {"issue", `{"issue": {"title": "T", "body": "B", "user": {"login": "alice"}}}`, "T\nB\n"},
+		"comment": {"comment", `{"comment": {"body": "C", "user": {"login": "alice"}}}`, "C\n"},
+		"review":  {"review", `{` + sameRepoPR + `, "review": {"body": "R", "user": {"login": "alice"}}}`, "R\n"},
+		"review comment": {"review-comment", `{` + sameRepoPR + `,
+			"comment": {"body": "RC", "user": {"login": "alice"}}}`, "RC\n"},
 		// A review with no body (an approval alone) is empty text.
-		"review without body": {"review", `{"review": {"body": null, "author_association": "MEMBER"}}`, "\n"},
+		"review without body": {"review", `{` + sameRepoPR + `, "review": {"body": null, "user": {"login": "alice"}}}`, "\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			run := runCollect(t, tc.kind, ptr(tc.event), nil)
+			run := runCollect(t, tc.kind, ptr(tc.event), fixtures("write", nil))
 			run.expect(t, collectOK)
 			if run.out != tc.want {
 				t.Fatalf("collected %q, want %q", run.out, tc.want)
@@ -204,107 +243,154 @@ func TestDisclosureCollectTextEvents(t *testing.T) {
 	}
 }
 
-// authorEvents holds, per kind, an event whose author is "alice" with the
-// association left as %q.
+// authorEvents holds, per kind, an event whose item alice wrote (with the
+// given author_association) and bob sent.
 var authorEvents = map[string]string{
 	"pr": `{"pull_request": {"number": 7, "title": "T", "head": {"ref": "b"}, "commits": 0,
-		"user": {"login": "alice"}, "author_association": %q}}`,
-	"issue":          `{"issue": {"title": "T", "body": "B", "user": {"login": "alice"}, "author_association": %q}}`,
-	"comment":        `{"comment": {"body": "C", "user": {"login": "alice"}, "author_association": %q}}`,
-	"review":         `{"review": {"body": "R", "user": {"login": "alice"}, "author_association": %q}}`,
-	"review-comment": `{"comment": {"body": "RC", "user": {"login": "alice"}, "author_association": %q}}`,
+		"user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
+	"issue":          `{"issue": {"title": "T", "body": "B", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
+	"comment":        `{"comment": {"body": "C", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
+	"review":         `{` + sameRepoPR + `, "review": {"body": "R", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
+	"review-comment": `{` + sameRepoPR + `, "comment": {"body": "RC", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
 }
 
-const permissionPath = "repos/acme/widgets/collaborators/alice/permission"
+const senderPermissionPath = "repos/acme/widgets/collaborators/bob/permission"
 
-// Whether a text is checked turns on the author's write access to the
-// repository. The event's author_association shows org membership only when
-// it is public, so a maintainer whose membership is private arrives as
-// CONTRIBUTOR: the permission API, not the association, decides.
+// Whether a text is checked turns on write access to the repository, read
+// from the permission API: an event's author_association shows org
+// membership only when it is public, so a maintainer whose membership is
+// private arrives as CONTRIBUTOR, and a MEMBER may hold only read. The
+// item's author or the event's sender (a maintainer editing an outsider's
+// item) having write access is enough.
 func TestDisclosureCollectChecksEveryoneWithWriteAccess(t *testing.T) {
 	for kind, event := range authorEvents {
-		// A public association of the project's own needs no lookup.
-		for _, association := range []string{"OWNER", "MEMBER", "COLLABORATOR"} {
-			t.Run(kind+"/"+association, func(t *testing.T) {
+		for name, tc := range map[string]struct {
+			association, author, sender string
+			want                        int
+		}{
+			"private member, admin":    {"CONTRIBUTOR", "admin", "read", collectOK},
+			"maintainer":               {"NONE", "maintain", "read", collectOK},
+			"writer":                   {"CONTRIBUTOR", "write", "none", collectOK},
+			"member with read only":    {"MEMBER", "read", "read", collectOutside},
+			"collaborator with triage": {"COLLABORATOR", "triage", "none", collectOutside},
+			"outsider":                 {"NONE", "none", "none", collectOutside},
+			"outsider, writer sends":   {"NONE", "none", "admin", collectOK},
+		} {
+			t.Run(kind+"/"+name, func(t *testing.T) {
 				t.Parallel()
-				run := runCollect(t, kind, ptr(fmt.Sprintf(event, association)),
-					map[string]string{"repos/acme/widgets/pulls/7/commits": `[]`})
-				run.expect(t, collectOK)
+				run := runCollect(t, kind, ptr(fmt.Sprintf(event, tc.association)), map[string]string{
+					permissionPath:                       `{"permission": "` + tc.author + `"}`,
+					senderPermissionPath:                 `{"permission": "` + tc.sender + `"}`,
+					"repos/acme/widgets/pulls/7/commits": `[]`,
+				})
+				run.expect(t, tc.want)
+				if tc.want == collectOutside && run.out != "" {
+					t.Fatalf("collected %q from an item no writer wrote or sent", run.out)
+				}
+			})
+		}
+	}
+}
+
+// An app's bot account is checked like a writer, with no lookup: the
+// permission API reports none for it, yet only an installed app can post
+// as one.
+func TestDisclosureCollectChecksBotAccounts(t *testing.T) {
+	event := `{"issue": {"title": "T", "body": "B", "user": {"login": "acme-app[bot]", "type": "Bot"}}}`
+	run := runCollect(t, "issue", &event, nil)
+	run.expect(t, collectOK)
+	if run.out != "T\nB\n" || len(run.calls) != 0 {
+		t.Fatalf("collected %q with calls %q", run.out, run.calls)
+	}
+}
+
+// A permission the API does not answer plainly fails the check: nothing is
+// printed, so nothing is matched, and nothing else is read.
+func TestDisclosureCollectFailsWhenAPermissionIsUnknown(t *testing.T) {
+	for name, answer := range map[string]*string{
+		"lookup fails (404, 5xx, rate limit)": nil,
+		"empty object":                        ptr(`{}`),
+		"empty permission":                    ptr(`{"permission": ""}`),
+		"unknown permission":                  ptr(`{"permission": "superuser"}`),
+	} {
+		for kind, event := range authorEvents {
+			t.Run(name+"/"+kind, func(t *testing.T) {
+				t.Parallel()
+				fx := map[string]string{"repos/acme/widgets/pulls/7/commits": `[]`}
+				if answer != nil {
+					fx[permissionPath] = *answer
+				}
+				run := runCollect(t, kind, ptr(fmt.Sprintf(event, "NONE")), fx)
+				run.expect(t, collectFailed)
+				if run.out != "" {
+					t.Fatalf("printed %q for an author whose access is unknown", run.out)
+				}
 				for _, call := range run.calls {
-					if call == permissionPath {
-						t.Errorf("looked up the permission of a %s", association)
+					if call != permissionPath {
+						t.Fatalf("read %s after the lookup failed", call)
 					}
 				}
 			})
 		}
-		// Any other association, a private member's included, is settled by
-		// the permission: write or above is checked, anything less is not.
-		cases := map[[2]string]int{}
-		for _, association := range []string{"CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "MANNEQUIN", "NONE", ""} {
-			cases[[2]string{association, "admin"}] = collectOK
-			cases[[2]string{association, "read"}] = collectOutside
-		}
-		for permission, want := range map[string]int{"maintain": collectOK, "write": collectOK, "triage": collectOutside, "none": collectOutside} {
-			cases[[2]string{"CONTRIBUTOR", permission}] = want
-		}
-		for c, want := range cases {
-			association, permission := c[0], c[1]
-			t.Run(kind+"/"+association+"/"+permission, func(t *testing.T) {
-				t.Parallel()
-				run := runCollect(t, kind, ptr(fmt.Sprintf(event, association)), map[string]string{
-					permissionPath:                       `{"permission": "` + permission + `"}`,
-					"repos/acme/widgets/pulls/7/commits": `[]`,
-				})
-				run.expect(t, want)
-				if want == collectOutside && (run.out != "" || len(run.calls) != 1) {
-					t.Fatalf("collected %q with calls %q from an author without write access", run.out, run.calls)
-				}
-			})
-		}
 	}
-}
-
-// An unreadable permission never skips the check: the author is treated as
-// one of ours and the text is collected.
-func TestDisclosureCollectChecksWhenThePermissionCannotBeRead(t *testing.T) {
-	for kind, event := range authorEvents {
-		t.Run(kind, func(t *testing.T) {
-			run := runCollect(t, kind, ptr(fmt.Sprintf(event, "CONTRIBUTOR")),
-				map[string]string{"repos/acme/widgets/pulls/7/commits": `[]`})
-			run.expect(t, collectOK)
-			if run.out == "" {
-				t.Fatal("collected nothing")
-			}
-		})
-	}
+	// The sender's lookup fails the same way.
+	t.Run("sender lookup fails", func(t *testing.T) {
+		run := runCollect(t, "issue", ptr(fmt.Sprintf(authorEvents["issue"], "NONE")), fixtures("read", nil))
+		run.expect(t, collectFailed)
+		if run.out != "" {
+			t.Fatalf("printed %q", run.out)
+		}
+	})
 }
 
 // A run triggered by a review on a fork PR gets no secrets, so there is no
-// list to match; the script says so rather than pass it as clean.
+// list to match; the script says so rather than pass it as clean. A fork
+// is any other head repository, or none once the fork is deleted.
 func TestDisclosureCollectReportsReviewsOnForkPullRequests(t *testing.T) {
-	for _, kind := range []string{"review", "review-comment"} {
-		t.Run(kind, func(t *testing.T) {
-			event := `{"pull_request": {"head": {"repo": {"fork": true}}},
-				"review": {"body": "R", "author_association": "OWNER"}, "comment": {"body": "C", "author_association": "OWNER"}}`
-			run := runCollect(t, kind, &event, nil)
-			run.expect(t, collectForkReview)
-			if run.out != "" || len(run.calls) != 0 {
-				t.Fatalf("collected %q with calls %q", run.out, run.calls)
-			}
-		})
+	for name, pr := range map[string]string{
+		"fork":         `"pull_request": {"head": {"repo": {"full_name": "someone/widgets", "fork": true}}}`,
+		"deleted fork": `"pull_request": {"head": {"repo": null}}`,
+		"no head":      `"pull_request": {}`,
+	} {
+		for _, kind := range []string{"review", "review-comment"} {
+			t.Run(name+"/"+kind, func(t *testing.T) {
+				event := `{` + pr + `, "review": {"body": "R", "user": {"login": "alice"}}, "comment": {"body": "C", "user": {"login": "alice"}}}`
+				run := runCollect(t, kind, &event, fixtures("admin", nil))
+				run.expect(t, collectForkReview)
+				if run.out != "" || len(run.calls) != 0 {
+					t.Fatalf("collected %q with calls %q", run.out, run.calls)
+				}
+			})
+		}
 	}
 }
 
 // Past what the API lists, part of the PR would go unread: fail rather
 // than pass it.
 func TestDisclosureCollectRefusesWhatTheAPICannotList(t *testing.T) {
+	// n merge commits: a full list of n commits with no files to read.
+	mergeCommits := func(n int) string {
+		listed := make([]string, n)
+		for i := range listed {
+			listed[i] = fmt.Sprintf(`{"sha": "c%d", "commit": {"message": "m"}, "parents": [{"sha": "a"}, {"sha": "b"}]}`, i)
+		}
+		return "[" + strings.Join(listed, ",") + "]"
+	}
 	t.Run("PR commits", func(t *testing.T) {
-		for commits, want := range map[int]int{0: collectOK, 250: collectOK, 251: collectTooBig, 1000: collectTooBig} {
-			event := strings.Replace(prEvent, `"commits": 2`, `"commits": `+strconv.Itoa(commits), 1)
-			run := runCollect(t, "pr", &event, map[string]string{"repos/acme/widgets/pulls/7/commits": `[]`})
-			run.expect(t, want)
-			if want == collectTooBig && (run.out != "" || len(run.calls) != 0) {
-				t.Fatalf("%d commits: collected %q with calls %q", commits, run.out, run.calls)
+		for _, tc := range []struct{ commits, listed, want int }{
+			{0, 0, collectOK},
+			{250, 250, collectOK},
+			{251, 251, collectTooBig},
+			{1000, 250, collectTooBig},
+			{3, 2, collectTooBig}, // a list the API cut short
+		} {
+			event := strings.Replace(prEvent, `"commits": 3`, `"commits": `+strconv.Itoa(tc.commits), 1)
+			run := runCollect(t, "pr", &event, fixtures("admin", map[string]string{
+				"repos/acme/widgets/pulls/7/commits": mergeCommits(tc.listed),
+			}))
+			run.expect(t, tc.want)
+			if tc.want == collectTooBig && run.out != "" && tc.commits > 250 {
+				t.Fatalf("%d commits: collected %q past the cap", tc.commits, run.out)
 			}
 		}
 	})
@@ -314,17 +400,18 @@ func TestDisclosureCollectRefusesWhatTheAPICannotList(t *testing.T) {
 			for i := range names {
 				names[i] = fmt.Sprintf(`{"filename": "f%d", "status": "removed"}`, i)
 			}
-			run := runCollect(t, "pr", ptr(prEvent), map[string]string{
-				"repos/acme/widgets/pulls/7/commits": `[{"sha": "c1", "commit": {"message": "m"}}]`,
+			event := strings.Replace(prEvent, `"commits": 3`, `"commits": 1`, 1)
+			run := runCollect(t, "pr", &event, fixtures("admin", map[string]string{
+				"repos/acme/widgets/pulls/7/commits": `[{"sha": "c1", "commit": {"message": "m"}, "parents": [{"sha": "p"}]}]`,
 				"repos/acme/widgets/commits/c1":      `{"files": [` + strings.Join(names, ",") + `]}`,
-			})
+			}))
 			run.expect(t, want)
 		}
 	})
 	t.Run("merge group commits", func(t *testing.T) {
 		event := `{"merge_group": {"base_sha": "b0", "head_sha": "h1"}}`
 		run := runCollect(t, "merge-group", &event, map[string]string{
-			"repos/acme/widgets/compare/b0...h1": `{"total_commits": 300, "commits": [{"sha": "m1", "commit": {"message": "m"}}]}`,
+			"repos/acme/widgets/compare/b0...h1": `{"total_commits": 300, "commits": [{"sha": "m1", "commit": {"message": "m"}, "parents": [{"sha": "b0"}]}]}`,
 			"repos/acme/widgets/commits/m1":      `{"files": []}`,
 		})
 		run.expect(t, collectTooBig)
@@ -334,6 +421,7 @@ func TestDisclosureCollectRefusesWhatTheAPICannotList(t *testing.T) {
 // A read that fails fails the check: it never passes for clean or for an
 // outside author.
 func TestDisclosureCollectFailsClosedOnAFailedRead(t *testing.T) {
+	oneCommit := strings.Replace(prEvent, `"commits": 3`, `"commits": 1`, 1)
 	for name, tc := range map[string]struct {
 		kind     string
 		event    *string
@@ -341,17 +429,26 @@ func TestDisclosureCollectFailsClosedOnAFailedRead(t *testing.T) {
 	}{
 		"no event file":     {"issue", nil, nil},
 		"event not JSON":    {"issue", ptr("{"), nil},
-		"commit list fails": {"pr", ptr(prEvent), nil},
-		"a commit fails":    {"pr", ptr(prEvent), map[string]string{"repos/acme/widgets/pulls/7/commits": prFixtures["repos/acme/widgets/pulls/7/commits"]}},
-		"a file's content fails": {"pr", ptr(prEvent), map[string]string{
-			"repos/acme/widgets/pulls/7/commits": `[{"sha": "c1", "commit": {"message": "m"}}]`,
-			"repos/acme/widgets/commits/c1":      `{"files": [{"filename": "a.bin", "status": "added"}]}`,
-		}},
+		"no author":         {"issue", ptr(`{"issue": {"title": "T"}}`), nil},
+		"commit list fails": {"pr", ptr(prEvent), fixtures("admin", nil)},
+		"a commit fails": {"pr", ptr(oneCommit), fixtures("admin", map[string]string{
+			"repos/acme/widgets/pulls/7/commits": `[{"sha": "c1", "commit": {"message": "m"}, "parents": [{"sha": "p"}]}]`,
+		})},
+		"a file's content fails": {"pr", ptr(oneCommit), fixtures("admin", map[string]string{
+			"repos/acme/widgets/pulls/7/commits": `[{"sha": "c1", "commit": {"message": "m"}, "parents": [{"sha": "p"}]}]`,
+			"repos/acme/widgets/commits/c1":      `{"files": [{"filename": "secret/a.bin", "status": "added"}]}`,
+		})},
 		"compare fails": {"merge-group", ptr(`{"merge_group": {"base_sha": "b0", "head_sha": "h1"}}`), nil},
 		"unknown kind":  {"wiki", ptr(`{}`), nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			runCollect(t, tc.kind, tc.event, tc.fixtures).expect(t, collectFailed)
+			run := runCollect(t, tc.kind, tc.event, tc.fixtures)
+			run.expect(t, collectFailed)
+			// The masks are registered only in the check step, so an error
+			// never names a file.
+			if strings.Contains(run.stderr, "secret/a.bin") {
+				t.Fatalf("the error names the file: %s", run.stderr)
+			}
 		})
 	}
 }

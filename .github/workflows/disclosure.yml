@@ -35,7 +35,7 @@ permissions: {}
 
 jobs:
   # One check name on the PR and in the merge queue, so it can be required.
-  pull-request:
+  disclosure:
     name: Disclosure
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -65,15 +65,22 @@ jobs:
           GH_REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          kind=pr
-          if [ "$EVENT_NAME" = "merge_group" ]; then kind=merge-group; fi
+          case "$EVENT_NAME" in
+            pull_request_target) kind=pr ;;
+            merge_group) kind=merge-group ;;
+            *) echo "::error::Unexpected event $EVENT_NAME."; exit 1 ;;
+          esac
           status=0
           bash scripts/disclosure-collect.sh "$kind" > "$RUNNER_TEMP/disclosure-text" || status=$?
           case "$status" in
             0) echo "check=true" >> "$GITHUB_OUTPUT" ;;
-            10) echo "::notice::Not checked: the author has no write access. The review gate's Neutrality & Disclosure reviewer covers outside contributions; the merge queue checks only what lands on main (each PR's squash commit message and net diff), not this PR's description, branch name or intermediate commits. See AGENTS.md §13." ;;
+            10) echo "::notice::Not checked: no one with write access wrote or sent this. See AGENTS.md §13 for what covers it instead." ;;
             11)
-              echo "::error::This PR, or a commit in it, has more commits or files than the GitHub API lists, so it cannot all be checked. Split it into smaller PRs or commits."
+              echo "::error::There are more commits, or a commit has more files, than the GitHub API lists, so not all of it can be checked. Split it into smaller PRs or commits."
+              exit 1
+              ;;
+            2)
+              echo "::error::A GitHub API read failed (often the hourly request limit), so nothing was checked. Re-run this check."
               exit 1
               ;;
             *) exit "$status" ;;
@@ -90,7 +97,7 @@ jobs:
             0) echo "No confidential terms found." ;;
             3) echo "::notice::The confidential-terms secret is not set; the disclosure check was skipped." ;;
             1)
-              echo "::error::The title, description, branch name, a commit message, a file name, an added line or a file's content contains a confidential term. Remove it, and use neutral examples (acme, example.com, example.test) instead. See AGENTS.md §13."
+              echo "::error::The title, description, branch name, a commit message, a file name, an added line or a file's content contains a confidential term. Use neutral examples (acme, example.com, example.test) instead. A later commit cannot clear an earlier one: rewrite the branch without it, force-push, and tell a maintainer, since the replaced commit stays public by SHA until GitHub purges it. See AGENTS.md §13."
               exit 1
               ;;
             *) exit "$status" ;;

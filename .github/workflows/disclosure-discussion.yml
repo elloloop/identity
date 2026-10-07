@@ -10,11 +10,13 @@ name: Disclosure (discussion)
 #
 # Which copy of this file and the scripts runs: issues and issue_comment
 # run the default branch's. pull_request_review and
-# pull_request_review_comment run the PR's merge ref, so a same-repository
-# PR's own edit of them takes effect on its own reviews. That is no
-# escalation: only people who can push branches here open such PRs, and
-# they already hold write access. A review on a fork PR gets a read-only
-# token and no secrets, so it is never checked; the collect script says so.
+# pull_request_review_comment run the PR's merge ref: on a same-repository
+# PR, the branch's own, unreviewed copy runs with the term list and
+# issues: write, and anyone who can review the PR can trigger it. That is no
+# escalation: only people who can push branches here open such PRs, they
+# already hold write access, and the secret is theirs to use. A review on a
+# fork PR gets a read-only token and no secrets, so it is never checked;
+# the collect script says so.
 
 on:
   issues:
@@ -68,8 +70,12 @@ jobs:
           bash scripts/disclosure-collect.sh "$kind" > "$RUNNER_TEMP/disclosure-text" || status=$?
           case "$status" in
             0) echo "check=true" >> "$GITHUB_OUTPUT" ;;
-            10) echo "::notice::Not checked: the author has no write access. See AGENTS.md §13." ;;
-            12) echo "::notice::Not checked: reviews on fork PRs get no secrets, so no review on a fork PR is checked, whoever wrote it. See AGENTS.md §13." ;;
+            10) echo "::notice::Not checked: no one with write access wrote or sent this. See AGENTS.md §13." ;;
+            12) echo "::notice::Not checked: reviews on fork PRs get no secrets. See AGENTS.md §13." ;;
+            2)
+              echo "::error::A GitHub API read failed (often the hourly request limit), so nothing was checked. Re-run this check."
+              exit 1
+              ;;
             *) exit "$status" ;;
           esac
 
@@ -109,10 +115,11 @@ jobs:
           # One request per offending item: an edit that still matches does
           # not post again.
           case "$KIND" in
+            issue) item="issue"; what="This issue's title or description" ;;
             comment) item="comment-$ITEM_ID"; what="Your comment" ;;
             review) item="review-$ITEM_ID"; what="Your review" ;;
             review-comment) item="review-comment-$ITEM_ID"; what="Your review comment" ;;
-            *) item="issue"; what="This issue's title or description" ;;
+            *) echo "::error::Unexpected kind $KIND."; exit 1 ;;
           esac
           marker="<!-- disclosure-check:$item -->"
           posted="$(gh api "repos/$GH_REPO/issues/$NUMBER/comments" --paginate \

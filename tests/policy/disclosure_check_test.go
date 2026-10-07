@@ -82,6 +82,14 @@ func TestDisclosureCheckFoldsSeparatorsAndInvisibleCharacters(t *testing.T) {
 		"word joiner":              "acme\u2060 widgets",
 		"Mongolian vowel sep":      "acme \u180ewidgets",
 		"separators and invisible": "acme\u200b_\u200blabs",
+		"no-break space":           "acme\u00a0widgets",
+		"em space":                 "acme\u2003widgets",
+		"ideographic space":        "acme\u3000widgets",
+		"en dash":                  "acme\u2013labs",
+		"minus sign":               "acme\u2212labs",
+		"left-to-right mark":       "acme\u200e widgets",
+		"right-to-left override":   "ac\u202eme widgets",
+		"isolate":                  "ac\u2066me\u2069 widgets",
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, code := runDisclosureCheck(t, testTerms, text, nil)
@@ -101,6 +109,24 @@ func TestDisclosureCheckFoldsSeparatorsAndInvisibleCharacters(t *testing.T) {
 				t.Fatalf("exit = %d, want %d (clean); output:\n%s", code, disclosureClean, out)
 			}
 		})
+	}
+}
+
+// A term's edge separators fold away, so ".example" matches the bare word.
+// The script says so on stderr, naming the term by its place, never its
+// text, and still checks.
+func TestDisclosureCheckWarnsWhenATermsEdgesFoldAway(t *testing.T) {
+	out, code := runDisclosureCheck(t, "acme widgets\n.acme-edge\nacme-tail_\n", "the acme edge case", nil)
+	if code != disclosureMatch {
+		t.Fatalf("exit = %d, want %d; output:\n%s", code, disclosureMatch, out)
+	}
+	for _, want := range []string{"term 2 starts or ends with a separator", "term 3 starts or ends with a separator"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "term 1 ") || strings.Contains(out, "edge") || strings.Contains(out, "tail") {
+		t.Errorf("warned about a plain term, or echoed a term:\n%s", out)
 	}
 }
 
@@ -241,6 +267,17 @@ var (
 	checkoutRef    = regexp.MustCompile(`(?m)^\s+ref:`)
 	termsName      = regexp.MustCompile(`(?i)confidential_terms`)
 	termsBinding   = regexp.MustCompile(`^ {10}CONFIDENTIAL_TERMS: \$\{\{ secrets\.CONFIDENTIAL_TERMS \}\}$`)
+
+	// collectArms are the case arms a workflow's collect step must have, by
+	// the collect script's exit status.
+	collectArms = map[string]*regexp.Regexp{
+		"0":  regexp.MustCompile(`(?m)^\s+0\) echo "check=true" >> "\$GITHUB_OUTPUT" ;;$`),
+		"2":  regexp.MustCompile(`(?s)\n\s+2\)\n\s+echo "::error::[^"]*[Rr]e-run[^"]*"\n\s+exit 1\n`),
+		"10": regexp.MustCompile(`(?m)^\s+10\) echo "::notice::[^"]*" ;;$`),
+		"11": regexp.MustCompile(`(?s)\n\s+11\)\n\s+echo "::error::[^"]*"\n\s+exit 1\n`),
+		"12": regexp.MustCompile(`(?m)^\s+12\) echo "::notice::[^"]*" ;;$`),
+		"*":  regexp.MustCompile(`(?m)^\s+\*\) exit "\$status" ;;$`),
+	}
 )
 
 func disclosureWorkflow(t *testing.T, name string) string {
@@ -266,18 +303,22 @@ func TestDisclosureWorkflowNeverRunsPullRequestCode(t *testing.T) {
 		t.Errorf("disclosure.yml triggers = %v, want exactly %v", got, want)
 	}
 	jobs := workflowJobs(t, wf)
-	if got := slices.Sorted(maps.Keys(jobs)); !slices.Equal(got, []string{"pull-request"}) {
-		t.Fatalf("disclosure.yml jobs = %v, want only pull-request", got)
+	if got := slices.Sorted(maps.Keys(jobs)); !slices.Equal(got, []string{"disclosure"}) {
+		t.Fatalf("disclosure.yml jobs = %v, want only disclosure", got)
 	}
-	if got, want := jobPermissions(jobs["pull-request"]), map[string]string{"contents": "read", "pull-requests": "read"}; !maps.Equal(got, want) {
-		t.Errorf("pull-request permissions = %v, want exactly %v", got, want)
+	job := jobs["disclosure"]
+	if got, want := jobPermissions(job), map[string]string{"contents": "read", "pull-requests": "read"}; !maps.Equal(got, want) {
+		t.Errorf("disclosure permissions = %v, want exactly %v", got, want)
 	}
-	if !strings.Contains(jobs["pull-request"], "    name: Disclosure\n") {
-		t.Error("the pull-request job must report the Disclosure check")
+	if !strings.Contains(job, "    name: Disclosure\n") {
+		t.Error("the disclosure job must report the Disclosure check")
 	}
-	if strings.Contains(jobs["pull-request"], "\n    if:") {
+	if strings.Contains(job, "\n    if:") {
 		t.Error("the Disclosure job must run on every event of its workflow, never skip")
 	}
+	assertCollectOutcomes(t, "disclosure.yml", wf, map[string]string{
+		"merge_group": "merge-group", "pull_request_target": "pr",
+	}, "11")
 	assertDisclosureWorkflowBasics(t, "disclosure.yml", wf)
 }
 
@@ -304,7 +345,46 @@ func TestDisclosureDiscussionWorkflow(t *testing.T) {
 	if strings.Contains(jobs["discussion"], "    name: Disclosure\n") {
 		t.Error("the discussion job must not report the required Disclosure check")
 	}
+	assertCollectOutcomes(t, "disclosure-discussion.yml", wf, map[string]string{
+		"issues": "issue", "issue_comment": "comment",
+		"pull_request_review": "review", "pull_request_review_comment": "review-comment",
+	}, "12")
 	assertDisclosureWorkflowBasics(t, "disclosure-discussion.yml", wf)
+}
+
+// assertCollectOutcomes pins how a workflow acts on what the collect script
+// returns: each event maps to its kind, collected text (0) is checked, a
+// failed read (2) fails the job with a re-run hint, no writer (10) is a
+// notice, and every other status fails the job. extra is the one more
+// status the workflow knows: 11 (too big) fails the job, 12 (a fork's
+// review) is a notice. The check step runs only on collected text.
+func assertCollectOutcomes(t *testing.T, name, wf string, kinds map[string]string, extra string) {
+	t.Helper()
+	collect := ""
+	for _, run := range runBlocks(wf) {
+		if strings.Contains(run, "bash scripts/disclosure-collect.sh") {
+			collect = run
+		}
+	}
+	if collect == "" {
+		t.Fatalf("%s never runs the collect script", name)
+	}
+	for event, kind := range kinds {
+		if !strings.Contains(collect, "\n            "+event+") kind="+kind+" ;;\n") {
+			t.Errorf("%s does not map %s to kind %s", name, event, kind)
+		}
+	}
+	if !strings.Contains(collect, "\n            *) echo \"::error::Unexpected event $EVENT_NAME.\"; exit 1 ;;\n") {
+		t.Errorf("%s must fail on an event it does not map", name)
+	}
+	for _, code := range []string{"0", "2", "10", extra, "*"} {
+		if !collectArms[code].MatchString(collect) {
+			t.Errorf("%s: the collect step does not handle status %s as it must", name, code)
+		}
+	}
+	if strings.Count(wf, "        if: steps.collect.outputs.check == 'true'\n") != 1 {
+		t.Errorf("%s: the check step must run only on collected text", name)
+	}
 }
 
 // assertDisclosureWorkflowBasics pins what both Disclosure workflows share:
@@ -349,9 +429,14 @@ func assertDisclosureWorkflowBasics(t *testing.T, name, wf string) {
 		}
 	}
 
-	// The term list reaches only the matcher, through one env binding per
-	// check step: it is never named in a run block, in any spelling.
+	// No run block takes anything by expression: event text reaches a
+	// script only as env or the event file. And the term list reaches only
+	// the matcher, through one env binding per check step: it is never named
+	// in a run block, in any spelling.
 	for _, run := range runBlocks(wf) {
+		if strings.Contains(run, "${{") {
+			t.Errorf("%s: a run block interpolates an expression:\n%s", name, run)
+		}
 		if termsName.MatchString(run) {
 			t.Errorf("%s: a run block names the term list:\n%s", name, run)
 		}
