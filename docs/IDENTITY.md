@@ -755,11 +755,11 @@ control when they run — `New` starts nothing):
 
 ## Deployment topology
 
-- **One identity deployment per operator.** Each operator runs its own
+- **One identity deployment per product.** Each product runs its own
   identity, and deployments share zero infrastructure beyond what they
-  happen to colocate. One deployment can serve several of its operator's
-  products, through **Projects** and the per-request product selector, but
-  no mode serves several operators.
+  happen to colocate. There is no "one identity serves two unrelated
+  products" mode — one deployment can host many **Projects**, but a
+  deployment is still per-product, not cross-product.
 - Each deployment has its own datastore — **Postgres** (which carries the
   Project/Tenant/Domain control plane) or **SQLite** (the single-file,
   single-project embedded tier with no control plane).
@@ -778,7 +778,7 @@ that don't belong:
   is the remaining tracked **v1.1** follow-up (ADR-0002, ADR-0007).
   Postgres row-level-security hardening already shipped in v1.0 (migration
   `0016_enable_rls_data_plane`, `internal/repo/postgres/rls.go`).
-- **Cross-operator SSO.** Two operators running their own identity
+- **Cross-product SSO.** Two products running their own identity
   deployments do not share sessions. If we ever need this, it'll be a
   separate service (an IdP that the per-product identities consume).
 - **Multi-tenant users.** A single user belonging to two tenants in the

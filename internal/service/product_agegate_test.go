@@ -532,13 +532,14 @@ func TestProductAgeGate_NativeOAuthLogin(t *testing.T) {
 			repo.users[userID].DateOfBirthMs = tc.dobMs
 			repo.mu.Unlock()
 
-			proj := nativeProjWithAuds("proj-restricted", "scope-restricted")
+			const restrictedProject = "proj-restricted"
+			proj := nativeProjWithAuds(restrictedProject, "scope-restricted")
 			proj.Products = ProjectProductsConfig{restrictedProduct: {MinimumAgeBand: MinimumAgeBandTeen}}
-			projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-restricted": proj}}
+			projects := &fakeNativeProjects{active: map[string]*AdminProject{restrictedProject: proj}}
 
 			signer := newNativeTokenSigner(t)
 			svc := newNativeTestAuthService(t, repo, signer, projects, func(c *config.Config) {
-				c.NativeOAuthProductProjects += "," + restrictedProduct + "=proj-restricted"
+				c.NativeOAuthProductProjects = restrictedProduct + "=" + restrictedProject
 			})
 			enableAgeGate(t, svc, false)
 
