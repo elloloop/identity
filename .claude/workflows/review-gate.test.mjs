@@ -194,6 +194,7 @@ const tests = {
     assert.match(history, /reviews\(first:100\)\{pageInfo\{hasNextPage\} nodes\{userContentEdits/)
     assert.match(history, /reviewThreads\(first:100\)\{pageInfo\{hasNextPage\} nodes\{comments\([^)]*\)\{pageInfo\{hasNextPage\} nodes\{userContentEdits/)
     assert.match(history, /HEAD_REF_FORCE_PUSHED_EVENT[^']*beforeCommit\{oid\} afterCommit\{oid\}/)
+    assert.match(history, /RENAMED_TITLE_EVENT[^']*RenamedTitleEvent\{previousTitle\}/)
     assert.match(neutrality, /compare\/<afterCommit>\.\.\.<beforeCommit>/)
     // A list cut short at a page cap is never read as clean.
     assert.equal((history.match(/first:/g) ?? []).length, (history.match(/pageInfo\{hasNextPage\}/g) ?? []).length)
@@ -228,7 +229,8 @@ const tests = {
     const history = /`(gh api graphql [^`]*)`/.exec(r.prompts['neutrality-disclosure'])?.[1] ?? ''
     assert.match(history, /-F n=42 /)
     assert.match(history, /issue\(number:\$n\)\{userContentEdits\(first:100\)[^']*comments\(first:100\)\{pageInfo\{hasNextPage\} nodes\{userContentEdits/)
-    assert.doesNotMatch(history, /reviews|reviewThreads|timelineItems/)
+    assert.match(history, /timelineItems\(itemTypes:RENAMED_TITLE_EVENT,[^']*RenamedTitleEvent\{previousTitle\}/)
+    assert.doesNotMatch(history, /reviews|reviewThreads|HEAD_REF_FORCE_PUSHED_EVENT/)
     assert.match(r.prompts['neutrality-disclosure'], /an unread list is never clean/)
     assert.doesNotMatch(r.prompts['neutrality-disclosure'], /gh pr /)
     const synth = r.prompts['synthesize:issue-42']
