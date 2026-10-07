@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -30,15 +31,19 @@ func (s *AuthService) emailTokenExpiry() time.Duration {
 // (https://<primary-auth-domain>) so a user sees a URL on the product's
 // own domain. Otherwise it falls back to the configured GATEWAY_APP_BASE_URL
 // (or a localhost dev default).
-func (s *AuthService) appBaseURL(ctx context.Context) string {
+func appBaseURL(ctx context.Context, cfg *config.Config) string {
 	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.PrimaryAuthDomain != "" {
 		return "https://" + scope.PrimaryAuthDomain
 	}
-	u := strings.TrimRight(s.cfg.AppBaseURL, "/")
+	u := strings.TrimRight(cfg.AppBaseURL, "/")
 	if u == "" {
 		u = "http://localhost:9002"
 	}
 	return u
+}
+
+func (s *AuthService) appBaseURL(ctx context.Context) string {
+	return appBaseURL(ctx, s.cfg)
 }
 
 // formatExpiresIn renders a human-friendly "X hours" / "X minutes"

@@ -124,7 +124,6 @@ All config is via environment variables. See `internal/config/config.go` for the
 | `GATEWAY_PASSKEY_RP_ID` | Passkey relying party ID — must match your domain |
 | `GATEWAY_PASSKEY_ORIGIN` | Allowed origin for passkey ceremonies |
 | `GATEWAY_TOTP_ISSUER` | Name shown in user authenticator apps |
-| `GATEWAY_DEFAULT_EMAIL_DOMAIN` | Default email domain for new accounts |
 | `GATEWAY_ALLOWED_ORIGINS` | CORS origins |
 | `GATEWAY_AUTH_ALLOW_LOCAL` | Set `false` in prod to disable username/password if you only want OAuth |
 

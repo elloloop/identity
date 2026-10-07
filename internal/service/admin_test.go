@@ -715,3 +715,66 @@ func TestAdminService_ResetUserPassword_RefusesAnonymous(t *testing.T) {
 		t.Fatalf("a refused reset still wrote a password hash: %v", got)
 	}
 }
+
+// The invitation link and email follow the request's project like every other
+// emailed link: on the project's primary auth domain when it has one, else on
+// GATEWAY_APP_BASE_URL, else on the localhost dev default — never a fixed host.
+// The email names the project's product, else the configured issuer name.
+func TestAdminService_InviteUser_LinkAndEmailFollowTheProject(t *testing.T) {
+	for _, tc := range []struct {
+		name, appBase, wantLink, wantSubject string
+		scope                                *ProjectScope
+	}{
+		{
+			name:        "project with a primary auth domain and a product name",
+			appBase:     "https://app.example.test",
+			scope:       &ProjectScope{ProjectID: "test-tenant", PrimaryAuthDomain: "auth.acme.example", Access: ProjectAccessConfig{Mode: AccessModeOpen}, Branding: ProjectBrandingConfig{ProductName: "Acme"}},
+			wantLink:    "https://auth.acme.example/auth/accept-invitation?token=",
+			wantSubject: "You're invited to Acme",
+		},
+		{
+			name:        "configured app base, no product name",
+			appBase:     "https://app.example.test/",
+			wantLink:    "https://app.example.test/auth/accept-invitation?token=",
+			wantSubject: "You're invited to Identity",
+		},
+		{
+			name:        "nothing configured",
+			wantLink:    "http://localhost:9002/auth/accept-invitation?token=",
+			wantSubject: "You're invited to Identity",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newFakeDB()
+			db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+			cfg := config.Load()
+			cfg.AppBaseURL = tc.appBase
+			cfg.TOTPIssuer = "Identity"
+			cfg.EmailBrandProductName = ""
+			rec := &recordingTransport{}
+			svc := NewAdminService(newFakeRepo(), db, "test-tenant", audit.NewLogger(nil, "test-tenant", zap.NewNop()), cfg, rec, zap.NewNop())
+			ctx := context.Background()
+			if tc.scope != nil {
+				ctx = WithProjectScope(ctx, tc.scope)
+			}
+
+			result, err := svc.InviteUser(ctx, "admin-1", "new@test.com", "New User", "member", "", 0, false)
+			if err != nil {
+				t.Fatalf("InviteUser: %v", err)
+			}
+			if want := tc.wantLink + result.InvitationToken; result.SetupURL != want {
+				t.Errorf("SetupURL = %q, want %q", result.SetupURL, want)
+			}
+			sent := rec.Sent()
+			if len(sent) != 1 {
+				t.Fatalf("expected 1 email, got %d", len(sent))
+			}
+			if sent[0].Subject != tc.wantSubject {
+				t.Errorf("Subject = %q, want %q", sent[0].Subject, tc.wantSubject)
+			}
+			if !strings.Contains(sent[0].Text, result.SetupURL) {
+				t.Errorf("email text does not carry the setup link %q", result.SetupURL)
+			}
+		})
+	}
+}

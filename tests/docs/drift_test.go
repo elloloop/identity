@@ -72,6 +72,10 @@ var allowedGatewayTokens = map[string]string{
 	"GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK":        "removed in v4.0; renamed to GATEWAY_ASSURANCE_ENFORCE_MAGIC_LINK (docs/UPGRADE.md)",
 	"GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP":    "removed in v4.0; renamed to GATEWAY_ASSURANCE_ENFORCE_PASSKEY_SIGNUP (docs/UPGRADE.md)",
 	"GATEWAY_CAPTCHA_ENFORCE_":                  "prefix fragment of the removed v3.x enforce family named in the UPGRADE rename table",
+
+	// Removed after v4.10: declared but never read; the upgrade guide tells
+	// operators it is ignored.
+	"GATEWAY_DEFAULT_EMAIL_DOMAIN": "removed after v4.10; never read; documented in docs/UPGRADE.md as ignored",
 	"GATEWAY_CAPTCHA_":                          "prefix fragment of the removed v3.x captcha family named in ADR-0012 and the UPGRADE rename table",
 
 	// (2) Test-harness only: read by internal/repo/postgres/*_test.go and the

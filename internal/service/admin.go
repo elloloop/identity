@@ -225,11 +225,7 @@ func (s *AdminService) InviteUser(
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
 
-	baseURL := strings.TrimRight(s.cfg.AppBaseURL, "/")
-	if baseURL == "" {
-		baseURL = "https://app.glassa.work"
-	}
-	setupURL := fmt.Sprintf("%s/auth/accept-invitation?token=%s", baseURL, rawToken)
+	setupURL := fmt.Sprintf("%s/auth/accept-invitation?token=%s", appBaseURL(ctx, s.cfg), rawToken)
 
 	// Best-effort: render and send the invitation email. Failures here
 	// never fail the RPC — the admin still gets the token in the
@@ -433,10 +429,16 @@ func (s *AdminService) ResetUserPassword(
 // strand a user.
 func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, link string) {
 	brand := resolveBranding(ctx, s.cfg, "")
+	// The product the user is invited to: the email branding's product name,
+	// else the name authenticator apps show, which always has a value.
+	org := brand.productName
+	if strings.TrimSpace(org) == "" {
+		org = s.cfg.TOTPIssuer
+	}
 	html, text, err := email.Render(email.TemplateInvitation, brand.templateData(map[string]any{
 		"UserName":    name,
 		"InviterName": "An administrator",
-		"OrgName":     s.cfg.TOTPIssuer,
+		"OrgName":     org,
 		"Role":        role,
 		"Link":        link,
 	}))
@@ -447,7 +449,7 @@ func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, 
 	msg := email.Message{
 		To:      to,
 		From:    s.cfg.SMTPFrom,
-		Subject: "You're invited to " + s.cfg.TOTPIssuer,
+		Subject: "You're invited to " + org,
 		HTML:    html,
 		Text:    text,
 	}

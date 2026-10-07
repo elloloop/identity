@@ -1,5 +1,29 @@
 # Upgrade guide
 
+## v4.10 → next — neutral built-in defaults; invitation links follow the project (behaviour change)
+
+No schema change and no migration.
+
+- **`GATEWAY_TOTP_ISSUER` and `GATEWAY_PASSKEY_RP_NAME` default to
+  `Identity`.** The built-in defaults used to name one deployment's
+  product. If you never set them, new authenticator-app enrolments and new
+  passkeys now show `Identity`: set both to your product's name. Existing
+  enrolments and passkeys keep the name they were created with.
+- **`GATEWAY_DEFAULT_EMAIL_DOMAIN` is removed.** Nothing ever read it; a
+  value left in your environment is ignored.
+- **Admin invitation links (`InviteUser`) follow the request's project**,
+  like reset and verification links: the project's primary auth domain,
+  else `GATEWAY_APP_BASE_URL`, else the localhost development default. With
+  `GATEWAY_APP_BASE_URL` set to empty they used to point at a fixed external
+  host. The invitation email names the project's email-branding product
+  name, else `GATEWAY_TOTP_ISSUER`.
+- **The built-in development TOTP key and recovery pepper changed.** They
+  apply only while `GATEWAY_TOTP_ENCRYPTION_KEY` and
+  `GATEWAY_TOTP_RECOVERY_PEPPER` are unset, which is logged as a warning at
+  boot and must never be the case in production. Two-step enrolments and
+  recovery codes made under the old development values no longer verify;
+  those users enrol again. Set real keys.
+
 ## v4.9 → v4.10 — reset and verification links can point at a sign-in hub (additive); stricter URL boot checks
 
 No schema change and no migration. A deployment that sets nothing new sends

@@ -82,11 +82,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.AuthAllowLocal != true {
 		t.Errorf("AuthAllowLocal: want true, got %v", cfg.AuthAllowLocal)
 	}
-	if cfg.DefaultEmailDomain != "glassa.work" {
-		t.Errorf("DefaultEmailDomain: want glassa.work, got %q", cfg.DefaultEmailDomain)
-	}
-	if cfg.TOTPIssuer != "Glassa Work" {
-		t.Errorf("TOTPIssuer: want 'Glassa Work', got %q", cfg.TOTPIssuer)
+	if cfg.TOTPIssuer != "Identity" {
+		t.Errorf("TOTPIssuer: want 'Identity', got %q", cfg.TOTPIssuer)
 	}
 	if cfg.PasskeyRPID != "localhost" {
 		t.Errorf("PasskeyRPID: want localhost, got %q", cfg.PasskeyRPID)
