@@ -55,7 +55,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: docs-site
-        run: pnpm install --frozen-lockfile || pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build site
         working-directory: docs-site

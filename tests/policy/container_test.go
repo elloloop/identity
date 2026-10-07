@@ -11,8 +11,8 @@ import (
 func TestContainerBuildUsesCIGoPatchVersion(t *testing.T) {
 	root := repoRoot(t)
 	dockerfile := readFile(t, filepath.Join(root, "Dockerfile"))
-	ciGoVersion := workflowGoVersion(t, readFile(t, filepath.Join(root, ".github", "workflows", "ci.yml")))
-	releaseGoVersion := workflowGoVersion(t, readFile(t, filepath.Join(root, ".github", "workflows", "release.yml")))
+	ciGoVersion := workflowEnvPin(t, readFile(t, filepath.Join(root, ".github", "workflows", "ci.yml")), "GO_VERSION")
+	releaseGoVersion := workflowEnvPin(t, readFile(t, filepath.Join(root, ".github", "workflows", "release.yml")), "GO_VERSION")
 
 	if releaseGoVersion != ciGoVersion {
 		t.Fatalf("release GO_VERSION = %q, CI GO_VERSION = %q", releaseGoVersion, ciGoVersion)
@@ -45,12 +45,13 @@ func TestContainerRuntimeHasNoDistributionPackageLayer(t *testing.T) {
 	}
 }
 
-func workflowGoVersion(t *testing.T, workflow string) string {
+// workflowEnvPin returns the value a workflow's env pins name to.
+func workflowEnvPin(t *testing.T, workflow, name string) string {
 	t.Helper()
 
-	matches := regexp.MustCompile(`(?m)^\s*GO_VERSION:\s*'([^']+)'$`).FindStringSubmatch(workflow)
+	matches := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(name) + `:\s*'([^']+)'$`).FindStringSubmatch(workflow)
 	if len(matches) != 2 {
-		t.Fatal("workflow GO_VERSION not found")
+		t.Fatalf("workflow %s not found", name)
 	}
 	return matches[1]
 }
