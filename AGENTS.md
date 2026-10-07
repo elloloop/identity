@@ -274,5 +274,24 @@ docs, proto comments, commit messages, and PR and issue text.
   IPs, internal URLs, account ids); no people beyond public authorship;
   no unannounced roadmap; no secrets.
 
-The review gate's **Neutrality & Disclosure** reviewer (§11) judges both
-questions on every PR, and on an issue in issue mode.
+Two checks hold this line. The review gate's **Neutrality & Disclosure**
+reviewer (§11) judges both questions on every PR, and on an issue in
+issue mode. The **Disclosure** workflow (`.github/workflows/disclosure.yml`)
+runs on its own, without a maintainer:
+
+- On every PR (`pull_request_target`, opened/edited/synchronize/reopened)
+  it matches the title, body, branch name, commit messages, changed file
+  names and the PR's added diff lines against a confidential-terms list,
+  case-insensitively, and a match fails the **Disclosure** check. It reads
+  all of that through the API and never checks out or runs PR code.
+- On every issue (opened/edited) and comment (created/edited) a match adds
+  the `needs-redaction` label and asks the author to redact, in one
+  comment per offending issue or comment (an edit does not post again). A maintainer removes the label once the text is clean, and
+  deletes the offending revision from the edit history, which GitHub
+  keeps public.
+- The list lives **only** in the repository secret `CONFIDENTIAL_TERMS`,
+  one term per line, so it is never in the repository itself. The check
+  never prints, comments or labels with a matched term. With the secret
+  unset it passes with a notice.
+
+The matcher is `scripts/disclosure-check.sh`, tested in `tests/policy`.

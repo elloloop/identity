@@ -35,7 +35,8 @@ Highlights for quick recall:
 - **Keep the repo general and public-safe (AGENTS.md §13).** General
   capabilities, not one client's features; neutral examples (`acme`,
   `example.com`, `example.test`); nothing private in code, docs, commits,
-  or PR/issue text.
+  or PR/issue text. The `Disclosure` workflow enforces a term list kept
+  in the `CONFIDENTIAL_TERMS` secret.
 
 If existing code violates these rules and your change touches it, fix
 the violation as part of your change. Do not preserve the wrong pattern.

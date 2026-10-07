@@ -46,6 +46,7 @@ See [AGENTS.md](../AGENTS.md). The following must be true:
 - [ ] No half-finished implementations (impl + tests + wiring all land together)
 - [ ] Bug fixes ship with regression tests
 - [ ] Commit messages are imperative, no AI attribution, no inaccessible-context references
+- [ ] General and safe to publish (§13): no client- or deployment-specific features, neutral examples (`acme`, `example.com`, `example.test`), no private names, hosts, infrastructure or secrets in the code, docs, commits or this description
 
 ## Contributor License Agreement
 
