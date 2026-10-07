@@ -16,11 +16,10 @@ import (
 
 // Exit statuses of scripts/disclosure-collect.sh.
 const (
-	collectOK         = 0
-	collectFailed     = 2
-	collectOutside    = 10
-	collectTooBig     = 11
-	collectForkReview = 12
+	collectOK      = 0
+	collectFailed  = 2
+	collectOutside = 10
+	collectTooBig  = 11
 )
 
 // fakeGH answers `gh api <path>` from fixtures, one file per API path, and
@@ -222,19 +221,12 @@ func TestDisclosureCollectMergeGroup(t *testing.T) {
 	}
 }
 
-// sameRepoPR is the pull_request of a review event on a PR from a branch of
-// this repository.
-const sameRepoPR = `"pull_request": {"head": {"repo": {"full_name": "acme/widgets"}}}`
-
 func TestDisclosureCollectTextEvents(t *testing.T) {
 	for name, tc := range map[string]struct{ kind, event, want string }{
 		"issue":   {"issue", `{"issue": {"title": "T", "body": "B", "user": {"login": "alice"}}}`, "T\nB\n"},
 		"comment": {"comment", `{"comment": {"body": "C", "user": {"login": "alice"}}}`, "C\n"},
-		"review":  {"review", `{` + sameRepoPR + `, "review": {"body": "R", "user": {"login": "alice"}}}`, "R\n"},
-		"review comment": {"review-comment", `{` + sameRepoPR + `,
-			"comment": {"body": "RC", "user": {"login": "alice"}}}`, "RC\n"},
-		// A review with no body (an approval alone) is empty text.
-		"review without body": {"review", `{` + sameRepoPR + `, "review": {"body": null, "user": {"login": "alice"}}}`, "\n"},
+		// An issue opened with no description is its title alone.
+		"issue without body": {"issue", `{"issue": {"title": "T", "body": null, "user": {"login": "alice"}}}`, "T\n\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			run := runCollect(t, tc.kind, ptr(tc.event), fixtures("write", nil))
@@ -251,10 +243,8 @@ func TestDisclosureCollectTextEvents(t *testing.T) {
 var authorEvents = map[string]string{
 	"pr": `{"pull_request": {"number": 7, "title": "T", "head": {"ref": "b"}, "commits": 0,
 		"user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
-	"issue":          `{"issue": {"title": "T", "body": "B", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
-	"comment":        `{"comment": {"body": "C", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
-	"review":         `{` + sameRepoPR + `, "review": {"body": "R", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
-	"review-comment": `{` + sameRepoPR + `, "comment": {"body": "RC", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
+	"issue":   `{"issue": {"title": "T", "body": "B", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
+	"comment": `{"comment": {"body": "C", "user": {"login": "alice"}, "author_association": %q}, "sender": {"login": "bob"}}`,
 }
 
 const senderPermissionPath = "repos/acme/widgets/collaborators/bob/permission"
@@ -272,14 +262,14 @@ func TestDisclosureCollectChecksWhatWritersWrote(t *testing.T) {
 			association, author, sender string
 			want                        int
 		}{
-			"private member, admin":           {"CONTRIBUTOR", "admin", "none", collectOK},
-			"maintainer":                      {"NONE", "maintain", "none", collectOK},
-			"writer, outsider sends":          {"CONTRIBUTOR", "write", "none", collectOK},
-			"member with read only":           {"MEMBER", "read", "none", collectOutside},
-			"collaborator with triage":        {"COLLABORATOR", "triage", "none", collectOutside},
-			"outsider":                        {"NONE", "none", "none", collectOutside},
-			"outsider, writer sends":          {"NONE", "none", "admin", collectOutside},
-			"outsider, maintainer sends (pr)": {"FIRST_TIME_CONTRIBUTOR", "read", "maintain", collectOutside},
+			"private member, admin":         {"CONTRIBUTOR", "admin", "none", collectOK},
+			"maintainer":                    {"NONE", "maintain", "none", collectOK},
+			"writer, outsider sends":        {"CONTRIBUTOR", "write", "none", collectOK},
+			"member with read only":         {"MEMBER", "read", "none", collectOutside},
+			"collaborator with triage":      {"COLLABORATOR", "triage", "none", collectOutside},
+			"outsider":                      {"NONE", "none", "none", collectOutside},
+			"outsider, writer sends":        {"NONE", "none", "admin", collectOutside},
+			"first-timer, maintainer sends": {"FIRST_TIME_CONTRIBUTOR", "read", "maintain", collectOutside},
 		} {
 			t.Run(kind+"/"+name, func(t *testing.T) {
 				t.Parallel()
@@ -352,28 +342,6 @@ func TestDisclosureCollectFailsWhenAPermissionIsUnknown(t *testing.T) {
 	})
 }
 
-// A run triggered by a review on a fork PR gets no secrets, so there is no
-// list to match; the script says so rather than pass it as clean. A fork
-// is any other head repository, or none once the fork is deleted.
-func TestDisclosureCollectReportsReviewsOnForkPullRequests(t *testing.T) {
-	for name, pr := range map[string]string{
-		"fork":         `"pull_request": {"head": {"repo": {"full_name": "someone/widgets", "fork": true}}}`,
-		"deleted fork": `"pull_request": {"head": {"repo": null}}`,
-		"no head":      `"pull_request": {}`,
-	} {
-		for _, kind := range []string{"review", "review-comment"} {
-			t.Run(name+"/"+kind, func(t *testing.T) {
-				event := `{` + pr + `, "review": {"body": "R", "user": {"login": "alice"}}, "comment": {"body": "C", "user": {"login": "alice"}}}`
-				run := runCollect(t, kind, &event, fixtures("admin", nil))
-				run.expect(t, collectForkReview)
-				if run.out != "" || len(run.calls) != 0 {
-					t.Fatalf("collected %q with calls %q", run.out, run.calls)
-				}
-			})
-		}
-	}
-}
-
 // Past what the API lists, part of the PR would go unread: fail rather
 // than pass it.
 func TestDisclosureCollectRefusesWhatTheAPICannotList(t *testing.T) {
@@ -434,17 +402,16 @@ func TestDisclosureCollectRefusesWhatTheAPICannotList(t *testing.T) {
 func TestDisclosureCollectFailsClosedOnAFailedRead(t *testing.T) {
 	oneCommit := strings.Replace(prEvent, `"commits": 3`, `"commits": 1`, 1)
 	for name, tc := range map[string]struct {
-		kind     string
-		event    *string
-		fixtures map[string]string
+		kind    string
+		event   *string
+		answers map[string]string
 	}{
-		"no event file (issue)":          {"issue", nil, nil},
-		"no event file (pr)":             {"pr", nil, nil},
-		"no event file (review)":         {"review", nil, nil},
-		"no event file (review comment)": {"review-comment", nil, nil},
-		"event not JSON":                 {"issue", ptr("{"), nil},
-		"no author":                      {"issue", ptr(`{"issue": {"title": "T"}}`), nil},
-		"commit list fails":              {"pr", ptr(prEvent), fixtures("admin", nil)},
+		"no event file (issue)":   {"issue", nil, nil},
+		"no event file (comment)": {"comment", nil, nil},
+		"no event file (pr)":      {"pr", nil, nil},
+		"event not JSON":          {"issue", ptr("{"), nil},
+		"no author":               {"issue", ptr(`{"issue": {"title": "T"}}`), nil},
+		"commit list fails":       {"pr", ptr(prEvent), fixtures("admin", nil)},
 		"a commit fails": {"pr", ptr(oneCommit), fixtures("admin", map[string]string{
 			"repos/acme/widgets/pulls/7/commits": `[{"sha": "c1", "commit": {"message": "m"}, "parents": [{"sha": "p"}]}]`,
 		})},
@@ -454,14 +421,33 @@ func TestDisclosureCollectFailsClosedOnAFailedRead(t *testing.T) {
 		})},
 		"compare fails": {"merge-group", ptr(`{"merge_group": {"base_sha": "b0", "head_sha": "h1"}}`), nil},
 		"unknown kind":  {"wiki", ptr(`{}`), nil},
+		"a review kind": {"review", ptr(`{"review": {"body": "R", "user": {"login": "alice"}}}`), nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			run := runCollect(t, tc.kind, tc.event, tc.fixtures)
+			run := runCollect(t, tc.kind, tc.event, tc.answers)
 			run.expect(t, collectFailed)
 			// The masks are registered only in the check step, so an error
 			// never names a file.
 			if strings.Contains(run.stderr, "secret/a.bin") {
 				t.Fatalf("the error names the file: %s", run.stderr)
+			}
+		})
+	}
+}
+
+// Without its event or repository the script fails with the documented
+// status rather than the shell's own.
+func TestDisclosureCollectNeedsItsEnvironment(t *testing.T) {
+	for _, unset := range []string{"GITHUB_EVENT_PATH", "GH_REPO"} {
+		t.Run(unset, func(t *testing.T) {
+			//nolint:gosec // The command is the repository-owned collect script.
+			cmd := exec.Command("bash", filepath.Join(repoRoot(t), "scripts", "disclosure-collect.sh"), "issue")
+			cmd.Env = append(withoutEnv(os.Environ(), "GITHUB_EVENT_PATH", "GH_REPO"),
+				"GITHUB_EVENT_PATH=/nonexistent/event.json", "GH_REPO=acme/widgets")
+			cmd.Env = withoutEnv(cmd.Env, unset)
+			var exitErr *exec.ExitError
+			if err := cmd.Run(); !errors.As(err, &exitErr) || exitErr.ExitCode() != collectFailed {
+				t.Fatalf("with %s unset: %v, want exit %d", unset, err, collectFailed)
 			}
 		})
 	}

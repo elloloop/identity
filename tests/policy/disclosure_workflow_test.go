@@ -20,11 +20,11 @@ var (
 	// collectArms are the case arms a workflow's collect step must have, by
 	// the collect script's exit status.
 	collectArms = map[string]*regexp.Regexp{
-		"0":  regexp.MustCompile(`(?m)^\s+0\) echo "check=true" >> "\$GITHUB_OUTPUT" ;;$`),
-		"2":  regexp.MustCompile(`(?s)\n\s+2\)\n\s+echo "::error::[^"]*[Rr]e-run[^"]*"\n\s+exit 1\n`),
-		"10": regexp.MustCompile(`(?m)^\s+10\) echo "::notice::[^"]*" ;;$`),
+		"0": regexp.MustCompile(`(?m)^\s+0\) echo "check=true" >> "\$GITHUB_OUTPUT" ;;$`),
+		"2": regexp.MustCompile(`(?s)\n\s+2\)\n\s+echo "::error::[^"]*[Rr]e-run[^"]*"\n\s+exit 1\n`),
+		// The author alone decides, so the notice says so, never "sent".
+		"10": regexp.MustCompile(`(?m)^\s+10\) echo "::notice::Not checked: the item's author has no write access\.[^"]*" ;;$`),
 		"11": regexp.MustCompile(`(?s)\n\s+11\)\n\s+echo "::error::[^"]*"\n\s+exit 1\n`),
-		"12": regexp.MustCompile(`(?m)^\s+12\) echo "::notice::[^"]*" ;;$`),
 		"*":  regexp.MustCompile(`(?m)^\s+\*\) exit "\$status" ;;$`),
 	}
 )
@@ -68,19 +68,40 @@ func TestDisclosureWorkflowNeverRunsPullRequestCode(t *testing.T) {
 	assertCollectOutcomes(t, "disclosure.yml", wf, map[string]string{
 		"merge_group": "merge-group", "pull_request_target": "pr",
 	}, "11")
+	// A match in the merge queue is a queued PR's squash, not a branch to
+	// rewrite: the message says which.
+	for _, want := range []string{
+		`if [ "$EVENT_NAME" = "merge_group" ]; then`,
+		`echo "::error::A queued PR's squash commit message`,
+		`echo "::error::The title, description, branch name`,
+	} {
+		if !strings.Contains(wf, want) {
+			t.Errorf("disclosure.yml lacks %q", want)
+		}
+	}
 	assertDisclosureWorkflowBasics(t, "disclosure.yml", wf)
 }
 
-// Issues, comments and reviews are checked by a workflow of their own, under
+// No workflow runs on review events: they would run the PR branch's copy of
+// the workflow with the repository's secrets.
+func TestNoDisclosureWorkflowRunsOnReviewEvents(t *testing.T) {
+	for _, name := range []string{"disclosure.yml", "disclosure-discussion.yml"} {
+		for event := range workflowTriggers(disclosureWorkflow(t, name)) {
+			if strings.HasPrefix(event, "pull_request_review") {
+				t.Errorf("%s listens for %s", name, event)
+			}
+		}
+	}
+}
+
+// Issues and comments are checked by a workflow of their own, under
 // another check name, so none of their runs touches the required check.
 func TestDisclosureDiscussionWorkflow(t *testing.T) {
 	wf := disclosureWorkflow(t, "disclosure-discussion.yml")
 
 	if got, want := workflowTriggers(wf), map[string]string{
-		"issues":                      "[opened, edited]",
-		"issue_comment":               "[created, edited]",
-		"pull_request_review":         "[submitted, edited]",
-		"pull_request_review_comment": "[created, edited]",
+		"issues":        "[opened, edited]",
+		"issue_comment": "[created, edited]",
 	}; !maps.Equal(got, want) {
 		t.Errorf("disclosure-discussion.yml triggers = %v, want exactly %v", got, want)
 	}
@@ -96,7 +117,7 @@ func TestDisclosureDiscussionWorkflow(t *testing.T) {
 	}
 	// The redaction request names the author whose text was checked: the
 	// item's author, the one the collect step's gate read, never the sender.
-	if !strings.Contains(wf, "          AUTHOR: ${{ github.event.comment.user.login || github.event.review.user.login || github.event.issue.user.login }}\n") ||
+	if !strings.Contains(wf, "          AUTHOR: ${{ github.event.comment.user.login || github.event.issue.user.login }}\n") ||
 		strings.Contains(wf, "github.event.sender") {
 		t.Error("the redaction request must @mention the item's author")
 	}
@@ -106,7 +127,7 @@ func TestDisclosureDiscussionWorkflow(t *testing.T) {
 			label = run
 		}
 	}
-	for _, kind := range []string{"issue", "comment", "review", "review-comment"} {
+	for _, kind := range []string{"issue", "comment"} {
 		if !strings.Contains(label, "\n            "+kind+") item=") {
 			t.Errorf("the label step has no arm for kind %s", kind)
 		}
@@ -116,8 +137,7 @@ func TestDisclosureDiscussionWorkflow(t *testing.T) {
 	}
 	assertCollectOutcomes(t, "disclosure-discussion.yml", wf, map[string]string{
 		"issues": "issue", "issue_comment": "comment",
-		"pull_request_review": "review", "pull_request_review_comment": "review-comment",
-	}, "12")
+	})
 	assertDisclosureWorkflowBasics(t, "disclosure-discussion.yml", wf)
 }
 
@@ -127,7 +147,7 @@ func TestDisclosureDiscussionWorkflow(t *testing.T) {
 // notice, and every other status fails the job. extra is the one more
 // status the workflow knows: 11 (too big) fails the job, 12 (a fork's
 // review) is a notice. The check step runs only on collected text.
-func assertCollectOutcomes(t *testing.T, name, wf string, kinds map[string]string, extra string) {
+func assertCollectOutcomes(t *testing.T, name, wf string, kinds map[string]string, extra ...string) {
 	t.Helper()
 	collect := ""
 	for _, run := range runBlocks(wf) {
@@ -146,7 +166,7 @@ func assertCollectOutcomes(t *testing.T, name, wf string, kinds map[string]strin
 	if !strings.Contains(collect, "\n            *) echo \"::error::Unexpected event $EVENT_NAME.\"; exit 1 ;;\n") {
 		t.Errorf("%s must fail on an event it does not map", name)
 	}
-	for _, code := range []string{"0", "2", "10", extra, "*"} {
+	for _, code := range append([]string{"0", "2", "10", "*"}, extra...) {
 		if !collectArms[code].MatchString(collect) {
 			t.Errorf("%s: the collect step does not handle status %s as it must", name, code)
 		}

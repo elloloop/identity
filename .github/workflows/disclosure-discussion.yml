@@ -1,31 +1,25 @@
 name: Disclosure (discussion)
 
-# Catches confidential terms in issues, comments, PR reviews and inline
-# review comments (AGENTS.md §13); disclosure.yml checks the PRs
-# themselves. These triggers live apart from that workflow so that no run
-# from them ever attaches a skipped "Disclosure" check to a PR head, which
-# GitHub would count as success for the required check. The term list lives
-# only in the CONFIDENTIAL_TERMS repository secret; nothing here ever
-# prints, comments or labels with a matched term.
+# Catches confidential terms in issues and in comments on issues and PRs
+# (AGENTS.md §13); disclosure.yml checks the PRs themselves. These triggers
+# live apart from that workflow so that no run from them ever attaches a
+# skipped "Disclosure" check to a PR head, which GitHub would count as
+# success for the required check. Both run the default branch's copy of this
+# file and the scripts. The term list lives only in the CONFIDENTIAL_TERMS
+# repository secret; nothing here ever prints, comments or labels with a
+# matched term.
 #
-# Which copy of this file and the scripts runs: issues and issue_comment
-# run the default branch's. pull_request_review and
-# pull_request_review_comment run the PR's merge ref: on a same-repository
-# PR, the branch's own, unreviewed copy runs with the term list and
-# issues: write, and anyone who can review the PR can trigger it. That is no
-# escalation: only people who can push branches here open such PRs, they
-# already hold write access, and the secret is theirs to use. A review on a
-# fork PR gets a read-only token and no secrets, so it is never checked;
-# the collect script says so.
+# Review bodies and inline review comments are not checked here, on
+# purpose: a pull_request_review or pull_request_review_comment run executes
+# the PR branch's copy of the workflow with this repository's secrets, and a
+# branch nobody else has reviewed (a dependency bot's action bump, say)
+# would then run next to the term list. The review gate's Neutrality &
+# Disclosure lens reads reviews and their edit history instead.
 
 on:
   issues:
     types: [opened, edited]
   issue_comment:
-    types: [created, edited]
-  pull_request_review:
-    types: [submitted, edited]
-  pull_request_review_comment:
     types: [created, edited]
 
 permissions: {}
@@ -36,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Labels and comments go through the issues API, which takes a PR number
-    # too, so issues: write covers a review on a PR as well.
+    # too, so issues: write covers a comment on a PR as well.
     permissions:
       contents: read
       issues: write
@@ -61,8 +55,6 @@ jobs:
           case "$EVENT_NAME" in
             issues) kind=issue ;;
             issue_comment) kind=comment ;;
-            pull_request_review) kind=review ;;
-            pull_request_review_comment) kind=review-comment ;;
             *) echo "::error::Unexpected event $EVENT_NAME."; exit 1 ;;
           esac
           echo "kind=$kind" >> "$GITHUB_OUTPUT"
@@ -70,8 +62,7 @@ jobs:
           bash scripts/disclosure-collect.sh "$kind" > "$RUNNER_TEMP/disclosure-text" || status=$?
           case "$status" in
             0) echo "check=true" >> "$GITHUB_OUTPUT" ;;
-            10) echo "::notice::Not checked: no one with write access wrote or sent this. See AGENTS.md §13." ;;
-            12) echo "::notice::Not checked: reviews on fork PRs get no secrets. See AGENTS.md §13." ;;
+            10) echo "::notice::Not checked: the item's author has no write access. See AGENTS.md §13." ;;
             2)
               echo "::error::A GitHub API read failed (often the hourly request limit), so nothing was checked. Re-run this check."
               exit 1
@@ -99,17 +90,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          NUMBER: ${{ github.event.issue.number }}
           KIND: ${{ steps.collect.outputs.kind }}
-          ITEM_ID: ${{ github.event.comment.id || github.event.review.id }}
-          AUTHOR: ${{ github.event.comment.user.login || github.event.review.user.login || github.event.issue.user.login }}
+          ITEM_ID: ${{ github.event.comment.id }}
+          AUTHOR: ${{ github.event.comment.user.login || github.event.issue.user.login }}
         run: |
           set -euo pipefail
           label=needs-redaction
-          if ! gh label list --search "$label" --json name --jq '.[].name' | grep -qx "$label"; then
-            gh label create "$label" --color B60205 \
-              --description "Contains details that must be removed before this can stay public"
-          fi
+          # --force makes this idempotent: concurrent runs may all create it.
+          gh label create "$label" --force --color B60205 \
+            --description "Contains details that must be removed before this can stay public"
           gh api --method POST "repos/$GH_REPO/issues/$NUMBER/labels" -f "labels[]=$label" > /dev/null
 
           # One request per offending item: an edit that still matches does
@@ -117,8 +107,6 @@ jobs:
           case "$KIND" in
             issue) item="issue"; what="This issue's title or description" ;;
             comment) item="comment-$ITEM_ID"; what="Your comment" ;;
-            review) item="review-$ITEM_ID"; what="Your review" ;;
-            review-comment) item="review-comment-$ITEM_ID"; what="Your review comment" ;;
             *) echo "::error::Unexpected kind $KIND."; exit 1 ;;
           esac
           marker="<!-- disclosure-check:$item -->"

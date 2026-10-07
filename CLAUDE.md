@@ -36,10 +36,10 @@ Highlights for quick recall:
   capabilities, not one client's features; neutral examples (`acme`,
   `example.com`, `example.test`); nothing private in code, docs, commits,
   or PR/issue text. The `Disclosure` workflows check what people with
-  write access write (PRs, commits, issues, comments, reviews), and what
-  the merge queue lands, against a term list kept in the
-  `CONFIDENTIAL_TERMS` secret; a permission lookup that fails fails the
-  check. §13 says exactly what each covers.
+  write access write (PRs, commits, issues, comments), and what the merge
+  queue lands, against a term list kept in the `CONFIDENTIAL_TERMS`
+  secret; a permission lookup that fails fails the check. Reviews are left
+  to the review gate. §13 says exactly what each covers.
 
 If existing code violates these rules and your change touches it, fix
 the violation as part of your change. Do not preserve the wrong pattern.

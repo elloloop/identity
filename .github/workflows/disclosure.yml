@@ -25,8 +25,10 @@ name: Disclosure
 # only because no PR code is ever checked out or run: the PR's text, commit
 # messages and added lines are read through the API as data, and the only
 # checkout is the base branch's own copy of the scripts. A merge_group run
-# takes this file and the scripts from the queued commit, which a
-# maintainer reviewed and queued, so nothing unreviewed runs there either.
+# takes this file and the scripts from the queued commit, so it runs only
+# reviewed code as long as code-owner review is required to queue a PR:
+# an auto-merge rule that queues a dependency bot's PR unreviewed would
+# run that PR's copy here.
 
 on:
   pull_request_target:
@@ -77,7 +79,7 @@ jobs:
           bash scripts/disclosure-collect.sh "$kind" > "$RUNNER_TEMP/disclosure-text" || status=$?
           case "$status" in
             0) echo "check=true" >> "$GITHUB_OUTPUT" ;;
-            10) echo "::notice::Not checked: no one with write access wrote or sent this. See AGENTS.md §13 for what covers it instead." ;;
+            10) echo "::notice::Not checked: the item's author has no write access. See AGENTS.md §13 for what covers it instead." ;;
             11)
               echo "::error::There are more commits, or a commit has more files, than the GitHub API lists, so not all of it can be checked. Split it into smaller PRs or commits."
               exit 1
@@ -93,6 +95,7 @@ jobs:
         if: steps.collect.outputs.check == 'true'
         env:
           CONFIDENTIAL_TERMS: ${{ secrets.CONFIDENTIAL_TERMS }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           status=0
           bash scripts/disclosure-check.sh < "$RUNNER_TEMP/disclosure-text" || status=$?
@@ -100,7 +103,11 @@ jobs:
             0) echo "No confidential terms found." ;;
             3) echo "::notice::The confidential-terms secret is not set; the disclosure check was skipped." ;;
             1)
-              echo "::error::The title, description, branch name, a commit message, a file name, an added line or a file's content contains a confidential term. Use neutral examples (acme, example.com, example.test) instead. A later commit cannot clear an earlier one: rewrite the branch without it, force-push, and tell a maintainer, since the replaced commit stays public by SHA until GitHub purges it. See AGENTS.md §13."
+              if [ "$EVENT_NAME" = "merge_group" ]; then
+                echo "::error::A queued PR's squash commit message, a file name, an added line or a file's content contains a confidential term. Remove that PR from the queue and fix it before it lands. See AGENTS.md §13."
+              else
+                echo "::error::The title, description, branch name, a commit message, a file name, an added line or a file's content contains a confidential term. Use neutral examples (acme, example.com, example.test) instead. A later commit cannot clear an earlier one: rewrite the branch without it, force-push, and tell a maintainer, since the replaced commit stays public by SHA until GitHub purges it. See AGENTS.md §13."
+              fi
               exit 1
               ;;
             *) exit "$status" ;;

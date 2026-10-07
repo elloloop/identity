@@ -12,8 +12,6 @@
 #   merge-group     the same for the commits the merge queue is about to land
 #   issue           title and description
 #   comment         an issue or PR conversation comment
-#   review          a PR review's body
-#   review-comment  an inline PR review comment
 #
 # Everything is read as data: the event through jq, the rest through
 # `gh api`. Nothing from the event is ever run.
@@ -25,8 +23,8 @@
 # instead of being skipped.
 #
 # Only items whose author has write access to the repository (admin,
-# maintain or write) are collected: the PR's, issue's, comment's or
-# review's author, whoever triggered the event. So a writer's PR is read in
+# maintain or write) are collected: the PR's, issue's or comment's author,
+# whoever triggered the event. So a writer's PR is read in
 # full on every event, and an outsider's never is, even when a maintainer
 # pushes to it or edits it. The threat is our own accidental leak; matching
 # anyone else's text would let them confirm guesses against the secret term
@@ -37,21 +35,13 @@
 # printed): it never matches the text. An app's bot account is checked like
 # a writer, since only an installed app can post as one.
 #
-# AGENTS.md §13 says what covers the rest: an outside PR's text and a
-# maintainer's commits pushed onto it are left to the review gate and to
-# the merge queue's run, which reads each PR's squash commit.
-#
-# A review on a fork PR is never checked, whoever wrote it: GitHub gives a
-# run triggered from a fork no secrets, so there is no term list to match.
-# The fork is told apart by the head repository's name, which also catches
-# a fork since deleted.
+# AGENTS.md §13 says what covers the rest, reviews among it.
 #
 # Exit status:
 #   0   the text is on stdout
 #   2   bad usage, or a read failed (the check must fail, not pass)
-#   10  not collected: no writer wrote or sent it (stdout empty)
+#   10  not collected: the item's author has no write access (stdout empty)
 #   11  past what the API lists; part of it may have been printed
-#   12  not collected: a review on a fork PR, which gets no secrets
 #
 # The statuses past 2 are ones jq and gh never return, so a tool failure
 # cannot pass for one of them. AGENTS.md §13 says what each means for a
@@ -59,7 +49,7 @@
 
 set -euo pipefail
 
-readonly outside=10 too_big=11 fork_review=12
+readonly outside=10 too_big=11
 
 # Seconds to wait before the one retry of a failed permission lookup.
 readonly retry_after=1
@@ -74,10 +64,12 @@ die() {
   exit 2
 }
 
-[[ $# -eq 1 ]] || die "usage: disclosure-collect.sh <pr|merge-group|issue|comment|review|review-comment>"
+[[ $# -eq 1 ]] || die "usage: disclosure-collect.sh <pr|merge-group|issue|comment>"
 kind="$1"
-event="${GITHUB_EVENT_PATH:?GITHUB_EVENT_PATH is not set}"
-repo="${GH_REPO:?GH_REPO is not set}"
+[[ -n "${GITHUB_EVENT_PATH-}" ]] || die "GITHUB_EVENT_PATH is not set"
+[[ -n "${GH_REPO-}" ]] || die "GH_REPO is not set"
+event="$GITHUB_EVENT_PATH"
+repo="$GH_REPO"
 
 ev() { jq -r "$1" "$event" || die "could not read $1 from the event"; }
 
@@ -115,7 +107,7 @@ require_writer() {
   case "$permission" in
     admin | maintain | write) ;;
     *)
-      echo "disclosure-collect: not checked, the author has no write access" >&2
+      echo "disclosure-collect: not checked, the item's author has no write access" >&2
       exit "$outside"
       ;;
   esac
@@ -214,23 +206,6 @@ case "$kind" in
   comment)
     require_writer '.comment'
     ev '.comment.body // ""'
-    ;;
-  review | review-comment)
-    # A fork's run gets no secrets. Its head repository is another
-    # repository, or none once the fork is deleted; .fork alone reads false
-    # for a deleted fork.
-    head_repo="$(ev '.pull_request.head.repo.full_name // ""')"
-    if [[ "$head_repo" != "$repo" ]]; then
-      echo "disclosure-collect: not checked, reviews on fork PRs get no secrets" >&2
-      exit "$fork_review"
-    fi
-    if [[ "$kind" == review ]]; then
-      require_writer '.review'
-      ev '.review.body // ""'
-    else
-      require_writer '.comment'
-      ev '.comment.body // ""'
-    fi
     ;;
   *)
     die "unknown kind $kind"

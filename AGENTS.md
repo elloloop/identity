@@ -170,8 +170,10 @@ instructions; §13 lists the material.
 2. **Security & Auth** — authn/authz, token mint/verify, crypto,
    challenge/nonce replay, secrets, injection/XSS/SSRF, data exposure,
    enumeration & timing oracles, abuse limits, supply-chain (§10).
-3. **Neutrality & Disclosure** — §13 across the diff, the PR text, commit
-   messages and linked issues: is anything client- or deployment-specific
+3. **Neutrality & Disclosure** — §13 across the diff, the PR text, its
+   comments and reviews, commit messages and linked issues, and the edit
+   history of each and the commits a force-push replaced: is anything
+   client- or deployment-specific
    (a real deployment's hosts or domains, a customer's product or brand
    names, behaviour or defaults special-cased for one operator, examples
    that name a real deployment instead of `acme` / `example.com` /
@@ -239,7 +241,7 @@ Run it on every PR — `Workflow({name: 'review-gate', args: <pr-number>})`.
 **Issue mode.** Run it on a new or edited issue —
 `Workflow({name: 'review-gate', args: 'issue:<issue-number>'})`. Only the
 Neutrality & Disclosure reviewer runs, over the issue's title, body and
-comments, and the result is posted as an issue comment: CLEAN, or FLAGGED
+comments and the edit history of each, and the result is posted as an issue comment: CLEAN, or FLAGGED
 with its findings (a request to build something for one named client
 counts, as does a private detail). The same fail-closed rules apply: a
 dropped, skipped or self-contradictory result flags the issue. It never
@@ -309,41 +311,43 @@ without a maintainer, against a confidential-terms list:
     diff, whoever wrote the PR, and not its description, branch name or
     intermediate commits. A merge-queue failure stops the merge only once
     `Disclosure` is a required status check on `main`, a repository
-    setting this file does not change.
+    setting this file does not change. The run uses the queued commit's
+    copy of the workflow and scripts, so it runs only reviewed code while
+    code-owner review is required to queue a PR; an auto-merge rule that
+    queues a dependency bot's PR unreviewed would run that PR's copy.
 - **Disclosure (discussion)** (`.github/workflows/disclosure-discussion.yml`)
-  checks issues (opened/edited), comments (created/edited), PR reviews
-  (submitted/edited) and inline review comments (created/edited) by
-  someone with write access. A match adds the `needs-redaction` label and
-  asks the author to redact, in one comment per offending item (an edit
-  does not post again). A maintainer removes the label once the text is
-  clean, and deletes the offending revision from the edit history, which
-  GitHub keeps public, for a PR description, comment or review as for an
-  issue. Review events run the PR's merge-ref copy of this workflow and
-  the scripts: on a same-repository PR, the branch's own, unreviewed copy
-  runs with the term list and `issues: write`, and anyone who can review
-  the PR can trigger it. That is no escalation, since only people who can
-  push branches here open such PRs, and they already hold write access.
+  checks issues (opened/edited) and comments on issues and PRs
+  (created/edited) whose author has write access, running the default
+  branch's copy of the workflow. A match adds the `needs-redaction` label
+  and asks the author to redact, in one comment per offending item (an
+  edit does not post again). A maintainer removes the label once the text
+  is clean, and deletes the offending revision from the edit history,
+  which GitHub keeps public, for a PR description or comment as for an
+  issue.
+- **Reviews are not checked by a workflow.** A review body or inline review
+  comment triggers a run from the PR branch's copy of the workflow with
+  this repository's secrets, so a branch nobody else has reviewed (a
+  dependency bot's action bump, say) would run next to the term list. No
+  workflow listens for review events; the review gate's Neutrality &
+  Disclosure lens reads reviews and their edit history instead.
 - **Only items whose author has write access are checked**: the PR's,
-  issue's, comment's or review's author, whoever triggered the event. A
-  writer's PR is read in full on every event; an outsider's never is, even
-  when a maintainer pushes to it, retitles or reopens it. Write access
-  (admin, maintain or write) is read from the repository permission API,
-  because an event's `author_association` shows org membership only when
-  it is public, and a member may hold only read. **A lookup that fails, or
+  issue's or comment's author, whoever triggered the event. A writer's PR
+  is read in full on every event; an outsider's never is, even when a
+  maintainer pushes to it, retitles or reopens it. Write access (admin,
+  maintain or write) is read from the repository permission API, because
+  an event's `author_association` shows org membership only when it is
+  public, and a member may hold only read. **A lookup that fails, or
   answers anything but a known permission, fails the check; it never
   matches the text**: re-run it. An app's bot account is checked like a
-  writer, since only an installed app can post as one. Anyone else's PR,
-  issue, comment or review passes with a notice. The threat is our own
-  accidental leak, and a public check on outsiders' text would let anyone
-  confirm guesses against the list one edit at a time. An outside PR's
-  description, branch name and intermediate commits, and a maintainer's
-  commits pushed onto it, are covered by the review gate and by the merge
-  queue's run, which reads each PR's squash commit, not by the PR-level
-  check.
-- **No review on a fork PR is checked**, ours included: GitHub gives a run
-  triggered from a fork no secrets, so there is no list to match, and the
-  run says so. A PR whose head is in another repository, or whose fork
-  was deleted, counts as a fork.
+  writer, since only an installed app can post as one; an app that
+  repeats an outsider's text in its own item exposes that text to the
+  match, so install none that does. Anyone else's PR, issue or comment
+  passes with a notice. The threat is our own accidental leak, and a
+  public check on outsiders' text would let anyone confirm guesses against
+  the list one edit at a time. An outside PR's description, branch name
+  and intermediate commits, and a maintainer's commits pushed onto it, are
+  covered by the review gate and by the merge queue's run, which reads
+  each PR's squash commit, not by the PR-level check.
 - Matching is case-insensitive and folds the text and the terms alike:
   `-`, `_`, `.` and Unicode spaces and dashes count as spaces, whitespace
   runs collapse, and invisible characters (zero-width, soft hyphen, word
