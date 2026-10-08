@@ -32,6 +32,11 @@ type configData struct {
 	// and its sign-up toggle to what the server enforces for the project.
 	PasswordLoginEnabled  bool `json:"passwordLoginEnabled"`
 	PasswordSignupEnabled bool `json:"passwordSignupEnabled"`
+	// UsernameSignupEnabled / UsernameLoginEnabled mirror the project's
+	// username-account settings: whether sign-up takes a username, and
+	// whether the identifier field accepts one.
+	UsernameSignupEnabled bool `json:"usernameSignupEnabled"`
+	UsernameLoginEnabled  bool `json:"usernameLoginEnabled"`
 	// OAuthProviders are the providers the page renders buttons for — the
 	// providers a login attempt through this request's project would
 	// resolve (own config, or the hub's under hub sharing), each with the
@@ -85,6 +90,8 @@ func Handler(cfg *config.Config, options OptionsSource, hostedOAuthEnabled bool)
 		data := configData{
 			PasswordLoginEnabled:  opts.PasswordLoginEnabled,
 			PasswordSignupEnabled: opts.PasswordSignupEnabled,
+			UsernameSignupEnabled: opts.UsernameSignupEnabled,
+			UsernameLoginEnabled:  opts.UsernameLoginEnabled,
 			OAuthProviders:        providers,
 			HostedOAuthEnabled:    hostedOAuthEnabled,
 			CaptchaProvider:       captchaProvider,
