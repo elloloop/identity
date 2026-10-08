@@ -158,8 +158,9 @@ import { Code } from "astro-expressive-code/components";
     <li>
       A username account has no email, so it has no email-based password reset.
       An admin resets its password with <code>ResetUserPassword</code>. The
-      temporary password from <code>CreateUser</code> is not forced to change at
-      first sign-in, so tell the person to change it.
+      temporary password from either RPC signs in only to be replaced: see
+      <a href="/identity/docs/auth/invitations#first-sign-in">First sign-in
+      with a temporary password</a>.
     </li>
   </ul>
 

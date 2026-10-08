@@ -60,6 +60,9 @@ const (
 	// IdentityServiceSubmitDateOfBirthProcedure is the fully-qualified name of the IdentityService's
 	// SubmitDateOfBirth RPC.
 	IdentityServiceSubmitDateOfBirthProcedure = "/identity.v1.IdentityService/SubmitDateOfBirth"
+	// IdentityServiceCompleteRequiredPasswordChangeProcedure is the fully-qualified name of the
+	// IdentityService's CompleteRequiredPasswordChange RPC.
+	IdentityServiceCompleteRequiredPasswordChangeProcedure = "/identity.v1.IdentityService/CompleteRequiredPasswordChange"
 	// IdentityServiceRequestEmailLoginCodeProcedure is the fully-qualified name of the
 	// IdentityService's RequestEmailLoginCode RPC.
 	IdentityServiceRequestEmailLoginCodeProcedure = "/identity.v1.IdentityService/RequestEmailLoginCode"
@@ -431,6 +434,10 @@ type IdentityServiceClient interface {
 	// error detail. Unauthenticated — the caller holds a ticket, not a
 	// session.
 	SubmitDateOfBirth(context.Context, *connect.Request[v1.SubmitDateOfBirthRequest]) (*connect.Response[v1.SubmitDateOfBirthResponse], error)
+	// Required password change: the only RPC that accepts the completion
+	// ticket carried by the password_change_required error detail.
+	// Unauthenticated — the caller holds a ticket, not a session.
+	CompleteRequiredPasswordChange(context.Context, *connect.Request[v1.CompleteRequiredPasswordChangeRequest]) (*connect.Response[v1.CompleteRequiredPasswordChangeResponse], error)
 	// Passwordless email login (OTP code + magic link)
 	RequestEmailLoginCode(context.Context, *connect.Request[v1.RequestEmailLoginCodeRequest]) (*connect.Response[v1.RequestEmailLoginCodeResponse], error)
 	VerifyEmailLoginCode(context.Context, *connect.Request[v1.VerifyEmailLoginCodeRequest]) (*connect.Response[v1.VerifyEmailLoginCodeResponse], error)
@@ -769,6 +776,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceSubmitDateOfBirthProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("SubmitDateOfBirth")),
+			connect.WithClientOptions(opts...),
+		),
+		completeRequiredPasswordChange: connect.NewClient[v1.CompleteRequiredPasswordChangeRequest, v1.CompleteRequiredPasswordChangeResponse](
+			httpClient,
+			baseURL+IdentityServiceCompleteRequiredPasswordChangeProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CompleteRequiredPasswordChange")),
 			connect.WithClientOptions(opts...),
 		),
 		requestEmailLoginCode: connect.NewClient[v1.RequestEmailLoginCodeRequest, v1.RequestEmailLoginCodeResponse](
@@ -1487,6 +1500,7 @@ type identityServiceClient struct {
 	mergeAccounts                   *connect.Client[v1.MergeAccountsRequest, v1.MergeAccountsResponse]
 	passwordLogin                   *connect.Client[v1.PasswordLoginRequest, v1.PasswordLoginResponse]
 	submitDateOfBirth               *connect.Client[v1.SubmitDateOfBirthRequest, v1.SubmitDateOfBirthResponse]
+	completeRequiredPasswordChange  *connect.Client[v1.CompleteRequiredPasswordChangeRequest, v1.CompleteRequiredPasswordChangeResponse]
 	requestEmailLoginCode           *connect.Client[v1.RequestEmailLoginCodeRequest, v1.RequestEmailLoginCodeResponse]
 	verifyEmailLoginCode            *connect.Client[v1.VerifyEmailLoginCodeRequest, v1.VerifyEmailLoginCodeResponse]
 	requestMagicLink                *connect.Client[v1.RequestMagicLinkRequest, v1.RequestMagicLinkResponse]
@@ -1649,6 +1663,11 @@ func (c *identityServiceClient) PasswordLogin(ctx context.Context, req *connect.
 // SubmitDateOfBirth calls identity.v1.IdentityService.SubmitDateOfBirth.
 func (c *identityServiceClient) SubmitDateOfBirth(ctx context.Context, req *connect.Request[v1.SubmitDateOfBirthRequest]) (*connect.Response[v1.SubmitDateOfBirthResponse], error) {
 	return c.submitDateOfBirth.CallUnary(ctx, req)
+}
+
+// CompleteRequiredPasswordChange calls identity.v1.IdentityService.CompleteRequiredPasswordChange.
+func (c *identityServiceClient) CompleteRequiredPasswordChange(ctx context.Context, req *connect.Request[v1.CompleteRequiredPasswordChangeRequest]) (*connect.Response[v1.CompleteRequiredPasswordChangeResponse], error) {
+	return c.completeRequiredPasswordChange.CallUnary(ctx, req)
 }
 
 // RequestEmailLoginCode calls identity.v1.IdentityService.RequestEmailLoginCode.
@@ -2257,6 +2276,10 @@ type IdentityServiceHandler interface {
 	// error detail. Unauthenticated — the caller holds a ticket, not a
 	// session.
 	SubmitDateOfBirth(context.Context, *connect.Request[v1.SubmitDateOfBirthRequest]) (*connect.Response[v1.SubmitDateOfBirthResponse], error)
+	// Required password change: the only RPC that accepts the completion
+	// ticket carried by the password_change_required error detail.
+	// Unauthenticated — the caller holds a ticket, not a session.
+	CompleteRequiredPasswordChange(context.Context, *connect.Request[v1.CompleteRequiredPasswordChangeRequest]) (*connect.Response[v1.CompleteRequiredPasswordChangeResponse], error)
 	// Passwordless email login (OTP code + magic link)
 	RequestEmailLoginCode(context.Context, *connect.Request[v1.RequestEmailLoginCodeRequest]) (*connect.Response[v1.RequestEmailLoginCodeResponse], error)
 	VerifyEmailLoginCode(context.Context, *connect.Request[v1.VerifyEmailLoginCodeRequest]) (*connect.Response[v1.VerifyEmailLoginCodeResponse], error)
@@ -2591,6 +2614,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceSubmitDateOfBirthProcedure,
 		svc.SubmitDateOfBirth,
 		connect.WithSchema(identityServiceMethods.ByName("SubmitDateOfBirth")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceCompleteRequiredPasswordChangeHandler := connect.NewUnaryHandler(
+		IdentityServiceCompleteRequiredPasswordChangeProcedure,
+		svc.CompleteRequiredPasswordChange,
+		connect.WithSchema(identityServiceMethods.ByName("CompleteRequiredPasswordChange")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceRequestEmailLoginCodeHandler := connect.NewUnaryHandler(
@@ -3315,6 +3344,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServicePasswordLoginHandler.ServeHTTP(w, r)
 		case IdentityServiceSubmitDateOfBirthProcedure:
 			identityServiceSubmitDateOfBirthHandler.ServeHTTP(w, r)
+		case IdentityServiceCompleteRequiredPasswordChangeProcedure:
+			identityServiceCompleteRequiredPasswordChangeHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestEmailLoginCodeProcedure:
 			identityServiceRequestEmailLoginCodeHandler.ServeHTTP(w, r)
 		case IdentityServiceVerifyEmailLoginCodeProcedure:
@@ -3592,6 +3623,10 @@ func (UnimplementedIdentityServiceHandler) PasswordLogin(context.Context, *conne
 
 func (UnimplementedIdentityServiceHandler) SubmitDateOfBirth(context.Context, *connect.Request[v1.SubmitDateOfBirthRequest]) (*connect.Response[v1.SubmitDateOfBirthResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SubmitDateOfBirth is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CompleteRequiredPasswordChange(context.Context, *connect.Request[v1.CompleteRequiredPasswordChangeRequest]) (*connect.Response[v1.CompleteRequiredPasswordChangeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CompleteRequiredPasswordChange is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) RequestEmailLoginCode(context.Context, *connect.Request[v1.RequestEmailLoginCodeRequest]) (*connect.Response[v1.RequestEmailLoginCodeResponse], error) {

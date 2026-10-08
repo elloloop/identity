@@ -197,3 +197,29 @@ func TestToConnectErrorDOBAlreadySet(t *testing.T) {
 		t.Fatalf("code = %v, want FailedPrecondition", got)
 	}
 }
+
+// TestToConnectErrorPasswordChangeRequired pins the wire contract of the
+// required-password-change step: failed_precondition, the stable
+// `password_change_required` token, and the ticket in a typed
+// PasswordChangeRequiredDetails.
+func TestToConnectErrorPasswordChangeRequired(t *testing.T) {
+	err := toConnectError(&service.PasswordChangeRequiredError{Ticket: "ticket-pc"})
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", got)
+	}
+	if !strings.Contains(err.Error(), "password_change_required") {
+		t.Fatalf("message = %q, want it to contain password_change_required", err.Error())
+	}
+	var cerr *connect.Error
+	if !errors.As(err, &cerr) || len(cerr.Details()) != 1 {
+		t.Fatalf("want one error detail, got %v", err)
+	}
+	msg, derr := cerr.Details()[0].Value()
+	if derr != nil {
+		t.Fatalf("detail Value: %v", derr)
+	}
+	details, ok := msg.(*identitypb.PasswordChangeRequiredDetails)
+	if !ok || details.CompletionToken != "ticket-pc" {
+		t.Fatalf("detail = %#v, want PasswordChangeRequiredDetails{ticket-pc}", msg)
+	}
+}

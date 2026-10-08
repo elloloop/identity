@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.11 → next — merging accounts (additive); SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
+## v4.11 → next — merging accounts (additive); a temporary password must be replaced at first sign-in; SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
 
 **Migration 0036** (SQLite 0019) adds `users.merged_into_user_id` with a
 constant default (catalog-only; `lock_timeout = 10s`; on timeout confirm the
@@ -48,6 +48,21 @@ column is absent, then `identity migrate force 35` and `identity migrate`).
   gateway and shares one set of per-IP limits.
 - **Match `RESOURCE_EXHAUSTED`, not the message,** for sign-up throttling:
   its text no longer mentions the identifier.
+
+- **A temporary password must be replaced at first sign-in (behaviour
+  change).** **Migration 0037** (SQLite 0020) adds
+  `users.password_change_required`, a constant default (catalog-only, the
+  same `lock_timeout` rule: on timeout confirm the column is absent, then
+  `identity migrate force 36` and `identity migrate`). A password an admin
+  issues from now on — `InviteUser` with `create_immediately`, `CreateUser`
+  in username mode, `ResetUserPassword` with `generate_temp_password` —
+  sets it, and `PasswordLogin` with that password answers
+  `FAILED_PRECONDITION` `password_change_required` with a
+  `PasswordChangeRequiredDetails` ticket instead of tokens. The client calls
+  the new `CompleteRequiredPasswordChange` (unauthenticated, per-IP login
+  rate limit) with the ticket and a new password. A client that signs
+  admin-created users in must handle the new refusal. Temporary passwords
+  issued before the upgrade are not flagged.
 
 ## v4.10 → v4.11 — account addresses on the project's domain (additive); neutral built-in defaults; invitation links follow the project (behaviour change)
 

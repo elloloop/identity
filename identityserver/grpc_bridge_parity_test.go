@@ -91,6 +91,7 @@ func TestGRPCBridge_ManagedMinorSurfaceIsBridged(t *testing.T) {
 		"RevokeParentalConsent",
 		"SetAccountMarket",
 		"SubmitDateOfBirth",
+		"CompleteRequiredPasswordChange",
 		"BeginPasskeyRegistration",
 		"CompletePasskeyRegistration",
 	} {

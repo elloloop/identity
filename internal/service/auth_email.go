@@ -233,10 +233,11 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 
 	now := s.nowMs()
 	if err := s.repo(ctx).UpdateUser(ctx, user.ID, map[string]any{
-		"password_hash":      pwHash,
-		"updated_at":         now,
-		"failed_login_count": 0,
-		"locked_until":       int64(0),
+		"password_hash":            pwHash,
+		"password_change_required": false,
+		"updated_at":               now,
+		"failed_login_count":       0,
+		"locked_until":             int64(0),
 	}); err != nil {
 		return fmt.Errorf("updating password: %w", err)
 	}

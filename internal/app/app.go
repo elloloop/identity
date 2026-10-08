@@ -391,6 +391,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
+			// The other completion half of a password login: unauthenticated,
+			// bcrypts the new password and mints a token pair.
+			PathPrefix: "/identity.v1.IdentityService/CompleteRequiredPasswordChange", Tag: "password_change_completion",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
 			// Passkey registration is session-less when it carries a
 			// managed-child enrolment ticket, and completing one mints the
 			// child's first token pair — a login by any other name.

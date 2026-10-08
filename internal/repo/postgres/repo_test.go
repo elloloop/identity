@@ -509,3 +509,43 @@ func requireQueryCount(ctx context.Context, t *testing.T, repo *pgRepository, ty
 	require.NoError(t, err)
 	require.Len(t, nodes, want)
 }
+
+// The admin surfaces issue a temporary password through the graph layer
+// (InviteUser create_immediately, ResetUserPassword): the flag that forces its
+// change must travel in the same create or patch as the hash.
+func TestPostgres_DBAtomicPasswordChangeRequired(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping postgres DB coverage test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	projectID := fmt.Sprintf("pcr-project-%d", time.Now().UnixNano())
+	repo, err := New(ctx, Config{DSN: dsn, MaxConns: 5, ConnTimeout: 5 * time.Second, AutoMigrate: true, ProjectID: projectID})
+	require.NoError(t, err)
+	defer repo.Close()
+	seedProject(ctx, t, repo, projectID)
+
+	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []graph.Operation{{
+		Type: graph.OpCreateNode, TypeID: dbTypeUser, NodeID: "pcr-user",
+		Data: map[string]any{
+			dbUfEmail: "pcr@example.com", dbUfStatus: "active", dbUfPasswordHash: "issued",
+			dbUfPasswordChangeRequired: true,
+		},
+	}})
+	require.NoError(t, err)
+	node, err := repo.GetNode(ctx, projectID, "actor", dbTypeUser, "pcr-user")
+	require.NoError(t, err)
+	require.Equal(t, true, node.Payload[dbUfPasswordChangeRequired])
+
+	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []graph.Operation{{
+		Type: graph.OpUpdateNode, TypeID: dbTypeUser, NodeID: "pcr-user",
+		Patch: map[string]any{dbUfPasswordHash: "own", dbUfPasswordChangeRequired: false},
+	}})
+	require.NoError(t, err)
+	u, err := repo.GetUser(ctx, "pcr-user")
+	require.NoError(t, err)
+	require.False(t, u.PasswordChangeRequired)
+	require.Equal(t, "own", u.PasswordHash)
+}

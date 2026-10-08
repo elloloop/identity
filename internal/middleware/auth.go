@@ -26,7 +26,8 @@ var AuthExemptPaths = map[string]bool{
 	// Required-DOB completion: the caller holds the short-lived completion
 	// ticket from the dob_required error detail, not a session JWT — no
 	// session exists until the DOB is submitted.
-	"/identity.v1.IdentityService/SubmitDateOfBirth": true,
+	"/identity.v1.IdentityService/SubmitDateOfBirth":              true,
+	"/identity.v1.IdentityService/CompleteRequiredPasswordChange": true,
 	// Passwordless email login: the caller is anonymous, proving control
 	// of an inbox via an OTP code or a magic-link token rather than a JWT.
 	"/identity.v1.IdentityService/RequestEmailLoginCode": true,

@@ -198,6 +198,10 @@ func (b *grpcBridge) PasswordLogin(ctx context.Context, in *identitypb.PasswordL
 	return invoke(ctx, b, in, b.h.PasswordLogin)
 }
 
+func (b *grpcBridge) CompleteRequiredPasswordChange(ctx context.Context, in *identitypb.CompleteRequiredPasswordChangeRequest) (*identitypb.CompleteRequiredPasswordChangeResponse, error) {
+	return invoke(ctx, in, b.h.CompleteRequiredPasswordChange)
+}
+
 func (b *grpcBridge) SubmitDateOfBirth(ctx context.Context, in *identitypb.SubmitDateOfBirthRequest) (*identitypb.SubmitDateOfBirthResponse, error) {
 	return invoke(ctx, b, in, b.h.SubmitDateOfBirth)
 }

@@ -148,6 +148,20 @@ func toConnectError(err error) *connect.Error {
 		}
 		return cerr
 
+	case errors.Is(err, service.ErrPasswordChangeRequired):
+		// FailedPrecondition, like dob_required: the client completes a step
+		// (CompleteRequiredPasswordChange) with the ticket in the detail.
+		cerr := connect.NewError(connect.CodeFailedPrecondition, err)
+		var pcErr *service.PasswordChangeRequiredError
+		if errors.As(err, &pcErr) && pcErr.Ticket != "" {
+			if detail, detErr := connect.NewErrorDetail(&identitypb.PasswordChangeRequiredDetails{
+				CompletionToken: pcErr.Ticket,
+			}); detErr == nil {
+				cerr.AddDetail(detail)
+			}
+		}
+		return cerr
+
 	case errors.Is(err, service.ErrMergeConflict):
 		// One of the two accounts changed between the merge's checks and its
 		// transaction (a concurrent merge or deactivation): retryable.

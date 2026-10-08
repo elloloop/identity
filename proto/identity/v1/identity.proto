@@ -104,6 +104,12 @@ message User {
   // account is DEACTIVATED, never signs in and can never be reactivated;
   // data a client holds under its id belongs to that account now.
   string merged_into_user_id = 30;
+  // password_change_required is set while the account's password is one an
+  // administrator issued (CreateUser in username mode, InviteUser with
+  // create_immediately, ResetUserPassword with generate_temporary). A
+  // PasswordLogin with it is refused `password_change_required` until the
+  // user chooses their own password through CompleteRequiredPasswordChange.
+  bool password_change_required = 31;
 }
 
 message MergeUsersRequest {
@@ -508,6 +514,46 @@ message SubmitDateOfBirthResponse {
   string access_token = 2; // empty when user.status is USER_STATUS_PENDING_PARENTAL_CONSENT
   string refresh_token = 3; // empty likewise
   int32 expires_in = 4; // Access token lifetime in seconds
+}
+
+// ─── Required password change ─────────────────────────────────────────
+// A password an administrator issued (User.password_change_required) signs
+// in once, to be replaced: PasswordLogin with it fails with
+// CodeFailedPrecondition, the stable `password_change_required` token in the
+// message, and a PasswordChangeRequiredDetails error detail carrying a
+// short-lived completion ticket. The client asks the user for a new password
+// and calls CompleteRequiredPasswordChange with the ticket. A wrong password
+// gets the ordinary sign-in refusal, so the step reveals nothing to a caller
+// who does not hold the issued password.
+
+// PasswordChangeRequiredDetails is the error detail attached to the
+// `password_change_required` refusal returned by PasswordLogin.
+message PasswordChangeRequiredDetails {
+  // A short-lived (10 minute) bearer ticket whose only use is a
+  // CompleteRequiredPasswordChange call for the account it was minted for.
+  // It is NOT an access token: it carries a `purpose` claim and
+  // authenticates no other RPC.
+  string completion_token = 1;
+}
+
+// CompleteRequiredPasswordChange replaces an administrator-issued password
+// with the user's own and completes the sign-in the refusal interrupted. The
+// new password meets the account's password policy and must differ from the
+// issued one. The response is PasswordLogin's: an account with two-step
+// verification (or a login policy requiring a second factor) gets
+// totp_required and a login_challenge_id instead of tokens.
+message CompleteRequiredPasswordChangeRequest {
+  string completion_token = 1; // from the password_change_required error detail
+  string new_password = 2;
+}
+
+message CompleteRequiredPasswordChangeResponse {
+  User user = 1;
+  string access_token = 2; // empty when totp_required=true
+  string refresh_token = 3; // empty when totp_required=true
+  int32 expires_in = 4; // Access token lifetime in seconds
+  bool totp_required = 5; // client must call VerifyTotp with login_challenge_id
+  string login_challenge_id = 6;
 }
 
 // ─── Passwordless Email Login (OTP code + magic link) ────────────────
@@ -2487,6 +2533,10 @@ service IdentityService {
   // error detail. Unauthenticated — the caller holds a ticket, not a
   // session.
   rpc SubmitDateOfBirth(SubmitDateOfBirthRequest) returns (SubmitDateOfBirthResponse);
+  // Required password change: the only RPC that accepts the completion
+  // ticket carried by the password_change_required error detail.
+  // Unauthenticated — the caller holds a ticket, not a session.
+  rpc CompleteRequiredPasswordChange(CompleteRequiredPasswordChangeRequest) returns (CompleteRequiredPasswordChangeResponse);
 
   // Passwordless email login (OTP code + magic link)
   rpc RequestEmailLoginCode(RequestEmailLoginCodeRequest) returns (RequestEmailLoginCodeResponse);

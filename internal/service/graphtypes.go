@@ -62,6 +62,9 @@ const (
 	// ufMergedInto carries the account a merged account was merged into, so
 	// the admin surfaces can refuse to reactivate it.
 	ufMergedInto = "22"
+	// ufPasswordChangeRequired marks a password an administrator issued: the
+	// next password sign-in must replace it (CompleteRequiredPasswordChange).
+	ufPasswordChangeRequired = "23"
 )
 
 // ── WorkingGroup field IDs (type_id 2) ─────────────────────────────

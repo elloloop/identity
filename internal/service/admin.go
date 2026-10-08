@@ -179,6 +179,7 @@ func (s *AdminService) InviteUser(
 			return nil, fmt.Errorf("hash temp password: %w", err)
 		}
 		userData[ufPasswordHash] = hash
+		userData[ufPasswordChangeRequired] = true
 		userData[ufStatus] = "active"
 	} else {
 		userData[ufStatus] = "invited"
@@ -397,7 +398,7 @@ func (s *AdminService) ResetUserPassword(
 		}
 		op := graph.Operation{
 			Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
-			Patch: map[string]any{ufPasswordHash: hash, ufUpdatedAt: now},
+			Patch: map[string]any{ufPasswordHash: hash, ufPasswordChangeRequired: true, ufUpdatedAt: now},
 		}
 		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 			return nil, fmt.Errorf("set temp password: %w", err)

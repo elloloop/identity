@@ -28,6 +28,7 @@ const userColumns = `
 	deletion_scheduled_at_ms,
 	is_anonymous, anonymous_last_seen_ms,
 	market, username, account_address, merged_into_user_id,
+	password_change_required,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed qualifies every column with the given table alias so
@@ -55,6 +56,7 @@ func scanUser(s scanner) (*service.User, error) {
 		phoneNumber                                            string
 		externalID                                             string
 		market, username, accountAddress, mergedInto           string
+		passwordChangeRequired                                 int64
 	)
 	if err := s.Scan(
 		&id, &email, &name, &role, &avatar, &status, &recovery,
@@ -69,6 +71,7 @@ func scanUser(s scanner) (*service.User, error) {
 		&deletionScheduledAtMs,
 		&isAnonymous, &anonymousLastSeenMs,
 		&market, &username, &accountAddress, &mergedInto,
+		&passwordChangeRequired,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -102,6 +105,7 @@ func scanUser(s scanner) (*service.User, error) {
 	u.Username = username
 	u.AccountAddress = accountAddress
 	u.MergedIntoUserID = mergedInto
+	u.PasswordChangeRequired = passwordChangeRequired != 0
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -266,6 +270,7 @@ const insertUserQuery = `
 		deletion_scheduled_at_ms,
 		is_anonymous, anonymous_last_seen_ms,
 		market, username, account_address, merged_into_user_id,
+		password_change_required,
 		created_at_ms, updated_at_ms
 	) VALUES (
 		$1, $2, $3, $4, $5, $6, $7,
@@ -280,7 +285,8 @@ const insertUserQuery = `
 		$24,
 		$25, $26,
 		$27, $28, $29, $30,
-		$31, $32
+		$31,
+		$32, $33
 	)`
 
 // insertUserArgs renders the bind args for insertUserQuery in column order.
@@ -299,6 +305,7 @@ func insertUserArgs(projectID, id, role, status string, u *service.User) []any {
 		u.DeletionScheduledAtMs,
 		u.IsAnonymous, u.AnonymousLastSeenMs,
 		u.Market, u.Username, u.AccountAddress, u.MergedIntoUserID,
+		u.PasswordChangeRequired,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	}
 }
@@ -377,6 +384,7 @@ var userFieldColumns = map[string]struct {
 	"username":                 {"username", "string"},
 	"account_address":          {"account_address", "string"},
 	"merged_into_user_id":      {"merged_into_user_id", "string"},
+	"password_change_required": {"password_change_required", "bool"},
 }
 
 func (r *sqliteRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {

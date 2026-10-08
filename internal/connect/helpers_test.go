@@ -288,6 +288,10 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 			}
 		case "password_hash":
 			u.PasswordHash = v.(string)
+		case "password_change_required":
+			if b, ok := v.(bool); ok {
+				u.PasswordChangeRequired = b
+			}
 		case "status":
 			u.Status = v.(string)
 		case "totp_required":

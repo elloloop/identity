@@ -527,6 +527,10 @@ func applyUserFields(u *User, fields map[string]any) {
 			if b, ok := v.(bool); ok {
 				u.EmailVerified = b
 			}
+		case "password_change_required":
+			if b, ok := v.(bool); ok {
+				u.PasswordChangeRequired = b
+			}
 		case "email_verified_at":
 			switch x := v.(type) {
 			case int64:

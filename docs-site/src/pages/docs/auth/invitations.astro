@@ -53,8 +53,8 @@ import { Code } from "astro-expressive-code/components";
     <code>InviteUser</code> with <code>create_immediately: true</code>
     creates a fully-active user with a randomly-generated temporary
     password, returned to the admin in the response. The admin hands the
-    password off out of band; the user signs in and is expected to change
-    it.
+    password off out of band; at the user's first sign-in they replace it
+    (see <a href="#first-sign-in">below</a>).
   </p>
   <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/InviteUser \\
   -H "Authorization: Bearer $ADMIN_TOKEN" \\
@@ -76,6 +76,40 @@ import { Code } from "astro-expressive-code/components";
     create-immediately path. With <code>generate_temp_password: true</code>
     the admin gets a temporary password; with <code>false</code> the admin
     gets a one-time reset token they can deliver themselves.
+  </p>
+
+  <h2 id="first-sign-in">First sign-in with a temporary password</h2>
+  <p>
+    A password an admin issued — <code>InviteUser</code> with
+    <code>create_immediately</code>, <code>CreateUser</code> in username mode,
+    <code>ResetUserPassword</code> with <code>generate_temp_password</code> —
+    opens no session. The account carries
+    <code>User.password_change_required</code>, and <code>PasswordLogin</code>
+    with the right password answers <code>FAILED_PRECONDITION</code>. The
+    message starts with <code>password_change_required</code> and a
+    <code>PasswordChangeRequiredDetails</code> error detail carries a
+    10-minute <code>completion_token</code>. A wrong password gets the
+    ordinary sign-in refusal, so the step tells nothing to someone without
+    the issued password.
+  </p>
+  <p>
+    Ask the user for a new password and call
+    <code>CompleteRequiredPasswordChange</code> with the token. It needs no
+    session. The new password must meet the account's password policy and
+    differ from the issued one. The response is <code>PasswordLogin</code>'s:
+    tokens, or <code>totp_required</code> and a
+    <code>login_challenge_id</code> when the account has two-step
+    verification or the login policy requires a second factor.
+  </p>
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/CompleteRequiredPasswordChange \\
+  -H 'Content-Type: application/json' \\
+  -d '{ "completionToken": "eyJ...", "newPassword": "a-password-of-their-own" }'`} lang="bash" />
+  <p>
+    The flag clears whenever the user sets a password themselves: this step,
+    <code>ChangePassword</code>, a reset link, or accepting an invitation. A
+    reset link the admin sends (<code>generate_temp_password: false</code>)
+    lets the user choose from the start, so it sets no flag. An account
+    still holding an issued password cannot be merged into another.
   </p>
 
   <h2>Audit trail</h2>
