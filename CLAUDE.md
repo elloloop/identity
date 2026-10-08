@@ -16,7 +16,9 @@ Highlights for quick recall:
   Conformance suites get extended, not bypassed.
 - **Clean commit messages.** Imperative mood, no AI attribution, no
   references to inaccessible context.
-- **PR review gate on every PR.** A fixed-roster multi-agent gate via
+- **PR review gate on every PR — always, never asked.** Dependabot's,
+  docs-only and release-prep PRs included; an agent runs it before merge
+  without asking whether to. A fixed-roster multi-agent gate via
   `Workflow({name: 'review-gate', args: <pr-number>})`: nine specialist
   reviewers (Correctness, Security & Auth, Neutrality & Disclosure, API
   Contract, Data & Migrations, Config & Operability, Maintainability &
