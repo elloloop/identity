@@ -138,6 +138,13 @@ func TestAuthTime_AnonymousAccounts(t *testing.T) {
 // No auth_time a trusted host forwards, however large, overflows the check.
 func TestMergeAccounts_AbsurdAuthTimeIsNotRecent(t *testing.T) {
 	svc, _, survivor, _, ctx := mergeFixture(t)
-	_, err := svc.MergeAccounts(ctx, survivor.ID, math.MaxInt64, "bob", accessTestPassword, "203.0.113.10", "agent", false)
-	require.ErrorIs(t, err, ErrReauthenticationRequired)
+	for name, authTime := range map[string]int64{
+		// 2^61 * 1000 is 0 mod 2^64: in milliseconds this wrapped to "now",
+		// the case a millisecond comparison got wrong.
+		"wraps to now in milliseconds": time.Now().Unix() + 1<<61,
+		"the largest value":            math.MaxInt64,
+	} {
+		_, err := svc.MergeAccounts(ctx, survivor.ID, authTime, "bob", accessTestPassword, "203.0.113.10", "agent", false)
+		require.ErrorIs(t, err, ErrReauthenticationRequired, name)
+	}
 }

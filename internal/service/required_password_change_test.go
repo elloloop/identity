@@ -351,22 +351,48 @@ func TestRequiredPasswordChange_ClearedWithAClearedPassword(t *testing.T) {
 // Every gate the sign-in passed after the password is checked again at
 // completion: a change in between wins over the ticket, and nothing changes.
 func TestRequiredPasswordChange_GatesRecheckedAtCompletion(t *testing.T) {
-	cases := map[string]func(svc *AuthService, u *User){
-		"locked":           func(_ *AuthService, u *User) { u.LockedUntil = nowMs() + 60_000 },
-		"deactivated":      func(_ *AuthService, u *User) { u.Status = StatusDeactivated },
-		"email unverified": func(svc *AuthService, u *User) { svc.cfg.AuthRequireVerifiedEmail = true; u.EmailVerified = false },
+	cases := map[string]struct {
+		change func(svc *AuthService, u *User)
+		// signInIn and completeIn are the scopes each half runs under; nil is
+		// the default project.
+		signInIn, completeIn func(t *testing.T) context.Context
+		want                 error
+	}{
+		"locked":      {change: func(_ *AuthService, u *User) { u.LockedUntil = nowMs() + 60_000 }, want: ErrAccountLocked},
+		"deactivated": {change: func(_ *AuthService, u *User) { u.Status = StatusDeactivated }, want: ErrAccountNotActive},
+		"email unverified": {
+			change: func(svc *AuthService, u *User) { svc.cfg.AuthRequireVerifiedEmail = true; u.EmailVerified = false },
+			want:   ErrEmailVerificationRequired,
+		},
+		"access closed": {
+			change:     func(*AuthService, *User) {},
+			signInIn:   func(t *testing.T) context.Context { return accessScope(t, `{"access":{"mode":"open"}}`) },
+			completeIn: func(t *testing.T) context.Context { return accessScope(t, `{"access":{"mode":"closed"}}`) },
+			want:       ErrAccessNotAllowed,
+		},
 	}
-	for name, change := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			repo := newFakeRepo()
 			svc := newTestAuthService(t, repo)
 			user := issuedPasswordUser(t, repo, "issued@example.com")
 			user.EmailVerified = true
-			ticket := passwordChangeTicket(t, svc, "issued@example.com")
+			signInCtx := context.Background()
+			if tc.signInIn != nil {
+				signInCtx = tc.signInIn(t)
+			}
+			_, loginErr := svc.PasswordLogin(signInCtx, "issued@example.com", issuedPW, "203.0.113.10", "agent")
+			var pcErr *PasswordChangeRequiredError
+			require.ErrorAs(t, loginErr, &pcErr)
+			ticket := pcErr.Ticket
 
-			change(svc, user)
-			_, err := svc.CompleteRequiredPasswordChange(context.Background(), ticket, strongPW, "", "203.0.113.10", "agent")
-			require.Error(t, err)
+			tc.change(svc, user)
+			ctx := context.Background()
+			if tc.completeIn != nil {
+				ctx = tc.completeIn(t)
+			}
+			_, err := svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "", "203.0.113.10", "agent")
+			require.ErrorIs(t, err, tc.want)
 			stored, _ := repo.GetUser(context.Background(), user.ID)
 			require.True(t, stored.PasswordChangeRequired, "nothing changed")
 			require.True(t, passwords.Verify(issuedPW, stored.PasswordHash))

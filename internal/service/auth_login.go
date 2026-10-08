@@ -673,10 +673,10 @@ func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts po
 			return loginPolicyDecision{}, err
 		}
 	}
-	// Email-verification gate. The password is correct at this point, so this
-	// is the one place the gate can fire without creating an enumeration oracle
-	// (an unknown email or a wrong password already returned above with the
-	// generic ErrUnauthenticated). When required, an unverified account cannot
+	// Email-verification gate. Callers reach this only with the password
+	// proven, so the gate can fire without creating an enumeration oracle (an
+	// unknown email or a wrong password was already refused with the generic
+	// ErrUnauthenticated). When required, an unverified account cannot
 	// authenticate — this closes the pre-hijacking vector where an attacker
 	// plants a password on an unverified address and waits for the real owner
 	// to verify it via OAuth/passwordless.
