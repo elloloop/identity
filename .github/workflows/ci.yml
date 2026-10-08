@@ -454,8 +454,11 @@ jobs:
           push: false
           load: true
           tags: identity:ci
+          # Only main writes the layer cache; PRs and the merge queue read it.
+          # A PR's own cache is visible to that PR alone and crowded the
+          # repository's 10 GB Actions cache out of main's Go build cache.
           cache-from: type=gha,scope=ci-docker
-          cache-to: type=gha,mode=max,scope=ci-docker
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=ci-docker' || '' }}
 
       - name: docker run smoke
         shell: bash

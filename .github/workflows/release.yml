@@ -136,8 +136,9 @@ jobs:
           target: server
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # A tag's Actions cache is visible to that tag alone, so a release
+          # writing one only evicted main's caches. It reads main's layers.
+          cache-from: type=gha,scope=ci-docker
           sbom: true
           provenance: mode=max
           build-args: |
