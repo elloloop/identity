@@ -121,7 +121,14 @@ import { Code } from "astro-expressive-code/components";
     <li>
       A username is 3–32 lowercase letters, digits, <code>_</code>,
       <code>-</code> and <code>.</code>. It may not contain <code>-at-</code>,
-      start or end with <code>.</code>, or contain <code>..</code>.
+      start or end with <code>.</code>, contain <code>..</code>, be a reserved
+      role name, or end in <code>-</code> and eight hex digits (the tag a
+      clashing account's fallback address carries).
+    </li>
+    <li>
+      A username account that adds an email (an email change) becomes an email
+      account, so it may only where <code>email_signup</code> is
+      <code>self</code>.
     </li>
     <li>
       A username is a public handle, so a taken one is reported as taken. This
@@ -232,8 +239,8 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>When it is issued</h2>
   <p>
-    A username (managed child) account gets its address when its guardian
-    creates it. An email account gets its address once its email is verified:
+    A username account gets its address when it is created: by its own
+    sign-up, by an admin, or by a guardian for a managed child. An email account gets its address once its email is verified:
     at sign-up when the sign-up proves the address (OAuth, passkey, an emailed
     code), otherwise at the first sign-in or session refresh after
     verification. That includes accounts an admin invites and accounts SCIM

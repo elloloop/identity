@@ -142,6 +142,18 @@ func (s *AuthService) enforceAccountAccessLogin(ctx context.Context, user *User)
 	return ErrAccessNotAllowed
 }
 
+// enforceEmailAdded refuses an account with no email (a username account)
+// adding one where the project does not let people create their own email
+// accounts: that would make it a self-created email account by another door.
+// An account that already has an email is changing it, not adding one.
+func (s *AuthService) enforceEmailAdded(ctx context.Context, user *User) error {
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil || user.Email != "" {
+		return nil
+	}
+	return s.enforceEmailSelfSignup(ctx, scope)
+}
+
 // enforceEmailSelfSignup refuses a self-signup the access mode admitted when
 // the project does not let people create their own email accounts
 // (accounts.email_signup "admin" or "off"). Like the mode check it is DB-free

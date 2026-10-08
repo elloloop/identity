@@ -308,3 +308,20 @@ func TestValidateUsernameFormat_RefusesTheIDFormTag(t *testing.T) {
 	require.NoError(t, validateUsernameFormat("bob-1a2b3c4"))
 	require.NoError(t, validateUsernameFormat("bob-cafebabe1"))
 }
+
+// A username account cannot become an email account by adding an email where
+// people may not create email accounts themselves.
+func TestUsernameAccount_CannotAddAnEmailWhereEmailSignupIsNotSelf(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	for mode, want := range map[string]error{"admin": ErrSignupByInvitationOnly, "off": ErrAccountKindOff} {
+		ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self","email_signup":"`+mode+`"}}`)
+		res, err := svc.UsernameSignup(ctx, "jo-"+mode, accessTestPassword, "", 0, "")
+		require.NoError(t, err)
+		err = svc.RequestEmailChange(ctx, res.User.ID, "jo@mail.example.test", accessTestPassword)
+		require.ErrorIs(t, err, want, mode)
+	}
+	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
+	res, err := svc.UsernameSignup(ctx, "jo-self", accessTestPassword, "", 0, "")
+	require.NoError(t, err)
+	require.NoError(t, svc.RequestEmailChange(ctx, res.User.ID, "jo@mail.example.test", accessTestPassword))
+}
