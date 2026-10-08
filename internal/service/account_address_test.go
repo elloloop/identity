@@ -338,3 +338,10 @@ func TestAccountAddress_IssuedOnRefresh(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "early-at-mail.example.com@accounts.example.com", u.AccountAddress)
 }
+
+func TestProjectAccountsConfig_DomainFitsAnAddress(t *testing.T) {
+	long := strings.Repeat("a", 60) + "." + strings.Repeat("b", 60) + "." + strings.Repeat("c", 60) + ".example"
+	require.Greater(t, len(long), maxAccountDomain)
+	_, err := ParseProjectConfig(`{"accounts":{"domain":"` + long + `"}}`)
+	require.Error(t, err)
+}

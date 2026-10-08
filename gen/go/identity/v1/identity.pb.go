@@ -419,7 +419,8 @@ type User struct {
 	// username is the parent-chosen, project-unique handle identifying a
 	// managed child account (children often have no email). Lowercase
 	// alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase at
-	// write time. Empty on every account not created via
+	// write time. A new or renamed username may not contain `-at-`, start or
+	// end with `.`, or contain `..`; one stored before that rule is kept. Empty on every account not created via
 	// CreateManagedChildAccount. Unique within the project when non-empty, and
 	// usable as the PasswordLogin identifier.
 	Username string `protobuf:"bytes,28,opt,name=username,proto3" json:"username,omitempty"`
@@ -6095,7 +6096,8 @@ func (x *GetGuardiansResponse) GetNextCursor() string {
 type CreateManagedChildAccountRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// username is the child account's project-unique handle: lowercase
-	// alphanumerics plus `_`/`-`/`.`, 3..32 chars (normalized to lowercase).
+	// alphanumerics plus `_`/`-`/`.`, 3..32 chars (normalized to lowercase),
+	// not containing `-at-`, not starting or ending with `.`, no `..`.
 	// A duplicate within the project is CodeAlreadyExists.
 	Username string `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
 	// display_name is the child's display name (optional).
@@ -6496,7 +6498,9 @@ type SetManagedChildUsernameRequest struct {
 	ChildUserId string                 `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
 	// username is the new project-unique handle, validated exactly as
 	// CreateManagedChildAccount validates it (lowercase alphanumerics plus
-	// `_`/`-`/`.`, 3..32 chars, normalized to lowercase). A duplicate within
+	// `_`/`-`/`.`, 3..32 chars, normalized to lowercase, no `-at-`, no `.` at
+	// either end, no `..`). Re-submitting the child's current username is a
+	// no-op even if it predates those rules. A duplicate within
 	// the project is ALREADY_EXISTS.
 	Username       string `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
 	StepUpPassword string `protobuf:"bytes,3,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`

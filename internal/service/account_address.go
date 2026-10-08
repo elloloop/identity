@@ -56,7 +56,9 @@ func (a ProjectAccountsConfig) validate() error {
 	if strings.TrimSpace(a.Domain) == "" {
 		return nil
 	}
-	if !isBareDomainName(canonicalAccountDomain(a.Domain)) {
+	// An address is at most 254 characters (RFC 5321), and its local part may
+	// take 64 of them plus the '@'.
+	if d := canonicalAccountDomain(a.Domain); !isBareDomainName(d) || len(d) > maxAccountDomain {
 		return fmt.Errorf("accounts.domain %q: want a fully qualified domain name such as accounts.example.com", a.Domain)
 	}
 	return nil
@@ -79,6 +81,10 @@ func canonicalAccountDomain(domain string) string {
 	}
 	return d
 }
+
+// maxAccountDomain bounds the account domain so that every address issued on
+// it fits RFC 5321's 254-character path: 254 - 64 (local part) - 1 ('@').
+const maxAccountDomain = 189
 
 // maxAddressLocalPart is RFC 5321's limit on the part of an address before
 // the '@'.
@@ -172,12 +178,13 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 	if local == "" {
 		return
 	}
-	for attempt := 1; attempt <= maxAddressAttempts+1; attempt++ {
-		candidate := fitAddressLocalPart(local, attempt)
-		if attempt > maxAddressAttempts {
-			sum := sha256.Sum256([]byte(u.ID))
-			candidate = fitAddressLocalPart(local+"-"+hex.EncodeToString(sum[:4]), 1)
-		}
+	candidates := make([]string, 0, maxAddressAttempts+1)
+	for attempt := 1; attempt <= maxAddressAttempts; attempt++ {
+		candidates = append(candidates, fitAddressLocalPart(local, attempt))
+	}
+	sum := sha256.Sum256([]byte(u.ID))
+	candidates = append(candidates, fitAddressLocalPart(local+"-"+hex.EncodeToString(sum[:4]), 1))
+	for _, candidate := range candidates {
 		held, err := repo.AssignAccountAddress(ctx, u.ID, candidate+"@"+scope.Accounts.Domain)
 		if err == nil {
 			u.AccountAddress = held
@@ -187,11 +194,11 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 			return
 		}
 		if !errors.Is(err, ErrAlreadyExists) {
-			logger.Warn("account_address_assign_failed", zap.String("user_id", u.ID), zap.Error(err))
+			logger.Warn("account_address_assign_failed", zap.String("project_id", scope.ProjectID), zap.String("user_id", u.ID), zap.Error(err))
 			return
 		}
 	}
-	logger.Warn("account_address_exhausted", zap.String("user_id", u.ID))
+	logger.Warn("account_address_exhausted", zap.String("project_id", scope.ProjectID), zap.String("user_id", u.ID))
 }
 
 // reissueEmailAddress re-derives the account address of an account whose
@@ -200,8 +207,9 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 // account is visible to. An address that came from a username is the
 // account's own handle and stays.
 //
-// A project that no longer issues addresses keeps the one it issued: the
-// address is only ever replaced by another, never dropped.
+// A project that no longer issues addresses keeps the one it issued. The
+// release and the new assignment are two writes; if the second fails the
+// account is left without an address until its next sign-in issues one.
 func reissueEmailAddress(ctx context.Context, repo Repository, logger *zap.Logger, u *User) {
 	if u == nil || u.Username != "" || u.AccountAddress == "" {
 		return

@@ -1223,6 +1223,8 @@ func applyUserStringField(u *service.User, key string, v any) bool {
 		u.Market = s
 	case "username":
 		u.Username = s
+	case "account_address":
+		u.AccountAddress = s
 	default:
 		return false
 	}
@@ -1232,7 +1234,8 @@ func applyUserStringField(u *service.User, key string, v any) bool {
 func isUserStringField(key string) bool {
 	switch key {
 	case "name", "email", "avatar_url", "password_hash", "status",
-		"recovery_email", "external_id", "phone_number", "market", "username":
+		"recovery_email", "external_id", "phone_number", "market", "username",
+		"account_address":
 		return true
 	}
 	return false

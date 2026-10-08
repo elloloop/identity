@@ -454,6 +454,26 @@ func TestSetManagedChildUsername(t *testing.T) {
 		}
 	})
 
+	t.Run("keeps a stored legacy handle and refuses a new one", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		// Stored before the address rules: "-at-" is no longer allowed in a
+		// new username.
+		if err := f.repo.UpdateUser(ctx, f.child.ID, map[string]any{"username": "pat-at-home"}); err != nil {
+			t.Fatalf("seed legacy username: %v", err)
+		}
+		// Re-submitting it is the idempotent no-op: any write would fail.
+		f.repo.updateUserErr = errors.New("no write expected")
+		child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "pat-at-home", strongPW, "", "")
+		if err != nil || child.Username != "pat-at-home" {
+			t.Fatalf("same legacy handle: %v %+v", err, child)
+		}
+		f.repo.updateUserErr = nil
+		// Renaming to a different handle the rules refuse is still refused.
+		if _, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "sam-at-home", strongPW, "", ""); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("new -at- handle: err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
 	t.Run("maps a racing unique-index violation", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		f.repo.updateUserErr = fmt.Errorf("unique index: %w", ErrAlreadyExists)
