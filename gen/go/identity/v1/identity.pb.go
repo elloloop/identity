@@ -427,8 +427,11 @@ type User struct {
 	// own domain (config_json accounts.domain): <username>@<domain> for a
 	// username account, the email with '@' written as "-at-" for an email
 	// account (bob@mail.example -> bob-at-mail.example@<domain>). Assigned at
-	// creation, or at the first sign-in after the project configures a domain,
-	// and never rewritten. Empty when the project issues none.
+	// creation, or at the first sign-in after the project configures a domain.
+	// A username's address never changes; an email's follows a confirmed
+	// change of that email, and the address it released can later be issued
+	// to another account — key on the user id, not this address. Empty when
+	// the project issues none.
 	AccountAddress string `protobuf:"bytes,29,opt,name=account_address,json=accountAddress,proto3" json:"account_address,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache

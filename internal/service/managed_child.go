@@ -50,14 +50,27 @@ func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
 }
 
-// validateUsernameFormat enforces the username shape. One rule, one
-// implementation: every write path that accepts a username validates here.
-func validateUsernameFormat(username string) error {
+// validateUsernameShape checks the alphabet and length every stored username
+// has always had. Sign-in looks a username up only when it passes, so it
+// must stay as permissive as every rule a stored username was created under:
+// usernames created before the address rules below still sign in.
+func validateUsernameShape(username string) error {
 	if len(username) < usernameMinLen || len(username) > usernameMaxLen {
 		return fmt.Errorf("%w: username must be %d-%d characters", ErrInvalidArgument, usernameMinLen, usernameMaxLen)
 	}
 	if !usernamePattern.MatchString(username) {
 		return fmt.Errorf("%w: username may contain only lowercase letters, digits, '_', '-', and '.'", ErrInvalidArgument)
+	}
+	return nil
+}
+
+// validateUsernameFormat is the rule for a NEW username — at creation or a
+// rename: the shape, plus the rules that keep its account address apart and
+// valid. One rule, one implementation: every write path that accepts a
+// username validates here.
+func validateUsernameFormat(username string) error {
+	if err := validateUsernameShape(username); err != nil {
+		return err
 	}
 	// A username is also the part before the '@' of the account's address on
 	// the project's domain, which an email account spells as "<local>-at-<host>".

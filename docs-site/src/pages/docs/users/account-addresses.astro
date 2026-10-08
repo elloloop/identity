@@ -44,7 +44,7 @@ import { Code } from "astro-expressive-code/components";
       <code>@</code> written as <code>-at-</code>:
       <code>bob@mail.example</code> becomes
       <code>bob-at-mail.example@accounts.example.com</code>. Two people named Bob
-      at different providers never collide, and the plain
+      at different providers get different addresses, and the plain
       <code>bob@accounts.example.com</code> stays free for a username account.
     </li>
     <li>
@@ -65,8 +65,9 @@ import { Code } from "astro-expressive-code/components";
       derived from the account's id ends the search.
     </li>
     <li>
-      Usernames may not contain <code>-at-</code>, so no username can take the
-      address another person's email derives to.
+      New usernames may not contain <code>-at-</code>, so no new username can
+      take the address another person's email derives to. Usernames created
+      before this rule keep working as they are.
     </li>
     <li>Anonymous accounts get no address until they are upgraded.</li>
   </ul>
@@ -85,7 +86,10 @@ import { Code } from "astro-expressive-code/components";
     leaves issued addresses as they were. The one exception is an address
     derived from an email: when the person confirms a change of email, the
     address follows it, so it never goes on spelling out an address they gave
-    up. A username's address is the account's own handle and stays. Failing to
+    up. A username's address is the account's own handle and stays. A project
+    that stops issuing addresses keeps the ones it issued. An address released
+    by an email change can later be issued to another account, so treat the
+    address as a handle and key on the user id. Failing to
     store an address never blocks a sign-in: the server logs it and tries again
     at the next sign-in.
   </p>

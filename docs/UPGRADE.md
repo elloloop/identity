@@ -25,7 +25,8 @@ again.
 - **Usernames may no longer contain `-at-`, start or end with `.`, or
   contain `..`.** This keeps a username's address apart from the addresses
   emails derive to, and keeps every address valid. It applies to new
-  managed child usernames and to renames; existing usernames are kept.
+  managed child usernames and to renames; existing usernames are kept and
+  still sign in.
 
 - **`GATEWAY_TOTP_ISSUER` and `GATEWAY_PASSKEY_RP_NAME` default to
   `Identity`.** The built-in defaults used to name one deployment's

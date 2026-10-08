@@ -466,7 +466,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		// standing (CreateManagedChildAccount succeeds under invite/closed).
 		identifierKey = "username"
 		username := normalizeUsername(identifier)
-		if validateUsernameFormat(username) == nil {
+		if validateUsernameShape(username) == nil {
 			user, err = s.repo(ctx).FindUserByUsername(ctx, username)
 			if err != nil {
 				return nil, err

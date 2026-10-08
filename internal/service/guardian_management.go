@@ -248,16 +248,17 @@ func (s *AuthService) SetManagedChildUsername(
 		return nil, err
 	}
 	username = normalizeUsername(username)
-	if err := validateUsernameFormat(username); err != nil {
-		return nil, err
-	}
 	repo := s.repo(ctx)
 	if username == child.Username {
-		// Idempotent: the handle is already this account's.
+		// Idempotent: the handle is already this account's — including one
+		// created before today's username rules, which stays valid as kept.
 		s.stampAgeBand(ctx, child)
 		s.auditGuardianAction(ctx, guardianOpSetUsername, guardianUserID, child.ID, true, ip, userAgent,
 			map[string]any{"username": username, "unchanged": true})
 		return child, nil
+	}
+	if err := validateUsernameFormat(username); err != nil {
+		return nil, err
 	}
 	existing, err := repo.FindUserByUsername(ctx, username)
 	if err != nil {

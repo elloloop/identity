@@ -27,6 +27,9 @@ import (
 // address is assigned once. Changing the project's domain later leaves it as
 // it was; an address derived from an email follows a confirmed change of
 // that email, so it never goes on spelling out an address the person gave up.
+// The address is a handle, not an identity: an address released by an email
+// change can later be issued to another account, so relying parties key on
+// the user id.
 type ProjectAccountsConfig struct {
 	// Domain is the domain account addresses are issued on, e.g.
 	// "accounts.example.com". Empty (the default) issues none.
@@ -179,7 +182,7 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 		if err == nil {
 			u.AccountAddress = held
 			if held != "" {
-				logger.Info("account_address_assigned", zap.String("user_id", u.ID))
+				logger.Info("account_address_assigned", zap.String("project_id", scope.ProjectID), zap.String("user_id", u.ID))
 			}
 			return
 		}
@@ -196,8 +199,14 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 // kept spelling out the old email would go on showing it to everyone the
 // account is visible to. An address that came from a username is the
 // account's own handle and stays.
+//
+// A project that no longer issues addresses keeps the one it issued: the
+// address is only ever replaced by another, never dropped.
 func reissueEmailAddress(ctx context.Context, repo Repository, logger *zap.Logger, u *User) {
 	if u == nil || u.Username != "" || u.AccountAddress == "" {
+		return
+	}
+	if scope := ProjectScopeFromContext(ctx); scope == nil || scope.Accounts.Domain == "" {
 		return
 	}
 	if err := repo.UpdateUser(ctx, u.ID, map[string]any{"account_address": ""}); err != nil {

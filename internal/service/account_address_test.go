@@ -279,3 +279,62 @@ func TestAccountAddress_Username(t *testing.T) {
 	ensureAccountAddress(ctx, repo, zap.NewNop(), u)
 	require.Equal(t, "bob@accounts.example.com", u.AccountAddress)
 }
+
+func TestAccountAddress_ConfirmEmailChangeReissues(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	ctx := accountsScope(t, "accounts.example.com")
+	user := seedUserWithPassword(t, repo, "old@mail.example.com", "Str0ng!Pass1")
+	ensureAccountAddress(ctx, repo, zap.NewNop(), user)
+	require.Equal(t, "old-at-mail.example.com@accounts.example.com", user.AccountAddress)
+
+	tok := requestAndExtractChangeToken(t, svc, repo, rec, user.ID, "new@mail.example.com", "Str0ng!Pass1")
+	got, err := svc.ConfirmEmailChange(ctx, tok)
+	require.NoError(t, err)
+	require.Equal(t, "new-at-mail.example.com@accounts.example.com", got.AccountAddress)
+	stored, err := repo.GetUser(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, got.AccountAddress, stored.AccountAddress)
+}
+
+func TestAccountAddress_KeptWhenTheProjectStopsIssuing(t *testing.T) {
+	repo := newFakeRepo()
+	u := seedUser(repo, "old@mail.example.com", "", "active")
+	ensureAccountAddress(accountsScope(t, "accounts.example.com"), repo, zap.NewNop(), u)
+	require.NotEmpty(t, u.AccountAddress)
+
+	u.Email = "new@mail.example.com"
+	reissueEmailAddress(accessScope(t, `{"access":{"mode":"open"}}`), repo, zap.NewNop(), u)
+	require.Equal(t, "old-at-mail.example.com@accounts.example.com", u.AccountAddress)
+}
+
+// A username stored before the address rules (here one containing "-at-")
+// still signs in: sign-in checks only the shape every stored username has.
+func TestAccountAddress_LegacyUsernameStillSignsIn(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := accessScope(t, `{"access":{"mode":"open"}}`)
+	legacy := seedUser(repo, "", hashPW(t, accessTestPassword), "active")
+	require.NoError(t, repo.UpdateUser(ctx, legacy.ID, map[string]any{"username": "pat-at-home"}))
+	require.ErrorIs(t, validateUsernameFormat("pat-at-home"), ErrInvalidArgument, "no new username may take it")
+
+	res, err := svc.PasswordLogin(ctx, "pat-at-home", accessTestPassword, "1.2.3.4", "agent")
+	require.NoError(t, err)
+	require.Equal(t, legacy.ID, res.User.ID)
+}
+
+func TestAccountAddress_IssuedOnRefresh(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	open := accessScope(t, `{"access":{"mode":"open"}}`)
+	seedUser(repo, "early@mail.example.com", hashPW(t, accessTestPassword), "active")
+	login, err := svc.PasswordLogin(open, "early@mail.example.com", accessTestPassword, "1.2.3.4", "agent")
+	require.NoError(t, err)
+	require.Empty(t, login.User.AccountAddress)
+
+	// The project configures a domain while the session is live: the next
+	// refresh issues the address without a new sign-in.
+	ctx := accountsScope(t, "accounts.example.com")
+	_, _, _, err = svc.RefreshToken(ctx, login.RefreshToken, "1.2.3.4", "agent")
+	require.NoError(t, err)
+	u, err := repo.FindUserByEmail(ctx, "early@mail.example.com")
+	require.NoError(t, err)
+	require.Equal(t, "early-at-mail.example.com@accounts.example.com", u.AccountAddress)
+}

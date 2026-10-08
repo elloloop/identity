@@ -128,9 +128,10 @@ type User struct {
 	// AccountAddress is the address the project issued this account on its own
 	// domain (ProjectAccountsConfig.Domain), e.g. bob@accounts.example.com for
 	// the username "bob" or bob-at-mail.example@accounts.example.com for
-	// bob@mail.example. Assigned once — at creation or, for an account that
-	// predates the domain, at its next sign-in — and never rewritten; unique
-	// within the project when non-empty. Empty when the project issues none.
+	// bob@mail.example. Assigned at creation or, for an account that predates
+	// the domain, at its next sign-in. A username's address never changes; an
+	// email's follows a confirmed change of that email. Unique within the
+	// project when non-empty. Empty when the project issues none.
 	AccountAddress string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
@@ -1770,9 +1771,6 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	// it is the one place to auto-cancel a pending self-service deletion: an
 	// owner who signs back in during the grace window has reclaimed the account.
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	// Every self-signup reaches here, and so does the first sign-in of an
-	// account that predates the project's account domain.
-	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, 0)
 }
 
@@ -1787,6 +1785,11 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	if sessionStart <= 0 {
 		sessionStart = now
 	}
+
+	// Every self-signup and every sign-in reaches here, refresh included, so
+	// an account that predates the project's account domain receives its
+	// address at its next session, however long-lived. A no-op once issued.
+	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	// Stamp the derived minor flag from the stored DOB so the token carries
 	// an authoritative is_minor claim when age-gating is on. No-op (false)
