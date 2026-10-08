@@ -81,7 +81,12 @@ func TestHandler_InjectsServerConfig(t *testing.T) {
 		{
 			name: "signup disabled",
 			opts: service.HostedUIOptions{PasswordLoginEnabled: true},
-			want: []string{`"passwordSignupEnabled":false`},
+			want: []string{`"passwordSignupEnabled":false`, `"usernameSignupEnabled":false`, `"usernameLoginEnabled":false`},
+		},
+		{
+			name: "username accounts",
+			opts: service.HostedUIOptions{PasswordLoginEnabled: true, UsernameSignupEnabled: true, UsernameLoginEnabled: true},
+			want: []string{`"passwordSignupEnabled":false`, `"usernameSignupEnabled":true`, `"usernameLoginEnabled":true`},
 		},
 		{
 			name: "providers with hosted flow on",

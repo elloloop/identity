@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.11 → next — SCIM honours email accounts being off (behaviour change)
+## v4.11 → next — SCIM honours email accounts being off; the hosted page follows the account settings (behaviour changes)
 
 No schema change and no migration.
 
@@ -8,6 +8,11 @@ No schema change and no migration.
   `accounts.email_signup` is `off`**, as admin creation already did. A
   project that never set `email_signup`, or set it to `self` or `admin`,
   sees no change.
+- **The hosted page (`/auth/`) now reads `accounts.email_signup` and
+  `accounts.username_signup`.** It hides email sign-up unless
+  `email_signup` is `self`, offers username sign-up where `UsernameSignup`
+  would accept it, and takes a username at sign-in where the project has
+  username accounts. A project with default settings sees no change.
 
 ## v4.10 → v4.11 — account addresses on the project's domain (additive); neutral built-in defaults; invitation links follow the project (behaviour change)
 

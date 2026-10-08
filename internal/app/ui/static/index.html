@@ -250,7 +250,7 @@
 
         <form id="auth-form">
             <div class="form-group">
-                <label for="email">Email</label>
+                <label for="email" id="identifier-label">Email</label>
                 <input type="email" id="email" required autocomplete="email" placeholder="name@example.com">
             </div>
             
@@ -302,9 +302,32 @@
         if (!passwordEnabled) {
             form.style.display = 'none';
         }
-        if (!passwordEnabled || !config.passwordSignupEnabled) {
+        // Sign-up is offered when the project lets people create their own
+        // email accounts, username accounts, or both; the identifier field
+        // takes a username wherever username accounts exist.
+        const emailSignup = !!config.passwordSignupEnabled;
+        const usernameSignup = !!config.usernameSignupEnabled;
+        if (!passwordEnabled || (!emailSignup && !usernameSignup)) {
             document.querySelector('.toggle-mode').style.display = 'none';
         }
+        const identifierInput = document.getElementById('email');
+        const identifierLabel = document.getElementById('identifier-label');
+        function setIdentifierField() {
+            const takesEmail = isLogin || emailSignup;
+            const takesUsername = isLogin ? !!config.usernameLoginEnabled : usernameSignup;
+            if (takesUsername) {
+                identifierInput.type = 'text';
+                identifierInput.autocomplete = 'username';
+                identifierLabel.textContent = takesEmail ? 'Email or username' : 'Username';
+                identifierInput.placeholder = takesEmail ? 'name@example.com or username' : 'username';
+            } else {
+                identifierInput.type = 'email';
+                identifierInput.autocomplete = 'email';
+                identifierLabel.textContent = 'Email';
+                identifierInput.placeholder = 'name@example.com';
+            }
+        }
+        setIdentifierField();
 
         // OAuth buttons render only for the providers the server enabled for
         // THIS project, and only when the hosted flow can actually complete:
@@ -429,6 +452,7 @@
 
         toggleLink.addEventListener('click', () => {
             isLogin = !isLogin;
+            setIdentifierField();
             errorMsg.style.display = 'none';
             successMsg.style.display = 'none';
             resultData.style.display = 'none';
@@ -475,11 +499,16 @@
             successMsg.style.display = 'none';
             resultData.style.display = 'none';
 
+            // A sign-up identifier with an '@' creates an email account;
+            // without one, a username account. Sign-in takes either.
+            const usernameMode = !isLogin && !email.includes('@');
             const endpoint = isLogin
                 ? '/identity.v1.IdentityService/PasswordLogin'
-                : '/identity.v1.IdentityService/PasswordSignup';
+                : usernameMode
+                    ? '/identity.v1.IdentityService/UsernameSignup'
+                    : '/identity.v1.IdentityService/PasswordSignup';
 
-            const payload = { email, password };
+            const payload = usernameMode ? { username: email, password } : { email, password };
 
             try {
                 const headers = { 'Content-Type': 'application/json' };

@@ -34,9 +34,19 @@ type HostedUIOptions struct {
 	// the project-wide AllowedMethods either impose no restriction or
 	// include "password".
 	PasswordLoginEnabled bool
-	// PasswordSignupEnabled reports whether the sign-up toggle may render:
-	// password login is allowed AND the deployment enables password signup.
+	// PasswordSignupEnabled reports whether email sign-up may render:
+	// password login is allowed, the deployment enables password signup, and
+	// the project lets people create their own email accounts
+	// (accounts.email_signup "self").
 	PasswordSignupEnabled bool
+	// UsernameSignupEnabled reports whether username sign-up may render:
+	// password login and signup are allowed and the project admits username
+	// self-signup (UsernameSignup's own rule).
+	UsernameSignupEnabled bool
+	// UsernameLoginEnabled reports whether the identifier field takes a
+	// username: the project has username accounts (accounts.username_signup
+	// is not "off"). Managed children sign in on their own apps.
+	UsernameLoginEnabled bool
 	// OAuthProviders are the providers the page may offer buttons for,
 	// resolved with the same precedence a login attempt uses (project
 	// config, then the default registry for the default project or under
@@ -52,7 +62,8 @@ type HostedUIOptions struct {
 func (s *AuthService) HostedUIOptions(ctx context.Context) HostedUIOptions {
 	allowed := ""
 	authDomain := ""
-	if scope := ProjectScopeFromContext(ctx); scope != nil {
+	scope := ProjectScopeFromContext(ctx)
+	if scope != nil {
 		allowed = scope.LoginDefaults.AllowedMethods
 		authDomain = scope.PrimaryAuthDomain
 	}
@@ -63,7 +74,11 @@ func (s *AuthService) HostedUIOptions(ctx context.Context) HostedUIOptions {
 	opts := HostedUIOptions{
 		PasswordLoginEnabled: s.cfg.AuthAllowLocal && methodAllowed(LoginMethodPassword),
 	}
-	opts.PasswordSignupEnabled = opts.PasswordLoginEnabled && s.cfg.PasswordSignupEnabled
+	signupOn := opts.PasswordLoginEnabled && s.cfg.PasswordSignupEnabled
+	accounts := accountsFor(scope)
+	opts.PasswordSignupEnabled = signupOn && accounts.emailSignup() == SignupSelf
+	opts.UsernameSignupEnabled = signupOn && usernameSelfSignupRefusal(scope) == nil
+	opts.UsernameLoginEnabled = opts.PasswordLoginEnabled && accounts.usernameSignup() != SignupOff
 	if methodAllowed(LoginMethodOAuth) {
 		own, borrowed := s.oauthResolver.providersFor(ctx)
 		for _, key := range own {

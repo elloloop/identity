@@ -42,24 +42,8 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 	if !s.cfg.PasswordSignupEnabled {
 		return nil, ErrSignupDisabled
 	}
-	scope := ProjectScopeFromContext(ctx)
-	if err := selfSignupRefusal(accountsFor(scope).usernameSignup()); err != nil {
+	if err := usernameSelfSignupRefusal(ProjectScopeFromContext(ctx)); err != nil {
 		return nil, err
-	}
-	if scope != nil {
-		switch scope.Access.mode() {
-		case AccessModeOpen:
-		case AccessModeInvite:
-			return nil, ErrSignupByInvitationOnly
-		default:
-			return nil, ErrAccessNotAllowed
-		}
-		// A deny layer (work email only, blocked domains) says who is turned
-		// away; a username carries no email it could clear, so a project that
-		// configures one admits no username self-signups.
-		if scope.Access.hasDenyLayer() {
-			return nil, ErrAccessNotAllowed
-		}
 	}
 	username = normalizeUsername(username)
 	if err := validateUsernameFormat(username); err != nil {
@@ -153,4 +137,29 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 // key always contains '@' and this one never does, so the two cannot meet.
 func usernameThrottleKey(projectID, username string) string {
 	return "username:" + projectID + ":" + username
+}
+
+// usernameSelfSignupRefusal is the project half of the username self-signup
+// rule, shared by UsernameSignup and the hosted page's options so the page
+// offers exactly what the RPC accepts: the project lets people create their
+// own username accounts, its access mode is open, and it has no deny layer
+// (a username carries no email a deny layer could clear).
+func usernameSelfSignupRefusal(scope *ProjectScope) error {
+	if err := selfSignupRefusal(accountsFor(scope).usernameSignup()); err != nil {
+		return err
+	}
+	if scope == nil {
+		return nil
+	}
+	switch scope.Access.mode() {
+	case AccessModeOpen:
+	case AccessModeInvite:
+		return ErrSignupByInvitationOnly
+	default:
+		return ErrAccessNotAllowed
+	}
+	if scope.Access.hasDenyLayer() {
+		return ErrAccessNotAllowed
+	}
+	return nil
 }

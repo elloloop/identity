@@ -131,3 +131,36 @@ func TestHostedUIOptions_ProjectOwnProviderWinsOverBorrowed(t *testing.T) {
 	assert.Equal(t, []string{"google"}, providerKeys(opts.OAuthProviders),
 		"strict isolation lists only the project's own providers")
 }
+
+func hostedScope(t *testing.T, configJSON string) context.Context {
+	t.Helper()
+	cfg, err := ParseProjectConfig(configJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return WithProjectScope(context.Background(), &ProjectScope{ProjectID: "proj-1", Access: cfg.Access, Accounts: cfg.Accounts})
+}
+
+// The page offers exactly the sign-ups the project's account settings allow.
+func TestHostedUIOptions_AccountSettings(t *testing.T) {
+	svc := newTestAuthService(t, newFakeRepo())
+	cases := []struct {
+		name                       string
+		config                     string
+		email, username, userLogin bool
+	}{
+		{"defaults: email only", `{"access":{"mode":"open"}}`, true, false, false},
+		{"email admin-only", `{"access":{"mode":"open"},"accounts":{"email_signup":"admin"}}`, false, false, false},
+		{"usernames self", `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`, true, true, true},
+		{"usernames admin-only", `{"access":{"mode":"open"},"accounts":{"email_signup":"off","username_signup":"admin"}}`, false, false, true},
+		{"usernames self but invite mode", `{"access":{"mode":"invite"},"accounts":{"username_signup":"self"}}`, true, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := svc.HostedUIOptions(hostedScope(t, tc.config))
+			assert.Equal(t, tc.email, opts.PasswordSignupEnabled, "email sign-up")
+			assert.Equal(t, tc.username, opts.UsernameSignupEnabled, "username sign-up")
+			assert.Equal(t, tc.userLogin, opts.UsernameLoginEnabled, "username sign-in")
+		})
+	}
+}
