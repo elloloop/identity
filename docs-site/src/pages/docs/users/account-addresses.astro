@@ -98,8 +98,10 @@ import { Code } from "astro-expressive-code/components";
     email, like any email account.
   </p>
   <p>
-    SCIM provisioning is an identity provider's admin channel and is not
-    governed by <code>email_signup</code>. The hosted sign-in page does not yet
+    SCIM provisioning is an identity provider's admin channel: with
+    <code>email_signup</code> <code>off</code> it refuses to create an account
+    (<code>403</code>), as admin creation is refused; under <code>self</code> and
+    <code>admin</code> it provisions as before. The hosted sign-in page does not yet
     read these settings: it offers email sign-up whenever the deployment
     allows password sign-up, and takes only email identifiers, so a project
     using username accounts or admin-only email accounts builds its own

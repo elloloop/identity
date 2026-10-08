@@ -110,6 +110,10 @@ var (
 	// ErrInvalidValue marks an attribute value the Store refuses; wrap it
 	// with the reason, which becomes the error detail.
 	ErrInvalidValue = errors.New("scim: invalid attribute value")
+	// ErrForbidden marks an operation the Store's policy does not permit
+	// (RFC 7644 §3.12: 403); wrap it with the reason, which becomes the
+	// error detail.
+	ErrForbidden = errors.New("scim: operation not permitted")
 )
 
 // splitName splits a SCIM formatted/display name into given/family parts on

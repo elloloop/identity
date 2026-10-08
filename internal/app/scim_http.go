@@ -301,6 +301,12 @@ func isActiveStatus(status string) bool {
 }
 
 func (s *repoSCIMStore) CreateUser(ctx context.Context, u scim.User) (scim.User, error) {
+	// An identity provider provisions email accounts, which a project with
+	// email accounts off has none of: SCIM is an admin channel, refused as
+	// admin creation is.
+	if scope := service.ProjectScopeFromContext(ctx); scope != nil && scope.Accounts.EmailAccountsOff() {
+		return scim.User{}, fmt.Errorf("%w: this project does not create email accounts", scim.ErrForbidden)
+	}
 	status := statusActive
 	if !u.Active {
 		status = statusDeactivated
