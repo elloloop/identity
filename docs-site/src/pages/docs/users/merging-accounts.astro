@@ -54,9 +54,13 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     Self-service merging is <strong>off</strong> until you set
     <code>GATEWAY_ACCOUNT_MERGE_ENABLED=true</code>. A merge retires an
     account for good, and applications learn about it only through the
-    <code>user.merged</code> webhook. Subscribe every application that stores
-    data under user ids to <code>user.merged</code> first. The admin
-    <code>MergeUsers</code> works either way.
+    <code>user.merged</code> webhook, so merging relies on webhooks: turn
+    them on (<code>GATEWAY_WEBHOOKS_ENABLED</code>) and subscribe every
+    application that stores data under user ids to <code>user.merged</code>
+    first. With merging on and webhooks off, identity logs
+    <code>account_merge_without_webhooks</code> at boot. The admin
+    <code>MergeUsers</code> works either way, and announces itself the same
+    way.
   </p>
 
   <h2>Who can merge</h2>
@@ -65,7 +69,8 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       <strong>The person</strong>, with <code>MergeAccounts</code> called from the
       survivor's session, with the client assurance a password sign-in needs.
       The session must come from a <strong>recent sign-in</strong>: within
-      <code>GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS</code> (default 300)
+      <code>GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS</code> (default 300,
+      at most 3600)
       of the call, by any method the account has, its second factor
       included. A refresh does not count, nor does a session opened by a QR
       handoff, an anonymous sign-in or a password just added to an anonymous

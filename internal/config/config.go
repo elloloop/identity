@@ -766,9 +766,9 @@ type Config struct {
 	// been authenticated (password, passkey, provider, with any second factor)
 	// within this many seconds, so a stolen or long-lived session cannot pull
 	// another account's credentials onto it. Driven by
-	// GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS (default 300; 0 selects
-	// the default; the check cannot be turned off). Read it through
-	// AccountMergeReauthMaxAge.
+	// GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS (default 300, at most
+	// 3600; 0 selects the default; the check cannot be turned off). Read it
+	// through AccountMergeReauthMaxAge.
 	AccountMergeReauthMaxAgeSeconds int
 	// PasswordResetEnabled gates RequestPasswordReset; when false the RPC stays
 	// enumeration-safe but is a no-op (admin resets still work).
@@ -2013,10 +2013,11 @@ func (c *Config) Validate() error {
 	if c.RateLimitUsernameTakenPerIP < 0 {
 		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitUsernameTakenPerIP)
 	}
-	if c.AccountMergeReauthMaxAgeSeconds < 0 {
+	if c.AccountMergeReauthMaxAgeSeconds < 0 || c.AccountMergeReauthMaxAgeSeconds > MaxAccountMergeReauthMaxAgeSeconds {
 		return fmt.Errorf(
-			"config: GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS=%d must not be negative (0 selects the default, %d; the check cannot be turned off)",
-			c.AccountMergeReauthMaxAgeSeconds, DefaultAccountMergeReauthMaxAgeSeconds,
+			"config: GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS=%d must be between 0 and %d (0 selects the default, %d; "+
+				"a longer window would let an old session count as a recent sign-in, and the check cannot be turned off)",
+			c.AccountMergeReauthMaxAgeSeconds, MaxAccountMergeReauthMaxAgeSeconds, DefaultAccountMergeReauthMaxAgeSeconds,
 		)
 	}
 
@@ -2644,6 +2645,10 @@ func envBool(key string, def bool) bool {
 // DefaultAccountMergeReauthMaxAgeSeconds is how recent a sign-in MergeAccounts
 // requires of the account that is kept when the deployment sets none.
 const DefaultAccountMergeReauthMaxAgeSeconds = 300
+
+// MaxAccountMergeReauthMaxAgeSeconds caps the window: a sign-in an hour old is
+// as recent as "recent" gets. Beyond it the check stops meaning anything.
+const MaxAccountMergeReauthMaxAgeSeconds = 3600
 
 // AccountMergeReauthMaxAge is how recent the kept account's sign-in must be
 // for MergeAccounts: the configured value, or the default when unset.
