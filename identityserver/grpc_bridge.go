@@ -718,9 +718,9 @@ func (b *grpcBridge) VerifyProjectAuthDomain(ctx context.Context, in *identitypb
 }
 
 func (b *grpcBridge) MergeAccounts(ctx context.Context, in *identitypb.MergeAccountsRequest) (*identitypb.MergeAccountsResponse, error) {
-	return invoke(ctx, in, b.h.MergeAccounts)
+	return invoke(ctx, b, in, b.h.MergeAccounts)
 }
 
 func (b *grpcBridge) MergeUsers(ctx context.Context, in *identitypb.MergeUsersRequest) (*identitypb.MergeUsersResponse, error) {
-	return invoke(ctx, in, b.h.MergeUsers)
+	return invoke(ctx, b, in, b.h.MergeUsers)
 }
