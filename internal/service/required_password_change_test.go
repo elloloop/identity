@@ -173,3 +173,40 @@ func TestMergeAccounts_RefusesAnIssuedPassword(t *testing.T) {
 	still, _ := repo.GetUser(ctx, native.ID)
 	require.Equal(t, StatusActive, still.Status)
 }
+
+// A temporary password often recovers an account someone else is signed in
+// to: completing the change ends every session opened before it.
+func TestRequiredPasswordChange_RevokesExistingSessions(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := context.Background()
+	user := issuedPasswordUser(t, repo, "issued@example.com")
+	_, err := repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
+		TokenHash: "earlier-session", UserID: user.ID, ExpiresAt: nowMs() + 60_000,
+	})
+	require.NoError(t, err)
+
+	ticket := passwordChangeTicket(t, svc, "issued@example.com")
+	res, err := svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "203.0.113.10", "agent")
+	require.NoError(t, err)
+
+	earlier, err := repo.FindRefreshTokenByHash(ctx, "earlier-session")
+	require.NoError(t, err)
+	require.Nil(t, earlier, "a session opened before the change is gone")
+	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "203.0.113.10", "agent")
+	require.NoError(t, err, "the session the change opened survives it")
+}
+
+func TestRequiredPasswordChange_ClearedByAcceptingAnInvitation(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := context.Background()
+	token := seedInvitedUser(t, repo, "invitee@example.com")
+	invitee, err := repo.FindUserByEmail(ctx, "invitee@example.com")
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateUser(ctx, invitee.ID, map[string]any{"password_change_required": true}))
+
+	_, err = svc.AcceptInvitation(ctx, token, strongPW, "Invitee", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	stored, _ := repo.GetUser(ctx, invitee.ID)
+	require.False(t, stored.PasswordChangeRequired, "the invitee chose their own password")
+}

@@ -53,8 +53,8 @@ import { Code } from "astro-expressive-code/components";
     <code>InviteUser</code> with <code>create_immediately: true</code>
     creates a fully-active user with a randomly-generated temporary
     password, returned to the admin in the response. The admin hands the
-    password off out of band; at the user's first sign-in they replace it
-    (see <a href="#first-sign-in">below</a>).
+    password off out of band; the user replaces it at
+    <a href="#first-sign-in">first sign-in with a temporary password</a>.
   </p>
   <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/InviteUser \\
   -H "Authorization: Bearer $ADMIN_TOKEN" \\
@@ -96,7 +96,8 @@ import { Code } from "astro-expressive-code/components";
     Ask the user for a new password and call
     <code>CompleteRequiredPasswordChange</code> with the token. It needs no
     session. The new password must meet the account's password policy and
-    differ from the issued one. The response is <code>PasswordLogin</code>'s:
+    differ from the issued one, and every existing session of the account
+    ends. The response is <code>PasswordLogin</code>'s:
     tokens, or <code>totp_required</code> and a
     <code>login_challenge_id</code> when the account has two-step
     verification or the login policy requires a second factor.

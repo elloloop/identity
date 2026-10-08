@@ -141,7 +141,9 @@ type User struct {
 	MergedIntoUserID string
 	// PasswordChangeRequired is set on an account whose password an admin
 	// issued: PasswordLogin refuses a session until the person chooses their
-	// own (CompleteRequiredPasswordChange). Cleared by every password change.
+	// own (CompleteRequiredPasswordChange). Cleared whenever the user sets
+	// their own: that step, ChangePassword, a reset link or an accepted
+	// invitation.
 	PasswordChangeRequired bool
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
 )
@@ -50,9 +52,12 @@ func (s *AuthService) requirePasswordChange(ctx context.Context, user *User, ipA
 // CompleteRequiredPasswordChange replaces an administrator-issued password
 // with the user's own and completes the sign-in the refusal interrupted. It is
 // unauthenticated — the ticket is the credential. The new password meets the
-// account's password policy and differs from the issued one. The rest is a
-// password sign-in's: a second factor, when the account or the login policy
-// requires one, is asked for before any token is issued.
+// account's password policy and differs from the issued one, and every
+// existing session ends. The rest is a password sign-in's: a second factor,
+// when the account or the login policy requires one, is asked for before any
+// token is issued. The password is set before that factor is proven: the
+// ticket already proves the issued password, which the second factor never
+// guarded, and the new password alone still opens no session.
 func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, completionToken, newPassword, ipAddr, userAgent string) (*LoginResult, error) {
 	claims, err := s.verifyPurposeTicket(ctx, completionToken, tokenPurposePasswordChange)
 	if err != nil {
@@ -96,11 +101,22 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 	user.PasswordHash = pwHash
 	user.PasswordChangeRequired = false
 	user.UpdatedAt = msToTime(now)
+	// A credential change ends every existing session, as a reset does: an
+	// admin often issues a temporary password to recover an account someone
+	// else was signed in to. The password is committed, so a revoke failure
+	// is logged rather than failing the step; the session this step opens
+	// is issued after it.
+	sessionsRevoked := true
+	if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
+		sessionsRevoked = false
+		s.logger.Warn("password_change_session_revoke_failed", zap.String("user_id", user.ID), zap.Error(err))
+	}
+	s.revokeUserSessionsIfModeSession(ctx, user.ID, "password_change_required")
 	s.audit.Log(
 		ctx, audit.EventPasswordChanged,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"reason": "password_change_required"}),
+		audit.WithDetails(map[string]any{"reason": "password_change_required", "sessions_revoked": sessionsRevoked}),
 	)
 
 	decision, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodPassword)

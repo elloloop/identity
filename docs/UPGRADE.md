@@ -61,8 +61,10 @@ column is absent, then `identity migrate force 35` and `identity migrate`).
   `PasswordChangeRequiredDetails` ticket instead of tokens. The client calls
   the new `CompleteRequiredPasswordChange` (unauthenticated, per-IP login
   rate limit) with the ticket and a new password. A client that signs
-  admin-created users in must handle the new refusal. Temporary passwords
-  issued before the upgrade are not flagged.
+  admin-created users in must handle the new refusal: deploy that support
+  before upgrading the server. Completing the change ends the account's
+  other sessions. Temporary passwords issued before the upgrade are not
+  flagged.
 
 ## v4.10 → v4.11 — account addresses on the project's domain (additive); neutral built-in defaults; invitation links follow the project (behaviour change)
 

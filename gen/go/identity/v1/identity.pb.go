@@ -447,7 +447,7 @@ type User struct {
 	MergedIntoUserId string `protobuf:"bytes,30,opt,name=merged_into_user_id,json=mergedIntoUserId,proto3" json:"merged_into_user_id,omitempty"`
 	// password_change_required is set while the account's password is one an
 	// administrator issued (CreateUser in username mode, InviteUser with
-	// create_immediately, ResetUserPassword with generate_temporary). A
+	// create_immediately, ResetUserPassword with generate_temp_password). A
 	// PasswordLogin with it is refused `password_change_required` until the
 	// user chooses their own password through CompleteRequiredPasswordChange.
 	PasswordChangeRequired bool `protobuf:"varint,31,opt,name=password_change_required,json=passwordChangeRequired,proto3" json:"password_change_required,omitempty"`

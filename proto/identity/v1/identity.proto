@@ -106,7 +106,7 @@ message User {
   string merged_into_user_id = 30;
   // password_change_required is set while the account's password is one an
   // administrator issued (CreateUser in username mode, InviteUser with
-  // create_immediately, ResetUserPassword with generate_temporary). A
+  // create_immediately, ResetUserPassword with generate_temp_password). A
   // PasswordLogin with it is refused `password_change_required` until the
   // user chooses their own password through CompleteRequiredPasswordChange.
   bool password_change_required = 31;
