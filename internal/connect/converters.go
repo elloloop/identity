@@ -63,6 +63,7 @@ func userToProto(u *service.User) *identitypb.User {
 		Market:           u.Market,
 		Username:         u.Username,
 		AccountAddress:   u.AccountAddress,
+		MergedIntoUserId: u.MergedIntoUserID,
 	}
 	if !u.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(u.CreatedAt)

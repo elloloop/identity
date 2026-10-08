@@ -1,9 +1,23 @@
 # Upgrade guide
 
-## v4.11 → next — SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
+## v4.11 → next — merging accounts (additive); SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
 
-No schema change and no migration.
+**Migration 0036** (SQLite 0019) adds `users.merged_into_user_id` with a
+constant default (catalog-only; `lock_timeout = 10s`; on timeout confirm the
+column is absent, then `identity migrate force 35` and `identity migrate`).
 
+- **`MergeAccounts` and the admin `MergeUsers` (new).** Merge one account of
+  a person into another without deleting anything: the other account is
+  retired (deactivated, with `User.merged_into_user_id` set, and never
+  reactivatable), the survivor
+  takes its username and password where it has none, and a `user.merged`
+  event (carrying `merged_into_user_id`) tells applications to move data
+  held under the retired id. See *Merging accounts* in the docs.
+- **Webhook subscribers receive a new event type, `user.merged`.** A
+  subscription with no event-type filter receives every type, so it gets
+  `user.merged` too; make sure your handler ignores (or handles) types it
+  does not know. A subscription that lists its types sees it only if it
+  lists it.
 - **SCIM `POST /Users` answers `403` when the project's
   `accounts.email_signup` is `off`**, as admin creation already did. A
   project that never set `email_signup`, or set it to `self` or `admin`,

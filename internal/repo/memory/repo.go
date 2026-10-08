@@ -649,17 +649,18 @@ func fieldInt64(v any) (int64, bool) {
 // ok=false and the field is left out of the UPDATE).
 var (
 	userStringFields = map[string]func(*service.User) *string{
-		"name":            func(u *service.User) *string { return &u.Name },
-		"email":           func(u *service.User) *string { return &u.Email },
-		"avatar_url":      func(u *service.User) *string { return &u.AvatarURL },
-		"password_hash":   func(u *service.User) *string { return &u.PasswordHash },
-		"status":          func(u *service.User) *string { return &u.Status },
-		"recovery_email":  func(u *service.User) *string { return &u.RecoveryEmail },
-		"external_id":     func(u *service.User) *string { return &u.ExternalID },
-		"phone_number":    func(u *service.User) *string { return &u.PhoneNumber },
-		"market":          func(u *service.User) *string { return &u.Market },
-		"username":        func(u *service.User) *string { return &u.Username },
-		"account_address": func(u *service.User) *string { return &u.AccountAddress },
+		"name":                func(u *service.User) *string { return &u.Name },
+		"email":               func(u *service.User) *string { return &u.Email },
+		"avatar_url":          func(u *service.User) *string { return &u.AvatarURL },
+		"password_hash":       func(u *service.User) *string { return &u.PasswordHash },
+		"status":              func(u *service.User) *string { return &u.Status },
+		"recovery_email":      func(u *service.User) *string { return &u.RecoveryEmail },
+		"external_id":         func(u *service.User) *string { return &u.ExternalID },
+		"phone_number":        func(u *service.User) *string { return &u.PhoneNumber },
+		"market":              func(u *service.User) *string { return &u.Market },
+		"username":            func(u *service.User) *string { return &u.Username },
+		"account_address":     func(u *service.User) *string { return &u.AccountAddress },
+		"merged_into_user_id": func(u *service.User) *string { return &u.MergedIntoUserID },
 	}
 
 	userBoolFields = map[string]func(*service.User) *bool{

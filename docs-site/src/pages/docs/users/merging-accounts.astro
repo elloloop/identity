@@ -1,0 +1,68 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Merging accounts">
+  <h1>Merging accounts</h1>
+  <p>
+    A person can end up with two accounts in one project. One example is a
+    Gmail sign-up (with the address <code>bob-at-gmail.com@accounts.example.com</code>)
+    alongside a username account <code>bob</code> (<code>bob@accounts.example.com</code>).
+    A merge joins them under one account <strong>without deleting
+    anything</strong>.
+  </p>
+
+  <h2>What a merge does</h2>
+  <ul>
+    <li>
+      Whoever asks chooses the <strong>survivor</strong>; the server never
+      picks. The other account is <strong>retired</strong>: it becomes
+      <code>USER_STATUS_DEACTIVATED</code>, and <code>merged_into_user_id</code>
+      names the survivor. All its sessions are revoked, it never signs in again,
+      and it can never be reactivated: <code>ReactivateUser</code> refuses it,
+      and SCIM no longer sees it. Its row, and everything stored under its id,
+      stays.
+    </li>
+    <li>
+      The survivor takes over whatever lets the person keep signing in the way
+      they did. It takes the retired account's <strong>username</strong> if it
+      has none, so <code>bob</code> now signs in to the survivor. It takes the
+      retired account's <strong>password</strong> if it has none. With
+      <code>take_address</code>, it takes the retired account's account address,
+      and its own old address moves to the retired account so neither is freed
+      for someone else.
+    </li>
+    <li>
+      A <code>user.merged</code> event names the retired account and carries
+      <code>merged_into_user_id</code>. Applications move whatever they hold
+      under the retired id to the survivor.
+    </li>
+  </ul>
+
+  <h2>Who can merge</h2>
+  <ul>
+    <li>
+      <strong>The person</strong>, with <code>MergeAccounts</code> called from the
+      survivor's session. They prove they control the other account with its
+      identifier (email or username) and password. These are checked as
+      <code>PasswordLogin</code> checks them: the same refusal for an unknown
+      identifier and a wrong password, the same lockout, and the same per-IP
+      limit. An account with two-step verification on cannot be merged by
+      password alone, so turn it off there first.
+    </li>
+    <li>
+      <strong>An admin</strong>, with <code>MergeUsers</code>, naming both
+      accounts. No password is asked.
+    </li>
+  </ul>
+
+  <h2>What cannot be merged</h2>
+  <ul>
+    <li>An account into itself.</li>
+    <li>An account that is not active.</li>
+    <li>An anonymous account: upgrade it instead.</li>
+    <li>A managed child's account, which stays with its guardian.</li>
+    <li>An account that is a guardian: move its children first.</li>
+  </ul>
+  <p>These refusals answer <code>FAILED_PRECONDITION</code>.</p>
+</DocsLayout>

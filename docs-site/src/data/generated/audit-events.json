@@ -3,6 +3,7 @@
   "account_deletion_requested",
   "account_locked",
   "account_market_changed",
+  "account_merged",
   "admin_help_requested",
   "admin_help_resolved",
   "admin_reset_password",

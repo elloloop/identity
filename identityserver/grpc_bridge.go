@@ -716,3 +716,11 @@ func (b *grpcBridge) VerifyPhoneCode(ctx context.Context, in *identitypb.VerifyP
 func (b *grpcBridge) VerifyProjectAuthDomain(ctx context.Context, in *identitypb.VerifyProjectAuthDomainRequest) (*identitypb.VerifyProjectAuthDomainResponse, error) {
 	return invoke(ctx, b, in, b.h.VerifyProjectAuthDomain)
 }
+
+func (b *grpcBridge) MergeAccounts(ctx context.Context, in *identitypb.MergeAccountsRequest) (*identitypb.MergeAccountsResponse, error) {
+	return invoke(ctx, in, b.h.MergeAccounts)
+}
+
+func (b *grpcBridge) MergeUsers(ctx context.Context, in *identitypb.MergeUsersRequest) (*identitypb.MergeUsersResponse, error) {
+	return invoke(ctx, in, b.h.MergeUsers)
+}

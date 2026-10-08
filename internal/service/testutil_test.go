@@ -547,6 +547,8 @@ func applyUserFields(u *User, fields map[string]any) {
 			u.Username = v.(string)
 		case "account_address":
 			u.AccountAddress = v.(string)
+		case "merged_into_user_id":
+			u.MergedIntoUserID = v.(string)
 		case "date_of_birth_ms":
 			switch x := v.(type) {
 			case int64:

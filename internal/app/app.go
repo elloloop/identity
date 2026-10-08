@@ -294,6 +294,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
+			// MergeAccounts verifies another account's password: the login
+			// quota bounds guessing through it as through PasswordLogin.
+			PathPrefix: "/identity.v1.IdentityService/MergeAccounts", Tag: "merge",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.v1.IdentityService/RequestPasswordReset", Tag: "reset",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitResetPerIP, 0),
 		},

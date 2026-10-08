@@ -108,6 +108,10 @@ const (
 	EventUserDeactivated   EventType = "user_deactivated"
 	EventUserReactivated   EventType = "user_reactivated"
 	EventUserDeleted       EventType = "user_deleted"
+	// EventAccountMerged records one account merged into another. The actor
+	// is whoever asked (the survivor's owner or an admin), the target the
+	// retired account; details name the survivor.
+	EventAccountMerged EventType = "account_merged"
 
 	// EventAnonymousSignIn records the creation of a credential-less
 	// account. EventAnonymousUpgraded records that account gaining a

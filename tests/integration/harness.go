@@ -1238,6 +1238,8 @@ func applyUserStringField(u *service.User, key string, v any) bool {
 		u.Username = s
 	case "account_address":
 		u.AccountAddress = s
+	case "merged_into_user_id":
+		u.MergedIntoUserID = s
 	default:
 		return false
 	}
@@ -1248,7 +1250,7 @@ func isUserStringField(key string) bool {
 	switch key {
 	case "name", "email", "avatar_url", "password_hash", "status",
 		"recovery_email", "external_id", "phone_number", "market", "username",
-		"account_address":
+		"account_address", "merged_into_user_id":
 		return true
 	}
 	return false

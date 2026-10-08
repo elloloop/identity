@@ -134,6 +134,11 @@ type User struct {
 	// confirmed change of an email. Unique within the
 	// project when non-empty. Empty when the project issues none.
 	AccountAddress string
+	// MergedIntoUserID is the account this one was merged into. A merged
+	// account is StatusDeactivated with this set: it no longer signs in, can
+	// never be reactivated, and keeps its data for the survivor's application
+	// to move. Empty on every unmerged account.
+	MergedIntoUserID string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
 	// deletion. Set when the owner requests deletion; cleared on cancel or a

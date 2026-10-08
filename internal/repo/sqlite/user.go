@@ -27,7 +27,7 @@ const userColumns = `
 	external_id,
 	deletion_scheduled_at_ms,
 	is_anonymous, anonymous_last_seen_ms,
-	market, username, account_address,
+	market, username, account_address, merged_into_user_id,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed qualifies every column with the given table alias so
@@ -54,7 +54,7 @@ func scanUser(s scanner) (*service.User, error) {
 		id, email, name, role, avatar, status, recovery, phash string
 		phoneNumber                                            string
 		externalID                                             string
-		market, username, accountAddress                       string
+		market, username, accountAddress, mergedInto           string
 	)
 	if err := s.Scan(
 		&id, &email, &name, &role, &avatar, &status, &recovery,
@@ -68,7 +68,7 @@ func scanUser(s scanner) (*service.User, error) {
 		&externalID,
 		&deletionScheduledAtMs,
 		&isAnonymous, &anonymousLastSeenMs,
-		&market, &username, &accountAddress,
+		&market, &username, &accountAddress, &mergedInto,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -101,6 +101,7 @@ func scanUser(s scanner) (*service.User, error) {
 	u.Market = market
 	u.Username = username
 	u.AccountAddress = accountAddress
+	u.MergedIntoUserID = mergedInto
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -264,7 +265,7 @@ const insertUserQuery = `
 		external_id,
 		deletion_scheduled_at_ms,
 		is_anonymous, anonymous_last_seen_ms,
-		market, username, account_address,
+		market, username, account_address, merged_into_user_id,
 		created_at_ms, updated_at_ms
 	) VALUES (
 		$1, $2, $3, $4, $5, $6, $7,
@@ -278,8 +279,8 @@ const insertUserQuery = `
 		$23,
 		$24,
 		$25, $26,
-		$27, $28, $29,
-		$30, $31
+		$27, $28, $29, $30,
+		$31, $32
 	)`
 
 // insertUserArgs renders the bind args for insertUserQuery in column order.
@@ -297,7 +298,7 @@ func insertUserArgs(projectID, id, role, status string, u *service.User) []any {
 		u.ExternalID,
 		u.DeletionScheduledAtMs,
 		u.IsAnonymous, u.AnonymousLastSeenMs,
-		u.Market, u.Username, u.AccountAddress,
+		u.Market, u.Username, u.AccountAddress, u.MergedIntoUserID,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	}
 }
@@ -375,6 +376,7 @@ var userFieldColumns = map[string]struct {
 	"market":                   {"market", "string"},
 	"username":                 {"username", "string"},
 	"account_address":          {"account_address", "string"},
+	"merged_into_user_id":      {"merged_into_user_id", "string"},
 }
 
 func (r *sqliteRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {

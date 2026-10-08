@@ -348,12 +348,15 @@ func (s *repoSCIMStore) CreateUser(ctx context.Context, u scim.User) (scim.User,
 // true, making it email-loginable AND still matched by the retention sweep,
 // which hard-deletes it with its sessions. UpgradeAnonymousAccount is the
 // one path that attaches an identity and clears the flag together.
+//
+// A merged account is absent too: it is retired for good, so no PUT or PATCH
+// may reactivate it or change it; its successor is the account to provision.
 func (s *repoSCIMStore) loadSCIMAddressable(ctx context.Context, id string) (*service.User, error) {
 	u, err := s.repo.GetUser(ctx, id)
 	if err != nil {
 		return nil, mapStoreErr(err)
 	}
-	if u == nil || u.IsAnonymous {
+	if u == nil || u.IsAnonymous || u.MergedIntoUserID != "" {
 		return nil, scim.ErrNotFound
 	}
 	return u, nil
