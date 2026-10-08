@@ -123,6 +123,10 @@ func accountAddressLocalPart(u *User) string {
 		// never claim the same address, whichever comes first. The split is
 		// at the last '@', as the canonicalizer splits.
 		at := strings.LastIndexByte(u.Email, '@')
+		if at < 0 {
+			// Not an address (a malformed stored row): nothing to derive.
+			return ""
+		}
 		src = u.Email[:at] + addressSeparator + u.Email[at+1:]
 	default:
 		return ""

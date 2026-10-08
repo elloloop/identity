@@ -43,6 +43,14 @@ type scimHandler struct {
 	// (Config.DefaultTenantID).
 	tenantID string
 	logger   *zap.Logger
+	// projects reads the configured project's stored policy (nil on drivers
+	// without a control plane). defaultProjectID and defaultAccounts are the
+	// env-configured default project and its account policy, used when the
+	// SCIM project is the default one, exactly as the project-resolution
+	// middleware's default pin uses them.
+	projects         service.NativeOAuthProjectStore
+	defaultProjectID string
+	defaultAccounts  service.ProjectAccountsConfig
 }
 
 // register wires the SCIM routes onto mux when enabled is true. The bearer
@@ -105,6 +113,11 @@ func (h *scimHandler) scimProvider() http.Handler {
 // request scope — lands under GATEWAY_SCIM_PROJECT_ID and never the
 // Host-resolved project. It is what keeps the deployment-wide bearer token
 // constrained to exactly one project across BOTH the data write and its audit.
+//
+// The pinned scope carries the project's account policy, read once the token
+// is accepted, so a SCIM email change re-derives an account address exactly
+// as a self-service one does. A failed policy read is a 503: provisioning
+// without the policy would leave addresses spelling emails people gave up.
 func (h *scimHandler) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := service.WithProjectScope(r.Context(), &service.ProjectScope{ProjectID: h.projectID})
@@ -112,8 +125,33 @@ func (h *scimHandler) authenticate(next http.Handler) http.Handler {
 			h.refuse(ctx, w, r, reason)
 			return
 		}
+		accounts, err := h.projectAccounts(ctx)
+		if err != nil {
+			h.logger.Error("scim_project_policy_unavailable", zap.String("project_id", h.projectID), zap.Error(err))
+			http.Error(w, "project policy unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		ctx = service.WithProjectScope(r.Context(), &service.ProjectScope{ProjectID: h.projectID, Accounts: accounts})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// projectAccounts is the SCIM project's account policy: the env default
+// project's for the default project (as the middleware's default pin), else
+// the project's stored config. A deployment with no control plane has only
+// the default project.
+func (h *scimHandler) projectAccounts(ctx context.Context) (service.ProjectAccountsConfig, error) {
+	if h.projectID == h.defaultProjectID || h.projects == nil {
+		return h.defaultAccounts, nil
+	}
+	proj, err := h.projects.ActiveProjectByID(ctx, h.projectID)
+	if err != nil {
+		return service.ProjectAccountsConfig{}, err
+	}
+	if proj == nil {
+		return service.ProjectAccountsConfig{}, fmt.Errorf("project %q is not active", h.projectID)
+	}
+	return proj.Accounts, nil
 }
 
 // Reasons a SCIM request is refused, recorded on the scim_auth_failed audit

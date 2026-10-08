@@ -754,35 +754,9 @@ func New(deps Deps) (*Built, error) {
 	logHostedOAuthFlow(logger, returnAllow)
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
-	// Inbound SCIM 2.0 provisioning (#260). Registered only when
-	// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer token
-	// + project id); otherwise /scim/v2/* 404s and the headless RPCs are
-	// unaffected. Every SCIM operation is scoped to the single configured
-	// project, so the deployment-wide bearer token can only touch that
-	// project's users.
-	if deps.Config.SCIMEnabled {
-		// Fail fast on a typo'd GATEWAY_SCIM_PROJECT_ID: verify at boot that it
-		// names a real, ACTIVE project rather than 500-ing on the first request.
-		// Only the postgres driver has a control plane to check against (the
-		// lookup is nil for memory, which pins all data to the default project).
-		if err := validateSCIMProject(deps.NativeOAuthProjects, deps.Config.SCIMProjectID); err != nil {
-			return nil, err
-		}
-		logger.Info("scim_server_enabled",
-			zap.String("mount", middleware.SCIMPathPrefix),
-			zap.String("project_id", deps.Config.SCIMProjectID))
-		(&scimHandler{
-			repo:        repo,
-			projectID:   deps.Config.SCIMProjectID,
-			bearerToken: deps.Config.SCIMBearerToken,
-			audit:       auditLog,
-			publisher:   eventPublisher,
-			tenantID:    deps.Config.DefaultTenantID,
-			logger:      logger,
-		}).register(mux, true)
-	} else {
-		logger.Info("scim_server_disabled",
-			zap.String("hint", "set GATEWAY_SCIM_ENABLED=true, GATEWAY_SCIM_BEARER_TOKEN and GATEWAY_SCIM_PROJECT_ID to enable /scim/v2"))
+	// Inbound SCIM 2.0 provisioning (#260); see mountSCIM.
+	if err := mountSCIM(mux, deps, repo, auditLog, eventPublisher, logger); err != nil {
+		return nil, err
 	}
 
 	// SAML 2.0 IdP surface (#255). Mounted only when GATEWAY_SAML_IDP_ENABLED
@@ -1220,4 +1194,48 @@ func buildDefaultProjectAccounts(cfg *config.Config, logger *zap.Logger) (servic
 		logger.Info("default_project_account_addresses_enabled", zap.String("domain", accounts.Domain))
 	}
 	return accounts, nil
+}
+
+// mountSCIM registers inbound SCIM 2.0 provisioning (#260) when
+// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer token +
+// project id); otherwise /scim/v2/* 404s and the headless RPCs are
+// unaffected. Every SCIM operation is scoped to the single configured
+// project, so the deployment-wide bearer token can only touch that project's
+// users.
+func mountSCIM(mux *http.ServeMux, deps Deps, repo service.Repository, auditLog *audit.Logger, publisher events.Publisher, logger *zap.Logger) error {
+	if !deps.Config.SCIMEnabled {
+		logger.Info("scim_server_disabled",
+			zap.String("hint", "set GATEWAY_SCIM_ENABLED=true, GATEWAY_SCIM_BEARER_TOKEN and GATEWAY_SCIM_PROJECT_ID to enable /scim/v2"))
+		return nil
+	}
+	// Fail fast on a typo'd GATEWAY_SCIM_PROJECT_ID: verify at boot that it
+	// names a real, ACTIVE project rather than 500-ing on the first request.
+	// Only the postgres driver has a control plane to check against (the
+	// lookup is nil for memory, which pins all data to the default project).
+	if err := validateSCIMProject(deps.NativeOAuthProjects, deps.Config.SCIMProjectID); err != nil {
+		return err
+	}
+	// The default project's account policy, for a SCIM project that is the
+	// default one. An invalid value fails the boot here as it does below.
+	defaultAccounts, err := service.NewDefaultProjectAccounts(deps.Config)
+	if err != nil {
+		return fmt.Errorf("default project accounts config (check GATEWAY_DEFAULT_EMAIL_DOMAIN): %w", err)
+	}
+	logger.Info("scim_server_enabled",
+		zap.String("mount", middleware.SCIMPathPrefix),
+		zap.String("project_id", deps.Config.SCIMProjectID))
+	(&scimHandler{
+		repo:        repo,
+		projectID:   deps.Config.SCIMProjectID,
+		bearerToken: deps.Config.SCIMBearerToken,
+		audit:       auditLog,
+		publisher:   publisher,
+		tenantID:    deps.Config.DefaultTenantID,
+		logger:      logger,
+
+		projects:         deps.NativeOAuthProjects,
+		defaultProjectID: deps.Config.DefaultProjectID,
+		defaultAccounts:  defaultAccounts,
+	}).register(mux, true)
+	return nil
 }

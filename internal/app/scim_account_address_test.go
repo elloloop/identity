@@ -2,49 +2,67 @@ package app
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/repo/memory"
 	"github.com/elloloop/identity/internal/service"
-	"github.com/elloloop/identity/pkg/scim"
 )
 
-// A SCIM write that changes an email account's email re-derives its account
-// address, as a confirmed self-service change does; one that leaves the email
-// alone, or touches a username account, keeps the address.
+// A SCIM email change, through the real handler chain (bearer check and the
+// project scope it pins), re-derives an email account's account address.
 func TestSCIM_EmailChangeFollowsTheAccountAddress(t *testing.T) {
-	cfg, err := service.ParseProjectConfig(`{"access":{"mode":"open"},"accounts":{"domain":"accounts.example.test"}}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := service.WithProjectScope(context.Background(), &service.ProjectScope{ProjectID: "p", Access: cfg.Access, Accounts: cfg.Accounts})
 	repo := memory.New()
-	s := &repoSCIMStore{repo: repo, logger: zap.NewNop()}
+	mux := http.NewServeMux()
+	(&scimHandler{
+		repo:             repo,
+		projectID:        testSCIMProjectID,
+		bearerToken:      testSCIMToken,
+		logger:           zap.NewNop(),
+		defaultProjectID: testSCIMProjectID,
+		defaultAccounts:  service.ProjectAccountsConfig{Domain: "accounts.example.test"},
+	}).register(mux, true)
+	scoped := repo.WithProject(testSCIMProjectID)
 
-	id, err := repo.CreateUser(ctx, &service.User{
+	id, err := scoped.CreateUser(context.Background(), &service.User{
 		Email: "old@mail.example.test", EmailVerified: true, Status: "active",
 		AccountAddress: "old-at-mail.example.test@accounts.example.test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReplaceUser(ctx, id, scim.User{Email: "old@mail.example.test", GivenName: "Renamed", Active: true}); err != nil {
-		t.Fatal(err)
+	rec := scimReq(t, mux, http.MethodPatch, "/scim/v2/Users/"+id, testSCIMToken, `{
+		"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+		"Operations":[{"op":"replace","path":"userName","value":"new@mail.example.test"}]
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if u, _ := repo.GetUser(ctx, id); u.AccountAddress != "old-at-mail.example.test@accounts.example.test" {
-		t.Fatalf("unchanged email kept the address: got %q", u.AccountAddress)
+	u, err := scoped.GetUser(context.Background(), id)
+	if err != nil || u == nil {
+		t.Fatalf("GetUser: %v %v", u, err)
 	}
-
-	newEmail := "new@mail.example.test"
-	if _, err := s.PatchUser(ctx, id, scim.UserPatch{Email: &newEmail}); err != nil {
-		t.Fatal(err)
-	}
-	// SCIM is the identity provider's word for the email, and it leaves the
-	// verified flag as it was, so the address follows straight away.
-	u, _ := repo.GetUser(ctx, id)
 	if u.AccountAddress != "new-at-mail.example.test@accounts.example.test" {
 		t.Fatalf("address after a SCIM email change: %q", u.AccountAddress)
+	}
+}
+
+// A project other than the default is read from the control plane; a failed
+// read refuses the request rather than provisioning without the policy.
+func TestSCIM_ProjectPolicyUnavailableIs503(t *testing.T) {
+	mux := http.NewServeMux()
+	(&scimHandler{
+		repo:             memory.New(),
+		projectID:        testSCIMProjectID,
+		bearerToken:      testSCIMToken,
+		logger:           zap.NewNop(),
+		projects:         &fakeNativeProjects{},
+		defaultProjectID: "another-project",
+	}).register(mux, true)
+	rec := scimReq(t, mux, http.MethodGet, "/scim/v2/Users", testSCIMToken, "")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 }

@@ -29,6 +29,7 @@ func TestAccountAddressLocalPart(t *testing.T) {
 		{"dot runs collapse", User{Username: "a..b"}, "a.b"},
 		{"leading and trailing dots dropped", User{Username: ".bob."}, "bob"},
 		{"no identifier", User{}, ""},
+		{"a malformed email derives nothing", User{Email: "not-an-address"}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
