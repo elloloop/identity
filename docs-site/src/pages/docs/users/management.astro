@@ -46,7 +46,9 @@ import { Code } from "astro-expressive-code/components";
     Cursor-paginated. Supports a status filter
     (<code>USER_STATUS_ACTIVE</code> /
     <code>USER_STATUS_INVITED</code> / etc.) and a substring search on
-    email + name.
+    email, name or username. A username account (one made with
+    <code>CreateUser</code> in username mode) is listed with its
+    <code>username</code>.
   </p>
   <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/ListUsers \\
   -H "Authorization: Bearer $ADMIN_TOKEN" \\
