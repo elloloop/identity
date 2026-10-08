@@ -167,14 +167,11 @@ func fitAddressLocalPart(local string, attempt int) string {
 // Any other failure is logged and left for the next sign-in to retry:
 // assigning an address is never a reason to refuse a sign-in.
 func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logger, u *User) {
-	if u == nil || u.ID == "" || u.AccountAddress != "" || u.IsAnonymous {
+	if u == nil || u.ID == "" || u.AccountAddress != "" {
 		return
 	}
 	scope := ProjectScopeFromContext(ctx)
-	if scope == nil || scope.Accounts.Domain == "" {
-		return
-	}
-	local := accountAddressLocalPart(u)
+	local := addressableLocalPart(scope, u)
 	if local == "" {
 		return
 	}
@@ -199,6 +196,34 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 		}
 	}
 	logger.Warn("account_address_exhausted", zap.String("project_id", scope.ProjectID), zap.String("user_id", u.ID))
+}
+
+// addressableLocalPart returns the local part u's address would take in
+// scope, or "" when u gets no address there: the project issues none, the
+// account is anonymous, or the address would spell an email nobody has yet
+// proven they own. An address that spells an email is issued only once that
+// email is verified, so an unverified sign-up never puts someone else's
+// mailbox name on the project's domain.
+func addressableLocalPart(scope *ProjectScope, u *User) string {
+	if scope == nil || scope.Accounts.Domain == "" || u.IsAnonymous {
+		return ""
+	}
+	if u.Username == "" && !u.EmailVerified {
+		return ""
+	}
+	return accountAddressLocalPart(u)
+}
+
+// predictedAccountAddress is the address a new account like u is issued when
+// nothing else holds it. The duplicate-signup decoy carries it, so a decoy
+// and a genuine new account return the same fields.
+func predictedAccountAddress(ctx context.Context, u *User) string {
+	scope := ProjectScopeFromContext(ctx)
+	local := addressableLocalPart(scope, u)
+	if local == "" {
+		return ""
+	}
+	return fitAddressLocalPart(local, 1) + "@" + scope.Accounts.Domain
 }
 
 // reissueEmailAddress re-derives the account address of an account whose

@@ -129,7 +129,8 @@ type User struct {
 	// domain (ProjectAccountsConfig.Domain), e.g. bob@accounts.example.com for
 	// the username "bob" or bob-at-mail.example@accounts.example.com for
 	// bob@mail.example. Assigned at creation or, for an account that predates
-	// the domain, at its next sign-in. A username's address never changes; an
+	// the domain, at its next sign-in; an email account gets it only once its
+	// email is verified. A username's address never changes; an
 	// email's follows a confirmed change of that email. Unique within the
 	// project when non-empty. Empty when the project issues none.
 	AccountAddress string
@@ -1786,11 +1787,6 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		sessionStart = now
 	}
 
-	// Every self-signup and every sign-in reaches here, refresh included, so
-	// an account that predates the project's account domain receives its
-	// address at its next session, however long-lived. A no-op once issued.
-	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
-
 	// Stamp the derived minor flag from the stored DOB so the token carries
 	// an authoritative is_minor claim when age-gating is on. No-op (false)
 	// when the gate is off or no DOB is on file.
@@ -1809,6 +1805,13 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	if err := s.enforceDOBRequired(ctx, user, ipAddr, userAgent); err != nil {
 		return "", "", err
 	}
+
+	// Every self-signup and every sign-in reaches here, refresh included, so
+	// an account that predates the project's account domain (or whose email
+	// was verified since) receives its address at its next session, however
+	// long-lived. After the gates above, so a refused session writes nothing.
+	// A no-op once issued.
+	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	claims := jwt.Claims{
 		Sub:       user.ID,

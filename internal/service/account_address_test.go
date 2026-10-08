@@ -91,15 +91,47 @@ func accountsScope(t *testing.T, domain string) context.Context {
 	})
 }
 
-func TestAccountAddress_IssuedAtSignup(t *testing.T) {
+func TestAccountAddress_IssuedOnceTheEmailIsVerified(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
+	svc.cfg.AuthRequireVerifiedEmail = false
 	ctx := accountsScope(t, "accounts.example.com")
 
-	_, err := svc.PasswordSignup(ctx, "bob@mail.example.com", accessTestPassword, "Bob", "", 0, "", EmailLinkParams{})
+	// A sign-up has not proven it owns the address: no address yet.
+	res, err := svc.PasswordSignup(ctx, "bob@mail.example.com", accessTestPassword, "Bob", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
+	require.Empty(t, res.User.AccountAddress)
 	u, err := repo.FindUserByEmail(ctx, "bob@mail.example.com")
 	require.NoError(t, err)
-	require.Equal(t, "bob-at-mail.example.com@accounts.example.com", u.AccountAddress)
+	require.Empty(t, u.AccountAddress)
+
+	// Verified, the next sign-in issues it.
+	require.NoError(t, repo.UpdateUser(ctx, u.ID, map[string]any{"email_verified": true}))
+	login, err := svc.PasswordLogin(ctx, "bob@mail.example.com", accessTestPassword, "1.2.3.4", "agent")
+	require.NoError(t, err)
+	require.Equal(t, "bob-at-mail.example.com@accounts.example.com", login.User.AccountAddress)
+}
+
+// The duplicate-signup decoy carries the address a genuine new account would
+// get, so account_address cannot tell a registered email from a new one.
+func TestAccountAddress_DuplicateSignupDecoyMatches(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.cfg.AuthRequireVerifiedEmail = false
+	ctx := accountsScope(t, "accounts.example.com")
+
+	fresh, err := svc.PasswordSignup(ctx, "carol@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	require.NoError(t, err)
+	dup, err := svc.PasswordSignup(ctx, "carol@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	require.NoError(t, err)
+	require.Equal(t, fresh.User.AccountAddress, dup.User.AccountAddress)
+	require.Equal(t, fresh.User.EmailVerified, dup.User.EmailVerified)
+
+	// A decoy for a path whose genuine account is created verified (passkey
+	// sign-up) carries the predicted address.
+	decoy := svc.newDuplicateSignupUser("dave@mail.example.com", "dave")
+	decoy.EmailVerified = true
+	out, err := svc.duplicateSignupDecoyResult(ctx, decoy)
+	require.NoError(t, err)
+	require.Equal(t, "dave-at-mail.example.com@accounts.example.com", out.User.AccountAddress)
 }
 
 func TestAccountAddress_NoneWithoutDomain(t *testing.T) {
@@ -115,7 +147,7 @@ func TestAccountAddress_NoneWithoutDomain(t *testing.T) {
 
 func TestAccountAddress_BackfilledAtNextSignIn(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
-	existing := seedUser(repo, "early@mail.example.com", hashPW(t, accessTestPassword), "active")
+	existing := verified(seedUser(repo, "early@mail.example.com", hashPW(t, accessTestPassword), "active"))
 	require.Empty(t, existing.AccountAddress)
 
 	ctx := accountsScope(t, "accounts.example.com")
@@ -143,7 +175,7 @@ func TestAccountAddress_ClashTakesNextSuffix(t *testing.T) {
 		"account_address": "bob-at-mail.example.com@accounts.example.com",
 	}))
 
-	u := seedUser(repo, "bob@mail.example.com", "", "active")
+	u := verified(seedUser(repo, "bob@mail.example.com", "", "active"))
 	ensureAccountAddress(ctx, repo, zap.NewNop(), u)
 	require.Equal(t, "bob-at-mail.example.com-2@accounts.example.com", u.AccountAddress)
 	stored, err := repo.GetUser(ctx, u.ID)
@@ -161,7 +193,7 @@ func TestAccountAddress_SkipsAnonymousAndFailuresDoNotBlock(t *testing.T) {
 
 	failing := newErrorRepo()
 	failing.failAssignAccountAddress = true
-	u := seedUser(failing.fakeRepo, "bob@mail.example.com", "", "active")
+	u := verified(seedUser(failing.fakeRepo, "bob@mail.example.com", "", "active"))
 	ensureAccountAddress(ctx, failing, zap.NewNop(), u)
 	require.Empty(t, u.AccountAddress, "a store failure leaves the address for the next sign-in")
 
@@ -178,14 +210,14 @@ func TestAccountAddress_SkipsAnonymousAndFailuresDoNotBlock(t *testing.T) {
 func TestAccountAddress_NeverReplacesAHeldAddress(t *testing.T) {
 	repo := newFakeRepo()
 	ctx := accountsScope(t, "accounts.example.com")
-	u := seedUser(repo, "bob@mail.example.com", "", "active")
+	u := verified(seedUser(repo, "bob@mail.example.com", "", "active"))
 	held, err := repo.AssignAccountAddress(ctx, u.ID, "first@accounts.example.com")
 	require.NoError(t, err)
 	require.Equal(t, "first@accounts.example.com", held)
 
 	// A stale copy of the account (read before the first assignment) asks
 	// again: the stored address wins and the copy learns it.
-	stale := &User{ID: u.ID, Email: u.Email}
+	stale := &User{ID: u.ID, Email: u.Email, EmailVerified: true}
 	ensureAccountAddress(ctx, repo, zap.NewNop(), stale)
 	require.Equal(t, "first@accounts.example.com", stale.AccountAddress)
 }
@@ -198,7 +230,7 @@ func TestAccountAddress_ExhaustedSuffixesEndOnTheIDSuffix(t *testing.T) {
 		_, err := repo.AssignAccountAddress(ctx, other.ID, fitAddressLocalPart("bob-at-mail.example.com", attempt)+"@accounts.example.com")
 		require.NoError(t, err)
 	}
-	u := seedUser(repo, "bob@mail.example.com", "", "active")
+	u := verified(seedUser(repo, "bob@mail.example.com", "", "active"))
 	ensureAccountAddress(ctx, repo, zap.NewNop(), u)
 	require.NotEmpty(t, u.AccountAddress)
 	require.True(t, strings.HasPrefix(u.AccountAddress, "bob-at-mail.example.com-"))
@@ -209,7 +241,7 @@ func TestAccountAddress_ExhaustedSuffixesEndOnTheIDSuffix(t *testing.T) {
 func TestAccountAddress_FollowsAConfirmedEmailChange(t *testing.T) {
 	repo := newFakeRepo()
 	ctx := accountsScope(t, "accounts.example.com")
-	u := seedUser(repo, "old@mail.example.com", "", "active")
+	u := verified(seedUser(repo, "old@mail.example.com", "", "active"))
 	ensureAccountAddress(ctx, repo, zap.NewNop(), u)
 	require.Equal(t, "old-at-mail.example.com@accounts.example.com", u.AccountAddress)
 
@@ -218,7 +250,7 @@ func TestAccountAddress_FollowsAConfirmedEmailChange(t *testing.T) {
 	require.Equal(t, "new-at-mail.example.com@accounts.example.com", u.AccountAddress)
 
 	// A username account keeps its handle whatever its email does.
-	named := seedUser(repo, "named@mail.example.com", "", "active")
+	named := verified(seedUser(repo, "named@mail.example.com", "", "active"))
 	named.Username = "named"
 	ensureAccountAddress(ctx, repo, zap.NewNop(), named)
 	named.Email = "other@mail.example.com"
@@ -251,7 +283,7 @@ func (r *addressRecordingRepo) AssignAccountAddress(_ context.Context, userID, a
 	return address, nil
 }
 
-func TestAccountAddress_IssuedToAnInvitedUser(t *testing.T) {
+func TestAccountAddress_NotIssuedToAnUnverifiedInvitee(t *testing.T) {
 	db := newFakeDB()
 	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
 	repo := &addressRecordingRepo{fakeRepo: newFakeRepo(), assigned: map[string]string{}}
@@ -260,8 +292,10 @@ func TestAccountAddress_IssuedToAnInvitedUser(t *testing.T) {
 	res, err := svc.InviteUser(accountsScope(t, "accounts.example.com"), "admin-1",
 		"new@mail.example.com", "New", "member", "", 0, true)
 	require.NoError(t, err)
-	require.Equal(t, "new-at-mail.example.com@accounts.example.com", res.User.AccountAddress)
-	require.Equal(t, res.User.AccountAddress, repo.assigned[res.User.ID])
+	// An invitee has not yet proven they own the address, so it gets none
+	// until it signs in verified.
+	require.Empty(t, res.User.AccountAddress)
+	require.Empty(t, repo.assigned)
 }
 
 func TestAccountAddress_IssuedToAManagedChild(t *testing.T) {
@@ -283,7 +317,7 @@ func TestAccountAddress_Username(t *testing.T) {
 func TestAccountAddress_ConfirmEmailChangeReissues(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	ctx := accountsScope(t, "accounts.example.com")
-	user := seedUserWithPassword(t, repo, "old@mail.example.com", "Str0ng!Pass1")
+	user := verified(seedUserWithPassword(t, repo, "old@mail.example.com", "Str0ng!Pass1"))
 	ensureAccountAddress(ctx, repo, zap.NewNop(), user)
 	require.Equal(t, "old-at-mail.example.com@accounts.example.com", user.AccountAddress)
 
@@ -298,7 +332,7 @@ func TestAccountAddress_ConfirmEmailChangeReissues(t *testing.T) {
 
 func TestAccountAddress_KeptWhenTheProjectStopsIssuing(t *testing.T) {
 	repo := newFakeRepo()
-	u := seedUser(repo, "old@mail.example.com", "", "active")
+	u := verified(seedUser(repo, "old@mail.example.com", "", "active"))
 	ensureAccountAddress(accountsScope(t, "accounts.example.com"), repo, zap.NewNop(), u)
 	require.NotEmpty(t, u.AccountAddress)
 
@@ -324,7 +358,7 @@ func TestAccountAddress_LegacyUsernameStillSignsIn(t *testing.T) {
 func TestAccountAddress_IssuedOnRefresh(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	open := accessScope(t, `{"access":{"mode":"open"}}`)
-	seedUser(repo, "early@mail.example.com", hashPW(t, accessTestPassword), "active")
+	verified(seedUser(repo, "early@mail.example.com", hashPW(t, accessTestPassword), "active"))
 	login, err := svc.PasswordLogin(open, "early@mail.example.com", accessTestPassword, "1.2.3.4", "agent")
 	require.NoError(t, err)
 	require.Empty(t, login.User.AccountAddress)
@@ -344,4 +378,11 @@ func TestProjectAccountsConfig_DomainFitsAnAddress(t *testing.T) {
 	require.Greater(t, len(long), maxAccountDomain)
 	_, err := ParseProjectConfig(`{"accounts":{"domain":"` + long + `"}}`)
 	require.Error(t, err)
+}
+
+// verified marks a seeded account's email verified: an address that spells an
+// email is issued only once the email is.
+func verified(u *User) *User {
+	u.EmailVerified = true
+	return u
 }

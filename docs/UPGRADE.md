@@ -14,8 +14,8 @@ again.
   project's config, or `GATEWAY_DEFAULT_EMAIL_DOMAIN` for the default
   project. Every permanent account is then issued an address on that
   domain: `<username>@<domain>` for a username account, and the email with
-  `@` written as `-at-` for an email account. Existing accounts get theirs
-  at their next sign-in. `User.account_address` carries it. A deployment
+  `@` written as `-at-` for an email account, once its email is verified.
+  Existing accounts get theirs at their next sign-in. `User.account_address` carries it. A deployment
   that sets neither behaves exactly as before. See *Account addresses* in
   the docs.
 - **`accounts` in a project's config is now read and validated.** A stored

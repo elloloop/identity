@@ -312,7 +312,11 @@ func (s *AuthService) handleDuplicatePasskeySignup(ctx context.Context, user *Us
 		)
 	}
 	s.logger.Info("passkey_signup_existing_email", zap.String("email", redactEmail(email)), zap.String("user_id", user.ID))
-	return s.duplicateSignupDecoyResult(ctx, s.newDuplicateSignupUser(email, fallbackDisplayName(email, "")))
+	// A genuine passkey sign-up's account is created verified (the in-flow
+	// OTP proved the address), so the decoy is too.
+	decoy := s.newDuplicateSignupUser(email, fallbackDisplayName(email, ""))
+	decoy.EmailVerified = true
+	return s.duplicateSignupDecoyResult(ctx, decoy)
 }
 
 func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) error {
@@ -373,6 +377,10 @@ func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displ
 // control and the account is created verified) must use this directly — never
 // the verified-email-gated newDuplicateSignupResult, which can be session-less.
 func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User) (*LoginResult, error) {
+	// A genuine new account that is issued a session is issued its account
+	// address too; the decoy carries the one it would get, or it would give
+	// the duplicate away.
+	user.AccountAddress = predictedAccountAddress(ctx, user)
 	decoyClaims := jwt.Claims{
 		Sub:    user.ID,
 		Email:  user.Email,
