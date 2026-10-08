@@ -136,8 +136,9 @@ metadata. Two rules it must follow, both of them load-bearing:
    win. Delete the identity keys before appending your own.
 
 `MergeAccounts` also reads `x-authenticated-auth-time`, the token's
-`auth_time` claim (the sign-in that opened the session, in epoch seconds):
-forward it, or every merge is refused `reauthentication_required`.
+`auth_time` claim (epoch seconds, present only on a token a sign-in
+issued): forward it from the verified token, after deleting any value the
+client sent, or every merge is refused `reauthentication_required`.
 
 ```go
 func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud bool) grpc.UnaryServerInterceptor {

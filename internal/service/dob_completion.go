@@ -63,14 +63,18 @@ func (e *DOBRequiredError) Unwrap() error { return ErrDOBRequired }
 // result would strand an email-less account in PENDING_PARENTAL_CONSENT
 // with no channel to reach a parent. The moment an anonymous account is
 // promoted to an identified one, the exemption ends and this gate applies.
-func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, ipAddr, userAgent string) error {
+//
+// authTimeMs is the sign-in behind the session being issued (0 for none);
+// the ticket carries it, so completing the step continues that session
+// rather than counting as a new sign-in.
+func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTimeMs int64, ipAddr, userAgent string) error {
 	if !s.ageGate.Enabled() || !s.cfg.AgeGateRequireDOB || user == nil {
 		return nil
 	}
 	if user.IsAnonymous || user.DateOfBirthMs != 0 {
 		return nil
 	}
-	ticket, err := s.mintDOBCompletionTicket(ctx, user)
+	ticket, err := s.mintDOBCompletionTicket(ctx, user, authTimeMs)
 	if err != nil {
 		return err
 	}
@@ -126,9 +130,12 @@ func (s *AuthService) verifyPurposeTicket(ctx context.Context, ticket, purpose s
 
 // mintDOBCompletionTicket signs the short-lived bearer credential that
 // authorizes exactly one thing: a SubmitDateOfBirth call for the account
-// named by sub.
-func (s *AuthService) mintDOBCompletionTicket(ctx context.Context, user *User) (string, error) {
-	return s.mintPurposeTicket(ctx, user.ID, tokenPurposeDOBCompletion, dobCompletionTicketTTL)
+// named by sub. It carries the sign-in behind the interrupted session
+// (auth_time, absent for none) for SubmitDateOfBirth to continue.
+func (s *AuthService) mintDOBCompletionTicket(ctx context.Context, user *User, authTimeMs int64) (string, error) {
+	return s.signPurposeTicket(ctx, jwt.Claims{
+		Sub: user.ID, Purpose: tokenPurposeDOBCompletion, AuthTime: authTimeMs / 1000,
+	}, dobCompletionTicketTTL)
 }
 
 // validateCompletionDOB rejects a missing, future, or implausibly old
@@ -222,8 +229,13 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 		return &LoginResult{User: user}, nil
 	}
 
+	// Completing the step continues the session it interrupted: the same
+	// sign-in, not a new one. A ticket from a refresh carries none, and the
+	// session it yields has none either.
 	s.updateLastLogin(ctx, user.ID)
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	s.cancelPendingDeletionOnLogin(ctx, user)
+	anchor := claims.AuthTime * 1000
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, anchor, anchor)
 	if err != nil {
 		return nil, err
 	}

@@ -18,13 +18,15 @@ column is absent, then `identity migrate force 35` and `identity migrate`).
   held under the retired id. See *Merging accounts* in the docs.
 - **`MergeAccounts` requires a recent sign-in of the account that is kept**:
   one within `GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS` (new, default
-  300; 0 selects it, and it cannot be turned off), read from the access token's new `auth_time` claim.
-  Otherwise it answers `FAILED_PRECONDITION` `reauthentication_required`.
-- **Access tokens carry `auth_time`** (OIDC, epoch seconds): the sign-in
-  that opened the session, unchanged by refreshes. Verifiers that ignore
-  unknown claims see no change. **Native-gRPC hosts** that use
-  `MergeAccounts` forward it as `x-authenticated-auth-time` metadata (see
-  the embedding guide).
+  300; 0 selects it, and it cannot be turned off), read from the access
+  token's new `auth_time` claim. Otherwise it answers `FAILED_PRECONDITION`
+  `reauthentication_required`.
+- **Access tokens a sign-in issues carry `auth_time`** (OIDC, epoch
+  seconds). A refreshed token, or one from a QR handoff, carries none.
+  Verifiers that ignore unknown claims see no change. **Native-gRPC hosts**
+  that use `MergeAccounts` forward it as `x-authenticated-auth-time`
+  metadata, after deleting any value the client sent (see the embedding
+  guide).
 - **Webhook subscribers receive a new event type, `user.merged`.** A
   subscription with no event-type filter receives every type, so it gets
   `user.merged` too; make sure your handler ignores (or handles) types it

@@ -677,7 +677,7 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 		require.ErrorIs(t, err, ErrUnauthenticated, "ticket %q must be refused", ticket)
 	}
 
-	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: user.ID})
+	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: user.ID}, 0)
 	require.NoError(t, err)
 
 	// A valid ticket with an out-of-range date is InvalidArgument.
@@ -698,7 +698,7 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 	repo.setDOBOnceErr = nil
 
 	// A ticket for an account that no longer exists refuses without a panic.
-	ghostTicket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: "no-such-user"})
+	ghostTicket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: "no-such-user"}, 0)
 	require.NoError(t, err)
 	_, err = svc.SubmitDateOfBirth(ctx, ghostTicket, dobAgeMs(30), "", "")
 	require.Error(t, err)
@@ -723,7 +723,7 @@ func TestSubmitDateOfBirth_IsSetOnce(t *testing.T) {
 	require.NoError(t, err)
 	enableAgeGate(t, svc, true)
 
-	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: res.User.ID})
+	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: res.User.ID}, 0)
 	require.NoError(t, err)
 
 	// The child-band submission lands first and gates the account.

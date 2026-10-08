@@ -292,7 +292,7 @@ func TestMergeAccounts_RequiresARecentSignIn(t *testing.T) {
 	for name, authTime := range map[string]int64{
 		"no sign-in time": 0,
 		"too long ago":    now - maxAge - 1,
-		"in the future":   now + 60,
+		"in the future":   now + 120,
 	} {
 		_, err := svc.MergeAccounts(ctx, survivor.ID, authTime, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 		require.ErrorIs(t, err, ErrReauthenticationRequired, name)
@@ -309,8 +309,8 @@ func TestMergeAccounts_RequiresARecentSignIn(t *testing.T) {
 	require.NoError(t, err, "a sign-in within the window is enough")
 }
 
-// auth_time is the sign-in that opened the session: stamped at sign-in and
-// kept, not renewed, by a refresh.
+// auth_time is stamped by a sign-in, and a refresh — not a sign-in — carries
+// none.
 func TestTokens_AuthTimeIsTheSignIn(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -330,5 +330,5 @@ func TestTokens_AuthTimeIsTheSignIn(t *testing.T) {
 	require.NoError(t, err)
 	claims, err = jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 	require.NoError(t, err)
-	require.Equal(t, signedInAt.Unix(), claims.AuthTime, "a refresh is not a sign-in")
+	require.Zero(t, claims.AuthTime, "a refresh is not a sign-in")
 }

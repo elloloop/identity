@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -318,6 +319,10 @@ func notifyMerge(ctx context.Context, cfg *config.Config, mailer email.Transport
 	}
 }
 
+// authTimeClockSkew is how far in the future an auth_time may be and still
+// count, allowing for clock drift between replicas.
+const authTimeClockSkew = 30 * time.Second
+
 // recentlyAuthenticated reports whether a session's sign-in (auth_time, epoch
 // seconds) is within GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS of now. A
 // session with no recorded sign-in time, or one in the future, is not.
@@ -325,6 +330,8 @@ func (s *AuthService) recentlyAuthenticated(authTimeSec int64) bool {
 	if authTimeSec <= 0 {
 		return false
 	}
+	// A sign-in stamped by a replica whose clock runs slightly ahead is
+	// still a sign-in; anything further in the future is not.
 	age := s.nowMs() - authTimeSec*1000
-	return age >= 0 && age <= s.cfg.AccountMergeReauthMaxAge().Milliseconds()
+	return age >= -authTimeClockSkew.Milliseconds() && age <= s.cfg.AccountMergeReauthMaxAge().Milliseconds()
 }
