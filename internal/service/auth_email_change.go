@@ -247,9 +247,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 	user.EmailVerified = true
 	user.EmailVerifiedAt = now
 	user.UpdatedAt = time.UnixMilli(now)
-	if user.Username == "" {
-		reissueAccountAddress(ctx, s.repo(ctx), s.logger, user)
-	}
+	ReissueAddressAfterEmailChange(ctx, s.repo(ctx), s.logger, user)
 
 	if err := s.repo(ctx).MarkEmailChangeTokenConsumed(ctx, rec.NodeID, now); err != nil {
 		s.logger.Warn("email_change_consume_failed",

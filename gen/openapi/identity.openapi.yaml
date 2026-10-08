@@ -8922,8 +8922,8 @@ components:
              creation, or at the first sign-in after the project configures a domain;
              an email account gets it only once its email is verified.
              It follows the identifier it came from: a guardian's rename for a
-             username, a confirmed email change for an email (SCIM email changes do
-             not re-derive it yet). A released address can later be issued to
+             username, an email change for an email (self-service or SCIM). A
+             released address can later be issued to
              another account, and distinct identifiers can collide (the later one
              takes a suffix) — key on the user id, not this address, and never treat
              it as proof of the email it spells. Empty when

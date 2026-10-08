@@ -362,11 +362,21 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 	if updated == nil {
 		return scim.User{}, scim.ErrNotFound
 	}
+	s.followEmailChange(ctx, existing, updated)
 	// A PUT always carries the full target active state, so a false deactivates
 	// and a true on a previously-deactivated account reactivates.
 	wasActive := isActiveStatus(existing.Status)
 	s.emitUserChange(ctx, !u.Active, u.Active && !wasActive, updated)
 	return toSCIMUser(updated), nil
+}
+
+// followEmailChange re-derives an email account's account address when a
+// SCIM write changed its email, as a confirmed self-service change does.
+func (s *repoSCIMStore) followEmailChange(ctx context.Context, before, after *service.User) {
+	if service.FoldEmail(before.Email) == service.FoldEmail(after.Email) {
+		return
+	}
+	service.ReissueAddressAfterEmailChange(ctx, s.repo, s.logger, after)
 }
 
 // revokeUserAccess kills a user's live sessions and refresh tokens so a
@@ -451,6 +461,7 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 	if updated == nil {
 		return scim.User{}, scim.ErrNotFound
 	}
+	s.followEmailChange(ctx, existing, updated)
 	// The deactivation / reactivation events derive from the REQUESTED target
 	// state (patch.Active / the deactivate flag above), not the observed
 	// transition, so a retry after a partial-failure deactivation re-emits

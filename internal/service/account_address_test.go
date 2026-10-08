@@ -24,7 +24,7 @@ func TestAccountAddressLocalPart(t *testing.T) {
 		{"email keeps its provider", User{Email: "bob@mail.example"}, "bob-at-mail.example"},
 		{"upper case folds", User{Email: "Bob@Mail.Example"}, "bob-at-mail.example"},
 		{"underscore kept, plus becomes a hyphen", User{Email: "bob_x+tag@mail.example"}, "bob_x-tag-at-mail.example"},
-		{"an email on the account domain keeps its local part", User{Email: "bob@accounts.example.test"}, "bob"},
+		{"an email on the account domain keeps the -at- form", User{Email: "bob@accounts.example.test"}, "bob-at-accounts.example.test"},
 		{"other characters become hyphens", User{Email: "bob!o'k@mail.example"}, "bob-o-k-at-mail.example"},
 		{"dot runs collapse", User{Username: "a..b"}, "a.b"},
 		{"leading and trailing dots dropped", User{Username: ".bob."}, "bob"},
@@ -32,7 +32,7 @@ func TestAccountAddressLocalPart(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, accountAddressLocalPart(&tc.user, "accounts.example.test"))
+			require.Equal(t, tc.want, accountAddressLocalPart(&tc.user))
 		})
 	}
 }
@@ -257,7 +257,7 @@ func TestAccountAddress_FollowsAConfirmedEmailChange(t *testing.T) {
 	named.Username = "named"
 	ensureAccountAddress(ctx, repo, zap.NewNop(), named)
 	named.Email = "other@mail.example.com"
-	// ConfirmEmailChange reissues only an email account's address.
+	ReissueAddressAfterEmailChange(ctx, repo, zap.NewNop(), named)
 	require.Equal(t, "named@accounts.example.com", named.AccountAddress)
 }
 
@@ -414,7 +414,7 @@ func TestAccountAddress_RoleNamesAndLegacySeparatorsTakeTheIDForm(t *testing.T) 
 func TestAccountAddress_ChangedLegacyUsernameTakesTheIDForm(t *testing.T) {
 	repo := newFakeRepo()
 	ctx := accountsScope(t, "accounts.example.test")
-	for name, base := range map[string]string{"bob.": "bob", "...": "user"} {
+	for name, base := range map[string]string{"bob.": "bob", "...": unnamedLocalPart} {
 		u := seedUser(repo, "", "", "active")
 		u.Username = name
 		ensureAccountAddress(ctx, repo, zap.NewNop(), u)
@@ -437,4 +437,33 @@ func TestAccountAddress_FollowsAManagedChildRename(t *testing.T) {
 	stored, err := f.repo.GetUser(ctx, f.child.ID)
 	require.NoError(t, err)
 	require.Equal(t, "kid.two@accounts.example.test", stored.AccountAddress)
+}
+
+// ConfirmEmailChange on a username account leaves its username address.
+func TestAccountAddress_UsernameAccountKeepsItsAddressOnEmailChange(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	ctx := accountsScope(t, "accounts.example.com")
+	user := verified(seedUserWithPassword(t, repo, "named@mail.example.com", "Str0ng!Pass1"))
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"username": "named"}))
+	user.Username = "named"
+	ensureAccountAddress(ctx, repo, zap.NewNop(), user)
+	require.Equal(t, "named@accounts.example.com", user.AccountAddress)
+
+	tok := requestAndExtractChangeToken(t, svc, repo, rec, user.ID, "other@mail.example.com", "Str0ng!Pass1")
+	got, err := svc.ConfirmEmailChange(ctx, tok)
+	require.NoError(t, err)
+	require.Equal(t, "named@accounts.example.com", got.AccountAddress)
+	stored, err := repo.GetUser(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, "named@accounts.example.com", stored.AccountAddress)
+}
+
+// The decoy predicts the id form where a real account would take it.
+func TestPredictedAccountAddress_FollowsTheUnsafeRule(t *testing.T) {
+	ctx := accountsScope(t, "accounts.example.test")
+	u := &User{ID: "u-1", Username: "postmaster"}
+	sum := sha256.Sum256([]byte("u-1"))
+	require.Equal(t, "postmaster-"+hex.EncodeToString(sum[:4])+"@accounts.example.test", predictedAccountAddress(ctx, u))
+	v := &User{ID: "u-2", Email: "bob@mail.example", EmailVerified: true}
+	require.Equal(t, "bob-at-mail.example@accounts.example.test", predictedAccountAddress(ctx, v))
 }

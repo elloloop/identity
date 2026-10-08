@@ -25,9 +25,9 @@ again.
   invalid `GATEWAY_DEFAULT_EMAIL_DOMAIN` stops the server from starting.
 - **Usernames may no longer contain `-at-`, start or end with `.`, contain
   `..`, or be a reserved role name** (`abuse`, `admin`, `administrator`,
-  `hostmaster`, `info`, `mailer-daemon`, `marketing`, `noc`, `no-reply`,
-  `noreply`, `postmaster`, `root`, `sales`, `security`, `ssl-admin`,
-  `support`, `webmaster`, `www`). This keeps a username's address apart from the addresses
+  `ftp`, `hostmaster`, `info`, `mailer-daemon`, `marketing`, `news`, `noc`,
+  `no-reply`, `noreply`, `postmaster`, `root`, `sales`, `security`,
+  `ssl-admin`, `support`, `usenet`, `uucp`, `webmaster`, `www`). This keeps a username's address apart from the addresses
   emails derive to, and keeps every address valid. It applies to new
   managed child usernames and to renames; existing usernames are kept and
   still sign in.

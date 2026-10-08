@@ -103,9 +103,8 @@ const maxAddressAttempts = 20
 //     "-at-" ("bob@mail.example" → "bob-at-mail.example"), so two people
 //     with the same name at different providers get different addresses,
 //     and a native <username>@<domain> address stays free for the person to
-//     claim later;
-//   - an email already on the account domain keeps its local part
-//     ("bob@corp.example" on corp.example → "bob").
+//     claim later. An email on the account domain is no exception: the plain
+//     namespace is the usernames'.
 //
 // Every character outside a-z, 0-9, '.', '_' and '-' becomes '-' — '+'
 // included, since mail systems that use subaddressing would deliver
@@ -113,20 +112,18 @@ const maxAddressAttempts = 20
 // of '.' collapse to one, and leading or trailing '.' are dropped, so the
 // result is always a valid dot-atom. An empty result means the account has no
 // identifier to derive from (an anonymous account), and gets no address.
-func accountAddressLocalPart(u *User, domain string) string {
+func accountAddressLocalPart(u *User) string {
 	var src string
 	switch {
 	case u.Username != "":
 		src = u.Username
 	case u.Email != "":
-		// An email already on the account domain is its own address there:
-		// bob@corp.example on corp.example is issued bob@corp.example.
-		local, host, _ := strings.Cut(strings.ToLower(u.Email), "@")
-		if host == domain {
-			src = local
-		} else {
-			src = local + addressSeparator + host
-		}
+		// Always the -at- form, even for an email on the account domain:
+		// usernames own the plain namespace, so a username and an email can
+		// never claim the same address, whichever comes first. The split is
+		// at the last '@', as the canonicalizer splits.
+		at := strings.LastIndexByte(u.Email, '@')
+		src = u.Email[:at] + addressSeparator + u.Email[at+1:]
 	default:
 		return ""
 	}
@@ -187,8 +184,7 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 	if local == "" {
 		return
 	}
-	sum := sha256.Sum256([]byte(u.ID))
-	idForm := fitAddressLocalPart(local+"-"+hex.EncodeToString(sum[:4]), 1)
+	idForm := idFormLocalPart(u, local)
 	candidates := make([]string, 0, maxAddressAttempts+1)
 	// A local part that is a role name, or a legacy username that spells
 	// another person's email-derived address, never takes its plain form or
@@ -204,7 +200,7 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 		held, err := repo.AssignAccountAddress(ctx, u.ID, candidate+"@"+scope.Accounts.Domain)
 		if err == nil {
 			u.AccountAddress = held
-			if held != "" {
+			if held == candidate+"@"+scope.Accounts.Domain {
 				logger.Info("account_address_assigned", zap.String("project_id", scope.ProjectID), zap.String("user_id", u.ID))
 			}
 			return
@@ -230,15 +226,19 @@ func addressableLocalPart(scope *ProjectScope, u *User) string {
 	if u.Username == "" && !u.EmailVerified {
 		return ""
 	}
-	local := accountAddressLocalPart(u, scope.Accounts.Domain)
+	local := accountAddressLocalPart(u)
 	// A legacy username the derivation had to change ("bob." → "bob") would
 	// otherwise take another username's address; plainFormUnsafe sends it to
 	// the id form, and one that derives to nothing still gets that form.
 	if u.Username != "" && local == "" {
-		return "user"
+		return unnamedLocalPart
 	}
 	return local
 }
+
+// unnamedLocalPart stands in for a legacy username that derives to nothing
+// (one made only of dots); plainFormUnsafe sends it to the id form.
+const unnamedLocalPart = "user"
 
 // addressSeparator is how an email account's local part spells the '@' of
 // its email. New usernames may not contain it (validateUsernameFormat), which
@@ -250,10 +250,11 @@ const addressSeparator = "-at-"
 // domain validation, and common system names. No account is issued them, so
 // no ordinary account receives mail meant for the domain's operators.
 var reservedLocalParts = map[string]bool{
-	"abuse": true, "admin": true, "administrator": true, "hostmaster": true,
-	"info": true, "mailer-daemon": true, "marketing": true, "noc": true,
-	"no-reply": true, "noreply": true, "postmaster": true, "root": true,
-	"sales": true, "security": true, "ssl-admin": true, "support": true,
+	"abuse": true, "admin": true, "administrator": true, "ftp": true,
+	"hostmaster": true, "info": true, "mailer-daemon": true, "marketing": true,
+	"news": true, "noc": true, "no-reply": true, "noreply": true,
+	"postmaster": true, "root": true, "sales": true, "security": true,
+	"ssl-admin": true, "support": true, "usenet": true, "uucp": true,
 	"webmaster": true, "www": true,
 }
 
@@ -271,6 +272,13 @@ func plainFormUnsafe(u *User, local string) bool {
 	return strings.Contains(local, addressSeparator) || local != u.Username
 }
 
+// idFormLocalPart is the last-resort local part: local tagged with a hash of
+// the account's id.
+func idFormLocalPart(u *User, local string) string {
+	sum := sha256.Sum256([]byte(u.ID))
+	return fitAddressLocalPart(local+"-"+hex.EncodeToString(sum[:4]), 1)
+}
+
 // predictedAccountAddress is the address a new account like u is issued when
 // nothing else holds it. The duplicate-signup decoy carries it, so a decoy
 // and a genuine new account return the same fields.
@@ -280,7 +288,21 @@ func predictedAccountAddress(ctx context.Context, u *User) string {
 	if local == "" {
 		return ""
 	}
+	if plainFormUnsafe(u, local) {
+		return idFormLocalPart(u, local) + "@" + scope.Accounts.Domain
+	}
 	return fitAddressLocalPart(local, 1) + "@" + scope.Accounts.Domain
+}
+
+// ReissueAddressAfterEmailChange is the one rule for every path that changes
+// an account's email (a confirmed self-service change, a SCIM write): an
+// email account's address follows its email; a username account's address
+// does not, because it came from the username.
+func ReissueAddressAfterEmailChange(ctx context.Context, repo Repository, logger *zap.Logger, u *User) {
+	if u == nil || u.Username != "" {
+		return
+	}
+	reissueAccountAddress(ctx, repo, logger, u)
 }
 
 // reissueAccountAddress re-derives an account's address after the identifier
