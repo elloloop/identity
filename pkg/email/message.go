@@ -84,6 +84,11 @@ func (m Message) Validate() error {
 	if strings.TrimSpace(m.Subject) == "" {
 		return fmt.Errorf("%w: subject is required", ErrInvalidMessage)
 	}
+	// The subject is written into the header as-is: a line break would start
+	// a header of the caller's choosing.
+	if strings.ContainsAny(m.Subject, "\r\n") {
+		return fmt.Errorf("%w: subject must be one line", ErrInvalidMessage)
+	}
 	if strings.TrimSpace(m.HTML) == "" && strings.TrimSpace(m.Text) == "" {
 		return fmt.Errorf("%w: at least one of html or text body must be non-empty", ErrInvalidMessage)
 	}

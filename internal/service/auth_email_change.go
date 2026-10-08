@@ -104,7 +104,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		return fmt.Errorf("creating email change token: %w", err)
 	}
 
-	link := fmt.Sprintf("%s/auth/confirm-email-change?token=%s", s.appBaseURL(ctx), rawToken)
+	link := fmt.Sprintf("%s/auth/confirm-email-change?token=%s", appBaseURL(ctx, s.cfg), rawToken)
 	expiresStr := formatExpiresIn(expiry)
 	brand := resolveBranding(ctx, s.cfg, "")
 

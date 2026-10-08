@@ -84,7 +84,7 @@ func (s *AuthService) emailLinkPageURL(ctx context.Context, page string) string 
 	if base := strings.TrimRight(s.cfg.EmailLinkBaseURL, "/"); base != "" {
 		return base + "/" + page
 	}
-	return s.appBaseURL(ctx) + appAuthPathPrefix + page
+	return appBaseURL(ctx, s.cfg) + appAuthPathPrefix + page
 }
 
 // buildEmailLink appends the token, then the product and the return_to (as

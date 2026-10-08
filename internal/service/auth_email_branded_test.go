@@ -15,30 +15,31 @@ import (
 func TestAppBaseURL_BrandedFromProjectScope(t *testing.T) {
 	t.Parallel()
 
-	s := &AuthService{cfg: &config.Config{AppBaseURL: "https://fallback.example/"}}
+	cfg := &config.Config{AppBaseURL: "https://fallback.example/"}
 
 	// No project scope → configured fallback (trailing slash trimmed).
-	if got := s.appBaseURL(context.Background()); got != "https://fallback.example" {
+	if got := appBaseURL(context.Background(), cfg); got != "https://fallback.example" {
 		t.Errorf("no scope: got %q, want https://fallback.example", got)
 	}
 
 	// Scope with a primary auth-domain → branded https host.
 	branded := WithProjectScope(context.Background(),
 		&ProjectScope{ProjectID: "p", PrimaryAuthDomain: "auth.acme.com"})
-	if got := s.appBaseURL(branded); got != "https://auth.acme.com" {
+	if got := appBaseURL(branded, cfg); got != "https://auth.acme.com" {
 		t.Errorf("branded: got %q, want https://auth.acme.com", got)
 	}
 
 	// Scope without a primary auth-domain → fallback.
 	noDomain := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "p"})
-	if got := s.appBaseURL(noDomain); got != "https://fallback.example" {
+	if got := appBaseURL(noDomain, cfg); got != "https://fallback.example" {
 		t.Errorf("scope without domain: got %q, want https://fallback.example", got)
 	}
 
-	// Empty config → localhost dev default.
-	dev := &AuthService{cfg: &config.Config{}}
-	if got := dev.appBaseURL(context.Background()); got != "http://localhost:9002" {
-		t.Errorf("empty cfg: got %q, want http://localhost:9002", got)
+	// Empty or absent config → localhost dev default.
+	for _, c := range []*config.Config{{}, nil} {
+		if got := appBaseURL(context.Background(), c); got != "http://localhost:9002" {
+			t.Errorf("cfg %v: got %q, want http://localhost:9002", c, got)
+		}
 	}
 }
 

@@ -1,5 +1,28 @@
 # Upgrade guide
 
+## v4.10 → next — neutral built-in defaults; invitation links follow the project (behaviour change)
+
+No schema change and no migration.
+
+- **`GATEWAY_TOTP_ISSUER` and `GATEWAY_PASSKEY_RP_NAME` default to
+  `Identity`.** The built-in defaults used to name one deployment's
+  product. If you never set them, new authenticator-app enrolments and new
+  passkeys now show `Identity`: set both to your product's name. Existing
+  enrolments and passkeys keep the name they were created with.
+- **`GATEWAY_DEFAULT_EMAIL_DOMAIN` defaults to empty.** Its built-in
+  default named one deployment's domain; set it to your own domain if you
+  use it.
+- **Admin invitation links (`InviteUser`) follow the request's project**,
+  like magic-link, email-change and tenant-invitation links: the project's
+  primary auth domain, else `GATEWAY_APP_BASE_URL`, else the localhost
+  development default. A configuration built in code with an empty
+  `AppBaseURL` used to point them at a fixed external host. The invitation
+  email names the product from the project's `branding.product_name`, else
+  `GATEWAY_EMAIL_BRAND_PRODUCT_NAME`, else `GATEWAY_TOTP_ISSUER`.
+- **No email is sent with a line break in its subject.** A product name
+  now reaches the invitation subject, so the email layer refuses a
+  multi-line subject instead of writing it into the header.
+
 ## v4.9 → v4.10 — reset and verification links can point at a sign-in hub (additive); stricter URL boot checks
 
 No schema change and no migration. A deployment that sets nothing new sends

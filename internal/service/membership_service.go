@@ -362,7 +362,7 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	if s.mailer == nil {
 		return
 	}
-	link := fmt.Sprintf("%s/auth/accept-invitation?token=%s", s.appBaseURL(ctx), rawToken)
+	link := fmt.Sprintf("%s/auth/accept-invitation?token=%s", appBaseURL(ctx, s.cfg), rawToken)
 	var brand resolvedBranding
 	if s.cfg != nil {
 		brand = resolveBranding(ctx, s.cfg, "")
@@ -412,23 +412,6 @@ func (s *MembershipService) tenantDisplayName(ctx context.Context, projectID, te
 		return d
 	}
 	return generic
-}
-
-// appBaseURL returns the public app base URL for the request's project, with
-// any trailing slash trimmed, so callers can concatenate "/auth/foo". It
-// mirrors AuthService.appBaseURL: a branded primary auth-domain when the
-// request resolved to one, else the configured GATEWAY_APP_BASE_URL, else a
-// localhost dev default.
-func (s *MembershipService) appBaseURL(ctx context.Context) string {
-	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.PrimaryAuthDomain != "" {
-		return "https://" + scope.PrimaryAuthDomain
-	}
-	if s.cfg != nil {
-		if u := strings.TrimRight(s.cfg.AppBaseURL, "/"); u != "" {
-			return u
-		}
-	}
-	return "http://localhost:9002"
 }
 
 // invitationTTL returns the configured invitation validity window, defaulting

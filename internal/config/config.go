@@ -831,7 +831,8 @@ type Config struct {
 	// TOTP secrets at rest. Throwaway dev key if unset; required in prod (a
 	// deterministic dev fallback must never be used in production).
 	TOTPEncryptionKey string
-	// TOTPIssuer is the issuer name shown in users' authenticator apps.
+	// TOTPIssuer is the issuer name shown in users' authenticator apps. The
+	// default is the neutral "Identity"; set it to your product's name.
 	TOTPIssuer string
 
 	// Pepper used as the HMAC-SHA-256 key for recovery-code hashing.
@@ -850,7 +851,8 @@ type Config struct {
 	// PasskeyRPID is the WebAuthn relying-party ID — must match the registrable
 	// domain (e.g. example.com).
 	PasskeyRPID string
-	// PasskeyRPName is the human-readable WebAuthn relying-party name.
+	// PasskeyRPName is the human-readable WebAuthn relying-party name. The
+	// default is the neutral "Identity"; set it to your product's name.
 	PasskeyRPName string
 	// PasskeyOrigin is the allowed origin for passkey ceremonies (scheme + host + port).
 	PasskeyOrigin string
@@ -876,7 +878,8 @@ type Config struct {
 	// LoginLockoutSeconds is how long (seconds) an account stays locked after the threshold is hit.
 	LoginLockoutSeconds int
 
-	// DefaultEmailDomain is the default email domain applied to new accounts.
+	// DefaultEmailDomain is the email domain this deployment assigns to the
+	// accounts it creates on its own domain. Empty (the default) assigns none.
 	DefaultEmailDomain string
 
 	// PublicEmailDomains extends the built-in set of consumer/public email
@@ -1395,13 +1398,13 @@ func loadFromEnv() *Config {
 		SAMLSigningCert: envStr("GATEWAY_SAML_SIGNING_CERT", ""),
 
 		TOTPEncryptionKey:  envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
-		TOTPIssuer:         envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
+		TOTPIssuer:         envStr("GATEWAY_TOTP_ISSUER", "Identity"),
 		TOTPRecoveryPepper: envStr("GATEWAY_TOTP_RECOVERY_PEPPER", ""),
 
 		LoginChallengeExpirySeconds: envInt("GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS", 300),
 
 		PasskeyRPID:                   envStr("GATEWAY_PASSKEY_RP_ID", "localhost"),
-		PasskeyRPName:                 envStr("GATEWAY_PASSKEY_RP_NAME", "Glassa Work"),
+		PasskeyRPName:                 envStr("GATEWAY_PASSKEY_RP_NAME", "Identity"),
 		PasskeyOrigin:                 envStr("GATEWAY_PASSKEY_ORIGIN", "http://localhost:9002"),
 		PasskeyChallengeExpirySeconds: envInt("GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS", 300),
 		PasskeySignupEnabled:          envBool("GATEWAY_PASSKEY_SIGNUP_ENABLED", true),
@@ -1412,7 +1415,7 @@ func loadFromEnv() *Config {
 		LoginMaxFailedAttempts: envInt("GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS", 5),
 		LoginLockoutSeconds:    envInt("GATEWAY_LOGIN_LOCKOUT_SECONDS", 900),
 
-		DefaultEmailDomain: envStr("GATEWAY_DEFAULT_EMAIL_DOMAIN", "glassa.work"),
+		DefaultEmailDomain: envStr("GATEWAY_DEFAULT_EMAIL_DOMAIN", ""),
 		PublicEmailDomains: envStr("GATEWAY_PUBLIC_EMAIL_DOMAINS", ""),
 
 		AllowedOrigins: envStr("GATEWAY_ALLOWED_ORIGINS", "http://localhost:9002,http://localhost:3000"),

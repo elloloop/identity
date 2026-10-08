@@ -380,9 +380,9 @@
   {
     "name": "GATEWAY_DEFAULT_EMAIL_DOMAIN",
     "type": "string",
-    "default": "glassa.work",
+    "default": "",
     "required": false,
-    "description": "is the default email domain applied to new accounts.",
+    "description": "is the email domain this deployment assigns to the accounts it creates on its own domain.",
     "category": "Email \u0026 branding",
     "anchor": "email-and-branding"
   },
@@ -1163,7 +1163,7 @@
   {
     "name": "GATEWAY_PASSKEY_RP_NAME",
     "type": "string",
-    "default": "Glassa Work",
+    "default": "Identity",
     "required": false,
     "description": "is the human-readable WebAuthn relying-party name.",
     "category": "Passkeys / WebAuthn",
@@ -1829,7 +1829,7 @@
   {
     "name": "GATEWAY_TOTP_ISSUER",
     "type": "string",
-    "default": "Glassa Work",
+    "default": "Identity",
     "required": false,
     "description": "is the issuer name shown in users' authenticator apps.",
     "category": "TOTP / 2FA",
