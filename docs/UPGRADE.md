@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.11 → next — merging accounts, which needs a recent sign-in (`auth_time` on access tokens; native-gRPC hosts opt in with `GRPCTrustAuthTime`); a temporary password must be replaced at first sign-in; SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
+## v4.11 → v4.12 — merging accounts, which needs a recent sign-in (`auth_time` on access tokens; native-gRPC hosts opt in with `GRPCTrustAuthTime`); a temporary password must be replaced at first sign-in; SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
 
 **Migration 0036** (SQLite 0019) adds `users.merged_into_user_id` with a
 constant default (catalog-only; `lock_timeout = 10s`; on timeout confirm the
