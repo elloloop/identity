@@ -163,6 +163,16 @@ import { Code } from "astro-expressive-code/components";
     point at a mail system that delivers them. Issuing an address does not set
     up mail.
   </p>
+  <p>
+    Usernames take the domain's plain addresses
+    (<code>bob@accounts.example.com</code>), first come first served. With
+    username self-signup on, use a domain dedicated to account addresses, such
+    as <code>accounts.example.com</code>, not one whose mailboxes belong to real
+    people, or a stranger could take a real mailbox's address. A workplace whose
+    username accounts only its admins create (<code>username_signup:
+    admin</code>) can use its own domain, since the admins choose every
+    username.
+  </p>
 
   <h2>How an address is formed</h2>
   <ul>

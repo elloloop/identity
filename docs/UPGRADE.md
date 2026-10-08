@@ -19,6 +19,8 @@ again.
   verified. `User.account_address` carries it. A deployment
   that sets neither behaves exactly as before. See *Account addresses* in
   the docs.
+- **Usernames may not end in `-` and eight hex digits**, the tag a clashing
+  account's fallback address carries.
 - **Who creates each kind of account (new; defaults keep today's
   behaviour).** `accounts.email_signup` and `accounts.username_signup`
   (default project: `GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP` and

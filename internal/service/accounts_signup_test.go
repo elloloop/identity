@@ -302,3 +302,9 @@ func TestUsernameAccount_WithEmailJudgedByEmail(t *testing.T) {
 	_, err = svc.PasswordLogin(listed, "ivan", accessTestPassword, "1.2.3.4", "agent")
 	require.NoError(t, err)
 }
+
+func TestValidateUsernameFormat_RefusesTheIDFormTag(t *testing.T) {
+	require.ErrorIs(t, validateUsernameFormat("bob-1a2b3c4d"), ErrInvalidArgument)
+	require.NoError(t, validateUsernameFormat("bob-1a2b3c4"))
+	require.NoError(t, validateUsernameFormat("bob-cafebabe1"))
+}
