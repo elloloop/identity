@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -130,15 +131,29 @@ func TestAdmin_ResetUserPassword_TempPassword(t *testing.T) {
 		t.Fatalf("expected empty reset token when temp password is requested")
 	}
 
-	login, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
+	// The temporary password signs in only to be replaced: identity refuses
+	// the session with a completion ticket, and the member chooses their own.
+	_, err = h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
 		Email:    memberEmail,
 		Password: reset.Msg.TemporaryPassword,
 	}))
+	ticket := passwordChangeTicket(t, err)
+	const ownPassword = "Own!Passw0rd-after-reset"
+	completed, err := h.Client.CompleteRequiredPasswordChange(ctx, connect.NewRequest(&identitypb.CompleteRequiredPasswordChangeRequest{
+		CompletionToken: ticket,
+		NewPassword:     ownPassword,
+	}))
 	if err != nil {
-		t.Fatalf("login with temporary password: %v", err)
+		t.Fatalf("CompleteRequiredPasswordChange: %v", err)
 	}
-	if login.Msg.GetUser().GetId() != memberID {
-		t.Fatalf("temp-password login user id = %q, want %q", login.Msg.GetUser().GetId(), memberID)
+	if completed.Msg.GetUser().GetId() != memberID || completed.Msg.GetAccessToken() == "" {
+		t.Fatalf("completion = %+v, want a session for %q", completed.Msg, memberID)
+	}
+	if _, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
+		Email:    memberEmail,
+		Password: ownPassword,
+	})); err != nil {
+		t.Fatalf("login with the member's own password: %v", err)
 	}
 
 	_, err = h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
@@ -326,4 +341,23 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 			t.Fatalf("%s code = %v, want PermissionDenied", tc.name, got)
 		}
 	}
+}
+
+// passwordChangeTicket asserts err is the password_change_required refusal and
+// returns the completion ticket its detail carries.
+func passwordChangeTicket(t *testing.T, err error) string {
+	t.Helper()
+	var cerr *connect.Error
+	if !errors.As(err, &cerr) || cerr.Code() != connect.CodeFailedPrecondition {
+		t.Fatalf("login with the issued password: want failed_precondition, got %v", err)
+	}
+	for _, d := range cerr.Details() {
+		if msg, derr := d.Value(); derr == nil {
+			if pc, ok := msg.(*identitypb.PasswordChangeRequiredDetails); ok && pc.GetCompletionToken() != "" {
+				return pc.GetCompletionToken()
+			}
+		}
+	}
+	t.Fatalf("the refusal carries no PasswordChangeRequiredDetails: %v", err)
+	return ""
 }
