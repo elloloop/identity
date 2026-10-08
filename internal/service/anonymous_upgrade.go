@@ -335,8 +335,7 @@ func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, u
 	if u == nil {
 		return nil, ErrNotFound
 	}
-	s.cancelPendingDeletionOnLogin(ctx, u)
-	access, refresh, err := s.issueTokensWithSessionStart(ctx, u, ipAddr, userAgent, s.nowMs(), authTimeMs)
+	access, refresh, err := s.issueSignInTokens(ctx, u, ipAddr, userAgent, s.nowMs(), authTimeMs)
 	if err != nil {
 		return nil, err
 	}

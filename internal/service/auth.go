@@ -1814,13 +1814,20 @@ func generateChallengeID() string {
 // absolute lifetime at now. The refresh path calls issueTokensWithSessionStart
 // directly so the anchor propagates unchanged across rotations.
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
-	// issueTokens is the single chokepoint every INTERACTIVE login funnels
-	// through (the refresh path calls issueTokensWithSessionStart directly), so
-	// it is the one place to auto-cancel a pending self-service deletion: an
-	// owner who signs back in during the grace window has reclaimed the account.
-	s.cancelPendingDeletionOnLogin(ctx, user)
 	now := s.nowMs()
-	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, now, now)
+	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now)
+}
+
+// issueSignInTokens is the chokepoint every interactive sign-in funnels
+// through (the refresh path calls issueTokensWithSessionStart directly), with
+// the session's anchor and auth_time spelled out by the caller: now for a
+// fresh credential proof (issueTokens), an earlier sign-in's time for a step
+// that continues one, 0 for a flow that proves no credential. It is the one
+// place to auto-cancel a pending self-service deletion: an owner who signs
+// back in during the grace window has reclaimed the account.
+func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+	s.cancelPendingDeletionOnLogin(ctx, user)
+	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionStartedAtMs, authTimeMs)
 }
 
 // issueTokensWithSessionStart mints a token pair, anchoring the session's

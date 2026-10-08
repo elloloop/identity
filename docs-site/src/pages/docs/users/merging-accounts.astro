@@ -68,7 +68,8 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       <code>GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS</code> (default 300)
       of the call, by any method the account has, its second factor
       included. A refresh does not count, nor does a session opened by a QR
-      handoff: sign the person in on that device with one of their
+      handoff, an anonymous sign-in or a password just added to an anonymous
+      account: sign the person in on that device with one of their
       credentials. An older session gets
       <code>FAILED_PRECONDITION</code> with
       <code>reauthentication_required</code>: sign the person in again, then

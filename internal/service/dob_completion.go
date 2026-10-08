@@ -233,9 +233,8 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	// sign-in, not a new one. A ticket from a refresh carries none, and the
 	// session it yields has none either.
 	s.updateLastLogin(ctx, user.ID)
-	s.cancelPendingDeletionOnLogin(ctx, user)
 	anchor := claims.AuthTime * 1000
-	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, anchor, anchor)
+	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, anchor, anchor)
 	if err != nil {
 		return nil, err
 	}

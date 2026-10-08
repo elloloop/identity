@@ -347,3 +347,29 @@ func TestRequiredPasswordChange_ClearedWithAClearedPassword(t *testing.T) {
 	require.Empty(t, stored.PasswordHash)
 	require.False(t, stored.PasswordChangeRequired)
 }
+
+// Every gate the sign-in passed after the password is checked again at
+// completion: a change in between wins over the ticket, and nothing changes.
+func TestRequiredPasswordChange_GatesRecheckedAtCompletion(t *testing.T) {
+	cases := map[string]func(svc *AuthService, u *User){
+		"locked":           func(_ *AuthService, u *User) { u.LockedUntil = nowMs() + 60_000 },
+		"deactivated":      func(_ *AuthService, u *User) { u.Status = StatusDeactivated },
+		"email unverified": func(svc *AuthService, u *User) { svc.cfg.AuthRequireVerifiedEmail = true; u.EmailVerified = false },
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newTestAuthService(t, repo)
+			user := issuedPasswordUser(t, repo, "issued@example.com")
+			user.EmailVerified = true
+			ticket := passwordChangeTicket(t, svc, "issued@example.com")
+
+			change(svc, user)
+			_, err := svc.CompleteRequiredPasswordChange(context.Background(), ticket, strongPW, "", "203.0.113.10", "agent")
+			require.Error(t, err)
+			stored, _ := repo.GetUser(context.Background(), user.ID)
+			require.True(t, stored.PasswordChangeRequired, "nothing changed")
+			require.True(t, passwords.Verify(issuedPW, stored.PasswordHash))
+		})
+	}
+}
