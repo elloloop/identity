@@ -1,0 +1,89 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Account addresses">
+  <h1>Account addresses</h1>
+  <p>
+    A project can issue every account an <strong>account address</strong> on a
+    domain the project owns. People keep signing up with whatever they have, an
+    email at any provider or a username, and each account also gets an address
+    on your domain. A consumer product gets a stable, project-unique handle for
+    every account. A workplace gets addresses its own mail system can deliver
+    to.
+  </p>
+
+  <h2>Turning it on</h2>
+  <p>
+    Set <code>accounts.domain</code> in the project's config. The default
+    project takes it from <code>GATEWAY_DEFAULT_EMAIL_DOMAIN</code>. Leaving it
+    empty, the default, issues no addresses.
+  </p>
+  <Code lang="json" code={`{
+  "accounts": {
+    "domain": "accounts.example.com"
+  }
+}`} />
+  <p>
+    The domain is stored lower-cased, without a trailing dot and IDN-punycoded,
+    and must be a fully qualified name. A domain that fails these checks fails
+    the config write. Mail reaches the addresses only if the domain's MX records
+    point at a mail system that delivers them. Issuing an address does not set
+    up mail.
+  </p>
+
+  <h2>How an address is formed</h2>
+  <ul>
+    <li>
+      <strong>Username accounts</strong> get <code>&lt;username&gt;@&lt;domain&gt;</code>:
+      <code>bob</code> becomes <code>bob@accounts.example.com</code>.
+    </li>
+    <li>
+      <strong>Email accounts</strong> keep their whole email, with the
+      <code>@</code> written as <code>-at-</code>:
+      <code>bob@mail.example</code> becomes
+      <code>bob-at-mail.example@accounts.example.com</code>. Two people named Bob
+      at different providers never collide, and the plain
+      <code>bob@accounts.example.com</code> stays free for a username account.
+    </li>
+    <li>
+      Letters are lower-cased. Every character other than <code>a–z</code>,
+      <code>0–9</code>, <code>.</code>, <code>_</code>, <code>+</code> and
+      <code>-</code> becomes <code>-</code>, and runs of dots collapse, so the
+      address is always valid.
+    </li>
+    <li>
+      If the part before the <code>@</code> is longer than 64 characters (the
+      limit for an email address), it keeps its first characters and ends in
+      eight hex digits of a hash of the whole value. The same account always
+      gets the same address.
+    </li>
+    <li>
+      If the address is already taken, the account gets the next free suffix:
+      <code>-2</code>, <code>-3</code> and so on.
+    </li>
+    <li>Anonymous accounts get no address until they are upgraded.</li>
+  </ul>
+
+  <h2>When it is issued</h2>
+  <p>
+    An account gets its address when it is created: at self-signup, through the
+    admin <code>CreateUser</code> and <code>InviteUser</code> calls, and when a
+    guardian creates a managed child account. An account that existed before the
+    project set a domain gets its address the next time it signs in. Accounts
+    provisioned by SCIM also get theirs at first sign-in.
+  </p>
+  <p>
+    An address is issued once and never rewritten. Changing the account's
+    email, or the project's domain, leaves an issued address as it was.
+    Failing to store an address never blocks a sign-in: the server logs it and
+    tries again at the next sign-in.
+  </p>
+
+  <h2>Where it appears</h2>
+  <p>
+    <code>User.account_address</code> carries it, on <code>GetCurrentUser</code>
+    and on the admin user reads.
+  </p>
+</DocsLayout>

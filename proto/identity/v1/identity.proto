@@ -82,6 +82,13 @@ message User {
   // CreateManagedChildAccount. Unique within the project when non-empty, and
   // usable as the PasswordLogin identifier.
   string username = 28;
+  // account_address is the address the project issued this account on its
+  // own domain (config_json accounts.domain): <username>@<domain> for a
+  // username account, the email with '@' written as "-at-" for an email
+  // account (bob@mail.example -> bob-at-mail.example@<domain>). Assigned at
+  // creation, or at the first sign-in after the project configures a domain,
+  // and never rewritten. Empty when the project issues none.
+  string account_address = 29;
 }
 
 message CreateUserRequest {

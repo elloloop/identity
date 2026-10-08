@@ -14,20 +14,21 @@ func userFromNode(n *graph.Node) *User {
 	}
 	p := n.Payload
 	return &User{
-		ID:            n.NodeID,
-		Email:         pstr(p, ufEmail),
-		Name:          pstr(p, ufName),
-		Role:          pstrOr(p, ufRole, "member"),
-		AvatarURL:     pstr(p, ufAvatarURL),
-		Status:        pstrOr(p, ufStatus, "active"),
-		RecoveryEmail: pstr(p, ufRecoveryEmail),
-		QuotaBytes:    pi64(p, ufQuotaBytes),
-		TotpRequired:  pbool(p, ufTOTPRequired),
-		LastLoginAtMs: pi64(p, ufLastLoginAt),
-		CreatedAt:     time.UnixMilli(pi64(p, ufCreatedAt)),
-		UpdatedAt:     time.UnixMilli(pi64(p, ufUpdatedAt)),
-		PasswordHash:  pstr(p, ufPasswordHash),
-		IsAnonymous:   pbool(p, ufIsAnonymous),
+		ID:             n.NodeID,
+		Email:          pstr(p, ufEmail),
+		Name:           pstr(p, ufName),
+		Role:           pstrOr(p, ufRole, "member"),
+		AvatarURL:      pstr(p, ufAvatarURL),
+		Status:         pstrOr(p, ufStatus, "active"),
+		RecoveryEmail:  pstr(p, ufRecoveryEmail),
+		QuotaBytes:     pi64(p, ufQuotaBytes),
+		TotpRequired:   pbool(p, ufTOTPRequired),
+		LastLoginAtMs:  pi64(p, ufLastLoginAt),
+		CreatedAt:      time.UnixMilli(pi64(p, ufCreatedAt)),
+		UpdatedAt:      time.UnixMilli(pi64(p, ufUpdatedAt)),
+		PasswordHash:   pstr(p, ufPasswordHash),
+		IsAnonymous:    pbool(p, ufIsAnonymous),
+		AccountAddress: pstr(p, ufAccountAddress),
 	}
 }
 

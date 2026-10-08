@@ -250,6 +250,9 @@ func (s *AdminService) InviteUser(
 		RecoveryEmail: strings.TrimSpace(strings.ToLower(recoveryEmail)),
 		QuotaBytes:    quotaBytes, CreatedAt: nowTime, UpdatedAt: nowTime,
 	}
+	// Issued now rather than at first sign-in, so the admin who created the
+	// account can hand its address over with the invitation.
+	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 	return &InviteResult{
 		User: user, InvitationToken: rawToken,
 		SetupURL: setupURL, TemporaryPassword: tempPassword,

@@ -89,6 +89,11 @@ type ProjectConfig struct {
 	// rather than the deployment-wide GATEWAY_AGEGATE_* pair. See
 	// ProjectJurisdictionsConfig.
 	Jurisdictions ProjectJurisdictionsConfig `json:"jurisdictions"`
+
+	// Accounts holds the project's account-domain policy: the domain on
+	// which every permanent account is issued an account address. Empty
+	// issues none. See ProjectAccountsConfig.
+	Accounts ProjectAccountsConfig `json:"accounts"`
 }
 
 // ProjectOAuthConfig is a project's per-provider hosted-flow OAuth
@@ -298,6 +303,9 @@ func (c ProjectConfig) Validate() error {
 		return err
 	}
 	if err := c.Jurisdictions.validate(); err != nil {
+		return err
+	}
+	if err := c.Accounts.validate(); err != nil {
 		return err
 	}
 	return nil
@@ -1265,5 +1273,8 @@ func ParseProjectConfig(configJSON string) (ProjectConfig, error) {
 	// And for jurisdiction codes: a stored market and the config keys it is
 	// looked up against must share one canonical form.
 	cfg.Jurisdictions = cfg.Jurisdictions.canonicalized()
+	// And for the account domain: every address issued on it shares one
+	// spelling.
+	cfg.Accounts = cfg.Accounts.canonicalized()
 	return cfg, nil
 }

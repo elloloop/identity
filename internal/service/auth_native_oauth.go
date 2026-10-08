@@ -284,7 +284,7 @@ func (s *AuthService) resolveNativeProject(ctx context.Context, product string) 
 		if p == nil {
 			return nil, fmt.Errorf("%w: unknown product %q", ErrInvalidArgument, product)
 		}
-		return &ProjectScope{ProjectID: p.ID, StorageScopeID: p.StorageScopeID, OAuth: p.OAuth, Access: p.Access, Products: p.Products, Jurisdictions: p.Jurisdictions}, nil
+		return &ProjectScope{ProjectID: p.ID, StorageScopeID: p.StorageScopeID, OAuth: p.OAuth, Access: p.Access, Products: p.Products, Jurisdictions: p.Jurisdictions, Accounts: p.Accounts}, nil
 	}
 
 	// No control plane: only the default project exists. Its native audiences
@@ -301,7 +301,8 @@ func (s *AuthService) resolveNativeProject(ctx context.Context, product string) 
 		StorageScopeID: s.cfg.DefaultTenantID,
 		// Precomputed once at construction (buildDefaultProjectAccess) rather than
 		// re-split/re-punycoded per login.
-		Access: s.defaultProjectAccess,
+		Access:   s.defaultProjectAccess,
+		Accounts: s.defaultProjectAccounts,
 	}, nil
 }
 

@@ -293,6 +293,7 @@ func (s *AuthService) CreateManagedChildAccount(
 		return nil, fmt.Errorf("creating managed child account: %w", err)
 	}
 	s.stampAgeBand(ctx, child)
+	ensureAccountAddress(ctx, repo, s.logger, child)
 
 	s.audit.Log(
 		ctx, audit.EventManagedChildAccountCreated,

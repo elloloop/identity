@@ -47,6 +47,7 @@ const (
 	dbUfEmailVerified    = "18"
 	dbUfEmailVerifiedAt  = "19"
 	dbUfIsAnonymous      = "20"
+	dbUfAccountAddress   = "21"
 )
 
 const (
@@ -963,6 +964,7 @@ func userNodeFromRecord(u *service.User) *graph.Node {
 			dbUfPasswordHash:     u.PasswordHash,
 			dbUfTOTPRequired:     u.TotpRequired,
 			dbUfIsAnonymous:      u.IsAnonymous,
+			dbUfAccountAddress:   u.AccountAddress,
 			dbUfFailedLoginCount: int64(u.FailedLoginCount),
 			dbUfLockedUntil:      u.LockedUntil,
 			dbUfStatus:           u.Status,

@@ -422,9 +422,16 @@ type User struct {
 	// write time. Empty on every account not created via
 	// CreateManagedChildAccount. Unique within the project when non-empty, and
 	// usable as the PasswordLogin identifier.
-	Username      string `protobuf:"bytes,28,opt,name=username,proto3" json:"username,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Username string `protobuf:"bytes,28,opt,name=username,proto3" json:"username,omitempty"`
+	// account_address is the address the project issued this account on its
+	// own domain (config_json accounts.domain): <username>@<domain> for a
+	// username account, the email with '@' written as "-at-" for an email
+	// account (bob@mail.example -> bob-at-mail.example@<domain>). Assigned at
+	// creation, or at the first sign-in after the project configures a domain,
+	// and never rewritten. Empty when the project issues none.
+	AccountAddress string `protobuf:"bytes,29,opt,name=account_address,json=accountAddress,proto3" json:"account_address,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -649,6 +656,13 @@ func (x *User) GetMarket() string {
 func (x *User) GetUsername() string {
 	if x != nil {
 		return x.Username
+	}
+	return ""
+}
+
+func (x *User) GetAccountAddress() string {
+	if x != nil {
+		return x.AccountAddress
 	}
 	return ""
 }
@@ -15879,7 +15893,7 @@ var File_identity_v1_identity_proto protoreflect.FileDescriptor
 
 const file_identity_v1_identity_proto_rawDesc = "" +
 	"\n" +
-	"\x1aidentity/v1/identity.proto\x12\videntity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x82\b\n" +
+	"\x1aidentity/v1/identity.proto\x12\videntity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xab\b\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
@@ -15914,7 +15928,8 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"externalId\x12!\n" +
 	"\fis_anonymous\x18\x1a \x01(\bR\visAnonymous\x12\x16\n" +
 	"\x06market\x18\x1b \x01(\tR\x06market\x12\x1a\n" +
-	"\busername\x18\x1c \x01(\tR\busername\"\x8d\x01\n" +
+	"\busername\x18\x1c \x01(\tR\busername\x12'\n" +
+	"\x0faccount_address\x18\x1d \x01(\tR\x0eaccountAddress\"\x8d\x01\n" +
 	"\x11CreateUserRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +

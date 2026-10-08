@@ -1,17 +1,34 @@
 # Upgrade guide
 
-## v4.10 → next — neutral built-in defaults; invitation links follow the project (behaviour change)
+## v4.10 → next — account addresses on the project's domain (additive); neutral built-in defaults; invitation links follow the project (behaviour change)
 
-No schema change and no migration.
+**Migration 0035** (SQLite 0018) adds `users.account_address` and a partial
+unique index on `(project_id, account_address)`. The column has a constant
+default, so adding it does not rewrite the table. The index build blocks
+writes to `users`, not reads, for one scan of the table. It waits at most
+10s for its lock. If it times out, version 35 is left dirty: confirm the
+column is absent, then `identity migrate force 34` and `identity migrate`
+again.
+
+- **Account addresses (new, off by default).** Set `accounts.domain` in a
+  project's config, or `GATEWAY_DEFAULT_EMAIL_DOMAIN` for the default
+  project. Every permanent account is then issued an address on that
+  domain: `<username>@<domain>` for a username account, and the email with
+  `@` written as `-at-` for an email account. Existing accounts get theirs
+  at their next sign-in. `User.account_address` carries it. A deployment
+  that sets neither behaves exactly as before. See *Account addresses* in
+  the docs.
 
 - **`GATEWAY_TOTP_ISSUER` and `GATEWAY_PASSKEY_RP_NAME` default to
   `Identity`.** The built-in defaults used to name one deployment's
   product. If you never set them, new authenticator-app enrolments and new
   passkeys now show `Identity`: set both to your product's name. Existing
   enrolments and passkeys keep the name they were created with.
-- **`GATEWAY_DEFAULT_EMAIL_DOMAIN` defaults to empty.** Its built-in
-  default named one deployment's domain; set it to your own domain if you
-  use it.
+- **`GATEWAY_DEFAULT_EMAIL_DOMAIN` defaults to empty, and now takes
+  effect.** Its built-in default named one deployment's domain, and nothing
+  read it. It is now the default project's account domain (above). **If
+  you set it before, the default project starts issuing account addresses
+  on that domain**: unset it unless you want that.
 - **Admin invitation links (`InviteUser`) follow the request's project**,
   like magic-link, email-change and tenant-invitation links: the project's
   primary auth domain, else `GATEWAY_APP_BASE_URL`, else the localhost

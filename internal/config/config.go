@@ -878,8 +878,11 @@ type Config struct {
 	// LoginLockoutSeconds is how long (seconds) an account stays locked after the threshold is hit.
 	LoginLockoutSeconds int
 
-	// DefaultEmailDomain is the email domain this deployment assigns to the
-	// accounts it creates on its own domain. Empty (the default) assigns none.
+	// DefaultEmailDomain is the DEFAULT project's account domain: when set,
+	// every permanent account in the default project is issued an account
+	// address on it (see service.ProjectAccountsConfig). A control-plane
+	// project sets its own in config_json `accounts.domain`. Empty (the
+	// default) issues none.
 	DefaultEmailDomain string
 
 	// PublicEmailDomains extends the built-in set of consumer/public email

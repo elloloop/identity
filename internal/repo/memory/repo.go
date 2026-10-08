@@ -387,6 +387,10 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 		if u.Username != "" && existing.Username == u.Username {
 			return "", fmt.Errorf("username %q: %w", u.Username, service.ErrAlreadyExists)
 		}
+		// And on (project_id, account_address) WHERE account_address <> ''.
+		if u.AccountAddress != "" && existing.AccountAddress == u.AccountAddress {
+			return "", fmt.Errorf("account address %q: %w", u.AccountAddress, service.ErrAlreadyExists)
+		}
 	}
 	// Honour a caller-provided id (matching the postgres/sqlite drivers).
 	// Passkey-first signup mints the user id during the Begin step and binds
@@ -438,6 +442,16 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 			for id, other := range r.users {
 				if id != userID && other.Username == username {
 					return fmt.Errorf("username %q: %w", username, service.ErrAlreadyExists)
+				}
+			}
+		}
+	}
+	// And for the (project_id, account_address) partial unique index.
+	if v, ok := fields["account_address"]; ok {
+		if addr, _ := v.(string); addr != "" {
+			for id, other := range r.users {
+				if id != userID && other.AccountAddress == addr {
+					return fmt.Errorf("account address %q: %w", addr, service.ErrAlreadyExists)
 				}
 			}
 		}
@@ -635,16 +649,17 @@ func fieldInt64(v any) (int64, bool) {
 // ok=false and the field is left out of the UPDATE).
 var (
 	userStringFields = map[string]func(*service.User) *string{
-		"name":           func(u *service.User) *string { return &u.Name },
-		"email":          func(u *service.User) *string { return &u.Email },
-		"avatar_url":     func(u *service.User) *string { return &u.AvatarURL },
-		"password_hash":  func(u *service.User) *string { return &u.PasswordHash },
-		"status":         func(u *service.User) *string { return &u.Status },
-		"recovery_email": func(u *service.User) *string { return &u.RecoveryEmail },
-		"external_id":    func(u *service.User) *string { return &u.ExternalID },
-		"phone_number":   func(u *service.User) *string { return &u.PhoneNumber },
-		"market":         func(u *service.User) *string { return &u.Market },
-		"username":       func(u *service.User) *string { return &u.Username },
+		"name":            func(u *service.User) *string { return &u.Name },
+		"email":           func(u *service.User) *string { return &u.Email },
+		"avatar_url":      func(u *service.User) *string { return &u.AvatarURL },
+		"password_hash":   func(u *service.User) *string { return &u.PasswordHash },
+		"status":          func(u *service.User) *string { return &u.Status },
+		"recovery_email":  func(u *service.User) *string { return &u.RecoveryEmail },
+		"external_id":     func(u *service.User) *string { return &u.ExternalID },
+		"phone_number":    func(u *service.User) *string { return &u.PhoneNumber },
+		"market":          func(u *service.User) *string { return &u.Market },
+		"username":        func(u *service.User) *string { return &u.Username },
+		"account_address": func(u *service.User) *string { return &u.AccountAddress },
 	}
 
 	userBoolFields = map[string]func(*service.User) *bool{
@@ -1786,6 +1801,13 @@ func (r *Repo) CreateManagedChildAccount(_ context.Context, u *service.User, edg
 		for _, existing := range r.users {
 			if existing.Username == u.Username {
 				return fmt.Errorf("username %q: %w", u.Username, service.ErrAlreadyExists)
+			}
+		}
+	}
+	if u.AccountAddress != "" {
+		for _, existing := range r.users {
+			if existing.AccountAddress == u.AccountAddress {
+				return fmt.Errorf("account address %q: %w", u.AccountAddress, service.ErrAlreadyExists)
 			}
 		}
 	}

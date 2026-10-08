@@ -2650,6 +2650,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runGuardianEdgeConformance(t, driver)
 	runManagedChildConformance(t, driver)
 	runEmailFoldConformance(t, driver)
+	runAccountAddressConformance(t, driver)
 }
 
 // uniqueHash returns a per-call unique token-hash string. Tests use

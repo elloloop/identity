@@ -420,6 +420,14 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
 	}
+	// Mirrors the drivers' (project_id, account_address) partial unique index.
+	if addr, _ := fields["account_address"].(string); addr != "" {
+		for id, other := range r.users {
+			if id != userID && other.AccountAddress == addr {
+				return fmt.Errorf("%w: account address %s already exists", ErrAlreadyExists, addr)
+			}
+		}
+	}
 	applyUserFields(u, fields)
 	return nil
 }
@@ -537,6 +545,8 @@ func applyUserFields(u *User, fields map[string]any) {
 			u.Market = v.(string)
 		case "username":
 			u.Username = v.(string)
+		case "account_address":
+			u.AccountAddress = v.(string)
 		case "date_of_birth_ms":
 			switch x := v.(type) {
 			case int64:

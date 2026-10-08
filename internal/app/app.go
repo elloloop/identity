@@ -855,6 +855,10 @@ func New(deps Deps) (*Built, error) {
 				"GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS): %w", err,
 		)
 	}
+	defaultAccounts, err := service.NewDefaultProjectAccounts(deps.Config)
+	if err != nil {
+		return nil, fmt.Errorf("default project accounts config (check GATEWAY_DEFAULT_EMAIL_DOMAIN): %w", err)
+	}
 	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
 	// default project denies all auth, so a fresh deployment that forgot to open
 	// it isn't silently locked out with no signal.
@@ -885,6 +889,7 @@ func New(deps Deps) (*Built, error) {
 			// resolver stamps one type either way. Deliberately NOT derived
 			// from the access mode: the two gate different things.
 			Anonymous: service.ProjectAnonymousConfig{Enabled: deps.Config.AnonymousEnabled},
+			Accounts:  defaultAccounts,
 		},
 		service.NewCachingProjectResolver(
 			deps.ProjectResolver,

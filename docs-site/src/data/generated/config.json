@@ -382,7 +382,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "is the email domain this deployment assigns to the accounts it creates on its own domain.",
+    "description": "is the DEFAULT project's account domain: when set, every permanent account in the default project is issued an account address on it (see service.ProjectAccountsConfig).",
     "category": "Email \u0026 branding",
     "anchor": "email-and-branding"
   },

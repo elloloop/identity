@@ -98,6 +98,12 @@ type ProjectScope struct {
 	// case the deployment-wide GATEWAY_AGEGATE_* pair classifies every
 	// account, exactly as before.
 	Jurisdictions ProjectJurisdictionsConfig
+
+	// Accounts is the project's account-domain policy, parsed from
+	// config_json — or, for the env default project, assembled from
+	// GATEWAY_DEFAULT_EMAIL_DOMAIN. Zero for a project that configures none,
+	// in which case no account addresses are issued.
+	Accounts ProjectAccountsConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -138,6 +144,7 @@ type ResolvedProject struct {
 	Assurance          ProjectAssuranceConfig
 	Anonymous          ProjectAnonymousConfig
 	Jurisdictions      ProjectJurisdictionsConfig
+	Accounts           ProjectAccountsConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

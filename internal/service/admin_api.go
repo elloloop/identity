@@ -108,6 +108,10 @@ type AdminProject struct {
 	// same reason. Ignored on writes; a zero value leaves the deployment-wide
 	// env thresholds in force.
 	Jurisdictions ProjectJurisdictionsConfig
+	// Accounts is the project's parsed config_json account-domain policy,
+	// so native sign-up issues account addresses exactly as the
+	// middleware-resolved paths do.
+	Accounts ProjectAccountsConfig
 }
 
 // AdminProjectCredential is the credential row an operator mints. Only the
