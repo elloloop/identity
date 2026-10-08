@@ -50,14 +50,42 @@ func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
 }
 
-// validateUsernameFormat enforces the username shape. One rule, one
-// implementation: every write path that accepts a username validates here.
-func validateUsernameFormat(username string) error {
+// validateUsernameShape checks the alphabet and length every stored username
+// has always had. Sign-in looks a username up only when it passes, so it
+// must stay as permissive as every rule a stored username was created under:
+// usernames created before the address rules below still sign in.
+func validateUsernameShape(username string) error {
 	if len(username) < usernameMinLen || len(username) > usernameMaxLen {
 		return fmt.Errorf("%w: username must be %d-%d characters", ErrInvalidArgument, usernameMinLen, usernameMaxLen)
 	}
 	if !usernamePattern.MatchString(username) {
 		return fmt.Errorf("%w: username may contain only lowercase letters, digits, '_', '-', and '.'", ErrInvalidArgument)
+	}
+	return nil
+}
+
+// validateUsernameFormat is the rule for a NEW username — at creation or a
+// rename: the shape, plus the rules that keep its account address apart and
+// valid. One rule, one implementation: every write path that accepts a
+// username validates here.
+func validateUsernameFormat(username string) error {
+	if err := validateUsernameShape(username); err != nil {
+		return err
+	}
+	// A username is also the part before the '@' of the account's address on
+	// the project's domain, which an email account spells as "<local>-at-<host>".
+	// Keeping "-at-" out of usernames keeps the two kinds of address apart, so
+	// no username can take the address another person's email derives to. The
+	// address must also be valid as it stands: no dot at either end and no two
+	// in a row.
+	if reservedLocalParts[username] {
+		return fmt.Errorf("%w: username %q is reserved", ErrInvalidArgument, username)
+	}
+	if strings.Contains(username, addressSeparator) {
+		return fmt.Errorf("%w: username may not contain '-at-'", ErrInvalidArgument)
+	}
+	if strings.HasPrefix(username, ".") || strings.HasSuffix(username, ".") || strings.Contains(username, "..") {
+		return fmt.Errorf("%w: username may not start or end with '.' or contain '..'", ErrInvalidArgument)
 	}
 	return nil
 }
@@ -293,6 +321,7 @@ func (s *AuthService) CreateManagedChildAccount(
 		return nil, fmt.Errorf("creating managed child account: %w", err)
 	}
 	s.stampAgeBand(ctx, child)
+	ensureAccountAddress(ctx, repo, s.logger, child)
 
 	s.audit.Log(
 		ctx, audit.EventManagedChildAccountCreated,

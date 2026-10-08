@@ -991,6 +991,10 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 		if u.Username != "" && existing.Username == u.Username {
 			return "", fmt.Errorf("username %q: %w", u.Username, service.ErrAlreadyExists)
 		}
+		// And on (project_id, account_address) WHERE account_address <> ''.
+		if u.AccountAddress != "" && existing.AccountAddress == u.AccountAddress {
+			return "", fmt.Errorf("account address %q: %w", u.AccountAddress, service.ErrAlreadyExists)
+		}
 	}
 	id := u.ID
 	if id == "" {
@@ -1017,6 +1021,15 @@ func (r *MemRepo) UpdateUser(_ context.Context, userID string, fields map[string
 			for id, other := range r.users {
 				if id != userID && other.Username == username {
 					return fmt.Errorf("username %q: %w", username, service.ErrAlreadyExists)
+				}
+			}
+		}
+	}
+	if v, ok := fields["account_address"]; ok {
+		if addr, _ := v.(string); addr != "" {
+			for id, other := range r.users {
+				if id != userID && other.AccountAddress == addr {
+					return fmt.Errorf("account address %q: %w", addr, service.ErrAlreadyExists)
 				}
 			}
 		}
@@ -1223,6 +1236,8 @@ func applyUserStringField(u *service.User, key string, v any) bool {
 		u.Market = s
 	case "username":
 		u.Username = s
+	case "account_address":
+		u.AccountAddress = s
 	default:
 		return false
 	}
@@ -1232,7 +1247,8 @@ func applyUserStringField(u *service.User, key string, v any) bool {
 func isUserStringField(key string) bool {
 	switch key {
 	case "name", "email", "avatar_url", "password_hash", "status",
-		"recovery_email", "external_id", "phone_number", "market", "username":
+		"recovery_email", "external_id", "phone_number", "market", "username",
+		"account_address":
 		return true
 	}
 	return false
@@ -2999,3 +3015,24 @@ var _ service.Repository = (*MemRepo)(nil)
 // silence unused import when graph is only referenced via the
 // service.DB stub; keep the import line stable for future replacement.
 var _ = (*graph.Node)(nil)
+
+// AssignAccountAddress mirrors the drivers' compare-and-set on the empty
+// address and their (project_id, account_address) unique index.
+func (r *MemRepo) AssignAccountAddress(_ context.Context, userID, address string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return "", nil
+	}
+	if u.AccountAddress != "" {
+		return u.AccountAddress, nil
+	}
+	for id, other := range r.users {
+		if id != userID && other.AccountAddress == address {
+			return "", fmt.Errorf("account address %q: %w", address, service.ErrAlreadyExists)
+		}
+	}
+	u.AccountAddress = address
+	return address, nil
+}

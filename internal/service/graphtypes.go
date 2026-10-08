@@ -56,6 +56,9 @@ const (
 	// layer. Without it userFromNode leaves User.IsAnonymous at its zero
 	// value, so the admin surfaces would report every account as permanent.
 	ufIsAnonymous = "20"
+	// ufAccountAddress carries the account address the project issued, so
+	// the admin surfaces report it alongside the email.
+	ufAccountAddress = "21"
 )
 
 // ── WorkingGroup field IDs (type_id 2) ─────────────────────────────

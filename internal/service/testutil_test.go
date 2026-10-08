@@ -420,6 +420,14 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
 	}
+	// Mirrors the drivers' (project_id, account_address) partial unique index.
+	if addr, _ := fields["account_address"].(string); addr != "" {
+		for id, other := range r.users {
+			if id != userID && other.AccountAddress == addr {
+				return fmt.Errorf("%w: account address %s already exists", ErrAlreadyExists, addr)
+			}
+		}
+	}
 	applyUserFields(u, fields)
 	return nil
 }
@@ -537,6 +545,8 @@ func applyUserFields(u *User, fields map[string]any) {
 			u.Market = v.(string)
 		case "username":
 			u.Username = v.(string)
+		case "account_address":
+			u.AccountAddress = v.(string)
 		case "date_of_birth_ms":
 			switch x := v.(type) {
 			case int64:
@@ -2439,4 +2449,25 @@ func (r *fakeRepo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, 
 		}
 	}
 	return nil
+}
+
+// AssignAccountAddress mirrors the drivers' compare-and-set on the empty
+// address and their (project_id, account_address) unique index.
+func (r *fakeRepo) AssignAccountAddress(_ context.Context, userID, address string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return "", nil
+	}
+	if u.AccountAddress != "" {
+		return u.AccountAddress, nil
+	}
+	for id, other := range r.users {
+		if id != userID && other.AccountAddress == address {
+			return "", fmt.Errorf("account address %q: %w", address, ErrAlreadyExists)
+		}
+	}
+	u.AccountAddress = address
+	return address, nil
 }

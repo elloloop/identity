@@ -60,6 +60,8 @@ type DefaultProject struct {
 	Access service.ProjectAccessConfig
 	// Anonymous is the GATEWAY_ANONYMOUS_* policy.
 	Anonymous service.ProjectAnonymousConfig
+	// Accounts is the GATEWAY_DEFAULT_EMAIL_DOMAIN account-domain policy.
+	Accounts service.ProjectAccountsConfig
 }
 
 // NewProjectResolver builds the middleware. def describes the default
@@ -160,6 +162,7 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 		// derived from Access — the two gate different things.
 		Access:    pr.def.Access,
 		Anonymous: pr.def.Anonymous,
+		Accounts:  pr.def.Accounts,
 	}, true
 }
 
@@ -222,6 +225,7 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		Assurance:          rp.Assurance,
 		Anonymous:          rp.Anonymous,
 		Jurisdictions:      rp.Jurisdictions,
+		Accounts:           rp.Accounts,
 	}
 }
 

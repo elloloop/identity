@@ -419,12 +419,28 @@ type User struct {
 	// username is the parent-chosen, project-unique handle identifying a
 	// managed child account (children often have no email). Lowercase
 	// alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase at
-	// write time. Empty on every account not created via
-	// CreateManagedChildAccount. Unique within the project when non-empty, and
-	// usable as the PasswordLogin identifier.
-	Username      string `protobuf:"bytes,28,opt,name=username,proto3" json:"username,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// write time. A new or renamed username may not contain `-at-`, start or
+	// end with `.`, contain `..`, or be a reserved role name (admin,
+	// postmaster, …); one stored before those rules is kept. Empty on every
+	// account not created via CreateManagedChildAccount. Unique within the
+	// project when non-empty, and usable as the PasswordLogin identifier.
+	Username string `protobuf:"bytes,28,opt,name=username,proto3" json:"username,omitempty"`
+	// account_address is the address the project issued this account on its
+	// own domain (config_json accounts.domain): <username>@<domain> for a
+	// username account, the email with '@' written as "-at-" for an email
+	// account (bob@mail.example -> bob-at-mail.example@<domain>). Assigned at
+	// creation, or at the first sign-in after the project configures a domain;
+	// an email account gets it only once its email is verified.
+	// It follows the identifier it came from: a guardian's rename for a
+	// username, an email change for an email (self-service or SCIM). A
+	// released address can later be issued to
+	// another account, and distinct identifiers can collide (the later one
+	// takes a suffix) — key on the user id, not this address, and never treat
+	// it as proof of the email it spells. Empty when
+	// the project issues none.
+	AccountAddress string `protobuf:"bytes,29,opt,name=account_address,json=accountAddress,proto3" json:"account_address,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -649,6 +665,13 @@ func (x *User) GetMarket() string {
 func (x *User) GetUsername() string {
 	if x != nil {
 		return x.Username
+	}
+	return ""
+}
+
+func (x *User) GetAccountAddress() string {
+	if x != nil {
+		return x.AccountAddress
 	}
 	return ""
 }
@@ -6078,7 +6101,8 @@ func (x *GetGuardiansResponse) GetNextCursor() string {
 type CreateManagedChildAccountRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// username is the child account's project-unique handle: lowercase
-	// alphanumerics plus `_`/`-`/`.`, 3..32 chars (normalized to lowercase).
+	// alphanumerics plus `_`/`-`/`.`, 3..32 chars (normalized to lowercase),
+	// not containing `-at-`, not starting or ending with `.`, no `..`.
 	// A duplicate within the project is CodeAlreadyExists.
 	Username string `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
 	// display_name is the child's display name (optional).
@@ -6479,7 +6503,9 @@ type SetManagedChildUsernameRequest struct {
 	ChildUserId string                 `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
 	// username is the new project-unique handle, validated exactly as
 	// CreateManagedChildAccount validates it (lowercase alphanumerics plus
-	// `_`/`-`/`.`, 3..32 chars, normalized to lowercase). A duplicate within
+	// `_`/`-`/`.`, 3..32 chars, normalized to lowercase, no `-at-`, no `.` at
+	// either end, no `..`). Re-submitting the child's current username is a
+	// no-op even if it predates those rules. A duplicate within
 	// the project is ALREADY_EXISTS.
 	Username       string `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
 	StepUpPassword string `protobuf:"bytes,3,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
@@ -15879,7 +15905,7 @@ var File_identity_v1_identity_proto protoreflect.FileDescriptor
 
 const file_identity_v1_identity_proto_rawDesc = "" +
 	"\n" +
-	"\x1aidentity/v1/identity.proto\x12\videntity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x82\b\n" +
+	"\x1aidentity/v1/identity.proto\x12\videntity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xab\b\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
@@ -15914,7 +15940,8 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"externalId\x12!\n" +
 	"\fis_anonymous\x18\x1a \x01(\bR\visAnonymous\x12\x16\n" +
 	"\x06market\x18\x1b \x01(\tR\x06market\x12\x1a\n" +
-	"\busername\x18\x1c \x01(\tR\busername\"\x8d\x01\n" +
+	"\busername\x18\x1c \x01(\tR\busername\x12'\n" +
+	"\x0faccount_address\x18\x1d \x01(\tR\x0eaccountAddress\"\x8d\x01\n" +
 	"\x11CreateUserRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +

@@ -1,0 +1,128 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Account addresses">
+  <h1>Account addresses</h1>
+  <p>
+    A project can issue every account an <strong>account address</strong> on a
+    domain the project owns. People keep signing up with whatever they have, an
+    email at any provider or a username, and each account also gets an address
+    on your domain: a project-unique handle for every account. Identity issues
+    and stores the address; it does not deliver mail. A project that runs mail
+    for the domain routes it by reading <code>account_address</code> from its
+    users. A released address can be issued again straight away, so a mail
+    system should key mailboxes on the user id.
+  </p>
+
+  <h2>Turning it on</h2>
+  <p>
+    Set <code>accounts.domain</code> in the project's config. The default
+    project takes it from <code>GATEWAY_DEFAULT_EMAIL_DOMAIN</code>. Leaving it
+    empty, the default, issues no addresses.
+  </p>
+  <Code lang="json" code={`{
+  "accounts": {
+    "domain": "accounts.example.com"
+  }
+}`} />
+  <p>
+    The domain is stored lower-cased, without a trailing dot and IDN-punycoded,
+    and must be a fully qualified name. A domain that fails these checks fails
+    the config write. Mail reaches the addresses only if the domain's MX records
+    point at a mail system that delivers them. Issuing an address does not set
+    up mail.
+  </p>
+
+  <h2>How an address is formed</h2>
+  <ul>
+    <li>
+      <strong>Username accounts</strong> get <code>&lt;username&gt;@&lt;domain&gt;</code>:
+      <code>bob</code> becomes <code>bob@accounts.example.com</code>.
+    </li>
+    <li>
+      <strong>Email accounts</strong> keep their whole email, with the
+      <code>@</code> written as <code>-at-</code>:
+      <code>bob@mail.example</code> becomes
+      <code>bob-at-mail.example@accounts.example.com</code>. Two people named Bob
+      at different providers get different addresses, and the plain
+      <code>bob@accounts.example.com</code> stays free for a username account.
+      An email already on the account domain takes the same form: the plain
+      namespace belongs to usernames, so a username and an email never claim
+      the same address.
+    </li>
+    <li>
+      Letters are lower-cased. Every character other than <code>a–z</code>,
+      <code>0–9</code>, <code>.</code>, <code>_</code> and <code>-</code>
+      becomes <code>-</code>, and runs of dots collapse, so the address is
+      always valid. That includes <code>+</code>: mail systems that use
+      subaddressing would deliver <code>bob+news-at-…</code> to
+      <code>bob</code>. Different identifiers can therefore map to the same
+      address; the later account takes a suffix.
+    </li>
+    <li>
+      If the part before the <code>@</code> is longer than 64 characters (the
+      limit for an email address), it keeps its first characters and ends in
+      eight hex digits of a hash of the whole value. The same account always
+      gets the same address.
+    </li>
+    <li>
+      If the address is already taken, the account gets the next free suffix:
+      <code>-2</code>, <code>-3</code> and so on. After twenty, a suffix
+      derived from the account's id ends the search.
+    </li>
+    <li>
+      New usernames may not contain <code>-at-</code>, so no new username can
+      take the address another person's email derives to. Usernames created
+      before this rule keep working as they are.
+    </li>
+    <li>Anonymous accounts get no address until they are upgraded.</li>
+    <li>
+      Role names that speak for a domain, such as <code>admin</code>,
+      <code>postmaster</code>, <code>hostmaster</code>, <code>abuse</code> and
+      <code>webmaster</code>, are never issued. New usernames may not be one,
+      and a username stored earlier that is one gets an address with a suffix
+      derived from the account's id instead.
+    </li>
+    <li>
+      An email-derived address contains the person's email. Treat it with the
+      same visibility rules as the email, and never as proof of it.
+    </li>
+  </ul>
+
+  <h2>When it is issued</h2>
+  <p>
+    A username (managed child) account gets its address when its guardian
+    creates it. An email account gets its address once its email is verified:
+    at sign-up when the sign-up proves the address (OAuth, passkey, an emailed
+    code), otherwise at the first sign-in or session refresh after
+    verification. That includes accounts an admin invites and accounts SCIM
+    provisions. An address spells the email, so it is never issued for an
+    email nobody has proven they own. An account that existed before the
+    project set a domain gets its address at its next sign-in or session
+    refresh, once its email is verified.
+  </p>
+  <p>
+    An address is written only to an account that has none, so it is never
+    replaced behind the account's back, and changing the project's domain
+    leaves issued addresses as they were. An address does follow a change of
+    the identifier it came from, so it never goes on spelling out a name or
+    mailbox the person gave up: an email account's follows a change of email,
+    confirmed by the person or written by SCIM, and a managed child's follows
+    its guardian's rename. A project
+    that stops issuing addresses keeps the ones it issued. An address released
+    by an email change can later be issued to another account, so treat the
+    address as a handle and key on the user id. Failing to
+    store an address never blocks a sign-in: the server logs it and tries again
+    at the next sign-in.
+  </p>
+
+  <h2>Where it appears</h2>
+  <p>
+    <code>User.account_address</code> carries it on every <code>User</code> the
+    API returns: sign-up, sign-in and refresh, <code>GetCurrentUser</code>, the
+    admin user reads, a guardian's view of a managed child, and the data
+    export.
+  </p>
+</DocsLayout>

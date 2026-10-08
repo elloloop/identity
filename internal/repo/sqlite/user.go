@@ -27,7 +27,7 @@ const userColumns = `
 	external_id,
 	deletion_scheduled_at_ms,
 	is_anonymous, anonymous_last_seen_ms,
-	market, username,
+	market, username, account_address,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed qualifies every column with the given table alias so
@@ -54,7 +54,7 @@ func scanUser(s scanner) (*service.User, error) {
 		id, email, name, role, avatar, status, recovery, phash string
 		phoneNumber                                            string
 		externalID                                             string
-		market, username                                       string
+		market, username, accountAddress                       string
 	)
 	if err := s.Scan(
 		&id, &email, &name, &role, &avatar, &status, &recovery,
@@ -68,7 +68,7 @@ func scanUser(s scanner) (*service.User, error) {
 		&externalID,
 		&deletionScheduledAtMs,
 		&isAnonymous, &anonymousLastSeenMs,
-		&market, &username,
+		&market, &username, &accountAddress,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -100,6 +100,7 @@ func scanUser(s scanner) (*service.User, error) {
 	u.AnonymousLastSeenMs = anonymousLastSeenMs
 	u.Market = market
 	u.Username = username
+	u.AccountAddress = accountAddress
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -263,7 +264,7 @@ const insertUserQuery = `
 		external_id,
 		deletion_scheduled_at_ms,
 		is_anonymous, anonymous_last_seen_ms,
-		market, username,
+		market, username, account_address,
 		created_at_ms, updated_at_ms
 	) VALUES (
 		$1, $2, $3, $4, $5, $6, $7,
@@ -277,8 +278,8 @@ const insertUserQuery = `
 		$23,
 		$24,
 		$25, $26,
-		$27, $28,
-		$29, $30
+		$27, $28, $29,
+		$30, $31
 	)`
 
 // insertUserArgs renders the bind args for insertUserQuery in column order.
@@ -296,7 +297,7 @@ func insertUserArgs(projectID, id, role, status string, u *service.User) []any {
 		u.ExternalID,
 		u.DeletionScheduledAtMs,
 		u.IsAnonymous, u.AnonymousLastSeenMs,
-		u.Market, u.Username,
+		u.Market, u.Username, u.AccountAddress,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	}
 }
@@ -373,6 +374,7 @@ var userFieldColumns = map[string]struct {
 	"anonymous_last_seen_ms":   {"anonymous_last_seen_ms", "int64"},
 	"market":                   {"market", "string"},
 	"username":                 {"username", "string"},
+	"account_address":          {"account_address", "string"},
 }
 
 func (r *sqliteRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
@@ -706,4 +708,30 @@ func (r *sqliteRepository) UpdateUserEmail(ctx context.Context, userID, newEmail
 		return wrapErr("UpdateUserEmail", err)
 	}
 	return nil
+}
+
+func (r *sqliteRepository) AssignAccountAddress(ctx context.Context, userID, address string) (string, error) {
+	if userID == "" || address == "" {
+		return "", errors.New("sqlite: AssignAccountAddress: missing user id or address")
+	}
+	const set = `
+		UPDATE users
+		   SET account_address = $3
+		 WHERE project_id = $1 AND id = $2 AND account_address = ''`
+	tag, err := r.db.Exec(ctx, set, r.projectID, userID, address)
+	if err != nil {
+		return "", wrapErr("AssignAccountAddress", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return address, nil
+	}
+	const get = `SELECT account_address FROM users WHERE project_id = $1 AND id = $2`
+	var current string
+	if err := r.db.QueryRow(ctx, get, r.projectID, userID).Scan(&current); err != nil {
+		if noRows(err) {
+			return "", nil
+		}
+		return "", wrapErr("AssignAccountAddress", err)
+	}
+	return current, nil
 }

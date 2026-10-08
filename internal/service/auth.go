@@ -125,6 +125,15 @@ type User struct {
 	// identifier. Empty on every account not created via
 	// CreateManagedChildAccount.
 	Username string
+	// AccountAddress is the address the project issued this account on its own
+	// domain (ProjectAccountsConfig.Domain), e.g. bob@accounts.example.com for
+	// the username "bob" or bob-at-mail.example@accounts.example.com for
+	// bob@mail.example. Assigned at creation or, for an account that predates
+	// the domain, at its next sign-in; an email account gets it only once its
+	// email is verified. It follows a guardian's rename of a username and a
+	// confirmed change of an email. Unique within the
+	// project when non-empty. Empty when the project issues none.
+	AccountAddress string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
 	// deletion. Set when the owner requests deletion; cleared on cancel or a
@@ -664,6 +673,14 @@ type Repository interface {
 	// token). Implementations must also set updated_at = atMs. An address
 	// another account already holds under FoldEmail is ErrAlreadyExists.
 	UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error
+
+	// AssignAccountAddress sets the user's account address only if it has
+	// none (a compare-and-set on the empty value, so two concurrent sign-ins
+	// can never overwrite an address already issued), and returns the
+	// address the account holds afterwards: the new one, or the one it
+	// already had. An address another account in the project holds is
+	// ErrAlreadyExists. An unknown user returns "" and no error.
+	AssignAccountAddress(ctx context.Context, userID, address string) (string, error)
 
 	// OAuth identities — links a (provider, provider_user_id) pair to a
 	// local User so OAuth login can survive provider-side email changes.
@@ -1304,6 +1321,12 @@ type AuthService struct {
 	// so a served deployment surfaces the error there.
 	defaultProjectAccess ProjectAccessConfig
 
+	// defaultProjectAccounts is the env-configured default project's account
+	// domain (GATEWAY_DEFAULT_EMAIL_DOMAIN), parsed once at construction for
+	// the same native-login fallback. An invalid domain issues no addresses
+	// here (with a WARN); app.New refuses to boot on it.
+	defaultProjectAccounts ProjectAccountsConfig
+
 	// runEmailSend runs a request-phase credential-email send. It defaults to
 	// SYNCHRONOUS (run inline); app.New swaps in an asynchronous dispatcher via
 	// WithAsyncEmailDispatch so the RPC response time cannot depend on — and thus
@@ -1504,25 +1527,26 @@ func NewAuthServiceWithOAuth(
 	}
 	ageGate := BuildAgeGate(cfg, logger)
 	return &AuthService{
-		defaultRepo:          repo,
-		defaultTenantID:      cfg.DefaultTenantID,
-		defaultProjectAccess: buildDefaultProjectAccess(cfg, logger),
-		ageGate:              ageGate,
-		minorData:            NewMinorDataMinimizer(cfg.MinorDataMinimization, ageGate, time.Now),
-		signer:               signer,
-		passkeys:             passkeysSvc,
-		audit:                auditLogger,
-		cfg:                  cfg,
-		totpKey:              totpKey,
-		totpRecoveryPepper:   totpRecoveryPepper,
-		mailer:               mailer,
-		smsSender:            smsSender,
-		logger:               logger,
-		oauthResolver:        newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
-		emailThrottle:        newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
-		signupThrottle:       newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
-		phoneThrottle:        newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
-		nowFunc:              time.Now,
+		defaultRepo:            repo,
+		defaultTenantID:        cfg.DefaultTenantID,
+		defaultProjectAccess:   buildDefaultProjectAccess(cfg, logger),
+		defaultProjectAccounts: buildDefaultProjectAccounts(cfg, logger),
+		ageGate:                ageGate,
+		minorData:              NewMinorDataMinimizer(cfg.MinorDataMinimization, ageGate, time.Now),
+		signer:                 signer,
+		passkeys:               passkeysSvc,
+		audit:                  auditLogger,
+		cfg:                    cfg,
+		totpKey:                totpKey,
+		totpRecoveryPepper:     totpRecoveryPepper,
+		mailer:                 mailer,
+		smsSender:              smsSender,
+		logger:                 logger,
+		oauthResolver:          newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
+		emailThrottle:          newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
+		signupThrottle:         newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
+		phoneThrottle:          newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
+		nowFunc:                time.Now,
 		// Default to synchronous sends; app.New opts into async via
 		// WithAsyncEmailDispatch. A synchronous default keeps every
 		// directly-constructed service (tests, embedders) deterministic.
@@ -1588,6 +1612,18 @@ func buildDefaultProjectAccess(cfg *config.Config, logger *zap.Logger) ProjectAc
 		return ProjectAccessConfig{Mode: AccessModeClosed}
 	}
 	return access
+}
+
+// buildDefaultProjectAccounts parses the env-configured default project's
+// account domain once. An invalid domain issues no addresses rather than
+// malformed ones, and logs a WARN.
+func buildDefaultProjectAccounts(cfg *config.Config, logger *zap.Logger) ProjectAccountsConfig {
+	accounts, err := NewDefaultProjectAccounts(cfg)
+	if err != nil {
+		logger.Warn("default_project_accounts_invalid_issuing_none", zap.Error(err))
+		return ProjectAccountsConfig{}
+	}
+	return accounts
 }
 
 // BuildAgeGate selects the age-determination provider from config. When
@@ -1769,6 +1805,13 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	if err := s.enforceDOBRequired(ctx, user, ipAddr, userAgent); err != nil {
 		return "", "", err
 	}
+
+	// Every self-signup and every sign-in reaches here, refresh included, so
+	// an account that predates the project's account domain (or whose email
+	// was verified since) receives its address at its next session, however
+	// long-lived. After the gates above, so a refused session writes nothing.
+	// A no-op once issued.
+	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	claims := jwt.Claims{
 		Sub:       user.ID,

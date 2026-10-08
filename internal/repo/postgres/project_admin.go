@@ -51,6 +51,7 @@ func (s *ProjectStore) ActiveProjectByID(ctx context.Context, projectID string) 
 		Access:         cfg.Access,
 		Products:       cfg.Products,
 		Jurisdictions:  cfg.Jurisdictions,
+		Accounts:       cfg.Accounts,
 	}, nil
 }
 

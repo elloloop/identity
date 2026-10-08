@@ -49,6 +49,7 @@ type errorRepo struct {
 	failFindEmailChangeToken       bool
 	failMarkEmailChangeConsumed    bool
 	failUpdateUserEmail            bool
+	failAssignAccountAddress       bool
 	failCreateOAuthIdentity        bool
 	failCreateSession              bool
 	failRevokeSessionsForUser      bool
@@ -219,6 +220,13 @@ func (r *errorRepo) UpdateUserEmail(ctx context.Context, userID, newEmail string
 		return errInjected
 	}
 	return r.fakeRepo.UpdateUserEmail(ctx, userID, newEmail, atMs)
+}
+
+func (r *errorRepo) AssignAccountAddress(ctx context.Context, userID, address string) (string, error) {
+	if r.failAssignAccountAddress {
+		return "", errInjected
+	}
+	return r.fakeRepo.AssignAccountAddress(ctx, userID, address)
 }
 
 func (r *errorRepo) CreateOAuthIdentity(ctx context.Context, oi *OAuthIdentity) error {

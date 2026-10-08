@@ -5717,7 +5717,8 @@ components:
           title: username
           description: |-
             username is the child account's project-unique handle: lowercase
-             alphanumerics plus `_`/`-`/`.`, 3..32 chars (normalized to lowercase).
+             alphanumerics plus `_`/`-`/`.`, 3..32 chars (normalized to lowercase),
+             not containing `-at-`, not starting or ending with `.`, no `..`.
              A duplicate within the project is CodeAlreadyExists.
         displayName:
           type: string
@@ -8293,7 +8294,9 @@ components:
           description: |-
             username is the new project-unique handle, validated exactly as
              CreateManagedChildAccount validates it (lowercase alphanumerics plus
-             `_`/`-`/`.`, 3..32 chars, normalized to lowercase). A duplicate within
+             `_`/`-`/`.`, 3..32 chars, normalized to lowercase, no `-at-`, no `.` at
+             either end, no `..`). Re-submitting the child's current username is a
+             no-op even if it predates those rules. A duplicate within
              the project is ALREADY_EXISTS.
         stepUpPassword:
           type: string
@@ -8903,9 +8906,28 @@ components:
             username is the parent-chosen, project-unique handle identifying a
              managed child account (children often have no email). Lowercase
              alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase at
-             write time. Empty on every account not created via
-             CreateManagedChildAccount. Unique within the project when non-empty, and
-             usable as the PasswordLogin identifier.
+             write time. A new or renamed username may not contain `-at-`, start or
+             end with `.`, contain `..`, or be a reserved role name (admin,
+             postmaster, …); one stored before those rules is kept. Empty on every
+             account not created via CreateManagedChildAccount. Unique within the
+             project when non-empty, and usable as the PasswordLogin identifier.
+        accountAddress:
+          type: string
+          title: account_address
+          description: |-
+            account_address is the address the project issued this account on its
+             own domain (config_json accounts.domain): <username>@<domain> for a
+             username account, the email with '@' written as "-at-" for an email
+             account (bob@mail.example -> bob-at-mail.example@<domain>). Assigned at
+             creation, or at the first sign-in after the project configures a domain;
+             an email account gets it only once its email is verified.
+             It follows the identifier it came from: a guardian's rename for a
+             username, an email change for an email (self-service or SCIM). A
+             released address can later be issued to
+             another account, and distinct identifiers can collide (the later one
+             takes a suffix) — key on the user id, not this address, and never treat
+             it as proof of the email it spells. Empty when
+             the project issues none.
       title: User
       additionalProperties: false
     identity.v1.UserStatus:
