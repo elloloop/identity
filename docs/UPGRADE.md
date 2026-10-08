@@ -32,11 +32,6 @@ again.
   `allowlist` and `closed`; a managed child is admitted under every mode.
   Before, a managed child in a non-`open` project could sign in but its
   first refresh was refused; now it refreshes too.
-- **Reserved usernames.** New usernames, managed children's included, may
-  not be a role name that speaks for a domain: `abuse`, `admin`,
-  `administrator`, `hostmaster`, `mailer-daemon`, `noc`, `no-reply`,
-  `noreply`, `postmaster`, `root`, `security`, `webmaster`. Existing
-  usernames are kept.
 - **`accounts` in a project's config is now read and validated.** A stored
   config that already had an `accounts` key with a `domain` that is not a
   fully qualified name stops that project resolving until it is fixed. An
