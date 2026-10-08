@@ -380,3 +380,22 @@ func TestBuildRateLimits_UsernameSignupLimited(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, call("/identity.v1.IdentityService/UsernameSignup"), "shared budget spent")
 	assert.Equal(t, http.StatusTooManyRequests, call("/identity.v1.IdentityService/PasswordSignup"), "shared budget spent")
 }
+
+// TestBuildRateLimits_MergeAccountsLimited asserts MergeAccounts, which
+// verifies another account's password, is on the per-IP login quota.
+func TestBuildRateLimits_MergeAccountsLimited(t *testing.T) {
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitLoginPerIP: 1, RateLimitSignupPerIP: 5, RateLimitResetPerIP: 5, RateLimitVerifyPerIP: 5, RateLimitPasswordlessPerIP: 5}
+	limits := buildRateLimits(cfg)
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	call := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/MergeAccounts", nil)
+		req.Header.Set(middleware.ClientIPHeader, "203.0.113.9")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	assert.Equal(t, http.StatusOK, call())
+	assert.Equal(t, http.StatusTooManyRequests, call())
+}

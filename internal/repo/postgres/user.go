@@ -28,7 +28,7 @@ const userColumns = `
 	external_id,
 	deletion_scheduled_at_ms,
 	is_anonymous, anonymous_last_seen_ms,
-	market, username, account_address,
+	market, username, account_address, merged_into_user_id,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed returns userColumns with every column qualified by
@@ -58,7 +58,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		id, email, name, role, avatar, status, recovery, phash string
 		phoneNumber                                            string
 		externalID                                             string
-		market, username, accountAddress                       string
+		market, username, accountAddress, mergedInto           string
 	)
 	if err := row.Scan(
 		&id, &email, &name, &role, &avatar, &status, &recovery,
@@ -72,7 +72,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		&externalID,
 		&deletionScheduledAtMs,
 		&isAnonymous, &anonymousLastSeenMs,
-		&market, &username, &accountAddress,
+		&market, &username, &accountAddress, &mergedInto,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -105,6 +105,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 	u.Market = market
 	u.Username = username
 	u.AccountAddress = accountAddress
+	u.MergedIntoUserID = mergedInto
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -281,7 +282,7 @@ const insertUserQuery = `
 		external_id,
 		deletion_scheduled_at_ms,
 		is_anonymous, anonymous_last_seen_ms,
-		market, username, account_address,
+		market, username, account_address, merged_into_user_id,
 		created_at_ms, updated_at_ms
 	) VALUES (
 		$1, $2, $3, $4, $5, $6, $7,
@@ -295,8 +296,8 @@ const insertUserQuery = `
 		$23,
 		$24,
 		$25, $26,
-		$27, $28, $29,
-		$30, $31
+		$27, $28, $29, $30,
+		$31, $32
 	)`
 
 // insertUserArgs renders the bind args for insertUserQuery in column order.
@@ -314,7 +315,7 @@ func insertUserArgs(projectID, id, role, status string, u *service.User) []any {
 		u.ExternalID,
 		u.DeletionScheduledAtMs,
 		u.IsAnonymous, u.AnonymousLastSeenMs,
-		u.Market, u.Username, u.AccountAddress,
+		u.Market, u.Username, u.AccountAddress, u.MergedIntoUserID,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	}
 }
@@ -393,6 +394,7 @@ var userFieldColumns = map[string]struct {
 	"market":                   {"market", "string"},
 	"username":                 {"username", "string"},
 	"account_address":          {"account_address", "string"},
+	"merged_into_user_id":      {"merged_into_user_id", "string"},
 }
 
 func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
@@ -766,4 +768,133 @@ func (r *pgRepository) AssignAccountAddress(ctx context.Context, userID, address
 		return "", wrapPgErr("AssignAccountAddress", err)
 	}
 	return current, nil
+}
+
+func (r *pgRepository) ApplyAccountMerge(ctx context.Context, m service.AccountMerge) error {
+	if m.SurvivorID == "" || m.OtherID == "" || m.SurvivorID == m.OtherID {
+		return errors.New("postgres: ApplyAccountMerge: two distinct account ids are required")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return wrapPgErr("ApplyAccountMerge", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const mergeable = `SELECT username, password_hash, email, email_verified, email_verified_at_ms, account_address
+		FROM users
+		WHERE project_id = $1 AND id = $2 AND status = 'active' AND merged_into_user_id = '' FOR UPDATE`
+	var (
+		oUsername, oPassword, oEmail, oAddress string
+		sUsername, sPassword, sEmail, sAddress string
+		oVerifiedAt, sVerifiedAt               int64
+		oVerified, sVerified                   bool
+	)
+	// Lock the two rows in id order, so two opposite merges running at once
+	// wait for each other instead of deadlocking.
+	read := func(id string, username, password, email *string, verified *bool, verifiedAt *int64, address *string) error {
+		err := tx.QueryRow(ctx, mergeable, r.projectID, id).Scan(username, password, email, verified, verifiedAt, address)
+		if noRows(err) {
+			return service.ErrMergeConflict
+		}
+		if err != nil {
+			return wrapPgErr("ApplyAccountMerge(read)", err)
+		}
+		return nil
+	}
+	readOther := func() error {
+		return read(m.OtherID, &oUsername, &oPassword, &oEmail, &oVerified, &oVerifiedAt, &oAddress)
+	}
+	readSurvivor := func() error {
+		return read(m.SurvivorID, &sUsername, &sPassword, &sEmail, &sVerified, &sVerifiedAt, &sAddress)
+	}
+	first, second := readOther, readSurvivor
+	if m.SurvivorID < m.OtherID {
+		first, second = readSurvivor, readOther
+	}
+	if err := first(); err != nil {
+		return err
+	}
+	if err := second(); err != nil {
+		return err
+	}
+	// A move fills an empty field of the survivor; one the survivor filled
+	// since the merge was decided is a conflict, never overwritten.
+	if (m.MoveUsername && sUsername != "") || (m.MovePassword && sPassword != "") || (m.MoveEmail && sEmail != "") {
+		return service.ErrMergeConflict
+	}
+
+	// Retire first, releasing what the survivor takes (each is unique).
+	retiredUsername, retiredEmail, retiredVerified, retiredVerifiedAt := oUsername, oEmail, oVerified, oVerifiedAt
+	if m.MoveUsername {
+		retiredUsername = ""
+	}
+	if m.MoveEmail {
+		retiredEmail, retiredVerifiedAt = "", 0
+		retiredVerified = false
+	}
+	// Every write is guarded on the state read above, so a concurrent merge
+	// or deactivation that got in between makes this one a conflict.
+	const guard = ` AND status = 'active' AND merged_into_user_id = ''`
+	tag, err := tx.Exec(ctx, `
+		UPDATE users
+		   SET status = 'deactivated', merged_into_user_id = $3,
+		       username = $4, email = $5, account_address = '',
+		       email_verified = $7, email_verified_at_ms = $8,
+		       deactivated_at_ms = $6, updated_at_ms = $6
+		 WHERE project_id = $1 AND id = $2`+guard,
+		r.projectID, m.OtherID, m.SurvivorID, retiredUsername, retiredEmail, m.AtMs, retiredVerified, retiredVerifiedAt)
+	if err != nil {
+		return wrapPgErr("ApplyAccountMerge(retire)", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return service.ErrMergeConflict
+	}
+
+	username, password, email, verified, verifiedAt, address := sUsername, sPassword, sEmail, sVerified, sVerifiedAt, sAddress
+	if m.MoveUsername {
+		username = oUsername
+	}
+	if m.MovePassword {
+		password = oPassword
+	}
+	if m.MoveEmail {
+		email, verified, verifiedAt = oEmail, oVerified, oVerifiedAt
+	}
+	retiredAddress := oAddress
+	if m.SwapAddress {
+		address, retiredAddress = oAddress, sAddress
+	}
+	tag, err = tx.Exec(ctx, `
+		UPDATE users
+		   SET username = $3, password_hash = $4, email = $5, email_verified = $6,
+		       email_verified_at_ms = $7, account_address = $8, updated_at_ms = $9
+		 WHERE project_id = $1 AND id = $2`+guard,
+		r.projectID, m.SurvivorID, username, password, email, verified, verifiedAt, address, m.AtMs)
+	if err != nil {
+		return wrapPgErr("ApplyAccountMerge(survivor)", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return service.ErrMergeConflict
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET account_address = $3 WHERE project_id = $1 AND id = $2`,
+		r.projectID, m.OtherID, retiredAddress); err != nil {
+		return wrapPgErr("ApplyAccountMerge(retired address)", err)
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE oauth_identities SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
+		r.projectID, m.OtherID, m.SurvivorID); err != nil {
+		return wrapPgErr("ApplyAccountMerge(oauth identities)", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = $2`, r.projectID, m.OtherID); err != nil {
+		return wrapPgErr("ApplyAccountMerge(refresh tokens)", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions SET revoked_at_ms = $3
+		 WHERE project_id = $1 AND user_id = $2 AND revoked_at_ms = 0`, r.projectID, m.OtherID, m.AtMs); err != nil {
+		return wrapPgErr("ApplyAccountMerge(sessions)", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return wrapPgErr("ApplyAccountMerge(commit)", err)
+	}
+	return nil
 }

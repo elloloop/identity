@@ -59,6 +59,9 @@ const (
 	// ufAccountAddress carries the account address the project issued, so
 	// the admin surfaces report it alongside the email.
 	ufAccountAddress = "21"
+	// ufMergedInto carries the account a merged account was merged into, so
+	// the admin surfaces can refuse to reactivate it.
+	ufMergedInto = "22"
 )
 
 // ── WorkingGroup field IDs (type_id 2) ─────────────────────────────

@@ -25,6 +25,7 @@ const (
 	IdentityService_RedeemOAuthCode_FullMethodName                 = "/identity.v1.IdentityService/RedeemOAuthCode"
 	IdentityService_PasswordSignup_FullMethodName                  = "/identity.v1.IdentityService/PasswordSignup"
 	IdentityService_UsernameSignup_FullMethodName                  = "/identity.v1.IdentityService/UsernameSignup"
+	IdentityService_MergeAccounts_FullMethodName                   = "/identity.v1.IdentityService/MergeAccounts"
 	IdentityService_PasswordLogin_FullMethodName                   = "/identity.v1.IdentityService/PasswordLogin"
 	IdentityService_SubmitDateOfBirth_FullMethodName               = "/identity.v1.IdentityService/SubmitDateOfBirth"
 	IdentityService_RequestEmailLoginCode_FullMethodName           = "/identity.v1.IdentityService/RequestEmailLoginCode"
@@ -111,6 +112,7 @@ const (
 	IdentityService_ListTenantMembers_FullMethodName               = "/identity.v1.IdentityService/ListTenantMembers"
 	IdentityService_RemoveTenantMember_FullMethodName              = "/identity.v1.IdentityService/RemoveTenantMember"
 	IdentityService_InviteUser_FullMethodName                      = "/identity.v1.IdentityService/InviteUser"
+	IdentityService_MergeUsers_FullMethodName                      = "/identity.v1.IdentityService/MergeUsers"
 	IdentityService_AcceptInvitation_FullMethodName                = "/identity.v1.IdentityService/AcceptInvitation"
 	IdentityService_DeactivateUser_FullMethodName                  = "/identity.v1.IdentityService/DeactivateUser"
 	IdentityService_ReactivateUser_FullMethodName                  = "/identity.v1.IdentityService/ReactivateUser"
@@ -158,6 +160,9 @@ type IdentityServiceClient interface {
 	// UsernameSignup creates an account identified by a username and a
 	// password (accounts.username_signup "self"). Sign in with PasswordLogin.
 	UsernameSignup(ctx context.Context, in *UsernameSignupRequest, opts ...grpc.CallOption) (*UsernameSignupResponse, error)
+	// MergeAccounts merges another of the caller's accounts into the caller's
+	// (see MergeAccountsRequest). Authenticated.
+	MergeAccounts(ctx context.Context, in *MergeAccountsRequest, opts ...grpc.CallOption) (*MergeAccountsResponse, error)
 	PasswordLogin(ctx context.Context, in *PasswordLoginRequest, opts ...grpc.CallOption) (*PasswordLoginResponse, error)
 	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
 	// RPC that accepts the completion ticket carried by the dob_required
@@ -333,6 +338,9 @@ type IdentityServiceClient interface {
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*InviteUserResponse, error)
+	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
+	// survivor_user_id, no password asked. Admin only.
+	MergeUsers(ctx context.Context, in *MergeUsersRequest, opts ...grpc.CallOption) (*MergeUsersResponse, error)
 	AcceptInvitation(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*AcceptInvitationResponse, error)
 	DeactivateUser(ctx context.Context, in *DeactivateUserRequest, opts ...grpc.CallOption) (*DeactivateUserResponse, error)
 	ReactivateUser(ctx context.Context, in *ReactivateUserRequest, opts ...grpc.CallOption) (*ReactivateUserResponse, error)
@@ -498,6 +506,16 @@ func (c *identityServiceClient) UsernameSignup(ctx context.Context, in *Username
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UsernameSignupResponse)
 	err := c.cc.Invoke(ctx, IdentityService_UsernameSignup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) MergeAccounts(ctx context.Context, in *MergeAccountsRequest, opts ...grpc.CallOption) (*MergeAccountsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MergeAccountsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_MergeAccounts_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1364,6 +1382,16 @@ func (c *identityServiceClient) InviteUser(ctx context.Context, in *InviteUserRe
 	return out, nil
 }
 
+func (c *identityServiceClient) MergeUsers(ctx context.Context, in *MergeUsersRequest, opts ...grpc.CallOption) (*MergeUsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MergeUsersResponse)
+	err := c.cc.Invoke(ctx, IdentityService_MergeUsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AcceptInvitation(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*AcceptInvitationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AcceptInvitationResponse)
@@ -1697,6 +1725,9 @@ type IdentityServiceServer interface {
 	// UsernameSignup creates an account identified by a username and a
 	// password (accounts.username_signup "self"). Sign in with PasswordLogin.
 	UsernameSignup(context.Context, *UsernameSignupRequest) (*UsernameSignupResponse, error)
+	// MergeAccounts merges another of the caller's accounts into the caller's
+	// (see MergeAccountsRequest). Authenticated.
+	MergeAccounts(context.Context, *MergeAccountsRequest) (*MergeAccountsResponse, error)
 	PasswordLogin(context.Context, *PasswordLoginRequest) (*PasswordLoginResponse, error)
 	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
 	// RPC that accepts the completion ticket carried by the dob_required
@@ -1872,6 +1903,9 @@ type IdentityServiceServer interface {
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error)
+	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
+	// survivor_user_id, no password asked. Admin only.
+	MergeUsers(context.Context, *MergeUsersRequest) (*MergeUsersResponse, error)
 	AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error)
 	DeactivateUser(context.Context, *DeactivateUserRequest) (*DeactivateUserResponse, error)
 	ReactivateUser(context.Context, *ReactivateUserRequest) (*ReactivateUserResponse, error)
@@ -2000,6 +2034,9 @@ func (UnimplementedIdentityServiceServer) PasswordSignup(context.Context, *Passw
 }
 func (UnimplementedIdentityServiceServer) UsernameSignup(context.Context, *UsernameSignupRequest) (*UsernameSignupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UsernameSignup not implemented")
+}
+func (UnimplementedIdentityServiceServer) MergeAccounts(context.Context, *MergeAccountsRequest) (*MergeAccountsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MergeAccounts not implemented")
 }
 func (UnimplementedIdentityServiceServer) PasswordLogin(context.Context, *PasswordLoginRequest) (*PasswordLoginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PasswordLogin not implemented")
@@ -2259,6 +2296,9 @@ func (UnimplementedIdentityServiceServer) RemoveTenantMember(context.Context, *R
 func (UnimplementedIdentityServiceServer) InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InviteUser not implemented")
 }
+func (UnimplementedIdentityServiceServer) MergeUsers(context.Context, *MergeUsersRequest) (*MergeUsersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MergeUsers not implemented")
+}
 func (UnimplementedIdentityServiceServer) AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AcceptInvitation not implemented")
 }
@@ -2480,6 +2520,24 @@ func _IdentityService_UsernameSignup_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).UsernameSignup(ctx, req.(*UsernameSignupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_MergeAccounts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MergeAccountsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).MergeAccounts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_MergeAccounts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).MergeAccounts(ctx, req.(*MergeAccountsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4032,6 +4090,24 @@ func _IdentityService_InviteUser_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_MergeUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MergeUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).MergeUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_MergeUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).MergeUsers(ctx, req.(*MergeUsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AcceptInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AcceptInvitationRequest)
 	if err := dec(in); err != nil {
@@ -4640,6 +4716,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _IdentityService_UsernameSignup_Handler,
 		},
 		{
+			MethodName: "MergeAccounts",
+			Handler:    _IdentityService_MergeAccounts_Handler,
+		},
+		{
 			MethodName: "PasswordLogin",
 			Handler:    _IdentityService_PasswordLogin_Handler,
 		},
@@ -4982,6 +5062,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "InviteUser",
 			Handler:    _IdentityService_InviteUser_Handler,
+		},
+		{
+			MethodName: "MergeUsers",
+			Handler:    _IdentityService_MergeUsers_Handler,
 		},
 		{
 			MethodName: "AcceptInvitation",

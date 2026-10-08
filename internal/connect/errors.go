@@ -101,6 +101,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAccountNotActive),
 		errors.Is(err, service.ErrInvitationPending),
 		errors.Is(err, service.ErrSignupDisabled),
+		errors.Is(err, service.ErrMergeRefused),
+		errors.Is(err, service.ErrAccountMergeDisabled),
 		errors.Is(err, service.ErrAccountKindOff),
 		errors.Is(err, service.ErrPasskeySignupDisabled),
 		errors.Is(err, service.ErrNativeOAuthDisabled),
@@ -145,6 +147,11 @@ func toConnectError(err error) *connect.Error {
 			}
 		}
 		return cerr
+
+	case errors.Is(err, service.ErrMergeConflict):
+		// One of the two accounts changed between the merge's checks and its
+		// transaction (a concurrent merge or deactivation): retryable.
+		return connect.NewError(connect.CodeAborted, err)
 
 	case errors.Is(err, service.ErrProjectConfigConflict):
 		// A per-project config_json write lost its optimistic-concurrency

@@ -46,6 +46,11 @@ const (
 	// consumer uses to tear down data that must not survive a reversible
 	// deactivation.
 	EventUserDeleted EventType = "user.deleted"
+	// EventUserMerged is emitted for the account a merge retired. Its user
+	// carries merged_into_user_id: the surviving account. The retired
+	// account's data is kept, not erased, so a consumer moves what it holds
+	// under the retired id to the survivor.
+	EventUserMerged EventType = "user.merged"
 )
 
 // Valid reports whether t is one of the known event types. Unknown types
@@ -53,7 +58,7 @@ const (
 // undeliverable outbox row.
 func (t EventType) Valid() bool {
 	switch t {
-	case EventUserCreated, EventUserUpdated, EventUserDeactivated, EventUserDeleted:
+	case EventUserCreated, EventUserUpdated, EventUserDeactivated, EventUserDeleted, EventUserMerged:
 		return true
 	default:
 		return false
@@ -69,6 +74,9 @@ type User struct {
 	Name          string `json:"name,omitempty"`
 	Status        string `json:"status,omitempty"`
 	EmailVerified bool   `json:"email_verified"`
+	// MergedIntoUserID is set on user.merged: the account this one was
+	// merged into.
+	MergedIntoUserID string `json:"merged_into_user_id,omitempty"`
 }
 
 // Event is the typed payload emitted by the service layer and delivered to

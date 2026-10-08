@@ -34,6 +34,10 @@ const (
 	// TemplateMagicLink carries the clickable single-use sign-in link for
 	// passwordless email login.
 	TemplateMagicLink = "magic_link"
+	// TemplateAccountMerged is the security notice sent when one account is
+	// merged into another: to the retired account's address (Retired true)
+	// and to the survivor's, each naming only the recipient's own account.
+	TemplateAccountMerged = "account_merged"
 )
 
 // Render returns the HTML and plain-text bodies for the given template name,

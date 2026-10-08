@@ -110,9 +110,17 @@ password arm promotes the account and issues **no** tokens, exactly as
 `PasswordSignup` does, rather than handing out a live session on an address
 the caller merely typed.
 
-Firebase's `credential-already-in-use` is matched, and like Firebase we **do
-not merge** the two accounts: merging silently destroys one account's data, and
-choosing which one survives is the application's decision, not the server's.
+Firebase's `credential-already-in-use` is matched, and like Firebase the
+upgrade **does not merge** the two accounts implicitly: an implicit merge would
+silently pick which one survives, and that is the application's decision, not
+the server's.
+
+*Amended in v4.12:* merging is now available as its own explicit operation,
+`MergeAccounts` (proved by the other account's password) and the admin
+`MergeUsers`. The caller names the survivor, and nothing is deleted: the other
+account is retired (deactivated, `merged_into_user_id` set) with its data
+kept, and a `user.merged` event tells applications to move what they hold under
+the retired id. The rationale above still holds for the upgrade itself.
 A second upgrade is refused (`FAILED_PRECONDITION`) — it would silently rebind
 an identified account to a different credential.
 

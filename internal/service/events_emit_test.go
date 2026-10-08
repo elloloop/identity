@@ -158,3 +158,57 @@ func TestToEventUser_OmitsSecrets(t *testing.T) {
 	// construction; assert the mapped fields are exactly the safe subset.
 	require.Equal(t, "active", got.Status)
 }
+
+// TestMergeAccounts_EmitsUserMergedEvent: a merge is announced with the
+// retired account and the survivor it now points at, so an application can
+// move what it holds under the retired id. A refused merge announces nothing.
+func TestMergeAccounts_EmitsUserMergedEvent(t *testing.T) {
+	svc, _, survivor, native, ctx := mergeFixture(t)
+	pub := &capturePublisher{}
+	svc.WithEventPublisher(pub)
+
+	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", "Wr0ng!Passw0rd", "203.0.113.10", "agent", false)
+	require.Error(t, err)
+	_, found := eventByType(pub.all(), events.EventUserMerged)
+	require.False(t, found, "a refused merge emits no event")
+
+	_, err = svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	require.NoError(t, err)
+	requireOneMergedEvent(t, pub.all(), native.ID, survivor.ID)
+}
+
+func TestMergeUsers_EmitsUserMergedEvent(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@example.test", "Admin", "admin", "active")
+	db.addUser("member-1", "member@example.test", "Member", "member", "active")
+	repo := newFakeRepo()
+	pub := &capturePublisher{}
+	svc := newTestAdminServiceWithRepo(db, repo).WithEventPublisher(pub)
+	ctx := accountsScope(t, "accounts.example.test")
+	survivor := seedUser(repo, "a@mail.example.test", "", StatusActive)
+	other := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)
+	other.Username = "ann"
+
+	_, err := svc.MergeUsers(ctx, "member-1", survivor.ID, other.ID, false)
+	require.Error(t, err)
+	_, found := eventByType(pub.all(), events.EventUserMerged)
+	require.False(t, found, "a refused merge emits no event")
+
+	_, err = svc.MergeUsers(ctx, "admin-1", survivor.ID, other.ID, false)
+	require.NoError(t, err)
+	requireOneMergedEvent(t, pub.all(), other.ID, survivor.ID)
+}
+
+func requireOneMergedEvent(t *testing.T, evs []events.Event, retiredID, survivorID string) {
+	t.Helper()
+	var merged []events.Event
+	for _, e := range evs {
+		if e.Type == events.EventUserMerged {
+			merged = append(merged, e)
+		}
+	}
+	require.Len(t, merged, 1)
+	require.Equal(t, retiredID, merged[0].User.ID, "the event names the retired account")
+	require.Equal(t, survivorID, merged[0].User.MergedIntoUserID, "and the survivor it was merged into")
+	require.NotEmpty(t, merged[0].ID)
+}

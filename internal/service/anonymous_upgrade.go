@@ -173,9 +173,11 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 // exchange itself, exactly as OAuthLogin and LinkIdentity do.
 //
 // The provider identity must be unclaimed. Firebase reports this as
-// credential-already-in-use, and like Firebase we do NOT merge the two
-// accounts: merging would silently destroy one account's data, and choosing
-// which one survives is the application's decision, not the server's.
+// credential-already-in-use, and like Firebase the upgrade does NOT merge the
+// two accounts implicitly: a merge chosen as a side effect of an upgrade would
+// pick the survivor for the application. Merging is a separate, explicit act
+// (MergeAccounts / MergeUsers) in which the caller names the survivor and
+// nothing is deleted — the other account is retired with its data kept.
 func (s *AuthService) UpgradeAnonymousWithOAuth(
 	ctx context.Context, userID string, cred AnonymousOAuthCredential,
 ) (*LoginResult, error) {

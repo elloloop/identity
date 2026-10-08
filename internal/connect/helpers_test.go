@@ -2486,3 +2486,51 @@ func (r *fakeRepo) AssignAccountAddress(_ context.Context, userID, address strin
 	u.AccountAddress = address
 	return address, nil
 }
+
+// ApplyAccountMerge mirrors the SQL drivers' single-transaction merge under
+// the store's lock: both accounts must be active and unmerged, or nothing
+// changes.
+func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	o, okO := r.users[m.OtherID]
+	sv, okS := r.users[m.SurvivorID]
+	mergeable := func(u *service.User) bool { return u.Status == "active" && u.MergedIntoUserID == "" }
+	if !okO || !okS || m.OtherID == m.SurvivorID || !mergeable(o) || !mergeable(sv) {
+		return service.ErrMergeConflict
+	}
+	if (m.MoveUsername && sv.Username != "") || (m.MovePassword && sv.PasswordHash != "") || (m.MoveEmail && sv.Email != "") {
+		return service.ErrMergeConflict
+	}
+	if m.MoveUsername {
+		sv.Username, o.Username = o.Username, ""
+	}
+	if m.MovePassword {
+		sv.PasswordHash = o.PasswordHash
+	}
+	if m.MoveEmail {
+		sv.Email, sv.EmailVerified, sv.EmailVerifiedAt = o.Email, o.EmailVerified, o.EmailVerifiedAt
+		o.Email, o.EmailVerified, o.EmailVerifiedAt = "", false, 0
+	}
+	if m.SwapAddress {
+		sv.AccountAddress, o.AccountAddress = o.AccountAddress, sv.AccountAddress
+	}
+	o.Status, o.MergedIntoUserID = "deactivated", m.SurvivorID
+	o.UpdatedAt, sv.UpdatedAt = time.UnixMilli(m.AtMs), time.UnixMilli(m.AtMs)
+	for _, oi := range r.oauthIdentities {
+		if oi.UserID == m.OtherID {
+			oi.UserID = m.SurvivorID
+		}
+	}
+	for h, rt := range r.refreshTokens {
+		if rt.UserID == m.OtherID {
+			delete(r.refreshTokens, h)
+		}
+	}
+	for _, se := range r.sessions {
+		if se.UserID == m.OtherID && se.RevokedAtMs == 0 {
+			se.RevokedAtMs = m.AtMs
+		}
+	}
+	return nil
+}

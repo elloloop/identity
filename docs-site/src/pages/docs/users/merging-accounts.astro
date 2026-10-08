@@ -1,0 +1,97 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Merging accounts">
+  <h1>Merging accounts</h1>
+  <p>
+    A person can end up with two accounts in one project. One example is a
+    Gmail sign-up (with the address <code>bob-at-gmail.com@accounts.example.com</code>)
+    alongside a username account <code>bob</code> (<code>bob@accounts.example.com</code>).
+    A merge joins them under one account <strong>without deleting
+    anything</strong>.
+  </p>
+
+  <h2>What a merge does</h2>
+  <ul>
+    <li>
+      Whoever asks chooses the <strong>survivor</strong>; the server never
+      picks. The other account is <strong>retired</strong>: it becomes
+      <code>USER_STATUS_DEACTIVATED</code>, and <code>merged_into_user_id</code>
+      names the survivor. All its sessions are revoked, it never signs in again,
+      and it can never be reactivated: <code>ReactivateUser</code> refuses it,
+      and SCIM no longer sees it. Its row, and everything stored under its id,
+      stays.
+    </li>
+    <li>
+      Everything that lets the person sign in the way they did moves to the
+      survivor, in one transaction:
+      <ul>
+        <li>the retired account's <strong>linked providers</strong> (Google, Apple, …), always;</li>
+        <li>its <strong>username</strong>, <strong>password</strong> and <strong>email</strong>, each only where the survivor has none of its own (a password that two-step verification protected does not move), so <code>bob</code> now signs in to the survivor;</li>
+        <li>with <code>take_address</code>, its account address. The survivor's old address moves to the retired account, so neither is freed for someone else.</li>
+      </ul>
+      <strong>Passkeys do not move.</strong> A passkey is bound to the account
+      it was registered for, so it would not sign in to the survivor. Register
+      passkeys again on the survivor.
+      If either account changes while the merge runs (another merge, a
+      deactivation), nothing is written and the call answers
+      <code>ABORTED</code>; try again.
+    </li>
+    <li>
+      An email goes to every address either account had, saying which account
+      was merged into which, so someone who did not ask for it hears at once.
+    </li>
+    <li>
+      A <code>user.merged</code> event names the retired account and carries
+      <code>merged_into_user_id</code>. Applications move whatever they hold
+      under the retired id to the survivor.
+    </li>
+  </ul>
+
+  <h2>Turning it on</h2>
+  <p>
+    Self-service merging is <strong>off</strong> until you set
+    <code>GATEWAY_ACCOUNT_MERGE_ENABLED=true</code>. A merge retires an
+    account for good, and applications learn about it only through the
+    <code>user.merged</code> webhook. Subscribe every application that stores
+    data under user ids to <code>user.merged</code> first. The admin
+    <code>MergeUsers</code> works either way.
+  </p>
+
+  <h2>Who can merge</h2>
+  <ul>
+    <li>
+      <strong>The person</strong>, with <code>MergeAccounts</code> called from the
+      survivor's session, with the client assurance a password sign-in needs.
+      The survivor is checked first, so an account that could not take another
+      in learns nothing about the other's password. They prove they control the other account with its
+      identifier (email or username) and password, checked by the same code as
+      a password sign-in: the access mode, the lockout, the account's status,
+      the verified-email requirement and the login policy all apply, with the
+      same refusals and audit entries, on the per-IP login limit. An account
+      protected by a second factor (enrolled two-step, or a policy requiring
+      one) cannot be merged by password alone: turn two-step off there first.
+    </li>
+    <li>
+      <strong>An admin</strong>, with <code>MergeUsers</code>, naming both
+      accounts. No password is asked.
+    </li>
+  </ul>
+
+  <h2>What cannot be merged</h2>
+  <ul>
+    <li>An account into itself.</li>
+    <li>An account that is not active.</li>
+    <li>An anonymous account: upgrade it instead.</li>
+    <li>A managed child's account, which stays with its guardian.</li>
+    <li>An account that is a guardian: move its children first.</li>
+    <li>
+      In self-service, an account your identity provider manages (SCIM
+      provisioned): merging it away would move its sign-in out of the provider's
+      control. An admin can merge it.
+    </li>
+    <li>An admin's own account, by that admin.</li>
+  </ul>
+  <p>These refusals answer <code>FAILED_PRECONDITION</code>.</p>
+</DocsLayout>

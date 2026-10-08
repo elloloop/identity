@@ -99,6 +99,11 @@ func (t *tx) Query(ctx context.Context, q string, args ...any) (rows, error) {
 	return queryOn(ctx, t.t, q, args...)
 }
 
+// QueryRow runs a single-row query inside the transaction.
+func (t *tx) QueryRow(ctx context.Context, q string, args ...any) row {
+	return queryRowOn(ctx, t.t, q, args...)
+}
+
 func (t *tx) Commit(ctx context.Context) error   { return t.t.Commit() }
 func (t *tx) Rollback(ctx context.Context) error { return t.t.Rollback() }
 

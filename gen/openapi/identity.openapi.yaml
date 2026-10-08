@@ -2730,6 +2730,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.LookupUsersResponse'
+  /identity.v1.IdentityService/MergeAccounts:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: MergeAccounts
+      description: |-
+        MergeAccounts merges another of the caller's accounts into the caller's
+         (see MergeAccountsRequest). Authenticated.
+      operationId: identity.v1.IdentityService.MergeAccounts
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.MergeAccountsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.MergeAccountsResponse'
+  /identity.v1.IdentityService/MergeUsers:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: MergeUsers
+      description: |-
+        MergeUsers is the admin form of MergeAccounts: merge other_user_id into
+         survivor_user_id, no password asked. Admin only.
+      operationId: identity.v1.IdentityService.MergeUsers
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.MergeUsersRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.MergeUsersResponse'
   /identity.v1.IdentityService/NativeOAuthLogin:
     post:
       tags:
@@ -7193,6 +7269,65 @@ components:
              requests it answers by its requested_emails, never by index or by email.
       title: LookupUsersResponse
       additionalProperties: false
+    identity.v1.MergeAccountsRequest:
+      type: object
+      properties:
+        otherIdentifier:
+          type: string
+          title: other_identifier
+          description: other_identifier is the other account's email or username.
+        otherPassword:
+          type: string
+          title: other_password
+          description: |-
+            other_password proves the caller controls the other account. Checked as
+             PasswordLogin checks it: one refusal for an unknown identifier or a wrong
+             password, and the same lockout. An account with two-step verification
+             on cannot be merged by password alone.
+        takeAddress:
+          type: boolean
+          title: take_address
+          description: |-
+            take_address moves the other account's account address to the survivor;
+             the survivor's old address moves to the retired account.
+      title: MergeAccountsRequest
+      additionalProperties: false
+      description: |-
+        MergeAccountsRequest merges another account of the caller into the
+         caller's own (the survivor). The other account is retired, not deleted
+         (DEACTIVATED with merged_into_user_id set); its data stays under its id for the application to move,
+         announced by a user.merged event. The survivor takes the other's username
+         when it has none, and its password when it has none.
+    identity.v1.MergeAccountsResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+      title: MergeAccountsResponse
+      additionalProperties: false
+    identity.v1.MergeUsersRequest:
+      type: object
+      properties:
+        survivorUserId:
+          type: string
+          title: survivor_user_id
+        otherUserId:
+          type: string
+          title: other_user_id
+        takeAddress:
+          type: boolean
+          title: take_address
+      title: MergeUsersRequest
+      additionalProperties: false
+    identity.v1.MergeUsersResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+      title: MergeUsersResponse
+      additionalProperties: false
     identity.v1.NativeOAuthLoginRequest:
       type: object
       properties:
@@ -8986,6 +9121,14 @@ components:
              takes a suffix) — key on the user id, not this address, and never treat
              it as proof of the email it spells. Empty when
              the project issues none.
+        mergedIntoUserId:
+          type: string
+          title: merged_into_user_id
+          description: |-
+            merged_into_user_id is set on an account merged into another
+             (MergeAccounts, MergeUsers): the account it was merged into. Such an
+             account is DEACTIVATED, never signs in and can never be reactivated;
+             data a client holds under its id belongs to that account now.
       title: User
       additionalProperties: false
     identity.v1.UserStatus:

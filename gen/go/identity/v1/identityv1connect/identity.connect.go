@@ -51,6 +51,9 @@ const (
 	// IdentityServiceUsernameSignupProcedure is the fully-qualified name of the IdentityService's
 	// UsernameSignup RPC.
 	IdentityServiceUsernameSignupProcedure = "/identity.v1.IdentityService/UsernameSignup"
+	// IdentityServiceMergeAccountsProcedure is the fully-qualified name of the IdentityService's
+	// MergeAccounts RPC.
+	IdentityServiceMergeAccountsProcedure = "/identity.v1.IdentityService/MergeAccounts"
 	// IdentityServicePasswordLoginProcedure is the fully-qualified name of the IdentityService's
 	// PasswordLogin RPC.
 	IdentityServicePasswordLoginProcedure = "/identity.v1.IdentityService/PasswordLogin"
@@ -307,6 +310,9 @@ const (
 	// IdentityServiceInviteUserProcedure is the fully-qualified name of the IdentityService's
 	// InviteUser RPC.
 	IdentityServiceInviteUserProcedure = "/identity.v1.IdentityService/InviteUser"
+	// IdentityServiceMergeUsersProcedure is the fully-qualified name of the IdentityService's
+	// MergeUsers RPC.
+	IdentityServiceMergeUsersProcedure = "/identity.v1.IdentityService/MergeUsers"
 	// IdentityServiceAcceptInvitationProcedure is the fully-qualified name of the IdentityService's
 	// AcceptInvitation RPC.
 	IdentityServiceAcceptInvitationProcedure = "/identity.v1.IdentityService/AcceptInvitation"
@@ -416,6 +422,9 @@ type IdentityServiceClient interface {
 	// UsernameSignup creates an account identified by a username and a
 	// password (accounts.username_signup "self"). Sign in with PasswordLogin.
 	UsernameSignup(context.Context, *connect.Request[v1.UsernameSignupRequest]) (*connect.Response[v1.UsernameSignupResponse], error)
+	// MergeAccounts merges another of the caller's accounts into the caller's
+	// (see MergeAccountsRequest). Authenticated.
+	MergeAccounts(context.Context, *connect.Request[v1.MergeAccountsRequest]) (*connect.Response[v1.MergeAccountsResponse], error)
 	PasswordLogin(context.Context, *connect.Request[v1.PasswordLoginRequest]) (*connect.Response[v1.PasswordLoginResponse], error)
 	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
 	// RPC that accepts the completion ticket carried by the dob_required
@@ -591,6 +600,9 @@ type IdentityServiceClient interface {
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
+	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
+	// survivor_user_id, no password asked. Admin only.
+	MergeUsers(context.Context, *connect.Request[v1.MergeUsersRequest]) (*connect.Response[v1.MergeUsersResponse], error)
 	AcceptInvitation(context.Context, *connect.Request[v1.AcceptInvitationRequest]) (*connect.Response[v1.AcceptInvitationResponse], error)
 	DeactivateUser(context.Context, *connect.Request[v1.DeactivateUserRequest]) (*connect.Response[v1.DeactivateUserResponse], error)
 	ReactivateUser(context.Context, *connect.Request[v1.ReactivateUserRequest]) (*connect.Response[v1.ReactivateUserResponse], error)
@@ -739,6 +751,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceUsernameSignupProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("UsernameSignup")),
+			connect.WithClientOptions(opts...),
+		),
+		mergeAccounts: connect.NewClient[v1.MergeAccountsRequest, v1.MergeAccountsResponse](
+			httpClient,
+			baseURL+IdentityServiceMergeAccountsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("MergeAccounts")),
 			connect.WithClientOptions(opts...),
 		),
 		passwordLogin: connect.NewClient[v1.PasswordLoginRequest, v1.PasswordLoginResponse](
@@ -1257,6 +1275,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("InviteUser")),
 			connect.WithClientOptions(opts...),
 		),
+		mergeUsers: connect.NewClient[v1.MergeUsersRequest, v1.MergeUsersResponse](
+			httpClient,
+			baseURL+IdentityServiceMergeUsersProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("MergeUsers")),
+			connect.WithClientOptions(opts...),
+		),
 		acceptInvitation: connect.NewClient[v1.AcceptInvitationRequest, v1.AcceptInvitationResponse](
 			httpClient,
 			baseURL+IdentityServiceAcceptInvitationProcedure,
@@ -1460,6 +1484,7 @@ type identityServiceClient struct {
 	redeemOAuthCode                 *connect.Client[v1.RedeemOAuthCodeRequest, v1.RedeemOAuthCodeResponse]
 	passwordSignup                  *connect.Client[v1.PasswordSignupRequest, v1.PasswordSignupResponse]
 	usernameSignup                  *connect.Client[v1.UsernameSignupRequest, v1.UsernameSignupResponse]
+	mergeAccounts                   *connect.Client[v1.MergeAccountsRequest, v1.MergeAccountsResponse]
 	passwordLogin                   *connect.Client[v1.PasswordLoginRequest, v1.PasswordLoginResponse]
 	submitDateOfBirth               *connect.Client[v1.SubmitDateOfBirthRequest, v1.SubmitDateOfBirthResponse]
 	requestEmailLoginCode           *connect.Client[v1.RequestEmailLoginCodeRequest, v1.RequestEmailLoginCodeResponse]
@@ -1546,6 +1571,7 @@ type identityServiceClient struct {
 	listTenantMembers               *connect.Client[v1.ListTenantMembersRequest, v1.ListTenantMembersResponse]
 	removeTenantMember              *connect.Client[v1.RemoveTenantMemberRequest, v1.RemoveTenantMemberResponse]
 	inviteUser                      *connect.Client[v1.InviteUserRequest, v1.InviteUserResponse]
+	mergeUsers                      *connect.Client[v1.MergeUsersRequest, v1.MergeUsersResponse]
 	acceptInvitation                *connect.Client[v1.AcceptInvitationRequest, v1.AcceptInvitationResponse]
 	deactivateUser                  *connect.Client[v1.DeactivateUserRequest, v1.DeactivateUserResponse]
 	reactivateUser                  *connect.Client[v1.ReactivateUserRequest, v1.ReactivateUserResponse]
@@ -1608,6 +1634,11 @@ func (c *identityServiceClient) PasswordSignup(ctx context.Context, req *connect
 // UsernameSignup calls identity.v1.IdentityService.UsernameSignup.
 func (c *identityServiceClient) UsernameSignup(ctx context.Context, req *connect.Request[v1.UsernameSignupRequest]) (*connect.Response[v1.UsernameSignupResponse], error) {
 	return c.usernameSignup.CallUnary(ctx, req)
+}
+
+// MergeAccounts calls identity.v1.IdentityService.MergeAccounts.
+func (c *identityServiceClient) MergeAccounts(ctx context.Context, req *connect.Request[v1.MergeAccountsRequest]) (*connect.Response[v1.MergeAccountsResponse], error) {
+	return c.mergeAccounts.CallUnary(ctx, req)
 }
 
 // PasswordLogin calls identity.v1.IdentityService.PasswordLogin.
@@ -2040,6 +2071,11 @@ func (c *identityServiceClient) InviteUser(ctx context.Context, req *connect.Req
 	return c.inviteUser.CallUnary(ctx, req)
 }
 
+// MergeUsers calls identity.v1.IdentityService.MergeUsers.
+func (c *identityServiceClient) MergeUsers(ctx context.Context, req *connect.Request[v1.MergeUsersRequest]) (*connect.Response[v1.MergeUsersResponse], error) {
+	return c.mergeUsers.CallUnary(ctx, req)
+}
+
 // AcceptInvitation calls identity.v1.IdentityService.AcceptInvitation.
 func (c *identityServiceClient) AcceptInvitation(ctx context.Context, req *connect.Request[v1.AcceptInvitationRequest]) (*connect.Response[v1.AcceptInvitationResponse], error) {
 	return c.acceptInvitation.CallUnary(ctx, req)
@@ -2212,6 +2248,9 @@ type IdentityServiceHandler interface {
 	// UsernameSignup creates an account identified by a username and a
 	// password (accounts.username_signup "self"). Sign in with PasswordLogin.
 	UsernameSignup(context.Context, *connect.Request[v1.UsernameSignupRequest]) (*connect.Response[v1.UsernameSignupResponse], error)
+	// MergeAccounts merges another of the caller's accounts into the caller's
+	// (see MergeAccountsRequest). Authenticated.
+	MergeAccounts(context.Context, *connect.Request[v1.MergeAccountsRequest]) (*connect.Response[v1.MergeAccountsResponse], error)
 	PasswordLogin(context.Context, *connect.Request[v1.PasswordLoginRequest]) (*connect.Response[v1.PasswordLoginResponse], error)
 	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
 	// RPC that accepts the completion ticket carried by the dob_required
@@ -2387,6 +2426,9 @@ type IdentityServiceHandler interface {
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
+	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
+	// survivor_user_id, no password asked. Admin only.
+	MergeUsers(context.Context, *connect.Request[v1.MergeUsersRequest]) (*connect.Response[v1.MergeUsersResponse], error)
 	AcceptInvitation(context.Context, *connect.Request[v1.AcceptInvitationRequest]) (*connect.Response[v1.AcceptInvitationResponse], error)
 	DeactivateUser(context.Context, *connect.Request[v1.DeactivateUserRequest]) (*connect.Response[v1.DeactivateUserResponse], error)
 	ReactivateUser(context.Context, *connect.Request[v1.ReactivateUserRequest]) (*connect.Response[v1.ReactivateUserResponse], error)
@@ -2531,6 +2573,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceUsernameSignupProcedure,
 		svc.UsernameSignup,
 		connect.WithSchema(identityServiceMethods.ByName("UsernameSignup")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceMergeAccountsHandler := connect.NewUnaryHandler(
+		IdentityServiceMergeAccountsProcedure,
+		svc.MergeAccounts,
+		connect.WithSchema(identityServiceMethods.ByName("MergeAccounts")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServicePasswordLoginHandler := connect.NewUnaryHandler(
@@ -3049,6 +3097,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("InviteUser")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceMergeUsersHandler := connect.NewUnaryHandler(
+		IdentityServiceMergeUsersProcedure,
+		svc.MergeUsers,
+		connect.WithSchema(identityServiceMethods.ByName("MergeUsers")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAcceptInvitationHandler := connect.NewUnaryHandler(
 		IdentityServiceAcceptInvitationProcedure,
 		svc.AcceptInvitation,
@@ -3255,6 +3309,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServicePasswordSignupHandler.ServeHTTP(w, r)
 		case IdentityServiceUsernameSignupProcedure:
 			identityServiceUsernameSignupHandler.ServeHTTP(w, r)
+		case IdentityServiceMergeAccountsProcedure:
+			identityServiceMergeAccountsHandler.ServeHTTP(w, r)
 		case IdentityServicePasswordLoginProcedure:
 			identityServicePasswordLoginHandler.ServeHTTP(w, r)
 		case IdentityServiceSubmitDateOfBirthProcedure:
@@ -3427,6 +3483,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceRemoveTenantMemberHandler.ServeHTTP(w, r)
 		case IdentityServiceInviteUserProcedure:
 			identityServiceInviteUserHandler.ServeHTTP(w, r)
+		case IdentityServiceMergeUsersProcedure:
+			identityServiceMergeUsersHandler.ServeHTTP(w, r)
 		case IdentityServiceAcceptInvitationProcedure:
 			identityServiceAcceptInvitationHandler.ServeHTTP(w, r)
 		case IdentityServiceDeactivateUserProcedure:
@@ -3522,6 +3580,10 @@ func (UnimplementedIdentityServiceHandler) PasswordSignup(context.Context, *conn
 
 func (UnimplementedIdentityServiceHandler) UsernameSignup(context.Context, *connect.Request[v1.UsernameSignupRequest]) (*connect.Response[v1.UsernameSignupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UsernameSignup is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) MergeAccounts(context.Context, *connect.Request[v1.MergeAccountsRequest]) (*connect.Response[v1.MergeAccountsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.MergeAccounts is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) PasswordLogin(context.Context, *connect.Request[v1.PasswordLoginRequest]) (*connect.Response[v1.PasswordLoginResponse], error) {
@@ -3866,6 +3928,10 @@ func (UnimplementedIdentityServiceHandler) RemoveTenantMember(context.Context, *
 
 func (UnimplementedIdentityServiceHandler) InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.InviteUser is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) MergeUsers(context.Context, *connect.Request[v1.MergeUsersRequest]) (*connect.Response[v1.MergeUsersResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.MergeUsers is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) AcceptInvitation(context.Context, *connect.Request[v1.AcceptInvitationRequest]) (*connect.Response[v1.AcceptInvitationResponse], error) {

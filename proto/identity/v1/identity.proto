@@ -99,6 +99,21 @@ message User {
   // it as proof of the email it spells. Empty when
   // the project issues none.
   string account_address = 29;
+  // merged_into_user_id is set on an account merged into another
+  // (MergeAccounts, MergeUsers): the account it was merged into. Such an
+  // account is DEACTIVATED, never signs in and can never be reactivated;
+  // data a client holds under its id belongs to that account now.
+  string merged_into_user_id = 30;
+}
+
+message MergeUsersRequest {
+  string survivor_user_id = 1;
+  string other_user_id = 2;
+  bool take_address = 3;
+}
+
+message MergeUsersResponse {
+  User user = 1;
 }
 
 message CreateUserRequest {
@@ -403,6 +418,28 @@ message UsernameSignupResponse {
   string access_token = 2;
   string refresh_token = 3;
   int32 expires_in = 4;
+}
+
+// MergeAccountsRequest merges another account of the caller into the
+// caller's own (the survivor). The other account is retired, not deleted
+// (DEACTIVATED with merged_into_user_id set); its data stays under its id for the application to move,
+// announced by a user.merged event. The survivor takes the other's username
+// when it has none, and its password when it has none.
+message MergeAccountsRequest {
+  // other_identifier is the other account's email or username.
+  string other_identifier = 1;
+  // other_password proves the caller controls the other account. Checked as
+  // PasswordLogin checks it: one refusal for an unknown identifier or a wrong
+  // password, and the same lockout. An account with two-step verification
+  // on cannot be merged by password alone.
+  string other_password = 2;
+  // take_address moves the other account's account address to the survivor;
+  // the survivor's old address moves to the retired account.
+  bool take_address = 3;
+}
+
+message MergeAccountsResponse {
+  User user = 1;
 }
 
 message PasswordLoginRequest {
@@ -2441,6 +2478,9 @@ service IdentityService {
   // UsernameSignup creates an account identified by a username and a
   // password (accounts.username_signup "self"). Sign in with PasswordLogin.
   rpc UsernameSignup(UsernameSignupRequest) returns (UsernameSignupResponse);
+  // MergeAccounts merges another of the caller's accounts into the caller's
+  // (see MergeAccountsRequest). Authenticated.
+  rpc MergeAccounts(MergeAccountsRequest) returns (MergeAccountsResponse);
   rpc PasswordLogin(PasswordLoginRequest) returns (PasswordLoginResponse);
   // Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
   // RPC that accepts the completion ticket carried by the dob_required
@@ -2644,6 +2684,9 @@ service IdentityService {
   // Admin user management (caller must have role=admin). Enforced in the
   // servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
   rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
+  // MergeUsers is the admin form of MergeAccounts: merge other_user_id into
+  // survivor_user_id, no password asked. Admin only.
+  rpc MergeUsers(MergeUsersRequest) returns (MergeUsersResponse);
   rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse);
   rpc DeactivateUser(DeactivateUserRequest) returns (DeactivateUserResponse);
   rpc ReactivateUser(ReactivateUserRequest) returns (ReactivateUserResponse);

@@ -66,3 +66,21 @@ func TestSCIM_ProjectPolicyUnavailableIs503(t *testing.T) {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 }
+
+// A merged account is absent from SCIM: no PUT or PATCH can reactivate it.
+func TestSCIM_MergedAccountIsNotAddressable(t *testing.T) {
+	h, repo := newSCIMTestHandler(t, true)
+	id, err := repo.CreateUser(context.Background(), &service.User{
+		Email: "gone@mail.example.test", Status: "deactivated", MergedIntoUserID: "survivor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := scimReq(t, h, http.MethodPatch, "/scim/v2/Users/"+id, testSCIMToken, `{
+		"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+		"Operations":[{"op":"replace","path":"active","value":true}]
+	}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("patch on a merged account: status = %d, want 404", rec.Code)
+	}
+}

@@ -43,6 +43,8 @@ func toEventUser(u *User) events.User {
 		Name:          u.Name,
 		Status:        u.Status,
 		EmailVerified: u.EmailVerified,
+
+		MergedIntoUserID: u.MergedIntoUserID,
 	}
 }
 

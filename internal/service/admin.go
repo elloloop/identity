@@ -334,6 +334,11 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 	if pstrOr(node.Payload, ufStatus, "active") == StatusPendingParentalConsent {
 		return ErrParentalConsentRequired
 	}
+	// A merged account is retired for good: its sign-in now belongs to the
+	// account it was merged into.
+	if pstr(node.Payload, ufMergedInto) != "" {
+		return fmt.Errorf("%w: a merged account cannot be reactivated", ErrMergeRefused)
+	}
 
 	now := nowMs()
 	op := graph.Operation{

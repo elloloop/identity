@@ -43,6 +43,7 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"MicrosoftClientSecret", cfg.MicrosoftClientSecret, ""},
 		{"MicrosoftTenantID", cfg.MicrosoftTenantID, ""},
 		{"PasswordSignupEnabled", cfg.PasswordSignupEnabled, true},
+		{"AccountMergeEnabled", cfg.AccountMergeEnabled, false},
 		{"PasswordResetEnabled", cfg.PasswordResetEnabled, true},
 		{"PasswordResetExpirySeconds", cfg.PasswordResetExpirySeconds, 900},
 		{"PasswordlessSignupEnabled", cfg.PasswordlessSignupEnabled, true},

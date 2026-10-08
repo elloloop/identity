@@ -134,6 +134,11 @@ type User struct {
 	// confirmed change of an email. Unique within the
 	// project when non-empty. Empty when the project issues none.
 	AccountAddress string
+	// MergedIntoUserID is the account this one was merged into. A merged
+	// account is StatusDeactivated with this set: it no longer signs in, can
+	// never be reactivated, and keeps its data for the survivor's application
+	// to move. Empty on every unmerged account.
+	MergedIntoUserID string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
 	// deletion. Set when the owner requests deletion; cleared on cancel or a
@@ -681,6 +686,18 @@ type Repository interface {
 	// already had. An address another account in the project holds is
 	// ErrAlreadyExists. An unknown user returns "" and no error.
 	AssignAccountAddress(ctx context.Context, userID, address string) (string, error)
+
+	// ApplyAccountMerge retires m.OtherID into m.SurvivorID in ONE
+	// transaction: both rows must still be active and unmerged when it runs
+	// (else ErrMergeConflict, with nothing written). The other account is
+	// deactivated with merged_into_user_id set; the moves m asks for (username,
+	// password, email, account-address swap) are made with the values read
+	// inside the transaction, and each only if the survivor still has none of
+	// its own (else ErrMergeConflict); the other account's linked provider
+	// identities move to the survivor (passkeys stay: they are bound to the
+	// account they were registered for); its refresh tokens are deleted and
+	// its sessions revoked. Any failure rolls all of it back.
+	ApplyAccountMerge(ctx context.Context, m AccountMerge) error
 
 	// OAuth identities — links a (provider, provider_user_id) pair to a
 	// local User so OAuth login can survive provider-side email changes.

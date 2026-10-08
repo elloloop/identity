@@ -64,6 +64,7 @@ export const sidebarSections: NavSection[] = [
       { label: "User Management", href: `${BASE}/docs/users/management` },
       { label: "Managed Minor Accounts", href: `${BASE}/docs/users/managed-minors` },
       { label: "Account Kinds and Addresses", href: `${BASE}/docs/users/account-addresses` },
+      { label: "Merging Accounts", href: `${BASE}/docs/users/merging-accounts` },
       { label: "Directory Lookup for Services", href: `${BASE}/docs/users/directory-lookup` },
     ],
   },
