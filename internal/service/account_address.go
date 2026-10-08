@@ -114,7 +114,7 @@ func accountAddressLocalPart(u *User) string {
 	case u.Username != "":
 		src = u.Username
 	case u.Email != "":
-		src = strings.Replace(u.Email, "@", "-at-", 1)
+		src = strings.Replace(u.Email, "@", addressSeparator, 1)
 	default:
 		return ""
 	}
@@ -175,12 +175,19 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 	if local == "" {
 		return
 	}
-	candidates := make([]string, 0, maxAddressAttempts+1)
-	for attempt := 1; attempt <= maxAddressAttempts; attempt++ {
-		candidates = append(candidates, fitAddressLocalPart(local, attempt))
-	}
 	sum := sha256.Sum256([]byte(u.ID))
-	candidates = append(candidates, fitAddressLocalPart(local+"-"+hex.EncodeToString(sum[:4]), 1))
+	idForm := fitAddressLocalPart(local+"-"+hex.EncodeToString(sum[:4]), 1)
+	candidates := make([]string, 0, maxAddressAttempts+1)
+	// A local part that is a role name, or a legacy username that spells
+	// another person's email-derived address, never takes its plain form or
+	// a -N neighbour: it goes straight to the id form, which no other account
+	// can derive.
+	if !plainFormUnsafe(u, local) {
+		for attempt := 1; attempt <= maxAddressAttempts; attempt++ {
+			candidates = append(candidates, fitAddressLocalPart(local, attempt))
+		}
+	}
+	candidates = append(candidates, idForm)
 	for _, candidate := range candidates {
 		held, err := repo.AssignAccountAddress(ctx, u.ID, candidate+"@"+scope.Accounts.Domain)
 		if err == nil {
@@ -212,6 +219,34 @@ func addressableLocalPart(scope *ProjectScope, u *User) string {
 		return ""
 	}
 	return accountAddressLocalPart(u)
+}
+
+// addressSeparator is how an email account's local part spells the '@' of
+// its email. New usernames may not contain it (validateUsernameFormat), which
+// keeps username addresses and email addresses apart.
+const addressSeparator = "-at-"
+
+// reservedLocalParts are the local parts that speak for a domain itself: the
+// RFC 2142 role mailboxes, the addresses certificate authorities accept for
+// domain validation, and common system names. No account is issued them, so
+// no ordinary account receives mail meant for the domain's operators.
+var reservedLocalParts = map[string]bool{
+	"abuse": true, "admin": true, "administrator": true, "hostmaster": true,
+	"info": true, "mailer-daemon": true, "marketing": true, "noc": true,
+	"no-reply": true, "noreply": true, "postmaster": true, "root": true,
+	"sales": true, "security": true, "ssl-admin": true, "support": true,
+	"webmaster": true, "www": true,
+}
+
+// plainFormUnsafe reports whether local must not be issued as it stands: it
+// is a reserved role name, or it comes from a username (one stored before
+// today's username rules) that contains the email separator and so could
+// take an address another person's email derives to.
+func plainFormUnsafe(u *User, local string) bool {
+	if reservedLocalParts[local] {
+		return true
+	}
+	return u.Username != "" && strings.Contains(local, addressSeparator)
 }
 
 // predictedAccountAddress is the address a new account like u is issued when

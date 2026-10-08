@@ -78,7 +78,10 @@ func validateUsernameFormat(username string) error {
 	// no username can take the address another person's email derives to. The
 	// address must also be valid as it stands: no dot at either end and no two
 	// in a row.
-	if strings.Contains(username, "-at-") {
+	if reservedLocalParts[username] {
+		return fmt.Errorf("%w: username %q is reserved", ErrInvalidArgument, username)
+	}
+	if strings.Contains(username, addressSeparator) {
 		return fmt.Errorf("%w: username may not contain '-at-'", ErrInvalidArgument)
 	}
 	if strings.HasPrefix(username, ".") || strings.HasSuffix(username, ".") || strings.Contains(username, "..") {

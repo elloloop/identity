@@ -70,18 +70,30 @@ import { Code } from "astro-expressive-code/components";
       before this rule keep working as they are.
     </li>
     <li>Anonymous accounts get no address until they are upgraded.</li>
+    <li>
+      Role names that speak for a domain, such as <code>admin</code>,
+      <code>postmaster</code>, <code>hostmaster</code>, <code>abuse</code> and
+      <code>webmaster</code>, are never issued. New usernames may not be one,
+      and a username stored earlier that is one gets an address with a suffix
+      derived from the account's id instead.
+    </li>
+    <li>
+      An email-derived address contains the person's email. Treat it with the
+      same visibility rules as the email, and never as proof of it.
+    </li>
   </ul>
 
   <h2>When it is issued</h2>
   <p>
-    A username account gets its address when it is created, by self-signup,
-    by an admin or by a guardian. An email account gets its address once its
-    email is verified: at sign-up when the sign-up proves the address (OAuth,
-    passkey, an emailed code), otherwise at the first sign-in after
-    verification. An address spells the email, so it is never issued for an
+    A username (managed child) account gets its address when its guardian
+    creates it. An email account gets its address once its email is verified:
+    at sign-up when the sign-up proves the address (OAuth, passkey, an emailed
+    code), otherwise at the first sign-in or session refresh after
+    verification. That includes accounts an admin invites and accounts SCIM
+    provisions. An address spells the email, so it is never issued for an
     email nobody has proven they own. An account that existed before the
     project set a domain gets its address at its next sign-in or session
-    refresh, and so do accounts provisioned by SCIM.
+    refresh, once its email is verified.
   </p>
   <p>
     An address is written only to an account that has none, so it is never

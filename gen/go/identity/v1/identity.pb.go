@@ -420,9 +420,10 @@ type User struct {
 	// managed child account (children often have no email). Lowercase
 	// alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase at
 	// write time. A new or renamed username may not contain `-at-`, start or
-	// end with `.`, or contain `..`; one stored before that rule is kept. Empty on every account not created via
-	// CreateManagedChildAccount. Unique within the project when non-empty, and
-	// usable as the PasswordLogin identifier.
+	// end with `.`, contain `..`, or be a reserved role name (admin,
+	// postmaster, …); one stored before those rules is kept. Empty on every
+	// account not created via CreateManagedChildAccount. Unique within the
+	// project when non-empty, and usable as the PasswordLogin identifier.
 	Username string `protobuf:"bytes,28,opt,name=username,proto3" json:"username,omitempty"`
 	// account_address is the address the project issued this account on its
 	// own domain (config_json accounts.domain): <username>@<domain> for a

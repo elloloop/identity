@@ -92,7 +92,8 @@ import { Code } from "astro-expressive-code/components";
     The child is identified by a <strong>parent-chosen username</strong>
     (lowercase letters, digits, <code>_</code>, <code>-</code>, <code>.</code>;
     3–32 characters; no <code>-at-</code>, no <code>.</code> at either end,
-    no <code>..</code>; unique within the project) because children below the
+    no <code>..</code>, not a reserved role name such as <code>admin</code> or
+    <code>postmaster</code>; unique within the project) because children below the
     ceiling frequently have no email address. That username is the login
     identifier: <code>PasswordLogin</code> accepts it in the <code>email</code>
     field whenever the value contains no <code>@</code>.

@@ -15,15 +15,19 @@ again.
   project. Every permanent account is then issued an address on that
   domain: `<username>@<domain>` for a username account, and the email with
   `@` written as `-at-` for an email account, once its email is verified.
-  Existing accounts get theirs at their next sign-in. `User.account_address` carries it. A deployment
+  Existing accounts get theirs at their next sign-in, once their email is
+  verified. `User.account_address` carries it. A deployment
   that sets neither behaves exactly as before. See *Account addresses* in
   the docs.
 - **`accounts` in a project's config is now read and validated.** A stored
   config that already had an `accounts` key with a `domain` that is not a
   fully qualified name stops that project resolving until it is fixed. An
   invalid `GATEWAY_DEFAULT_EMAIL_DOMAIN` stops the server from starting.
-- **Usernames may no longer contain `-at-`, start or end with `.`, or
-  contain `..`.** This keeps a username's address apart from the addresses
+- **Usernames may no longer contain `-at-`, start or end with `.`, contain
+  `..`, or be a reserved role name** (`abuse`, `admin`, `administrator`,
+  `hostmaster`, `info`, `mailer-daemon`, `marketing`, `noc`, `no-reply`,
+  `noreply`, `postmaster`, `root`, `sales`, `security`, `ssl-admin`,
+  `support`, `webmaster`, `www`). This keeps a username's address apart from the addresses
   emails derive to, and keeps every address valid. It applies to new
   managed child usernames and to renames; existing usernames are kept and
   still sign in.

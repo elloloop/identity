@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -385,4 +387,23 @@ func TestProjectAccountsConfig_DomainFitsAnAddress(t *testing.T) {
 func verified(u *User) *User {
 	u.EmailVerified = true
 	return u
+}
+
+// A role name, or a legacy username that spells an email-derived address,
+// never takes its plain address: it gets the id form, which nobody else can
+// derive.
+func TestAccountAddress_RoleNamesAndLegacySeparatorsTakeTheIDForm(t *testing.T) {
+	repo := newFakeRepo()
+	ctx := accountsScope(t, "accounts.example.test")
+	for _, name := range []string{"postmaster", "admin", "pat-at-mail.example.test"} {
+		u := seedUser(repo, "", "", "active")
+		u.Username = name
+		ensureAccountAddress(ctx, repo, zap.NewNop(), u)
+		sum := sha256.Sum256([]byte(u.ID))
+		want := name + "-" + hex.EncodeToString(sum[:4]) + "@accounts.example.test"
+		require.Equal(t, want, u.AccountAddress, name)
+	}
+	require.ErrorIs(t, validateUsernameFormat("postmaster"), ErrInvalidArgument)
+	require.ErrorIs(t, validateUsernameFormat("www"), ErrInvalidArgument)
+	require.NoError(t, validateUsernameFormat("postmasters"))
 }
