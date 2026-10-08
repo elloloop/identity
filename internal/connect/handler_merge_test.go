@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	"github.com/elloloop/identity/internal/config"
 )
 
 func TestMergeAccounts_Handler(t *testing.T) {
@@ -38,5 +39,21 @@ func TestMergeUsers_Handler_AdminOnly(t *testing.T) {
 	}), "member-1"))
 	if err == nil {
 		t.Fatal("a member must not merge accounts")
+	}
+}
+
+// MergeAccounts checks another account's password, so it requires the client
+// assurance a password sign-in does.
+func TestMergeAccounts_RequiresLoginAssurance(t *testing.T) {
+	fv := &fakeVerifier{}
+	h := newHarnessWithWebAssurance(t, fv, func(c *config.Config) {
+		enableAssurance(c)
+		c.AccountMergeEnabled = true
+	})
+	_, err := h.client.MergeAccounts(context.Background(), authedReq(withClientHeaders(connect.NewRequest(&identitypb.MergeAccountsRequest{
+		OtherIdentifier: "assured@example.com", OtherPassword: strongPW,
+	})), "user-1"))
+	if connectCodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("without an assurance token: want PermissionDenied, got %v: %v", connectCodeOf(err), err)
 	}
 }

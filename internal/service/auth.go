@@ -692,9 +692,11 @@ type Repository interface {
 	// (else ErrMergeConflict, with nothing written). The other account is
 	// deactivated with merged_into_user_id set; the moves m asks for (username,
 	// password, email, account-address swap) are made with the values read
-	// inside the transaction; the other account's linked provider identities
-	// and passkeys move to the survivor; its refresh tokens are deleted and its
-	// sessions revoked. Any failure rolls all of it back.
+	// inside the transaction, and each only if the survivor still has none of
+	// its own (else ErrMergeConflict); the other account's linked provider
+	// identities move to the survivor (passkeys stay: they are bound to the
+	// account they were registered for); its refresh tokens are deleted and
+	// its sessions revoked. Any failure rolls all of it back.
 	ApplyAccountMerge(ctx context.Context, m AccountMerge) error
 
 	// OAuth identities — links a (provider, provider_user_id) pair to a

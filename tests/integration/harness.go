@@ -3051,6 +3051,9 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 	if !okO || !okS || m.OtherID == m.SurvivorID || !mergeable(o) || !mergeable(sv) {
 		return service.ErrMergeConflict
 	}
+	if (m.MoveUsername && sv.Username != "") || (m.MovePassword && sv.PasswordHash != "") || (m.MoveEmail && sv.Email != "") {
+		return service.ErrMergeConflict
+	}
 	if m.MoveUsername {
 		sv.Username, o.Username = o.Username, ""
 	}
@@ -3058,7 +3061,7 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 		sv.PasswordHash = o.PasswordHash
 	}
 	if m.MoveEmail {
-		sv.Email, sv.EmailVerified, o.Email = o.Email, o.EmailVerified, ""
+		sv.Email, sv.EmailVerified, sv.EmailVerifiedAt, o.Email = o.Email, o.EmailVerified, o.EmailVerifiedAt, ""
 	}
 	if m.SwapAddress {
 		sv.AccountAddress, o.AccountAddress = o.AccountAddress, sv.AccountAddress
@@ -3067,11 +3070,6 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {
 			oi.UserID = m.SurvivorID
-		}
-	}
-	for _, pk := range r.passkeyCreds {
-		if pk.UserID == m.OtherID {
-			pk.UserID = m.SurvivorID
 		}
 	}
 	for h, rt := range r.refreshTokens {

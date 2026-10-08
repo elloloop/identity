@@ -10,7 +10,8 @@ column is absent, then `identity migrate force 35` and `identity migrate`).
   and the admin `MergeUsers` (new).** Merge one account of
   a person into another without deleting anything: the other account is
   retired (deactivated, with `User.merged_into_user_id` set, and never
-  reactivatable), its linked providers and passkeys move to the survivor,
+  reactivatable), its linked providers move to the survivor (passkeys stay:
+  register them again),
   which also takes its username, password and email where it has none, all
   in one transaction, and a `user.merged`
   event (carrying `merged_into_user_id`) tells applications to move data

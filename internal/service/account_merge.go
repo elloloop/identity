@@ -49,10 +49,13 @@ var ErrAccountMergeDisabled = errors.New("merging accounts is not enabled on thi
 //
 // Everything that lets the person sign in the way they used to moves to the
 // survivor, in one transaction (Repository.ApplyAccountMerge): its linked
-// provider identities and passkeys always; its username, password and email
+// provider identities always; its username, password and email
 // where the survivor has none of its own; and, on request (takeAddress), its
 // account address, the survivor's old address moving to the retired account
-// so neither is freed for someone else.
+// so neither is freed for someone else. Passkeys do not move: a passkey is
+// bound to the account it was registered for (its WebAuthn user handle), so
+// it would not sign in to the survivor. The person registers passkeys again
+// on the survivor.
 //
 // Refused: merging an account with itself; an account that is not active;
 // an anonymous account (upgrade it instead); a managed child's account (it
@@ -81,6 +84,12 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID, otherIdenti
 	}
 	if survivor == nil {
 		return nil, ErrUnauthenticated
+	}
+	// The caller's own account is checked before any password is, so an
+	// account that could never be a survivor gets no answer about the other
+	// account's password.
+	if err := checkSurvivor(ctx, repo, survivor); err != nil {
+		return nil, err
 	}
 	other, decision, err := s.verifyPasswordCredential(ctx, otherIdentifier, otherPassword, ipAddr, userAgent)
 	if err != nil {
@@ -174,22 +183,20 @@ func mergeAccounts(ctx context.Context, repo Repository, survivor, other *User, 
 }
 
 func checkMergeable(ctx context.Context, repo Repository, survivor, other *User) error {
-	switch {
-	case survivor.ID == other.ID:
+	if survivor.ID == other.ID {
 		return fmt.Errorf("%w: an account cannot be merged into itself", ErrMergeRefused)
-	case survivor.Status != StatusActive || other.Status != StatusActive:
+	}
+	if err := checkSurvivor(ctx, repo, survivor); err != nil {
+		return err
+	}
+	if other.Status != StatusActive || other.MergedIntoUserID != "" {
 		return fmt.Errorf("%w: both accounts must be active", ErrMergeRefused)
-	case survivor.IsAnonymous || other.IsAnonymous:
+	}
+	if other.IsAnonymous {
 		return fmt.Errorf("%w: upgrade an anonymous account instead of merging it", ErrMergeRefused)
 	}
-	for _, u := range []*User{survivor, other} {
-		guardians, err := repo.ListGuardiansOfChild(ctx, u.ID, 1, 0)
-		if err != nil {
-			return fmt.Errorf("check guardianship: %w", err)
-		}
-		if len(guardians) > 0 {
-			return fmt.Errorf("%w: a managed child's account stays with its guardian", ErrMergeRefused)
-		}
+	if err := refuseManagedChild(ctx, repo, other); err != nil {
+		return err
 	}
 	children, err := repo.ListChildrenOfGuardian(ctx, other.ID, 1, 0)
 	if err != nil {
@@ -197,6 +204,29 @@ func checkMergeable(ctx context.Context, repo Repository, survivor, other *User)
 	}
 	if len(children) > 0 {
 		return fmt.Errorf("%w: the other account is a guardian; move its children first", ErrMergeRefused)
+	}
+	return nil
+}
+
+// checkSurvivor refuses an account that cannot take another one in: not
+// active, already merged, anonymous, or a managed child.
+func checkSurvivor(ctx context.Context, repo Repository, survivor *User) error {
+	if survivor.Status != StatusActive || survivor.MergedIntoUserID != "" {
+		return fmt.Errorf("%w: both accounts must be active", ErrMergeRefused)
+	}
+	if survivor.IsAnonymous {
+		return fmt.Errorf("%w: upgrade an anonymous account instead of merging into it", ErrMergeRefused)
+	}
+	return refuseManagedChild(ctx, repo, survivor)
+}
+
+func refuseManagedChild(ctx context.Context, repo Repository, u *User) error {
+	guardians, err := repo.ListGuardiansOfChild(ctx, u.ID, 1, 0)
+	if err != nil {
+		return fmt.Errorf("check guardianship: %w", err)
+	}
+	if len(guardians) > 0 {
+		return fmt.Errorf("%w: a managed child's account stays with its guardian", ErrMergeRefused)
 	}
 	return nil
 }

@@ -191,3 +191,14 @@ func TestMergeAccounts_ConcurrentChangeIsAConflict(t *testing.T) {
 	err := repo.ApplyAccountMerge(context.Background(), AccountMerge{SurvivorID: a.ID, OtherID: b.ID, AtMs: 1})
 	require.ErrorIs(t, err, ErrMergeConflict)
 }
+
+// A caller whose own account could never be a survivor learns nothing about
+// the other account's password: it is refused before any password check.
+func TestMergeAccounts_SurvivorCheckedBeforeThePassword(t *testing.T) {
+	svc, repo, survivor, native, ctx := mergeFixture(t)
+	survivor.Status = StatusDeactivated
+	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", "Wr0ng!Passw0rd", "1.2.3.4", "agent", false)
+	require.ErrorIs(t, err, ErrMergeRefused)
+	got, _ := repo.GetUser(ctx, native.ID)
+	require.Zero(t, got.FailedLoginCount, "no password was checked")
+}

@@ -748,25 +748,47 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	const mergeable = `SELECT username, password_hash, email, email_verified, account_address
+	const mergeable = `SELECT username, password_hash, email, email_verified, email_verified_at_ms, account_address
 		FROM users
 		WHERE project_id = $1 AND id = $2 AND status = 'active' AND merged_into_user_id = ''`
 	var (
 		oUsername, oPassword, oEmail, oAddress string
 		sUsername, sPassword, sEmail, sAddress string
+		oVerifiedAt, sVerifiedAt               int64
 		oVerified, sVerified                   int64
 	)
-	if err := tx.QueryRow(ctx, mergeable, r.projectID, m.OtherID).Scan(&oUsername, &oPassword, &oEmail, &oVerified, &oAddress); err != nil {
+	// Lock the two rows in id order, so two opposite merges running at once
+	// wait for each other instead of deadlocking.
+	read := func(id string, username, password, email *string, verified *int64, verifiedAt *int64, address *string) error {
+		err := tx.QueryRow(ctx, mergeable, r.projectID, id).Scan(username, password, email, verified, verifiedAt, address)
 		if noRows(err) {
 			return service.ErrMergeConflict
 		}
-		return wrapErr("ApplyAccountMerge(other)", err)
+		if err != nil {
+			return wrapErr("ApplyAccountMerge(read)", err)
+		}
+		return nil
 	}
-	if err := tx.QueryRow(ctx, mergeable, r.projectID, m.SurvivorID).Scan(&sUsername, &sPassword, &sEmail, &sVerified, &sAddress); err != nil {
-		if noRows(err) {
-			return service.ErrMergeConflict
-		}
-		return wrapErr("ApplyAccountMerge(survivor)", err)
+	readOther := func() error {
+		return read(m.OtherID, &oUsername, &oPassword, &oEmail, &oVerified, &oVerifiedAt, &oAddress)
+	}
+	readSurvivor := func() error {
+		return read(m.SurvivorID, &sUsername, &sPassword, &sEmail, &sVerified, &sVerifiedAt, &sAddress)
+	}
+	first, second := readOther, readSurvivor
+	if m.SurvivorID < m.OtherID {
+		first, second = readSurvivor, readOther
+	}
+	if err := first(); err != nil {
+		return err
+	}
+	if err := second(); err != nil {
+		return err
+	}
+	// A move fills an empty field of the survivor; one the survivor filled
+	// since the merge was decided is a conflict, never overwritten.
+	if (m.MoveUsername && sUsername != "") || (m.MovePassword && sPassword != "") || (m.MoveEmail && sEmail != "") {
+		return service.ErrMergeConflict
 	}
 
 	// Retire first, releasing what the survivor takes (each is unique).
@@ -794,7 +816,7 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 		return service.ErrMergeConflict
 	}
 
-	username, password, email, verified, address := sUsername, sPassword, sEmail, sVerified, sAddress
+	username, password, email, verified, verifiedAt, address := sUsername, sPassword, sEmail, sVerified, sVerifiedAt, sAddress
 	if m.MoveUsername {
 		username = oUsername
 	}
@@ -802,7 +824,7 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 		password = oPassword
 	}
 	if m.MoveEmail {
-		email, verified = oEmail, oVerified
+		email, verified, verifiedAt = oEmail, oVerified, oVerifiedAt
 	}
 	retiredAddress := oAddress
 	if m.SwapAddress {
@@ -811,9 +833,9 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 	tag, err = tx.Exec(ctx, `
 		UPDATE users
 		   SET username = $3, password_hash = $4, email = $5, email_verified = $6,
-		       account_address = $7, updated_at_ms = $8
+		       email_verified_at_ms = $7, account_address = $8, updated_at_ms = $9
 		 WHERE project_id = $1 AND id = $2`+guard,
-		r.projectID, m.SurvivorID, username, password, email, verified, address, m.AtMs)
+		r.projectID, m.SurvivorID, username, password, email, verified, verifiedAt, address, m.AtMs)
 	if err != nil {
 		return wrapErr("ApplyAccountMerge(survivor)", err)
 	}
@@ -827,7 +849,6 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 
 	for _, q := range []string{
 		`UPDATE oauth_identities SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
-		`UPDATE passkeys SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
 	} {
 		if _, err := tx.Exec(ctx, q, r.projectID, m.OtherID, m.SurvivorID); err != nil {
 			return wrapErr("ApplyAccountMerge(credentials)", err)
