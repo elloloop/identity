@@ -85,6 +85,34 @@ func runAccountAddressConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("Assign_CompareAndSet", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id := createTestUser(t, r, "aa-cas@example.com")
+			held, err := r.AssignAccountAddress(ctx, id, "first@accounts.example.com")
+			if err != nil || held != "first@accounts.example.com" {
+				t.Fatalf("first assign: %q %v", held, err)
+			}
+			// A second assignment never replaces the held address; it reports it.
+			held, err = r.AssignAccountAddress(ctx, id, "second@accounts.example.com")
+			if err != nil || held != "first@accounts.example.com" {
+				t.Fatalf("second assign: %q %v, want the first address kept", held, err)
+			}
+			got, err := r.GetUser(ctx, id)
+			if err != nil || got == nil || got.AccountAddress != "first@accounts.example.com" {
+				t.Fatalf("stored address: %#v %v", got, err)
+			}
+			// Another account's address is a clash.
+			other := createTestUser(t, r, "aa-cas-2@example.com")
+			if _, err := r.AssignAccountAddress(ctx, other, "first@accounts.example.com"); !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("clashing assign: want ErrAlreadyExists, got %v", err)
+			}
+			// An unknown account holds nothing.
+			if held, err := r.AssignAccountAddress(ctx, "no-such-user", "x@accounts.example.com"); err != nil || held != "" {
+				t.Fatalf("unknown user: %q %v", held, err)
+			}
+		})
+
 		t.Run("Empty_NotUnique", func(t *testing.T) {
 			r := driver.NewRepo(t)
 			createTestUser(t, r, "aa-e1@example.com")

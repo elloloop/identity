@@ -24,8 +24,9 @@ import (
 // independent of whichever external mailbox (if any) the person signed up
 // with. A project that runs mail for its domain can deliver to it; one that
 // does not still gets a stable, project-unique handle for each account. The
-// address is assigned once and never rewritten — changing the account's email
-// or the project's domain later leaves an assigned address as it was.
+// address is assigned once. Changing the project's domain later leaves it as
+// it was; an address derived from an email follows a confirmed change of
+// that email, so it never goes on spelling out an address the person gave up.
 type ProjectAccountsConfig struct {
 	// Domain is the domain account addresses are issued on, e.g.
 	// "accounts.example.com". Empty (the default) issues none.
@@ -45,30 +46,35 @@ func NewDefaultProjectAccounts(cfg *config.Config) (ProjectAccountsConfig, error
 
 // validate rejects a domain that could never form a deliverable address, so
 // a typo fails the config write (and project resolution) instead of minting
-// addresses nobody can use.
+// addresses nobody can use. The rule is the one the access deny-lists use for
+// a bare domain name: LDH labels of 1-63 characters, no leading or trailing
+// hyphen, at least two labels.
 func (a ProjectAccountsConfig) validate() error {
-	d := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(a.Domain)), ".")
-	if d == "" {
+	if strings.TrimSpace(a.Domain) == "" {
 		return nil
 	}
-	ascii, err := idna.Lookup.ToASCII(d)
-	if err != nil {
-		return fmt.Errorf("accounts.domain %q: %w", a.Domain, err)
-	}
-	if len(ascii) > 253 || !strings.Contains(ascii, ".") {
+	if !isBareDomainName(canonicalAccountDomain(a.Domain)) {
 		return fmt.Errorf("accounts.domain %q: want a fully qualified domain name such as accounts.example.com", a.Domain)
 	}
 	return nil
 }
 
-// canonicalized returns the domain lower-cased, trimmed, without a trailing
-// dot and IDN-punycoded, so every address issued on it has one spelling.
+// canonicalized returns the domain in the one spelling every address issued
+// on it shares.
 func (a ProjectAccountsConfig) canonicalized() ProjectAccountsConfig {
-	d := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(a.Domain)), ".")
+	return ProjectAccountsConfig{Domain: canonicalAccountDomain(a.Domain)}
+}
+
+// canonicalAccountDomain lower-cases and trims a domain, drops a trailing
+// dot and punycodes IDN labels. Unlike canonicalizeDomain it folds no
+// provider aliases: this is the project's own domain, not one to match a
+// login address against.
+func canonicalAccountDomain(domain string) string {
+	d := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
 	if ascii, err := idna.Lookup.ToASCII(d); err == nil {
 		d = ascii
 	}
-	return ProjectAccountsConfig{Domain: d}
+	return d
 }
 
 // maxAddressLocalPart is RFC 5321's limit on the part of an address before
@@ -141,16 +147,18 @@ func fitAddressLocalPart(local string, attempt int) string {
 }
 
 // ensureAccountAddress gives u an account address on the project's domain
-// when the project issues them and u has none yet. It is called where
-// accounts are created and where a session is issued, so an account created
-// before the project configured a domain receives its address at its next
-// sign-in.
+// when the project issues them and u has none yet. It runs where accounts are
+// created and where sessions are issued, so an account created before the
+// project configured a domain receives its address at its next sign-in.
 //
-// A clash with another account's address moves on to the next suffix; any
-// other failure is logged and left for the next sign-in to retry. Assigning an
-// address is never a reason to refuse a sign-in.
+// The write is a compare-and-set on the empty address, so it never replaces
+// an address the account already holds. A clash with another account moves
+// on to the next suffix; if all of them are taken, a final suffix derived
+// from the account's id, which no other account can derive, ends the walk.
+// Any other failure is logged and left for the next sign-in to retry:
+// assigning an address is never a reason to refuse a sign-in.
 func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logger, u *User) {
-	if u == nil || u.AccountAddress != "" || u.IsAnonymous {
+	if u == nil || u.ID == "" || u.AccountAddress != "" || u.IsAnonymous {
 		return
 	}
 	scope := ProjectScopeFromContext(ctx)
@@ -161,11 +169,18 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 	if local == "" {
 		return
 	}
-	for attempt := 1; attempt <= maxAddressAttempts; attempt++ {
-		addr := fitAddressLocalPart(local, attempt) + "@" + scope.Accounts.Domain
-		err := repo.UpdateUser(ctx, u.ID, map[string]any{"account_address": addr})
+	for attempt := 1; attempt <= maxAddressAttempts+1; attempt++ {
+		candidate := fitAddressLocalPart(local, attempt)
+		if attempt > maxAddressAttempts {
+			sum := sha256.Sum256([]byte(u.ID))
+			candidate = fitAddressLocalPart(local+"-"+hex.EncodeToString(sum[:4]), 1)
+		}
+		held, err := repo.AssignAccountAddress(ctx, u.ID, candidate+"@"+scope.Accounts.Domain)
 		if err == nil {
-			u.AccountAddress = addr
+			u.AccountAddress = held
+			if held != "" {
+				logger.Info("account_address_assigned", zap.String("user_id", u.ID))
+			}
 			return
 		}
 		if !errors.Is(err, ErrAlreadyExists) {
@@ -173,5 +188,22 @@ func ensureAccountAddress(ctx context.Context, repo Repository, logger *zap.Logg
 			return
 		}
 	}
-	logger.Warn("account_address_exhausted", zap.String("user_id", u.ID), zap.Int("attempts", maxAddressAttempts))
+	logger.Warn("account_address_exhausted", zap.String("user_id", u.ID))
+}
+
+// reissueEmailAddress re-derives the account address of an account whose
+// address came from its email, after the email changed: an address that
+// kept spelling out the old email would go on showing it to everyone the
+// account is visible to. An address that came from a username is the
+// account's own handle and stays.
+func reissueEmailAddress(ctx context.Context, repo Repository, logger *zap.Logger, u *User) {
+	if u == nil || u.Username != "" || u.AccountAddress == "" {
+		return
+	}
+	if err := repo.UpdateUser(ctx, u.ID, map[string]any{"account_address": ""}); err != nil {
+		logger.Warn("account_address_release_failed", zap.String("user_id", u.ID), zap.Error(err))
+		return
+	}
+	u.AccountAddress = ""
+	ensureAccountAddress(ctx, repo, logger, u)
 }

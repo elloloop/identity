@@ -859,6 +859,9 @@ func New(deps Deps) (*Built, error) {
 	if err != nil {
 		return nil, fmt.Errorf("default project accounts config (check GATEWAY_DEFAULT_EMAIL_DOMAIN): %w", err)
 	}
+	if defaultAccounts.Domain != "" {
+		logger.Info("default_project_account_addresses_enabled", zap.String("domain", defaultAccounts.Domain))
+	}
 	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
 	// default project denies all auth, so a fresh deployment that forgot to open
 	// it isn't silently locked out with no signal.

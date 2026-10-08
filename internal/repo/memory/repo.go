@@ -2310,3 +2310,25 @@ var (
 	_ service.Repository = (*Repo)(nil)
 	_ service.DB         = (*Repo)(nil)
 )
+
+func (r *Repo) AssignAccountAddress(_ context.Context, userID, address string) (string, error) {
+	if userID == "" || address == "" {
+		return "", errors.New("memory: AssignAccountAddress: missing user id or address")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return "", nil
+	}
+	if u.AccountAddress != "" {
+		return u.AccountAddress, nil
+	}
+	for id, other := range r.users {
+		if id != userID && other.AccountAddress == address {
+			return "", fmt.Errorf("account address %q: %w", address, service.ErrAlreadyExists)
+		}
+	}
+	u.AccountAddress = address
+	return address, nil
+}

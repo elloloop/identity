@@ -672,6 +672,14 @@ type Repository interface {
 	// another account already holds under FoldEmail is ErrAlreadyExists.
 	UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error
 
+	// AssignAccountAddress sets the user's account address only if it has
+	// none (a compare-and-set on the empty value, so two concurrent sign-ins
+	// can never overwrite an address already issued), and returns the
+	// address the account holds afterwards: the new one, or the one it
+	// already had. An address another account in the project holds is
+	// ErrAlreadyExists. An unknown user returns "" and no error.
+	AssignAccountAddress(ctx context.Context, userID, address string) (string, error)
+
 	// OAuth identities — links a (provider, provider_user_id) pair to a
 	// local User so OAuth login can survive provider-side email changes.
 	FindUserByProviderID(ctx context.Context, provider, providerUserID string) (*User, error)
@@ -1762,9 +1770,8 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	// it is the one place to auto-cancel a pending self-service deletion: an
 	// owner who signs back in during the grace window has reclaimed the account.
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	// Every sign-up reaches here, and so does the first sign-in of an account
-	// that predates the project's account domain: the one place that issues
-	// both their account addresses.
+	// Every self-signup reaches here, and so does the first sign-in of an
+	// account that predates the project's account domain.
 	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, 0)
 }

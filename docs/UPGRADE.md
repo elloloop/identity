@@ -18,6 +18,14 @@ again.
   at their next sign-in. `User.account_address` carries it. A deployment
   that sets neither behaves exactly as before. See *Account addresses* in
   the docs.
+- **`accounts` in a project's config is now read and validated.** A stored
+  config that already had an `accounts` key with a `domain` that is not a
+  fully qualified name stops that project resolving until it is fixed. An
+  invalid `GATEWAY_DEFAULT_EMAIL_DOMAIN` stops the server from starting.
+- **Usernames may no longer contain `-at-`, start or end with `.`, or
+  contain `..`.** This keeps a username's address apart from the addresses
+  emails derive to, and keeps every address valid. It applies to new
+  managed child usernames and to renames; existing usernames are kept.
 
 - **`GATEWAY_TOTP_ISSUER` and `GATEWAY_PASSKEY_RP_NAME` default to
   `Identity`.** The built-in defaults used to name one deployment's

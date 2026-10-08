@@ -116,6 +116,28 @@ func TestProjectResolver_DefaultPin_CarriesAccessMode(t *testing.T) {
 	assert.Equal(t, service.AccessModeClosed, cap.scope.Access.Mode)
 }
 
+// Both the default pin and a resolved project carry the account policy, so
+// account addresses are issued on every path.
+func TestProjectResolver_CarriesAccounts(t *testing.T) {
+	accounts := service.ProjectAccountsConfig{Domain: "accounts.example.test"}
+	cap := &projectScopeCapture{}
+	h := NewProjectResolver(DefaultProject{ProjectID: defProjectID, StorageScopeID: defScopeID, Accounts: accounts}, nil, nil)(cap.handler())
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/x", nil))
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, accounts, cap.scope.Accounts)
+
+	resolver := &fakeProjectResolver{
+		byHost: map[string]*service.ResolvedProject{
+			"auth.acme.test": {ID: "proj-acme", StorageScopeID: "scope-acme", Accounts: accounts},
+		},
+	}
+	_, resolved := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
+		r.Host = "auth.acme.test"
+	})
+	require.NotNil(t, resolved.scope)
+	assert.Equal(t, accounts, resolved.scope.Accounts)
+}
+
 // A resolved project carries the primary auth-domain the resolver returned.
 func TestProjectResolver_Resolved_CarriesPrimaryAuthDomain(t *testing.T) {
 	resolver := &fakeProjectResolver{

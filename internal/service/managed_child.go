@@ -59,6 +59,18 @@ func validateUsernameFormat(username string) error {
 	if !usernamePattern.MatchString(username) {
 		return fmt.Errorf("%w: username may contain only lowercase letters, digits, '_', '-', and '.'", ErrInvalidArgument)
 	}
+	// A username is also the part before the '@' of the account's address on
+	// the project's domain, which an email account spells as "<local>-at-<host>".
+	// Keeping "-at-" out of usernames keeps the two kinds of address apart, so
+	// no username can take the address another person's email derives to. The
+	// address must also be valid as it stands: no dot at either end and no two
+	// in a row.
+	if strings.Contains(username, "-at-") {
+		return fmt.Errorf("%w: username may not contain '-at-'", ErrInvalidArgument)
+	}
+	if strings.HasPrefix(username, ".") || strings.HasSuffix(username, ".") || strings.Contains(username, "..") {
+		return fmt.Errorf("%w: username may not start or end with '.' or contain '..'", ErrInvalidArgument)
+	}
 	return nil
 }
 

@@ -52,7 +52,7 @@ func TestFitAddressLocalPart(t *testing.T) {
 	exact := strings.Repeat("b", maxAddressLocalPart)
 	require.Equal(t, exact, fitAddressLocalPart(exact, 1))
 
-	// A cut that lands on a dot never leaves "..": the dot is trimmed.
+	// A cut that lands on a dot leaves no dot before the hash tag.
 	dotted := strings.Repeat("c", 54) + "." + strings.Repeat("d", 20)
 	require.NotContains(t, fitAddressLocalPart(dotted, 1), ".-")
 }
@@ -70,7 +70,7 @@ func TestProjectAccountsConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, cfg.Accounts.Domain)
 
-	for _, bad := range []string{"localhost", "-bad-.example", "a b.example"} {
+	for _, bad := range []string{"localhost", "-bad-.example", "a b.example", ".example", "a..b.example", "x-.example"} {
 		_, err := ParseProjectConfig(`{"accounts":{"domain":"` + bad + `"}}`)
 		require.Error(t, err, bad)
 	}
@@ -159,10 +159,116 @@ func TestAccountAddress_SkipsAnonymousAndFailuresDoNotBlock(t *testing.T) {
 	ensureAccountAddress(ctx, repo, zap.NewNop(), anon)
 	require.Empty(t, anon.AccountAddress)
 
-	u := seedUser(repo, "bob@mail.example.com", "", "active")
-	repo.updateUserErr = context.DeadlineExceeded
-	ensureAccountAddress(ctx, repo, zap.NewNop(), u)
+	failing := newErrorRepo()
+	failing.failAssignAccountAddress = true
+	u := seedUser(failing.fakeRepo, "bob@mail.example.com", "", "active")
+	ensureAccountAddress(ctx, failing, zap.NewNop(), u)
 	require.Empty(t, u.AccountAddress, "a store failure leaves the address for the next sign-in")
+
+	// An account the store has no row for (an id the caller made up) gets
+	// nothing, and nothing is written.
+	ghost := &User{ID: "ghost", Email: "ghost@mail.example.com"}
+	ensureAccountAddress(ctx, repo, zap.NewNop(), ghost)
+	require.Empty(t, ghost.AccountAddress)
+	noID := &User{Email: "noid@mail.example.com"}
+	ensureAccountAddress(ctx, repo, zap.NewNop(), noID)
+	require.Empty(t, noID.AccountAddress)
+}
+
+func TestAccountAddress_NeverReplacesAHeldAddress(t *testing.T) {
+	repo := newFakeRepo()
+	ctx := accountsScope(t, "accounts.example.com")
+	u := seedUser(repo, "bob@mail.example.com", "", "active")
+	held, err := repo.AssignAccountAddress(ctx, u.ID, "first@accounts.example.com")
+	require.NoError(t, err)
+	require.Equal(t, "first@accounts.example.com", held)
+
+	// A stale copy of the account (read before the first assignment) asks
+	// again: the stored address wins and the copy learns it.
+	stale := &User{ID: u.ID, Email: u.Email}
+	ensureAccountAddress(ctx, repo, zap.NewNop(), stale)
+	require.Equal(t, "first@accounts.example.com", stale.AccountAddress)
+}
+
+func TestAccountAddress_ExhaustedSuffixesEndOnTheIDSuffix(t *testing.T) {
+	repo := newFakeRepo()
+	ctx := accountsScope(t, "accounts.example.com")
+	for attempt := 1; attempt <= maxAddressAttempts; attempt++ {
+		other := seedUser(repo, "", "", "active")
+		_, err := repo.AssignAccountAddress(ctx, other.ID, fitAddressLocalPart("bob-at-mail.example.com", attempt)+"@accounts.example.com")
+		require.NoError(t, err)
+	}
+	u := seedUser(repo, "bob@mail.example.com", "", "active")
+	ensureAccountAddress(ctx, repo, zap.NewNop(), u)
+	require.NotEmpty(t, u.AccountAddress)
+	require.True(t, strings.HasPrefix(u.AccountAddress, "bob-at-mail.example.com-"))
+	require.True(t, strings.HasSuffix(u.AccountAddress, "@accounts.example.com"))
+	require.NotContains(t, u.AccountAddress, "-21@")
+}
+
+func TestAccountAddress_FollowsAConfirmedEmailChange(t *testing.T) {
+	repo := newFakeRepo()
+	ctx := accountsScope(t, "accounts.example.com")
+	u := seedUser(repo, "old@mail.example.com", "", "active")
+	ensureAccountAddress(ctx, repo, zap.NewNop(), u)
+	require.Equal(t, "old-at-mail.example.com@accounts.example.com", u.AccountAddress)
+
+	u.Email = "new@mail.example.com"
+	reissueEmailAddress(ctx, repo, zap.NewNop(), u)
+	require.Equal(t, "new-at-mail.example.com@accounts.example.com", u.AccountAddress)
+
+	// A username account keeps its handle whatever its email does.
+	named := seedUser(repo, "named@mail.example.com", "", "active")
+	named.Username = "named"
+	ensureAccountAddress(ctx, repo, zap.NewNop(), named)
+	named.Email = "other@mail.example.com"
+	reissueEmailAddress(ctx, repo, zap.NewNop(), named)
+	require.Equal(t, "named@accounts.example.com", named.AccountAddress)
+}
+
+func TestValidateUsernameFormat_KeepsAddressesApart(t *testing.T) {
+	for _, bad := range []string{"alice-at-mail.example", ".bob", "bob.", "bo..b"} {
+		require.ErrorIs(t, validateUsernameFormat(bad), ErrInvalidArgument, bad)
+	}
+	for _, good := range []string{"bob", "bob.smith", "bob-at", "at-bob", "b_o-b"} {
+		require.NoError(t, validateUsernameFormat(good), good)
+	}
+}
+
+// addressRecordingRepo records the account addresses assigned through it, for
+// call sites whose accounts live in another store (the admin graph).
+type addressRecordingRepo struct {
+	*fakeRepo
+	assigned map[string]string
+}
+
+// WithProject keeps the recorder in place when the service binds the
+// request's project.
+func (r *addressRecordingRepo) WithProject(string) Repository { return r }
+
+func (r *addressRecordingRepo) AssignAccountAddress(_ context.Context, userID, address string) (string, error) {
+	r.assigned[userID] = address
+	return address, nil
+}
+
+func TestAccountAddress_IssuedToAnInvitedUser(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	repo := &addressRecordingRepo{fakeRepo: newFakeRepo(), assigned: map[string]string{}}
+	svc := newTestAdminServiceWithRepo(db, repo)
+
+	res, err := svc.InviteUser(accountsScope(t, "accounts.example.com"), "admin-1",
+		"new@mail.example.com", "New", "member", "", 0, true)
+	require.NoError(t, err)
+	require.Equal(t, "new-at-mail.example.com@accounts.example.com", res.User.AccountAddress)
+	require.Equal(t, res.User.AccountAddress, repo.assigned[res.User.ID])
+}
+
+func TestAccountAddress_IssuedToAManagedChild(t *testing.T) {
+	f := newManagedChildFixture(t, true)
+	res, err := f.svc.CreateManagedChildAccount(accountsScope(t, "accounts.example.com"), f.adult.ID, f.req(), "1.2.3.4", "agent/1.0")
+	require.NoError(t, err)
+	require.Equal(t, "kid.one@accounts.example.com", res.Child.AccountAddress)
 }
 
 func TestAccountAddress_Username(t *testing.T) {

@@ -741,3 +741,29 @@ func (r *pgRepository) UpdateUserEmail(ctx context.Context, userID, newEmail str
 	}
 	return nil
 }
+
+func (r *pgRepository) AssignAccountAddress(ctx context.Context, userID, address string) (string, error) {
+	if userID == "" || address == "" {
+		return "", errors.New("postgres: AssignAccountAddress: missing user id or address")
+	}
+	const set = `
+		UPDATE users
+		   SET account_address = $3
+		 WHERE project_id = $1 AND id = $2 AND account_address = ''`
+	tag, err := r.pool.Exec(ctx, set, r.projectID, userID, address)
+	if err != nil {
+		return "", wrapPgErr("AssignAccountAddress", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return address, nil
+	}
+	const get = `SELECT account_address FROM users WHERE project_id = $1 AND id = $2`
+	var current string
+	if err := r.pool.QueryRow(ctx, get, r.projectID, userID).Scan(&current); err != nil {
+		if noRows(err) {
+			return "", nil
+		}
+		return "", wrapPgErr("AssignAccountAddress", err)
+	}
+	return current, nil
+}

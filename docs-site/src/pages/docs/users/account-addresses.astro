@@ -61,7 +61,12 @@ import { Code } from "astro-expressive-code/components";
     </li>
     <li>
       If the address is already taken, the account gets the next free suffix:
-      <code>-2</code>, <code>-3</code> and so on.
+      <code>-2</code>, <code>-3</code> and so on. After twenty, a suffix
+      derived from the account's id ends the search.
+    </li>
+    <li>
+      Usernames may not contain <code>-at-</code>, so no username can take the
+      address another person's email derives to.
     </li>
     <li>Anonymous accounts get no address until they are upgraded.</li>
   </ul>
@@ -75,10 +80,14 @@ import { Code } from "astro-expressive-code/components";
     provisioned by SCIM also get theirs at first sign-in.
   </p>
   <p>
-    An address is issued once and never rewritten. Changing the account's
-    email, or the project's domain, leaves an issued address as it was.
-    Failing to store an address never blocks a sign-in: the server logs it and
-    tries again at the next sign-in.
+    An address is written only to an account that has none, so it is never
+    replaced behind the account's back, and changing the project's domain
+    leaves issued addresses as they were. The one exception is an address
+    derived from an email: when the person confirms a change of email, the
+    address follows it, so it never goes on spelling out an address they gave
+    up. A username's address is the account's own handle and stays. Failing to
+    store an address never blocks a sign-in: the server logs it and tries again
+    at the next sign-in.
   </p>
 
   <h2>Where it appears</h2>

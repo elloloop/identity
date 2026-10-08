@@ -2450,3 +2450,24 @@ func (r *fakeRepo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, 
 	}
 	return nil
 }
+
+// AssignAccountAddress mirrors the drivers' compare-and-set on the empty
+// address and their (project_id, account_address) unique index.
+func (r *fakeRepo) AssignAccountAddress(_ context.Context, userID, address string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return "", nil
+	}
+	if u.AccountAddress != "" {
+		return u.AccountAddress, nil
+	}
+	for id, other := range r.users {
+		if id != userID && other.AccountAddress == address {
+			return "", fmt.Errorf("account address %q: %w", address, ErrAlreadyExists)
+		}
+	}
+	u.AccountAddress = address
+	return address, nil
+}

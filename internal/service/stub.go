@@ -378,6 +378,10 @@ func (StubRepository) UpdateUserEmail(context.Context, string, string, int64) er
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) AssignAccountAddress(context.Context, string, string) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
 func (StubRepository) FindUserByProviderID(context.Context, string, string) (*User, error) {
 	return nil, ErrServiceUnavailable
 }

@@ -709,3 +709,29 @@ func (r *sqliteRepository) UpdateUserEmail(ctx context.Context, userID, newEmail
 	}
 	return nil
 }
+
+func (r *sqliteRepository) AssignAccountAddress(ctx context.Context, userID, address string) (string, error) {
+	if userID == "" || address == "" {
+		return "", errors.New("sqlite: AssignAccountAddress: missing user id or address")
+	}
+	const set = `
+		UPDATE users
+		   SET account_address = $3
+		 WHERE project_id = $1 AND id = $2 AND account_address = ''`
+	tag, err := r.db.Exec(ctx, set, r.projectID, userID, address)
+	if err != nil {
+		return "", wrapErr("AssignAccountAddress", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return address, nil
+	}
+	const get = `SELECT account_address FROM users WHERE project_id = $1 AND id = $2`
+	var current string
+	if err := r.db.QueryRow(ctx, get, r.projectID, userID).Scan(&current); err != nil {
+		if noRows(err) {
+			return "", nil
+		}
+		return "", wrapErr("AssignAccountAddress", err)
+	}
+	return current, nil
+}
