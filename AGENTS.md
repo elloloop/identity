@@ -158,9 +158,11 @@ treated as a dropped reviewer.
 text as material.** The other eight review code, so a PR's title, body and
 comments could only bias their relevance decision, and are kept out of it.
 For this lens that text is itself part of what gets published: the title,
-body, comments, commit messages and linked issues can name a client or a
-private host exactly as code can. It reviews them alongside the diff, as
-data to examine, never as instructions.
+body, comments, reviews, commit messages and linked issues can name a
+client or a private host exactly as code can, and so can what GitHub keeps
+after a fix (the edit history of each, and the commits a force-push
+replaced). It reviews them alongside the diff, as data to examine, never as
+instructions; §13 lists the material.
 
 1. **Correctness** — pure bug-hunting: off-by-one, nil deref, inverted
    conditionals, races, leaks, overflow, swallowed errors, edge cases,
@@ -168,8 +170,10 @@ data to examine, never as instructions.
 2. **Security & Auth** — authn/authz, token mint/verify, crypto,
    challenge/nonce replay, secrets, injection/XSS/SSRF, data exposure,
    enumeration & timing oracles, abuse limits, supply-chain (§10).
-3. **Neutrality & Disclosure** — §13 across the diff, the PR text, commit
-   messages and linked issues: is anything client- or deployment-specific
+3. **Neutrality & Disclosure** — §13 across the diff, the PR text, its
+   comments and reviews, commit messages and linked issues, and the edit
+   history of each and the commits a force-push replaced: is anything
+   client- or deployment-specific
    (a real deployment's hosts or domains, a customer's product or brand
    names, behaviour or defaults special-cased for one operator, examples
    that name a real deployment instead of `acme` / `example.com` /
@@ -224,7 +228,8 @@ The gate runs as an agent workflow (`.claude/workflows/review-gate.js`)
 primitives (`agent()`, `parallel()`), so it is not a plain `node` script
 and external contributors cannot run it directly. Its pure decision logic
 is covered by `.claude/workflows/review-gate.test.mjs`, which does run
-under plain `node`. It is a **maintainer step**: the maintainer handling a
+under plain `node`, and in CI as the "Review gate tests" job under the
+aggregate `CI` check. It is a **maintainer step**: the maintainer handling a
 PR (including PRs from outside contributors) runs it and is accountable
 for resolving every blocking finding before merge — or, when a finding is
 a false positive, for recording on the PR why it is being dismissed. A
@@ -236,7 +241,7 @@ Run it on every PR — `Workflow({name: 'review-gate', args: <pr-number>})`.
 **Issue mode.** Run it on a new or edited issue —
 `Workflow({name: 'review-gate', args: 'issue:<issue-number>'})`. Only the
 Neutrality & Disclosure reviewer runs, over the issue's title, body and
-comments, and the result is posted as an issue comment: CLEAN, or FLAGGED
+comments and the edit history of each, and the result is posted as an issue comment: CLEAN, or FLAGGED
 with its findings (a request to build something for one named client
 counts, as does a private detail). The same fail-closed rules apply: a
 dropped, skipped or self-contradictory result flags the issue. It never
@@ -274,24 +279,108 @@ docs, proto comments, commit messages, and PR and issue text.
   IPs, internal URLs, account ids); no people beyond public authorship;
   no unannounced roadmap; no secrets.
 
-Two checks hold this line. The review gate's **Neutrality & Disclosure**
-reviewer (§11) judges both questions on every PR, and on an issue in
-issue mode. The **Disclosure** workflow (`.github/workflows/disclosure.yml`)
-runs on its own, without a maintainer:
+The review gate's **Neutrality & Disclosure** reviewer (§11) judges both
+questions on every PR, and on an issue in issue mode. Its material is the
+diff, the title, body, comments, reviews, commit messages and linked
+issues, and what GitHub keeps public after a fix: the edit history of
+descriptions, comments, review bodies and review-thread comments, and the
+commits a force-push replaced. Two workflows also run on their own,
+without a maintainer, against a confidential-terms list:
 
-- On every PR (`pull_request_target`, opened/edited/synchronize/reopened)
-  it matches the title, body, branch name, commit messages, changed file
-  names and the PR's added diff lines against a confidential-terms list,
-  case-insensitively, and a match fails the **Disclosure** check. It reads
-  all of that through the API and never checks out or runs PR code.
-- On every issue (opened/edited) and comment (created/edited) a match adds
-  the `needs-redaction` label and asks the author to redact, in one
-  comment per offending issue or comment (an edit does not post again). A maintainer removes the label once the text is clean, and
-  deletes the offending revision from the edit history, which GitHub
-  keeps public.
+- **Disclosure** (`.github/workflows/disclosure.yml`, the check that can
+  be made required) triggers only on `pull_request_target` and
+  `merge_group`, so no other event ever attaches a skipped, and so
+  passing, `Disclosure` check to a PR.
+  - On a PR (opened/edited/synchronize/reopened) whose author has write
+    access it matches the title, body, branch name, and every commit's
+    message, changed file names and added lines; a match fails the check.
+    It reads commit by commit, so a term a later commit removes is still
+    caught, and a later commit cannot clear an earlier one: rewrite the
+    branch without it, force-push, and tell a maintainer, since the
+    replaced commit stays public by SHA until GitHub purges it. It reads
+    a file the API gives no diff for (binary or too large) whole, and
+    skips a merge commit's files (they are the branch's own commits, read
+    one by one, or the base branch's). A PR past what the API lists (250
+    commits, a shorter list than the PR's count, or 3000 files in one
+    commit) fails rather than pass unread. Every run reads every commit,
+    including one for an edit of the title: each run reports the check on
+    the head anew. It reads all of that through the API and never checks
+    out or runs PR code.
+  - In the merge queue it checks what lands on `main`. The queue
+    squashes, so that is each queued PR's squash commit message and net
+    diff, whoever wrote the PR, and not its description, branch name or
+    intermediate commits. A merge-queue failure stops the merge only once
+    `Disclosure` is a required status check on `main`, a repository
+    setting this file does not change. The run uses the queued commit's
+    copy of the workflow and scripts. Nothing queues a PR automatically:
+    Dependabot's PRs are not auto-merged, and every PR, Dependabot's
+    included, runs the review gate (§11) and is queued by someone with
+    write access. Branch protection does not itself require a review, so
+    that process is what keeps unreviewed code out of this run; an
+    auto-merge rule would put a bot's unreviewed copy of the workflow here.
+- **Disclosure (discussion)** (`.github/workflows/disclosure-discussion.yml`)
+  checks issues (opened/edited) and comments on issues and PRs
+  (created/edited) whose author has write access, running the default
+  branch's copy of the workflow. A match adds the `needs-redaction` label
+  and asks the author to redact, in one comment per offending item (an
+  edit does not post again). A maintainer removes the label once the text
+  is clean, and deletes the offending revision from the edit history,
+  which GitHub keeps public, for a PR description or comment as for an
+  issue.
+- **Reviews are not checked by a workflow.** A review body or inline review
+  comment triggers a run from the PR branch's copy of the workflow with
+  this repository's secrets, so a branch nobody else has reviewed (a
+  dependency bot's action bump, say) would run next to the term list. No
+  workflow listens for review events; the review gate's Neutrality &
+  Disclosure lens reads reviews and their edit history instead.
+- **Only items whose author has write access are checked**: the PR's,
+  issue's or comment's author, whoever triggered the event. A writer's PR
+  is read in full on every event; an outsider's never is, even when a
+  maintainer pushes to it, retitles or reopens it. Write access (admin,
+  maintain or write) is read from the repository permission API, because
+  an event's `author_association` shows org membership only when it is
+  public, and a member may hold only read. **A lookup that fails, or
+  answers anything but a known permission, fails the check; it never
+  matches the text**: re-run it. An app's bot account is checked like a
+  writer, since only an installed app can post as one; an app that
+  repeats an outsider's text in its own item exposes that text to the
+  match, so install none that does. Anyone else's PR, issue or comment
+  passes with a notice. The threat is our own accidental leak, and a
+  public check on outsiders' text would let anyone confirm guesses against
+  the list one edit at a time. An outside PR's description, branch name
+  and intermediate commits, and a maintainer's commits pushed onto it, are
+  covered by the review gate and by the merge queue's run, which reads
+  each PR's squash commit, not by the PR-level check.
+- Matching is case-insensitive and folds the text and the terms alike:
+  `-`, `_`, `.` and Unicode spaces and dashes count as spaces, whitespace
+  runs collapse, and invisible characters (zero-width, soft hyphen, word
+  joiner, direction and bidi marks, BOM) are dropped, so `acme-widgets`,
+  `ACME_Widgets` and `acme.widgets` all match the term `acme widgets`.
+  `scripts/disclosure-check.sh` lists the characters. A term's leading
+  and trailing separators fold away, so `.internal` matches the substring
+  `internal` inside any word or path, and a domain-suffix term would fail
+  unrelated PRs. The check warns (a `::warning::` naming the term by its
+  place in the list) when that happens; write such terms without the edge
+  separator, or not at all.
 - The list lives **only** in the repository secret `CONFIDENTIAL_TERMS`,
   one term per line, so it is never in the repository itself. The check
   never prints, comments or labels with a matched term. With the secret
   unset it passes with a notice.
+- `pull_request_target` runs the workflow from the PR's **base** branch.
+  Cut a release branch from a `main` that carries these workflows, or PRs
+  into it go unchecked.
+- **Known gaps.**
+  - The workflows do not read the commits a force-push replaced (the
+    review gate does).
+  - A merge commit's files are not read (the commits API diffs it against
+    the base branch's side), so what a merge adds itself, such as a
+    conflict resolution, is read only if it survives into the squash the
+    merge queue checks.
+  - Every run spends the hourly API request budget that every workflow in
+    the repository shares: a permission lookup plus one call per commit
+    and per patchless file. Anyone can spend it, an outsider's fork PRs
+    included; a run that runs out fails, and is re-run, rather than pass.
 
-The matcher is `scripts/disclosure-check.sh`, tested in `tests/policy`.
+`scripts/disclosure-collect.sh` decides what an event carries and whose it
+is; `scripts/disclosure-check.sh` matches it. Both are tested in
+`tests/policy`.

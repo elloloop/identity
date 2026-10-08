@@ -184,6 +184,23 @@ const tests = {
     assert.match(neutrality, /--json commits/)
     assert.match(neutrality, /closingIssuesReferences/)
     assert.match(neutrality, /never repeat a sensitive value verbatim/i)
+    // What GitHub keeps public after a fix is material too: the edit
+    // history of the description, comments, review bodies and review-thread
+    // comments, and the commits each force-push replaced.
+    const history = /`(gh api graphql [^`]*)`/.exec(neutrality)?.[1] ?? ''
+    assert.match(history, /-F n=154 /)
+    assert.match(history, /pullRequest\(number:\$n\)\{userContentEdits\(first:100\)/)
+    // The current text of every comment, review body and inline review
+    // comment, not only its earlier revisions.
+    assert.match(history, /comments\(first:100\)\{pageInfo\{hasNextPage\} nodes\{author\{login\} body userContentEdits/)
+    assert.match(history, /reviews\(first:100\)\{pageInfo\{hasNextPage\} nodes\{author\{login\} body userContentEdits/)
+    assert.match(history, /reviewThreads\(first:100\)\{pageInfo\{hasNextPage\} nodes\{comments\([^)]*\)\{pageInfo\{hasNextPage\} nodes\{author\{login\} path body userContentEdits/)
+    assert.match(history, /HEAD_REF_FORCE_PUSHED_EVENT[^']*beforeCommit\{oid\} afterCommit\{oid\}/)
+    assert.match(history, /RENAMED_TITLE_EVENT[^']*RenamedTitleEvent\{previousTitle\}/)
+    assert.match(neutrality, /compare\/<afterCommit>\.\.\.<beforeCommit>/)
+    // A list cut short at a page cap is never read as clean.
+    assert.equal((history.match(/first:/g) ?? []).length, (history.match(/pageInfo\{hasNextPage\}/g) ?? []).length)
+    assert.match(neutrality, /hasNextPage is true[^.]*finding; an unread list is never clean/)
     assert.doesNotMatch(neutrality, /MUST NOT influence this decision/)
     // Every self-gating lens still decides relevance from the file list
     // alone, with the submitter-authored text kept out of that decision.
@@ -211,6 +228,12 @@ const tests = {
     assert.equal(r.posted, true)
     assert.deepEqual(Object.keys(r.prompts).sort(), ['neutrality-disclosure', 'synthesize:issue-42'])
     assert.match(r.prompts['neutrality-disclosure'], /gh issue view 42 --comments/)
+    const history = /`(gh api graphql [^`]*)`/.exec(r.prompts['neutrality-disclosure'])?.[1] ?? ''
+    assert.match(history, /-F n=42 /)
+    assert.match(history, /issue\(number:\$n\)\{userContentEdits\(first:100\)[^']*comments\(first:100\)\{pageInfo\{hasNextPage\} nodes\{author\{login\} body userContentEdits/)
+    assert.match(history, /timelineItems\(itemTypes:RENAMED_TITLE_EVENT,[^']*RenamedTitleEvent\{previousTitle\}/)
+    assert.doesNotMatch(history, /reviews|reviewThreads|HEAD_REF_FORCE_PUSHED_EVENT/)
+    assert.match(r.prompts['neutrality-disclosure'], /an unread list is never clean/)
     assert.doesNotMatch(r.prompts['neutrality-disclosure'], /gh pr /)
     const synth = r.prompts['synthesize:issue-42']
     assert.match(synth, /gh issue comment 42 --body-file/)
