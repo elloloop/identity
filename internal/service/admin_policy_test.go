@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -344,5 +345,35 @@ func TestNormalizeAllowedMethods_DedupesAndCanonicalizes(t *testing.T) {
 	}
 	if empty, err := normalizeAllowedMethods("  "); err != nil || empty != "" {
 		t.Fatalf("empty: got %q err %v", empty, err)
+	}
+}
+
+// The default project's settings are environment variables: its config RPCs
+// refuse, naming them, instead of storing a blob nothing reads. Other projects
+// are unaffected.
+func TestProjectConfig_DefaultProjectRefused(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(policyAdminSecret)
+	f.svc.WithDefaultProject("hub")
+	ctx := context.Background()
+
+	_, err := f.svc.UpsertProjectConfig(ctx, policyAdminSecret, "hub", `{"accounts":{"username_signup":"admin"}}`)
+	if !errors.Is(err, ErrDefaultProjectConfig) || !strings.Contains(err.Error(), "GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP") {
+		t.Fatalf("upsert err = %v, want ErrDefaultProjectConfig naming the variables", err)
+	}
+	if _, err := f.svc.GetProjectConfig(ctx, policyAdminSecret, " hub "); !errors.Is(err, ErrDefaultProjectConfig) {
+		t.Fatalf("get err = %v, want ErrDefaultProjectConfig", err)
+	}
+	// The secret is still checked first: a wrong one learns nothing.
+	if _, err := f.svc.GetProjectConfig(ctx, "wrong", "hub"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("bad-secret err = %v, want ErrPermissionDenied", err)
+	}
+
+	projectID, err := f.svc.AdminCreateProject(ctx, policyAdminSecret, "Kids", "scope-kids")
+	if err != nil {
+		t.Fatalf("AdminCreateProject: %v", err)
+	}
+	if _, err := f.svc.UpsertProjectConfig(ctx, policyAdminSecret, projectID, "{}"); err != nil {
+		t.Fatalf("another project: %v", err)
 	}
 }

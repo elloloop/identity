@@ -1,5 +1,15 @@
 # Upgrade guide
 
+## v4.12 → next — config RPCs refuse the default project (behaviour change)
+
+No schema change and no migration.
+
+- **`GetProjectConfig` and `UpsertProjectConfig` answer `FAILED_PRECONDITION`
+  for the deployment's default project** (`GATEWAY_DEFAULT_PROJECT_ID`). Its
+  settings come from `GATEWAY_DEFAULT_PROJECT_*` and
+  `GATEWAY_DEFAULT_EMAIL_DOMAIN`; a config stored for it was accepted and then
+  never read. Set those variables instead. Other projects are unaffected.
+
 ## v4.12 → next — the admin user view shows usernames (fix)
 
 No schema change and no migration.

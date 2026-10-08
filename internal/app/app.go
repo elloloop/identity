@@ -1039,6 +1039,10 @@ func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *za
 		secret = deps.Config.AdminAPISecret
 		disableBootstrap = deps.Config.DisableFirstAdminBootstrap
 	}
+	defaultProjectID := ""
+	if deps.Config != nil {
+		defaultProjectID = deps.Config.DefaultProjectID
+	}
 	return service.NewControlPlaneAdminService(
 		secret,
 		disableBootstrap,
@@ -1051,7 +1055,7 @@ func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *za
 		deps.DNSResolver,
 		auditLog,
 		logger,
-	)
+	).WithDefaultProject(defaultProjectID)
 }
 
 // buildDirectoryService returns the DirectoryService backing LookupUsers, or

@@ -127,7 +127,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrFirstAdminBootstrapDisabled),
 		errors.Is(err, service.ErrAuthDomainNotVerified),
 		errors.Is(err, service.ErrProjectSecretsKeyMissing),
-		errors.Is(err, service.ErrLastCredential):
+		errors.Is(err, service.ErrLastCredential),
+		errors.Is(err, service.ErrDefaultProjectConfig):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrQrLoginNotPending):

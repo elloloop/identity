@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -232,6 +233,34 @@ type ControlPlaneAdminService struct {
 	audit   *audit.Logger
 	logger  *zap.Logger
 	nowFunc func() int64
+	// defaultProjectID is the deployment's env-configured default project
+	// (GATEWAY_DEFAULT_PROJECT_ID). Its settings come from GATEWAY_DEFAULT_*
+	// variables, never from a stored config, so the config RPCs refuse it
+	// rather than store a blob nothing reads.
+	defaultProjectID string
+}
+
+// ErrDefaultProjectConfig is returned by GetProjectConfig and
+// UpsertProjectConfig for the deployment's default project, whose settings
+// are environment variables: a stored config for it would be ignored.
+var ErrDefaultProjectConfig = errors.New("the default project is configured by environment variables, not a stored config")
+
+// WithDefaultProject names the deployment's default project, whose config the
+// config RPCs refuse (see ErrDefaultProjectConfig).
+func (s *ControlPlaneAdminService) WithDefaultProject(projectID string) *ControlPlaneAdminService {
+	s.defaultProjectID = strings.TrimSpace(projectID)
+	return s
+}
+
+// refuseDefaultProject reports ErrDefaultProjectConfig for the default
+// project, naming the variables that configure it.
+func (s *ControlPlaneAdminService) refuseDefaultProject(projectID string) error {
+	if s.defaultProjectID == "" || projectID != s.defaultProjectID {
+		return nil
+	}
+	return fmt.Errorf("%w: project %q is this deployment's default project; set its settings with "+
+		"GATEWAY_DEFAULT_PROJECT_* and GATEWAY_DEFAULT_EMAIL_DOMAIN (e.g. GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP, "+
+		"GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP, GATEWAY_DEFAULT_PROJECT_ACCESS_MODE)", ErrDefaultProjectConfig, projectID)
 }
 
 // NewControlPlaneAdminService wires the admin service. An empty secret

@@ -398,7 +398,9 @@ type IdentityServiceClient interface {
 	// Per-project config authoring. UpsertProjectConfig replaces a project's
 	// config_json blob (the typed knobs an operator sets — e.g. CORS allowed
 	// origins); GetProjectConfig reads it back. Operator-only, like the other
-	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane. Both
+	// refuse the deployment's default project (FAILED_PRECONDITION): its
+	// settings are GATEWAY_DEFAULT_PROJECT_* environment variables.
 	UpsertProjectConfig(ctx context.Context, in *UpsertProjectConfigRequest, opts ...grpc.CallOption) (*UpsertProjectConfigResponse, error)
 	GetProjectConfig(ctx context.Context, in *GetProjectConfigRequest, opts ...grpc.CallOption) (*GetProjectConfigResponse, error)
 	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
@@ -1977,7 +1979,9 @@ type IdentityServiceServer interface {
 	// Per-project config authoring. UpsertProjectConfig replaces a project's
 	// config_json blob (the typed knobs an operator sets — e.g. CORS allowed
 	// origins); GetProjectConfig reads it back. Operator-only, like the other
-	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane. Both
+	// refuse the deployment's default project (FAILED_PRECONDITION): its
+	// settings are GATEWAY_DEFAULT_PROJECT_* environment variables.
 	UpsertProjectConfig(context.Context, *UpsertProjectConfigRequest) (*UpsertProjectConfigResponse, error)
 	GetProjectConfig(context.Context, *GetProjectConfigRequest) (*GetProjectConfigResponse, error)
 	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider

@@ -237,6 +237,9 @@ func (s *ControlPlaneAdminService) UpsertProjectConfig(ctx context.Context, secr
 	if projectID == "" {
 		return "", fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
+	if err := s.refuseDefaultProject(projectID); err != nil {
+		return "", err
+	}
 	// Validate the blob decodes to the typed config before persisting it, so a
 	// malformed config is a caller error rather than a write the login/resolver
 	// path later trips over.
@@ -271,6 +274,9 @@ func (s *ControlPlaneAdminService) GetProjectConfig(ctx context.Context, secret,
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
 		return "", fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
+	}
+	if err := s.refuseDefaultProject(projectID); err != nil {
+		return "", err
 	}
 	stored, _, err := s.projects.GetProjectConfig(ctx, projectID)
 	return stored, err

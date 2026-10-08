@@ -46,6 +46,7 @@ func TestToConnectError_SentinelMapping(t *testing.T) {
 		{"NotFound", service.ErrNotFound, connect.CodeNotFound},
 		{"PermissionDenied", service.ErrPermissionDenied, connect.CodePermissionDenied},
 		{"ProductAgeRestricted", service.ErrProductAgeRestricted, connect.CodePermissionDenied},
+		{"DefaultProjectConfig", service.ErrDefaultProjectConfig, connect.CodeFailedPrecondition},
 		{"AlreadyExists", service.ErrAlreadyExists, connect.CodeAlreadyExists},
 		{"Unauthenticated", service.ErrUnauthenticated, connect.CodeUnauthenticated},
 		{"TokenExpired", service.ErrTokenExpired, connect.CodeUnauthenticated},
