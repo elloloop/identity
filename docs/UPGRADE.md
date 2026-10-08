@@ -1,5 +1,14 @@
 # Upgrade guide
 
+## v4.12 → next — the admin user view shows usernames (fix)
+
+No schema change and no migration.
+
+- **`GetUser` and `ListUsers` return a username account's `username`**, and
+  `ListUsers`' `search` matches usernames too. Before, an account made with
+  `CreateUser` in username mode came back from both with no username and no
+  email, and search could not find it.
+
 ## v4.11 → v4.12 — merging accounts, which needs a recent sign-in (`auth_time` on access tokens; native-gRPC hosts opt in with `GRPCTrustAuthTime`); a temporary password must be replaced at first sign-in; SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
 
 **Migration 0036** (SQLite 0019) adds `users.merged_into_user_id` with a

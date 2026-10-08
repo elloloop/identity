@@ -78,7 +78,7 @@ func (s *AdminService) ListUsers(
 			continue
 		}
 		if searchLower != "" {
-			hay := strings.ToLower(u.Email + " " + u.Name)
+			hay := strings.ToLower(u.Email + " " + u.Name + " " + u.Username)
 			if !strings.Contains(hay, searchLower) {
 				continue
 			}

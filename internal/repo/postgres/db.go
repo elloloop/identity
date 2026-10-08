@@ -50,6 +50,7 @@ const (
 	dbUfAccountAddress         = "21"
 	dbUfMergedInto             = "22"
 	dbUfPasswordChangeRequired = "23"
+	dbUfUsername               = "24"
 )
 
 const (
@@ -979,6 +980,7 @@ func userNodeFromRecord(u *service.User) *graph.Node {
 			dbUfEmailVerified:          u.EmailVerified,
 			dbUfEmailVerifiedAt:        u.EmailVerifiedAt,
 			dbUfPasswordChangeRequired: u.PasswordChangeRequired,
+			dbUfUsername:               u.Username,
 		},
 	}
 }

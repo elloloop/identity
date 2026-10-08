@@ -31,6 +31,7 @@ func userFromNode(n *graph.Node) *User {
 		AccountAddress:         pstr(p, ufAccountAddress),
 		MergedIntoUserID:       pstr(p, ufMergedInto),
 		PasswordChangeRequired: pbool(p, ufPasswordChangeRequired),
+		Username:               pstr(p, ufUsername),
 	}
 }
 

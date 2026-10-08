@@ -176,13 +176,13 @@ message DeleteUserResponse {}
 
 // Admin-only paginated user listing.
 //   Requires the caller's JWT to carry role=admin.
-//   Supports filtering by status and substring search on email/name.
+//   Supports filtering by status and substring search on email, name or username.
 message ListUsersRequest {
   string tenant_id = 1;
   string cursor = 2;
   int32 limit = 3;
   UserStatus status_filter = 4; // USER_STATUS_UNSPECIFIED = no filter
-  string search = 5; // optional substring match on email/name
+  string search = 5; // optional substring match on email, name or username
 }
 
 message ListUsersResponse {

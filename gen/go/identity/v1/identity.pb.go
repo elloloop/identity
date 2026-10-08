@@ -1259,14 +1259,14 @@ func (*DeleteUserResponse) Descriptor() ([]byte, []int) {
 // Admin-only paginated user listing.
 //
 //	Requires the caller's JWT to carry role=admin.
-//	Supports filtering by status and substring search on email/name.
+//	Supports filtering by status and substring search on email, name or username.
 type ListUsersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	Cursor        string                 `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
 	StatusFilter  UserStatus             `protobuf:"varint,4,opt,name=status_filter,json=statusFilter,proto3,enum=identity.v1.UserStatus" json:"status_filter,omitempty"` // USER_STATUS_UNSPECIFIED = no filter
-	Search        string                 `protobuf:"bytes,5,opt,name=search,proto3" json:"search,omitempty"`                                                              // optional substring match on email/name
+	Search        string                 `protobuf:"bytes,5,opt,name=search,proto3" json:"search,omitempty"`                                                              // optional substring match on email, name or username
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

@@ -7200,13 +7200,13 @@ components:
         search:
           type: string
           title: search
-          description: optional substring match on email/name
+          description: optional substring match on email, name or username
       title: ListUsersRequest
       additionalProperties: false
       description: |-
         Admin-only paginated user listing.
            Requires the caller's JWT to carry role=admin.
-           Supports filtering by status and substring search on email/name.
+           Supports filtering by status and substring search on email, name or username.
     identity.v1.ListUsersResponse:
       type: object
       properties:
