@@ -223,6 +223,7 @@ func TestBuildRateLimits_ManagedMinorPathsLimited(t *testing.T) {
 	metered := []string{
 		"/identity.v1.IdentityService/CreateManagedChildAccount",
 		"/identity.v1.IdentityService/SubmitDateOfBirth",
+		"/identity.v1.IdentityService/CompleteRequiredPasswordChange",
 		"/identity.v1.IdentityService/BeginPasskeyRegistration",
 		"/identity.v1.IdentityService/CompletePasskeyRegistration",
 		"/identity.v1.IdentityService/GrantParentalConsent",

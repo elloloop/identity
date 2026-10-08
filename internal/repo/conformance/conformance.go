@@ -2652,6 +2652,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runEmailFoldConformance(t, driver)
 	runAccountAddressConformance(t, driver)
 	runMergedIntoConformance(t, driver)
+	runPasswordChangeRequiredConformance(t, driver)
 	runAccountMergeConformance(t, driver)
 }
 

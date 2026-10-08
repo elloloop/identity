@@ -333,16 +333,8 @@ func projectLoginControls(ctx context.Context) loginControls {
 // steer the user into enrollment rather than handing them a challenge they
 // cannot answer.
 func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, policyForced bool) (*LoginResult, error) {
-	if policyForced && !user.TotpRequired {
-		cred, err := s.repo(ctx).GetTotpCredential(ctx, user.ID)
-		if err != nil {
-			return nil, err
-		}
-		if cred == nil || !cred.Verified {
-			s.logger.Info("login_policy_2fa_required_no_factor_enrolled",
-				zap.String("user_id", user.ID))
-			return nil, fmt.Errorf("%w: your organization requires two-factor authentication; enroll a second factor", ErrTotpRequired)
-		}
+	if err := s.ensureSecondFactorEnrolled(ctx, user, policyForced); err != nil {
+		return nil, err
 	}
 
 	challengeID, err := s.issueLoginChallenge(ctx, user.ID)
@@ -367,4 +359,23 @@ func allowedMethodsContains(allowedMethods, method string) bool {
 		}
 	}
 	return false
+}
+
+// ensureSecondFactorEnrolled refuses a sign-in the login policy requires a
+// second factor for (policyForced) when the account has none enrolled to
+// prove: the user must enroll one first.
+func (s *AuthService) ensureSecondFactorEnrolled(ctx context.Context, user *User, policyForced bool) error {
+	if !policyForced || user.TotpRequired {
+		return nil
+	}
+	cred, err := s.repo(ctx).GetTotpCredential(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	if cred == nil || !cred.Verified {
+		s.logger.Info("login_policy_2fa_required_no_factor_enrolled",
+			zap.String("user_id", user.ID))
+		return fmt.Errorf("%w: your organization requires two-factor authentication; enroll a second factor", ErrTotpRequired)
+	}
+	return nil
 }

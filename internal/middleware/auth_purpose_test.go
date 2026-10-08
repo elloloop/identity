@@ -184,3 +184,19 @@ func TestAuthMiddleware_PasskeyRegistrationPaths_Exempt(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 	}
 }
+
+// CompleteRequiredPasswordChange is reached with a ticket, never a session,
+// so it must be JWT-exempt like SubmitDateOfBirth.
+func TestAuthMiddleware_CompleteRequiredPasswordChange_Exempt(t *testing.T) {
+	kr := testSigner(t)
+	var called bool
+	var userID string
+
+	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/CompleteRequiredPasswordChange", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.True(t, called, "CompleteRequiredPasswordChange must be JWT-exempt")
+	assert.Equal(t, http.StatusOK, rec.Code)
+}

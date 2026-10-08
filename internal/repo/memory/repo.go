@@ -664,10 +664,11 @@ var (
 	}
 
 	userBoolFields = map[string]func(*service.User) *bool{
-		"totp_required":  func(u *service.User) *bool { return &u.TotpRequired },
-		"email_verified": func(u *service.User) *bool { return &u.EmailVerified },
-		"is_anonymous":   func(u *service.User) *bool { return &u.IsAnonymous },
-		"phone_verified": func(u *service.User) *bool { return &u.PhoneVerified },
+		"totp_required":            func(u *service.User) *bool { return &u.TotpRequired },
+		"email_verified":           func(u *service.User) *bool { return &u.EmailVerified },
+		"is_anonymous":             func(u *service.User) *bool { return &u.IsAnonymous },
+		"phone_verified":           func(u *service.User) *bool { return &u.PhoneVerified },
+		"password_change_required": func(u *service.User) *bool { return &u.PasswordChangeRequired },
 	}
 
 	userInt64Fields = map[string]func(*service.User) *int64{

@@ -253,6 +253,28 @@ func (h *IdentityHandler) SubmitDateOfBirth(
 	return connect.NewResponse(resp), nil
 }
 
+// CompleteRequiredPasswordChange replaces an administrator-issued password:
+// the caller holds the ticket carried by the password_change_required error
+// detail, not a session.
+func (h *IdentityHandler) CompleteRequiredPasswordChange(
+	ctx context.Context,
+	req *connect.Request[identitypb.CompleteRequiredPasswordChangeRequest],
+) (*connect.Response[identitypb.CompleteRequiredPasswordChangeResponse], error) {
+	ipAddr := clientIP(req.Header())
+	userAgent := clientUserAgent(req.Header())
+
+	result, err := h.auth.CompleteRequiredPasswordChange(ctx, req.Msg.CompletionToken, req.Msg.NewPassword, req.Msg.SecondFactorCode, ipAddr, userAgent)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.CompleteRequiredPasswordChangeResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}), nil
+}
+
 // ─── Passwordless Email Login RPCs ──────────────────────────────────────────
 
 // RequestEmailLoginCode emails a 6-digit OTP. The response is identical

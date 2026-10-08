@@ -979,6 +979,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.CompletePasskeySignupResponse'
+  /identity.v1.IdentityService/CompleteRequiredPasswordChange:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CompleteRequiredPasswordChange
+      description: |-
+        Required password change: the only RPC that accepts the completion
+         ticket carried by the password_change_required error detail.
+         Unauthenticated — the caller holds a ticket, not a session.
+      operationId: identity.v1.IdentityService.CompleteRequiredPasswordChange
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CompleteRequiredPasswordChangeRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CompleteRequiredPasswordChangeResponse'
   /identity.v1.IdentityService/ConfirmEmailChange:
     post:
       tags:
@@ -5562,6 +5601,48 @@ components:
           format: int32
       title: CompletePasskeySignupResponse
       additionalProperties: false
+    identity.v1.CompleteRequiredPasswordChangeRequest:
+      type: object
+      properties:
+        completionToken:
+          type: string
+          title: completion_token
+          description: from the password_change_required error detail
+        newPassword:
+          type: string
+          title: new_password
+        secondFactorCode:
+          type: string
+          title: second_factor_code
+          description: required when second_factor_required was set
+      title: CompleteRequiredPasswordChangeRequest
+      additionalProperties: false
+      description: |-
+        CompleteRequiredPasswordChange replaces an administrator-issued password
+         with the user's own and completes the sign-in the refusal interrupted. The
+         new password meets the account's password policy and must differ from the
+         issued one. Where a second factor is required, second_factor_code (a
+         two-step or recovery code) is verified first: nothing changes until it is.
+         Every existing session of the account ends, and a new one is issued.
+    identity.v1.CompleteRequiredPasswordChangeResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+        refreshToken:
+          type: string
+          title: refresh_token
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+          description: Access token lifetime in seconds
+      title: CompleteRequiredPasswordChangeResponse
+      additionalProperties: false
     identity.v1.ConfirmEmailChangeRequest:
       type: object
       properties:
@@ -7520,6 +7601,29 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: PasskeyCredentialInfo
       additionalProperties: false
+    identity.v1.PasswordChangeRequiredDetails:
+      type: object
+      properties:
+        completionToken:
+          type: string
+          title: completion_token
+          description: |-
+            A short-lived (10 minute) bearer ticket whose only use is a
+             CompleteRequiredPasswordChange call for the account it was minted for.
+             It is NOT an access token: it carries a `purpose` claim and
+             authenticates no other RPC. A new issued password spends it.
+        secondFactorRequired:
+          type: boolean
+          title: second_factor_required
+          description: |-
+            second_factor_required: the account has two-step verification, or the
+             login policy requires a second factor. CompleteRequiredPasswordChange
+             then needs second_factor_code, checked before anything changes.
+      title: PasswordChangeRequiredDetails
+      additionalProperties: false
+      description: |-
+        PasswordChangeRequiredDetails is the error detail attached to the
+         `password_change_required` refusal returned by PasswordLogin.
     identity.v1.PasswordCredential:
       type: object
       properties:
@@ -9129,6 +9233,15 @@ components:
              (MergeAccounts, MergeUsers): the account it was merged into. Such an
              account is DEACTIVATED, never signs in and can never be reactivated;
              data a client holds under its id belongs to that account now.
+        passwordChangeRequired:
+          type: boolean
+          title: password_change_required
+          description: |-
+            password_change_required is set while the account's password is one an
+             administrator issued (CreateUser in username mode, InviteUser with
+             create_immediately, ResetUserPassword with generate_temp_password). A
+             PasswordLogin with it is refused `password_change_required` until the
+             user chooses their own password through CompleteRequiredPasswordChange.
       title: User
       additionalProperties: false
     identity.v1.UserStatus:

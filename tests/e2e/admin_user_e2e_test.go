@@ -209,10 +209,25 @@ func TestE2E_Admin_UserCRUD(t *testing.T) {
 		t.Fatalf("temporaryPassword was empty")
 	}
 
-	// Verify temporary password works for login
-	targetAt, _ := h.Login(t, targetEmail, tempPW)
-	if targetAt == "" {
-		t.Fatalf("login with temporary password failed")
+	// The temporary password signs in only to be replaced: the refusal carries
+	// a completion ticket, and the user's own password completes the sign-in.
+	refusal, status := h.rpcCall(t, "PasswordLogin", map[string]any{
+		"email":    targetEmail,
+		"password": tempPW,
+	}, "")
+	if status != http.StatusBadRequest || refusal["code"] != "failed_precondition" {
+		t.Fatalf("login with temporary password: status=%d body=%v, want failed_precondition", status, refusal)
+	}
+	ticket := completionTicket(t, refusal)
+	completed, status := h.rpcCall(t, "CompleteRequiredPasswordChange", map[string]any{
+		"completionToken": ticket,
+		"newPassword":     "Own!Passw0rd-e2e-reset",
+	}, "")
+	if status != http.StatusOK || completed["accessToken"] == "" {
+		t.Fatalf("CompleteRequiredPasswordChange status=%d body=%v", status, completed)
+	}
+	if targetAt, _ := h.Login(t, targetEmail, "Own!Passw0rd-e2e-reset"); targetAt == "" {
+		t.Fatalf("login with the user's own password failed")
 	}
 
 	// 8. Delete User
@@ -235,4 +250,24 @@ func TestE2E_Admin_UserCRUD(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// completionTicket reads the ticket from a password_change_required refusal's
+// PasswordChangeRequiredDetails, as the Connect JSON protocol carries it.
+func completionTicket(t *testing.T, refusal map[string]any) string {
+	t.Helper()
+	details, _ := refusal["details"].([]any)
+	for _, d := range details {
+		m, _ := d.(map[string]any)
+		if m["type"] != "identity.v1.PasswordChangeRequiredDetails" {
+			continue
+		}
+		if debug, ok := m["debug"].(map[string]any); ok {
+			if ticket, _ := debug["completionToken"].(string); ticket != "" {
+				return ticket
+			}
+		}
+	}
+	t.Fatalf("the refusal carries no PasswordChangeRequiredDetails: %v", refusal)
+	return ""
 }

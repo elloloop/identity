@@ -428,6 +428,13 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// Password verified -- reset failed-attempt counters.
 	s.resetFailedLogin(ctx, user)
 
+	// An administrator-issued password opens no session: the user replaces
+	// it first. The completion step takes the second factor too, and checks
+	// it before it changes anything.
+	if user.PasswordChangeRequired {
+		return nil, s.requirePasswordChange(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
+	}
+
 	// 2FA branch: TOTP required, either because the user enrolled it or
 	// because the tenant's LoginPolicy mandates a second factor for this
 	// single-factor primary method.
@@ -1131,6 +1138,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		// The password predates the proof of email control, so it cannot be
 		// trusted to belong to the verified owner. Clear it.
 		patch["password_hash"] = ""
+		patch["password_change_required"] = false
 	}
 
 	user.EmailVerified = true
@@ -1391,9 +1399,10 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 
 	now := s.nowMs()
 	patch := map[string]any{
-		"password_hash": pwHash,
-		"status":        StatusActive,
-		"updated_at":    now,
+		"password_hash":            pwHash,
+		"password_change_required": false,
+		"status":                   StatusActive,
+		"updated_at":               now,
 	}
 	if name != "" {
 		patch["name"] = strings.TrimSpace(name)

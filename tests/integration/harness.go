@@ -1272,6 +1272,8 @@ func applyUserBoolField(u *service.User, key string, v any) bool {
 		u.PhoneVerified = b
 	case "idv_verified":
 		u.IDVVerified = b
+	case "password_change_required":
+		u.PasswordChangeRequired = b
 	default:
 		return false
 	}
@@ -1280,7 +1282,8 @@ func applyUserBoolField(u *service.User, key string, v any) bool {
 
 func isUserBoolField(key string) bool {
 	switch key {
-	case "totp_required", "email_verified", "is_anonymous", "phone_verified", "idv_verified":
+	case "totp_required", "email_verified", "is_anonymous", "phone_verified", "idv_verified",
+		"password_change_required":
 		return true
 	}
 	return false

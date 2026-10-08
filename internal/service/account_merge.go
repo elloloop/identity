@@ -219,6 +219,11 @@ func checkMergeable(ctx context.Context, repo Repository, survivor, other *User)
 	if other.IsAnonymous {
 		return fmt.Errorf("%w: upgrade an anonymous account instead of merging it", ErrMergeRefused)
 	}
+	// A password an administrator issued would arrive on the survivor as an
+	// ordinary one, skipping the change its user still owes.
+	if other.PasswordChangeRequired {
+		return fmt.Errorf("%w: the other account still has the password it was issued; sign in to it and choose a new one first", ErrMergeRefused)
+	}
 	if err := refuseManagedChild(ctx, repo, other); err != nil {
 		return err
 	}

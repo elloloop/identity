@@ -64,7 +64,7 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 
 	op := graph.Operation{
 		Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: userID,
-		Patch: map[string]any{ufPasswordHash: newHash, ufUpdatedAt: nowMs()},
+		Patch: map[string]any{ufPasswordHash: newHash, ufPasswordChangeRequired: false, ufUpdatedAt: nowMs()},
 	}
 	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(userID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("update password: %w", err)

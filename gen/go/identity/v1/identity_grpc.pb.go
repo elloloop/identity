@@ -28,6 +28,7 @@ const (
 	IdentityService_MergeAccounts_FullMethodName                   = "/identity.v1.IdentityService/MergeAccounts"
 	IdentityService_PasswordLogin_FullMethodName                   = "/identity.v1.IdentityService/PasswordLogin"
 	IdentityService_SubmitDateOfBirth_FullMethodName               = "/identity.v1.IdentityService/SubmitDateOfBirth"
+	IdentityService_CompleteRequiredPasswordChange_FullMethodName  = "/identity.v1.IdentityService/CompleteRequiredPasswordChange"
 	IdentityService_RequestEmailLoginCode_FullMethodName           = "/identity.v1.IdentityService/RequestEmailLoginCode"
 	IdentityService_VerifyEmailLoginCode_FullMethodName            = "/identity.v1.IdentityService/VerifyEmailLoginCode"
 	IdentityService_RequestMagicLink_FullMethodName                = "/identity.v1.IdentityService/RequestMagicLink"
@@ -169,6 +170,10 @@ type IdentityServiceClient interface {
 	// error detail. Unauthenticated — the caller holds a ticket, not a
 	// session.
 	SubmitDateOfBirth(ctx context.Context, in *SubmitDateOfBirthRequest, opts ...grpc.CallOption) (*SubmitDateOfBirthResponse, error)
+	// Required password change: the only RPC that accepts the completion
+	// ticket carried by the password_change_required error detail.
+	// Unauthenticated — the caller holds a ticket, not a session.
+	CompleteRequiredPasswordChange(ctx context.Context, in *CompleteRequiredPasswordChangeRequest, opts ...grpc.CallOption) (*CompleteRequiredPasswordChangeResponse, error)
 	// Passwordless email login (OTP code + magic link)
 	RequestEmailLoginCode(ctx context.Context, in *RequestEmailLoginCodeRequest, opts ...grpc.CallOption) (*RequestEmailLoginCodeResponse, error)
 	VerifyEmailLoginCode(ctx context.Context, in *VerifyEmailLoginCodeRequest, opts ...grpc.CallOption) (*VerifyEmailLoginCodeResponse, error)
@@ -536,6 +541,16 @@ func (c *identityServiceClient) SubmitDateOfBirth(ctx context.Context, in *Submi
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SubmitDateOfBirthResponse)
 	err := c.cc.Invoke(ctx, IdentityService_SubmitDateOfBirth_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) CompleteRequiredPasswordChange(ctx context.Context, in *CompleteRequiredPasswordChangeRequest, opts ...grpc.CallOption) (*CompleteRequiredPasswordChangeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CompleteRequiredPasswordChangeResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CompleteRequiredPasswordChange_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1734,6 +1749,10 @@ type IdentityServiceServer interface {
 	// error detail. Unauthenticated — the caller holds a ticket, not a
 	// session.
 	SubmitDateOfBirth(context.Context, *SubmitDateOfBirthRequest) (*SubmitDateOfBirthResponse, error)
+	// Required password change: the only RPC that accepts the completion
+	// ticket carried by the password_change_required error detail.
+	// Unauthenticated — the caller holds a ticket, not a session.
+	CompleteRequiredPasswordChange(context.Context, *CompleteRequiredPasswordChangeRequest) (*CompleteRequiredPasswordChangeResponse, error)
 	// Passwordless email login (OTP code + magic link)
 	RequestEmailLoginCode(context.Context, *RequestEmailLoginCodeRequest) (*RequestEmailLoginCodeResponse, error)
 	VerifyEmailLoginCode(context.Context, *VerifyEmailLoginCodeRequest) (*VerifyEmailLoginCodeResponse, error)
@@ -2043,6 +2062,9 @@ func (UnimplementedIdentityServiceServer) PasswordLogin(context.Context, *Passwo
 }
 func (UnimplementedIdentityServiceServer) SubmitDateOfBirth(context.Context, *SubmitDateOfBirthRequest) (*SubmitDateOfBirthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitDateOfBirth not implemented")
+}
+func (UnimplementedIdentityServiceServer) CompleteRequiredPasswordChange(context.Context, *CompleteRequiredPasswordChangeRequest) (*CompleteRequiredPasswordChangeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CompleteRequiredPasswordChange not implemented")
 }
 func (UnimplementedIdentityServiceServer) RequestEmailLoginCode(context.Context, *RequestEmailLoginCodeRequest) (*RequestEmailLoginCodeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RequestEmailLoginCode not implemented")
@@ -2574,6 +2596,24 @@ func _IdentityService_SubmitDateOfBirth_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).SubmitDateOfBirth(ctx, req.(*SubmitDateOfBirthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_CompleteRequiredPasswordChange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompleteRequiredPasswordChangeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CompleteRequiredPasswordChange(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CompleteRequiredPasswordChange_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CompleteRequiredPasswordChange(ctx, req.(*CompleteRequiredPasswordChangeRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4726,6 +4766,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubmitDateOfBirth",
 			Handler:    _IdentityService_SubmitDateOfBirth_Handler,
+		},
+		{
+			MethodName: "CompleteRequiredPasswordChange",
+			Handler:    _IdentityService_CompleteRequiredPasswordChange_Handler,
 		},
 		{
 			MethodName: "RequestEmailLoginCode",

@@ -45,6 +45,8 @@ const (
 	issue3UfQuotaBytes    = "15"
 	issue3UfDeactivatedAt = "16"
 	issue3UfLastLoginAt   = "17"
+	// issue3UfPasswordChangeRequired marks a password an admin issued.
+	issue3UfPasswordChangeRequired = "23"
 
 	issue3GfName        = "1"
 	issue3GfDescription = "2"
@@ -350,18 +352,19 @@ func (d *issue3DB) createNode(op graph.Operation) (string, error) {
 		defer d.repo.mu.Unlock()
 		id := d.repo.nextID()
 		d.repo.users[id] = &service.User{
-			ID:            id,
-			Email:         strings.ToLower(issue3String(op.Data[issue3UfEmail])),
-			Name:          issue3String(op.Data[issue3UfName]),
-			Role:          issue3String(op.Data[issue3UfRole]),
-			AvatarURL:     issue3String(op.Data[issue3UfAvatarURL]),
-			Status:        issue3String(op.Data[issue3UfStatus]),
-			RecoveryEmail: strings.ToLower(issue3String(op.Data[issue3UfRecoveryEmail])),
-			QuotaBytes:    issue3Int64(op.Data[issue3UfQuotaBytes]),
-			PasswordHash:  issue3String(op.Data[issue3UfPasswordHash]),
-			CreatedAt:     time.UnixMilli(issue3Int64(op.Data[issue3UfCreatedAt])),
-			UpdatedAt:     time.UnixMilli(issue3Int64(op.Data[issue3UfUpdatedAt])),
-			LastLoginAtMs: issue3Int64(op.Data[issue3UfLastLoginAt]),
+			ID:                     id,
+			Email:                  strings.ToLower(issue3String(op.Data[issue3UfEmail])),
+			Name:                   issue3String(op.Data[issue3UfName]),
+			Role:                   issue3String(op.Data[issue3UfRole]),
+			AvatarURL:              issue3String(op.Data[issue3UfAvatarURL]),
+			Status:                 issue3String(op.Data[issue3UfStatus]),
+			RecoveryEmail:          strings.ToLower(issue3String(op.Data[issue3UfRecoveryEmail])),
+			QuotaBytes:             issue3Int64(op.Data[issue3UfQuotaBytes]),
+			PasswordHash:           issue3String(op.Data[issue3UfPasswordHash]),
+			CreatedAt:              time.UnixMilli(issue3Int64(op.Data[issue3UfCreatedAt])),
+			UpdatedAt:              time.UnixMilli(issue3Int64(op.Data[issue3UfUpdatedAt])),
+			LastLoginAtMs:          issue3Int64(op.Data[issue3UfLastLoginAt]),
+			PasswordChangeRequired: op.Data[issue3UfPasswordChangeRequired] == true,
 		}
 		return id, nil
 	case issue3TypeUserInvitation:
@@ -447,6 +450,8 @@ func (d *issue3DB) updateNode(op graph.Operation) error {
 				u.UpdatedAt = time.UnixMilli(issue3Int64(v))
 			case issue3UfLastLoginAt:
 				u.LastLoginAtMs = issue3Int64(v)
+			case issue3UfPasswordChangeRequired:
+				u.PasswordChangeRequired = v == true
 			}
 		}
 	case issue3TypeUserInvitation:
@@ -509,17 +514,18 @@ func issue3IsAuditWrite(ops []graph.Operation) bool {
 
 func issue3UserNode(u *service.User) *graph.Node {
 	payload := map[string]any{
-		issue3UfEmail:         u.Email,
-		issue3UfName:          u.Name,
-		issue3UfRole:          u.Role,
-		issue3UfAvatarURL:     u.AvatarURL,
-		issue3UfCreatedAt:     u.CreatedAt.UnixMilli(),
-		issue3UfUpdatedAt:     u.UpdatedAt.UnixMilli(),
-		issue3UfPasswordHash:  u.PasswordHash,
-		issue3UfStatus:        u.Status,
-		issue3UfRecoveryEmail: u.RecoveryEmail,
-		issue3UfQuotaBytes:    u.QuotaBytes,
-		issue3UfLastLoginAt:   u.LastLoginAtMs,
+		issue3UfEmail:                  u.Email,
+		issue3UfName:                   u.Name,
+		issue3UfRole:                   u.Role,
+		issue3UfAvatarURL:              u.AvatarURL,
+		issue3UfCreatedAt:              u.CreatedAt.UnixMilli(),
+		issue3UfUpdatedAt:              u.UpdatedAt.UnixMilli(),
+		issue3UfPasswordHash:           u.PasswordHash,
+		issue3UfStatus:                 u.Status,
+		issue3UfRecoveryEmail:          u.RecoveryEmail,
+		issue3UfQuotaBytes:             u.QuotaBytes,
+		issue3UfLastLoginAt:            u.LastLoginAtMs,
+		issue3UfPasswordChangeRequired: u.PasswordChangeRequired,
 	}
 	return &graph.Node{NodeID: u.ID, TypeID: issue3TypeUser, Payload: payload}
 }

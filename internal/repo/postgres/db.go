@@ -27,28 +27,29 @@ const (
 )
 
 const (
-	dbUfEmail            = "1"
-	dbUfName             = "2"
-	dbUfRole             = "3"
-	dbUfAvatarURL        = "4"
-	dbUfCreatedAt        = "5"
-	dbUfUpdatedAt        = "6"
-	dbUfPasswordHash     = "7"
-	dbUfTOTPRequired     = "8"
-	dbUfFailedLoginCount = "9"
-	dbUfLockedUntil      = "10"
-	dbUfStatus           = "11"
-	dbUfRecoveryEmail    = "12"
-	dbUfInvitedBy        = "13"
-	dbUfInvitedAt        = "14"
-	dbUfQuotaBytes       = "15"
-	dbUfDeactivatedAt    = "16"
-	dbUfLastLoginAt      = "17"
-	dbUfEmailVerified    = "18"
-	dbUfEmailVerifiedAt  = "19"
-	dbUfIsAnonymous      = "20"
-	dbUfAccountAddress   = "21"
-	dbUfMergedInto       = "22"
+	dbUfEmail                  = "1"
+	dbUfName                   = "2"
+	dbUfRole                   = "3"
+	dbUfAvatarURL              = "4"
+	dbUfCreatedAt              = "5"
+	dbUfUpdatedAt              = "6"
+	dbUfPasswordHash           = "7"
+	dbUfTOTPRequired           = "8"
+	dbUfFailedLoginCount       = "9"
+	dbUfLockedUntil            = "10"
+	dbUfStatus                 = "11"
+	dbUfRecoveryEmail          = "12"
+	dbUfInvitedBy              = "13"
+	dbUfInvitedAt              = "14"
+	dbUfQuotaBytes             = "15"
+	dbUfDeactivatedAt          = "16"
+	dbUfLastLoginAt            = "17"
+	dbUfEmailVerified          = "18"
+	dbUfEmailVerifiedAt        = "19"
+	dbUfIsAnonymous            = "20"
+	dbUfAccountAddress         = "21"
+	dbUfMergedInto             = "22"
+	dbUfPasswordChangeRequired = "23"
 )
 
 const (
@@ -138,23 +139,24 @@ const (
 
 var (
 	userQueryFields = map[string]dbFieldSpec{
-		dbUfEmail:            {col: "email", kind: dbKindString, foldCol: "email_fold"},
-		dbUfName:             {col: "name", kind: dbKindString},
-		dbUfRole:             {col: "role", kind: dbKindString},
-		dbUfAvatarURL:        {col: "avatar_url", kind: dbKindString},
-		dbUfPasswordHash:     {col: "password_hash", kind: dbKindString},
-		dbUfTOTPRequired:     {col: "totp_required", kind: dbKindBool},
-		dbUfFailedLoginCount: {col: "failed_login_count", kind: dbKindInt64},
-		dbUfLockedUntil:      {col: "locked_until_ms", kind: dbKindInt64},
-		dbUfStatus:           {col: "status", kind: dbKindString},
-		dbUfRecoveryEmail:    {col: "recovery_email", kind: dbKindString, caseInsensitive: true},
-		dbUfInvitedBy:        {col: "invited_by", kind: dbKindString},
-		dbUfInvitedAt:        {col: "invited_at_ms", kind: dbKindInt64},
-		dbUfQuotaBytes:       {col: "quota_bytes", kind: dbKindInt64},
-		dbUfDeactivatedAt:    {col: "deactivated_at_ms", kind: dbKindInt64},
-		dbUfLastLoginAt:      {col: "last_login_at_ms", kind: dbKindInt64},
-		dbUfEmailVerified:    {col: "email_verified", kind: dbKindBool},
-		dbUfEmailVerifiedAt:  {col: "email_verified_at_ms", kind: dbKindInt64},
+		dbUfEmail:                  {col: "email", kind: dbKindString, foldCol: "email_fold"},
+		dbUfName:                   {col: "name", kind: dbKindString},
+		dbUfRole:                   {col: "role", kind: dbKindString},
+		dbUfAvatarURL:              {col: "avatar_url", kind: dbKindString},
+		dbUfPasswordHash:           {col: "password_hash", kind: dbKindString},
+		dbUfTOTPRequired:           {col: "totp_required", kind: dbKindBool},
+		dbUfFailedLoginCount:       {col: "failed_login_count", kind: dbKindInt64},
+		dbUfLockedUntil:            {col: "locked_until_ms", kind: dbKindInt64},
+		dbUfStatus:                 {col: "status", kind: dbKindString},
+		dbUfRecoveryEmail:          {col: "recovery_email", kind: dbKindString, caseInsensitive: true},
+		dbUfInvitedBy:              {col: "invited_by", kind: dbKindString},
+		dbUfInvitedAt:              {col: "invited_at_ms", kind: dbKindInt64},
+		dbUfQuotaBytes:             {col: "quota_bytes", kind: dbKindInt64},
+		dbUfDeactivatedAt:          {col: "deactivated_at_ms", kind: dbKindInt64},
+		dbUfLastLoginAt:            {col: "last_login_at_ms", kind: dbKindInt64},
+		dbUfEmailVerified:          {col: "email_verified", kind: dbKindBool},
+		dbUfEmailVerifiedAt:        {col: "email_verified_at_ms", kind: dbKindInt64},
+		dbUfPasswordChangeRequired: {col: "password_change_required", kind: dbKindBool},
 	}
 	groupQueryFields = map[string]dbFieldSpec{
 		dbGfName:        {col: "name", kind: dbKindString},
@@ -422,6 +424,7 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op graph
 		deactivatedAt, _ := nullableInt64(op.Data[dbUfDeactivatedAt])
 		lastLoginAt, _ := nullableInt64(op.Data[dbUfLastLoginAt])
 		emailVerifiedAt, _ := nullableInt64(op.Data[dbUfEmailVerifiedAt])
+		passwordChangeRequired, _ := nullableBool(op.Data[dbUfPasswordChangeRequired])
 
 		_, err := tx.Exec(
 			ctx, `
@@ -431,21 +434,21 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op graph
 				failed_login_count, locked_until_ms,
 				email_verified, email_verified_at_ms,
 				invited_by, invited_at_ms, last_login_at_ms, deactivated_at_ms,
-				created_at_ms, updated_at_ms
+				created_at_ms, updated_at_ms, password_change_required
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7,
 				$8, $9, $10, $11,
 				$12, $13,
 				$14, $15,
 				$16, $17, $18, $19,
-				$20, $21
+				$20, $21, $22
 			)
 		`, id, r.projectID, email, name, role, avatarURL, status,
 			recoveryEmail, passwordHash, quotaBytes, totpRequired,
 			failedLoginCount, lockedUntil,
 			emailVerified, emailVerifiedAt,
 			invitedBy, invitedAt, lastLoginAt, deactivatedAt,
-			createdAt, updatedAt,
+			createdAt, updatedAt, passwordChangeRequired,
 		)
 		if err != nil {
 			return "", wrapPgErr("ExecuteAtomic(create user)", err)
@@ -956,25 +959,26 @@ func userNodeFromRecord(u *service.User) *graph.Node {
 		NodeID: u.ID,
 		TypeID: dbTypeUser,
 		Payload: map[string]any{
-			dbUfEmail:            u.Email,
-			dbUfName:             u.Name,
-			dbUfRole:             u.Role,
-			dbUfAvatarURL:        u.AvatarURL,
-			dbUfCreatedAt:        u.CreatedAt.UnixMilli(),
-			dbUfUpdatedAt:        u.UpdatedAt.UnixMilli(),
-			dbUfPasswordHash:     u.PasswordHash,
-			dbUfTOTPRequired:     u.TotpRequired,
-			dbUfIsAnonymous:      u.IsAnonymous,
-			dbUfAccountAddress:   u.AccountAddress,
-			dbUfMergedInto:       u.MergedIntoUserID,
-			dbUfFailedLoginCount: int64(u.FailedLoginCount),
-			dbUfLockedUntil:      u.LockedUntil,
-			dbUfStatus:           u.Status,
-			dbUfRecoveryEmail:    u.RecoveryEmail,
-			dbUfQuotaBytes:       u.QuotaBytes,
-			dbUfLastLoginAt:      u.LastLoginAtMs,
-			dbUfEmailVerified:    u.EmailVerified,
-			dbUfEmailVerifiedAt:  u.EmailVerifiedAt,
+			dbUfEmail:                  u.Email,
+			dbUfName:                   u.Name,
+			dbUfRole:                   u.Role,
+			dbUfAvatarURL:              u.AvatarURL,
+			dbUfCreatedAt:              u.CreatedAt.UnixMilli(),
+			dbUfUpdatedAt:              u.UpdatedAt.UnixMilli(),
+			dbUfPasswordHash:           u.PasswordHash,
+			dbUfTOTPRequired:           u.TotpRequired,
+			dbUfIsAnonymous:            u.IsAnonymous,
+			dbUfAccountAddress:         u.AccountAddress,
+			dbUfMergedInto:             u.MergedIntoUserID,
+			dbUfFailedLoginCount:       int64(u.FailedLoginCount),
+			dbUfLockedUntil:            u.LockedUntil,
+			dbUfStatus:                 u.Status,
+			dbUfRecoveryEmail:          u.RecoveryEmail,
+			dbUfQuotaBytes:             u.QuotaBytes,
+			dbUfLastLoginAt:            u.LastLoginAtMs,
+			dbUfEmailVerified:          u.EmailVerified,
+			dbUfEmailVerifiedAt:        u.EmailVerifiedAt,
+			dbUfPasswordChangeRequired: u.PasswordChangeRequired,
 		},
 	}
 }

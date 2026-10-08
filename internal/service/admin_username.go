@@ -69,8 +69,11 @@ func (s *AdminService) CreateUsernameUser(ctx context.Context, actorID, username
 		Role:         role,
 		Status:       StatusActive,
 		PasswordHash: hash,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		// The administrator knows this password; the user replaces it at
+		// their first sign-in.
+		PasswordChangeRequired: true,
+		CreatedAt:              now,
+		UpdatedAt:              now,
 	}
 	id, err := repo.CreateUser(ctx, user)
 	if err != nil {

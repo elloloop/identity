@@ -88,12 +88,16 @@ func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, ipAddr
 // the same key as access tokens but carries a purpose claim, so it can never
 // authenticate a request.
 func (s *AuthService) mintPurposeTicket(ctx context.Context, userID, purpose string, ttl time.Duration) (string, error) {
-	claims := jwt.Claims{
-		Sub:     userID,
-		Tenant:  s.tenantID(ctx),
-		Project: s.projectID(ctx),
-		Purpose: purpose,
-	}
+	return s.signPurposeTicket(ctx, jwt.Claims{Sub: userID, Purpose: purpose}, ttl)
+}
+
+// signPurposeTicket signs claims (a subject, a purpose and whatever the flow
+// carries) as a purpose ticket scoped to this request's tenant, project and
+// audience.
+func (s *AuthService) signPurposeTicket(ctx context.Context, claims jwt.Claims, ttl time.Duration) (string, error) {
+	purpose := claims.Purpose
+	claims.Tenant = s.tenantID(ctx)
+	claims.Project = s.projectID(ctx)
 	if s.cfg.JWTAudience != "" {
 		claims.Audience = []string{s.cfg.JWTAudience}
 	}

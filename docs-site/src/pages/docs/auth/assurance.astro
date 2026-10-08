@@ -138,7 +138,7 @@ import { Code } from "astro-expressive-code/components";
       to hold per-project <code>config_json</code>: on sqlite/memory every
       request is pinned to the default project with no block to read, so
       setting it yields a deployment where no client can ever obtain a token
-      and all six gated endpoints deny.
+      and every gated endpoint denies.
     </li>
     <li>
       <code>GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP</code>,
