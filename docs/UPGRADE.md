@@ -6,11 +6,13 @@
 constant default (catalog-only; `lock_timeout = 10s`; on timeout confirm the
 column is absent, then `identity migrate force 35` and `identity migrate`).
 
-- **`MergeAccounts` and the admin `MergeUsers` (new).** Merge one account of
+- **`MergeAccounts` (new, off by default: `GATEWAY_ACCOUNT_MERGE_ENABLED`)
+  and the admin `MergeUsers` (new).** Merge one account of
   a person into another without deleting anything: the other account is
   retired (deactivated, with `User.merged_into_user_id` set, and never
-  reactivatable), the survivor
-  takes its username and password where it has none, and a `user.merged`
+  reactivatable), its linked providers and passkeys move to the survivor,
+  which also takes its username, password and email where it has none, all
+  in one transaction, and a `user.merged`
   event (carrying `merged_into_user_id`) tells applications to move data
   held under the retired id. See *Merging accounts* in the docs.
 - **Webhook subscribers receive a new event type, `user.merged`.** A

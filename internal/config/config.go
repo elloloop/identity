@@ -749,6 +749,15 @@ type Config struct {
 	// UsernameSignup; set false to disable both (admin-driven creation and
 	// invitations still work).
 	PasswordSignupEnabled bool
+
+	// AccountMergeEnabled turns on self-service MergeAccounts: a person
+	// merging another of their accounts into the one they are signed in to.
+	// A merge retires an account for good and announces it to applications
+	// only through the user.merged webhook, so it is OFF by default; turn it
+	// on once the applications that hold data under user ids subscribe to
+	// user.merged. Admin MergeUsers is available either way. Driven by
+	// GATEWAY_ACCOUNT_MERGE_ENABLED.
+	AccountMergeEnabled bool
 	// PasswordResetEnabled gates RequestPasswordReset; when false the RPC stays
 	// enumeration-safe but is a no-op (admin resets still work).
 	PasswordResetEnabled bool
@@ -1391,6 +1400,7 @@ func loadFromEnv() *Config {
 		SCIMProjectID:   envStr("GATEWAY_SCIM_PROJECT_ID", ""),
 
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
+		AccountMergeEnabled:        envBool("GATEWAY_ACCOUNT_MERGE_ENABLED", false),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
 

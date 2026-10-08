@@ -687,6 +687,16 @@ type Repository interface {
 	// ErrAlreadyExists. An unknown user returns "" and no error.
 	AssignAccountAddress(ctx context.Context, userID, address string) (string, error)
 
+	// ApplyAccountMerge retires m.OtherID into m.SurvivorID in ONE
+	// transaction: both rows must still be active and unmerged when it runs
+	// (else ErrMergeConflict, with nothing written). The other account is
+	// deactivated with merged_into_user_id set; the moves m asks for (username,
+	// password, email, account-address swap) are made with the values read
+	// inside the transaction; the other account's linked provider identities
+	// and passkeys move to the survivor; its refresh tokens are deleted and its
+	// sessions revoked. Any failure rolls all of it back.
+	ApplyAccountMerge(ctx context.Context, m AccountMerge) error
+
 	// OAuth identities — links a (provider, provider_user_id) pair to a
 	// local User so OAuth login can survive provider-side email changes.
 	FindUserByProviderID(ctx context.Context, provider, providerUserID string) (*User, error)

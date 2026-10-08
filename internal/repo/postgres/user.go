@@ -769,3 +769,112 @@ func (r *pgRepository) AssignAccountAddress(ctx context.Context, userID, address
 	}
 	return current, nil
 }
+
+func (r *pgRepository) ApplyAccountMerge(ctx context.Context, m service.AccountMerge) error {
+	if m.SurvivorID == "" || m.OtherID == "" || m.SurvivorID == m.OtherID {
+		return errors.New("postgres: ApplyAccountMerge: two distinct account ids are required")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return wrapPgErr("ApplyAccountMerge", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const mergeable = `SELECT username, password_hash, email, email_verified, account_address
+		FROM users
+		WHERE project_id = $1 AND id = $2 AND status = 'active' AND merged_into_user_id = '' FOR UPDATE`
+	var (
+		oUsername, oPassword, oEmail, oAddress string
+		sUsername, sPassword, sEmail, sAddress string
+		oVerified, sVerified                   bool
+	)
+	if err := tx.QueryRow(ctx, mergeable, r.projectID, m.OtherID).Scan(&oUsername, &oPassword, &oEmail, &oVerified, &oAddress); err != nil {
+		if noRows(err) {
+			return service.ErrMergeConflict
+		}
+		return wrapPgErr("ApplyAccountMerge(other)", err)
+	}
+	if err := tx.QueryRow(ctx, mergeable, r.projectID, m.SurvivorID).Scan(&sUsername, &sPassword, &sEmail, &sVerified, &sAddress); err != nil {
+		if noRows(err) {
+			return service.ErrMergeConflict
+		}
+		return wrapPgErr("ApplyAccountMerge(survivor)", err)
+	}
+
+	// Retire first, releasing what the survivor takes (each is unique).
+	retiredUsername, retiredEmail := oUsername, oEmail
+	if m.MoveUsername {
+		retiredUsername = ""
+	}
+	if m.MoveEmail {
+		retiredEmail = ""
+	}
+	// Every write is guarded on the state read above, so a concurrent merge
+	// or deactivation that got in between makes this one a conflict.
+	const guard = ` AND status = 'active' AND merged_into_user_id = ''`
+	tag, err := tx.Exec(ctx, `
+		UPDATE users
+		   SET status = 'deactivated', merged_into_user_id = $3,
+		       username = $4, email = $5, account_address = '',
+		       deactivated_at_ms = $6, updated_at_ms = $6
+		 WHERE project_id = $1 AND id = $2`+guard,
+		r.projectID, m.OtherID, m.SurvivorID, retiredUsername, retiredEmail, m.AtMs)
+	if err != nil {
+		return wrapPgErr("ApplyAccountMerge(retire)", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return service.ErrMergeConflict
+	}
+
+	username, password, email, verified, address := sUsername, sPassword, sEmail, sVerified, sAddress
+	if m.MoveUsername {
+		username = oUsername
+	}
+	if m.MovePassword {
+		password = oPassword
+	}
+	if m.MoveEmail {
+		email, verified = oEmail, oVerified
+	}
+	retiredAddress := oAddress
+	if m.SwapAddress {
+		address, retiredAddress = oAddress, sAddress
+	}
+	tag, err = tx.Exec(ctx, `
+		UPDATE users
+		   SET username = $3, password_hash = $4, email = $5, email_verified = $6,
+		       account_address = $7, updated_at_ms = $8
+		 WHERE project_id = $1 AND id = $2`+guard,
+		r.projectID, m.SurvivorID, username, password, email, verified, address, m.AtMs)
+	if err != nil {
+		return wrapPgErr("ApplyAccountMerge(survivor)", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return service.ErrMergeConflict
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET account_address = $3 WHERE project_id = $1 AND id = $2`,
+		r.projectID, m.OtherID, retiredAddress); err != nil {
+		return wrapPgErr("ApplyAccountMerge(retired address)", err)
+	}
+
+	for _, q := range []string{
+		`UPDATE oauth_identities SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
+		`UPDATE passkeys SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
+	} {
+		if _, err := tx.Exec(ctx, q, r.projectID, m.OtherID, m.SurvivorID); err != nil {
+			return wrapPgErr("ApplyAccountMerge(credentials)", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = $2`, r.projectID, m.OtherID); err != nil {
+		return wrapPgErr("ApplyAccountMerge(refresh tokens)", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions SET revoked_at_ms = $3
+		 WHERE project_id = $1 AND user_id = $2 AND revoked_at_ms = 0`, r.projectID, m.OtherID, m.AtMs); err != nil {
+		return wrapPgErr("ApplyAccountMerge(sessions)", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return wrapPgErr("ApplyAccountMerge(commit)", err)
+	}
+	return nil
+}

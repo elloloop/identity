@@ -9,6 +9,15 @@
     "anchor": "other"
   },
   {
+    "name": "GATEWAY_ACCOUNT_MERGE_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "turns on self-service MergeAccounts: a person merging another of their accounts into the one they are signed in to.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_ADMIN_API_SECRET",
     "type": "string",
     "default": "",

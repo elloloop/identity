@@ -416,213 +416,13 @@ func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User
 // matched nor whether the account exists.
 // If TOTP is enabled, returns TotpRequired=true with a LoginChallengeID.
 func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr, userAgent string) (*LoginResult, error) {
-	if !s.cfg.AuthAllowLocal {
-		return nil, ErrLocalAuthDisabled
-	}
-	if password == "" {
-		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
-	}
-
-	identifier := strings.TrimSpace(strings.ToLower(email))
-	// An absent identifier is a malformed request, not a failed lookup: it
-	// names no account of either kind, so refusing it with InvalidArgument
-	// (as the password check above does) creates no enumeration oracle. Every
-	// NON-empty identifier falls through to the uniform refusal below,
-	// whether it is an unknown email, an unknown username, or syntactically
-	// neither.
-	if identifier == "" {
-		return nil, fmt.Errorf("%w: email or username is required", ErrInvalidArgument)
-	}
-	var user *User
-	var err error
-	// identifierKey names the identifier kind in audit details (the audit
-	// trail is internal — it may distinguish what the client response must
-	// not).
-	identifierKey := "email"
-	if strings.Contains(identifier, "@") {
-		email = identifier
-		if err := validateEmailFormat(email); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
-		}
-		// Canonicalize the lookup key so alice.smith@gmail.com and
-		// alicesmith@gmail.com both resolve to the one User row stored
-		// under the canonical form. PasswordSignup writes the canonical
-		// form, so lookup must use the same. Canonicalized ONCE here and reused for
-		// both the access gate (cemail) and the DB lookup (email).
-		cemail, usable := canonicalMailbox(email)
-		if !usable {
-			return nil, errNoUsableMailbox
-		}
-		email = string(cemail)
-
-		// Enforce the project access mode (login context) BEFORE the user lookup and
-		// bcrypt: the check is DB-free (email + config), so failing fast on a
-		// closed/off-list project avoids a bcrypt CPU-DoS on disallowed addresses and
-		// keeps the denial identical regardless of password correctness (no
-		// password-guessing oracle). It reveals only allowlist membership — a project
-		// property, not account existence — matching PasswordSignup's fail-fast.
-		if err := s.enforceProjectAccessLogin(ctx, cemail); err != nil {
-			return nil, err
-		}
-		user, err = s.repo(ctx).FindUserByEmail(ctx, email)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// Username login. The email-keyed gate cannot run before the lookup —
-		// there is no email to key it on — so the account's access rule
-		// (enforceAccountAccessLogin) runs once the password is proven.
-		identifierKey = "username"
-		username := normalizeUsername(identifier)
-		if validateUsernameShape(username) == nil {
-			user, err = s.repo(ctx).FindUserByUsername(ctx, username)
-			if err != nil {
-				return nil, err
-			}
-		}
-		// A syntactically impossible username matches no account; fall through
-		// with user == nil to the uniform refusal.
-		identifier = username
-	}
-
-	if user == nil {
-		// Run a dummy bcrypt verification so the response time for an
-		// unknown identifier is comparable to the wrong-password path. This
-		// closes the enumeration timing oracle (the bcrypt cost dominates
-		// wall time; without this, the no-user path returns in microseconds
-		// while the wrong-password path takes ~250ms).
-		_ = passwords.Verify(password, getDummyPasswordHash())
-		s.logger.Info("local_login_failed", zap.String("reason", "user_not_found"))
-		s.audit.Log(
-			ctx, audit.EventLoginFailure,
-			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": "user_not_found", identifierKey: identifier}),
-		)
-		return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
-	}
-
-	// Lockout check. While locked, the account is blocked regardless of
-	// password correctness — emit a dedicated `login_locked` audit event
-	// so operators can distinguish "tried during lockout" from
-	// "threshold tripped".
-	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
-		s.audit.Log(
-			ctx, audit.EventLoginLocked,
-			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{
-				"reason":       "account_locked",
-				"locked_until": user.LockedUntil,
-			}),
-		)
-		return nil, fmt.Errorf("%w: account temporarily locked due to too many failed attempts", ErrAccountLocked)
-	}
-
-	// Lockout window has passed. Reset count + LockedUntil before
-	// proceeding so any subsequent failure starts a fresh count from 0.
-	if user.LockedUntil > 0 && user.LockedUntil <= s.nowMs() {
-		if err := s.repo(ctx).ResetFailedLoginCount(ctx, user.ID); err != nil {
-			s.logger.Warn("failed_login_reset_post_lockout_failed",
-				zap.String("user_id", user.ID), zap.Error(err))
-		}
-		user.FailedLoginCount = 0
-		user.LockedUntil = 0
-	}
-
-	// No password set (OAuth-only user).
-	if user.PasswordHash == "" {
-		s.audit.Log(
-			ctx, audit.EventLoginFailure,
-			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": "no_password_set"}),
-		)
-		return nil, fmt.Errorf("%w: no password set for this account", ErrNoPasswordSet)
-	}
-
-	if !passwords.Verify(password, user.PasswordHash) {
-		// Record the failure. Errors propagate as ErrUnauthenticated so
-		// a DB outage during the increment cannot be used to bypass the
-		// lockout (fail-closed).
-		_, lockedNow, recErr := s.recordFailedLogin(ctx, user)
-		if recErr != nil {
-			return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
-		}
-		if lockedNow {
-			s.audit.Log(
-				ctx, audit.EventAccountLocked,
-				audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-				audit.WithSuccess(false),
-				audit.WithDetails(map[string]any{
-					"lockout_seconds": s.cfg.LoginLockoutSeconds,
-					"max_attempts":    s.cfg.LoginMaxFailedAttempts,
-				}),
-			)
-		}
-		s.audit.Log(
-			ctx, audit.EventLoginFailure,
-			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": "password_mismatch"}),
-		)
-		return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
-	}
-
-	// Account status (lockout / suspended / invited / IDV) is a hard gate.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
-		return nil, err
-	}
-	// A username sign-in skipped the email-keyed gate above; it gets the
-	// account rule here, once the password is proven, so a refusal reveals
-	// nothing to a caller without the password. The rule judges an account
-	// that also has an email by that email, exactly as refresh will.
-	if identifierKey == "username" {
-		if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
-			return nil, err
-		}
-	}
-
-	// Email-verification gate. The password is correct at this point, so this
-	// is the one place the gate can fire without creating an enumeration oracle
-	// (an unknown email or a wrong password already returned above with the
-	// generic ErrUnauthenticated). When required, an unverified account cannot
-	// authenticate — this closes the pre-hijacking vector where an attacker
-	// plants a password on an unverified address and waits for the real owner
-	// to verify it via OAuth/passwordless.
-	//
-	// An account with NO email is out of the gate's scope entirely: a managed
-	// child is identified by a username and structurally has no address to
-	// verify, so gating it would make the parent-set password permanently
-	// unusable (the flag defaults ON) — and there is no pre-hijacking vector
-	// to close, because there is no address for an attacker to plant a
-	// password against or for an owner to later verify.
-	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && user.Email != "" && !user.EmailVerified {
-		s.audit.Log(
-			ctx, audit.EventLoginFailure,
-			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": "email_not_verified"}),
-		)
-		// Best-effort: resend the verification email so the user can complete
-		// verification and retry. Failures (throttle, transport) must not change
-		// the response — the gate result is the same either way.
-		if sendErr := s.sendEmailVerification(ctx, user.ID, emailLink{}); sendErr != nil {
-			s.logger.Warn("login_verification_resend_failed",
-				zap.String("user_id", user.ID), zap.Error(sendErr))
-		}
-		return nil, ErrEmailVerificationRequired
-	}
-
-	// Credentials are proven; consult the tenant's LoginPolicy. This runs
-	// only after authentication so a denial never reveals account existence,
-	// and before tokens are issued so a disallowed method yields no session.
-	// The policy resolves from the account's STORED email — for a username-
-	// identified managed child that is "" (no governed tenant), so the project
-	// default applies, matching the passkey login path.
-	decision, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodPassword)
+	user, decision, err := s.verifyPasswordCredential(ctx, email, password, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
+	}
+	identifierKey, identifier := "email", user.Email
+	if user.Email == "" || !strings.Contains(strings.TrimSpace(email), "@") {
+		identifierKey, identifier = "username", user.Username
 	}
 
 	// Password verified -- reset failed-attempt counters.
@@ -654,6 +454,226 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
+}
+
+// verifyPasswordCredential is the credential check of a password sign-in,
+// shared by PasswordLogin and MergeAccounts so the two cannot drift: local
+// auth on, the identifier resolved (an email, canonicalized, or a username),
+// the project and account access gates, the lockout, the password, the
+// account's status, the verified-email gate and the login policy — each with
+// its audit entry. It returns the account and the policy decision (whether a
+// second factor is required); it does not reset the failed-login count, record
+// a sign-in, or issue anything.
+func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, password, ipAddr, userAgent string) (*User, loginPolicyDecision, error) {
+	if !s.cfg.AuthAllowLocal {
+		return nil, loginPolicyDecision{}, ErrLocalAuthDisabled
+	}
+	if password == "" {
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: password is required", ErrInvalidArgument)
+	}
+
+	identifier := strings.TrimSpace(strings.ToLower(email))
+	// An absent identifier is a malformed request, not a failed lookup: it
+	// names no account of either kind, so refusing it with InvalidArgument
+	// (as the password check above does) creates no enumeration oracle. Every
+	// NON-empty identifier falls through to the uniform refusal below,
+	// whether it is an unknown email, an unknown username, or syntactically
+	// neither.
+	if identifier == "" {
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: email or username is required", ErrInvalidArgument)
+	}
+	var user *User
+	var err error
+	// identifierKey names the identifier kind in audit details (the audit
+	// trail is internal — it may distinguish what the client response must
+	// not).
+	identifierKey := "email"
+	if strings.Contains(identifier, "@") {
+		email = identifier
+		if err := validateEmailFormat(email); err != nil {
+			return nil, loginPolicyDecision{}, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+		}
+		// Canonicalize the lookup key so alice.smith@gmail.com and
+		// alicesmith@gmail.com both resolve to the one User row stored
+		// under the canonical form. PasswordSignup writes the canonical
+		// form, so lookup must use the same. Canonicalized ONCE here and reused for
+		// both the access gate (cemail) and the DB lookup (email).
+		cemail, usable := canonicalMailbox(email)
+		if !usable {
+			return nil, loginPolicyDecision{}, errNoUsableMailbox
+		}
+		email = string(cemail)
+
+		// Enforce the project access mode (login context) BEFORE the user lookup and
+		// bcrypt: the check is DB-free (email + config), so failing fast on a
+		// closed/off-list project avoids a bcrypt CPU-DoS on disallowed addresses and
+		// keeps the denial identical regardless of password correctness (no
+		// password-guessing oracle). It reveals only allowlist membership — a project
+		// property, not account existence — matching PasswordSignup's fail-fast.
+		if err := s.enforceProjectAccessLogin(ctx, cemail); err != nil {
+			return nil, loginPolicyDecision{}, err
+		}
+		user, err = s.repo(ctx).FindUserByEmail(ctx, email)
+		if err != nil {
+			return nil, loginPolicyDecision{}, err
+		}
+	} else {
+		// Username login. The email-keyed gate cannot run before the lookup —
+		// there is no email to key it on — so the account's access rule
+		// (enforceAccountAccessLogin) runs once the password is proven.
+		identifierKey = "username"
+		username := normalizeUsername(identifier)
+		if validateUsernameShape(username) == nil {
+			user, err = s.repo(ctx).FindUserByUsername(ctx, username)
+			if err != nil {
+				return nil, loginPolicyDecision{}, err
+			}
+		}
+		// A syntactically impossible username matches no account; fall through
+		// with user == nil to the uniform refusal.
+		identifier = username
+	}
+
+	if user == nil {
+		// Run a dummy bcrypt verification so the response time for an
+		// unknown identifier is comparable to the wrong-password path. This
+		// closes the enumeration timing oracle (the bcrypt cost dominates
+		// wall time; without this, the no-user path returns in microseconds
+		// while the wrong-password path takes ~250ms).
+		_ = passwords.Verify(password, getDummyPasswordHash())
+		s.logger.Info("local_login_failed", zap.String("reason", "user_not_found"))
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
+			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{"reason": "user_not_found", identifierKey: identifier}),
+		)
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+	}
+
+	// Lockout check. While locked, the account is blocked regardless of
+	// password correctness — emit a dedicated `login_locked` audit event
+	// so operators can distinguish "tried during lockout" from
+	// "threshold tripped".
+	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
+		s.audit.Log(
+			ctx, audit.EventLoginLocked,
+			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{
+				"reason":       "account_locked",
+				"locked_until": user.LockedUntil,
+			}),
+		)
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: account temporarily locked due to too many failed attempts", ErrAccountLocked)
+	}
+
+	// Lockout window has passed. Reset count + LockedUntil before
+	// proceeding so any subsequent failure starts a fresh count from 0.
+	if user.LockedUntil > 0 && user.LockedUntil <= s.nowMs() {
+		if err := s.repo(ctx).ResetFailedLoginCount(ctx, user.ID); err != nil {
+			s.logger.Warn("failed_login_reset_post_lockout_failed",
+				zap.String("user_id", user.ID), zap.Error(err))
+		}
+		user.FailedLoginCount = 0
+		user.LockedUntil = 0
+	}
+
+	// No password set (OAuth-only user).
+	if user.PasswordHash == "" {
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
+			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{"reason": "no_password_set"}),
+		)
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: no password set for this account", ErrNoPasswordSet)
+	}
+
+	if !passwords.Verify(password, user.PasswordHash) {
+		// Record the failure. Errors propagate as ErrUnauthenticated so
+		// a DB outage during the increment cannot be used to bypass the
+		// lockout (fail-closed).
+		_, lockedNow, recErr := s.recordFailedLogin(ctx, user)
+		if recErr != nil {
+			return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		}
+		if lockedNow {
+			s.audit.Log(
+				ctx, audit.EventAccountLocked,
+				audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+				audit.WithSuccess(false),
+				audit.WithDetails(map[string]any{
+					"lockout_seconds": s.cfg.LoginLockoutSeconds,
+					"max_attempts":    s.cfg.LoginMaxFailedAttempts,
+				}),
+			)
+		}
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
+			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{"reason": "password_mismatch"}),
+		)
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+	}
+
+	// Account status (lockout / suspended / invited / IDV) is a hard gate.
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return nil, loginPolicyDecision{}, err
+	}
+	// A username sign-in skipped the email-keyed gate above; it gets the
+	// account rule here, once the password is proven, so a refusal reveals
+	// nothing to a caller without the password. The rule judges an account
+	// that also has an email by that email, exactly as refresh will.
+	if identifierKey == "username" {
+		if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
+			return nil, loginPolicyDecision{}, err
+		}
+	}
+
+	// Email-verification gate. The password is correct at this point, so this
+	// is the one place the gate can fire without creating an enumeration oracle
+	// (an unknown email or a wrong password already returned above with the
+	// generic ErrUnauthenticated). When required, an unverified account cannot
+	// authenticate — this closes the pre-hijacking vector where an attacker
+	// plants a password on an unverified address and waits for the real owner
+	// to verify it via OAuth/passwordless.
+	//
+	// An account with NO email is out of the gate's scope entirely: a managed
+	// child is identified by a username and structurally has no address to
+	// verify, so gating it would make the parent-set password permanently
+	// unusable (the flag defaults ON) — and there is no pre-hijacking vector
+	// to close, because there is no address for an attacker to plant a
+	// password against or for an owner to later verify.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && user.Email != "" && !user.EmailVerified {
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
+			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{"reason": "email_not_verified"}),
+		)
+		// Best-effort: resend the verification email so the user can complete
+		// verification and retry. Failures (throttle, transport) must not change
+		// the response — the gate result is the same either way.
+		if sendErr := s.sendEmailVerification(ctx, user.ID, emailLink{}); sendErr != nil {
+			s.logger.Warn("login_verification_resend_failed",
+				zap.String("user_id", user.ID), zap.Error(sendErr))
+		}
+		return nil, loginPolicyDecision{}, ErrEmailVerificationRequired
+	}
+
+	// Credentials are proven; consult the tenant's LoginPolicy. This runs
+	// only after authentication so a denial never reveals account existence,
+	// and before tokens are issued so a disallowed method yields no session.
+	// The policy resolves from the account's STORED email — for a username-
+	// identified managed child that is "" (no governed tenant), so the project
+	// default applies, matching the passkey login path.
+	decision, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodPassword)
+	if err != nil {
+		return nil, loginPolicyDecision{}, err
+	}
+	return user, decision, nil
 }
 
 // ── OAuthLogin ─────────────────────────────────────────────────────────

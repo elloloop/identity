@@ -2652,6 +2652,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runEmailFoldConformance(t, driver)
 	runAccountAddressConformance(t, driver)
 	runMergedIntoConformance(t, driver)
+	runAccountMergeConformance(t, driver)
 }
 
 // uniqueHash returns a per-call unique token-hash string. Tests use

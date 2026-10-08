@@ -768,6 +768,7 @@ func New(deps Deps) (*Built, error) {
 	logHostedOAuthFlow(logger, returnAllow)
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
+	warnMergeWithoutWebhooks(deps.Config, logger)
 	// Inbound SCIM 2.0 provisioning (#260); see mountSCIM.
 	if err := mountSCIM(mux, deps, repo, auditLog, eventPublisher, logger); err != nil {
 		return nil, err
@@ -1263,4 +1264,15 @@ func mountSCIM(mux *http.ServeMux, deps Deps, repo service.Repository, auditLog 
 		defaultAccounts:  defaultAccounts,
 	}).register(mux, true)
 	return nil
+}
+
+// warnMergeWithoutWebhooks warns when self-service merging is on but
+// outbound webhooks are off: a merge retires an account for good and
+// announces it only through the user.merged webhook, so with webhooks off
+// applications never learn that data under the retired id belongs elsewhere.
+func warnMergeWithoutWebhooks(cfg *config.Config, logger *zap.Logger) {
+	if cfg.AccountMergeEnabled && !cfg.WebhooksEnabled {
+		logger.Warn("account_merge_without_webhooks",
+			zap.String("hint", "GATEWAY_ACCOUNT_MERGE_ENABLED is on but GATEWAY_WEBHOOKS_ENABLED is off: applications will not receive user.merged"))
+	}
 }

@@ -24,13 +24,16 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       stays.
     </li>
     <li>
-      The survivor takes over whatever lets the person keep signing in the way
-      they did. It takes the retired account's <strong>username</strong> if it
-      has none, so <code>bob</code> now signs in to the survivor. It takes the
-      retired account's <strong>password</strong> if it has none. With
-      <code>take_address</code>, it takes the retired account's account address,
-      and its own old address moves to the retired account so neither is freed
-      for someone else.
+      Everything that lets the person sign in the way they did moves to the
+      survivor, in one transaction:
+      <ul>
+        <li>the retired account's <strong>linked providers</strong> (Google, Apple, …) and <strong>passkeys</strong>, always;</li>
+        <li>its <strong>username</strong>, <strong>password</strong> and <strong>email</strong>, each only where the survivor has none of its own, so <code>bob</code> now signs in to the survivor;</li>
+        <li>with <code>take_address</code>, its account address. The survivor's old address moves to the retired account, so neither is freed for someone else.</li>
+      </ul>
+      If either account changes while the merge runs (another merge, a
+      deactivation), nothing is written and the call answers
+      <code>ABORTED</code>; try again.
     </li>
     <li>
       A <code>user.merged</code> event names the retired account and carries
@@ -39,16 +42,27 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     </li>
   </ul>
 
+  <h2>Turning it on</h2>
+  <p>
+    Self-service merging is <strong>off</strong> until you set
+    <code>GATEWAY_ACCOUNT_MERGE_ENABLED=true</code>. A merge retires an
+    account for good, and applications learn about it only through the
+    <code>user.merged</code> webhook. Subscribe every application that stores
+    data under user ids to <code>user.merged</code> first. The admin
+    <code>MergeUsers</code> works either way.
+  </p>
+
   <h2>Who can merge</h2>
   <ul>
     <li>
       <strong>The person</strong>, with <code>MergeAccounts</code> called from the
       survivor's session. They prove they control the other account with its
-      identifier (email or username) and password. These are checked as
-      <code>PasswordLogin</code> checks them: the same refusal for an unknown
-      identifier and a wrong password, the same lockout, and the same per-IP
-      limit. An account with two-step verification on cannot be merged by
-      password alone, so turn it off there first.
+      identifier (email or username) and password, checked by the same code as
+      a password sign-in: the access mode, the lockout, the account's status,
+      the verified-email requirement and the login policy all apply, with the
+      same refusals and audit entries, on the per-IP login limit. An account
+      protected by a second factor (enrolled two-step, or a policy requiring
+      one) cannot be merged by password alone: turn two-step off there first.
     </li>
     <li>
       <strong>An admin</strong>, with <code>MergeUsers</code>, naming both

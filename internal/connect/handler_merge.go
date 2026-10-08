@@ -18,7 +18,8 @@ func (h *IdentityHandler) MergeAccounts(
 	if callerID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
-	user, err := h.auth.MergeAccounts(ctx, callerID, req.Msg.OtherIdentifier, req.Msg.OtherPassword, req.Msg.TakeAddress)
+	user, err := h.auth.MergeAccounts(ctx, callerID, req.Msg.OtherIdentifier, req.Msg.OtherPassword,
+		clientIP(req.Header()), clientUserAgent(req.Header()), req.Msg.TakeAddress)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

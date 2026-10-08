@@ -382,6 +382,10 @@ func (StubRepository) AssignAccountAddress(context.Context, string, string) (str
 	return "", ErrServiceUnavailable
 }
 
+func (StubRepository) ApplyAccountMerge(context.Context, AccountMerge) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) FindUserByProviderID(context.Context, string, string) (*User, error) {
 	return nil, ErrServiceUnavailable
 }
