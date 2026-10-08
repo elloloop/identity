@@ -371,6 +371,10 @@ func TestSetManagedChildPassword_SetsAndCutsSessions(t *testing.T) {
 	f := newGuardianFixture(ctx, t)
 	seedChildSession(t, f.repo, f.child.ID)
 	const newPW = "An0ther!Str0ng"
+	// Even a flag left on the child: the guardian's password owes no change.
+	if err := f.repo.UpdateUser(ctx, f.child.ID, map[string]any{"password_change_required": true}); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, f.child.ID, newPW, strongPW, "", ""); err != nil {
 		t.Fatalf("SetManagedChildPassword: %v", err)
@@ -382,6 +386,9 @@ func TestSetManagedChildPassword_SetsAndCutsSessions(t *testing.T) {
 	}
 	if !passwords.Verify(newPW, stored.PasswordHash) {
 		t.Fatal("the new password does not verify against the stored hash")
+	}
+	if stored.PasswordChangeRequired {
+		t.Fatal("a password the guardian set must not owe a change")
 	}
 	if f.childSessionsLive(t) {
 		t.Fatal("setting the password must cut the child's sessions and refresh tokens")

@@ -142,6 +142,10 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 		"password_hash":            pwHash,
 		"password_change_required": false,
 		"updated_at":               now,
+		// A completed sign-in clears the failed-attempt count, as
+		// PasswordLogin does: wrong codes before it no longer count.
+		"failed_login_count": 0,
+		"locked_until":       int64(0),
 	}); err != nil {
 		return nil, fmt.Errorf("updating password: %w", err)
 	}

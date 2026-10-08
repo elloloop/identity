@@ -30,6 +30,40 @@ type AccountMerge struct {
 	AtMs        int64
 }
 
+// ApplyToUsers is the merge's change to the two account records, for a store
+// that holds them in memory (the memory driver and the test stores): the
+// guards the SQL drivers apply in their transaction, then the moves. It
+// changes nothing and returns ErrMergeConflict when either account is no
+// longer active and unmerged, or a move would overwrite a field the survivor
+// has filled. The caller re-points the other account's linked providers and
+// ends its sessions under the same lock.
+func (m AccountMerge) ApplyToUsers(survivor, other *User) error {
+	mergeable := func(u *User) bool { return u.Status == StatusActive && u.MergedIntoUserID == "" }
+	if survivor == nil || other == nil || m.OtherID == m.SurvivorID || !mergeable(other) || !mergeable(survivor) {
+		return ErrMergeConflict
+	}
+	if (m.MoveUsername && survivor.Username != "") || (m.MovePassword && survivor.PasswordHash != "") ||
+		(m.MoveEmail && survivor.Email != "") {
+		return ErrMergeConflict
+	}
+	if m.MoveUsername {
+		survivor.Username, other.Username = other.Username, ""
+	}
+	if m.MovePassword {
+		survivor.PasswordHash = other.PasswordHash
+	}
+	if m.MoveEmail {
+		survivor.Email, survivor.EmailVerified, survivor.EmailVerifiedAt = other.Email, other.EmailVerified, other.EmailVerifiedAt
+		other.Email, other.EmailVerified, other.EmailVerifiedAt = "", false, 0
+	}
+	if m.SwapAddress {
+		survivor.AccountAddress, other.AccountAddress = other.AccountAddress, survivor.AccountAddress
+	}
+	other.Status, other.MergedIntoUserID = StatusDeactivated, m.SurvivorID
+	other.UpdatedAt, survivor.UpdatedAt = time.UnixMilli(m.AtMs), time.UnixMilli(m.AtMs)
+	return nil
+}
+
 // ErrMergeConflict is returned by ApplyAccountMerge when either account is no
 // longer active and unmerged by the time the merge runs (a concurrent merge,
 // deactivation or deletion won); nothing was written.
@@ -330,8 +364,9 @@ func (s *AuthService) recentlyAuthenticated(authTimeSec int64) bool {
 	if authTimeSec <= 0 {
 		return false
 	}
-	// A sign-in stamped by a replica whose clock runs slightly ahead is
-	// still a sign-in; anything further in the future is not.
-	age := s.nowMs() - authTimeSec*1000
-	return age >= -authTimeClockSkew.Milliseconds() && age <= s.cfg.AccountMergeReauthMaxAge().Milliseconds()
+	// Compared in seconds, so no claim value can overflow the arithmetic. A
+	// sign-in stamped by a replica whose clock runs slightly ahead is still a
+	// sign-in; anything further in the future is not.
+	age := s.nowMs()/1000 - authTimeSec
+	return age >= -int64(authTimeClockSkew.Seconds()) && age <= int64(s.cfg.AccountMergeReauthMaxAge().Seconds())
 }

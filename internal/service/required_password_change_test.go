@@ -56,6 +56,7 @@ func TestRequiredPasswordChange_RoundTrip(t *testing.T) {
 	require.NotErrorIs(t, err, ErrPasswordChangeRequired)
 
 	ticket := passwordChangeTicket(t, svc, "issued@example.com")
+	user.FailedLoginCount = 2 // wrong attempts after the ticket was minted
 
 	res, err := svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
@@ -66,6 +67,7 @@ func TestRequiredPasswordChange_RoundTrip(t *testing.T) {
 	stored, _ := repo.GetUser(ctx, user.ID)
 	require.False(t, stored.PasswordChangeRequired)
 	require.True(t, passwords.Verify(strongPW, stored.PasswordHash))
+	require.Zero(t, stored.FailedLoginCount, "the completed sign-in clears the wrong-password count")
 
 	_, err = svc.PasswordLogin(ctx, "issued@example.com", issuedPW, "203.0.113.10", "agent")
 	require.ErrorIs(t, err, ErrUnauthenticated, "the issued password no longer signs in")

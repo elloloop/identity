@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.11 → next — merging accounts (additive); a temporary password must be replaced at first sign-in; SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
+## v4.11 → next — merging accounts, which needs a recent sign-in (`auth_time` on access tokens; native-gRPC hosts opt in with `GRPCTrustAuthTime`); a temporary password must be replaced at first sign-in; SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
 
 **Migration 0036** (SQLite 0019) adds `users.merged_into_user_id` with a
 constant default (catalog-only; `lock_timeout = 10s`; on timeout confirm the
@@ -21,8 +21,12 @@ column is absent, then `identity migrate force 35` and `identity migrate`).
   300; 0 selects it, and it cannot be turned off), read from the access
   token's new `auth_time` claim. Otherwise it answers `FAILED_PRECONDITION`
   `reauthentication_required`.
-- **Access tokens a sign-in issues carry `auth_time`** (OIDC, epoch
-  seconds). A refreshed token, or one from a QR handoff, carries none.
+- **Access tokens a sign-in issues carry `auth_time`** (epoch seconds;
+  named after OIDC's, but deliberately narrower). A refreshed token, or one
+  from a QR handoff, an anonymous sign-in or a password added to an
+  anonymous account, carries none. A client that signs a user in again
+  before `MergeAccounts` uses that sign-in's own access token, not a
+  refreshed one.
   Verifiers that ignore unknown claims see no change. **Native-gRPC hosts**
   that use `MergeAccounts` forward it as `x-authenticated-auth-time`
   metadata, after deleting any value the client sent, and set the new
