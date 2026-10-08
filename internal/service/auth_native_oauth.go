@@ -181,7 +181,7 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 	// of a NEW user is gated as self-signup inside resolveOrCreateUserByEmail.
 	// user.Email is the DB-persisted (canonical) account email; wrap once
 	// (idempotent, self-heals a legacy row).
-	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+	if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
 		return nil, err
 	}
 

@@ -2257,7 +2257,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// so a denial does not destroy the credential on its way out. Anonymous
 	// accounts carry no email to judge, and their own refusals run above.
 	if !timeoutUser.IsAnonymous {
-		if err := s.enforceProjectAccessLogin(ctx, canonicalize(timeoutUser.Email)); err != nil {
+		if err := s.enforceAccountAccessLogin(ctx, timeoutUser); err != nil {
 			return nil, "", "", err
 		}
 	}
@@ -2306,7 +2306,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		// consumed. Refresh is an anonymous account's only recurring sign of
 		// life; stamping it here is what keeps an active one out of the sweep.
 		s.touchAnonymousActivity(ctx, user)
-	} else if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+	} else if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
 		return nil, "", "", err
 	}
 

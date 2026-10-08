@@ -279,15 +279,15 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	// Password and username sign-up share one limiter and tag (the limiter
 	// keys on tag and IP): both create an account and hash a password, so an
 	// IP's sign-up budget is the surface's, not each RPC's.
-	passwordSignupLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0)
+	signupLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0)
 	limits := []middleware.PathLimit{
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
-			Limiter: passwordSignupLimiter,
+			Limiter: signupLimiter,
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/UsernameSignup", Tag: "signup",
-			Limiter: passwordSignupLimiter,
+			Limiter: signupLimiter,
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordLogin", Tag: "login",

@@ -577,6 +577,14 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
 		return nil, err
 	}
+	// A username sign-in skipped the email-keyed gate above; it gets the
+	// account rule here, once the password is proven, so a refusal reveals
+	// nothing to a caller without the password.
+	if user.Email == "" {
+		if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
+			return nil, err
+		}
+	}
 
 	// Email-verification gate. The password is correct at this point, so this
 	// is the one place the gate can fire without creating an enumeration oracle
@@ -801,7 +809,7 @@ func (s *AuthService) OAuthLogin(
 	// check then permits the (now existing) user for invite mode. user.Email is
 	// the DB-persisted (already canonical) account email; wrap once — idempotent,
 	// and it self-heals a legacy non-canonical row.
-	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+	if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
 		return nil, err
 	}
 
@@ -1344,7 +1352,7 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	// be on the list (an admin cannot invite someone the allowlist excludes), and
 	// a closed project refuses every acceptance. user.Email is the DB-persisted
 	// (canonical) account email; wrap once (idempotent, self-heals a legacy row).
-	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+	if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
 		return nil, err
 	}
 

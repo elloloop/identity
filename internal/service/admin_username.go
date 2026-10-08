@@ -31,12 +31,9 @@ func (s *AdminService) CreateUsernameUser(ctx context.Context, actorID, username
 	if err := validateUsernameFormat(username); err != nil {
 		return nil, err
 	}
-	role = strings.ToLower(strings.TrimSpace(role))
-	if role == "" {
-		role = "member"
-	}
-	if role != "admin" && role != "member" && role != "guest" {
-		return nil, fmt.Errorf("%w: role must be admin|member|guest", ErrInvalidArgument)
+	role, err := normalizeAssignableRole(role)
+	if err != nil {
+		return nil, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -86,4 +83,17 @@ func (s *AdminService) CreateUsernameUser(ctx context.Context, actorID, username
 		audit.WithDetails(map[string]any{"username": username, "role": role}),
 	)
 	return &InviteResult{User: user, TemporaryPassword: tempPassword}, nil
+}
+
+// normalizeAssignableRole is the one rule for the role an admin gives an
+// account it creates: admin, member or guest, member when unset.
+func normalizeAssignableRole(role string) (string, error) {
+	role = strings.ToLower(strings.TrimSpace(role))
+	if role == "" {
+		return "member", nil
+	}
+	if role != "admin" && role != "member" && role != "guest" {
+		return "", fmt.Errorf("%w: role must be admin|member|guest", ErrInvalidArgument)
+	}
+	return role, nil
 }

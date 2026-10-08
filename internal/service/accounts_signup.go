@@ -62,3 +62,17 @@ func accountsFor(scope *ProjectScope) ProjectAccountsConfig {
 	}
 	return scope.Accounts
 }
+
+// selfSignupRefusal is the refusal a person gets for creating their own
+// account of a kind whose mode is mode: none under "self", invitation-only
+// under "admin", and ErrAccountKindOff under "off".
+func selfSignupRefusal(mode string) error {
+	switch mode {
+	case SignupSelf:
+		return nil
+	case SignupAdmin:
+		return ErrSignupByInvitationOnly
+	default:
+		return ErrAccountKindOff
+	}
+}

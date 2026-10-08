@@ -58,6 +58,15 @@ import { Code } from "astro-expressive-code/components";
     "username_signup": "self"
   }
 }`} />
+  <p>A workplace:</p>
+  <Code lang="json" code={`{
+  "access": { "mode": "invite" },
+  "accounts": {
+    "domain": "example.com",
+    "email_signup": "off",
+    "username_signup": "admin"
+  }
+}`} />
   <p>
     A consumer product keeps email self-signup and, if it wants handles, turns
     on username self-signup. A workplace sets <code>email_signup</code> to
@@ -73,10 +82,24 @@ import { Code } from "astro-expressive-code/components";
     no email for an allowlist or a deny-list to match, so username self-signup
     works only in <code>open</code> mode: <code>invite</code> refuses it as
     invitation-only, and <code>allowlist</code> and <code>closed</code> refuse
-    it. The mode does not gate <em>sign-in</em> by username: whether a username
-    account may exist was settled when it was created, as it already was for
-    managed child accounts. SCIM provisioning is an identity provider's admin
-    channel and is not governed by <code>email_signup</code>.
+    it, as does any configured deny layer.
+  </p>
+  <p>
+    Signing in to a username account, and refreshing its session, follow one
+    rule: <code>open</code> and <code>invite</code> admit it, and
+    <code>allowlist</code> and <code>closed</code> refuse it, so closing a
+    project stops every username account too. Managed child accounts are the
+    exception: they sign in under every mode, because their guardian settled
+    whether they may exist. That makes <code>invite</code> the mode for a
+    workplace: nobody signs themselves up, and the accounts admins make sign in.
+  </p>
+  <p>
+    SCIM provisioning is an identity provider's admin channel and is not
+    governed by <code>email_signup</code>. The hosted sign-in page does not yet
+    read these settings: it offers email sign-up whenever the deployment
+    allows password sign-up, and takes only email identifiers, so a project
+    using username accounts or admin-only email accounts builds its own
+    sign-in screen for now.
   </p>
 
   <h3>Username accounts</h3>

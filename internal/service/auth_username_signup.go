@@ -24,7 +24,8 @@ import (
 // The project's access mode applies as it does to every self-signup, except
 // that a username has no email for an allowlist or the deny layer to match:
 // open admits, invite refuses with ErrSignupByInvitationOnly, and allowlist,
-// closed and an unset mode refuse with ErrAccessNotAllowed.
+// closed, an unset mode and any configured deny layer refuse with
+// ErrAccessNotAllowed.
 //
 // A username is a public handle the person chooses, so a taken one is
 // reported as taken (ErrAlreadyExists) rather than hidden behind a decoy:
@@ -42,12 +43,8 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 		return nil, ErrSignupDisabled
 	}
 	scope := ProjectScopeFromContext(ctx)
-	switch accountsFor(scope).usernameSignup() {
-	case SignupSelf:
-	case SignupAdmin:
-		return nil, ErrSignupByInvitationOnly
-	default:
-		return nil, ErrAccountKindOff
+	if err := selfSignupRefusal(accountsFor(scope).usernameSignup()); err != nil {
+		return nil, err
 	}
 	if scope != nil {
 		switch scope.Access.mode() {
@@ -55,6 +52,12 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 		case AccessModeInvite:
 			return nil, ErrSignupByInvitationOnly
 		default:
+			return nil, ErrAccessNotAllowed
+		}
+		// A deny layer (work email only, blocked domains) says who is turned
+		// away; a username carries no email it could clear, so a project that
+		// configures one admits no username self-signups.
+		if scope.Access.hasDenyLayer() {
 			return nil, ErrAccessNotAllowed
 		}
 	}

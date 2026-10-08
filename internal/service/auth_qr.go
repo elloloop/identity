@@ -252,7 +252,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	// would keep handing out sessions through QR until every pre-existing
 	// approval expired. Login context — the account already exists.
 	if !user.IsAnonymous {
-		if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+		if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
 			return nil, err
 		}
 	}

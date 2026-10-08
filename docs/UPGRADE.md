@@ -26,6 +26,17 @@ again.
   Email defaults to `self` and usernames to `off`, so nothing changes until
   you choose. New: `UsernameSignup`, and `CreateUser` takes `username` and
   returns `temporary_password` for a username account.
+- **Sign-in and refresh follow one access rule for every account.** An
+  account with an email is judged by its email, as before. A username
+  account is admitted under `open` and `invite` and refused under
+  `allowlist` and `closed`; a managed child is admitted under every mode.
+  Before, a managed child in a non-`open` project could sign in but its
+  first refresh was refused; now it refreshes too.
+- **Reserved usernames.** New usernames, managed children's included, may
+  not be a role name that speaks for a domain: `abuse`, `admin`,
+  `administrator`, `hostmaster`, `mailer-daemon`, `noc`, `no-reply`,
+  `noreply`, `postmaster`, `root`, `security`, `webmaster`. Existing
+  usernames are kept.
 - **`accounts` in a project's config is now read and validated.** A stored
   config that already had an `accounts` key with a `domain` that is not a
   fully qualified name stops that project resolving until it is fixed. An

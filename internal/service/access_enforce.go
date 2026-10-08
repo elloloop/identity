@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/elloloop/identity/internal/config"
 
@@ -95,21 +96,64 @@ func (s *AuthService) enforceProjectAccess(ctx context.Context, email canonicalE
 	return ErrAccessNotAllowed
 }
 
+// enforceAccountAccessLogin is the login-time access rule for an EXISTING
+// account, applied identically on every sign-in path and on refresh, so an
+// account never signs in where it could not refresh or the reverse.
+//
+// An account with an email is judged by its email, as enforceProjectAccessLogin
+// always has. A username account has no email for an allowlist or deny layer
+// to match, so it is judged by the mode alone:
+//
+//	mode        username account     managed child
+//	open        permit               permit
+//	invite      permit               permit
+//	allowlist   DENY                 permit
+//	closed      DENY                 permit
+//	unset       DENY                 permit
+//
+// open and invite admit an account that exists, whoever created it. allowlist
+// and closed refuse it, so turning a project closed stops every username
+// account a stranger could have signed up for while it was open. A managed
+// child keeps signing in under every mode: whether it may exist was settled by
+// its guardian's standing (CreateManagedChildAccount succeeds under
+// invite/closed), and its guardian edge is what identifies it.
+func (s *AuthService) enforceAccountAccessLogin(ctx context.Context, user *User) error {
+	if user.Email != "" || user.Username == "" {
+		return s.enforceProjectAccessLogin(ctx, canonicalize(user.Email))
+	}
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil {
+		return nil
+	}
+	switch scope.Access.mode() {
+	case AccessModeOpen, AccessModeInvite:
+		return nil
+	}
+	edges, err := s.repo(ctx).ListGuardiansOfChild(ctx, user.ID, 1, 0)
+	if err != nil {
+		return fmt.Errorf("checking guardianship: %w", err)
+	}
+	if len(edges) > 0 {
+		return nil
+	}
+	s.logger.Info("project_access_denied",
+		zap.String("project_id", s.projectID(ctx)),
+		zap.String("mode", scope.Access.mode()),
+		zap.Bool("username_account", true))
+	return ErrAccessNotAllowed
+}
+
 // enforceEmailSelfSignup refuses a self-signup the access mode admitted when
 // the project does not let people create their own email accounts
 // (accounts.email_signup "admin" or "off"). Like the mode check it is DB-free
 // and says nothing about whether the address has an account.
 func (s *AuthService) enforceEmailSelfSignup(ctx context.Context, scope *ProjectScope) error {
-	switch scope.Accounts.emailSignup() {
-	case SignupSelf:
-		return nil
-	case SignupAdmin:
-		s.logger.Info("email_self_signup_refused", zap.String("project_id", s.projectID(ctx)), zap.String("email_signup", SignupAdmin))
-		return ErrSignupByInvitationOnly
-	default:
-		s.logger.Info("email_self_signup_refused", zap.String("project_id", s.projectID(ctx)), zap.String("email_signup", SignupOff))
-		return ErrAccountKindOff
+	mode := scope.Accounts.emailSignup()
+	err := selfSignupRefusal(mode)
+	if err != nil {
+		s.logger.Info("email_self_signup_refused", zap.String("project_id", s.projectID(ctx)), zap.String("email_signup", mode))
 	}
+	return err
 }
 
 // accessAllowsCodeSend reports whether a request-phase LOGIN credential email (a

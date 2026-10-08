@@ -140,12 +140,9 @@ func (s *AdminService) InviteUser(
 	if accountsFor(ProjectScopeFromContext(ctx)).emailSignup() == SignupOff {
 		return nil, ErrAccountKindOff
 	}
-	role = strings.ToLower(strings.TrimSpace(role))
-	if role == "" {
-		role = "member"
-	}
-	if role != "admin" && role != "member" && role != "guest" {
-		return nil, errors.New("role must be admin|member|guest")
+	role, err := normalizeAssignableRole(role)
+	if err != nil {
+		return nil, err
 	}
 	if name == "" {
 		name = strings.Split(email, "@")[0]

@@ -230,3 +230,51 @@ func TestValidateUsernameFormat_ReservedRoleNames(t *testing.T) {
 	}
 	require.NoError(t, validateUsernameFormat("admins"))
 }
+
+// One login-time rule for username accounts, the same on sign-in and refresh.
+func TestUsernameAccount_AccessRuleOnSignInAndRefresh(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	open := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
+	res, err := svc.UsernameSignup(open, "gina", accessTestPassword, "", 0, "")
+	require.NoError(t, err)
+
+	// The project is closed afterwards: the self-signed-up account can
+	// neither sign in nor refresh.
+	closed := signupScope(t, `{"access":{"mode":"closed"},"accounts":{"username_signup":"self"}}`)
+	_, err = svc.PasswordLogin(closed, "gina", accessTestPassword, "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+	_, _, _, err = svc.RefreshToken(closed, res.RefreshToken, "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+	allow := signupScope(t, `{"access":{"mode":"allowlist","allowed_domains":["mail.example.com"]}}`)
+	_, err = svc.PasswordLogin(allow, "gina", accessTestPassword, "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+
+	// A wrong password still gets the generic refusal under closed, so the
+	// access refusal is no oracle for a caller without the password.
+	_, err = svc.PasswordLogin(closed, "gina", "Wr0ng!Passw0rd", "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrUnauthenticated)
+
+	// The workplace recipe: invite mode, admin-made username accounts sign in
+	// and refresh.
+	invite := signupScope(t, `{"access":{"mode":"invite"},"accounts":{"email_signup":"off","username_signup":"admin"}}`)
+	login, err := svc.PasswordLogin(invite, "gina", accessTestPassword, "1.2.3.4", "agent")
+	require.NoError(t, err)
+	_, _, _, err = svc.RefreshToken(invite, login.RefreshToken, "1.2.3.4", "agent")
+	require.NoError(t, err)
+
+	// A managed child keeps signing in and refreshing under closed: its
+	// guardian settled whether it may exist.
+	child := seedManagedChild(t, repo, "kid.closed", dobAgeMs(9))
+	seedGuardianEdge(context.Background(), t, repo, res.User.ID, child.ID)
+	kid, err := svc.PasswordLogin(closed, "kid.closed", strongPW, "1.2.3.4", "agent")
+	require.NoError(t, err)
+	_, _, _, err = svc.RefreshToken(closed, kid.RefreshToken, "1.2.3.4", "agent")
+	require.NoError(t, err)
+}
+
+func TestUsernameSignup_RefusedUnderADenyLayer(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	ctx := signupScope(t, `{"access":{"mode":"open","block_public_email_domains":true},"accounts":{"username_signup":"self"}}`)
+	_, err := svc.UsernameSignup(ctx, "hank", accessTestPassword, "", 0, "")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+}
