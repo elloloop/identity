@@ -991,6 +991,10 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 		if u.Username != "" && existing.Username == u.Username {
 			return "", fmt.Errorf("username %q: %w", u.Username, service.ErrAlreadyExists)
 		}
+		// And on (project_id, account_address) WHERE account_address <> ''.
+		if u.AccountAddress != "" && existing.AccountAddress == u.AccountAddress {
+			return "", fmt.Errorf("account address %q: %w", u.AccountAddress, service.ErrAlreadyExists)
+		}
 	}
 	id := u.ID
 	if id == "" {
@@ -1017,6 +1021,15 @@ func (r *MemRepo) UpdateUser(_ context.Context, userID string, fields map[string
 			for id, other := range r.users {
 				if id != userID && other.Username == username {
 					return fmt.Errorf("username %q: %w", username, service.ErrAlreadyExists)
+				}
+			}
+		}
+	}
+	if v, ok := fields["account_address"]; ok {
+		if addr, _ := v.(string); addr != "" {
+			for id, other := range r.users {
+				if id != userID && other.AccountAddress == addr {
+					return fmt.Errorf("account address %q: %w", addr, service.ErrAlreadyExists)
 				}
 			}
 		}
