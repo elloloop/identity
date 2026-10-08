@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.12 → next — the admin user view shows usernames (fix)
+## v4.12.0 → v4.12.1 — the admin user view shows usernames (fix)
 
 No schema change and no migration.
 
