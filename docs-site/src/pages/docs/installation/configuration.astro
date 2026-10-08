@@ -246,7 +246,7 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     <a href="#reset-and-verification-links">Reset and verification links</a>)
     still fails the call with <code>invalid_argument</code>, whether or not
     reset is enabled. Likewise <code>GATEWAY_PASSWORD_SIGNUP_ENABLED=false</code>
-    rejects self-serve <code>PasswordSignup</code> while leaving admin- and
+    rejects self-serve <code>PasswordSignup</code> and <code>UsernameSignup</code> while leaving admin- and
     invitation-driven account creation intact. See the
     <a href="/identity/docs/operations/password-toggle-rollout">password-toggle
     rollout runbook</a>.

@@ -37,7 +37,8 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>BeginOAuthLogin</code></td><td>none</td><td>Mint OAuth state + PKCE artifacts and return the provider authorization URL</td></tr>
     <tr><td><code>OAuthLogin</code></td><td>none</td><td>Exchange the authorization code, validate provider identity, upsert the user, and issue tokens</td></tr>
     <tr><td><code>PasswordSignup</code></td><td>none</td><td>Create user with email + password</td></tr>
-    <tr><td><code>PasswordLogin</code></td><td>none</td><td>Email + password → tokens (or TOTP challenge)</td></tr>
+    <tr><td><code>UsernameSignup</code></td><td>none</td><td>Create user with username + password (project's <code>accounts.username_signup</code> must be <code>self</code>)</td></tr>
+    <tr><td><code>PasswordLogin</code></td><td>none</td><td>Email or username + password → tokens (or TOTP challenge)</td></tr>
   </table>
 
   <h2>Session / token</h2>
@@ -112,7 +113,7 @@ import { Code } from "astro-expressive-code/components";
   <h2>Users</h2>
   <table>
     <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>CreateUser</code></td><td>admin</td><td>Direct create</td></tr>
+    <tr><td><code>CreateUser</code></td><td>admin</td><td>Direct create, by email or by <code>username</code> (a username account returns a <code>temporary_password</code>)</td></tr>
     <tr><td><code>GetUser</code></td><td>admin</td><td>Fetch one</td></tr>
     <tr><td><code>UpdateUser</code></td><td>admin</td><td>Edit name / avatar / role</td></tr>
     <tr><td><code>DeleteUser</code></td><td>admin</td><td>Hard delete</td></tr>
