@@ -57,10 +57,11 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     <code>user.merged</code> webhook, so merging relies on webhooks: turn
     them on (<code>GATEWAY_WEBHOOKS_ENABLED</code>) and subscribe every
     application that stores data under user ids to <code>user.merged</code>
-    first. With merging on and webhooks off, identity logs
-    <code>account_merge_without_webhooks</code> at boot. The admin
-    <code>MergeUsers</code> works either way, and announces itself the same
-    way.
+    first. The admin <code>MergeUsers</code> works whether or not
+    self-service merging is on, and it too announces each merge only through
+    <code>user.merged</code>, so it needs webhooks as well. Identity logs
+    <code>account_merge_without_webhooks</code> at boot when self-service
+    merging is on and webhooks are off; no warning covers admin merges.
   </p>
 
   <h2>Who can merge</h2>

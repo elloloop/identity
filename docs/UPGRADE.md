@@ -12,8 +12,9 @@ No schema change and no migration.
   applications learn about it only through the `user.merged` event: before
   turning on `GATEWAY_ACCOUNT_MERGE_ENABLED`, turn on
   `GATEWAY_WEBHOOKS_ENABLED` and subscribe every application that keeps data
-  under user ids to `user.merged`. With merging on and webhooks off, identity
-  logs `account_merge_without_webhooks` at boot.
+  under user ids to `user.merged`; the admin `MergeUsers` announces its merges
+  the same way. Identity already logs `account_merge_without_webhooks` at boot
+  (since v4.12) when self-service merging is on and webhooks are off.
 
 ## v4.12.0 → v4.12.1 — the admin user view shows usernames (fix)
 
