@@ -469,13 +469,9 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 			return nil, err
 		}
 	} else {
-		// Username login. The email-keyed project access gate is skipped
-		// deliberately: a username account has no email for the mode's
-		// allowlist or deny layer to match, and whether it may exist in the
-		// project was settled when it was created — by the guardian's standing
-		// for a managed child (which succeeds under invite/closed), by an
-		// admin for an admin-created account, and by UsernameSignup's own
-		// open-mode check for a self-signed-up one.
+		// Username login. The email-keyed gate cannot run before the lookup —
+		// there is no email to key it on — so the account's access rule
+		// (enforceAccountAccessLogin) runs once the password is proven.
 		identifierKey = "username"
 		username := normalizeUsername(identifier)
 		if validateUsernameShape(username) == nil {
@@ -579,8 +575,9 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	}
 	// A username sign-in skipped the email-keyed gate above; it gets the
 	// account rule here, once the password is proven, so a refusal reveals
-	// nothing to a caller without the password.
-	if user.Email == "" {
+	// nothing to a caller without the password. The rule judges an account
+	// that also has an email by that email, exactly as refresh will.
+	if identifierKey == "username" {
 		if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
 			return nil, err
 		}

@@ -24,8 +24,16 @@ func (s *AdminService) CreateUsernameUser(ctx context.Context, actorID, username
 	if _, err := s.requireAdmin(ctx, actorID); err != nil {
 		return nil, err
 	}
-	if accountsFor(ProjectScopeFromContext(ctx)).usernameSignup() == SignupOff {
+	scope := ProjectScopeFromContext(ctx)
+	if accountsFor(scope).usernameSignup() == SignupOff {
 		return nil, ErrAccountKindOff
+	}
+	// Refuse an account that could never sign in: outside open and invite,
+	// the access rule refuses every username account that is not a managed
+	// child (enforceAccountAccessLogin), as InviteUser refuses an invitation
+	// the invitee could never redeem.
+	if scope != nil && !usernameAccountsAdmitted(scope.Access) {
+		return nil, ErrAccessNotAllowed
 	}
 	username = normalizeUsername(username)
 	if err := validateUsernameFormat(username); err != nil {

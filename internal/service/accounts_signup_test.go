@@ -110,7 +110,13 @@ func TestCreateUsernameUser(t *testing.T) {
 	_, err := svc.CreateUsernameUser(off, "admin-1", "bob", "Bob", "member")
 	require.ErrorIs(t, err, ErrAccountKindOff, "usernames are off by default")
 
-	ctx := signupScope(t, `{"access":{"mode":"closed"},"accounts":{"domain":"accounts.example.com","username_signup":"admin"}}`)
+	for _, mode := range []string{`"closed"`, `"allowlist","allowed_domains":["mail.example.com"]`} {
+		refused := signupScope(t, `{"access":{"mode":`+mode+`},"accounts":{"username_signup":"admin"}}`)
+		_, err := svc.CreateUsernameUser(refused, "admin-1", "bob", "", "")
+		require.ErrorIs(t, err, ErrAccessNotAllowed, "an account that could never sign in is refused under %s", mode)
+	}
+
+	ctx := signupScope(t, `{"access":{"mode":"invite"},"accounts":{"domain":"accounts.example.com","username_signup":"admin"}}`)
 	_, err = svc.CreateUsernameUser(ctx, "member-1", "bob", "Bob", "member")
 	require.Error(t, err, "only an admin")
 
@@ -277,4 +283,22 @@ func TestUsernameSignup_RefusedUnderADenyLayer(t *testing.T) {
 	ctx := signupScope(t, `{"access":{"mode":"open","block_public_email_domains":true},"accounts":{"username_signup":"self"}}`)
 	_, err := svc.UsernameSignup(ctx, "hank", accessTestPassword, "", 0, "")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
+}
+
+// A username account that also has an email is judged by that email when it
+// signs in by username, exactly as on refresh.
+func TestUsernameAccount_WithEmailJudgedByEmail(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	open := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
+	res, err := svc.UsernameSignup(open, "ivan", accessTestPassword, "", 0, "")
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateUser(open, res.User.ID, map[string]any{"email": "ivan@other.example.com"}))
+
+	allow := signupScope(t, `{"access":{"mode":"allowlist","allowed_domains":["mail.example.com"]}}`)
+	_, err = svc.PasswordLogin(allow, "ivan", accessTestPassword, "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+
+	listed := signupScope(t, `{"access":{"mode":"allowlist","allowed_domains":["other.example.com"]}}`)
+	_, err = svc.PasswordLogin(listed, "ivan", accessTestPassword, "1.2.3.4", "agent")
+	require.NoError(t, err)
 }

@@ -92,6 +92,10 @@ import { Code } from "astro-expressive-code/components";
     exception: they sign in under every mode, because their guardian settled
     whether they may exist. That makes <code>invite</code> the mode for a
     workplace: nobody signs themselves up, and the accounts admins make sign in.
+    <code>CreateUser</code> refuses a username account under
+    <code>allowlist</code> and <code>closed</code>, where it could never sign
+    in. A username account that has also added an email is judged by that
+    email, like any email account.
   </p>
   <p>
     SCIM provisioning is an identity provider's admin channel and is not

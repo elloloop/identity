@@ -125,8 +125,7 @@ func (s *AuthService) enforceAccountAccessLogin(ctx context.Context, user *User)
 	if scope == nil {
 		return nil
 	}
-	switch scope.Access.mode() {
-	case AccessModeOpen, AccessModeInvite:
+	if usernameAccountsAdmitted(scope.Access) {
 		return nil
 	}
 	edges, err := s.repo(ctx).ListGuardiansOfChild(ctx, user.ID, 1, 0)
@@ -256,4 +255,15 @@ func modeAdmits(access ProjectAccessConfig, email canonicalEmail, isSignup bool)
 		// AccessModeClosed and any unset/unrecognized mode: default-DENY.
 		return false
 	}
+}
+
+// usernameAccountsAdmitted reports whether the mode admits username accounts
+// that are not managed children: open and invite do; allowlist, closed and an
+// unset mode, which have no email to judge them by, do not.
+func usernameAccountsAdmitted(access ProjectAccessConfig) bool {
+	switch access.mode() {
+	case AccessModeOpen, AccessModeInvite:
+		return true
+	}
+	return false
 }
