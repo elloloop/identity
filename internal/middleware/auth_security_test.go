@@ -182,3 +182,28 @@ func mintToken(t *testing.T, s *jwttest.Signer, sub string) string {
 	require.NoError(t, err)
 	return tok
 }
+
+// The sign-in time reaches the handlers only from a verified token: a
+// client-sent X-Authenticated-Auth-Time is dropped, and a token's auth_time
+// is passed through.
+func TestAuthMiddleware_AuthTimeComesOnlyFromTheToken(t *testing.T) {
+	kr := newSecTestKR(t)
+	var seen string
+	handler := AuthMiddleware(kr, "", "", false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get(AuthenticatedAuthTimeHeader)
+	}))
+	serve := func(token string) string {
+		seen = ""
+		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/MergeAccounts", nil)
+		req.Header.Set(AuthenticatedAuthTimeHeader, "9999999999")
+		req.Header.Set("Authorization", "Bearer "+token)
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+		return seen
+	}
+
+	assert.Empty(t, serve(mintToken(t, kr, "user-1")), "a token without auth_time carries none, whatever the client sent")
+
+	tok, err := kr.SignAccessToken(context.Background(), jwtpkg.Claims{Sub: "user-1", Tenant: "t1", AuthTime: 1_700_000_000}, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, "1700000000", serve(tok))
+}

@@ -7377,8 +7377,13 @@ components:
         MergeAccountsRequest merges another account of the caller into the
          caller's own (the survivor). The other account is retired, not deleted
          (DEACTIVATED with merged_into_user_id set); its data stays under its id for the application to move,
-         announced by a user.merged event. The survivor takes the other's username
-         when it has none, and its password when it has none.
+         announced by a user.merged event. The survivor takes the other's username,
+         password and email where it has none, and the other's linked providers; a
+         password that two-step verification protects never moves. The caller's
+         session must come from a sign-in within
+         GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS (the access token's auth_time);
+         otherwise the call fails with FAILED_PRECONDITION and the stable
+         `reauthentication_required` token: sign the user in again and retry.
     identity.v1.MergeAccountsResponse:
       type: object
       properties:

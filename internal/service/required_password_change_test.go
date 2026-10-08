@@ -206,7 +206,7 @@ func TestRequiredPasswordChange_ClearedWhenTheUserSetsTheirOwn(t *testing.T) {
 func TestMergeAccounts_RefusesAnIssuedPassword(t *testing.T) {
 	svc, repo, survivor, native, ctx := mergeFixture(t)
 	native.PasswordChangeRequired = true
-	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	_, err := svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrMergeRefused)
 	still, _ := repo.GetUser(ctx, native.ID)
 	require.Equal(t, StatusActive, still.Status)

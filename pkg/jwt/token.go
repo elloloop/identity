@@ -57,9 +57,15 @@ type Claims struct {
 	// Binding ties a purpose ticket to the state it was minted against (an
 	// opaque fingerprint the issuing flow defines), so a change to that state
 	// spends the ticket. Empty on access tokens and on unbound tickets.
-	Binding   string `json:"bnd,omitempty"`
-	IssuedAt  int64  `json:"iat"`
-	ExpiresAt int64  `json:"exp"`
+	Binding string `json:"bnd,omitempty"`
+	// AuthTime is when the user authenticated (OIDC `auth_time`, epoch
+	// seconds), present only on a token a sign-in issued: a refreshed token,
+	// or one from a flow that proves no credential (a QR handoff), omits it.
+	// On a purpose ticket it carries the sign-in of the session the ticket
+	// interrupted. An RPC that needs a recent sign-in compares it with now.
+	AuthTime  int64 `json:"auth_time,omitempty"`
+	IssuedAt  int64 `json:"iat"`
+	ExpiresAt int64 `json:"exp"`
 }
 
 // ClaimsMap converts the access-token claims plus standard iat/exp into
@@ -96,6 +102,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if c.Binding != "" {
 		m["bnd"] = c.Binding
+	}
+	if c.AuthTime > 0 {
+		m["auth_time"] = c.AuthTime
 	}
 	if len(c.Audience) > 0 {
 		m["aud"] = c.Audience
@@ -259,6 +268,9 @@ func verifyToken(tokenStr string, kp KeyProvider, expectedTenant, expectedAudien
 	if v, ok := tok.Get("bnd"); ok {
 		claims.Binding, _ = v.(string)
 	}
+	if v, ok := tok.Get("auth_time"); ok {
+		claims.AuthTime = numericClaim(v)
+	}
 	if v, ok := tok.Get("is_minor"); ok {
 		claims.IsMinor, _ = v.(bool)
 	}
@@ -380,4 +392,22 @@ func extractKID(tokenBytes []byte) (string, error) {
 	}
 	headers := sigs[0].ProtectedHeaders()
 	return headers.KeyID(), nil
+}
+
+// numericClaim reads a JSON number claim, which a JWT library may decode as
+// float64, json.Number or an integer type; anything else reads as zero.
+func numericClaim(v any) int64 {
+	switch n := v.(type) {
+	case float64:
+		return int64(n)
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return i
+	default:
+		return 0
+	}
 }

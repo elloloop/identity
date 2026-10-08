@@ -64,8 +64,18 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     <li>
       <strong>The person</strong>, with <code>MergeAccounts</code> called from the
       survivor's session, with the client assurance a password sign-in needs.
-      The survivor is checked first, so an account that could not take another
-      in learns nothing about the other's password. They prove they control the other account with its
+      The session must come from a <strong>recent sign-in</strong>: within
+      <code>GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS</code> (default 300)
+      of the call, by any method the account has, its second factor
+      included. A refresh does not count, nor does a session opened by a QR
+      handoff: sign the person in on that device with one of their
+      credentials. An older session gets
+      <code>FAILED_PRECONDITION</code> with
+      <code>reauthentication_required</code>: sign the person in again, then
+      retry. A stolen or long-lived session therefore cannot pull another
+      account's credentials onto the survivor. The survivor is checked first,
+      so an account that could not take another in learns nothing about the
+      other's password. They prove they control the other account with its
       identifier (email or username) and password, checked by the same code as
       a password sign-in: the access mode, the lockout, the account's status,
       the verified-email requirement and the login policy all apply, with the

@@ -257,7 +257,12 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 		}
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	// A QR handoff proves no credential on this device: the session it opens
+	// is new (its own absolute lifetime) but carries no auth_time, so it never
+	// counts as a recent sign-in, and its refreshes carry none either. The pending-deletion cancel issueTokens does
+	// is kept: the approving device did sign in.
+	s.cancelPendingDeletionOnLogin(ctx, user)
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, 0, 0)
 	if err != nil {
 		return nil, err
 	}

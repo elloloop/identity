@@ -360,3 +360,19 @@ func TestValidate_UsernameTakenBudgetNotNegative(t *testing.T) {
 		t.Fatalf("Validate = %v, want the negative budget refused", err)
 	}
 }
+
+func TestAccountMergeReauthMaxAge(t *testing.T) {
+	c := &Config{}
+	if got := c.AccountMergeReauthMaxAge(); got != DefaultAccountMergeReauthMaxAgeSeconds*time.Second {
+		t.Fatalf("unset: got %v, want the default", got)
+	}
+	c.AccountMergeReauthMaxAgeSeconds = 60
+	if got := c.AccountMergeReauthMaxAge(); got != time.Minute {
+		t.Fatalf("set: got %v", got)
+	}
+	c = Load()
+	c.AccountMergeReauthMaxAgeSeconds = -1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS") {
+		t.Fatalf("negative must be refused, got %v", err)
+	}
+}

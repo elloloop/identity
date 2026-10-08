@@ -116,7 +116,8 @@ silently pick which one survives, and that is the application's decision, not
 the server's.
 
 *Amended in v4.12:* merging is now available as its own explicit operation,
-`MergeAccounts` (proved by the other account's password) and the admin
+`MergeAccounts` (proved by the other account's password, from a session
+whose sign-in is recent: the token's `auth_time`) and the admin
 `MergeUsers`. The caller names the survivor, and nothing is deleted: the other
 account is retired (deactivated, `merged_into_user_id` set) with its data
 kept, and a `user.merged` event tells applications to move what they hold under

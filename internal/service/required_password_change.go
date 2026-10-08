@@ -60,6 +60,9 @@ func (s *AuthService) requirePasswordChange(ctx context.Context, user *User, pol
 	}
 	ticket, err := s.signPurposeTicket(ctx, jwt.Claims{
 		Sub: user.ID, Purpose: tokenPurposePasswordChange, Binding: passwordBinding(user.PasswordHash),
+		// The issued password was just proven: the sign-in the completion
+		// continues.
+		AuthTime: s.nowMs() / 1000,
 	}, passwordChangeTicketTTL)
 	if err != nil {
 		return err
@@ -163,8 +166,11 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 		audit.WithDetails(map[string]any{"reason": "password_change_required", "sessions_revoked": sessionsRevoked}),
 	)
 
+	// The sign-in happened when the issued password was proven; the ticket
+	// carries that moment as the session's auth_time.
 	s.updateLastLogin(ctx, user.ID)
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	s.cancelPendingDeletionOnLogin(ctx, user)
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, s.nowMs(), claims.AuthTime*1000)
 	if err != nil {
 		return nil, err
 	}

@@ -1819,15 +1819,20 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	// it is the one place to auto-cancel a pending self-service deletion: an
 	// owner who signs back in during the grace window has reclaimed the account.
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, 0)
+	now := s.nowMs()
+	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, now, now)
 }
 
 // issueTokensWithSessionStart mints a token pair, anchoring the session's
-// absolute lifetime at sessionStartedAtMs. A value <= 0 anchors a brand-new
-// session at now (the initial-login case); the refresh path passes the consumed
-// token's SessionStartedAt so the per-tenant absolute timeout is measured from
-// the original login rather than re-set on every rotation.
-func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs int64) (string, string, error) {
+// absolute lifetime at sessionStartedAtMs (<= 0 anchors a new session at
+// now) and stamping authTimeMs as the token's auth_time: the sign-in that
+// opened the session, which only a credential proof may set to now. A
+// session no sign-in vouches for passes 0 and carries no auth_time, so it
+// can never count as a recent sign-in. The refresh path passes the consumed
+// token's SessionStartedAt as the anchor, so the absolute timeout keeps
+// measuring from the original sign-in, and no auth_time: a refresh is not a
+// sign-in, and only the tokens a sign-in issues vouch for one.
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
 	now := s.nowMs()
 	sessionStart := sessionStartedAtMs
 	if sessionStart <= 0 {
@@ -1849,7 +1854,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// written. Like the product gate it lives here, at the chokepoint, so
 	// every session-issuing path — initial login, refresh, and any path
 	// added later — is covered by construction.
-	if err := s.enforceDOBRequired(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.enforceDOBRequired(ctx, user, authTimeMs, ipAddr, userAgent); err != nil {
 		return "", "", err
 	}
 
@@ -1870,6 +1875,8 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		AvatarURL: user.AvatarURL,
 		IsMinor:   user.IsMinor,
 		Anonymous: user.IsAnonymous,
+		// Set only when a sign-in issues this token.
+		AuthTime: authTimeMs / 1000,
 	}
 	if s.cfg.JWTAudience != "" {
 		claims.Audience = []string{s.cfg.JWTAudience}
@@ -2277,7 +2284,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// issueTokensWithSessionStart (so nothing is bypassed); this early pass
 	// exists only so the refusal is non-destructive and the client can
 	// complete the step and rotate normally.
-	if err := s.enforceDOBRequired(ctx, timeoutUser, ipAddr, userAgent); err != nil {
+	if err := s.enforceDOBRequired(ctx, timeoutUser, 0, ipAddr, userAgent); err != nil {
 		return nil, "", "", err
 	}
 
@@ -2349,8 +2356,8 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// Propagate the session-start anchor UNCHANGED across the rotation so the
 	// absolute timeout keeps measuring from the original login. A legacy row
 	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
-	// issueTokensWithSessionStart.
-	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, record.SessionStartedAt)
+	// issueTokensWithSessionStart. No auth_time: a rotation is not a sign-in.
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, record.SessionStartedAt, 0)
 	if err != nil {
 		return nil, "", "", err
 	}

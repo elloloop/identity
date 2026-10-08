@@ -265,3 +265,20 @@ func TestClaims_AllFieldsPresent(t *testing.T) {
 	assert.NotNil(t, m["iat"])
 	assert.NotNil(t, m["exp"])
 }
+
+// auth_time round-trips: written only when set, read back as epoch seconds.
+func TestClaims_AuthTimeRoundTrip(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+	tok, err := s.SignAccessToken(context.Background(), Claims{Sub: "u", AuthTime: 1_700_000_000}, 15*time.Minute)
+	require.NoError(t, err)
+	claims, err := VerifyAccessToken(tok, s, "", "", false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1_700_000_000), claims.AuthTime)
+
+	tok, err = s.SignAccessToken(context.Background(), Claims{Sub: "u"}, 15*time.Minute)
+	require.NoError(t, err)
+	claims, err = VerifyAccessToken(tok, s, "", "", false)
+	require.NoError(t, err)
+	assert.Zero(t, claims.AuthTime)
+	assert.NotContains(t, Claims{Sub: "u"}.ClaimsMap(time.Now(), time.Minute), "auth_time")
+}
