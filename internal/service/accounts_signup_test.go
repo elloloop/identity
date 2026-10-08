@@ -205,3 +205,28 @@ func TestUsernameSignup_ChildIsAGuardiansToCreate(t *testing.T) {
 	_, err = svc.UsernameSignup(ctx, "grownup", accessTestPassword, "", dobAgeMs(30), "")
 	require.NoError(t, err)
 }
+
+func TestUsernameSignup_Throttled(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.signupThrottle = newEmailSendThrottle(60_000, 0)
+	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
+
+	// Spend the username's bucket.
+	require.True(t, svc.signupThrottle.allow(usernameThrottleKey("project-a", "erin"), svc.nowMs()))
+	_, err := svc.UsernameSignup(ctx, "erin", accessTestPassword, "", 0, "")
+	require.ErrorIs(t, err, ErrSignupThrottled)
+
+	// Other buckets are untouched: another username, the same username in
+	// another project, and the same string as an email key.
+	_, err = svc.UsernameSignup(ctx, "frank", accessTestPassword, "", 0, "")
+	require.NoError(t, err)
+	require.True(t, svc.signupThrottle.allow(usernameThrottleKey("project-b", "erin"), svc.nowMs()))
+	require.True(t, svc.signupThrottle.allow("erin", svc.nowMs()))
+}
+
+func TestValidateUsernameFormat_ReservedRoleNames(t *testing.T) {
+	for _, name := range []string{"admin", "postmaster", "abuse", "webmaster", "noreply"} {
+		require.ErrorIs(t, validateUsernameFormat(name), ErrInvalidArgument, name)
+	}
+	require.NoError(t, validateUsernameFormat("admins"))
+}

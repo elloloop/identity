@@ -345,3 +345,38 @@ func TestBuildRateLimits_WindowFromConfig(t *testing.T) {
 
 	assert.Equal(t, time.Minute, rateLimitWindow(&config.Config{}))
 }
+
+// TestBuildRateLimits_UsernameSignupLimited asserts UsernameSignup is on the
+// per-IP signup quota and shares PasswordSignup's budget: an IP that spent
+// it on one sign-up RPC cannot start over on the other.
+func TestBuildRateLimits_UsernameSignupLimited(t *testing.T) {
+	cfg := &config.Config{
+		RateLimitWindowSeconds:     60,
+		RateLimitSignupPerIP:       2,
+		RateLimitLoginPerIP:        30,
+		RateLimitResetPerIP:        5,
+		RateLimitVerifyPerIP:       20,
+		RateLimitPasswordlessPerIP: 5,
+	}
+	limits := buildRateLimits(cfg)
+	byPath := map[string]middleware.PathLimit{}
+	for _, l := range limits {
+		byPath[l.PathPrefix] = l
+	}
+	require.Contains(t, byPath, "/identity.v1.IdentityService/UsernameSignup")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	call := func(path string) int {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "9.9.9.8")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	assert.Equal(t, http.StatusOK, call("/identity.v1.IdentityService/PasswordSignup"))
+	assert.Equal(t, http.StatusOK, call("/identity.v1.IdentityService/UsernameSignup"))
+	assert.Equal(t, http.StatusTooManyRequests, call("/identity.v1.IdentityService/UsernameSignup"), "shared budget spent")
+	assert.Equal(t, http.StatusTooManyRequests, call("/identity.v1.IdentityService/PasswordSignup"), "shared budget spent")
+}

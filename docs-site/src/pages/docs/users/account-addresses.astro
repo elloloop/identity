@@ -69,10 +69,14 @@ import { Code } from "astro-expressive-code/components";
     are a guardian's to create and are not governed by these settings.
   </p>
   <p>
-    The access mode still applies. A username has no email for an allowlist or
-    a deny-list to match, so username self-signup works only in
-    <code>open</code> mode: <code>invite</code> refuses it as invitation-only,
-    and <code>allowlist</code> and <code>closed</code> refuse it.
+    The access mode still gates username <em>self-signup</em>. A username has
+    no email for an allowlist or a deny-list to match, so username self-signup
+    works only in <code>open</code> mode: <code>invite</code> refuses it as
+    invitation-only, and <code>allowlist</code> and <code>closed</code> refuse
+    it. The mode does not gate <em>sign-in</em> by username: whether a username
+    account may exist was settled when it was created, as it already was for
+    managed child accounts. SCIM provisioning is an identity provider's admin
+    channel and is not governed by <code>email_signup</code>.
   </p>
 
   <h3>Username accounts</h3>
@@ -93,7 +97,16 @@ import { Code } from "astro-expressive-code/components";
       start or end with <code>.</code>, or contain <code>..</code>.
     </li>
     <li>
-      A username is a public handle, so a taken one is reported as taken.
+      A username is a public handle, so a taken one is reported as taken. This
+      tells a caller whether a username exists in the project, managed child
+      usernames included. The per-IP sign-up limit (shared with
+      <code>PasswordSignup</code>) and a per-username throttle, which answers
+      <code>RESOURCE_EXHAUSTED</code>, bound how fast anyone can ask.
+    </li>
+    <li>
+      Role names that speak for a domain, such as <code>admin</code>,
+      <code>postmaster</code>, <code>abuse</code> and <code>webmaster</code>,
+      are reserved.
     </li>
     <li>
       A date of birth in the child band is refused. A child's account is made by
@@ -101,7 +114,9 @@ import { Code } from "astro-expressive-code/components";
     </li>
     <li>
       A username account has no email, so it has no email-based password reset.
-      An admin resets its password.
+      An admin resets its password with <code>ResetUserPassword</code>. The
+      temporary password from <code>CreateUser</code> is not forced to change at
+      first sign-in, so tell the person to change it.
     </li>
   </ul>
 

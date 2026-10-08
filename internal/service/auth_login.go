@@ -408,7 +408,8 @@ func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User
 
 // PasswordLogin authenticates a user with identifier + password. The
 // identifier is an email address, OR — when it contains no '@' — the username
-// of a managed child account within the project. The two lookups share one
+// of a username account within the project (a managed child, a username
+// sign-up or an admin-created username account). The two lookups share one
 // failure surface: unknown identifier, wrong password, and (on the username
 // path) a syntactically impossible username all return the identical generic
 // invalid-credentials refusal, so the endpoint discloses neither which form
@@ -468,10 +469,13 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 			return nil, err
 		}
 	} else {
-		// Managed-child username login. The email-keyed project access gate is
-		// skipped deliberately: a managed child has no email to gate on, and
-		// the membership question was settled at creation by the guardian's
-		// standing (CreateManagedChildAccount succeeds under invite/closed).
+		// Username login. The email-keyed project access gate is skipped
+		// deliberately: a username account has no email for the mode's
+		// allowlist or deny layer to match, and whether it may exist in the
+		// project was settled when it was created — by the guardian's standing
+		// for a managed child (which succeeds under invite/closed), by an
+		// admin for an admin-created account, and by UsernameSignup's own
+		// open-mode check for a self-signed-up one.
 		identifierKey = "username"
 		username := normalizeUsername(identifier)
 		if validateUsernameShape(username) == nil {

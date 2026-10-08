@@ -416,14 +416,15 @@ type User struct {
 	// market on file" — the project default or the deployment-wide thresholds
 	// apply.
 	Market string `protobuf:"bytes,27,opt,name=market,proto3" json:"market,omitempty"`
-	// username is the parent-chosen, project-unique handle identifying a
-	// managed child account (children often have no email). Lowercase
+	// username is the project-unique handle identifying a username account:
+	// one a guardian made (CreateManagedChildAccount), a person signed up for
+	// (UsernameSignup) or an admin created (CreateUser.username). Lowercase
 	// alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase at
 	// write time. A new or renamed username may not contain `-at-`, start or
 	// end with `.`, contain `..`, or be a reserved role name (admin,
-	// postmaster, …); one stored before those rules is kept. Empty on every
-	// account not created via CreateManagedChildAccount. Unique within the
-	// project when non-empty, and usable as the PasswordLogin identifier.
+	// postmaster, …); one stored before those rules is kept. Empty on email
+	// accounts. Unique within the project when non-empty, and usable as the
+	// PasswordLogin identifier.
 	Username string `protobuf:"bytes,28,opt,name=username,proto3" json:"username,omitempty"`
 	// account_address is the address the project issued this account on its
 	// own domain (config_json accounts.domain): <username>@<domain> for a
@@ -2986,8 +2987,8 @@ func (x *UsernameSignupResponse) GetExpiresIn() int32 {
 type PasswordLoginRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// email is the login identifier: the account's email address, OR — when the
-	// value contains no `@` — the username of a managed child account within
-	// this project (see User.username). The response is identical whether the
+	// value contains no `@` — the username of a username account within this
+	// project (see User.username). The response is identical whether the
 	// identifier matched by email, by username, or not at all, so the endpoint
 	// discloses neither which form matched nor whether the account exists.
 	Email         string `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`

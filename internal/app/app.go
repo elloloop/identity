@@ -276,16 +276,18 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	// budget is the surface's, not each RPC's. The login budget is the right
 	// analogue: the cost driver is the same password verification.
 	guardianLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0)
+	// Password and username sign-up share one limiter and tag (the limiter
+	// keys on tag and IP): both create an account and hash a password, so an
+	// IP's sign-up budget is the surface's, not each RPC's.
+	passwordSignupLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0)
 	limits := []middleware.PathLimit{
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+			Limiter: passwordSignupLimiter,
 		},
 		{
-			// Username signup: unauthenticated account creation, on the same
-			// per-IP signup quota as PasswordSignup.
-			PathPrefix: "/identity.v1.IdentityService/UsernameSignup", Tag: "username_signup",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+			PathPrefix: "/identity.v1.IdentityService/UsernameSignup", Tag: "signup",
+			Limiter: passwordSignupLimiter,
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordLogin", Tag: "login",
@@ -835,7 +837,7 @@ func New(deps Deps) (*Built, error) {
 				"GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS): %w", err,
 		)
 	}
-	defaultAccounts, err := buildDefaultProjectAccounts(deps.Config, logger)
+	defaultAccounts, err := buildDefaultProjectAccounts(deps.Config, defaultAccess, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -1190,12 +1192,22 @@ func randomEventID() string {
 
 // buildDefaultProjectAccounts builds the env-configured default project's
 // account policy, failing the boot on an invalid value, and logs what it
-// turns on.
-func buildDefaultProjectAccounts(cfg *config.Config, logger *zap.Logger) (service.ProjectAccountsConfig, error) {
+// turns on — and warns about a username setting the default project's access
+// mode can never let anyone use.
+func buildDefaultProjectAccounts(cfg *config.Config, access service.ProjectAccessConfig, logger *zap.Logger) (service.ProjectAccountsConfig, error) {
 	accounts, err := service.NewDefaultProjectAccounts(cfg)
 	if err != nil {
 		return service.ProjectAccountsConfig{}, fmt.Errorf("default project accounts config (check GATEWAY_DEFAULT_EMAIL_DOMAIN, "+
 			"GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP, GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP): %w", err)
+	}
+	switch {
+	case accounts.UsernameSignup == service.SignupSelf && access.Mode != service.AccessModeOpen:
+		logger.Warn("default_project_username_signup_unreachable",
+			zap.String("hint", "username self-signup needs GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open; every UsernameSignup will be refused"))
+	case accounts.UsernameSignup == service.SignupAdmin &&
+		access.Mode != service.AccessModeOpen && access.Mode != service.AccessModeInvite:
+		logger.Warn("default_project_username_accounts_unreachable",
+			zap.String("hint", "admin-created username accounts sign in only under GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open or invite; CreateUser will refuse them"))
 	}
 	if accounts.Domain != "" {
 		logger.Info("default_project_account_addresses_enabled", zap.String("domain", accounts.Domain))

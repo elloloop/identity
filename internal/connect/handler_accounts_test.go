@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	"github.com/elloloop/identity/internal/service"
 )
 
 // With no project policy choosing them, username accounts are off: neither a
@@ -50,5 +51,14 @@ func TestUsernameSignup_SignupDisabled(t *testing.T) {
 	}))
 	if connectCodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("want FailedPrecondition, got %v: %v", connectCodeOf(err), err)
+	}
+}
+
+func TestToConnectError_SignupThrottledIsResourceExhausted(t *testing.T) {
+	if got := connectCodeOf(toConnectError(service.ErrSignupThrottled)); got != connect.CodeResourceExhausted {
+		t.Fatalf("code = %v, want ResourceExhausted", got)
+	}
+	if got := connectCodeOf(toConnectError(service.ErrAccountKindOff)); got != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", got)
 	}
 }

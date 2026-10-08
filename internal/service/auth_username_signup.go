@@ -28,7 +28,10 @@ import (
 //
 // A username is a public handle the person chooses, so a taken one is
 // reported as taken (ErrAlreadyExists) rather than hidden behind a decoy:
-// the person has to pick another. A date of birth that falls in the child
+// the person has to pick another. This does tell a caller whether a username
+// exists in the project — managed child usernames included — which is the
+// price of handles; the per-IP signup limit and the per-username throttle
+// bound how fast anyone can ask. A date of birth that falls in the child
 // band is refused — a child's username account is a guardian's to create
 // (CreateManagedChildAccount), with consent.
 func (s *AuthService) UsernameSignup(ctx context.Context, username, password, name string, dateOfBirthMs int64, market string) (*LoginResult, error) {
@@ -77,9 +80,10 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 		return nil, err
 	}
 	// The per-identifier signup throttle PasswordSignup keys on the email,
-	// keyed on the username here (prefixed, so the two never share a bucket).
-	if !s.signupThrottle.allow("username:"+username, s.nowMs()) {
-		s.logger.Info("username_signup_throttled", zap.String("username", username))
+	// keyed here on the project and the username, so a username never shares a
+	// bucket with an email or with the same username in another project.
+	if !s.signupThrottle.allow(usernameThrottleKey(s.projectID(ctx), username), s.nowMs()) {
+		s.logger.Info("username_signup_throttled", zap.String("project_id", s.projectID(ctx)))
 		return nil, ErrSignupThrottled
 	}
 
@@ -140,4 +144,10 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
+}
+
+// usernameThrottleKey is the signup-throttle bucket for a username. An email
+// key always contains '@' and this one never does, so the two cannot meet.
+func usernameThrottleKey(projectID, username string) string {
+	return "username:" + projectID + ":" + username
 }

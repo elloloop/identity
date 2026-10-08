@@ -117,13 +117,13 @@ type User struct {
 	// pair the age band derives from; empty means the project default or the
 	// deployment-wide env thresholds apply.
 	Market string
-	// Username is the parent-chosen, project-unique handle identifying a
-	// managed child account (children often have no email). Lowercase
+	// Username is the project-unique handle identifying a username account:
+	// one a guardian made (CreateManagedChildAccount), a person signed up for
+	// (UsernameSignup) or an admin created (CreateUser). Lowercase
 	// alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase
 	// before storage; unique within the project when non-empty (the SQL
 	// drivers' partial unique index), and usable as the PasswordLogin
-	// identifier. Empty on every account not created via
-	// CreateManagedChildAccount.
+	// identifier. Empty on email accounts.
 	Username string
 	// AccountAddress is the address the project issued this account on its own
 	// domain (ProjectAccountsConfig.Domain), e.g. bob@accounts.example.com for
