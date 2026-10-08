@@ -365,10 +365,16 @@ func TestRequiredPasswordChange_GatesRecheckedAtCompletion(t *testing.T) {
 			want:   ErrEmailVerificationRequired,
 		},
 		"access closed": {
-			change:     func(*AuthService, *User) {},
-			signInIn:   func(t *testing.T) context.Context { return accessScope(t, `{"access":{"mode":"open"}}`) },
-			completeIn: func(t *testing.T) context.Context { return accessScope(t, `{"access":{"mode":"closed"}}`) },
-			want:       ErrAccessNotAllowed,
+			change: func(*AuthService, *User) {},
+			signInIn: func(t *testing.T) context.Context {
+				t.Helper()
+				return accessScope(t, `{"access":{"mode":"open"}}`)
+			},
+			completeIn: func(t *testing.T) context.Context {
+				t.Helper()
+				return accessScope(t, `{"access":{"mode":"closed"}}`)
+			},
+			want: ErrAccessNotAllowed,
 		},
 	}
 	for name, tc := range cases {
