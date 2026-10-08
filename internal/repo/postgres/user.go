@@ -824,12 +824,13 @@ func (r *pgRepository) ApplyAccountMerge(ctx context.Context, m service.AccountM
 	}
 
 	// Retire first, releasing what the survivor takes (each is unique).
-	retiredUsername, retiredEmail := oUsername, oEmail
+	retiredUsername, retiredEmail, retiredVerified, retiredVerifiedAt := oUsername, oEmail, oVerified, oVerifiedAt
 	if m.MoveUsername {
 		retiredUsername = ""
 	}
 	if m.MoveEmail {
-		retiredEmail = ""
+		retiredEmail, retiredVerifiedAt = "", 0
+		retiredVerified = false
 	}
 	// Every write is guarded on the state read above, so a concurrent merge
 	// or deactivation that got in between makes this one a conflict.
@@ -838,9 +839,10 @@ func (r *pgRepository) ApplyAccountMerge(ctx context.Context, m service.AccountM
 		UPDATE users
 		   SET status = 'deactivated', merged_into_user_id = $3,
 		       username = $4, email = $5, account_address = '',
+		       email_verified = $7, email_verified_at_ms = $8,
 		       deactivated_at_ms = $6, updated_at_ms = $6
 		 WHERE project_id = $1 AND id = $2`+guard,
-		r.projectID, m.OtherID, m.SurvivorID, retiredUsername, retiredEmail, m.AtMs)
+		r.projectID, m.OtherID, m.SurvivorID, retiredUsername, retiredEmail, m.AtMs, retiredVerified, retiredVerifiedAt)
 	if err != nil {
 		return wrapPgErr("ApplyAccountMerge(retire)", err)
 	}

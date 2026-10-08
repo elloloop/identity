@@ -217,9 +217,42 @@ func TestMergeAccounts_NotifiesBothAddresses(t *testing.T) {
 	defer rec.mu.Unlock()
 	to := map[string]bool{}
 	for _, m := range rec.sent {
-		if m.Subject == "Two of your accounts were merged" {
+		if m.Subject == AccountMergedSubject {
 			to[m.To] = true
 		}
 	}
 	require.True(t, to["keep@mail.example.com"] && to["gone@mail.example.com"], "notices: %v", to)
+}
+
+// An account an identity provider manages is merged only by an admin.
+func TestMergeAccounts_RefusesIdPManagedAccounts(t *testing.T) {
+	svc, _, survivor, native, ctx := mergeFixture(t)
+	native.ExternalID = "idp-7"
+	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.4", "agent", false)
+	require.ErrorIs(t, err, ErrMergeRefused)
+
+	svc2, _, survivor2, _, ctx2 := mergeFixture(t)
+	survivor2.ExternalID = "idp-8"
+	_, err = svc2.MergeAccounts(ctx2, survivor2.ID, "bob", accessTestPassword, "203.0.113.4", "agent", false)
+	require.ErrorIs(t, err, ErrMergeRefused)
+}
+
+func TestMergeUsers_RefusesTheAdminsOwnAccountAndKeepsTOTPPasswords(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@example.test", "Admin", "admin", "active")
+	repo := newFakeRepo()
+	svc := newTestAdminServiceWithRepo(db, repo)
+	ctx := accountsScope(t, "accounts.example.test")
+
+	_, err := svc.MergeUsers(ctx, "admin-1", "someone", "admin-1", false)
+	require.ErrorIs(t, err, ErrMergeRefused)
+
+	survivor := seedUser(repo, "a@mail.example.com", "", StatusActive)
+	other := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)
+	other.Username = "tia"
+	other.TotpRequired = true
+	merged, err := svc.MergeUsers(ctx, "admin-1", survivor.ID, other.ID, false)
+	require.NoError(t, err)
+	require.Empty(t, merged.PasswordHash, "a password a second factor protected does not move")
+	require.Equal(t, "tia", merged.Username)
 }

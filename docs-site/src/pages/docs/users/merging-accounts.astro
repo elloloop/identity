@@ -28,7 +28,7 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       survivor, in one transaction:
       <ul>
         <li>the retired account's <strong>linked providers</strong> (Google, Apple, …), always;</li>
-        <li>its <strong>username</strong>, <strong>password</strong> and <strong>email</strong>, each only where the survivor has none of its own, so <code>bob</code> now signs in to the survivor;</li>
+        <li>its <strong>username</strong>, <strong>password</strong> and <strong>email</strong>, each only where the survivor has none of its own (a password that two-step verification protected does not move), so <code>bob</code> now signs in to the survivor;</li>
         <li>with <code>take_address</code>, its account address. The survivor's old address moves to the retired account, so neither is freed for someone else.</li>
       </ul>
       <strong>Passkeys do not move.</strong> A passkey is bound to the account
@@ -86,6 +86,12 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     <li>An anonymous account: upgrade it instead.</li>
     <li>A managed child's account, which stays with its guardian.</li>
     <li>An account that is a guardian: move its children first.</li>
+    <li>
+      In self-service, an account your identity provider manages (SCIM
+      provisioned): merging it away would move its sign-in out of the provider's
+      control. An admin can merge it.
+    </li>
+    <li>An admin's own account, by that admin.</li>
   </ul>
   <p>These refusals answer <code>FAILED_PRECONDITION</code>.</p>
 </DocsLayout>

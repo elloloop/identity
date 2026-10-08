@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/events"
@@ -37,6 +37,12 @@ var ErrMergeConflict = errors.New("one of the accounts changed while merging; tr
 // ErrMergeRefused is returned when two accounts cannot be merged as they
 // stand; the wrapped message says why and what to do first.
 var ErrMergeRefused = errors.New("these accounts cannot be merged")
+
+// errIDPManaged refuses a self-service merge involving an account an identity
+// provider provisions (SCIM, ExternalID set): merging it away would move its
+// sign-in out of the provider's control, past its deprovisioning. An admin
+// can merge it (MergeUsers).
+var errIDPManaged = fmt.Errorf("%w: an account your identity provider manages can only be merged by an admin", ErrMergeRefused)
 
 // ErrAccountMergeDisabled is returned by MergeAccounts when the deployment has
 // not turned self-service merging on (GATEWAY_ACCOUNT_MERGE_ENABLED).
@@ -95,9 +101,16 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID, otherIdenti
 	if err := checkSurvivor(ctx, repo, survivor); err != nil {
 		return nil, err
 	}
+	if survivor.ExternalID != "" {
+		return nil, errIDPManaged
+	}
 	other, decision, err := s.verifyPasswordCredential(ctx, otherIdentifier, otherPassword, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
+	}
+	if other.ExternalID != "" {
+		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "idp_managed")
+		return nil, errIDPManaged
 	}
 	if other.TotpRequired || decision.RequireSecondFactor {
 		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "second_factor_required")
@@ -110,7 +123,7 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID, otherIdenti
 		return nil, err
 	}
 	s.auditMerge(ctx, survivor.ID, retired.ID, ipAddr, userAgent, true, "")
-	notifyMerge(ctx, s.mailer, s.cfg.SMTPFrom, s.logger, other, merged)
+	notifyMerge(ctx, s.cfg, s.mailer, s.logger, other, merged)
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserMerged, retired)
 	return merged, nil
 }
@@ -133,6 +146,9 @@ func (s *AdminService) MergeUsers(ctx context.Context, actorID, survivorID, othe
 	if _, err := s.requireAdmin(ctx, actorID); err != nil {
 		return nil, err
 	}
+	if otherID == actorID {
+		return nil, fmt.Errorf("%w: an admin cannot merge away their own account", ErrMergeRefused)
+	}
 	repo := s.repo(ctx)
 	survivor, err := repo.GetUser(ctx, survivorID)
 	if err != nil {
@@ -152,7 +168,7 @@ func (s *AdminService) MergeUsers(ctx context.Context, actorID, survivorID, othe
 	s.audit.Log(ctx, audit.EventAccountMerged,
 		audit.WithActor(actorID), audit.WithTarget(retired.ID), audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"survivor": survivor.ID, "source": "admin"}))
-	notifyMerge(ctx, s.mailer, s.cfg.SMTPFrom, s.logger, other, merged)
+	notifyMerge(ctx, s.cfg, s.mailer, s.logger, other, merged)
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserMerged, retired)
 	return merged, nil
 }
@@ -167,7 +183,9 @@ func mergeAccounts(ctx context.Context, repo Repository, survivor, other *User, 
 		SurvivorID:   survivor.ID,
 		OtherID:      other.ID,
 		MoveUsername: other.Username != "" && survivor.Username == "",
-		MovePassword: other.PasswordHash != "" && survivor.PasswordHash == "",
+		// A password a second factor protected does not move: on the
+		// survivor it would sign in without one.
+		MovePassword: other.PasswordHash != "" && survivor.PasswordHash == "" && !other.TotpRequired,
 		MoveEmail:    other.Email != "" && survivor.Email == "",
 		SwapAddress:  takeAddress && other.AccountAddress != "",
 		AtMs:         now,
@@ -237,38 +255,45 @@ func refuseManagedChild(ctx context.Context, repo Repository, u *User) error {
 	return nil
 }
 
+// AccountMergedSubject is the subject of the merge security notice.
+const AccountMergedSubject = "Two of your accounts were merged"
+
 // notifyMerge tells the person, at every address either account had, that one
 // account was merged into the other: a merge cannot be undone, so someone who
-// did not ask for it must hear about it at once. Best-effort, like the other
-// security notices: a failed send is logged and never undoes the merge.
-func notifyMerge(ctx context.Context, mailer email.Transport, from string, logger *zap.Logger, retired, survivor *User) {
+// did not ask for it must hear about it at once. Each notice names only the
+// recipient's own account. It goes through the template and branding pipeline
+// like every other notice. Best-effort: a failed render or send is logged and
+// never undoes the merge.
+func notifyMerge(ctx context.Context, cfg *config.Config, mailer email.Transport, logger *zap.Logger, retired, survivor *User) {
 	if mailer == nil {
 		return
 	}
-	retiredName := retired.Email
-	if retiredName == "" {
-		retiredName = retired.Username
-	}
-	survivorName := survivor.Email
-	if survivorName == "" {
-		survivorName = survivor.Username
-	}
-	text := strings.Join([]string{
-		"Hi,",
-		"",
-		fmt.Sprintf("The account %s was merged into the account %s.", retiredName, survivorName),
-		"It no longer signs in on its own; sign in with the account it was merged into.",
-		"",
-		"If you did not do this, contact the administrator of this service now.",
-	}, "\n")
-	sent := map[string]bool{}
-	for _, to := range []string{retired.Email, survivor.Email} {
-		if to == "" || sent[to] {
-			continue
+	brand := resolveBranding(ctx, cfg, "")
+	send := func(to string, u *User, isRetired bool) {
+		if to == "" {
+			return
 		}
-		sent[to] = true
-		if err := mailer.Send(ctx, email.Message{To: to, From: from, Subject: "Two of your accounts were merged", Text: text}); err != nil {
-			logger.Warn("account_merge_notice_failed", zap.String("user_id", survivor.ID), zap.Error(err))
+		yours := u.Email
+		if yours == "" {
+			yours = u.Username
 		}
+		html, text, err := email.Render(email.TemplateAccountMerged, brand.templateData(map[string]any{
+			"UserName":    displayNameOrEmail(u),
+			"YourAccount": yours,
+			"Retired":     isRetired,
+		}))
+		if err != nil {
+			logger.Warn("account_merge_notice_render_failed", zap.Error(err))
+			return
+		}
+		msg := email.Message{To: to, From: cfg.SMTPFrom, Subject: AccountMergedSubject, HTML: html, Text: text}
+		brand.applyTo(&msg)
+		if err := mailer.Send(ctx, msg); err != nil {
+			logger.Warn("account_merge_notice_failed", zap.String("user_id", u.ID), zap.Error(err))
+		}
+	}
+	send(retired.Email, retired, true)
+	if survivor.Email != retired.Email {
+		send(survivor.Email, survivor, false)
 	}
 }

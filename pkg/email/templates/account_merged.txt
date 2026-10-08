@@ -1,0 +1,10 @@
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Hi {{.UserName}},
+
+{{if .Retired}}Your account {{.YourAccount}} was merged into another account. It no longer signs in on its own: sign in with the account it was merged into.{{else}}Another account was merged into your account {{.YourAccount}}. Its sign-in methods now sign in to this account.{{end}}
+
+A merge cannot be undone. If you did not do this, contact support immediately — your account may be compromised.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}

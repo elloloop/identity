@@ -2496,7 +2496,8 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m AccountMerge) error {
 		sv.PasswordHash = o.PasswordHash
 	}
 	if m.MoveEmail {
-		sv.Email, sv.EmailVerified, sv.EmailVerifiedAt, o.Email = o.Email, o.EmailVerified, o.EmailVerifiedAt, ""
+		sv.Email, sv.EmailVerified, sv.EmailVerifiedAt = o.Email, o.EmailVerified, o.EmailVerifiedAt
+		o.Email, o.EmailVerified, o.EmailVerifiedAt = "", false, 0
 	}
 	if m.SwapAddress {
 		sv.AccountAddress, o.AccountAddress = o.AccountAddress, sv.AccountAddress

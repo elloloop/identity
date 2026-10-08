@@ -53,8 +53,8 @@ func runAccountMergeConformance(t *testing.T, driver Driver) {
 			if s.Email != "am-carol@example.com" || !s.EmailVerified || s.EmailVerifiedAt != 500 || s.Username != "am-carol" {
 				t.Fatalf("survivor after merge: %#v", s)
 			}
-			if o.Email != "" {
-				t.Fatalf("retired keeps the moved email: %q", o.Email)
+			if o.Email != "" || o.EmailVerified || o.EmailVerifiedAt != 0 {
+				t.Fatalf("retired keeps the moved email or its verification: %#v", o)
 			}
 			linked, err := r.FindUserByProviderID(ctx, "google", "am-g-1")
 			if err != nil || linked == nil || linked.ID != survivor {
