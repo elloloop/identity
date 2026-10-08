@@ -2,8 +2,8 @@
 --
 -- Set on an account whose password an admin issued (a temporary password):
 -- PasswordLogin then refuses a session until the person chooses their own
--- password (CompleteRequiredPasswordChange). Cleared whenever the user sets
--- their own: that step, ChangePassword, a reset link or an accepted invitation.
+-- password (CompleteRequiredPasswordChange). True only while the stored
+-- password is one an admin issued.
 -- A constant default makes this a catalog-only change; lock_timeout bounds the
 -- wait for the lock as in 0034-0036 (on timeout: confirm the column is absent,
 -- then `identity migrate force 36` and `identity migrate`).

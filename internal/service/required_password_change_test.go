@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -246,4 +247,101 @@ func TestRequiredPasswordChange_ClearedByAcceptingAnInvitation(t *testing.T) {
 	require.NoError(t, err)
 	stored, _ := repo.GetUser(ctx, invitee.ID)
 	require.False(t, stored.PasswordChangeRequired, "the invitee chose their own password")
+}
+
+// enrollTotp gives user a verified two-step credential and one recovery code,
+// returning the secret and the code.
+func enrollTotp(t *testing.T, svc *AuthService, repo *fakeRepo, user *User) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+	secret, err := totp.GenerateSecret()
+	require.NoError(t, err)
+	enc, err := secretcrypto.Encrypt(secret, svc.totpKey)
+	require.NoError(t, err)
+	_, err = repo.CreateTotpCredential(ctx, &TotpCredRecord{UserID: user.ID, SecretEncrypted: enc, Verified: true})
+	require.NoError(t, err)
+	recovery := "abcd-efgh-ijkl"
+	_, err = repo.CreateRecoveryCode(ctx, &RecoveryCodeRecord{
+		UserID: user.ID, CodeHash: totp.HashRecoveryCode(recovery, svc.totpRecoveryPepper),
+	})
+	require.NoError(t, err)
+	return secret, recovery
+}
+
+// A refused new password costs no recovery code: the password checks run
+// before the second factor is spent.
+func TestRequiredPasswordChange_RefusedPasswordKeepsTheRecoveryCode(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	user := issuedPasswordUser(t, repo, "issued@example.com")
+	user.TotpRequired = true
+	_, recovery := enrollTotp(t, svc, repo, user)
+	ticket := passwordChangeTicket(t, svc, "issued@example.com")
+	ctx := context.Background()
+
+	_, err := svc.CompleteRequiredPasswordChange(ctx, ticket, "short", recovery, "203.0.113.10", "agent")
+	require.Error(t, err)
+	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, issuedPW, recovery, "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	res, err := svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, recovery, "203.0.113.10", "agent")
+	require.NoError(t, err, "the recovery code was not spent by the refusals")
+	require.NotEmpty(t, res.AccessToken)
+}
+
+// The ticket allows more than one attempt, so wrong codes count toward the
+// account's lockout and lock it at the password threshold.
+func TestRequiredPasswordChange_WrongCodesLockTheAccount(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	user := issuedPasswordUser(t, repo, "issued@example.com")
+	user.TotpRequired = true
+	secret, _ := enrollTotp(t, svc, repo, user)
+	ticket := passwordChangeTicket(t, svc, "issued@example.com")
+	ctx := context.Background()
+
+	for i := 0; i < svc.cfg.LoginMaxFailedAttempts; i++ {
+		_, err := svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "000000", "203.0.113.10", "agent")
+		require.ErrorIs(t, err, ErrInvalidTotpCode)
+	}
+	code, err := totpGenerateCode(secret)
+	require.NoError(t, err)
+	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, code, "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrAccountLocked, "even the right code waits out the lockout")
+}
+
+// A login policy requiring a second factor applies to the step: with none
+// enrolled the sign-in is refused before any ticket; with one enrolled the
+// client is told to ask for it.
+func TestRequiredPasswordChange_PolicyForcedSecondFactor(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
+	ctx := withProjectLoginDefaults("proj-1", "", true)
+	user := issuedPasswordUser(t, repo, "issued@example.com")
+
+	_, err := svc.PasswordLogin(ctx, "issued@example.com", issuedPW, "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrTotpRequired, "no factor enrolled: enroll first, no ticket")
+	var pcErr *PasswordChangeRequiredError
+	require.False(t, errors.As(err, &pcErr))
+
+	enrollTotp(t, svc, repo, user)
+	_, err = svc.PasswordLogin(ctx, "issued@example.com", issuedPW, "203.0.113.10", "agent")
+	require.ErrorAs(t, err, &pcErr)
+	require.True(t, pcErr.SecondFactorRequired)
+	_, err = svc.CompleteRequiredPasswordChange(ctx, pcErr.Ticket, strongPW, "", "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+}
+
+// An external proof of email control that clears an untrusted password
+// clears the flag with it: there is no issued password left to replace.
+func TestRequiredPasswordChange_ClearedWithAClearedPassword(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := context.Background()
+	user := issuedPasswordUser(t, repo, "issued@example.com")
+	user.EmailVerified = false
+	svc.markEmailVerifiedViaExternalProof(ctx, user, nowMs(), "oauth")
+	stored, _ := repo.GetUser(ctx, user.ID)
+	require.Empty(t, stored.PasswordHash)
+	require.False(t, stored.PasswordChangeRequired)
 }

@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -34,12 +35,16 @@ type PasswordChangeRequiredError struct {
 func (e *PasswordChangeRequiredError) Error() string { return ErrPasswordChangeRequired.Error() }
 func (e *PasswordChangeRequiredError) Unwrap() error { return ErrPasswordChangeRequired }
 
+// passwordBindingBytes is how much of the SHA-256 the binding keeps: 128
+// bits, ample to tell two salted hashes apart, short enough for a claim.
+const passwordBindingBytes = 16
+
 // passwordBinding fingerprints the password a ticket was minted against. The
 // hash is salted, so issuing a new password changes it and spends every
 // ticket minted for the old one.
 func passwordBinding(passwordHash string) string {
 	sum := sha256.Sum256([]byte(passwordHash))
-	return hex.EncodeToString(sum[:16])
+	return hex.EncodeToString(sum[:passwordBindingBytes])
 }
 
 // requirePasswordChange refuses the session a correct administrator-issued
@@ -53,7 +58,9 @@ func (s *AuthService) requirePasswordChange(ctx context.Context, user *User, pol
 	if err := s.ensureSecondFactorEnrolled(ctx, user, policyForced); err != nil {
 		return err
 	}
-	ticket, err := s.mintBoundPurposeTicket(ctx, user.ID, tokenPurposePasswordChange, passwordBinding(user.PasswordHash), passwordChangeTicketTTL)
+	ticket, err := s.signPurposeTicket(ctx, jwt.Claims{
+		Sub: user.ID, Purpose: tokenPurposePasswordChange, Binding: passwordBinding(user.PasswordHash),
+	}, passwordChangeTicketTTL)
 	if err != nil {
 		return err
 	}
@@ -93,36 +100,35 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 		return nil, fmt.Errorf("%w: invalid or expired %s ticket", ErrUnauthenticated, tokenPurposePasswordChange)
 	}
 	// Up to passwordChangeTicketTTL may have passed since the sign-in that
-	// minted the ticket; a status change in that window wins over it.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
-		return nil, err
-	}
-	decision, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodPassword)
+	// minted the ticket: every gate that sign-in passed after the password is
+	// checked again, so a change in that window wins over the ticket.
+	decision, err := s.recheckSignInGates(ctx, user, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
 	}
-	if user.TotpRequired || decision.RequireSecondFactor {
-		if secondFactorCode == "" {
-			return nil, fmt.Errorf("%w: second_factor_code is required", ErrInvalidArgument)
-		}
-		if err := s.ensureSecondFactorEnrolled(ctx, user, decision.RequireSecondFactor); err != nil {
-			return nil, err
-		}
-		if _, err := s.verifySecondFactorCode(ctx, user.ID, secondFactorCode, ipAddr, userAgent); err != nil {
-			return nil, err
-		}
+	secondFactor := user.TotpRequired || decision.RequireSecondFactor
+	if secondFactor && secondFactorCode == "" {
+		return nil, fmt.Errorf("%w: second_factor_code is required", ErrInvalidArgument)
 	}
-	// A username account has no email; its username stands in for the
-	// email in the policy's identifier-similarity check.
-	identifier := user.Email
-	if identifier == "" {
-		identifier = user.Username
-	}
-	if err := s.validatePasswordStrengthForEmail(ctx, identifier, newPassword); err != nil {
+	// The checks with no side effect come before the second factor, whose
+	// recovery codes are spent on use: a refused password must not cost one.
+	// The email selects the owning tenant's password policy, as at sign-up.
+	if err := s.validatePasswordStrengthForEmail(ctx, user.Email, newPassword); err != nil {
 		return nil, err
 	}
 	if passwords.Verify(newPassword, user.PasswordHash) {
 		return nil, fmt.Errorf("%w: choose a password different from the one you were given", ErrInvalidArgument)
+	}
+	if secondFactor {
+		if err := s.ensureSecondFactorEnrolled(ctx, user, decision.RequireSecondFactor); err != nil {
+			return nil, err
+		}
+		if _, err := s.verifySecondFactorCode(ctx, user.ID, secondFactorCode, ipAddr, userAgent); err != nil {
+			// The ticket allows more than one attempt, so a wrong code counts
+			// toward the account's lockout as a wrong password does.
+			s.countFailedSecondFactor(ctx, user, ipAddr, userAgent)
+			return nil, err
+		}
 	}
 	pwHash, err := passwords.Hash(newPassword)
 	if err != nil {
@@ -174,4 +180,43 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
+}
+
+// recheckSignInGates repeats, for an account whose password was proven
+// earlier, the gates a password sign-in applies after the password: the
+// account's status and lockout, the access rule, the verified-email
+// requirement and the login policy, whose decision it returns.
+func (s *AuthService) recheckSignInGates(ctx context.Context, user *User, ipAddr, userAgent string) (loginPolicyDecision, error) {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return loginPolicyDecision{}, err
+	}
+	if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
+		return loginPolicyDecision{}, err
+	}
+	if s.cfg.AuthRequireVerifiedEmail && user.Email != "" && !user.EmailVerified {
+		return loginPolicyDecision{}, ErrEmailVerificationRequired
+	}
+	return s.enforceLoginPolicy(ctx, user.Email, LoginMethodPassword)
+}
+
+// countFailedSecondFactor records a wrong second-factor code against the
+// account's failed-login count, locking it at the same threshold a wrong
+// password does.
+func (s *AuthService) countFailedSecondFactor(ctx context.Context, user *User, ipAddr, userAgent string) {
+	_, lockedNow, err := s.recordFailedLogin(ctx, user)
+	if err != nil {
+		s.logger.Warn("second_factor_failure_count_failed", zap.String("user_id", user.ID), zap.Error(err))
+		return
+	}
+	if lockedNow {
+		s.audit.Log(
+			ctx, audit.EventAccountLocked,
+			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{
+				"lockout_seconds": s.cfg.LoginLockoutSeconds,
+				"max_attempts":    s.cfg.LoginMaxFailedAttempts,
+			}),
+		)
+	}
 }
