@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.10 → next — account addresses on the project's domain (additive); neutral built-in defaults; invitation links follow the project (behaviour change)
+## v4.10 → v4.11 — account addresses on the project's domain (additive); neutral built-in defaults; invitation links follow the project (behaviour change)
 
 **Migration 0035** (SQLite 0018) adds `users.account_address` and a partial
 unique index on `(project_id, account_address)`. The column has a constant
