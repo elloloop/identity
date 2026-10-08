@@ -1,0 +1,207 @@
+package service
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/elloloop/identity/internal/config"
+)
+
+func signupScope(t *testing.T, configJSON string) context.Context {
+	t.Helper()
+	cfg, err := ParseProjectConfig(configJSON)
+	require.NoError(t, err)
+	return WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "project-a", Access: cfg.Access, Accounts: cfg.Accounts,
+	})
+}
+
+func TestProjectAccountsConfig_SignupModes(t *testing.T) {
+	cfg, err := ParseProjectConfig(`{"accounts":{"email_signup":" Admin ","username_signup":"SELF"}}`)
+	require.NoError(t, err)
+	require.Equal(t, SignupAdmin, cfg.Accounts.emailSignup())
+	require.Equal(t, SignupSelf, cfg.Accounts.usernameSignup())
+
+	cfg, err = ParseProjectConfig(`{}`)
+	require.NoError(t, err)
+	require.Equal(t, SignupSelf, cfg.Accounts.emailSignup(), "email self-signup stays the default")
+	require.Equal(t, SignupOff, cfg.Accounts.usernameSignup(), "usernames are off unless chosen")
+
+	for _, bad := range []string{`{"accounts":{"email_signup":"open"}}`, `{"accounts":{"username_signup":"yes"}}`} {
+		_, err := ParseProjectConfig(bad)
+		require.Error(t, err, bad)
+	}
+
+	def, err := NewDefaultProjectAccounts(&config.Config{DefaultProjectEmailSignup: "off", DefaultProjectUsernameSignup: "admin"})
+	require.NoError(t, err)
+	require.Equal(t, SignupOff, def.emailSignup())
+	require.Equal(t, SignupAdmin, def.usernameSignup())
+	_, err = NewDefaultProjectAccounts(&config.Config{DefaultProjectUsernameSignup: "everyone"})
+	require.Error(t, err)
+
+	require.Equal(t, SignupSelf, accountsFor(nil).emailSignup())
+	require.Equal(t, SignupOff, accountsFor(nil).usernameSignup())
+}
+
+func TestEmailSignup_AdminOnlyAndOff(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+
+	admin := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"admin"}}`)
+	_, err := svc.PasswordSignup(admin, "new@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	require.ErrorIs(t, err, ErrSignupByInvitationOnly)
+
+	off := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"off"}}`)
+	_, err = svc.PasswordSignup(off, "new@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	require.ErrorIs(t, err, ErrAccountKindOff)
+
+	self := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"self"}}`)
+	_, err = svc.PasswordSignup(self, "new@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	require.NoError(t, err)
+}
+
+func TestEmailSignup_AdminOnly_ExistingAccountsStillSignIn(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	seedUser(repo, "made@mail.example.com", hashPW(t, accessTestPassword), "active")
+	admin := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"admin"}}`)
+	_, err := svc.PasswordLogin(admin, "made@mail.example.com", accessTestPassword, "1.2.3.4", "agent")
+	require.NoError(t, err)
+}
+
+func TestEmailSignup_AdminOnly_CodesOnlyToExistingAccounts(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	seedUser(repo, "made@mail.example.com", "", "active")
+
+	admin := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"admin"}}`)
+	require.False(t, svc.accessAllowsCodeSend(admin, canonicalize("stranger@mail.example.com")))
+	require.True(t, svc.accessAllowsCodeSend(admin, canonicalize("made@mail.example.com")))
+
+	allow := signupScope(t, `{"access":{"mode":"allowlist","allowed_domains":["mail.example.com"]},"accounts":{"email_signup":"admin"}}`)
+	require.False(t, svc.accessAllowsCodeSend(allow, canonicalize("stranger@mail.example.com")))
+	require.True(t, svc.accessAllowsCodeSend(allow, canonicalize("made@mail.example.com")))
+
+	self := signupScope(t, `{"access":{"mode":"open"}}`)
+	require.True(t, svc.accessAllowsCodeSend(self, canonicalize("stranger@mail.example.com")))
+}
+
+func TestInviteUser_EmailOff(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	svc := newTestAdminService(db)
+
+	off := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"off"}}`)
+	_, err := svc.InviteUser(off, "admin-1", "new@mail.example.com", "New", "member", "", 0, true)
+	require.ErrorIs(t, err, ErrAccountKindOff)
+
+	admin := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"admin"}}`)
+	_, err = svc.InviteUser(admin, "admin-1", "new@mail.example.com", "New", "member", "", 0, true)
+	require.NoError(t, err, "an admin creates email accounts when email_signup is admin")
+}
+
+func TestCreateUsernameUser(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	db.addUser("member-1", "member@test.com", "Member", "member", "active")
+	repo := newFakeRepo()
+	svc := newTestAdminServiceWithRepo(db, repo)
+
+	off := signupScope(t, `{"access":{"mode":"open"}}`)
+	_, err := svc.CreateUsernameUser(off, "admin-1", "bob", "Bob", "member")
+	require.ErrorIs(t, err, ErrAccountKindOff, "usernames are off by default")
+
+	ctx := signupScope(t, `{"access":{"mode":"closed"},"accounts":{"domain":"accounts.example.com","username_signup":"admin"}}`)
+	_, err = svc.CreateUsernameUser(ctx, "member-1", "bob", "Bob", "member")
+	require.Error(t, err, "only an admin")
+
+	res, err := svc.CreateUsernameUser(ctx, "admin-1", " Bob ", "", "")
+	require.NoError(t, err)
+	require.Equal(t, "bob", res.User.Username)
+	require.Equal(t, "bob", res.User.Name)
+	require.Equal(t, "member", res.User.Role)
+	require.Equal(t, StatusActive, res.User.Status)
+	require.Empty(t, res.User.Email)
+	require.Equal(t, "bob@accounts.example.com", res.User.AccountAddress)
+	require.NotEmpty(t, res.TemporaryPassword)
+	require.Empty(t, res.User.PasswordHash, "the hash never leaves the service")
+
+	stored, err := repo.FindUserByUsername(ctx, "bob")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.NotEmpty(t, stored.PasswordHash)
+
+	_, err = svc.CreateUsernameUser(ctx, "admin-1", "bob", "", "")
+	require.ErrorIs(t, err, ErrAlreadyExists)
+	_, err = svc.CreateUsernameUser(ctx, "admin-1", "bob-at-mail.example", "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	_, err = svc.CreateUsernameUser(ctx, "admin-1", "carol", "", "owner")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+}
+
+func TestUsernameSignup(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"domain":"accounts.example.com","username_signup":"self"}}`)
+
+	res, err := svc.UsernameSignup(ctx, "Bob", accessTestPassword, "Bob B", 0, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+	require.Equal(t, "bob", res.User.Username)
+	require.Equal(t, "Bob B", res.User.Name)
+	require.Empty(t, res.User.Email)
+	require.Equal(t, "bob@accounts.example.com", res.User.AccountAddress)
+
+	stored, err := repo.FindUserByUsername(ctx, "bob")
+	require.NoError(t, err)
+	require.Equal(t, "bob@accounts.example.com", stored.AccountAddress)
+
+	// The username signs in through PasswordLogin.
+	login, err := svc.PasswordLogin(ctx, "bob", accessTestPassword, "1.2.3.4", "agent")
+	require.NoError(t, err)
+	require.Equal(t, res.User.ID, login.User.ID)
+
+	// Taken usernames are reported as taken.
+	_, err = svc.UsernameSignup(ctx, "bob", accessTestPassword, "", 0, "")
+	require.ErrorIs(t, err, ErrAlreadyExists)
+
+	_, err = svc.UsernameSignup(ctx, "x", accessTestPassword, "", 0, "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	_, err = svc.UsernameSignup(ctx, "carol", "", "", 0, "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	_, err = svc.UsernameSignup(ctx, "carol", "short", "", 0, "")
+	require.ErrorIs(t, err, ErrWeakPassword)
+}
+
+func TestUsernameSignup_Refusals(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	cases := []struct {
+		name   string
+		config string
+		want   error
+	}{
+		{"off by default", `{"access":{"mode":"open"}}`, ErrAccountKindOff},
+		{"admin only", `{"access":{"mode":"open"},"accounts":{"username_signup":"admin"}}`, ErrSignupByInvitationOnly},
+		{"invite mode", `{"access":{"mode":"invite"},"accounts":{"username_signup":"self"}}`, ErrSignupByInvitationOnly},
+		{"closed mode", `{"access":{"mode":"closed"},"accounts":{"username_signup":"self"}}`, ErrAccessNotAllowed},
+		{"allowlist has no email to match", `{"access":{"mode":"allowlist","allowed_domains":["mail.example.com"]},"accounts":{"username_signup":"self"}}`, ErrAccessNotAllowed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.UsernameSignup(signupScope(t, tc.config), "dave", accessTestPassword, "", 0, "")
+			require.ErrorIs(t, err, tc.want)
+		})
+	}
+
+	svc.cfg.PasswordSignupEnabled = false
+	_, err := svc.UsernameSignup(signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`), "dave", accessTestPassword, "", 0, "")
+	require.ErrorIs(t, err, ErrSignupDisabled)
+}
+
+func TestUsernameSignup_ChildIsAGuardiansToCreate(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	enableAgeGate(t, svc, false)
+	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
+	_, err := svc.UsernameSignup(ctx, "kiddo", accessTestPassword, "", dobAgeMs(8), "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	_, err = svc.UsernameSignup(ctx, "grownup", accessTestPassword, "", dobAgeMs(30), "")
+	require.NoError(t, err)
+}

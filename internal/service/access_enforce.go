@@ -73,6 +73,9 @@ func (s *AuthService) enforceProjectAccess(ctx context.Context, email canonicalE
 	}
 	access := scope.Access
 	if accessPermits(s.cfg, access, email, isSignup) {
+		if isSignup {
+			return s.enforceEmailSelfSignup(ctx, scope)
+		}
 		return nil
 	}
 	// Name WHICH half refused. With a deny layer configured, a refusal on an
@@ -90,6 +93,23 @@ func (s *AuthService) enforceProjectAccess(ctx context.Context, email canonicalE
 		return ErrSignupByInvitationOnly
 	}
 	return ErrAccessNotAllowed
+}
+
+// enforceEmailSelfSignup refuses a self-signup the access mode admitted when
+// the project does not let people create their own email accounts
+// (accounts.email_signup "admin" or "off"). Like the mode check it is DB-free
+// and says nothing about whether the address has an account.
+func (s *AuthService) enforceEmailSelfSignup(ctx context.Context, scope *ProjectScope) error {
+	switch scope.Accounts.emailSignup() {
+	case SignupSelf:
+		return nil
+	case SignupAdmin:
+		s.logger.Info("email_self_signup_refused", zap.String("project_id", s.projectID(ctx)), zap.String("email_signup", SignupAdmin))
+		return ErrSignupByInvitationOnly
+	default:
+		s.logger.Info("email_self_signup_refused", zap.String("project_id", s.projectID(ctx)), zap.String("email_signup", SignupOff))
+		return ErrAccountKindOff
+	}
 }
 
 // accessAllowsCodeSend reports whether a request-phase LOGIN credential email (a
@@ -120,9 +140,9 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email canonicalE
 	}
 	switch scope.Access.mode() {
 	case AccessModeOpen:
-		return true
+		return s.selfSignupOrExisting(ctx, scope, email)
 	case AccessModeAllowlist:
-		return scope.Access.permits(email)
+		return scope.Access.permits(email) && s.selfSignupOrExisting(ctx, scope, email)
 	case AccessModeInvite:
 		// The existence check uses the same canonical key accounts are stored
 		// under — otherwise a real user requesting with non-canonical casing/dots
@@ -133,6 +153,18 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email canonicalE
 		// AccessModeClosed and any unset/unrecognized mode: never send.
 		return false
 	}
+}
+
+// selfSignupOrExisting is the send rule for a project that lets people create
+// their own email accounts: anyone the mode admits may get a code, since
+// redeeming it can create the account. When only admins create them (or
+// email accounts are off), a code to an address with no account is
+// undeliverable spam, as in invite mode, so only an existing account gets one.
+func (s *AuthService) selfSignupOrExisting(ctx context.Context, scope *ProjectScope, email canonicalEmail) bool {
+	if scope.Accounts.emailSignup() == SignupSelf {
+		return true
+	}
+	return s.userExists(ctx, email)
 }
 
 // userExists treats a lookup error as "does not exist" so the caller fails

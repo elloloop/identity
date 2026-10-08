@@ -48,6 +48,9 @@ const (
 	// IdentityServicePasswordSignupProcedure is the fully-qualified name of the IdentityService's
 	// PasswordSignup RPC.
 	IdentityServicePasswordSignupProcedure = "/identity.v1.IdentityService/PasswordSignup"
+	// IdentityServiceUsernameSignupProcedure is the fully-qualified name of the IdentityService's
+	// UsernameSignup RPC.
+	IdentityServiceUsernameSignupProcedure = "/identity.v1.IdentityService/UsernameSignup"
 	// IdentityServicePasswordLoginProcedure is the fully-qualified name of the IdentityService's
 	// PasswordLogin RPC.
 	IdentityServicePasswordLoginProcedure = "/identity.v1.IdentityService/PasswordLogin"
@@ -410,6 +413,9 @@ type IdentityServiceClient interface {
 	NativeOAuthLogin(context.Context, *connect.Request[v1.NativeOAuthLoginRequest]) (*connect.Response[v1.NativeOAuthLoginResponse], error)
 	RedeemOAuthCode(context.Context, *connect.Request[v1.RedeemOAuthCodeRequest]) (*connect.Response[v1.RedeemOAuthCodeResponse], error)
 	PasswordSignup(context.Context, *connect.Request[v1.PasswordSignupRequest]) (*connect.Response[v1.PasswordSignupResponse], error)
+	// UsernameSignup creates an account identified by a username and a
+	// password (accounts.username_signup "self"). Sign in with PasswordLogin.
+	UsernameSignup(context.Context, *connect.Request[v1.UsernameSignupRequest]) (*connect.Response[v1.UsernameSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[v1.PasswordLoginRequest]) (*connect.Response[v1.PasswordLoginResponse], error)
 	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
 	// RPC that accepts the completion ticket carried by the dob_required
@@ -727,6 +733,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServicePasswordSignupProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("PasswordSignup")),
+			connect.WithClientOptions(opts...),
+		),
+		usernameSignup: connect.NewClient[v1.UsernameSignupRequest, v1.UsernameSignupResponse](
+			httpClient,
+			baseURL+IdentityServiceUsernameSignupProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UsernameSignup")),
 			connect.WithClientOptions(opts...),
 		),
 		passwordLogin: connect.NewClient[v1.PasswordLoginRequest, v1.PasswordLoginResponse](
@@ -1447,6 +1459,7 @@ type identityServiceClient struct {
 	nativeOAuthLogin                *connect.Client[v1.NativeOAuthLoginRequest, v1.NativeOAuthLoginResponse]
 	redeemOAuthCode                 *connect.Client[v1.RedeemOAuthCodeRequest, v1.RedeemOAuthCodeResponse]
 	passwordSignup                  *connect.Client[v1.PasswordSignupRequest, v1.PasswordSignupResponse]
+	usernameSignup                  *connect.Client[v1.UsernameSignupRequest, v1.UsernameSignupResponse]
 	passwordLogin                   *connect.Client[v1.PasswordLoginRequest, v1.PasswordLoginResponse]
 	submitDateOfBirth               *connect.Client[v1.SubmitDateOfBirthRequest, v1.SubmitDateOfBirthResponse]
 	requestEmailLoginCode           *connect.Client[v1.RequestEmailLoginCodeRequest, v1.RequestEmailLoginCodeResponse]
@@ -1590,6 +1603,11 @@ func (c *identityServiceClient) RedeemOAuthCode(ctx context.Context, req *connec
 // PasswordSignup calls identity.v1.IdentityService.PasswordSignup.
 func (c *identityServiceClient) PasswordSignup(ctx context.Context, req *connect.Request[v1.PasswordSignupRequest]) (*connect.Response[v1.PasswordSignupResponse], error) {
 	return c.passwordSignup.CallUnary(ctx, req)
+}
+
+// UsernameSignup calls identity.v1.IdentityService.UsernameSignup.
+func (c *identityServiceClient) UsernameSignup(ctx context.Context, req *connect.Request[v1.UsernameSignupRequest]) (*connect.Response[v1.UsernameSignupResponse], error) {
+	return c.usernameSignup.CallUnary(ctx, req)
 }
 
 // PasswordLogin calls identity.v1.IdentityService.PasswordLogin.
@@ -2191,6 +2209,9 @@ type IdentityServiceHandler interface {
 	NativeOAuthLogin(context.Context, *connect.Request[v1.NativeOAuthLoginRequest]) (*connect.Response[v1.NativeOAuthLoginResponse], error)
 	RedeemOAuthCode(context.Context, *connect.Request[v1.RedeemOAuthCodeRequest]) (*connect.Response[v1.RedeemOAuthCodeResponse], error)
 	PasswordSignup(context.Context, *connect.Request[v1.PasswordSignupRequest]) (*connect.Response[v1.PasswordSignupResponse], error)
+	// UsernameSignup creates an account identified by a username and a
+	// password (accounts.username_signup "self"). Sign in with PasswordLogin.
+	UsernameSignup(context.Context, *connect.Request[v1.UsernameSignupRequest]) (*connect.Response[v1.UsernameSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[v1.PasswordLoginRequest]) (*connect.Response[v1.PasswordLoginResponse], error)
 	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
 	// RPC that accepts the completion ticket carried by the dob_required
@@ -2504,6 +2525,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServicePasswordSignupProcedure,
 		svc.PasswordSignup,
 		connect.WithSchema(identityServiceMethods.ByName("PasswordSignup")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUsernameSignupHandler := connect.NewUnaryHandler(
+		IdentityServiceUsernameSignupProcedure,
+		svc.UsernameSignup,
+		connect.WithSchema(identityServiceMethods.ByName("UsernameSignup")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServicePasswordLoginHandler := connect.NewUnaryHandler(
@@ -3226,6 +3253,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceRedeemOAuthCodeHandler.ServeHTTP(w, r)
 		case IdentityServicePasswordSignupProcedure:
 			identityServicePasswordSignupHandler.ServeHTTP(w, r)
+		case IdentityServiceUsernameSignupProcedure:
+			identityServiceUsernameSignupHandler.ServeHTTP(w, r)
 		case IdentityServicePasswordLoginProcedure:
 			identityServicePasswordLoginHandler.ServeHTTP(w, r)
 		case IdentityServiceSubmitDateOfBirthProcedure:
@@ -3489,6 +3518,10 @@ func (UnimplementedIdentityServiceHandler) RedeemOAuthCode(context.Context, *con
 
 func (UnimplementedIdentityServiceHandler) PasswordSignup(context.Context, *connect.Request[v1.PasswordSignupRequest]) (*connect.Response[v1.PasswordSignupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.PasswordSignup is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UsernameSignup(context.Context, *connect.Request[v1.UsernameSignupRequest]) (*connect.Response[v1.UsernameSignupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UsernameSignup is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) PasswordLogin(context.Context, *connect.Request[v1.PasswordLoginRequest]) (*connect.Response[v1.PasswordLoginResponse], error) {

@@ -19,6 +19,13 @@ again.
   verified. `User.account_address` carries it. A deployment
   that sets neither behaves exactly as before. See *Account addresses* in
   the docs.
+- **Who creates each kind of account (new; defaults keep today's
+  behaviour).** `accounts.email_signup` and `accounts.username_signup`
+  (default project: `GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP` and
+  `GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP`) take `self`, `admin` or `off`.
+  Email defaults to `self` and usernames to `off`, so nothing changes until
+  you choose. New: `UsernameSignup`, and `CreateUser` takes `username` and
+  returns `temporary_password` for a username account.
 - **`accounts` in a project's config is now read and validated.** A stored
   config that already had an `accounts` key with a `domain` that is not a
   fully qualified name stops that project resolving until it is fixed. An

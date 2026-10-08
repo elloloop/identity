@@ -165,6 +165,34 @@ func (h *IdentityHandler) PasswordSignup(
 	return connect.NewResponse(resp), nil
 }
 
+// UsernameSignup creates an account identified by a username and issues
+// tokens. It is gated exactly as PasswordSignup is (local auth, password
+// signup, client assurance), and by the project's accounts.username_signup.
+func (h *IdentityHandler) UsernameSignup(
+	ctx context.Context,
+	req *connect.Request[identitypb.UsernameSignupRequest],
+) (*connect.Response[identitypb.UsernameSignupResponse], error) {
+	if h.cfg != nil && !h.cfg.PasswordSignupEnabled {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, service.ErrSignupDisabled)
+	}
+	if err := h.requireAssurance(ctx, h.assuranceEnforcePasswordSignup(), req.Header()); err != nil {
+		return nil, toConnectError(err)
+	}
+	result, err := h.auth.UsernameSignup(
+		ctx, req.Msg.Username, req.Msg.Password, req.Msg.Name,
+		req.Msg.DateOfBirthMs, req.Msg.Market,
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.UsernameSignupResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}), nil
+}
+
 // PasswordLogin authenticates a user with email and password. If TOTP is
 // enabled, returns totp_required=true and a login_challenge_id for the
 // client to pass to VerifyTotp.

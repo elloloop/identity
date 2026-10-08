@@ -15,9 +15,11 @@ import (
 	"github.com/elloloop/identity/internal/config"
 )
 
-// ProjectAccountsConfig is a project's account-domain policy, parsed from
+// ProjectAccountsConfig is a project's account policy, parsed from
 // config_json `accounts` — or, for the env default project, assembled from
-// GATEWAY_DEFAULT_EMAIL_DOMAIN.
+// GATEWAY_DEFAULT_EMAIL_DOMAIN and GATEWAY_DEFAULT_PROJECT_*_SIGNUP. It says
+// which kinds of account the project has and who creates them (see
+// accounts_signup.go), and on which domain their addresses are issued.
 //
 // When Domain is set, every permanent account in the project is given an
 // ACCOUNT ADDRESS on that domain: an address the project itself owns,
@@ -34,13 +36,28 @@ type ProjectAccountsConfig struct {
 	// Domain is the domain account addresses are issued on, e.g.
 	// "accounts.example.com". Empty (the default) issues none.
 	Domain string `json:"domain"`
+
+	// EmailSignup says who creates accounts identified by an email address:
+	// "self" (the person signs up; the default), "admin" (only an admin
+	// creates them; people sign in to the account an admin made), or "off"
+	// (the project has no email accounts to create).
+	EmailSignup string `json:"email_signup"`
+
+	// UsernameSignup says who creates accounts identified by a username:
+	// "off" (the default), "self" or "admin", as for EmailSignup. Managed
+	// child accounts are a guardian's to create and are not governed here.
+	UsernameSignup string `json:"username_signup"`
 }
 
 // NewDefaultProjectAccounts builds the env-configured default project's
 // account policy, validated and canonicalized by the same rules as the
 // config_json path.
 func NewDefaultProjectAccounts(cfg *config.Config) (ProjectAccountsConfig, error) {
-	a := ProjectAccountsConfig{Domain: cfg.DefaultEmailDomain}
+	a := ProjectAccountsConfig{
+		Domain:         cfg.DefaultEmailDomain,
+		EmailSignup:    cfg.DefaultProjectEmailSignup,
+		UsernameSignup: cfg.DefaultProjectUsernameSignup,
+	}
 	if err := a.validate(); err != nil {
 		return ProjectAccountsConfig{}, err
 	}
@@ -53,6 +70,12 @@ func NewDefaultProjectAccounts(cfg *config.Config) (ProjectAccountsConfig, error
 // a bare domain name: LDH labels of 1-63 characters, no leading or trailing
 // hyphen, at least two labels.
 func (a ProjectAccountsConfig) validate() error {
+	if err := validateSignupMode("accounts.email_signup", a.EmailSignup); err != nil {
+		return err
+	}
+	if err := validateSignupMode("accounts.username_signup", a.UsernameSignup); err != nil {
+		return err
+	}
 	if strings.TrimSpace(a.Domain) == "" {
 		return nil
 	}
@@ -65,9 +88,13 @@ func (a ProjectAccountsConfig) validate() error {
 }
 
 // canonicalized returns the domain in the one spelling every address issued
-// on it shares.
+// on it shares, and the signup modes in theirs.
 func (a ProjectAccountsConfig) canonicalized() ProjectAccountsConfig {
-	return ProjectAccountsConfig{Domain: canonicalAccountDomain(a.Domain)}
+	return ProjectAccountsConfig{
+		Domain:         canonicalAccountDomain(a.Domain),
+		EmailSignup:    canonicalSignupMode(a.EmailSignup),
+		UsernameSignup: canonicalSignupMode(a.UsernameSignup),
+	}
 }
 
 // canonicalAccountDomain lower-cases and trims a domain, drops a trailing

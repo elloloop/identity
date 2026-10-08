@@ -3,8 +3,8 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
 import { Code } from "astro-expressive-code/components";
 ---
 
-<DocsLayout title="Account addresses">
-  <h1>Account addresses</h1>
+<DocsLayout title="Account kinds and addresses">
+  <h1>Account kinds and addresses</h1>
   <p>
     A project can issue every account an <strong>account address</strong> on a
     domain the project owns. People keep signing up with whatever they have, an
@@ -16,7 +16,96 @@ import { Code } from "astro-expressive-code/components";
     system should key mailboxes on the user id.
   </p>
 
-  <h2>Turning it on</h2>
+  <h2>Which accounts a project has, and who creates them</h2>
+  <p>
+    A project has two kinds of account, and chooses for each who creates it:
+  </p>
+  <ul>
+    <li>
+      <strong>Email accounts</strong>, identified by an email at any provider:
+      <code>accounts.email_signup</code>.
+    </li>
+    <li>
+      <strong>Username accounts</strong>, identified by a username and a
+      password, with no email: <code>accounts.username_signup</code>.
+    </li>
+  </ul>
+  <p>Each setting takes one of three values:</p>
+  <ul>
+    <li>
+      <code>self</code>: people create their own. This is the default for email
+      accounts.
+    </li>
+    <li>
+      <code>admin</code>: only an admin creates them, through
+      <code>CreateUser</code> (and <code>InviteUser</code> for email accounts).
+      People sign in to the account an admin made, and self-signup is refused
+      as invitation-only. Sign-in codes go only to addresses that already have
+      an account.
+    </li>
+    <li>
+      <code>off</code>: the project has no accounts of this kind to create, and
+      both self-signup and admin creation are refused. This is the default for
+      username accounts. Accounts of the kind that already exist keep signing
+      in.
+    </li>
+  </ul>
+  <Code lang="json" code={`{
+  "access": { "mode": "open" },
+  "accounts": {
+    "domain": "accounts.example.com",
+    "email_signup": "self",
+    "username_signup": "self"
+  }
+}`} />
+  <p>
+    A consumer product keeps email self-signup and, if it wants handles, turns
+    on username self-signup. A workplace sets <code>email_signup</code> to
+    <code>off</code> and <code>username_signup</code> to <code>admin</code>, so
+    every account is one its admins made, with an address on its domain. The
+    default project takes these from
+    <code>GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP</code> and
+    <code>GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP</code>. Managed child accounts
+    are a guardian's to create and are not governed by these settings.
+  </p>
+  <p>
+    The access mode still applies. A username has no email for an allowlist or
+    a deny-list to match, so username self-signup works only in
+    <code>open</code> mode: <code>invite</code> refuses it as invitation-only,
+    and <code>allowlist</code> and <code>closed</code> refuse it.
+  </p>
+
+  <h3>Username accounts</h3>
+  <ul>
+    <li>
+      People sign up with <code>UsernameSignup</code> (username, password, and
+      optionally a name, date of birth and market) and sign in with
+      <code>PasswordLogin</code>, using the username as the identifier.
+    </li>
+    <li>
+      An admin creates one with <code>CreateUser</code>, setting
+      <code>username</code> instead of <code>email</code>. The response carries
+      a temporary password to hand to the person.
+    </li>
+    <li>
+      A username is 3–32 lowercase letters, digits, <code>_</code>,
+      <code>-</code> and <code>.</code>. It may not contain <code>-at-</code>,
+      start or end with <code>.</code>, or contain <code>..</code>.
+    </li>
+    <li>
+      A username is a public handle, so a taken one is reported as taken.
+    </li>
+    <li>
+      A date of birth in the child band is refused. A child's account is made by
+      their guardian, with consent, as a managed child account.
+    </li>
+    <li>
+      A username account has no email, so it has no email-based password reset.
+      An admin resets its password.
+    </li>
+  </ul>
+
+  <h2>Turning on addresses</h2>
   <p>
     Set <code>accounts.domain</code> in the project's config. The default
     project takes it from <code>GATEWAY_DEFAULT_EMAIL_DOMAIN</code>. Leaving it

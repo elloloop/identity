@@ -2,6 +2,7 @@ package connect
 
 import (
 	"context"
+	"fmt"
 
 	"connectrpc.com/connect"
 
@@ -208,8 +209,9 @@ func (h *IdentityHandler) SetUserQuota(
 // ─── CRUD User RPCs ─────────────────────────────────────────────────────────
 // Lower-level CRUD operations from the proto service definition.
 
-// CreateUser creates a new user. Admin only.
-// Delegates to InviteUser with createImmediately=true.
+// CreateUser creates a new user. Admin only. An email account delegates to
+// InviteUser with createImmediately=true; a username account is created
+// active with a temporary password, returned for the admin to hand over.
 func (h *IdentityHandler) CreateUser(
 	ctx context.Context,
 	req *connect.Request[identitypb.CreateUserRequest],
@@ -217,6 +219,19 @@ func (h *IdentityHandler) CreateUser(
 	callerID := authenticatedUserID(req.Header())
 	if callerID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	if req.Msg.Username != "" {
+		if req.Msg.Email != "" {
+			return nil, toConnectError(fmt.Errorf("%w: set one of email and username", service.ErrInvalidArgument))
+		}
+		result, err := h.admin.CreateUsernameUser(ctx, callerID, req.Msg.Username, req.Msg.Name, req.Msg.Role)
+		if err != nil {
+			return nil, toConnectError(err)
+		}
+		return connect.NewResponse(&identitypb.CreateUserResponse{
+			User:              userToProto(result.User),
+			TemporaryPassword: result.TemporaryPassword,
+		}), nil
 	}
 
 	result, err := h.admin.InviteUser(

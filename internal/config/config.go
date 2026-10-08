@@ -270,6 +270,19 @@ type Config struct {
 	// GATEWAY_DEFAULT_PROJECT_ACCESS_MODE.
 	DefaultProjectAccessMode string
 
+	// DefaultProjectEmailSignup says who creates the default project's email
+	// accounts: "self" (empty means this), "admin" or "off" (see
+	// service.Signup*). It stands in for `accounts.email_signup`, since the
+	// default project has no config_json. Driven by
+	// GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP.
+	DefaultProjectEmailSignup string
+
+	// DefaultProjectUsernameSignup says who creates the default project's
+	// username accounts: "off" (empty means this), "self" or "admin". It
+	// stands in for `accounts.username_signup`. Driven by
+	// GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP.
+	DefaultProjectUsernameSignup string
+
 	// DefaultProjectAllowedEmails is the comma-separated email allowlist applied
 	// to the default project when DefaultProjectAccessMode is "allowlist"
 	// (ignored for open/invite/closed). Driven by
@@ -1250,6 +1263,8 @@ func loadFromEnv() *Config {
 		// deployment that upgrades and configures nothing fails closed. Set
 		// GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open to restore unrestricted signup.
 		DefaultProjectAccessMode:     envStr("GATEWAY_DEFAULT_PROJECT_ACCESS_MODE", "closed"),
+		DefaultProjectEmailSignup:    envStr("GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP", ""),
+		DefaultProjectUsernameSignup: envStr("GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP", ""),
 		DefaultProjectAllowedEmails:  envStr("GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS", ""),
 		DefaultProjectAllowedDomains: envStr("GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS", ""),
 		// The deny layer is OFF by default: it subtracts from the configured

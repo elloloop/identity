@@ -1092,6 +1092,17 @@ var (
 	// the denial is uniform across every email (invite-only is a project
 	// property, not a per-account signal), so it discloses no account existence.
 	ErrSignupByInvitationOnly = errors.New("this project is invitation-only; self-signup is disabled")
+
+	// ErrAccountKindOff is returned when a project has turned off the kind
+	// of account a request would create — accounts.email_signup or
+	// accounts.username_signup is "off" — whether a person or an admin asks.
+	ErrAccountKindOff = errors.New("this project does not create accounts of this kind")
+
+	// ErrSignupThrottled is returned when one identifier has been used for
+	// too many sign-up attempts in the throttle window. Email sign-up hides
+	// its throttle behind the duplicate-signup decoy; a username is a public
+	// handle with no such decoy, so its throttle says so.
+	ErrSignupThrottled = errors.New("too many sign-up attempts for this identifier; try again later")
 	// ErrProductAgeRestricted is returned when authentication succeeded but the
 	// account's derived age band is below the minimum the requested product
 	// configures (ProjectProductsConfig). It maps to CodePermissionDenied, and

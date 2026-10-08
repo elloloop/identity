@@ -24,6 +24,7 @@ const (
 	IdentityService_NativeOAuthLogin_FullMethodName                = "/identity.v1.IdentityService/NativeOAuthLogin"
 	IdentityService_RedeemOAuthCode_FullMethodName                 = "/identity.v1.IdentityService/RedeemOAuthCode"
 	IdentityService_PasswordSignup_FullMethodName                  = "/identity.v1.IdentityService/PasswordSignup"
+	IdentityService_UsernameSignup_FullMethodName                  = "/identity.v1.IdentityService/UsernameSignup"
 	IdentityService_PasswordLogin_FullMethodName                   = "/identity.v1.IdentityService/PasswordLogin"
 	IdentityService_SubmitDateOfBirth_FullMethodName               = "/identity.v1.IdentityService/SubmitDateOfBirth"
 	IdentityService_RequestEmailLoginCode_FullMethodName           = "/identity.v1.IdentityService/RequestEmailLoginCode"
@@ -154,6 +155,9 @@ type IdentityServiceClient interface {
 	NativeOAuthLogin(ctx context.Context, in *NativeOAuthLoginRequest, opts ...grpc.CallOption) (*NativeOAuthLoginResponse, error)
 	RedeemOAuthCode(ctx context.Context, in *RedeemOAuthCodeRequest, opts ...grpc.CallOption) (*RedeemOAuthCodeResponse, error)
 	PasswordSignup(ctx context.Context, in *PasswordSignupRequest, opts ...grpc.CallOption) (*PasswordSignupResponse, error)
+	// UsernameSignup creates an account identified by a username and a
+	// password (accounts.username_signup "self"). Sign in with PasswordLogin.
+	UsernameSignup(ctx context.Context, in *UsernameSignupRequest, opts ...grpc.CallOption) (*UsernameSignupResponse, error)
 	PasswordLogin(ctx context.Context, in *PasswordLoginRequest, opts ...grpc.CallOption) (*PasswordLoginResponse, error)
 	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
 	// RPC that accepts the completion ticket carried by the dob_required
@@ -484,6 +488,16 @@ func (c *identityServiceClient) PasswordSignup(ctx context.Context, in *Password
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PasswordSignupResponse)
 	err := c.cc.Invoke(ctx, IdentityService_PasswordSignup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) UsernameSignup(ctx context.Context, in *UsernameSignupRequest, opts ...grpc.CallOption) (*UsernameSignupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UsernameSignupResponse)
+	err := c.cc.Invoke(ctx, IdentityService_UsernameSignup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1680,6 +1694,9 @@ type IdentityServiceServer interface {
 	NativeOAuthLogin(context.Context, *NativeOAuthLoginRequest) (*NativeOAuthLoginResponse, error)
 	RedeemOAuthCode(context.Context, *RedeemOAuthCodeRequest) (*RedeemOAuthCodeResponse, error)
 	PasswordSignup(context.Context, *PasswordSignupRequest) (*PasswordSignupResponse, error)
+	// UsernameSignup creates an account identified by a username and a
+	// password (accounts.username_signup "self"). Sign in with PasswordLogin.
+	UsernameSignup(context.Context, *UsernameSignupRequest) (*UsernameSignupResponse, error)
 	PasswordLogin(context.Context, *PasswordLoginRequest) (*PasswordLoginResponse, error)
 	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
 	// RPC that accepts the completion ticket carried by the dob_required
@@ -1980,6 +1997,9 @@ func (UnimplementedIdentityServiceServer) RedeemOAuthCode(context.Context, *Rede
 }
 func (UnimplementedIdentityServiceServer) PasswordSignup(context.Context, *PasswordSignupRequest) (*PasswordSignupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PasswordSignup not implemented")
+}
+func (UnimplementedIdentityServiceServer) UsernameSignup(context.Context, *UsernameSignupRequest) (*UsernameSignupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UsernameSignup not implemented")
 }
 func (UnimplementedIdentityServiceServer) PasswordLogin(context.Context, *PasswordLoginRequest) (*PasswordLoginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PasswordLogin not implemented")
@@ -2442,6 +2462,24 @@ func _IdentityService_PasswordSignup_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).PasswordSignup(ctx, req.(*PasswordSignupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_UsernameSignup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UsernameSignupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).UsernameSignup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_UsernameSignup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).UsernameSignup(ctx, req.(*UsernameSignupRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4596,6 +4634,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PasswordSignup",
 			Handler:    _IdentityService_PasswordSignup_Handler,
+		},
+		{
+			MethodName: "UsernameSignup",
+			Handler:    _IdentityService_UsernameSignup_Handler,
 		},
 		{
 			MethodName: "PasswordLogin",

@@ -135,6 +135,11 @@ func (s *AdminService) InviteUser(
 	if scope := ProjectScopeFromContext(ctx); scope != nil && !accessPermits(s.cfg, scope.Access, cemail, false) {
 		return nil, ErrAccessNotAllowed
 	}
+	// A project with email accounts off has none for an admin to create
+	// either; "admin" and "self" both let an admin create one.
+	if accountsFor(ProjectScopeFromContext(ctx)).emailSignup() == SignupOff {
+		return nil, ErrAccountKindOff
+	}
 	role = strings.ToLower(strings.TrimSpace(role))
 	if role == "" {
 		role = "member"

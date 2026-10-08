@@ -282,6 +282,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
+			// Username signup: unauthenticated account creation, on the same
+			// per-IP signup quota as PasswordSignup.
+			PathPrefix: "/identity.v1.IdentityService/UsernameSignup", Tag: "username_signup",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordLogin", Tag: "login",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
@@ -1188,7 +1194,8 @@ func randomEventID() string {
 func buildDefaultProjectAccounts(cfg *config.Config, logger *zap.Logger) (service.ProjectAccountsConfig, error) {
 	accounts, err := service.NewDefaultProjectAccounts(cfg)
 	if err != nil {
-		return service.ProjectAccountsConfig{}, fmt.Errorf("default project accounts config (check GATEWAY_DEFAULT_EMAIL_DOMAIN): %w", err)
+		return service.ProjectAccountsConfig{}, fmt.Errorf("default project accounts config (check GATEWAY_DEFAULT_EMAIL_DOMAIN, "+
+			"GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP, GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP): %w", err)
 	}
 	if accounts.Domain != "" {
 		logger.Info("default_project_account_addresses_enabled", zap.String("domain", accounts.Domain))
