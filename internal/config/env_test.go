@@ -371,8 +371,14 @@ func TestAccountMergeReauthMaxAge(t *testing.T) {
 		t.Fatalf("set: got %v", got)
 	}
 	c = Load()
-	c.AccountMergeReauthMaxAgeSeconds = -1
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS") {
-		t.Fatalf("negative must be refused, got %v", err)
+	for _, v := range []int{-1, MaxAccountMergeReauthMaxAgeSeconds + 1} {
+		c.AccountMergeReauthMaxAgeSeconds = v
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS") {
+			t.Fatalf("%d must be refused, got %v", v, err)
+		}
+	}
+	c.AccountMergeReauthMaxAgeSeconds = MaxAccountMergeReauthMaxAgeSeconds
+	if err := c.Validate(); err != nil {
+		t.Fatalf("the cap itself is allowed: %v", err)
 	}
 }

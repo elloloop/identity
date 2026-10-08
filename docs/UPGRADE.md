@@ -1,5 +1,20 @@
 # Upgrade guide
 
+## v4.12.1 → next — the recent-sign-in window for merging is capped (behaviour change)
+
+No schema change and no migration.
+
+- **`GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS` must be at most 3600.**
+  A larger value let an hours-old session count as a recent sign-in, and is
+  now refused at boot. A deployment that never set it, or set it within the
+  range, sees no change.
+- **Merging relies on webhooks.** A merge retires an account, and
+  applications learn about it only through the `user.merged` event: before
+  turning on `GATEWAY_ACCOUNT_MERGE_ENABLED`, turn on
+  `GATEWAY_WEBHOOKS_ENABLED` and subscribe every application that keeps data
+  under user ids to `user.merged`. With merging on and webhooks off, identity
+  logs `account_merge_without_webhooks` at boot.
+
 ## v4.12.0 → v4.12.1 — the admin user view shows usernames (fix)
 
 No schema change and no migration.
