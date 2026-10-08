@@ -357,8 +357,8 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		{
 			// Anonymous sign-in creates a real user row per call, from an
 			// unauthenticated caller: without a quota it is an unbounded
-			// row-insert primitive. Shares the signup budget because that is
-			// what it is — account creation.
+			// row-insert primitive. Its own budget, the size of the signup
+			// budget, because what it does is account creation.
 			PathPrefix: "/identity.v1.IdentityService/SignInAnonymously", Tag: "anonymous_signin",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
@@ -378,8 +378,8 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// the step-up verify the refused calls also pay, then writes a
 			// user + edge + consent row. Without a quota that is the same
 			// unbounded row-insert primitive SignInAnonymously would be, one
-			// authentication further in. Shares the signup budget because
-			// that is what it is.
+			// authentication further in. Its own budget, the size of the
+			// signup budget, because what it does is account creation.
 			PathPrefix: "/identity.v1.IdentityService/CreateManagedChildAccount", Tag: "managed_child_create",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},

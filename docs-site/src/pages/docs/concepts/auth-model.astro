@@ -163,6 +163,13 @@ import { Code } from "astro-expressive-code/components";
     sends a notice email to the existing address, and does not create a
     second user or mint a durable session for the caller.
   </p>
+  <p>
+    <code>UsernameSignup</code> is an exception, by design (as is
+    <code>UpgradeAnonymousAccount</code>, which reports a taken address): a
+    username is chosen to be found, so it says when one is taken, within a
+    per-IP budget
+    (see <a href="/identity/docs/users/account-addresses">Account addresses</a>).
+  </p>
 
   <h2>Replica consistency</h2>
   <p>

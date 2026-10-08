@@ -165,7 +165,9 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 		s.logger.Warn("anonymous_upgrade_verification_send_failed",
 			zap.String("user_id", userID), zap.Error(err))
 	}
-	return s.reissueAfterUpgrade(ctx, userID, cred.IPAddress, cred.UserAgent)
+	// A password the anonymous session just chose proves nothing beyond that
+	// session: the reissued token carries no auth_time.
+	return s.reissueAfterUpgrade(ctx, userID, cred.IPAddress, cred.UserAgent, 0)
 }
 
 // UpgradeAnonymousWithOAuth attaches a federated identity to the calling
@@ -309,7 +311,8 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 			"email_at_link_time": string(email),
 		}),
 	)
-	return s.reissueAfterUpgrade(ctx, userID, cred.IPAddress, cred.UserAgent)
+	// The provider just authenticated the person: a sign-in.
+	return s.reissueAfterUpgrade(ctx, userID, cred.IPAddress, cred.UserAgent, s.nowMs())
 }
 
 // reissueAfterUpgrade re-reads the promoted account and mints a fresh token
@@ -321,7 +324,10 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 // caller's existing access token asserts anonymous=true, so without a new
 // one every downstream service would keep treating a now-permanent account
 // as anonymous until that token happened to expire.
-func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, userAgent string) (*LoginResult, error) {
+//
+// authTimeMs is the sign-in the upgrade amounts to: now for a provider's
+// authentication, 0 for a password the session chose itself.
+func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, userAgent string, authTimeMs int64) (*LoginResult, error) {
 	u, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -329,7 +335,7 @@ func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, u
 	if u == nil {
 		return nil, ErrNotFound
 	}
-	access, refresh, err := s.issueTokens(ctx, u, ipAddr, userAgent)
+	access, refresh, err := s.issueSignInTokens(ctx, u, ipAddr, userAgent, s.nowMs(), authTimeMs)
 	if err != nil {
 		return nil, err
 	}

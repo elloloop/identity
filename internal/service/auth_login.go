@@ -629,24 +629,54 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
-	// Account status (lockout / suspended / invited / IDV) is a hard gate.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	// A username sign-in skipped the email-keyed access gate above; it gets
+	// the account rule after the password, so a refusal reveals nothing to a
+	// caller without it.
+	decision, err := s.postPasswordGates(ctx, user, postPasswordGateOpts{
+		checkAccess:        identifierKey == "username",
+		resendVerification: true,
+	}, ipAddr, userAgent)
+	if err != nil {
 		return nil, loginPolicyDecision{}, err
 	}
-	// A username sign-in skipped the email-keyed gate above; it gets the
-	// account rule here, once the password is proven, so a refusal reveals
-	// nothing to a caller without the password. The rule judges an account
-	// that also has an email by that email, exactly as refresh will.
-	if identifierKey == "username" {
+	return user, decision, nil
+}
+
+// postPasswordGateOpts are the ways the callers of postPasswordGates differ on
+// purpose.
+type postPasswordGateOpts struct {
+	// checkAccess applies the project access rule to the account. A sign-in
+	// by email already passed the email-keyed gate before the lookup; a
+	// username sign-in, or a later step that re-checks, has not.
+	checkAccess bool
+	// resendVerification sends a fresh verification email when the gate
+	// refuses an unverified address: a sign-in is where the person is
+	// waiting for one.
+	resendVerification bool
+}
+
+// postPasswordGates is every gate a password sign-in applies once the
+// password is proven, in one place for every caller that proves one (the
+// sign-in, and a step that completes it later): the account's status and
+// lockout, the access rule when asked, the verified-email requirement and the
+// login policy, whose decision it returns. Each refusal is audited as the
+// sign-in's.
+func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts postPasswordGateOpts, ipAddr, userAgent string) (loginPolicyDecision, error) {
+	// Account status (lockout / suspended / invited / IDV) is a hard gate.
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return loginPolicyDecision{}, err
+	}
+	// The rule judges an account that also has an email by that email,
+	// exactly as refresh will.
+	if opts.checkAccess {
 		if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
-			return nil, loginPolicyDecision{}, err
+			return loginPolicyDecision{}, err
 		}
 	}
-
-	// Email-verification gate. The password is correct at this point, so this
-	// is the one place the gate can fire without creating an enumeration oracle
-	// (an unknown email or a wrong password already returned above with the
-	// generic ErrUnauthenticated). When required, an unverified account cannot
+	// Email-verification gate. Callers reach this only with the password
+	// proven, so the gate can fire without creating an enumeration oracle (an
+	// unknown email or a wrong password was already refused with the generic
+	// ErrUnauthenticated). When required, an unverified account cannot
 	// authenticate — this closes the pre-hijacking vector where an attacker
 	// plants a password on an unverified address and waits for the real owner
 	// to verify it via OAuth/passwordless.
@@ -667,11 +697,13 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 		// Best-effort: resend the verification email so the user can complete
 		// verification and retry. Failures (throttle, transport) must not change
 		// the response — the gate result is the same either way.
-		if sendErr := s.sendEmailVerification(ctx, user.ID, emailLink{}); sendErr != nil {
-			s.logger.Warn("login_verification_resend_failed",
-				zap.String("user_id", user.ID), zap.Error(sendErr))
+		if opts.resendVerification {
+			if sendErr := s.sendEmailVerification(ctx, user.ID, emailLink{}); sendErr != nil {
+				s.logger.Warn("login_verification_resend_failed",
+					zap.String("user_id", user.ID), zap.Error(sendErr))
+			}
 		}
-		return nil, loginPolicyDecision{}, ErrEmailVerificationRequired
+		return loginPolicyDecision{}, ErrEmailVerificationRequired
 	}
 
 	// Credentials are proven; consult the tenant's LoginPolicy. This runs
@@ -680,11 +712,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 	// The policy resolves from the account's STORED email — for a username-
 	// identified managed child that is "" (no governed tenant), so the project
 	// default applies, matching the passkey login path.
-	decision, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodPassword)
-	if err != nil {
-		return nil, loginPolicyDecision{}, err
-	}
-	return user, decision, nil
+	return s.enforceLoginPolicy(ctx, user.Email, LoginMethodPassword)
 }
 
 // ── OAuthLogin ─────────────────────────────────────────────────────────

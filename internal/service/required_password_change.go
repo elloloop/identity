@@ -105,7 +105,7 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 	// Up to passwordChangeTicketTTL may have passed since the sign-in that
 	// minted the ticket: every gate that sign-in passed after the password is
 	// checked again, so a change in that window wins over the ticket.
-	decision, err := s.recheckSignInGates(ctx, user, ipAddr, userAgent)
+	decision, err := s.postPasswordGates(ctx, user, postPasswordGateOpts{checkAccess: true}, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +142,10 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 		"password_hash":            pwHash,
 		"password_change_required": false,
 		"updated_at":               now,
+		// A completed sign-in clears the failed-attempt count, as
+		// PasswordLogin does: wrong codes before it no longer count.
+		"failed_login_count": 0,
+		"locked_until":       int64(0),
 	}); err != nil {
 		return nil, fmt.Errorf("updating password: %w", err)
 	}
@@ -169,8 +173,7 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 	// The sign-in happened when the issued password was proven; the ticket
 	// carries that moment as the session's auth_time.
 	s.updateLastLogin(ctx, user.ID)
-	s.cancelPendingDeletionOnLogin(ctx, user)
-	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, s.nowMs(), claims.AuthTime*1000)
+	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, s.nowMs(), claims.AuthTime*1000)
 	if err != nil {
 		return nil, err
 	}
@@ -186,23 +189,6 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
-}
-
-// recheckSignInGates repeats, for an account whose password was proven
-// earlier, the gates a password sign-in applies after the password: the
-// account's status and lockout, the access rule, the verified-email
-// requirement and the login policy, whose decision it returns.
-func (s *AuthService) recheckSignInGates(ctx context.Context, user *User, ipAddr, userAgent string) (loginPolicyDecision, error) {
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
-		return loginPolicyDecision{}, err
-	}
-	if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
-		return loginPolicyDecision{}, err
-	}
-	if s.cfg.AuthRequireVerifiedEmail && user.Email != "" && !user.EmailVerified {
-		return loginPolicyDecision{}, ErrEmailVerificationRequired
-	}
-	return s.enforceLoginPolicy(ctx, user.Email, LoginMethodPassword)
 }
 
 // countFailedSecondFactor records a wrong second-factor code against the

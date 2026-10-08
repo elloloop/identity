@@ -58,9 +58,10 @@ type Claims struct {
 	// opaque fingerprint the issuing flow defines), so a change to that state
 	// spends the ticket. Empty on access tokens and on unbound tickets.
 	Binding string `json:"bnd,omitempty"`
-	// AuthTime is when the user authenticated (OIDC `auth_time`, epoch
-	// seconds), present only on a token a sign-in issued: a refreshed token,
-	// or one from a flow that proves no credential (a QR handoff), omits it.
+	// AuthTime is when the user authenticated (epoch seconds; named after
+	// OIDC's `auth_time` but narrower on purpose), present only on a token a
+	// sign-in issued: a refreshed token, or one from a flow that proves no
+	// credential (a QR handoff, an anonymous account), omits it.
 	// On a purpose ticket it carries the sign-in of the session the ticket
 	// interrupted. An RPC that needs a recent sign-in compares it with now.
 	AuthTime  int64 `json:"auth_time,omitempty"`

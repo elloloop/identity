@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -106,4 +107,44 @@ func TestAuthTime_RequiredPasswordChangeKeepsTheSignIn(t *testing.T) {
 	res, err := svc.CompleteRequiredPasswordChange(context.Background(), ticket, strongPW, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, res.AccessToken))
+}
+
+// An anonymous account proves no credential, and neither does a password it
+// chooses for itself; a provider's authentication at upgrade is a sign-in.
+func TestAuthTime_AnonymousAccounts(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AuthRequireVerifiedEmail = false
+	ctx := anonCtx(true, AccessModeOpen)
+
+	anon, err := svc.SignInAnonymously(ctx, "203.0.113.10", "ua")
+	require.NoError(t, err)
+	require.Zero(t, authTimeOf(t, svc, anon.AccessToken), "anonymous sign-in")
+
+	up, err := svc.UpgradeAnonymousWithPassword(ctx, anon.User.ID, AnonymousPasswordCredential{
+		Email: "upgraded@example.com", Password: "Str0ng-Passw0rd!x",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, up.AccessToken)
+	require.Zero(t, authTimeOf(t, svc, up.AccessToken), "a password the anonymous session chose")
+
+	anon2, err := svc.SignInAnonymously(ctx, "203.0.113.10", "ua")
+	require.NoError(t, err)
+	viaProvider, err := svc.UpgradeAnonymousWithOAuth(ctx, anon2.User.ID, oauthCred())
+	require.NoError(t, err)
+	require.InDelta(t, time.Now().Unix(), authTimeOf(t, svc, viaProvider.AccessToken), 5, "the provider's sign-in")
+}
+
+// No auth_time a trusted host forwards, however large, overflows the check.
+func TestMergeAccounts_AbsurdAuthTimeIsNotRecent(t *testing.T) {
+	svc, _, survivor, _, ctx := mergeFixture(t)
+	for name, authTime := range map[string]int64{
+		// 2^61 * 1000 is 0 mod 2^64: in milliseconds this wrapped to "now",
+		// the case a millisecond comparison got wrong.
+		"wraps to now in milliseconds": time.Now().Unix() + 1<<61,
+		"the largest value":            math.MaxInt64,
+	} {
+		_, err := svc.MergeAccounts(ctx, survivor.ID, authTime, "bob", accessTestPassword, "203.0.113.10", "agent", false)
+		require.ErrorIs(t, err, ErrReauthenticationRequired, name)
+	}
 }

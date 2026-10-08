@@ -229,7 +229,7 @@
     "type": "boolean",
     "default": "true",
     "required": false,
-    "description": "requires an assurance token on the PasswordSignup and UsernameSignup endpoints.",
+    "description": "requires an assurance token on every RPC that creates a password account: PasswordSignup, UsernameSignup and UpgradeAnonymousAccount.",
     "category": "Client assurance",
     "anchor": "client-assurance"
   },
@@ -1273,7 +1273,7 @@
     "type": "boolean",
     "default": "true",
     "required": false,
-    "description": "gates self-serve PasswordSignup and UsernameSignup; set false to disable both (admin-driven creation and invitations still work).",
+    "description": "gates every self-serve way to a password account: PasswordSignup, UsernameSignup and UpgradeAnonymousAccount with a password, and the hosted page's sign-up form.",
     "category": "Password \u0026 lockout",
     "anchor": "password-and-lockout"
   },
@@ -1480,7 +1480,7 @@
     "type": "integer",
     "default": "10",
     "required": false,
-    "description": "is the per-IP request cap per window on PasswordSignup and UsernameSignup, together.",
+    "description": "is the per-IP request cap per window on the account-creating RPCs.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },

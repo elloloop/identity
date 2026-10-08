@@ -332,9 +332,9 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
   <h2>Operational notes</h2>
   <ul>
     <li>
-      <strong>Rate limits.</strong> <code>SignInAnonymously</code> shares the
-      per-IP signup budget (<code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code>),
-      because that is what it is — account creation. Enabling anonymous
+      <strong>Rate limits.</strong> <code>SignInAnonymously</code> has its own
+      per-IP budget, the size of <code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code>,
+      because what it does is account creation. Enabling anonymous
       sign-in without assurance or a meaningful quota gives the internet an
       unbounded row-insert primitive.
     </li>

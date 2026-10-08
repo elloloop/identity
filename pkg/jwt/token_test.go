@@ -282,3 +282,20 @@ func TestClaims_AuthTimeRoundTrip(t *testing.T) {
 	assert.Zero(t, claims.AuthTime)
 	assert.NotContains(t, Claims{Sub: "u"}.ClaimsMap(time.Now(), time.Minute), "auth_time")
 }
+
+// bnd round-trips on a purpose ticket and is absent when unset.
+func TestClaims_BindingRoundTrip(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+	tok, err := s.SignAccessToken(context.Background(), Claims{Sub: "u", Purpose: "p", Binding: "fingerprint"}, time.Minute)
+	require.NoError(t, err)
+	claims, err := VerifyPurposeToken(tok, s, "", "", false, "p")
+	require.NoError(t, err)
+	assert.Equal(t, "fingerprint", claims.Binding)
+
+	tok, err = s.SignAccessToken(context.Background(), Claims{Sub: "u", Purpose: "p"}, time.Minute)
+	require.NoError(t, err)
+	claims, err = VerifyPurposeToken(tok, s, "", "", false, "p")
+	require.NoError(t, err)
+	assert.Empty(t, claims.Binding)
+	assert.NotContains(t, Claims{Sub: "u"}.ClaimsMap(time.Now(), time.Minute), "bnd")
+}

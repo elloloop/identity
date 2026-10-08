@@ -218,7 +218,10 @@ func (s *AuthService) SetManagedChildPassword(
 	repo := s.repo(ctx)
 	if err := repo.UpdateUser(ctx, child.ID, map[string]any{
 		"password_hash": hash,
-		"updated_at":    now,
+		// The guardian chose this password; an administrator did not issue
+		// it, so it owes no change at the child's next sign-in.
+		"password_change_required": false,
+		"updated_at":               now,
 		// Clear the lockout with the credential, exactly as the self-service
 		// ResetPassword does: whoever tripped it is usually the person the
 		// new password is for, and this is the ONLY recovery path an
