@@ -202,3 +202,24 @@ func TestMergeAccounts_SurvivorCheckedBeforeThePassword(t *testing.T) {
 	got, _ := repo.GetUser(ctx, native.ID)
 	require.Zero(t, got.FailedLoginCount, "no password was checked")
 }
+
+// A merge is announced at every address either account had.
+func TestMergeAccounts_NotifiesBothAddresses(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.cfg.AccountMergeEnabled = true
+	ctx := accountsScope(t, "accounts.example.test")
+	survivor := seedUser(repo, "keep@mail.example.com", "", StatusActive)
+	verified(seedUser(repo, "gone@mail.example.com", hashPW(t, accessTestPassword), StatusActive))
+
+	_, err := svc.MergeAccounts(ctx, survivor.ID, "gone@mail.example.com", accessTestPassword, "203.0.113.4", "agent", false)
+	require.NoError(t, err)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	to := map[string]bool{}
+	for _, m := range rec.sent {
+		if m.Subject == "Two of your accounts were merged" {
+			to[m.To] = true
+		}
+	}
+	require.True(t, to["keep@mail.example.com"] && to["gone@mail.example.com"], "notices: %v", to)
+}

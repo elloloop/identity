@@ -757,8 +757,9 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 		oVerifiedAt, sVerifiedAt               int64
 		oVerified, sVerified                   int64
 	)
-	// Lock the two rows in id order, so two opposite merges running at once
-	// wait for each other instead of deadlocking.
+	// SQLite has no row locks: the database-level write lock serializes
+	// merges, and the guarded writes below catch any change made since these
+	// reads. (The id order mirrors the Postgres driver.)
 	read := func(id string, username, password, email *string, verified *int64, verifiedAt *int64, address *string) error {
 		err := tx.QueryRow(ctx, mergeable, r.projectID, id).Scan(username, password, email, verified, verifiedAt, address)
 		if noRows(err) {
@@ -847,12 +848,9 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 		return wrapErr("ApplyAccountMerge(retired address)", err)
 	}
 
-	for _, q := range []string{
-		`UPDATE oauth_identities SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
-	} {
-		if _, err := tx.Exec(ctx, q, r.projectID, m.OtherID, m.SurvivorID); err != nil {
-			return wrapErr("ApplyAccountMerge(credentials)", err)
-		}
+	if _, err := tx.Exec(ctx, `UPDATE oauth_identities SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
+		r.projectID, m.OtherID, m.SurvivorID); err != nil {
+		return wrapErr("ApplyAccountMerge(oauth identities)", err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = $2`, r.projectID, m.OtherID); err != nil {
 		return wrapErr("ApplyAccountMerge(refresh tokens)", err)

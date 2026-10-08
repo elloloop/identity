@@ -1362,6 +1362,11 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	if user == nil {
 		return nil, fmt.Errorf("%w: user for invitation not found", ErrNotFound)
 	}
+	// A merged account is retired for good; accepting an old invitation must
+	// not bring it back.
+	if user.MergedIntoUserID != "" {
+		return nil, fmt.Errorf("%w: a merged account cannot accept an invitation", ErrMergeRefused)
+	}
 
 	// Enforce the project access mode (login/invite context) on the invitee.
 	// Invitation acceptance is the sanctioned way into an invite-only project, so

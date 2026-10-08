@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/events"
 )
 
@@ -106,6 +110,7 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID, otherIdenti
 		return nil, err
 	}
 	s.auditMerge(ctx, survivor.ID, retired.ID, ipAddr, userAgent, true, "")
+	notifyMerge(ctx, s.mailer, s.cfg.SMTPFrom, s.logger, other, merged)
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserMerged, retired)
 	return merged, nil
 }
@@ -147,6 +152,7 @@ func (s *AdminService) MergeUsers(ctx context.Context, actorID, survivorID, othe
 	s.audit.Log(ctx, audit.EventAccountMerged,
 		audit.WithActor(actorID), audit.WithTarget(retired.ID), audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"survivor": survivor.ID, "source": "admin"}))
+	notifyMerge(ctx, s.mailer, s.cfg.SMTPFrom, s.logger, other, merged)
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserMerged, retired)
 	return merged, nil
 }
@@ -229,4 +235,40 @@ func refuseManagedChild(ctx context.Context, repo Repository, u *User) error {
 		return fmt.Errorf("%w: a managed child's account stays with its guardian", ErrMergeRefused)
 	}
 	return nil
+}
+
+// notifyMerge tells the person, at every address either account had, that one
+// account was merged into the other: a merge cannot be undone, so someone who
+// did not ask for it must hear about it at once. Best-effort, like the other
+// security notices: a failed send is logged and never undoes the merge.
+func notifyMerge(ctx context.Context, mailer email.Transport, from string, logger *zap.Logger, retired, survivor *User) {
+	if mailer == nil {
+		return
+	}
+	retiredName := retired.Email
+	if retiredName == "" {
+		retiredName = retired.Username
+	}
+	survivorName := survivor.Email
+	if survivorName == "" {
+		survivorName = survivor.Username
+	}
+	text := strings.Join([]string{
+		"Hi,",
+		"",
+		fmt.Sprintf("The account %s was merged into the account %s.", retiredName, survivorName),
+		"It no longer signs in on its own; sign in with the account it was merged into.",
+		"",
+		"If you did not do this, contact the administrator of this service now.",
+	}, "\n")
+	sent := map[string]bool{}
+	for _, to := range []string{retired.Email, survivor.Email} {
+		if to == "" || sent[to] {
+			continue
+		}
+		sent[to] = true
+		if err := mailer.Send(ctx, email.Message{To: to, From: from, Subject: "Two of your accounts were merged", Text: text}); err != nil {
+			logger.Warn("account_merge_notice_failed", zap.String("user_id", survivor.ID), zap.Error(err))
+		}
+	}
 }

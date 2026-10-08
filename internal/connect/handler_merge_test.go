@@ -40,6 +40,9 @@ func TestMergeUsers_Handler_AdminOnly(t *testing.T) {
 	if err == nil {
 		t.Fatal("a member must not merge accounts")
 	}
+	if code := connectCodeOf(err); code != connect.CodePermissionDenied && code != connect.CodeUnknown {
+		t.Fatalf("a member's merge: code %v", code)
+	}
 }
 
 // MergeAccounts checks another account's password, so it requires the client

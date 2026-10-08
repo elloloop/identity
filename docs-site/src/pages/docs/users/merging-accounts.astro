@@ -39,6 +39,10 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       <code>ABORTED</code>; try again.
     </li>
     <li>
+      An email goes to every address either account had, saying which account
+      was merged into which, so someone who did not ask for it hears at once.
+    </li>
+    <li>
       A <code>user.merged</code> event names the retired account and carries
       <code>merged_into_user_id</code>. Applications move whatever they hold
       under the retired id to the survivor.

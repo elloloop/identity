@@ -280,6 +280,7 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	// keys on tag and IP): both create an account and hash a password, so an
 	// IP's sign-up budget is the surface's, not each RPC's.
 	signupLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0)
+	loginLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0)
 	limits := []middleware.PathLimit{
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
@@ -291,13 +292,14 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordLogin", Tag: "login",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+			Limiter: loginLimiter,
 		},
 		{
-			// MergeAccounts verifies another account's password: the login
-			// quota bounds guessing through it as through PasswordLogin.
-			PathPrefix: "/identity.v1.IdentityService/MergeAccounts", Tag: "merge",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+			// MergeAccounts verifies another account's password, so it spends
+			// the same per-IP login budget (limiter and tag) as PasswordLogin:
+			// it is not a second guessing budget.
+			PathPrefix: "/identity.v1.IdentityService/MergeAccounts", Tag: "login",
+			Limiter: loginLimiter,
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/RequestPasswordReset", Tag: "reset",

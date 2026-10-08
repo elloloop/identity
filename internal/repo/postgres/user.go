@@ -879,12 +879,9 @@ func (r *pgRepository) ApplyAccountMerge(ctx context.Context, m service.AccountM
 		return wrapPgErr("ApplyAccountMerge(retired address)", err)
 	}
 
-	for _, q := range []string{
-		`UPDATE oauth_identities SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
-	} {
-		if _, err := tx.Exec(ctx, q, r.projectID, m.OtherID, m.SurvivorID); err != nil {
-			return wrapPgErr("ApplyAccountMerge(credentials)", err)
-		}
+	if _, err := tx.Exec(ctx, `UPDATE oauth_identities SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
+		r.projectID, m.OtherID, m.SurvivorID); err != nil {
+		return wrapPgErr("ApplyAccountMerge(oauth identities)", err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = $2`, r.projectID, m.OtherID); err != nil {
 		return wrapPgErr("ApplyAccountMerge(refresh tokens)", err)

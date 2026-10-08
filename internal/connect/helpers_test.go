@@ -2515,6 +2515,7 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) 
 		sv.AccountAddress, o.AccountAddress = o.AccountAddress, sv.AccountAddress
 	}
 	o.Status, o.MergedIntoUserID = "deactivated", m.SurvivorID
+	o.UpdatedAt, sv.UpdatedAt = time.UnixMilli(m.AtMs), time.UnixMilli(m.AtMs)
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {
 			oi.UserID = m.SurvivorID
