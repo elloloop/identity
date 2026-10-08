@@ -137,9 +137,16 @@ import { Code } from "astro-expressive-code/components";
     <li>
       A username is a public handle, so a taken one is reported as taken. This
       tells a caller whether a username exists in the project, managed child
-      usernames included. The per-IP sign-up limit (shared with
-      <code>PasswordSignup</code>) and a per-username throttle, which answers
-      <code>RESOURCE_EXHAUSTED</code>, bound how fast anyone can ask.
+      usernames included. Three limits bound how much anyone can learn: the
+      per-IP sign-up limit (shared with <code>PasswordSignup</code>), a
+      per-username throttle, and a per-IP budget of "taken" answers
+      (<code>GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP</code>, default 5 per rate-limit
+      window, counted per server replica and per exact address; <code>0</code>
+      turns it off). Once an IP has spent that budget, every
+      <code>UsernameSignup</code> from it answers
+      <code>RESOURCE_EXHAUSTED</code> until the window ends, whether the name
+      is free or not. Many people behind one shared address (a school or office
+      NAT) share one budget; raise it there if they hit it.
     </li>
     <li>
       Reserved role names (see below) may not be usernames.

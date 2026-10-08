@@ -62,7 +62,7 @@ func TestGRPCBridge_DeclaresEveryRPC(t *testing.T) {
 			"gets codes.Unimplemented for them: %v\n"+
 			"Add each to identityserver/grpc_bridge.go — it is three lines:\n"+
 			"\tfunc (b *grpcBridge) Foo(ctx context.Context, in *identitypb.FooRequest) (*identitypb.FooResponse, error) {\n"+
-			"\t\treturn invoke(ctx, in, b.h.Foo)\n"+
+			"\t\treturn invoke(ctx, b, in, b.h.Foo)\n"+
 			"\t}", missing)
 	}
 }

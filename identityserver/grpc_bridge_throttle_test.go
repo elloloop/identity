@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -75,5 +76,28 @@ func TestGRPCBridge_ThrottleWithoutStream(t *testing.T) {
 	}
 	if logs.FilterMessage("rate_limit_exceeded").Len() != 1 {
 		t.Fatal("the refusal was not logged")
+	}
+}
+
+// invoke sets the client IP header from the transport and never takes it
+// from the caller's metadata, so a caller cannot choose the address its
+// limits and audit entries are keyed on.
+func TestGRPCBridge_InvokeSetsTheClientIPFromTheTransport(t *testing.T) {
+	b := &grpcBridge{logger: zap.NewNop()}
+	ctx := peerContext("198.51.100.4", metadata.Pairs("x-client-ip", "192.0.2.99", "x-forwarded-for", "192.0.2.98", "x-real-ip", "192.0.2.97"))
+	var seen, xff, realIP string
+	fn := func(_ context.Context, req *connect.Request[struct{}]) (*connect.Response[struct{}], error) {
+		seen = req.Header().Get(middleware.ClientIPHeader)
+		xff, realIP = req.Header().Get("X-Forwarded-For"), req.Header().Get("X-Real-Ip")
+		return connect.NewResponse(&struct{}{}), nil
+	}
+	if _, err := invoke(ctx, b, &struct{}{}, fn); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "198.51.100.4" {
+		t.Fatalf("handler saw client IP %q, want the transport peer", seen)
+	}
+	if xff != "" || realIP != "" {
+		t.Fatalf("caller-supplied forwarding headers reached the handler: xff=%q real-ip=%q", xff, realIP)
 	}
 }

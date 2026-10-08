@@ -1467,6 +1467,15 @@
     "anchor": "rate-limiting"
   },
   {
+    "name": "GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "caps how many \"that username is taken\" answers UsernameSignup gives one client IP per rate-limit window (per replica, per exact address); past it, every UsernameSignup from that IP is refused as throttled until the window ends, so the endpoint cannot be used to list which usernames exist.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
     "name": "GATEWAY_RATE_LIMIT_VERIFY_PER_IP",
     "type": "integer",
     "default": "20",
