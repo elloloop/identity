@@ -456,8 +456,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	}, nil
 }
 
-// verifyPasswordCredential is the credential check of a password sign-in,
-// shared by PasswordLogin and MergeAccounts so the two cannot drift: local
+// verifyPasswordCredential is the whole credential check of a password
+// sign-in, for every caller that must prove a password: local
 // auth on, the identifier resolved (an email, canonicalized, or a username),
 // the project and account access gates, the lockout, the password, the
 // account's status, the verified-email gate and the login policy — each with

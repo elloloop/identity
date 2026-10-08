@@ -71,7 +71,7 @@ func TestMergeAccounts_ProofAndRefusals(t *testing.T) {
 	_, err = svc.MergeAccounts(ctx, survivor.ID, "nobody", accessTestPassword, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrUnauthenticated, "an unknown identifier gets the same refusal")
 	_, err = svc.MergeAccounts(ctx, survivor.ID, "", "", "203.0.113.10", "agent", false)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInvalidArgument)
 
 	native.TotpRequired = true
 	_, err = svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
@@ -255,4 +255,23 @@ func TestMergeUsers_RefusesTheAdminsOwnAccountAndKeepsTOTPPasswords(t *testing.T
 	require.NoError(t, err)
 	require.Empty(t, merged.PasswordHash, "a password a second factor protected does not move")
 	require.Equal(t, "tia", merged.Username)
+}
+
+// An invitation issued before a merge must not bring the retired account back.
+func TestAcceptInvitation_RefusesAMergedAccount(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := context.Background()
+	token := seedInvitedUser(t, repo, "invitee@example.com")
+	invitee, err := repo.FindUserByEmail(ctx, "invitee@example.com")
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateUser(ctx, invitee.ID, map[string]any{
+		"status": StatusDeactivated, "merged_into_user_id": "survivor-1",
+	}))
+
+	res, err := svc.AcceptInvitation(ctx, token, accessTestPassword, "Invitee", "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrMergeRefused)
+	require.Nil(t, res, "no tokens for a merged account")
+	still, _ := repo.GetUser(ctx, invitee.ID)
+	require.Equal(t, StatusDeactivated, still.Status)
+	require.Empty(t, still.PasswordHash, "the invitation set no password")
 }
