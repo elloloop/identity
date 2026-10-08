@@ -50,7 +50,9 @@ const (
 	dbUfAccountAddress         = "21"
 	dbUfMergedInto             = "22"
 	dbUfPasswordChangeRequired = "23"
-	dbUfUsername               = "24"
+	// dbUfUsername is read-only on the graph path: usernames are written only
+	// by CreateUser and the username RPCs, never through ExecuteAtomic.
+	dbUfUsername = "24"
 )
 
 const (
@@ -322,7 +324,7 @@ func (r *pgRepository) SearchNodes(ctx context.Context, _, _ string, typeID int,
 			SELECT `+userColumns+`
 			  FROM users
 			 WHERE project_id = $1
-			   AND (lower(email) LIKE $2 OR lower(name) LIKE $2)
+			   AND (lower(email) LIKE $2 OR lower(name) LIKE $2 OR lower(username) LIKE $2)
 			 ORDER BY created_at_ms ASC, id ASC
 		`, r.projectID, q)
 		if err != nil {

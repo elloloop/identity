@@ -2483,12 +2483,8 @@ func (r *fakeRepo) AssignAccountAddress(_ context.Context, userID, address strin
 func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m AccountMerge) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	o, okO := r.users[m.OtherID]
-	sv, okS := r.users[m.SurvivorID]
-	if !okO || !okS {
-		return ErrMergeConflict
-	}
-	if err := m.ApplyToUsers(sv, o); err != nil {
+	// A missing account is nil, which ApplyToUsers refuses.
+	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
 	}
 	for _, oi := range r.oauthIdentities {

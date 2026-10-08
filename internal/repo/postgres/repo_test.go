@@ -576,4 +576,7 @@ func TestPostgres_DBUserNodeCarriesUsername(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
 	require.Equal(t, "rob.smith", nodes[0].Payload[dbUfUsername])
+	found, err := repo.SearchNodes(ctx, projectID, "actor", dbTypeUser, "rob.sm")
+	require.NoError(t, err)
+	require.Len(t, found, 1, "search matches the username")
 }
