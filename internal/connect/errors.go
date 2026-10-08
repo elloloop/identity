@@ -74,7 +74,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrManagedChildNotMinor):
 		return connect.NewError(connect.CodeInvalidArgument, err)
 
-	case errors.Is(err, service.ErrAccountLocked):
+	case errors.Is(err, service.ErrAccountLocked),
+		errors.Is(err, service.ErrSignupThrottled):
 		// CodeResourceExhausted: lockout is a per-account quota of failed
 		// attempts. ResourceExhausted matches gRPC's documented semantics
 		// for "the resource is exhausted" / rate-limit-style failures and
@@ -100,6 +101,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAccountNotActive),
 		errors.Is(err, service.ErrInvitationPending),
 		errors.Is(err, service.ErrSignupDisabled),
+		errors.Is(err, service.ErrAccountKindOff),
 		errors.Is(err, service.ErrPasskeySignupDisabled),
 		errors.Is(err, service.ErrNativeOAuthDisabled),
 		errors.Is(err, service.ErrParentalConsentRequired),

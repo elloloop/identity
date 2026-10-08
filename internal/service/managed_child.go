@@ -39,6 +39,9 @@ import (
 // regexp stays a pure character-class check.
 var usernamePattern = regexp.MustCompile(`^[a-z0-9._-]+$`)
 
+// idFormTag matches the hash tag idFormLocalPart appends.
+var idFormTag = regexp.MustCompile(`-[0-9a-f]{8}$`)
+
 const (
 	usernameMinLen = 3
 	usernameMaxLen = 32
@@ -80,6 +83,12 @@ func validateUsernameFormat(username string) error {
 	// in a row.
 	if reservedLocalParts[username] {
 		return fmt.Errorf("%w: username %q is reserved", ErrInvalidArgument, username)
+	}
+	// The id form a clashing account falls back to ends in "-" and eight hex
+	// digits (idFormLocalPart); no username may spell one, or it could take
+	// the address another account's fallback needs.
+	if idFormTag.MatchString(username) {
+		return fmt.Errorf("%w: username may not end in '-' and eight hex digits", ErrInvalidArgument)
 	}
 	if strings.Contains(username, addressSeparator) {
 		return fmt.Errorf("%w: username may not contain '-at-'", ErrInvalidArgument)

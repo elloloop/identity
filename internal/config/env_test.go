@@ -62,6 +62,8 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"LoginMaxFailedAttempts", cfg.LoginMaxFailedAttempts, 5},
 		{"LoginLockoutSeconds", cfg.LoginLockoutSeconds, 900},
 		{"DefaultEmailDomain", cfg.DefaultEmailDomain, ""},
+		{"DefaultProjectEmailSignup", cfg.DefaultProjectEmailSignup, ""},
+		{"DefaultProjectUsernameSignup", cfg.DefaultProjectUsernameSignup, ""},
 		{"AllowedOrigins", cfg.AllowedOrigins, "http://localhost:9002,http://localhost:3000"},
 		{"CookieDomain", cfg.CookieDomain, ""},
 		{"CookieSecure", cfg.CookieSecure, false},

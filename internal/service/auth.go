@@ -117,13 +117,13 @@ type User struct {
 	// pair the age band derives from; empty means the project default or the
 	// deployment-wide env thresholds apply.
 	Market string
-	// Username is the parent-chosen, project-unique handle identifying a
-	// managed child account (children often have no email). Lowercase
+	// Username is the project-unique handle identifying a username account:
+	// one a guardian made (CreateManagedChildAccount), a person signed up for
+	// (UsernameSignup) or an admin created (CreateUser). Lowercase
 	// alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase
 	// before storage; unique within the project when non-empty (the SQL
 	// drivers' partial unique index), and usable as the PasswordLogin
-	// identifier. Empty on every account not created via
-	// CreateManagedChildAccount.
+	// identifier. Empty on email accounts.
 	Username string
 	// AccountAddress is the address the project issued this account on its own
 	// domain (ProjectAccountsConfig.Domain), e.g. bob@accounts.example.com for
@@ -1092,6 +1092,17 @@ var (
 	// the denial is uniform across every email (invite-only is a project
 	// property, not a per-account signal), so it discloses no account existence.
 	ErrSignupByInvitationOnly = errors.New("this project is invitation-only; self-signup is disabled")
+
+	// ErrAccountKindOff is returned when a project has turned off the kind
+	// of account a request would create — accounts.email_signup or
+	// accounts.username_signup is "off" — whether a person or an admin asks.
+	ErrAccountKindOff = errors.New("this project does not create accounts of this kind")
+
+	// ErrSignupThrottled is returned when one identifier has been used for
+	// too many sign-up attempts in the throttle window. Email sign-up hides
+	// its throttle behind the duplicate-signup decoy; a username is a public
+	// handle with no such decoy, so its throttle says so.
+	ErrSignupThrottled = errors.New("too many sign-up attempts for this identifier; try again later")
 	// ErrProductAgeRestricted is returned when authentication succeeded but the
 	// account's derived age band is below the minimum the requested product
 	// configures (ProjectProductsConfig). It maps to CodePermissionDenied, and
@@ -2246,7 +2257,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// so a denial does not destroy the credential on its way out. Anonymous
 	// accounts carry no email to judge, and their own refusals run above.
 	if !timeoutUser.IsAnonymous {
-		if err := s.enforceProjectAccessLogin(ctx, canonicalize(timeoutUser.Email)); err != nil {
+		if err := s.enforceAccountAccessLogin(ctx, timeoutUser); err != nil {
 			return nil, "", "", err
 		}
 	}
@@ -2295,7 +2306,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		// consumed. Refresh is an anonymous account's only recurring sign of
 		// life; stamping it here is what keeps an active one out of the sweep.
 		s.touchAnonymousActivity(ctx, user)
-	} else if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+	} else if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
 		return nil, "", "", err
 	}
 

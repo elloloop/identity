@@ -4245,6 +4245,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.UpsertProjectConfigResponse'
+  /identity.v1.IdentityService/UsernameSignup:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UsernameSignup
+      description: |-
+        UsernameSignup creates an account identified by a username and a
+         password (accounts.username_signup "self"). Sign in with PasswordLogin.
+      operationId: identity.v1.IdentityService.UsernameSignup
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UsernameSignupRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UsernameSignupResponse'
   /identity.v1.IdentityService/VerifyDomain:
     post:
       tags:
@@ -5834,6 +5872,9 @@ components:
         email:
           type: string
           title: email
+          description: |-
+            email identifies an email account. Exactly one of email and username is
+             set. Refused when the project's accounts.email_signup is "off".
         name:
           type: string
           title: name
@@ -5846,6 +5887,15 @@ components:
         tenantId:
           type: string
           title: tenant_id
+        username:
+          type: string
+          title: username
+          description: |-
+            username identifies a username account instead of an email: lowercase
+             letters, digits, '_', '-' and '.', 3..32 characters, no '-at-', no '.'
+             at either end or twice in a row. Requires the project's
+             accounts.username_signup to be "admin" or "self". The account has no
+             email, so the response carries a temporary password to hand over.
       title: CreateUserRequest
       additionalProperties: false
     identity.v1.CreateUserResponse:
@@ -5854,6 +5904,13 @@ components:
         user:
           title: user
           $ref: '#/components/schemas/identity.v1.User'
+        temporaryPassword:
+          type: string
+          title: temporary_password
+          description: |-
+            temporary_password is set only for a username account: the password the
+             admin hands to the person, who signs in with PasswordLogin and the
+             username. Email accounts get an invitation email instead.
       title: CreateUserResponse
       additionalProperties: false
     identity.v1.DOBRequiredDetails:
@@ -7354,8 +7411,8 @@ components:
           title: email
           description: |-
             email is the login identifier: the account's email address, OR — when the
-             value contains no `@` — the username of a managed child account within
-             this project (see User.username). The response is identical whether the
+             value contains no `@` — the username of a username account within this
+             project (see User.username). The response is identical whether the
              identifier matched by email, by username, or not at all, so the endpoint
              discloses neither which form matched nor whether the account exists.
         password:
@@ -8903,14 +8960,15 @@ components:
           type: string
           title: username
           description: |-
-            username is the parent-chosen, project-unique handle identifying a
-             managed child account (children often have no email). Lowercase
+            username is the project-unique handle identifying a username account:
+             one a guardian made (CreateManagedChildAccount), a person signed up for
+             (UsernameSignup) or an admin created (CreateUser.username). Lowercase
              alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase at
              write time. A new or renamed username may not contain `-at-`, start or
              end with `.`, contain `..`, or be a reserved role name (admin,
-             postmaster, …); one stored before those rules is kept. Empty on every
-             account not created via CreateManagedChildAccount. Unique within the
-             project when non-empty, and usable as the PasswordLogin identifier.
+             postmaster, …); one stored before those rules is kept. Empty on email
+             accounts. Unique within the project when non-empty, and usable as the
+             PasswordLogin identifier.
         accountAddress:
           type: string
           title: account_address
@@ -8941,6 +8999,61 @@ components:
         - USER_STATUS_SUSPENDED
         - USER_STATUS_PENDING_PARENTAL_CONSENT
         - USER_STATUS_PENDING_DELETION
+    identity.v1.UsernameSignupRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          title: username
+          description: |-
+            username: lowercase letters, digits, '_', '-' and '.', 3..32 characters,
+             no '-at-', no '.' at either end or twice in a row. Normalized to lower
+             case. A taken username is refused with ALREADY_EXISTS.
+        password:
+          type: string
+          title: password
+        name:
+          type: string
+          title: name
+          description: name is the display name. Optional; defaults to the username.
+        dateOfBirthMs:
+          type:
+            - integer
+            - string
+          title: date_of_birth_ms
+          format: int64
+          description: |-
+            date_of_birth_ms: epoch ms. Required when GATEWAY_AGEGATE_REQUIRE_DOB.
+             A child-band date is refused: a child's account is created by their
+             guardian (CreateManagedChildAccount).
+        market:
+          type: string
+          title: market
+          description: 'market: as on PasswordSignupRequest.'
+      title: UsernameSignupRequest
+      additionalProperties: false
+      description: |-
+        UsernameSignupRequest creates an account identified by a username, for a
+         project whose accounts.username_signup is "self". The account has no email;
+         when the project has an account domain, its address is <username>@<domain>.
+    identity.v1.UsernameSignupResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+        refreshToken:
+          type: string
+          title: refresh_token
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+      title: UsernameSignupResponse
+      additionalProperties: false
     identity.v1.VerifyDomainRequest:
       type: object
       properties:

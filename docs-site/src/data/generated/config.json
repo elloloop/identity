@@ -450,6 +450,15 @@
     "anchor": "projects-and-tenancy"
   },
   {
+    "name": "GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "says who creates the default project's email accounts: \"self\" (empty means this), \"admin\" or \"off\" (see service.Signup*).",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
     "name": "GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS",
     "type": "string",
     "default": "",
@@ -464,6 +473,15 @@
     "default": "default",
     "required": false,
     "description": "is the id of the control-plane Project the service seeds on boot (postgres driver) and pins zero-config requests to.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "says who creates the default project's username accounts: \"off\" (empty means this), \"self\" or \"admin\".",
     "category": "Projects \u0026 tenancy",
     "anchor": "projects-and-tenancy"
   },

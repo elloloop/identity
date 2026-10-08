@@ -21,6 +21,8 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/RedeemOAuthCode": true,
 	"/identity.v1.IdentityService/PasswordLogin":   true,
 	"/identity.v1.IdentityService/PasswordSignup":  true,
+	// UsernameSignup creates an account; the caller has none yet.
+	"/identity.v1.IdentityService/UsernameSignup": true,
 	// Required-DOB completion: the caller holds the short-lived completion
 	// ticket from the dob_required error detail, not a session JWT — no
 	// session exists until the DOB is submitted.

@@ -385,7 +385,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 	// project must still refuse a non-member — otherwise a passkey enrolled
 	// before the project was restricted would keep working. user.Email is the
 	// DB-persisted (canonical) account email; wrap once (idempotent, self-heals).
-	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+	if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
 		return nil, err
 	}
 

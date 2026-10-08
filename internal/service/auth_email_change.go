@@ -79,6 +79,11 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 	if err := s.enforceProjectAccessLogin(ctx, canonicalize(newEmail)); err != nil {
 		return err
 	}
+	// An account with no email that adds one becomes an email account; where
+	// people may not create those themselves, they may not this way either.
+	if err := s.enforceEmailAdded(ctx, user); err != nil {
+		return err
+	}
 
 	existing, err := s.repo(ctx).FindUserByEmail(ctx, newEmail)
 	if err != nil {
@@ -235,6 +240,9 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 	// policy. Redemption is the authoritative point, the same place the
 	// passwordless flows put their decisive access check.
 	if err := s.enforceProjectAccessLogin(ctx, newEmail); err != nil {
+		return nil, err
+	}
+	if err := s.enforceEmailAdded(ctx, user); err != nil {
 		return nil, err
 	}
 

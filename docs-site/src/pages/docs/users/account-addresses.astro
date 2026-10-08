@@ -3,8 +3,8 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
 import { Code } from "astro-expressive-code/components";
 ---
 
-<DocsLayout title="Account addresses">
-  <h1>Account addresses</h1>
+<DocsLayout title="Account kinds and addresses">
+  <h1>Account kinds and addresses</h1>
   <p>
     A project can issue every account an <strong>account address</strong> on a
     domain the project owns. People keep signing up with whatever they have, an
@@ -16,7 +16,143 @@ import { Code } from "astro-expressive-code/components";
     system should key mailboxes on the user id.
   </p>
 
-  <h2>Turning it on</h2>
+  <h2>Which accounts a project has, and who creates them</h2>
+  <p>
+    A project has two kinds of account, and chooses for each who creates it:
+  </p>
+  <ul>
+    <li>
+      <strong>Email accounts</strong>, identified by an email at any provider:
+      <code>accounts.email_signup</code>.
+    </li>
+    <li>
+      <strong>Username accounts</strong>, identified by a username and a
+      password, with no email: <code>accounts.username_signup</code>.
+    </li>
+  </ul>
+  <p>Each setting takes one of three values:</p>
+  <ul>
+    <li>
+      <code>self</code>: people create their own. This is the default for email
+      accounts.
+    </li>
+    <li>
+      <code>admin</code>: only an admin creates them, through
+      <code>CreateUser</code> (and <code>InviteUser</code> for email accounts).
+      People sign in to the account an admin made, and self-signup is refused
+      as invitation-only. Sign-in codes go only to addresses that already have
+      an account.
+    </li>
+    <li>
+      <code>off</code>: the project has no accounts of this kind to create, and
+      both self-signup and admin creation are refused. This is the default for
+      username accounts. Accounts of the kind that already exist keep signing
+      in.
+    </li>
+  </ul>
+  <Code lang="json" code={`{
+  "access": { "mode": "open" },
+  "accounts": {
+    "domain": "accounts.example.com",
+    "email_signup": "self",
+    "username_signup": "self"
+  }
+}`} />
+  <p>A workplace:</p>
+  <Code lang="json" code={`{
+  "access": { "mode": "invite" },
+  "accounts": {
+    "domain": "example.com",
+    "email_signup": "off",
+    "username_signup": "admin"
+  }
+}`} />
+  <p>
+    A consumer product keeps email self-signup and, if it wants handles, turns
+    on username self-signup. A workplace sets <code>email_signup</code> to
+    <code>off</code> and <code>username_signup</code> to <code>admin</code>, so
+    every account is one its admins made, with an address on its domain. The
+    default project takes these from
+    <code>GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP</code> and
+    <code>GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP</code>. Managed child accounts
+    are a guardian's to create and are not governed by these settings.
+  </p>
+  <p>
+    The access mode still gates username <em>self-signup</em>. A username has
+    no email for an allowlist or a deny-list to match, so username self-signup
+    works only in <code>open</code> mode: <code>invite</code> refuses it as
+    invitation-only, and <code>allowlist</code> and <code>closed</code> refuse
+    it, as does any configured deny layer.
+  </p>
+  <p>
+    Signing in to a username account, and refreshing its session, follow one
+    rule: <code>open</code> and <code>invite</code> admit it, and
+    <code>allowlist</code> and <code>closed</code> refuse it, so closing a
+    project stops every username account too. Managed child accounts are the
+    exception: they sign in under every mode, because their guardian settled
+    whether they may exist. That makes <code>invite</code> the mode for a
+    workplace: nobody signs themselves up, and the accounts admins make sign in.
+    <code>CreateUser</code> refuses a username account under
+    <code>allowlist</code> and <code>closed</code>, where it could never sign
+    in. A username account that has also added an email is judged by that
+    email, like any email account.
+  </p>
+  <p>
+    SCIM provisioning is an identity provider's admin channel and is not
+    governed by <code>email_signup</code>. The hosted sign-in page does not yet
+    read these settings: it offers email sign-up whenever the deployment
+    allows password sign-up, and takes only email identifiers, so a project
+    using username accounts or admin-only email accounts builds its own
+    sign-in screen for now.
+  </p>
+
+  <h3>Username accounts</h3>
+  <ul>
+    <li>
+      People sign up with <code>UsernameSignup</code> (username, password, and
+      optionally a name, date of birth and market) and sign in with
+      <code>PasswordLogin</code>, using the username as the identifier.
+    </li>
+    <li>
+      An admin creates one with <code>CreateUser</code>, setting
+      <code>username</code> instead of <code>email</code>. The response carries
+      a temporary password to hand to the person.
+    </li>
+    <li>
+      A username is 3–32 lowercase letters, digits, <code>_</code>,
+      <code>-</code> and <code>.</code>. It may not contain <code>-at-</code>,
+      start or end with <code>.</code>, contain <code>..</code>, be a reserved
+      role name, or end in <code>-</code> and eight hex digits (the tag a
+      clashing account's fallback address carries).
+    </li>
+    <li>
+      A username account that adds an email (an email change) becomes an email
+      account, so it may only where <code>email_signup</code> is
+      <code>self</code>.
+    </li>
+    <li>
+      A username is a public handle, so a taken one is reported as taken. This
+      tells a caller whether a username exists in the project, managed child
+      usernames included. The per-IP sign-up limit (shared with
+      <code>PasswordSignup</code>) and a per-username throttle, which answers
+      <code>RESOURCE_EXHAUSTED</code>, bound how fast anyone can ask.
+    </li>
+    <li>
+      Reserved role names (see below) may not be usernames.
+    </li>
+    <li>
+      A date of birth in the child band is refused. A child's account is made by
+      their guardian, with consent, as a managed child account.
+    </li>
+    <li>
+      A username account has no email, so it has no email-based password reset.
+      An admin resets its password with <code>ResetUserPassword</code>. The
+      temporary password from <code>CreateUser</code> is not forced to change at
+      first sign-in, so tell the person to change it.
+    </li>
+  </ul>
+
+  <h2>Turning on addresses</h2>
   <p>
     Set <code>accounts.domain</code> in the project's config. The default
     project takes it from <code>GATEWAY_DEFAULT_EMAIL_DOMAIN</code>. Leaving it
@@ -33,6 +169,16 @@ import { Code } from "astro-expressive-code/components";
     the config write. Mail reaches the addresses only if the domain's MX records
     point at a mail system that delivers them. Issuing an address does not set
     up mail.
+  </p>
+  <p>
+    Usernames take the domain's plain addresses
+    (<code>bob@accounts.example.com</code>), first come first served. With
+    username self-signup on, use a domain dedicated to account addresses, such
+    as <code>accounts.example.com</code>, not one whose mailboxes belong to real
+    people, or a stranger could take a real mailbox's address. A workplace whose
+    username accounts only its admins create (<code>username_signup:
+    admin</code>) can use its own domain, since the admins choose every
+    username.
   </p>
 
   <h2>How an address is formed</h2>
@@ -93,8 +239,8 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>When it is issued</h2>
   <p>
-    A username (managed child) account gets its address when its guardian
-    creates it. An email account gets its address once its email is verified:
+    A username account gets its address when it is created: by its own
+    sign-up, by an admin, or by a guardian for a managed child. An email account gets its address once its email is verified:
     at sign-up when the sign-up proves the address (OAuth, passkey, an emailed
     code), otherwise at the first sign-in or session refresh after
     verification. That includes accounts an admin invites and accounts SCIM
