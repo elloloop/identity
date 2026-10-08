@@ -60,7 +60,8 @@ column is absent, then `identity migrate force 35` and `identity migrate`).
   `FAILED_PRECONDITION` `password_change_required` with a
   `PasswordChangeRequiredDetails` ticket instead of tokens. The client calls
   the new `CompleteRequiredPasswordChange` (unauthenticated, per-IP login
-  rate limit) with the ticket and a new password. A client that signs
+  rate limit) with the ticket, a new password and, when the detail's
+  `second_factor_required` is set, the user's two-step code. A client that signs
   admin-created users in must handle the new refusal: deploy that support
   before upgrading the server. Completing the change ends the account's
   other sessions. Temporary passwords issued before the upgrade are not

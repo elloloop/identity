@@ -9,6 +9,8 @@ import (
 
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passwords"
+	"github.com/elloloop/identity/pkg/secretcrypto"
+	"github.com/elloloop/identity/pkg/totp"
 )
 
 const issuedPW = "Issu3d!Temp0rary"
@@ -54,7 +56,7 @@ func TestRequiredPasswordChange_RoundTrip(t *testing.T) {
 
 	ticket := passwordChangeTicket(t, svc, "issued@example.com")
 
-	res, err := svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "203.0.113.10", "agent")
+	res, err := svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
 	require.NotEmpty(t, res.RefreshToken)
@@ -71,7 +73,7 @@ func TestRequiredPasswordChange_RoundTrip(t *testing.T) {
 	require.NotEmpty(t, login.AccessToken)
 
 	// The ticket is spent once the change is made.
-	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, "An0ther!Passw0rd", "203.0.113.10", "agent")
+	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, "An0ther!Passw0rd", "", "203.0.113.10", "agent")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 }
 
@@ -82,44 +84,79 @@ func TestRequiredPasswordChange_Refusals(t *testing.T) {
 	user := issuedPasswordUser(t, repo, "issued@example.com")
 	ticket := passwordChangeTicket(t, svc, "issued@example.com")
 
-	_, err := svc.CompleteRequiredPasswordChange(ctx, ticket, issuedPW, "203.0.113.10", "agent")
+	_, err := svc.CompleteRequiredPasswordChange(ctx, ticket, issuedPW, "", "203.0.113.10", "agent")
 	require.ErrorIs(t, err, ErrInvalidArgument, "the issued password cannot be kept")
-	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, "", "203.0.113.10", "agent")
+	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, "", "", "203.0.113.10", "agent")
 	require.ErrorIs(t, err, ErrInvalidArgument)
-	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, "short", "203.0.113.10", "agent")
+	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, "short", "", "203.0.113.10", "agent")
 	require.Error(t, err, "the password policy applies")
 
 	// Only a password-change ticket is accepted.
 	other, err := svc.mintPurposeTicket(ctx, user.ID, tokenPurposeDOBCompletion, passwordChangeTicketTTL)
 	require.NoError(t, err)
-	_, err = svc.CompleteRequiredPasswordChange(ctx, other, strongPW, "203.0.113.10", "agent")
+	_, err = svc.CompleteRequiredPasswordChange(ctx, other, strongPW, "", "203.0.113.10", "agent")
 	require.ErrorIs(t, err, ErrUnauthenticated)
-	_, err = svc.CompleteRequiredPasswordChange(ctx, "not-a-ticket", strongPW, "203.0.113.10", "agent")
+	_, err = svc.CompleteRequiredPasswordChange(ctx, "not-a-ticket", strongPW, "", "203.0.113.10", "agent")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 
 	// A deactivation after the ticket was minted wins over it.
 	user.Status = StatusDeactivated
-	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "203.0.113.10", "agent")
+	_, err = svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "", "203.0.113.10", "agent")
 	require.Error(t, err)
 	stored, _ := repo.GetUser(ctx, user.ID)
 	require.True(t, stored.PasswordChangeRequired, "nothing changed on a refusal")
 	require.True(t, passwords.Verify(issuedPW, stored.PasswordHash))
 }
 
-// The second factor is asked for after the change, not skipped by it.
-func TestRequiredPasswordChange_SecondFactorStillRequired(t *testing.T) {
+// An account with two-step verification proves it before anything changes:
+// the issued password alone can neither set a password nor end sessions.
+func TestRequiredPasswordChange_SecondFactorFirst(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := context.Background()
+	user := issuedPasswordUser(t, repo, "issued@example.com")
+	user.TotpRequired = true
+	secret, err := totp.GenerateSecret()
+	require.NoError(t, err)
+	enc, err := secretcrypto.Encrypt(secret, svc.totpKey)
+	require.NoError(t, err)
+	_, err = repo.CreateTotpCredential(ctx, &TotpCredRecord{UserID: user.ID, SecretEncrypted: enc, Verified: true})
+	require.NoError(t, err)
+	_, err = repo.CreateRefreshToken(ctx, &RefreshTokenRecord{TokenHash: "earlier-session", UserID: user.ID, ExpiresAt: nowMs() + 60_000})
+	require.NoError(t, err)
+
+	_, loginErr := svc.PasswordLogin(ctx, "issued@example.com", issuedPW, "203.0.113.10", "agent")
+	var pcErr *PasswordChangeRequiredError
+	require.ErrorAs(t, loginErr, &pcErr)
+	require.True(t, pcErr.SecondFactorRequired, "the client is told to ask for a code")
+
+	_, err = svc.CompleteRequiredPasswordChange(ctx, pcErr.Ticket, strongPW, "", "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrInvalidArgument, "no code, no change")
+	_, err = svc.CompleteRequiredPasswordChange(ctx, pcErr.Ticket, strongPW, "000000", "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrInvalidTotpCode)
+	stored, _ := repo.GetUser(ctx, user.ID)
+	require.True(t, stored.PasswordChangeRequired)
+	require.True(t, passwords.Verify(issuedPW, stored.PasswordHash), "a wrong code changes nothing")
+	earlier, _ := repo.FindRefreshTokenByHash(ctx, "earlier-session")
+	require.NotNil(t, earlier, "and ends no session")
+
+	code, err := totpGenerateCode(secret)
+	require.NoError(t, err)
+	res, err := svc.CompleteRequiredPasswordChange(ctx, pcErr.Ticket, strongPW, code, "203.0.113.10", "agent")
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+}
+
+// A ticket is minted against one issued password: issuing another spends it.
+func TestRequiredPasswordChange_ReissueSpendsTheTicket(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	user := issuedPasswordUser(t, repo, "issued@example.com")
-	user.TotpRequired = true
 	ticket := passwordChangeTicket(t, svc, "issued@example.com")
 
-	res, err := svc.CompleteRequiredPasswordChange(context.Background(), ticket, strongPW, "203.0.113.10", "agent")
-	require.NoError(t, err)
-	require.True(t, res.TotpRequired)
-	require.NotEmpty(t, res.LoginChallengeID)
-	require.Empty(t, res.AccessToken)
-	require.Empty(t, res.RefreshToken)
+	user.PasswordHash = hashPW(t, "Re!ssued-Temp0rary")
+	_, err := svc.CompleteRequiredPasswordChange(context.Background(), ticket, strongPW, "", "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrUnauthenticated)
 }
 
 func TestRequiredPasswordChange_AdminIssuedPasswordsAreFlagged(t *testing.T) {
@@ -187,7 +224,7 @@ func TestRequiredPasswordChange_RevokesExistingSessions(t *testing.T) {
 	require.NoError(t, err)
 
 	ticket := passwordChangeTicket(t, svc, "issued@example.com")
-	res, err := svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "203.0.113.10", "agent")
+	res, err := svc.CompleteRequiredPasswordChange(ctx, ticket, strongPW, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
 
 	earlier, err := repo.FindRefreshTokenByHash(ctx, "earlier-session")

@@ -5611,15 +5611,19 @@ components:
         newPassword:
           type: string
           title: new_password
+        secondFactorCode:
+          type: string
+          title: second_factor_code
+          description: required when second_factor_required was set
       title: CompleteRequiredPasswordChangeRequest
       additionalProperties: false
       description: |-
         CompleteRequiredPasswordChange replaces an administrator-issued password
          with the user's own and completes the sign-in the refusal interrupted. The
          new password meets the account's password policy and must differ from the
-         issued one. The response is PasswordLogin's: an account with two-step
-         verification (or a login policy requiring a second factor) gets
-         totp_required and a login_challenge_id instead of tokens.
+         issued one. Where a second factor is required, second_factor_code (a
+         two-step or recovery code) is verified first: nothing changes until it is.
+         Every existing session of the account ends, and a new one is issued.
     identity.v1.CompleteRequiredPasswordChangeResponse:
       type: object
       properties:
@@ -5629,23 +5633,14 @@ components:
         accessToken:
           type: string
           title: access_token
-          description: empty when totp_required=true
         refreshToken:
           type: string
           title: refresh_token
-          description: empty when totp_required=true
         expiresIn:
           type: integer
           title: expires_in
           format: int32
           description: Access token lifetime in seconds
-        totpRequired:
-          type: boolean
-          title: totp_required
-          description: client must call VerifyTotp with login_challenge_id
-        loginChallengeId:
-          type: string
-          title: login_challenge_id
       title: CompleteRequiredPasswordChangeResponse
       additionalProperties: false
     identity.v1.ConfirmEmailChangeRequest:
@@ -7616,7 +7611,14 @@ components:
             A short-lived (10 minute) bearer ticket whose only use is a
              CompleteRequiredPasswordChange call for the account it was minted for.
              It is NOT an access token: it carries a `purpose` claim and
-             authenticates no other RPC.
+             authenticates no other RPC. A new issued password spends it.
+        secondFactorRequired:
+          type: boolean
+          title: second_factor_required
+          description: |-
+            second_factor_required: the account has two-step verification, or the
+             login policy requires a second factor. CompleteRequiredPasswordChange
+             then needs second_factor_code, checked before anything changes.
       title: PasswordChangeRequiredDetails
       additionalProperties: false
       description: |-

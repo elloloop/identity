@@ -148,52 +148,10 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
-	cred, err := s.repo(ctx).GetTotpCredential(ctx, userID)
+	method, err := s.verifySecondFactorCode(ctx, userID, code, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
 	}
-	if cred == nil || !cred.Verified {
-		return nil, fmt.Errorf("%w: TOTP is not enabled for this user", ErrNotFound)
-	}
-
-	totpOK := false
-	recoveryUsed := false
-
-	secret, err := secretcrypto.Decrypt(cred.SecretEncrypted, s.totpKey)
-	if err != nil {
-		s.logger.Error("totp_decrypt_failed", zap.String("user_id", userID), zap.Error(err))
-		secret = ""
-	}
-
-	if secret != "" && totp.VerifyCode(secret, code) {
-		totpOK = true
-	} else {
-		// Try recovery code.
-		codeHash := totp.HashRecoveryCode(code, s.totpRecoveryPepper)
-		if codeHash != "" {
-			rc, rcErr := s.repo(ctx).FindRecoveryCodeByHash(ctx, userID, codeHash)
-			if rcErr == nil && rc != nil && !rc.Used {
-				_ = s.repo(ctx).UpdateRecoveryCode(ctx, rc.NodeID, map[string]any{
-					"used":    true,
-					"used_at": s.nowMs(),
-				})
-				recoveryUsed = true
-			}
-		}
-	}
-
-	if !totpOK && !recoveryUsed {
-		s.audit.Log(
-			ctx, audit.EventTotpVerified,
-			audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": "invalid_code"}),
-		)
-		return nil, fmt.Errorf("%w: invalid code", ErrInvalidTotpCode)
-	}
-
-	now := s.nowMs()
-	_ = s.repo(ctx).UpdateTotpCredential(ctx, cred.NodeID, map[string]any{"last_used_at": now})
 	s.updateLastLogin(ctx, userID)
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
@@ -201,10 +159,6 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 		return nil, err
 	}
 
-	method := "totp"
-	if recoveryUsed {
-		method = "recovery_code"
-	}
 	s.audit.Log(
 		ctx, audit.EventTotpVerified,
 		audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
@@ -221,7 +175,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 	s.logger.Info(
 		"totp_login_success",
 		zap.String("user_id", userID),
-		zap.Bool("recovery", recoveryUsed),
+		zap.Bool("recovery", method == "recovery_code"),
 	)
 
 	return &LoginResult{
@@ -300,4 +254,61 @@ func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, userID, passw
 
 	s.logger.Info("recovery_codes_regenerated", zap.String("user_id", userID))
 	return codes, nil
+}
+
+// verifySecondFactorCode checks code as the account's second factor: a
+// current two-step code, or an unused recovery code (spent on success). A
+// wrong code is audited and refused with ErrInvalidTotpCode. It returns the
+// method that matched ("totp" or "recovery_code").
+func (s *AuthService) verifySecondFactorCode(ctx context.Context, userID, code, ipAddr, userAgent string) (string, error) {
+	cred, err := s.repo(ctx).GetTotpCredential(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	if cred == nil || !cred.Verified {
+		return "", fmt.Errorf("%w: TOTP is not enabled for this user", ErrNotFound)
+	}
+
+	totpOK := false
+	recoveryUsed := false
+
+	secret, err := secretcrypto.Decrypt(cred.SecretEncrypted, s.totpKey)
+	if err != nil {
+		s.logger.Error("totp_decrypt_failed", zap.String("user_id", userID), zap.Error(err))
+		secret = ""
+	}
+
+	if secret != "" && totp.VerifyCode(secret, code) {
+		totpOK = true
+	} else {
+		// Try recovery code.
+		codeHash := totp.HashRecoveryCode(code, s.totpRecoveryPepper)
+		if codeHash != "" {
+			rc, rcErr := s.repo(ctx).FindRecoveryCodeByHash(ctx, userID, codeHash)
+			if rcErr == nil && rc != nil && !rc.Used {
+				_ = s.repo(ctx).UpdateRecoveryCode(ctx, rc.NodeID, map[string]any{
+					"used":    true,
+					"used_at": s.nowMs(),
+				})
+				recoveryUsed = true
+			}
+		}
+	}
+
+	if !totpOK && !recoveryUsed {
+		s.audit.Log(
+			ctx, audit.EventTotpVerified,
+			audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{"reason": "invalid_code"}),
+		)
+		return "", fmt.Errorf("%w: invalid code", ErrInvalidTotpCode)
+	}
+
+	now := s.nowMs()
+	_ = s.repo(ctx).UpdateTotpCredential(ctx, cred.NodeID, map[string]any{"last_used_at": now})
+	if recoveryUsed {
+		return "recovery_code", nil
+	}
+	return "totp", nil
 }

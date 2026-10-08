@@ -3564,10 +3564,14 @@ type PasswordChangeRequiredDetails struct {
 	// A short-lived (10 minute) bearer ticket whose only use is a
 	// CompleteRequiredPasswordChange call for the account it was minted for.
 	// It is NOT an access token: it carries a `purpose` claim and
-	// authenticates no other RPC.
+	// authenticates no other RPC. A new issued password spends it.
 	CompletionToken string `protobuf:"bytes,1,opt,name=completion_token,json=completionToken,proto3" json:"completion_token,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// second_factor_required: the account has two-step verification, or the
+	// login policy requires a second factor. CompleteRequiredPasswordChange
+	// then needs second_factor_code, checked before anything changes.
+	SecondFactorRequired bool `protobuf:"varint,2,opt,name=second_factor_required,json=secondFactorRequired,proto3" json:"second_factor_required,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *PasswordChangeRequiredDetails) Reset() {
@@ -3607,18 +3611,26 @@ func (x *PasswordChangeRequiredDetails) GetCompletionToken() string {
 	return ""
 }
 
+func (x *PasswordChangeRequiredDetails) GetSecondFactorRequired() bool {
+	if x != nil {
+		return x.SecondFactorRequired
+	}
+	return false
+}
+
 // CompleteRequiredPasswordChange replaces an administrator-issued password
 // with the user's own and completes the sign-in the refusal interrupted. The
 // new password meets the account's password policy and must differ from the
-// issued one. The response is PasswordLogin's: an account with two-step
-// verification (or a login policy requiring a second factor) gets
-// totp_required and a login_challenge_id instead of tokens.
+// issued one. Where a second factor is required, second_factor_code (a
+// two-step or recovery code) is verified first: nothing changes until it is.
+// Every existing session of the account ends, and a new one is issued.
 type CompleteRequiredPasswordChangeRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	CompletionToken string                 `protobuf:"bytes,1,opt,name=completion_token,json=completionToken,proto3" json:"completion_token,omitempty"` // from the password_change_required error detail
-	NewPassword     string                 `protobuf:"bytes,2,opt,name=new_password,json=newPassword,proto3" json:"new_password,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	CompletionToken  string                 `protobuf:"bytes,1,opt,name=completion_token,json=completionToken,proto3" json:"completion_token,omitempty"` // from the password_change_required error detail
+	NewPassword      string                 `protobuf:"bytes,2,opt,name=new_password,json=newPassword,proto3" json:"new_password,omitempty"`
+	SecondFactorCode string                 `protobuf:"bytes,3,opt,name=second_factor_code,json=secondFactorCode,proto3" json:"second_factor_code,omitempty"` // required when second_factor_required was set
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *CompleteRequiredPasswordChangeRequest) Reset() {
@@ -3665,16 +3677,21 @@ func (x *CompleteRequiredPasswordChangeRequest) GetNewPassword() string {
 	return ""
 }
 
+func (x *CompleteRequiredPasswordChangeRequest) GetSecondFactorCode() string {
+	if x != nil {
+		return x.SecondFactorCode
+	}
+	return ""
+}
+
 type CompleteRequiredPasswordChangeResponse struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	User             *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
-	AccessToken      string                 `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`     // empty when totp_required=true
-	RefreshToken     string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`  // empty when totp_required=true
-	ExpiresIn        int32                  `protobuf:"varint,4,opt,name=expires_in,json=expiresIn,proto3" json:"expires_in,omitempty"`          // Access token lifetime in seconds
-	TotpRequired     bool                   `protobuf:"varint,5,opt,name=totp_required,json=totpRequired,proto3" json:"totp_required,omitempty"` // client must call VerifyTotp with login_challenge_id
-	LoginChallengeId string                 `protobuf:"bytes,6,opt,name=login_challenge_id,json=loginChallengeId,proto3" json:"login_challenge_id,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	AccessToken   string                 `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
+	RefreshToken  string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	ExpiresIn     int32                  `protobuf:"varint,4,opt,name=expires_in,json=expiresIn,proto3" json:"expires_in,omitempty"` // Access token lifetime in seconds
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CompleteRequiredPasswordChangeResponse) Reset() {
@@ -3733,20 +3750,6 @@ func (x *CompleteRequiredPasswordChangeResponse) GetExpiresIn() int32 {
 		return x.ExpiresIn
 	}
 	return 0
-}
-
-func (x *CompleteRequiredPasswordChangeResponse) GetTotpRequired() bool {
-	if x != nil {
-		return x.TotpRequired
-	}
-	return false
-}
-
-func (x *CompleteRequiredPasswordChangeResponse) GetLoginChallengeId() string {
-	if x != nil {
-		return x.LoginChallengeId
-	}
-	return ""
 }
 
 // RequestEmailLoginCode emails a 6-digit one-time code to the address.
@@ -16764,20 +16767,20 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"J\n" +
+	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"\x80\x01\n" +
 	"\x1dPasswordChangeRequiredDetails\x12)\n" +
-	"\x10completion_token\x18\x01 \x01(\tR\x0fcompletionToken\"u\n" +
+	"\x10completion_token\x18\x01 \x01(\tR\x0fcompletionToken\x124\n" +
+	"\x16second_factor_required\x18\x02 \x01(\bR\x14secondFactorRequired\"\xa3\x01\n" +
 	"%CompleteRequiredPasswordChangeRequest\x12)\n" +
 	"\x10completion_token\x18\x01 \x01(\tR\x0fcompletionToken\x12!\n" +
-	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\"\x89\x02\n" +
+	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\x12,\n" +
+	"\x12second_factor_code\x18\x03 \x01(\tR\x10secondFactorCode\"\xb6\x01\n" +
 	"&CompleteRequiredPasswordChangeResponse\x12%\n" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x04 \x01(\x05R\texpiresIn\x12#\n" +
-	"\rtotp_required\x18\x05 \x01(\bR\ftotpRequired\x12,\n" +
-	"\x12login_challenge_id\x18\x06 \x01(\tR\x10loginChallengeId\"I\n" +
+	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"I\n" +
 	"\x1cRequestEmailLoginCodeRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05emailJ\x04\b\x02\x10\x03R\rcaptcha_token\"\x1f\n" +
 	"\x1dRequestEmailLoginCodeResponse\"G\n" +

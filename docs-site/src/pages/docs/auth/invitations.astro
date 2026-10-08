@@ -95,16 +95,20 @@ import { Code } from "astro-expressive-code/components";
   <p>
     Ask the user for a new password and call
     <code>CompleteRequiredPasswordChange</code> with the token. It needs no
-    session. The new password must meet the account's password policy and
-    differ from the issued one, and every existing session of the account
-    ends. The response is <code>PasswordLogin</code>'s:
-    tokens, or <code>totp_required</code> and a
-    <code>login_challenge_id</code> when the account has two-step
-    verification or the login policy requires a second factor.
+    session. When the detail's <code>second_factor_required</code> is set
+    (the account has two-step verification, or the login policy requires a
+    second factor), also ask for their code and send it as
+    <code>second_factor_code</code>: a two-step or recovery code. It is
+    checked before anything changes, so the issued password alone can
+    neither set a password nor end a session. The new password must meet the
+    account's password policy and differ from the issued one. Then every
+    existing session of the account ends and the response carries a new
+    one. Issuing another temporary password spends any token minted for the
+    previous one.
   </p>
   <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/CompleteRequiredPasswordChange \\
   -H 'Content-Type: application/json' \\
-  -d '{ "completionToken": "eyJ...", "newPassword": "a-password-of-their-own" }'`} lang="bash" />
+  -d '{ "completionToken": "eyJ...", "newPassword": "a-password-of-their-own", "secondFactorCode": "123456" }'`} lang="bash" />
   <p>
     The flag clears whenever the user sets a password themselves: this step,
     <code>ChangePassword</code>, a reset link, or accepting an invitation. A

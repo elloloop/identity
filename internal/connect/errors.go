@@ -155,7 +155,8 @@ func toConnectError(err error) *connect.Error {
 		var pcErr *service.PasswordChangeRequiredError
 		if errors.As(err, &pcErr) && pcErr.Ticket != "" {
 			if detail, detErr := connect.NewErrorDetail(&identitypb.PasswordChangeRequiredDetails{
-				CompletionToken: pcErr.Ticket,
+				CompletionToken:      pcErr.Ticket,
+				SecondFactorRequired: pcErr.SecondFactorRequired,
 			}); detErr == nil {
 				cerr.AddDetail(detail)
 			}

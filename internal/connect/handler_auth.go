@@ -255,7 +255,7 @@ func (h *IdentityHandler) SubmitDateOfBirth(
 
 // CompleteRequiredPasswordChange replaces an administrator-issued password:
 // the caller holds the ticket carried by the password_change_required error
-// detail, not a session. The response is PasswordLogin's.
+// detail, not a session.
 func (h *IdentityHandler) CompleteRequiredPasswordChange(
 	ctx context.Context,
 	req *connect.Request[identitypb.CompleteRequiredPasswordChangeRequest],
@@ -263,17 +263,15 @@ func (h *IdentityHandler) CompleteRequiredPasswordChange(
 	ipAddr := clientIP(req.Header())
 	userAgent := clientUserAgent(req.Header())
 
-	result, err := h.auth.CompleteRequiredPasswordChange(ctx, req.Msg.CompletionToken, req.Msg.NewPassword, ipAddr, userAgent)
+	result, err := h.auth.CompleteRequiredPasswordChange(ctx, req.Msg.CompletionToken, req.Msg.NewPassword, req.Msg.SecondFactorCode, ipAddr, userAgent)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.CompleteRequiredPasswordChangeResponse{
-		User:             userToProto(result.User),
-		AccessToken:      result.AccessToken,
-		RefreshToken:     result.RefreshToken,
-		ExpiresIn:        result.ExpiresIn,
-		TotpRequired:     result.TotpRequired,
-		LoginChallengeId: result.LoginChallengeID,
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
 	}), nil
 }
 

@@ -522,9 +522,10 @@ message SubmitDateOfBirthResponse {
 // CodeFailedPrecondition, the stable `password_change_required` token in the
 // message, and a PasswordChangeRequiredDetails error detail carrying a
 // short-lived completion ticket. The client asks the user for a new password
-// and calls CompleteRequiredPasswordChange with the ticket. A wrong password
-// gets the ordinary sign-in refusal, so the step reveals nothing to a caller
-// who does not hold the issued password.
+// (and, when second_factor_required is set, their two-step code) and calls
+// CompleteRequiredPasswordChange with the ticket. A wrong password gets the
+// ordinary sign-in refusal, so the step reveals nothing to a caller who does
+// not hold the issued password.
 
 // PasswordChangeRequiredDetails is the error detail attached to the
 // `password_change_required` refusal returned by PasswordLogin.
@@ -532,28 +533,31 @@ message PasswordChangeRequiredDetails {
   // A short-lived (10 minute) bearer ticket whose only use is a
   // CompleteRequiredPasswordChange call for the account it was minted for.
   // It is NOT an access token: it carries a `purpose` claim and
-  // authenticates no other RPC.
+  // authenticates no other RPC. A new issued password spends it.
   string completion_token = 1;
+  // second_factor_required: the account has two-step verification, or the
+  // login policy requires a second factor. CompleteRequiredPasswordChange
+  // then needs second_factor_code, checked before anything changes.
+  bool second_factor_required = 2;
 }
 
 // CompleteRequiredPasswordChange replaces an administrator-issued password
 // with the user's own and completes the sign-in the refusal interrupted. The
 // new password meets the account's password policy and must differ from the
-// issued one. The response is PasswordLogin's: an account with two-step
-// verification (or a login policy requiring a second factor) gets
-// totp_required and a login_challenge_id instead of tokens.
+// issued one. Where a second factor is required, second_factor_code (a
+// two-step or recovery code) is verified first: nothing changes until it is.
+// Every existing session of the account ends, and a new one is issued.
 message CompleteRequiredPasswordChangeRequest {
   string completion_token = 1; // from the password_change_required error detail
   string new_password = 2;
+  string second_factor_code = 3; // required when second_factor_required was set
 }
 
 message CompleteRequiredPasswordChangeResponse {
   User user = 1;
-  string access_token = 2; // empty when totp_required=true
-  string refresh_token = 3; // empty when totp_required=true
+  string access_token = 2;
+  string refresh_token = 3;
   int32 expires_in = 4; // Access token lifetime in seconds
-  bool totp_required = 5; // client must call VerifyTotp with login_challenge_id
-  string login_challenge_id = 6;
 }
 
 // ─── Passwordless Email Login (OTP code + magic link) ────────────────

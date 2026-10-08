@@ -429,10 +429,10 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	s.resetFailedLogin(ctx, user)
 
 	// An administrator-issued password opens no session: the user replaces
-	// it first. This comes before the second factor, which the completion
-	// step asks for once the password is the user's own.
+	// it first. The completion step takes the second factor too, and checks
+	// it before it changes anything.
 	if user.PasswordChangeRequired {
-		return nil, s.requirePasswordChange(ctx, user, ipAddr, userAgent)
+		return nil, s.requirePasswordChange(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
 	}
 
 	// 2FA branch: TOTP required, either because the user enrolled it or
@@ -1138,6 +1138,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		// The password predates the proof of email control, so it cannot be
 		// trusted to belong to the verified owner. Clear it.
 		patch["password_hash"] = ""
+		patch["password_change_required"] = false
 	}
 
 	user.EmailVerified = true

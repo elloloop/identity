@@ -53,7 +53,11 @@ type Claims struct {
 	// Verifiers that authenticate requests MUST reject or ignore any token
 	// whose purpose is non-empty — it is proof of one interrupted flow,
 	// not of a session.
-	Purpose   string `json:"purpose,omitempty"`
+	Purpose string `json:"purpose,omitempty"`
+	// Binding ties a purpose ticket to the state it was minted against (an
+	// opaque fingerprint the issuing flow defines), so a change to that state
+	// spends the ticket. Empty on access tokens and on unbound tickets.
+	Binding   string `json:"bnd,omitempty"`
 	IssuedAt  int64  `json:"iat"`
 	ExpiresAt int64  `json:"exp"`
 }
@@ -89,6 +93,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if c.Purpose != "" {
 		m["purpose"] = c.Purpose
+	}
+	if c.Binding != "" {
+		m["bnd"] = c.Binding
 	}
 	if len(c.Audience) > 0 {
 		m["aud"] = c.Audience
@@ -248,6 +255,9 @@ func verifyToken(tokenStr string, kp KeyProvider, expectedTenant, expectedAudien
 	}
 	if v, ok := tok.Get("purpose"); ok {
 		claims.Purpose, _ = v.(string)
+	}
+	if v, ok := tok.Get("bnd"); ok {
+		claims.Binding, _ = v.(string)
 	}
 	if v, ok := tok.Get("is_minor"); ok {
 		claims.IsMinor, _ = v.(bool)
