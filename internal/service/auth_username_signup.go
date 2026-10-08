@@ -32,7 +32,7 @@ import (
 // the person has to pick another. That tells a caller whether a username
 // exists in the project, managed child usernames included, so how much anyone
 // can learn is bounded three ways: the per-IP signup limit, the per-username
-// throttle, and a per-IP budget of "taken" answers (GATEWAY_USERNAME_TAKEN_PER_IP)
+// throttle, and a per-IP budget of "taken" answers (GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP)
 // after which every UsernameSignup from that IP is refused as throttled,
 // available name or not, until the window ends. A date of birth that falls in the child
 // band is refused — a child's username account is a guardian's to create

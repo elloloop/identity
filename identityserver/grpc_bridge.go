@@ -126,7 +126,13 @@ func invoke[Req, Resp any](
 			}
 		}
 	}
-	creq.Header().Del(middleware.ClientIPHeader)
+	// The handlers fall back to X-Forwarded-For / X-Real-Ip when the client IP
+	// header is absent; on gRPC those were copied from the caller's metadata,
+	// so they go too. clientIP already honoured a trusted proxy's
+	// x-forwarded-for when it resolved the address.
+	for _, h := range []string{middleware.ClientIPHeader, "X-Forwarded-For", "X-Real-Ip"} {
+		creq.Header().Del(h)
+	}
 	if ip := b.clientIP(ctx); ip != "" {
 		creq.Header().Set(middleware.ClientIPHeader, ip)
 	}

@@ -329,7 +329,7 @@ func TestUsernameAccount_CannotAddAnEmailWhereEmailSignupIsNotSelf(t *testing.T)
 	require.NoError(t, svc.RequestEmailChange(ctx, res.User.ID, "jo@mail.example.test", accessTestPassword))
 }
 
-// After an IP has been told GATEWAY_USERNAME_TAKEN_PER_IP times that a
+// After an IP has been told GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP times that a
 // username is taken, every UsernameSignup from it is throttled, free name or
 // not, so the refusal reveals nothing more.
 func TestUsernameSignup_TakenAnswersAreBudgetedPerIP(t *testing.T) {
