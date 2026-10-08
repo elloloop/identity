@@ -286,6 +286,7 @@ func (s *AuthService) SetManagedChildUsername(
 	}
 	child.Username = username
 	child.UpdatedAt = msToTime(now)
+	reissueAccountAddress(ctx, repo, s.logger, child)
 	s.stampAgeBand(ctx, child)
 	s.auditGuardianAction(ctx, guardianOpSetUsername, guardianUserID, child.ID, true, ip, userAgent,
 		map[string]any{"previous_username": previous, "username": username})

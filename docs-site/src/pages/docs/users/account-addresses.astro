@@ -46,12 +46,17 @@ import { Code } from "astro-expressive-code/components";
       <code>bob-at-mail.example@accounts.example.com</code>. Two people named Bob
       at different providers get different addresses, and the plain
       <code>bob@accounts.example.com</code> stays free for a username account.
+      An email already on the account domain keeps its own address:
+      <code>bob@accounts.example.com</code> signing up is issued exactly that.
     </li>
     <li>
       Letters are lower-cased. Every character other than <code>a–z</code>,
-      <code>0–9</code>, <code>.</code>, <code>_</code>, <code>+</code> and
-      <code>-</code> becomes <code>-</code>, and runs of dots collapse, so the
-      address is always valid.
+      <code>0–9</code>, <code>.</code>, <code>_</code> and <code>-</code>
+      becomes <code>-</code>, and runs of dots collapse, so the address is
+      always valid. That includes <code>+</code>: mail systems that use
+      subaddressing would deliver <code>bob+news-at-…</code> to
+      <code>bob</code>. Different identifiers can therefore map to the same
+      address; the later account takes a suffix.
     </li>
     <li>
       If the part before the <code>@</code> is longer than 64 characters (the
@@ -98,10 +103,11 @@ import { Code } from "astro-expressive-code/components";
   <p>
     An address is written only to an account that has none, so it is never
     replaced behind the account's back, and changing the project's domain
-    leaves issued addresses as they were. The one exception is an address
-    derived from an email: when the person confirms a change of email, the
-    address follows it, so it never goes on spelling out an address they gave
-    up. A username's address is the account's own handle and stays. A project
+    leaves issued addresses as they were. An address does follow a change of
+    the identifier it came from, so it never goes on spelling out a name or
+    mailbox the person gave up: an email account's follows a confirmed email
+    change, and a managed child's follows its guardian's rename. Email changes
+    made through SCIM do not re-derive it yet. A project
     that stops issuing addresses keeps the ones it issued. An address released
     by an email change can later be issued to another account, so treat the
     address as a handle and key on the user id. Failing to

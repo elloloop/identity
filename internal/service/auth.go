@@ -130,8 +130,8 @@ type User struct {
 	// the username "bob" or bob-at-mail.example@accounts.example.com for
 	// bob@mail.example. Assigned at creation or, for an account that predates
 	// the domain, at its next sign-in; an email account gets it only once its
-	// email is verified. A username's address never changes; an
-	// email's follows a confirmed change of that email. Unique within the
+	// email is verified. It follows a guardian's rename of a username and a
+	// confirmed change of an email. Unique within the
 	// project when non-empty. Empty when the project issues none.
 	AccountAddress string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account

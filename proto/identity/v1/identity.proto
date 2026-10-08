@@ -90,9 +90,12 @@ message User {
   // account (bob@mail.example -> bob-at-mail.example@<domain>). Assigned at
   // creation, or at the first sign-in after the project configures a domain;
   // an email account gets it only once its email is verified.
-  // A username's address never changes; an email's follows a confirmed
-  // change of that email, and the address it released can later be issued
-  // to another account — key on the user id, not this address. Empty when
+  // It follows the identifier it came from: a guardian's rename for a
+  // username, a confirmed email change for an email (SCIM email changes do
+  // not re-derive it yet). A released address can later be issued to
+  // another account, and distinct identifiers can collide (the later one
+  // takes a suffix) — key on the user id, not this address, and never treat
+  // it as proof of the email it spells. Empty when
   // the project issues none.
   string account_address = 29;
 }

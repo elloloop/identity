@@ -23,7 +23,8 @@ func TestAccountAddressLocalPart(t *testing.T) {
 		{"username wins over email", User{Username: "bob", Email: "bob@mail.example"}, "bob"},
 		{"email keeps its provider", User{Email: "bob@mail.example"}, "bob-at-mail.example"},
 		{"upper case folds", User{Email: "Bob@Mail.Example"}, "bob-at-mail.example"},
-		{"plus and underscore kept", User{Email: "bob_x+tag@mail.example"}, "bob_x+tag-at-mail.example"},
+		{"underscore kept, plus becomes a hyphen", User{Email: "bob_x+tag@mail.example"}, "bob_x-tag-at-mail.example"},
+		{"an email on the account domain keeps its local part", User{Email: "bob@accounts.example.test"}, "bob"},
 		{"other characters become hyphens", User{Email: "bob!o'k@mail.example"}, "bob-o-k-at-mail.example"},
 		{"dot runs collapse", User{Username: "a..b"}, "a.b"},
 		{"leading and trailing dots dropped", User{Username: ".bob."}, "bob"},
@@ -31,7 +32,7 @@ func TestAccountAddressLocalPart(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, accountAddressLocalPart(&tc.user))
+			require.Equal(t, tc.want, accountAddressLocalPart(&tc.user, "accounts.example.test"))
 		})
 	}
 }
@@ -248,7 +249,7 @@ func TestAccountAddress_FollowsAConfirmedEmailChange(t *testing.T) {
 	require.Equal(t, "old-at-mail.example.com@accounts.example.com", u.AccountAddress)
 
 	u.Email = "new@mail.example.com"
-	reissueEmailAddress(ctx, repo, zap.NewNop(), u)
+	reissueAccountAddress(ctx, repo, zap.NewNop(), u)
 	require.Equal(t, "new-at-mail.example.com@accounts.example.com", u.AccountAddress)
 
 	// A username account keeps its handle whatever its email does.
@@ -256,7 +257,7 @@ func TestAccountAddress_FollowsAConfirmedEmailChange(t *testing.T) {
 	named.Username = "named"
 	ensureAccountAddress(ctx, repo, zap.NewNop(), named)
 	named.Email = "other@mail.example.com"
-	reissueEmailAddress(ctx, repo, zap.NewNop(), named)
+	// ConfirmEmailChange reissues only an email account's address.
 	require.Equal(t, "named@accounts.example.com", named.AccountAddress)
 }
 
@@ -339,7 +340,7 @@ func TestAccountAddress_KeptWhenTheProjectStopsIssuing(t *testing.T) {
 	require.NotEmpty(t, u.AccountAddress)
 
 	u.Email = "new@mail.example.com"
-	reissueEmailAddress(accessScope(t, `{"access":{"mode":"open"}}`), repo, zap.NewNop(), u)
+	reissueAccountAddress(accessScope(t, `{"access":{"mode":"open"}}`), repo, zap.NewNop(), u)
 	require.Equal(t, "old-at-mail.example.com@accounts.example.com", u.AccountAddress)
 }
 
@@ -406,4 +407,34 @@ func TestAccountAddress_RoleNamesAndLegacySeparatorsTakeTheIDForm(t *testing.T) 
 	require.ErrorIs(t, validateUsernameFormat("postmaster"), ErrInvalidArgument)
 	require.ErrorIs(t, validateUsernameFormat("www"), ErrInvalidArgument)
 	require.NoError(t, validateUsernameFormat("postmasters"))
+}
+
+// A legacy username the derivation would change takes the id form, so it
+// cannot take the plain address another username owns.
+func TestAccountAddress_ChangedLegacyUsernameTakesTheIDForm(t *testing.T) {
+	repo := newFakeRepo()
+	ctx := accountsScope(t, "accounts.example.test")
+	for name, base := range map[string]string{"bob.": "bob", "...": "user"} {
+		u := seedUser(repo, "", "", "active")
+		u.Username = name
+		ensureAccountAddress(ctx, repo, zap.NewNop(), u)
+		sum := sha256.Sum256([]byte(u.ID))
+		require.Equal(t, base+"-"+hex.EncodeToString(sum[:4])+"@accounts.example.test", u.AccountAddress, name)
+	}
+}
+
+// A guardian's rename re-derives the child's address, so the retired handle
+// (often the child's real name) stops showing.
+func TestAccountAddress_FollowsAManagedChildRename(t *testing.T) {
+	ctx := accountsScope(t, "accounts.example.test")
+	f := newGuardianFixture(ctx, t)
+	ensureAccountAddress(ctx, f.repo, zap.NewNop(), f.child)
+	require.Equal(t, "kid.one@accounts.example.test", f.child.AccountAddress)
+
+	child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "kid.two", strongPW, "", "")
+	require.NoError(t, err)
+	require.Equal(t, "kid.two@accounts.example.test", child.AccountAddress)
+	stored, err := f.repo.GetUser(ctx, f.child.ID)
+	require.NoError(t, err)
+	require.Equal(t, "kid.two@accounts.example.test", stored.AccountAddress)
 }

@@ -25,11 +25,11 @@ import (
 // with. A project that runs mail for its domain can deliver to it; one that
 // does not still gets a stable, project-unique handle for each account. The
 // address is assigned once. Changing the project's domain later leaves it as
-// it was; an address derived from an email follows a confirmed change of
-// that email, so it never goes on spelling out an address the person gave up.
-// The address is a handle, not an identity: an address released by an email
-// change can later be issued to another account, so relying parties key on
-// the user id.
+// it was; it follows a change of the identifier it came from (a confirmed
+// email change, a guardian's rename), so it never goes on spelling out a name
+// or mailbox the person gave up. The address is a handle, not an identity:
+// a released address can later be issued to another account, so relying
+// parties key on the user id.
 type ProjectAccountsConfig struct {
 	// Domain is the domain account addresses are issued on, e.g.
 	// "accounts.example.com". Empty (the default) issues none.
@@ -101,27 +101,39 @@ const maxAddressAttempts = 20
 //     address is exactly <username>@<domain>;
 //   - an email address keeps its whole spelling, with the '@' written as
 //     "-at-" ("bob@mail.example" → "bob-at-mail.example"), so two people
-//     with the same name at different providers never collide, and a native
-//     <username>@<domain> address stays free for the person to claim later.
+//     with the same name at different providers get different addresses,
+//     and a native <username>@<domain> address stays free for the person to
+//     claim later;
+//   - an email already on the account domain keeps its local part
+//     ("bob@corp.example" on corp.example → "bob").
 //
-// Every character outside a-z, 0-9, '.', '_', '+' and '-' becomes '-', runs
+// Every character outside a-z, 0-9, '.', '_' and '-' becomes '-' — '+'
+// included, since mail systems that use subaddressing would deliver
+// "bob+news-at-…" to "bob" — runs
 // of '.' collapse to one, and leading or trailing '.' are dropped, so the
 // result is always a valid dot-atom. An empty result means the account has no
 // identifier to derive from (an anonymous account), and gets no address.
-func accountAddressLocalPart(u *User) string {
+func accountAddressLocalPart(u *User, domain string) string {
 	var src string
 	switch {
 	case u.Username != "":
 		src = u.Username
 	case u.Email != "":
-		src = strings.Replace(u.Email, "@", addressSeparator, 1)
+		// An email already on the account domain is its own address there:
+		// bob@corp.example on corp.example is issued bob@corp.example.
+		local, host, _ := strings.Cut(strings.ToLower(u.Email), "@")
+		if host == domain {
+			src = local
+		} else {
+			src = local + addressSeparator + host
+		}
 	default:
 		return ""
 	}
 	var b strings.Builder
 	for _, r := range strings.ToLower(src) {
 		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '+', r == '-':
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-':
 			b.WriteRune(r)
 		case r == '.':
 			if s := b.String(); s != "" && !strings.HasSuffix(s, ".") {
@@ -218,7 +230,14 @@ func addressableLocalPart(scope *ProjectScope, u *User) string {
 	if u.Username == "" && !u.EmailVerified {
 		return ""
 	}
-	return accountAddressLocalPart(u)
+	local := accountAddressLocalPart(u, scope.Accounts.Domain)
+	// A legacy username the derivation had to change ("bob." → "bob") would
+	// otherwise take another username's address; plainFormUnsafe sends it to
+	// the id form, and one that derives to nothing still gets that form.
+	if u.Username != "" && local == "" {
+		return "user"
+	}
+	return local
 }
 
 // addressSeparator is how an email account's local part spells the '@' of
@@ -246,7 +265,10 @@ func plainFormUnsafe(u *User, local string) bool {
 	if reservedLocalParts[local] {
 		return true
 	}
-	return u.Username != "" && strings.Contains(local, addressSeparator)
+	if u.Username == "" {
+		return false
+	}
+	return strings.Contains(local, addressSeparator) || local != u.Username
 }
 
 // predictedAccountAddress is the address a new account like u is issued when
@@ -261,17 +283,19 @@ func predictedAccountAddress(ctx context.Context, u *User) string {
 	return fitAddressLocalPart(local, 1) + "@" + scope.Accounts.Domain
 }
 
-// reissueEmailAddress re-derives the account address of an account whose
-// address came from its email, after the email changed: an address that
-// kept spelling out the old email would go on showing it to everyone the
-// account is visible to. An address that came from a username is the
-// account's own handle and stays.
+// reissueAccountAddress re-derives an account's address after the identifier
+// it came from changed: a confirmed email change for an email account, a
+// rename for a username account. An address that kept spelling the old
+// identifier would go on showing it (often a real name, or a mailbox the
+// person gave up) to everyone the account is visible to. Callers pass only
+// accounts whose address came from the identifier that changed: a username
+// account's address does not follow its email.
 //
 // A project that no longer issues addresses keeps the one it issued. The
 // release and the new assignment are two writes; if the second fails the
 // account is left without an address until its next sign-in issues one.
-func reissueEmailAddress(ctx context.Context, repo Repository, logger *zap.Logger, u *User) {
-	if u == nil || u.Username != "" || u.AccountAddress == "" {
+func reissueAccountAddress(ctx context.Context, repo Repository, logger *zap.Logger, u *User) {
+	if u == nil || u.AccountAddress == "" {
 		return
 	}
 	if scope := ProjectScopeFromContext(ctx); scope == nil || scope.Accounts.Domain == "" {
