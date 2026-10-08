@@ -1872,6 +1872,15 @@
     "anchor": "http-cors-and-cookies"
   },
   {
+    "name": "GATEWAY_USERNAME_TAKEN_PER_IP",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "caps how many \"that username is taken\" answers UsernameSignup gives one client IP per rate-limit window; past it, every UsernameSignup from that IP is refused as throttled until the window ends, so the endpoint cannot be used to list which usernames exist.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS",
     "type": "integer",
     "default": "2",

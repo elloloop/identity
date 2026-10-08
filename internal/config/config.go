@@ -1043,6 +1043,12 @@ type Config struct {
 	RateLimitWindowSeconds int
 	// RateLimitSignupPerIP is the per-IP request cap per window on PasswordSignup and UsernameSignup, together.
 	RateLimitSignupPerIP int
+	// UsernameTakenPerIP caps how many "that username is taken" answers
+	// UsernameSignup gives one client IP per rate-limit window; past it, every
+	// UsernameSignup from that IP is refused as throttled until the window
+	// ends, so the endpoint cannot be used to list which usernames exist.
+	// 0 disables the cap. Driven by GATEWAY_USERNAME_TAKEN_PER_IP.
+	UsernameTakenPerIP int
 	// RateLimitLoginPerIP is the per-IP request cap per window on the login endpoints.
 	RateLimitLoginPerIP int
 	// RateLimitResetPerIP is the per-IP request cap per window on RequestPasswordReset.
@@ -1481,6 +1487,7 @@ func loadFromEnv() *Config {
 
 		RateLimitWindowSeconds:     envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
 		RateLimitSignupPerIP:       envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
+		UsernameTakenPerIP:         envInt("GATEWAY_USERNAME_TAKEN_PER_IP", 5),
 		RateLimitLoginPerIP:        envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
 		RateLimitResetPerIP:        envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
 		RateLimitVerifyPerIP:       envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),

@@ -29,13 +29,15 @@ import (
 //
 // A username is a public handle the person chooses, so a taken one is
 // reported as taken (ErrAlreadyExists) rather than hidden behind a decoy:
-// the person has to pick another. This does tell a caller whether a username
-// exists in the project — managed child usernames included — which is the
-// price of handles; the per-IP signup limit and the per-username throttle
-// bound how fast anyone can ask. A date of birth that falls in the child
+// the person has to pick another. That tells a caller whether a username
+// exists in the project, managed child usernames included, so how much anyone
+// can learn is bounded three ways: the per-IP signup limit, the per-username
+// throttle, and a per-IP budget of "taken" answers (GATEWAY_USERNAME_TAKEN_PER_IP)
+// after which every UsernameSignup from that IP is refused as throttled,
+// available name or not, until the window ends. A date of birth that falls in the child
 // band is refused — a child's username account is a guardian's to create
 // (CreateManagedChildAccount), with consent.
-func (s *AuthService) UsernameSignup(ctx context.Context, username, password, name string, dateOfBirthMs int64, market string) (*LoginResult, error) {
+func (s *AuthService) UsernameSignup(ctx context.Context, username, password, name string, dateOfBirthMs int64, market, ipAddr string) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
 	}
@@ -74,12 +76,17 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 		return nil, ErrSignupThrottled
 	}
 
+	if s.usernameProbes.exhausted(ipAddr, s.nowMs()) {
+		s.logger.Info("username_signup_probe_budget_spent", zap.String("project_id", s.projectID(ctx)))
+		return nil, ErrSignupThrottled
+	}
 	repo := s.repo(ctx)
 	existing, err := repo.FindUserByUsername(ctx, username)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
+		s.usernameProbes.spend(ipAddr, s.nowMs())
 		return nil, fmt.Errorf("%w: username %q is already taken", ErrAlreadyExists, username)
 	}
 	pwHash, err := passwords.Hash(password)
@@ -105,6 +112,7 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 	id, err := repo.CreateUser(ctx, user)
 	if err != nil {
 		if errors.Is(err, ErrAlreadyExists) {
+			s.usernameProbes.spend(ipAddr, s.nowMs())
 			return nil, fmt.Errorf("%w: username %q is already taken", ErrAlreadyExists, username)
 		}
 		return nil, fmt.Errorf("creating user: %w", err)

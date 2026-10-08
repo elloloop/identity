@@ -180,7 +180,7 @@ func (h *IdentityHandler) UsernameSignup(
 	}
 	result, err := h.auth.UsernameSignup(
 		ctx, req.Msg.Username, req.Msg.Password, req.Msg.Name,
-		req.Msg.DateOfBirthMs, req.Msg.Market,
+		req.Msg.DateOfBirthMs, req.Msg.Market, clientIP(req.Header()),
 	)
 	if err != nil {
 		return nil, toConnectError(err)

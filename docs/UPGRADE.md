@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.11 → next — SCIM honours email accounts being off; the hosted page follows the account settings (behaviour changes)
+## v4.11 → next — SCIM honours email accounts being off; the hosted page follows the account settings; gRPC client IPs come from the transport (behaviour changes); a per-IP budget for "username taken" answers
 
 No schema change and no migration.
 
@@ -13,6 +13,10 @@ No schema change and no migration.
   `email_signup` is `self`, offers username sign-up where `UsernameSignup`
   would accept it, and takes a username at sign-in where the project has
   username accounts. A project with default settings sees no change.
+- **`GATEWAY_USERNAME_TAKEN_PER_IP` (new, default 5).** `UsernameSignup`
+  tells a caller when a username is taken; after an IP has been told that
+  this many times in one rate-limit window, every `UsernameSignup` from it
+  answers `RESOURCE_EXHAUSTED` until the window ends. `0` disables it.
 
 ## v4.10 → v4.11 — account addresses on the project's domain (additive); neutral built-in defaults; invitation links follow the project (behaviour change)
 
