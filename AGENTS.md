@@ -237,6 +237,11 @@ self-confirmed reviewer can still be wrong; what is not allowed is
 merging past a blocking finding silently.
 
 Run it on every PR — `Workflow({name: 'review-gate', args: <pr-number>})`.
+**Always, without asking.** Every PR means every PR: Dependabot's, docs
+and comment fixes, release prep, a one-line change. An agent working on
+this repository runs the gate as part of the PR, before merge, and never
+asks the maintainer whether to; there is no size or risk below which it
+is skipped.
 
 **Issue mode.** Run it on a new or edited issue —
 `Workflow({name: 'review-gate', args: 'issue:<issue-number>'})`. Only the
