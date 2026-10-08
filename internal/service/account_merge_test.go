@@ -28,7 +28,7 @@ func TestMergeAccounts_TakesUsernamePasswordAndAddress(t *testing.T) {
 	svc, repo, survivor, native, ctx := mergeFixture(t)
 	other := *native
 
-	merged, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "1.2.3.4", "agent", true)
+	merged, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", true)
 	require.NoError(t, err)
 	require.Equal(t, survivor.ID, merged.ID)
 	require.Equal(t, "bob", merged.Username)
@@ -44,7 +44,7 @@ func TestMergeAccounts_TakesUsernamePasswordAndAddress(t *testing.T) {
 		"the survivor's old address stays reserved on the retired account")
 
 	// The username now signs in to the survivor.
-	login, err := svc.PasswordLogin(ctx, "bob", accessTestPassword, "1.2.3.4", "agent")
+	login, err := svc.PasswordLogin(ctx, "bob", accessTestPassword, "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Equal(t, survivor.ID, login.User.ID)
 }
@@ -54,7 +54,7 @@ func TestMergeAccounts_KeepsTheSurvivorsOwnWhenItHasThem(t *testing.T) {
 	survivor.Username = "robert"
 	survivor.PasswordHash = hashPW(t, "An0ther!Passw0rd")
 
-	merged, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "1.2.3.4", "agent", false)
+	merged, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.NoError(t, err)
 	require.Equal(t, "robert", merged.Username)
 	require.Equal(t, "bob-at-mail.example.test@accounts.example.test", merged.AccountAddress)
@@ -66,26 +66,26 @@ func TestMergeAccounts_KeepsTheSurvivorsOwnWhenItHasThem(t *testing.T) {
 func TestMergeAccounts_ProofAndRefusals(t *testing.T) {
 	svc, repo, survivor, native, ctx := mergeFixture(t)
 
-	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", "Wr0ng!Passw0rd", "1.2.3.4", "agent", false)
+	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", "Wr0ng!Passw0rd", "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrUnauthenticated)
-	_, err = svc.MergeAccounts(ctx, survivor.ID, "nobody", accessTestPassword, "1.2.3.4", "agent", false)
+	_, err = svc.MergeAccounts(ctx, survivor.ID, "nobody", accessTestPassword, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrUnauthenticated, "an unknown identifier gets the same refusal")
-	_, err = svc.MergeAccounts(ctx, survivor.ID, "", "", "1.2.3.4", "agent", false)
+	_, err = svc.MergeAccounts(ctx, survivor.ID, "", "", "203.0.113.10", "agent", false)
 	require.Error(t, err)
 
 	native.TotpRequired = true
-	_, err = svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "1.2.3.4", "agent", false)
+	_, err = svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrMergeRefused)
 	native.TotpRequired = false
 
 	// Into itself.
-	_, err = svc.MergeAccounts(ctx, native.ID, "bob", accessTestPassword, "1.2.3.4", "agent", false)
+	_, err = svc.MergeAccounts(ctx, native.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrMergeRefused)
 
 	// A guardian's account is not merged away from its children.
 	child := seedUser(repo, "", "", StatusActive)
 	seedGuardianEdge(ctx, t, repo, native.ID, child.ID)
-	_, err = svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "1.2.3.4", "agent", false)
+	_, err = svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrMergeRefused)
 
 	// Nothing changed on a refusal.
@@ -98,9 +98,9 @@ func TestMergeAccounts_RetiredAccountNoLongerSignsIn(t *testing.T) {
 	svc, _, survivor, _, ctx := mergeFixture(t)
 	survivor.Username = "robert"
 	survivor.PasswordHash = hashPW(t, "An0ther!Passw0rd")
-	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "1.2.3.4", "agent", false)
+	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.NoError(t, err)
-	_, err = svc.PasswordLogin(ctx, "bob", accessTestPassword, "1.2.3.4", "agent")
+	_, err = svc.PasswordLogin(ctx, "bob", accessTestPassword, "203.0.113.10", "agent")
 	require.Error(t, err, "the retired account's own credentials no longer sign in")
 }
 
@@ -139,7 +139,7 @@ func TestReactivateUser_RefusesAMergedAccount(t *testing.T) {
 func TestMergeAccounts_OffByDefault(t *testing.T) {
 	svc, _, survivor, _, ctx := mergeFixture(t)
 	svc.cfg.AccountMergeEnabled = false
-	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "1.2.3.4", "agent", false)
+	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrAccountMergeDisabled)
 }
 
@@ -149,20 +149,20 @@ func TestMergeAccounts_UsesTheSignInGates(t *testing.T) {
 	t.Run("closed project", func(t *testing.T) {
 		svc, _, survivor, _, _ := mergeFixture(t)
 		closed := signupScope(t, `{"access":{"mode":"closed"},"accounts":{"domain":"accounts.example.test"}}`)
-		_, err := svc.MergeAccounts(closed, survivor.ID, "bob", accessTestPassword, "1.2.3.4", "agent", false)
+		_, err := svc.MergeAccounts(closed, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 		require.ErrorIs(t, err, ErrAccessNotAllowed)
 	})
 	t.Run("deactivated account", func(t *testing.T) {
 		svc, _, survivor, native, ctx := mergeFixture(t)
 		native.Status = StatusDeactivated
-		_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "1.2.3.4", "agent", false)
+		_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 		require.Error(t, err)
 	})
 	t.Run("unverified email when verification is required", func(t *testing.T) {
 		svc, repo, survivor, _, ctx := mergeFixture(t)
 		svc.cfg.AuthRequireVerifiedEmail = true
 		seedUser(repo, "eve@mail.example.com", hashPW(t, accessTestPassword), StatusActive)
-		_, err := svc.MergeAccounts(ctx, survivor.ID, "eve@mail.example.com", accessTestPassword, "1.2.3.4", "agent", false)
+		_, err := svc.MergeAccounts(ctx, survivor.ID, "eve@mail.example.com", accessTestPassword, "203.0.113.10", "agent", false)
 		require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	})
 }
@@ -175,7 +175,7 @@ func TestMergeAccounts_MovesEmailAndLinkedCredentials(t *testing.T) {
 	other := verified(seedUser(repo, "carol@mail.example.com", hashPW(t, accessTestPassword), StatusActive))
 	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{UserID: other.ID, Provider: "google", ProviderUserID: "g-1"}))
 
-	merged, err := svc.MergeAccounts(ctx, survivor.ID, "carol@mail.example.com", accessTestPassword, "1.2.3.4", "agent", false)
+	merged, err := svc.MergeAccounts(ctx, survivor.ID, "carol@mail.example.com", accessTestPassword, "203.0.113.10", "agent", false)
 	require.NoError(t, err)
 	require.Equal(t, "carol@mail.example.com", merged.Email, "the survivor had no email: it takes the other's")
 	linked, err := repo.FindUserByProviderID(ctx, "google", "g-1")
@@ -197,7 +197,7 @@ func TestMergeAccounts_ConcurrentChangeIsAConflict(t *testing.T) {
 func TestMergeAccounts_SurvivorCheckedBeforeThePassword(t *testing.T) {
 	svc, repo, survivor, native, ctx := mergeFixture(t)
 	survivor.Status = StatusDeactivated
-	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", "Wr0ng!Passw0rd", "1.2.3.4", "agent", false)
+	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", "Wr0ng!Passw0rd", "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrMergeRefused)
 	got, _ := repo.GetUser(ctx, native.ID)
 	require.Zero(t, got.FailedLoginCount, "no password was checked")

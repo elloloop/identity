@@ -33,7 +33,7 @@ func TestMergeAccounts_Handler(t *testing.T) {
 
 func TestMergeUsers_Handler_AdminOnly(t *testing.T) {
 	h := newHarness(t)
-	h.db.addUser("member-1", "member@e.com", "Member", "member", "active")
+	h.db.addUser("member-1", "member@example.com", "Member", "member", "active")
 	_, err := h.client.MergeUsers(context.Background(), authedReq(connect.NewRequest(&identitypb.MergeUsersRequest{
 		SurvivorUserId: "a", OtherUserId: "b",
 	}), "member-1"))
