@@ -35,6 +35,13 @@ func validateSignupMode(field, mode string) error {
 	return fmt.Errorf("%s: %q is not one of %q, %q or %q", field, mode, SignupSelf, SignupAdmin, SignupOff)
 }
 
+// EmailAccountsOff reports whether the project has turned email accounts off
+// (accounts.email_signup "off"): no one, person or admin, creates one. The
+// SCIM store, outside this package, refuses provisioning by it.
+func (a ProjectAccountsConfig) EmailAccountsOff() bool {
+	return a.emailSignup() == SignupOff
+}
+
 // emailSignup is who creates email accounts. Unset means "self", so a project
 // that configures nothing keeps today's email self-signup.
 func (a ProjectAccountsConfig) emailSignup() string {

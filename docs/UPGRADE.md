@@ -1,5 +1,14 @@
 # Upgrade guide
 
+## v4.11 → next — SCIM honours email accounts being off (behaviour change)
+
+No schema change and no migration.
+
+- **SCIM `POST /Users` answers `403` when the project's
+  `accounts.email_signup` is `off`**, as admin creation already did. A
+  project that never set `email_signup`, or set it to `self` or `admin`,
+  sees no change.
+
 ## v4.10 → v4.11 — account addresses on the project's domain (additive); neutral built-in defaults; invitation links follow the project (behaviour change)
 
 **Migration 0035** (SQLite 0018) adds `users.account_address` and a partial

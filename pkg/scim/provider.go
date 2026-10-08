@@ -293,6 +293,8 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "uniqueness", "a resource with this attribute already exists")
 	case errors.Is(err, ErrInvalidValue):
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
+	case errors.Is(err, ErrForbidden):
+		writeError(w, http.StatusForbidden, "", err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, "", "internal error")
 	}
