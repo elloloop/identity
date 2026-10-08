@@ -20,8 +20,10 @@ package connect
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/assurance"
 )
@@ -148,6 +150,16 @@ type headerReader interface {
 // The middleware sets X-Authenticated-User-Id after verifying the JWT.
 func authenticatedUserID(headers headerReader) string {
 	return headers.Get("X-Authenticated-User-Id")
+}
+
+// authenticatedAuthTime returns the verified session's sign-in time (epoch
+// seconds) the auth middleware injected, or 0 when there is none.
+func authenticatedAuthTime(headers headerReader) int64 {
+	v, err := strconv.ParseInt(headers.Get(middleware.AuthenticatedAuthTimeHeader), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 // clientIP returns the client IP resolved by ClientIPMiddleware via the

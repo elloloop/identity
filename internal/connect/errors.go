@@ -103,6 +103,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrSignupDisabled),
 		errors.Is(err, service.ErrMergeRefused),
 		errors.Is(err, service.ErrAccountMergeDisabled),
+		errors.Is(err, service.ErrReauthenticationRequired),
 		errors.Is(err, service.ErrAccountKindOff),
 		errors.Is(err, service.ErrPasskeySignupDisabled),
 		errors.Is(err, service.ErrNativeOAuthDisabled),

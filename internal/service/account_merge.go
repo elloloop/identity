@@ -48,6 +48,15 @@ var errIDPManaged = fmt.Errorf("%w: an account your identity provider manages ca
 // not turned self-service merging on (GATEWAY_ACCOUNT_MERGE_ENABLED).
 var ErrAccountMergeDisabled = errors.New("merging accounts is not enabled on this server")
 
+// ErrReauthenticationRequired is returned by MergeAccounts when the caller's
+// session was not opened by a sign-in within
+// GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS. It maps to
+// CodeFailedPrecondition, and its message leads with the stable
+// `reauthentication_required` token clients match on to sign the user in
+// again (any method, with any second factor) and retry. The token is part of
+// the wire contract — do not reword it.
+var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in again to merge accounts")
+
 // Merging two accounts of one person.
 //
 // A merge never deletes anything. One account, the survivor, chosen by
@@ -80,12 +89,18 @@ var ErrAccountMergeDisabled = errors.New("merging accounts is not enabled on thi
 // second factor protects — enrolled two-step, or a policy requiring one —
 // cannot be merged by its password alone. The deployment must have turned
 // merging on (GATEWAY_ACCOUNT_MERGE_ENABLED).
-func (s *AuthService) MergeAccounts(ctx context.Context, survivorID, otherIdentifier, otherPassword, ipAddr, userAgent string, takeAddress bool) (*User, error) {
+func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, authTimeSec int64, otherIdentifier, otherPassword, ipAddr, userAgent string, takeAddress bool) (*User, error) {
 	if !s.cfg.AccountMergeEnabled {
 		return nil, ErrAccountMergeDisabled
 	}
 	if survivorID == "" {
 		return nil, ErrUnauthenticated
+	}
+	// The account that is kept proves itself as freshly as the other one: a
+	// session is not enough, a recent sign-in is. Before any password check,
+	// so a stale session learns nothing about the other account.
+	if !s.recentlyAuthenticated(authTimeSec) {
+		return nil, ErrReauthenticationRequired
 	}
 	repo := s.repo(ctx)
 	survivor, err := repo.GetUser(ctx, survivorID)
@@ -301,4 +316,15 @@ func notifyMerge(ctx context.Context, cfg *config.Config, mailer email.Transport
 	if survivor.Email != retired.Email {
 		send(survivor.Email, survivor, false)
 	}
+}
+
+// recentlyAuthenticated reports whether a session's sign-in (auth_time, epoch
+// seconds) is within GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS of now. A
+// session with no recorded sign-in time, or one in the future, is not.
+func (s *AuthService) recentlyAuthenticated(authTimeSec int64) bool {
+	if authTimeSec <= 0 {
+		return false
+	}
+	age := s.nowMs() - authTimeSec*1000
+	return age >= 0 && age <= s.cfg.AccountMergeReauthMaxAge().Milliseconds()
 }

@@ -1870,6 +1870,8 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		AvatarURL: user.AvatarURL,
 		IsMinor:   user.IsMinor,
 		Anonymous: user.IsAnonymous,
+		// The sign-in that opened the session, kept across refreshes.
+		AuthTime: sessionStart / 1000,
 	}
 	if s.cfg.JWTAudience != "" {
 		claims.Audience = []string{s.cfg.JWTAudience}

@@ -758,6 +758,15 @@ type Config struct {
 	// user.merged. Admin MergeUsers is available either way. Driven by
 	// GATEWAY_ACCOUNT_MERGE_ENABLED.
 	AccountMergeEnabled bool
+	// AccountMergeReauthMaxAgeSeconds bounds how long ago the caller of
+	// MergeAccounts may have signed in: the account that is kept must have
+	// been authenticated (password, passkey, provider, with any second factor)
+	// within this many seconds, so a stolen or long-lived session cannot pull
+	// another account's credentials onto it. Driven by
+	// GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS (default 300; 0 selects
+	// the default; the check cannot be turned off). Read it through
+	// AccountMergeReauthMaxAge.
+	AccountMergeReauthMaxAgeSeconds int
 	// PasswordResetEnabled gates RequestPasswordReset; when false the RPC stays
 	// enumeration-safe but is a no-op (admin resets still work).
 	PasswordResetEnabled bool
@@ -1399,10 +1408,11 @@ func loadFromEnv() *Config {
 		SCIMBearerToken: envStr("GATEWAY_SCIM_BEARER_TOKEN", ""),
 		SCIMProjectID:   envStr("GATEWAY_SCIM_PROJECT_ID", ""),
 
-		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
-		AccountMergeEnabled:        envBool("GATEWAY_ACCOUNT_MERGE_ENABLED", false),
-		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
-		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
+		PasswordSignupEnabled:           envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
+		AccountMergeEnabled:             envBool("GATEWAY_ACCOUNT_MERGE_ENABLED", false),
+		AccountMergeReauthMaxAgeSeconds: envInt("GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS", DefaultAccountMergeReauthMaxAgeSeconds),
+		PasswordResetEnabled:            envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
+		PasswordResetExpirySeconds:      envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
 
 		GuardianStepUpAllowNoPassword: envBool("GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD", false),
 
@@ -1995,6 +2005,12 @@ func (c *Config) Validate() error {
 	}
 	if c.RateLimitUsernameTakenPerIP < 0 {
 		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitUsernameTakenPerIP)
+	}
+	if c.AccountMergeReauthMaxAgeSeconds < 0 {
+		return fmt.Errorf(
+			"config: GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS=%d must not be negative (0 selects the default, %d; the check cannot be turned off)",
+			c.AccountMergeReauthMaxAgeSeconds, DefaultAccountMergeReauthMaxAgeSeconds,
+		)
 	}
 
 	if err := c.validateSMS(); err != nil {
@@ -2616,4 +2632,17 @@ func envBool(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+// DefaultAccountMergeReauthMaxAgeSeconds is how recent a sign-in MergeAccounts
+// requires of the account that is kept when the deployment sets none.
+const DefaultAccountMergeReauthMaxAgeSeconds = 300
+
+// AccountMergeReauthMaxAge is how recent the kept account's sign-in must be
+// for MergeAccounts: the configured value, or the default when unset.
+func (c *Config) AccountMergeReauthMaxAge() time.Duration {
+	if c.AccountMergeReauthMaxAgeSeconds <= 0 {
+		return DefaultAccountMergeReauthMaxAgeSeconds * time.Second
+	}
+	return time.Duration(c.AccountMergeReauthMaxAgeSeconds) * time.Second
 }

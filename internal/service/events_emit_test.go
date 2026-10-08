@@ -167,12 +167,12 @@ func TestMergeAccounts_EmitsUserMergedEvent(t *testing.T) {
 	pub := &capturePublisher{}
 	svc.WithEventPublisher(pub)
 
-	_, err := svc.MergeAccounts(ctx, survivor.ID, "bob", "Wr0ng!Passw0rd", "203.0.113.10", "agent", false)
+	_, err := svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", "Wr0ng!Passw0rd", "203.0.113.10", "agent", false)
 	require.Error(t, err)
 	_, found := eventByType(pub.all(), events.EventUserMerged)
 	require.False(t, found, "a refused merge emits no event")
 
-	_, err = svc.MergeAccounts(ctx, survivor.ID, "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	_, err = svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.NoError(t, err)
 	requireOneMergedEvent(t, pub.all(), native.ID, survivor.ID)
 }

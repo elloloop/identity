@@ -133,7 +133,11 @@ metadata. Two rules it must follow, both of them load-bearing:
 2. **Strip the identity metadata a client sent.** The bridge copies incoming
    metadata verbatim, and `AppendToIncomingContext` puts your value *after*
    any the client supplied — so a client-set `x-authenticated-user-id` would
-   win. Delete the three identity keys before appending your own.
+   win. Delete the identity keys before appending your own.
+
+`MergeAccounts` also reads `x-authenticated-auth-time`, the token's
+`auth_time` claim (the sign-in that opened the session, in epoch seconds):
+forward it, or every merge is refused `reauthentication_required`.
 
 ```go
 func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud bool) grpc.UnaryServerInterceptor {
@@ -145,12 +149,16 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
         md.Delete("x-authenticated-user-id")
         md.Delete("x-authenticated-tenant-id")
         md.Delete("x-authenticated-project-id")
+        md.Delete("x-authenticated-auth-time")
         if toks := md.Get("authorization"); len(toks) > 0 {
             // VerifyAccessToken rejects a purpose-bearing ticket for us.
             claims, err := jwt.VerifyAccessToken(
                 strings.TrimPrefix(toks[0], "Bearer "), kp, tenant, audience, requireAud)
             if err == nil {
                 md.Set("x-authenticated-user-id", claims.Sub)
+                if claims.AuthTime > 0 {
+                    md.Set("x-authenticated-auth-time", strconv.FormatInt(claims.AuthTime, 10))
+                }
             }
         }
         return handler(metadata.NewIncomingContext(ctx, md), req)

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
@@ -242,6 +243,11 @@ const AuthenticatedTenantHeader = "X-Authenticated-Tenant"
 // the token.
 const AuthenticatedProjectHeader = "X-Authenticated-Project"
 
+// AuthenticatedAuthTimeHeader carries the verified `auth_time` claim (epoch
+// seconds of the sign-in that opened the session) to the handlers that need
+// a recent sign-in. Absent when the token has none.
+const AuthenticatedAuthTimeHeader = "X-Authenticated-Auth-Time"
+
 // setAuthHeaders writes the verified identity headers from claims. Only
 // called after VerifyAccessToken succeeds, so the values are trusted.
 func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
@@ -252,6 +258,9 @@ func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
 	if claims.Project != "" {
 		r.Header.Set(AuthenticatedProjectHeader, claims.Project)
 	}
+	if claims.AuthTime > 0 {
+		r.Header.Set(AuthenticatedAuthTimeHeader, strconv.FormatInt(claims.AuthTime, 10))
+	}
 }
 
 // clearAuthHeaders removes any inbound copies of the identity headers so
@@ -261,6 +270,7 @@ func clearAuthHeaders(r *http.Request) {
 	r.Header.Del(AuthenticatedUserIDHeader)
 	r.Header.Del(AuthenticatedTenantHeader)
 	r.Header.Del(AuthenticatedProjectHeader)
+	r.Header.Del(AuthenticatedAuthTimeHeader)
 }
 
 // extractBearerToken returns the token portion of an "Authorization: Bearer <token>"
