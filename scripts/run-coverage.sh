@@ -5,6 +5,7 @@ set -euo pipefail
 # COVERAGE_PART runs one part of the suite, so CI can run the parts in
 # parallel and merge their profiles (scripts/merge-coverage.sh):
 #   unit:<i>/<n>  the i-th of n round-robin shards of the unit packages
+#   e2e:<i>/<n>   the i-th of n round-robin shards of the e2e tests
 #   integration | e2e | realpostgres | postgres
 # Unset, it runs every part in turn and writes the merged cover.out.
 part="${COVERAGE_PART:-all}"
@@ -54,12 +55,23 @@ fi
 # CI runner the whole-suite wall-clock is ~230s, so the old 180s budget
 # timed out there even though the suite passes (~37s on a dev box). 600s
 # matches the headroom the realpostgres suite already uses.
-if [[ "${RUN_INTEGRATION_COVERAGE:-}" == "1" ]] && runs e2e; then
-  go test -count=1 -tags=e2e -race -timeout=600s \
-    -coverprofile=cover.e2e.out \
+if [[ "${RUN_INTEGRATION_COVERAGE:-}" == "1" ]] && { runs e2e || [[ "$part" == e2e:* ]]; }; then
+  e2e_run=()
+  e2e_profile=cover.e2e.out
+  if [[ "$part" == e2e:* ]]; then
+    shard="${part#e2e:}"
+    index="${shard%/*}"
+    count="${shard#*/}"
+    names="$(grep -rhoE '^func Test[A-Za-z0-9_]+' tests/e2e | sed 's/^func //' | sort \
+      | awk -v i="$index" -v n="$count" '(NR - 1) % n == i - 1' | paste -sd '|' -)"
+    e2e_run=(-run "^(${names})\$")
+    e2e_profile="cover.e2e-$index.out"
+  fi
+  go test -count=1 -tags=e2e -race -timeout=600s ${e2e_run[@]+"${e2e_run[@]}"} \
+    -coverprofile="$e2e_profile" \
     -coverpkg="$tagged_coverpkg" \
     ./tests/e2e/...
-  profiles+=(cover.e2e.out)
+  profiles+=("$e2e_profile")
 fi
 
 if [[ -n "${GATEWAY_POSTGRES_DSN:-}" ]] && runs realpostgres; then
