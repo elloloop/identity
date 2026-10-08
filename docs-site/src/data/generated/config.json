@@ -211,7 +211,7 @@
     "type": "boolean",
     "default": "true",
     "required": false,
-    "description": "requires an assurance token on the PasswordSignup endpoint.",
+    "description": "requires an assurance token on the PasswordSignup and UsernameSignup endpoints.",
     "category": "Client assurance",
     "anchor": "client-assurance"
   },
@@ -1255,7 +1255,7 @@
     "type": "boolean",
     "default": "true",
     "required": false,
-    "description": "gates self-serve PasswordSignup; set false to disable it (admin-driven invitations still work).",
+    "description": "gates self-serve PasswordSignup and UsernameSignup; set false to disable both (admin-driven creation and invitations still work).",
     "category": "Password \u0026 lockout",
     "anchor": "password-and-lockout"
   },
@@ -1462,7 +1462,7 @@
     "type": "integer",
     "default": "10",
     "required": false,
-    "description": "is the per-IP request cap per window on PasswordSignup.",
+    "description": "is the per-IP request cap per window on PasswordSignup and UsernameSignup, together.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },

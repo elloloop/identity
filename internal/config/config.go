@@ -597,7 +597,7 @@ type Config struct {
 	// AssuranceRecaptchaScoreThreshold is the reCAPTCHA v3 score below which a
 	// response is rejected; must be in [0,1].
 	AssuranceRecaptchaScoreThreshold float64
-	// AssuranceEnforcePasswordSignup requires an assurance token on the PasswordSignup endpoint.
+	// AssuranceEnforcePasswordSignup requires an assurance token on the PasswordSignup and UsernameSignup endpoints.
 	AssuranceEnforcePasswordSignup bool
 	// AssuranceEnforcePasswordLogin requires an assurance token on the PasswordLogin endpoint.
 	AssuranceEnforcePasswordLogin bool
@@ -745,8 +745,9 @@ type Config struct {
 
 	// Password.
 
-	// PasswordSignupEnabled gates self-serve PasswordSignup; set false to
-	// disable it (admin-driven invitations still work).
+	// PasswordSignupEnabled gates self-serve PasswordSignup and
+	// UsernameSignup; set false to disable both (admin-driven creation and
+	// invitations still work).
 	PasswordSignupEnabled bool
 	// PasswordResetEnabled gates RequestPasswordReset; when false the RPC stays
 	// enumeration-safe but is a no-op (admin resets still work).
@@ -1040,7 +1041,7 @@ type Config struct {
 
 	// RateLimitWindowSeconds is the sliding window length (seconds) for the per-IP limiter.
 	RateLimitWindowSeconds int
-	// RateLimitSignupPerIP is the per-IP request cap per window on PasswordSignup.
+	// RateLimitSignupPerIP is the per-IP request cap per window on PasswordSignup and UsernameSignup, together.
 	RateLimitSignupPerIP int
 	// RateLimitLoginPerIP is the per-IP request cap per window on the login endpoints.
 	RateLimitLoginPerIP int
