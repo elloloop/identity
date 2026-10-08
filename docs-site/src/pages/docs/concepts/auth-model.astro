@@ -70,7 +70,8 @@ import { Code } from "astro-expressive-code/components";
 
   <h3>Exempt paths</h3>
   <ul>
-    <li><code>BeginOAuthLogin</code>, <code>OAuthLogin</code>, <code>PasswordLogin</code>, <code>PasswordSignup</code>, <code>RefreshToken</code>, <code>Logout</code>, <code>GetCurrentUser</code></li>
+    <li><code>BeginOAuthLogin</code>, <code>OAuthLogin</code>, <code>PasswordLogin</code>, <code>PasswordSignup</code>, <code>UsernameSignup</code>, <code>RefreshToken</code>, <code>Logout</code>, <code>GetCurrentUser</code></li>
+    <li><code>SubmitDateOfBirth</code>, <code>CompleteRequiredPasswordChange</code> (completion steps: the caller holds a ticket, not a session)</li>
     <li><code>RequestEmailLoginCode</code>, <code>VerifyEmailLoginCode</code>, <code>RequestMagicLink</code>, <code>RedeemMagicLink</code> (passwordless)</li>
     <li><code>BeginPasskeyLogin</code>, <code>CompletePasskeyLogin</code></li>
     <li><code>InitiateQrLogin</code>, <code>PollQrLogin</code></li>
