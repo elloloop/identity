@@ -45,9 +45,12 @@ type grpcBridge struct {
 	directoryLimit middleware.PathLimit
 	trustedProxies []*net.IPNet
 	logger         *zap.Logger
+	// trustAuthTime: the host's interceptor owns x-authenticated-auth-time
+	// (Options.GRPCTrustAuthTime). Otherwise the bridge drops it.
+	trustAuthTime bool
 }
 
-func newGRPCBridge(built *app.Built, logger *zap.Logger) *grpcBridge {
+func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime bool) *grpcBridge {
 	directoryLimit, ok := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceLookupUsersProcedure)
 	if !ok {
 		// app.Build always configures this limit; reaching here means the
@@ -60,6 +63,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger) *grpcBridge {
 		directoryLimit: directoryLimit,
 		trustedProxies: built.TrustedProxies,
 		logger:         logger,
+		trustAuthTime:  trustAuthTime,
 	}
 }
 
@@ -135,6 +139,11 @@ func invoke[Req, Resp any](
 	}
 	if ip := b.clientIP(ctx); ip != "" {
 		creq.Header().Set(middleware.ClientIPHeader, ip)
+	}
+	// The sign-in time vouches for a recent sign-in; only a host that said
+	// its interceptor sets it from the verified token may pass it on.
+	if !b.trustAuthTime {
+		creq.Header().Del(middleware.AuthenticatedAuthTimeHeader)
 	}
 	cresp, err := fn(ctx, creq)
 	if err != nil {

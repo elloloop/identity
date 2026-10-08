@@ -137,8 +137,11 @@ metadata. Two rules it must follow, both of them load-bearing:
 
 `MergeAccounts` also reads `x-authenticated-auth-time`, the token's
 `auth_time` claim (epoch seconds, present only on a token a sign-in
-issued): forward it from the verified token, after deleting any value the
-client sent, or every merge is refused `reauthentication_required`.
+issued). Forward it from the verified token, after deleting any value the
+client sent, **and** set `Options.GRPCTrustAuthTime`: until you do, the
+bridge drops the key, so an interceptor written before it existed cannot let
+a client vouch for its own sign-in, and every merge over native gRPC is
+refused `reauthentication_required`.
 
 ```go
 func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud bool) grpc.UnaryServerInterceptor {

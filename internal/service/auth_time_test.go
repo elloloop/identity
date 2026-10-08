@@ -91,3 +91,19 @@ func TestAuthTime_UnanchoredRefreshHasNone(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, authTimeOf(t, svc, access))
 }
+
+// Completing a required password change continues the sign-in that proved
+// the issued password: auth_time is that moment, not the completion.
+func TestAuthTime_RequiredPasswordChangeKeepsTheSignIn(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	issuedPasswordUser(t, repo, "issued@example.com")
+	signedInAt := time.Now().Add(-5 * time.Minute).Truncate(time.Second)
+	svc.nowFunc = func() time.Time { return signedInAt }
+	ticket := passwordChangeTicket(t, svc, "issued@example.com")
+	svc.nowFunc = time.Now
+
+	res, err := svc.CompleteRequiredPasswordChange(context.Background(), ticket, strongPW, "", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, res.AccessToken))
+}

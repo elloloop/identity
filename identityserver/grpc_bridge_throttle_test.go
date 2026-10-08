@@ -101,3 +101,28 @@ func TestGRPCBridge_InvokeSetsTheClientIPFromTheTransport(t *testing.T) {
 		t.Fatalf("caller-supplied forwarding headers reached the handler: xff=%q real-ip=%q", xff, realIP)
 	}
 }
+
+// A sign-in time a caller sent in metadata never reaches the handlers unless
+// the host declared that its interceptor owns the key: an interceptor written
+// before the key existed would otherwise let a client vouch for its own
+// recent sign-in.
+func TestGRPCBridge_AuthTimeOnlyWhenTheHostOwnsIt(t *testing.T) {
+	md := metadata.Pairs("x-authenticated-auth-time", "1700000000")
+	for _, trust := range []bool{false, true} {
+		b := &grpcBridge{logger: zap.NewNop(), trustAuthTime: trust}
+		var seen string
+		fn := func(_ context.Context, req *connect.Request[struct{}]) (*connect.Response[struct{}], error) {
+			seen = req.Header().Get(middleware.AuthenticatedAuthTimeHeader)
+			return connect.NewResponse(&struct{}{}), nil
+		}
+		if _, err := invoke(peerContext("198.51.100.4", md), b, &struct{}{}, fn); err != nil {
+			t.Fatal(err)
+		}
+		if trust && seen != "1700000000" {
+			t.Fatalf("trusted host: handler saw %q, want the interceptor's value", seen)
+		}
+		if !trust && seen != "" {
+			t.Fatalf("untrusted host: the caller's auth time %q reached the handler", seen)
+		}
+	}
+}

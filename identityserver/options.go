@@ -48,6 +48,16 @@ type Options struct {
 	// logger; the container passes a zap production logger.
 	Logger *zap.Logger
 
+	// GRPCTrustAuthTime lets the native-gRPC bridge pass the
+	// x-authenticated-auth-time metadata through to the handlers. Set it only
+	// when the host's gRPC auth interceptor deletes any value the client sent
+	// and sets it from the verified token's auth_time (see the embedding
+	// guide). Left false, the bridge drops the key, and MergeAccounts over
+	// native gRPC is refused reauthentication_required: a host interceptor
+	// written before the key existed cannot let a client vouch for its own
+	// sign-in.
+	GRPCTrustAuthTime bool
+
 	// MetricsRegistry is where identity records its Prometheus RED
 	// metrics. nil uses prometheus.DefaultRegisterer (what the container
 	// wants). Tests pass an isolated registry to avoid collisions.

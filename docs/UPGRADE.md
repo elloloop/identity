@@ -25,8 +25,9 @@ column is absent, then `identity migrate force 35` and `identity migrate`).
   seconds). A refreshed token, or one from a QR handoff, carries none.
   Verifiers that ignore unknown claims see no change. **Native-gRPC hosts**
   that use `MergeAccounts` forward it as `x-authenticated-auth-time`
-  metadata, after deleting any value the client sent (see the embedding
-  guide).
+  metadata, after deleting any value the client sent, and set the new
+  `Options.GRPCTrustAuthTime`; without it the bridge drops the key and
+  merges over native gRPC are refused (see the embedding guide).
 - **Webhook subscribers receive a new event type, `user.merged`.** A
   subscription with no event-type filter receives every type, so it gets
   `user.merged` too; make sure your handler ignores (or handles) types it

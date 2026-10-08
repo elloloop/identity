@@ -43,6 +43,7 @@ import { Code } from "astro-expressive-code/components";
   "tenant": "acme",            // logical tenant, derived from verified domain
   "role": "admin",             // "admin" | "member" | "guest"
   "sid": "sess_01HZ...",       // session ID
+  "auth_time": 1730000000,     // sign-in time; absent on refreshed, QR and anonymous tokens
   "iat": 1730000000,
   "exp": 1730000900
 }`} lang="json" />

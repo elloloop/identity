@@ -67,7 +67,9 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       The session must come from a <strong>recent sign-in</strong>: within
       <code>GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS</code> (default 300)
       of the call, by any method the account has, its second factor
-      included. A refresh does not count. An older session gets
+      included. A refresh does not count, nor does a session opened by a QR
+      handoff: sign the person in on that device with one of their
+      credentials. An older session gets
       <code>FAILED_PRECONDITION</code> with
       <code>reauthentication_required</code>: sign the person in again, then
       retry. A stolen or long-lived session therefore cannot pull another

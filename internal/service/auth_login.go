@@ -381,12 +381,16 @@ func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User
 	// address too; the decoy carries the one it would get, or it would give
 	// the duplicate away.
 	user.AccountAddress = predictedAccountAddress(ctx, user)
+	// The same claim set a real sign-up's token carries, or the decoy's
+	// shape would give the duplicate away.
 	decoyClaims := jwt.Claims{
-		Sub:    user.ID,
-		Email:  user.Email,
-		Name:   user.Name,
-		Role:   user.Role,
-		Tenant: s.tenantID(ctx),
+		Sub:      user.ID,
+		Email:    user.Email,
+		Name:     user.Name,
+		Role:     user.Role,
+		Tenant:   s.tenantID(ctx),
+		Project:  s.projectID(ctx),
+		AuthTime: s.nowMs() / 1000,
 	}
 	if s.cfg.JWTAudience != "" {
 		decoyClaims.Audience = []string{s.cfg.JWTAudience}
