@@ -855,12 +855,9 @@ func New(deps Deps) (*Built, error) {
 				"GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS): %w", err,
 		)
 	}
-	defaultAccounts, err := service.NewDefaultProjectAccounts(deps.Config)
+	defaultAccounts, err := buildDefaultProjectAccounts(deps.Config, logger)
 	if err != nil {
-		return nil, fmt.Errorf("default project accounts config (check GATEWAY_DEFAULT_EMAIL_DOMAIN): %w", err)
-	}
-	if defaultAccounts.Domain != "" {
-		logger.Info("default_project_account_addresses_enabled", zap.String("domain", defaultAccounts.Domain))
+		return nil, err
 	}
 	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
 	// default project denies all auth, so a fresh deployment that forgot to open
@@ -1209,4 +1206,18 @@ func randomEventID() string {
 		panic("app: crypto/rand failed generating event id: " + err.Error())
 	}
 	return "evt_" + hex.EncodeToString(b[:])
+}
+
+// buildDefaultProjectAccounts builds the env-configured default project's
+// account policy, failing the boot on an invalid value, and logs what it
+// turns on.
+func buildDefaultProjectAccounts(cfg *config.Config, logger *zap.Logger) (service.ProjectAccountsConfig, error) {
+	accounts, err := service.NewDefaultProjectAccounts(cfg)
+	if err != nil {
+		return service.ProjectAccountsConfig{}, fmt.Errorf("default project accounts config (check GATEWAY_DEFAULT_EMAIL_DOMAIN): %w", err)
+	}
+	if accounts.Domain != "" {
+		logger.Info("default_project_account_addresses_enabled", zap.String("domain", accounts.Domain))
+	}
+	return accounts, nil
 }
