@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -348,5 +349,13 @@ func TestEnvTest_EmailServiceAddress_DefaultPorts(t *testing.T) {
 	expected := "email-service:50053"
 	if got := cfg.EmailServiceAddress(); got != expected {
 		t.Errorf("EmailServiceAddress default: got %q, want %q", got, expected)
+	}
+}
+
+func TestValidate_UsernameTakenBudgetNotNegative(t *testing.T) {
+	cfg := Load()
+	cfg.RateLimitUsernameTakenPerIP = -1
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP") {
+		t.Fatalf("Validate = %v, want the negative budget refused", err)
 	}
 }

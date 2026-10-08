@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -350,11 +353,51 @@ func TestUsernameSignup_TakenAnswersAreBudgetedPerIP(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestProbeBudget_WindowResets(t *testing.T) {
+func TestProbeBudget_ReserveRefundWindow(t *testing.T) {
 	b := newProbeBudget(1000, 1)
-	b.spend("ip", 0)
-	require.True(t, b.exhausted("ip", 500))
-	require.False(t, b.exhausted("ip", 1500))
-	require.False(t, b.exhausted("", 500), "no IP, no budget")
-	require.False(t, (*probeBudget)(nil).exhausted("ip", 0))
+	require.True(t, b.reserve("ip", 0))
+	require.False(t, b.reserve("ip", 500), "spent")
+	b.refund("ip", 600)
+	require.True(t, b.reserve("ip", 700), "a refunded unit can be reserved again")
+	require.True(t, b.reserve("ip", 1500), "a new window")
+	require.True(t, b.reserve("", 0), "no IP, no budget")
+	require.True(t, (*probeBudget)(nil).reserve("ip", 0))
+}
+
+// Parallel requests from one IP cannot all pass the budget together: at most
+// limit of them reach the "taken" answer.
+func TestUsernameSignup_ParallelTakenAnswersStayWithinTheBudget(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.usernameProbes = newProbeBudget(60_000, 3)
+	svc.signupThrottle = newEmailSendThrottle(0, 0)
+	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
+	_, err := svc.UsernameSignup(ctx, "taken", accessTestPassword, "", 0, "", "")
+	require.NoError(t, err)
+
+	const n = 20
+	var mu sync.Mutex
+	taken := 0
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := svc.UsernameSignup(ctx, "taken", accessTestPassword, "", 0, "", "198.51.100.9")
+			if errors.Is(err, ErrAlreadyExists) {
+				mu.Lock()
+				taken++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	require.LessOrEqual(t, taken, 3)
+}
+
+func TestProbeBudget_StaysBounded(t *testing.T) {
+	b := newProbeBudget(1_000_000, 1)
+	for i := 0; i < probeBudgetMaxSize+10; i++ {
+		b.reserve(fmt.Sprintf("ip-%d", i), 0)
+	}
+	require.LessOrEqual(t, len(b.spent), probeBudgetMaxSize)
 }

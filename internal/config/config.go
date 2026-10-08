@@ -1043,12 +1043,13 @@ type Config struct {
 	RateLimitWindowSeconds int
 	// RateLimitSignupPerIP is the per-IP request cap per window on PasswordSignup and UsernameSignup, together.
 	RateLimitSignupPerIP int
-	// UsernameTakenPerIP caps how many "that username is taken" answers
-	// UsernameSignup gives one client IP per rate-limit window; past it, every
-	// UsernameSignup from that IP is refused as throttled until the window
-	// ends, so the endpoint cannot be used to list which usernames exist.
-	// 0 disables the cap. Driven by GATEWAY_USERNAME_TAKEN_PER_IP.
-	UsernameTakenPerIP int
+	// RateLimitUsernameTakenPerIP caps how many "that username is taken"
+	// answers UsernameSignup gives one client IP per rate-limit window
+	// (per replica, per exact address); past it, every UsernameSignup from
+	// that IP is refused as throttled until the window ends, so the endpoint
+	// cannot be used to list which usernames exist. 0 disables the cap.
+	// Driven by GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP.
+	RateLimitUsernameTakenPerIP int
 	// RateLimitLoginPerIP is the per-IP request cap per window on the login endpoints.
 	RateLimitLoginPerIP int
 	// RateLimitResetPerIP is the per-IP request cap per window on RequestPasswordReset.
@@ -1485,19 +1486,19 @@ func loadFromEnv() *Config {
 			"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32,::1/128",
 		),
 
-		RateLimitWindowSeconds:     envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
-		RateLimitSignupPerIP:       envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
-		UsernameTakenPerIP:         envInt("GATEWAY_USERNAME_TAKEN_PER_IP", 5),
-		RateLimitLoginPerIP:        envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
-		RateLimitResetPerIP:        envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
-		RateLimitVerifyPerIP:       envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
-		RateLimitPasswordlessPerIP: envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
-		RateLimitAssurancePerIP:    envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
-		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
-		RateLimitIDVPerIP:          envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
-		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
-		RateLimitDirectoryPerIP:    envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
-		RateLimitSCIMPerIP:         envInt("GATEWAY_RATE_LIMIT_SCIM_PER_IP", DefaultRateLimitSCIMPerIP),
+		RateLimitWindowSeconds:      envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
+		RateLimitSignupPerIP:        envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
+		RateLimitUsernameTakenPerIP: envInt("GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP", 5),
+		RateLimitLoginPerIP:         envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
+		RateLimitResetPerIP:         envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
+		RateLimitVerifyPerIP:        envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
+		RateLimitPasswordlessPerIP:  envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
+		RateLimitAssurancePerIP:     envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
+		RateLimitPhonePerIP:         envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
+		RateLimitIDVPerIP:           envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
+		RateLimitBootstrapPerIP:     envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
+		RateLimitDirectoryPerIP:     envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
+		RateLimitSCIMPerIP:          envInt("GATEWAY_RATE_LIMIT_SCIM_PER_IP", DefaultRateLimitSCIMPerIP),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
@@ -1981,6 +1982,9 @@ func (c *Config) Validate() error {
 	}
 	if c.RateLimitSCIMPerIP < 0 {
 		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_SCIM_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitSCIMPerIP)
+	}
+	if c.RateLimitUsernameTakenPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitUsernameTakenPerIP)
 	}
 
 	if err := c.validateSMS(); err != nil {

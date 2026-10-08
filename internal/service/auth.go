@@ -1098,11 +1098,11 @@ var (
 	// accounts.username_signup is "off" — whether a person or an admin asks.
 	ErrAccountKindOff = errors.New("this project does not create accounts of this kind")
 
-	// ErrSignupThrottled is returned when one identifier has been used for
-	// too many sign-up attempts in the throttle window. Email sign-up hides
+	// ErrSignupThrottled is returned when one identifier, or one client IP,
+	// has made too many sign-up attempts in the throttle window. Email sign-up hides
 	// its throttle behind the duplicate-signup decoy; a username is a public
 	// handle with no such decoy, so its throttle says so.
-	ErrSignupThrottled = errors.New("too many sign-up attempts for this identifier; try again later")
+	ErrSignupThrottled = errors.New("too many sign-up attempts; try again later")
 	// ErrProductAgeRestricted is returned when authentication succeeded but the
 	// account's derived age band is below the minimum the requested product
 	// configures (ProjectProductsConfig). It maps to CodePermissionDenied, and
@@ -1316,8 +1316,8 @@ type AuthService struct {
 	webAssurance      assurance.Verifier
 	emailThrottle     *emailSendThrottle
 	signupThrottle    *emailSendThrottle
-	// usernameProbes caps "username taken" answers per client IP (see
-	// UsernameSignup and config.UsernameTakenPerIP).
+	// usernameProbes caps "username taken" answers per client IP
+	// (config.RateLimitUsernameTakenPerIP).
 	usernameProbes *probeBudget
 	phoneThrottle  *emailSendThrottle
 	// returnAllow validates the magic-link return_to against
@@ -1559,7 +1559,7 @@ func NewAuthServiceWithOAuth(
 		oauthResolver:          newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
 		emailThrottle:          newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
 		signupThrottle:         newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
-		usernameProbes:         newProbeBudget(int64(cfg.RateLimitWindowSeconds)*1000, cfg.UsernameTakenPerIP),
+		usernameProbes:         newProbeBudget(rateLimitWindowMs(cfg), cfg.RateLimitUsernameTakenPerIP),
 		phoneThrottle:          newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
 		nowFunc:                time.Now,
 		// Default to synchronous sends; app.New opts into async via

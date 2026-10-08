@@ -17,6 +17,17 @@ No schema change and no migration.
   tells a caller when a username is taken; after an IP has been told that
   this many times in one rate-limit window, every `UsernameSignup` from it
   answers `RESOURCE_EXHAUSTED` until the window ends. `0` disables it.
+- **`GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP` (new, default 5).**
+  `UsernameSignup` tells a caller when a username is taken; after an IP has
+  been told that this many times in one rate-limit window, every
+  `UsernameSignup` from it answers `RESOURCE_EXHAUSTED` until the window
+  ends. Counted per replica and per exact address; users behind one shared
+  NAT share it, so raise it (or set `0` to disable) where that bites.
+- **Native gRPC: the client IP handlers see is the transport's.** The gRPC
+  bridge used to copy an incoming `x-client-ip` metadata entry through to
+  the handlers, so a gRPC caller could choose the address its rate limits,
+  budgets and audit entries were keyed on. It now always sets it from the
+  connection (and a trusted proxy's `x-forwarded-for`), as HTTP does.
 
 ## v4.10 → v4.11 — account addresses on the project's domain (additive); neutral built-in defaults; invitation links follow the project (behaviour change)
 

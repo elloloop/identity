@@ -68,6 +68,19 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 	if err := s.validatePasswordStrengthForEmail(ctx, username, password); err != nil {
 		return nil, err
 	}
+	// Reserve one "taken" answer before anything can reveal whether the name
+	// exists; every outcome below that reveals nothing gives it back.
+	if !s.usernameProbes.reserve(ipAddr, s.nowMs()) {
+		s.logger.Info("username_signup_probe_budget_spent",
+			zap.String("project_id", s.projectID(ctx)), zap.String("client_ip", ipAddr))
+		return nil, ErrSignupThrottled
+	}
+	revealed := false
+	defer func() {
+		if !revealed {
+			s.usernameProbes.refund(ipAddr, s.nowMs())
+		}
+	}()
 	// The per-identifier signup throttle PasswordSignup keys on the email,
 	// keyed here on the project and the username, so a username never shares a
 	// bucket with an email or with the same username in another project.
@@ -76,17 +89,13 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 		return nil, ErrSignupThrottled
 	}
 
-	if s.usernameProbes.exhausted(ipAddr, s.nowMs()) {
-		s.logger.Info("username_signup_probe_budget_spent", zap.String("project_id", s.projectID(ctx)))
-		return nil, ErrSignupThrottled
-	}
 	repo := s.repo(ctx)
 	existing, err := repo.FindUserByUsername(ctx, username)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		s.usernameProbes.spend(ipAddr, s.nowMs())
+		revealed = true // the reserved unit stays spent
 		return nil, fmt.Errorf("%w: username %q is already taken", ErrAlreadyExists, username)
 	}
 	pwHash, err := passwords.Hash(password)
@@ -112,7 +121,7 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 	id, err := repo.CreateUser(ctx, user)
 	if err != nil {
 		if errors.Is(err, ErrAlreadyExists) {
-			s.usernameProbes.spend(ipAddr, s.nowMs())
+			revealed = true
 			return nil, fmt.Errorf("%w: username %q is already taken", ErrAlreadyExists, username)
 		}
 		return nil, fmt.Errorf("creating user: %w", err)
