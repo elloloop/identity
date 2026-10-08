@@ -8,7 +8,6 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   GO_VERSION: '1.26.6'
-  GOLANGCI_LINT_VERSION: 'v2.12.1'
   GOVULNCHECK_VERSION: 'v1.1.4'
 
 permissions:
@@ -16,29 +15,47 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Re-run every gate `ci.yml` runs on PRs. A broken build must NOT publish.
+  # A release publishes only a commit main's CI already passed: every gate
+  # ci.yml runs (lint, race + coverage, smoke, integration, e2e, fuzz,
+  # docker) ran on this exact commit in the merge queue and on main. Re-running
+  # them here doubled the release time and could not catch anything new;
+  # only the vulnerability scan, whose database moves daily, runs again.
   # ---------------------------------------------------------------------------
-  lint:
-    name: Lint
+  verified:
+    name: CI passed on this commit
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      checks: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-          # Full lint on the tagged commit. only-new-issues needs a PR/diff
-          # base to compare against; on a tag push there is none, so the
-          # action's compare-commits call 404s and fails the release. Main is
-          # already gated on new-issue lint at PR time, so a full lint here is
-          # the correct release gate and works without a base ref.
-          only-new-issues: false
-          args: --config=.golangci.yml
+      - name: The tag is on main and main's CI passed on it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          status="$(gh api "repos/$REPO/compare/main...$SHA" --jq .status)"
+          if [[ "$status" != identical && "$status" != behind ]]; then
+            echo "::error::$SHA is not on main (compare status: $status); tag a commit from main"
+            exit 1
+          fi
+          # main's CI may still be running when a tag follows a merge closely.
+          for _ in $(seq 1 90); do
+            conclusions="$(gh api "repos/$REPO/commits/$SHA/check-runs?check_name=CI&per_page=100" \
+              --jq '[.check_runs[] | select(.app.slug == "github-actions") | .conclusion // "pending"] | join(" ")')"
+            if [[ " $conclusions " == *" success "* ]]; then
+              echo "CI passed on $SHA"
+              exit 0
+            fi
+            if [[ -n "$conclusions" && " $conclusions " != *" pending "* ]]; then
+              echo "::error::CI did not pass on $SHA (conclusions: $conclusions)"
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::no passing CI on $SHA after 15 minutes"
+          exit 1
 
   vuln:
     name: Vulnerability scan
@@ -55,282 +72,12 @@ jobs:
       - name: govulncheck
         run: govulncheck ./...
 
-  test-part:
-    name: Test (${{ matrix.part }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        part: ['unit:1/4', 'unit:2/4', 'unit:3/4', 'unit:4/4', integration, e2e, realpostgres, postgres]
-    services:
-      postgres:
-        image: postgres:16.13-alpine3.23
-        env:
-          POSTGRES_USER: identity
-          POSTGRES_PASSWORD: identity
-          POSTGRES_DB: identity
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U identity"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 12
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
 
-      - name: Wait for coverage backends
-        run: |
-          for i in $(seq 1 30); do
-            if (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1; then echo "postgres up"; break; fi
-            sleep 1
-            if [[ $i -eq 30 ]]; then echo "postgres did not come up"; exit 1; fi
-          done
 
-      - name: go test (race + coverage, ${{ matrix.part }})
-        env:
-          COVERAGE_PART: ${{ matrix.part }}
-          RUN_INTEGRATION_COVERAGE: "1"
-          GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
-          GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
-        run: bash scripts/run-coverage.sh
 
-      - name: Name the profile artifact
-        id: artifact
-        run: echo "name=cover-${COVERAGE_PART//[:\/]/-}" >> "$GITHUB_OUTPUT"
-        env:
-          COVERAGE_PART: ${{ matrix.part }}
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: ${{ steps.artifact.outputs.name }}
-          path: cover.*.out
-          if-no-files-found: error
-          retention-days: 1
 
-  test:
-    name: Build + Test + Coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [test-part]
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: go build
-        run: go build ./...
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: cover-*
-          merge-multiple: true
-
-      - name: Merge coverage profiles
-        run: bash scripts/merge-coverage.sh cover.out cover.*.out
-
-      - name: Coverage summary
-        run: go tool cover -func=cover.out | tail -n 30
-
-      # internal/ coverage is genuinely ~85% but the -race run is
-      # nondeterministic about which driver/error branches execute, so
-      # the merged statement count jitters ~±4 (8965–8969 / 10548) run
-      # to run. An 85% line sat dead-centre of that jitter and failed
-      # unrelated PRs at random; 84% keeps a real floor without the
-      # coin-flip. Per-package gates in .coverage-gates.yml stay strict.
-      - name: Coverage gate (internal/ >= 84%)
-        run: bash scripts/coverage-gate.sh cover.out 84 internal/
-
-      - name: Coverage gate (pkg/ >= 88%)
-        run: bash scripts/coverage-gate.sh cover.out 88 pkg/
-
-      - name: Coverage gate (per-package)
-        run: bash scripts/coverage-gate.sh cover.out --config .coverage-gates.yml
-
-      - name: Upload coverage artifact
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: coverage
-          path: cover.out
-          if-no-files-found: warn
-          retention-days: 14
-
-  smoke:
-    name: Boot smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: go test -tags=smoke
-        run: |
-          if compgen -G "tests/smoke/*.go" > /dev/null; then
-            go test -tags=smoke -timeout=120s ./tests/smoke/...
-          else
-            echo "no smoke tests under tests/smoke — skipping"
-          fi
-
-  integration:
-    name: Integration tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: go test -tags=integration
-        run: |
-          if compgen -G "tests/integration/*.go" > /dev/null; then
-            go test -tags=integration -race -timeout=180s ./tests/integration/...
-          else
-            echo "no integration tests under tests/integration — skipping"
-          fi
-
-  realpostgres:
-    name: Integration (real postgres)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:16.13-alpine3.23
-        env:
-          POSTGRES_USER: identity
-          POSTGRES_PASSWORD: identity
-          POSTGRES_DB: identity
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U identity"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 12
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: Wait for postgres
-        run: |
-          for i in $(seq 1 30); do
-            if (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1; then echo "postgres up"; exit 0; fi
-            sleep 1
-          done
-          echo "postgres did not come up"; exit 1
-      - name: go test -tags=realpostgres (integration)
-        env:
-          GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
-        run: |
-          if compgen -G "tests/integration/*_realpostgres_test.go" > /dev/null; then
-            go test -tags=realpostgres -race -timeout=300s ./tests/integration/...
-          else
-            echo "no realpostgres integration tests yet — skipping"
-          fi
-      - name: go test -tags=realpostgres internal/repo/postgres
-        env:
-          GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
-        run: go test -race -timeout=300s ./internal/repo/postgres/...
-
-  # Replay the committed seed corpus deterministically as ordinary tests
-  # (no `-fuzz`). A regression of any known crash fails the release
-  # reproducibly. Live fuzzing (`-fuzz`) is non-deterministic — a time-boxed
-  # run on a shared runner fails with "context deadline exceeded" when a worker
-  # is mid-execution as the budget expires, a flake that depends on runner load
-  # rather than on any input. That flake blocked the v1.1.0 release, so live
-  # exploration is left to the nightly job, which has a generous per-target
-  # budget and uploads any crashers as artifacts.
-  fuzz:
-    name: Fuzz smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: Replay fuzz seed corpus
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t pkgs < <(
-            grep -rEl --include='*_test.go' '^func Fuzz[A-Za-z0-9_]+\(' . \
-              | sed -E 's|/[^/]+$||' \
-              | sort -u
-          )
-          if [[ ${#pkgs[@]} -eq 0 ]]; then
-            echo "no fuzz targets — skipping"
-            exit 0
-          fi
-          go test -race -timeout=120s "${pkgs[@]}"
-
-  docker:
-    name: Container build smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
-
-      - name: docker build --target server
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
-        with:
-          context: .
-          target: server
-          push: false
-          load: true
-          tags: identity:release-smoke
-          cache-from: type=gha,scope=release-docker
-          cache-to: type=gha,mode=max,scope=release-docker
-
-      - name: docker run smoke
-        shell: bash
-        run: |
-          set -euo pipefail
-          cid="$(
-            docker run -d \
-              -e GATEWAY_CONNECT_PORT=8080 \
-              -e GATEWAY_METRICS_PORT=9090 \
-              -e GATEWAY_GRPC_PORT=50052 \
-              -e GATEWAY_REPO_DRIVER=memory \
-              -e GATEWAY_DEFAULT_TENANT_ID=docker-smoke \
-              -e GATEWAY_JWT_KEYS= \
-              -e GATEWAY_TOTP_ENCRYPTION_KEY= \
-              -p 127.0.0.1:18080:8080 \
-              identity:release-smoke
-          )"
-          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
-
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:18080/health > /tmp/identity-health.json; then
-              grep -q '"status":"ok"' /tmp/identity-health.json
-              exit 0
-            fi
-            if [[ "$(docker inspect -f '{{.State.Running}}' "$cid")" != "true" ]]; then
-              docker logs "$cid"
-              exit 1
-            fi
-            sleep 1
-          done
-          docker logs "$cid"
-          exit 1
 
   # ---------------------------------------------------------------------------
   # Build, push, sign, and scan the published image.
@@ -338,7 +85,7 @@ jobs:
   build-and-push:
     name: Build and Push Image
     runs-on: ubuntu-latest
-    needs: [lint, vuln, test-part, test, smoke, integration, realpostgres, fuzz, docker]
+    needs: [verified, vuln]
     permissions:
       contents: read
       packages: write
