@@ -55,10 +55,14 @@ jobs:
       - name: govulncheck
         run: govulncheck ./...
 
-  test:
-    name: Build + Test + Coverage
+  test-part:
+    name: Test (${{ matrix.part }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ['unit:1/4', 'unit:2/4', 'unit:3/4', 'unit:4/4', integration, e2e, realpostgres, postgres]
     services:
       postgres:
         image: postgres:16.13-alpine3.23
@@ -75,12 +79,12 @@ jobs:
           --health-retries 12
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - name: go build
-        run: go build ./...
+
       - name: Wait for coverage backends
         run: |
           for i in $(seq 1 30); do
@@ -88,20 +92,78 @@ jobs:
             sleep 1
             if [[ $i -eq 30 ]]; then echo "postgres did not come up"; exit 1; fi
           done
-      - name: go test (race + merged coverage)
+
+      - name: go test (race + coverage, ${{ matrix.part }})
         env:
+          COVERAGE_PART: ${{ matrix.part }}
           RUN_INTEGRATION_COVERAGE: "1"
           GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
           GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
         run: bash scripts/run-coverage.sh
-      # internal/ jitters ~±4 stmts under -race (see ci.yml); 84% keeps
-      # a real floor without failing unrelated PRs at the 85% boundary.
+
+      - name: Name the profile artifact
+        id: artifact
+        run: echo "name=cover-${COVERAGE_PART//[:\/]/-}" >> "$GITHUB_OUTPUT"
+        env:
+          COVERAGE_PART: ${{ matrix.part }}
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: cover.*.out
+          if-no-files-found: error
+          retention-days: 1
+
+  test:
+    name: Build + Test + Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test-part]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: go build
+        run: go build ./...
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: cover-*
+          merge-multiple: true
+
+      - name: Merge coverage profiles
+        run: bash scripts/merge-coverage.sh cover.out cover.*.out
+
+      - name: Coverage summary
+        run: go tool cover -func=cover.out | tail -n 30
+
+      # internal/ coverage is genuinely ~85% but the -race run is
+      # nondeterministic about which driver/error branches execute, so
+      # the merged statement count jitters ~±4 (8965–8969 / 10548) run
+      # to run. An 85% line sat dead-centre of that jitter and failed
+      # unrelated PRs at random; 84% keeps a real floor without the
+      # coin-flip. Per-package gates in .coverage-gates.yml stay strict.
       - name: Coverage gate (internal/ >= 84%)
         run: bash scripts/coverage-gate.sh cover.out 84 internal/
+
       - name: Coverage gate (pkg/ >= 88%)
         run: bash scripts/coverage-gate.sh cover.out 88 pkg/
+
       - name: Coverage gate (per-package)
         run: bash scripts/coverage-gate.sh cover.out --config .coverage-gates.yml
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage
+          path: cover.out
+          if-no-files-found: warn
+          retention-days: 14
 
   smoke:
     name: Boot smoke
@@ -276,7 +338,7 @@ jobs:
   build-and-push:
     name: Build and Push Image
     runs-on: ubuntu-latest
-    needs: [lint, vuln, test, smoke, integration, realpostgres, fuzz, docker]
+    needs: [lint, vuln, test-part, test, smoke, integration, realpostgres, fuzz, docker]
     permissions:
       contents: read
       packages: write
