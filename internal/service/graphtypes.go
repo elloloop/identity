@@ -65,6 +65,9 @@ const (
 	// ufPasswordChangeRequired marks a password an administrator issued: the
 	// next password sign-in must replace it (CompleteRequiredPasswordChange).
 	ufPasswordChangeRequired = "23"
+	// ufUsername carries a username account's username, so the admin
+	// surfaces (GetUser, ListUsers) show it and can find the account by it.
+	ufUsername = "24"
 )
 
 // ── WorkingGroup field IDs (type_id 2) ─────────────────────────────

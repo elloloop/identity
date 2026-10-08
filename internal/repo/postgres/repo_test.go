@@ -549,3 +549,31 @@ func TestPostgres_DBAtomicPasswordChangeRequired(t *testing.T) {
 	require.False(t, u.PasswordChangeRequired)
 	require.Equal(t, "own", u.PasswordHash)
 }
+
+// The admin surfaces read users through the graph layer: a username account's
+// username travels with it.
+func TestPostgres_DBUserNodeCarriesUsername(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping postgres DB coverage test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	projectID := fmt.Sprintf("un-project-%d", time.Now().UnixNano())
+	repo, err := New(ctx, Config{DSN: dsn, MaxConns: 5, ConnTimeout: 5 * time.Second, AutoMigrate: true, ProjectID: projectID})
+	require.NoError(t, err)
+	defer repo.Close()
+	seedProject(ctx, t, repo, projectID)
+
+	now := time.Now()
+	id, err := repo.CreateUser(ctx, &service.User{Username: "rob.smith", Name: "Robert", Status: "active", Role: "member", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	node, err := repo.GetNode(ctx, projectID, "actor", dbTypeUser, id)
+	require.NoError(t, err)
+	require.Equal(t, "rob.smith", node.Payload[dbUfUsername])
+	nodes, err := repo.QueryNodes(ctx, projectID, "actor", dbTypeUser, nil)
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	require.Equal(t, "rob.smith", nodes[0].Payload[dbUfUsername])
+}

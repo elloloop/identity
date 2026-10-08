@@ -778,3 +778,28 @@ func TestAdminService_InviteUser_LinkAndEmailFollowTheProject(t *testing.T) {
 		})
 	}
 }
+
+// A username account has no email; the admin surfaces show its username and
+// find it by it.
+func TestAdminService_UsernameAccountsInTheAdminSurfaces(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	db.addUser("user-1", "", "Robert", "member", "active")
+	db.nodes["user-1"].Payload[ufUsername] = "rob.smith"
+	svc := newTestAdminService(db)
+
+	users, _, total, err := svc.ListUsers(context.Background(), "admin-1", "", "rob.sm", "", 50)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if total != 1 || users[0].ID != "user-1" || users[0].Username != "rob.smith" {
+		t.Fatalf("search by username: total=%d users=%+v", total, users)
+	}
+	got, err := svc.GetUser(context.Background(), "admin-1", "user-1")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if got.Username != "rob.smith" {
+		t.Fatalf("GetUser username = %q, want rob.smith", got.Username)
+	}
+}
