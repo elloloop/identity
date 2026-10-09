@@ -762,7 +762,8 @@ type Config struct {
 	// GATEWAY_ACCOUNT_MERGE_ENABLED.
 	AccountMergeEnabled bool
 	// AccountMergeReauthMaxAgeSeconds bounds how long ago the caller of
-	// MergeAccounts may have signed in: the account that is kept must have
+	// MergeAccounts may have signed in, at most 3600 seconds: the account
+	// that is kept must have
 	// been authenticated (password, passkey, provider, with any second factor)
 	// within this many seconds, so a stolen or long-lived session cannot pull
 	// another account's credentials onto it. Driven by
@@ -2653,8 +2654,14 @@ const MaxAccountMergeReauthMaxAgeSeconds = 3600
 // AccountMergeReauthMaxAge is how recent the kept account's sign-in must be
 // for MergeAccounts: the configured value, or the default when unset.
 func (c *Config) AccountMergeReauthMaxAge() time.Duration {
-	if c.AccountMergeReauthMaxAgeSeconds <= 0 {
+	switch {
+	case c.AccountMergeReauthMaxAgeSeconds <= 0:
 		return DefaultAccountMergeReauthMaxAgeSeconds * time.Second
+	case c.AccountMergeReauthMaxAgeSeconds > MaxAccountMergeReauthMaxAgeSeconds:
+		// Validate refuses this at boot; a Config built in code without it
+		// still never gets a longer window.
+		return MaxAccountMergeReauthMaxAgeSeconds * time.Second
+	default:
+		return time.Duration(c.AccountMergeReauthMaxAgeSeconds) * time.Second
 	}
-	return time.Duration(c.AccountMergeReauthMaxAgeSeconds) * time.Second
 }

@@ -22,6 +22,7 @@ const tokenPurposePasswordChange = "password_change" // #nosec G101 -- a claim v
 
 // passwordChangeTicketTTL bounds the step: long enough to choose and type a
 // password, short enough that a leaked ticket expires within minutes.
+// The proto doc of PasswordChangeRequiredDetails quotes it; change both.
 const passwordChangeTicketTTL = 10 * time.Minute
 
 // PasswordChangeRequiredError is the typed form of ErrPasswordChangeRequired.

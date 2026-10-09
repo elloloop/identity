@@ -370,6 +370,10 @@ func TestAccountMergeReauthMaxAge(t *testing.T) {
 	if got := c.AccountMergeReauthMaxAge(); got != time.Minute {
 		t.Fatalf("set: got %v", got)
 	}
+	c.AccountMergeReauthMaxAgeSeconds = 86400
+	if got := c.AccountMergeReauthMaxAge(); got != MaxAccountMergeReauthMaxAgeSeconds*time.Second {
+		t.Fatalf("over the cap: got %v, want the cap", got)
+	}
 	c = Load()
 	for _, v := range []int{-1, MaxAccountMergeReauthMaxAgeSeconds + 1} {
 		c.AccountMergeReauthMaxAgeSeconds = v

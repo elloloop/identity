@@ -430,8 +430,8 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
-			// Passkey-first signup: unauthenticated account creation. Bound by
-			// the same per-IP signup quota as PasswordSignup so it cannot be
+			// Passkey-first signup: unauthenticated account creation. Its own
+			// per-IP budget, the size of the signup budget, so it cannot be
 			// used to mass-create accounts or pump verification mail.
 			PathPrefix: "/identity.v1.IdentityService/BeginPasskeySignup", Tag: "passkey_signup",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),

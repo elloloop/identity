@@ -139,8 +139,8 @@ func TestAuthTime_AnonymousAccounts(t *testing.T) {
 func TestMergeAccounts_AbsurdAuthTimeIsNotRecent(t *testing.T) {
 	svc, _, survivor, _, ctx := mergeFixture(t)
 	for name, authTime := range map[string]int64{
-		// 2^61 * 1000 is 0 mod 2^64: in milliseconds this wrapped to "now",
-		// the case a millisecond comparison got wrong.
+		// 2^61 s is 0 mod 2^64 once scaled to milliseconds: a value that
+		// lands on "now" under a millisecond comparison.
 		"wraps to now in milliseconds": time.Now().Unix() + 1<<61,
 		"the largest value":            math.MaxInt64,
 	} {

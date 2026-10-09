@@ -22,7 +22,7 @@
     "type": "integer",
     "default": "300",
     "required": false,
-    "description": "bounds how long ago the caller of MergeAccounts may have signed in: the account that is kept must have been authenticated (password, passkey, provider, with any second factor) within this many seconds, so a stolen or long-lived session cannot pull another account's credentials onto it.",
+    "description": "bounds how long ago the caller of MergeAccounts may have signed in, at most 3600 seconds: the account that is kept must have been authenticated (password, passkey, provider, with any second factor) within this many seconds, so a stolen or long-lived session cannot pull another account's credentials onto it.",
     "category": "Other",
     "anchor": "other"
   },

@@ -3047,12 +3047,8 @@ func (r *MemRepo) AssignAccountAddress(_ context.Context, userID, address string
 func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	o, okO := r.users[m.OtherID]
-	sv, okS := r.users[m.SurvivorID]
-	if !okO || !okS {
-		return service.ErrMergeConflict
-	}
-	if err := m.ApplyToUsers(sv, o); err != nil {
+	// A missing account is nil, which ApplyToUsers refuses.
+	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
 	}
 	for _, oi := range r.oauthIdentities {

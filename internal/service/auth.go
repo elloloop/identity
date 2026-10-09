@@ -1818,9 +1818,9 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now)
 }
 
-// issueSignInTokens is the chokepoint every interactive sign-in funnels
-// through (the refresh path calls issueTokensWithSessionStart directly), with
-// the session's anchor and auth_time spelled out by the caller: now for a
+// issueSignInTokens issues the tokens of an interactive sign-in into an
+// existing account, with the session's anchor and auth_time spelled out by
+// the caller: now for a
 // fresh credential proof (issueTokens), an earlier sign-in's time for a step
 // that continues one, 0 for a flow that proves no credential. It is the one
 // place to auto-cancel a pending self-service deletion: an owner who signs
