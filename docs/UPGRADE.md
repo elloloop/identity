@@ -1,9 +1,19 @@
 # Upgrade guide
 
-## v4.12.2 → next — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); `pkg/emailaddr`
+## v4.12.2 → v4.13.0 — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); `pkg/emailaddr`; an optional `iss` claim and per-project token audience
 
 No schema change and no migration.
 
+- **Tokens can name their issuer and their project (additive, off by
+  default).** Every project of a deployment signs with the deployment's
+  keys, so a signature alone does not say which project a token belongs to.
+  `GATEWAY_JWT_ISSUER` adds an `iss` claim to every token identity mints, so
+  a verifier can pin who minted it. `GATEWAY_JWT_PROJECT_AUDIENCE=true` adds
+  the minting project's id to the token's `aud`, next to `GATEWAY_JWT_AUDIENCE`
+  when that is set, so a verifier serving one project can refuse another
+  project's token with a standard audience check. With it on, a verifier
+  that requires `aud` to be exactly one string must accept a list, or keep
+  `GATEWAY_JWT_AUDIENCE` unset.
 - **A sign-in stores the account's email in canonical form (behaviour
   change).** An account stored under another spelling of its mailbox (a
   dotted Gmail address, capitals or a `+tag`, saved by a release before every
