@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.12.1 → next — the recent-sign-in window for merging is capped (behaviour change)
+## v4.12.1 → v4.12.2 — the recent-sign-in window for merging is capped (behaviour change); Go 1.26.9 for the net/http and http2 advisories
 
 No schema change and no migration.
 
@@ -15,6 +15,12 @@ No schema change and no migration.
   under user ids to `user.merged`; the admin `MergeUsers` announces its merges
   the same way. Identity already logs `account_merge_without_webhooks` at boot
   (since v4.12) when self-service merging is on and webhooks are off.
+- **Built with Go 1.26.9 and `golang.org/x/net` v0.60.0**, which fix the
+  `net/http` and http2 advisories GO-2026-6609 to GO-2026-6613 and
+  GO-2026-6617. The published image carries the fix; anyone building identity
+  or embedding its `pkg/` libraries should build on Go 1.26.9 or later.
+- The graph `SearchNodes` query on Postgres matches usernames as well as
+  emails and names (internal; no API change).
 
 ## v4.12.0 → v4.12.1 — the admin user view shows usernames (fix)
 
