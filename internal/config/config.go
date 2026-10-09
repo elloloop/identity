@@ -368,6 +368,15 @@ type Config struct {
 	// claim; the false default lets a deploy roll out the mint-side change
 	// first, wait for in-flight tokens to expire, then flip to required.
 	JWTRequireAudience bool
+	// JWTIssuer, when non-empty, is stamped on every minted token as the
+	// "iss" claim, so a verifier can pin the issuer.
+	JWTIssuer string
+	// JWTProjectAudience, when true, adds the minting project's id to every
+	// token's "aud" claim, beside the configured audience when set. All projects sign
+	// with the deployment's keys, so a signature alone does not say which
+	// project a token belongs to; a verifier that serves one project can
+	// then require that project as its audience with a standard aud check.
+	JWTProjectAudience bool
 
 	// RefreshExpirySeconds is the refresh-token lifetime in seconds (default 7 days).
 	RefreshExpirySeconds int
@@ -1319,6 +1328,8 @@ func loadFromEnv() *Config {
 		JWTExpirySeconds:   envInt("GATEWAY_JWT_EXPIRY_SECONDS", 900),
 		JWTAudience:        envStr("GATEWAY_JWT_AUDIENCE", ""),
 		JWTRequireAudience: envBool("GATEWAY_JWT_REQUIRE_AUD", false),
+		JWTIssuer:          envStr("GATEWAY_JWT_ISSUER", ""),
+		JWTProjectAudience: envBool("GATEWAY_JWT_PROJECT_AUDIENCE", false),
 
 		RefreshExpirySeconds: envInt("GATEWAY_REFRESH_EXPIRY_SECONDS", 604800),
 

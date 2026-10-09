@@ -392,9 +392,7 @@ func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User
 		Project:  s.projectID(ctx),
 		AuthTime: s.nowMs() / 1000,
 	}
-	if s.cfg.JWTAudience != "" {
-		decoyClaims.Audience = []string{s.cfg.JWTAudience}
-	}
+	s.stampTokenScope(&decoyClaims)
 	accessToken, err := s.signer.SignAccessToken(ctx, decoyClaims, s.cfg.JWTExpiry())
 	if err != nil {
 		return nil, fmt.Errorf("creating duplicate-signup decoy token: %w", err)

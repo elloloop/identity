@@ -299,3 +299,22 @@ func TestClaims_BindingRoundTrip(t *testing.T) {
 	assert.Empty(t, claims.Binding)
 	assert.NotContains(t, Claims{Sub: "u"}.ClaimsMap(time.Now(), time.Minute), "bnd")
 }
+
+// The issuer rides as "iss" when set and round-trips through verification;
+// a token minted without one carries no iss claim at all.
+func TestCreateAndVerify_IssuerClaim(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+
+	tokenStr, err := s.SignAccessToken(context.Background(), Claims{Sub: "user-1", Issuer: "https://auth.example.org"}, time.Minute)
+	require.NoError(t, err)
+	got, err := VerifyAccessToken(tokenStr, s, "", "", false)
+	require.NoError(t, err)
+	assert.Equal(t, "https://auth.example.org", got.Issuer)
+
+	bare, err := s.SignAccessToken(context.Background(), Claims{Sub: "user-1"}, time.Minute)
+	require.NoError(t, err)
+	tok, err := jwtoken.ParseInsecure([]byte(bare))
+	require.NoError(t, err)
+	_, has := tok.Get("iss")
+	assert.False(t, has, "no issuer configured, no iss claim")
+}
