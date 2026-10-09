@@ -729,6 +729,15 @@
     "anchor": "jwt-and-tokens"
   },
   {
+    "name": "GATEWAY_JWT_ISSUER",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "when non-empty, is stamped on every minted token as the \"iss\" claim, so a verifier can pin the issuer.",
+    "category": "JWT \u0026 tokens",
+    "anchor": "jwt-and-tokens"
+  },
+  {
     "name": "GATEWAY_JWT_KEYS_FILE",
     "type": "string",
     "default": "",
@@ -752,6 +761,15 @@
     "default": "",
     "required": true,
     "description": "is a CSV of \"kid=keyARN\" entries for the \"kms_aws\" signer; required when GATEWAY_JWT_SIGNER=kms_aws.",
+    "category": "JWT \u0026 tokens",
+    "anchor": "jwt-and-tokens"
+  },
+  {
+    "name": "GATEWAY_JWT_PROJECT_AUDIENCE",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "when true, adds the minting project's id to every token's \"aud\" claim, beside the configured audience when set.",
     "category": "JWT \u0026 tokens",
     "anchor": "jwt-and-tokens"
   },

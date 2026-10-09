@@ -1885,9 +1885,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		// Set only when a sign-in issues this token.
 		AuthTime: authTimeMs / 1000,
 	}
-	if s.cfg.JWTAudience != "" {
-		claims.Audience = []string{s.cfg.JWTAudience}
-	}
+	s.stampTokenScope(&claims)
 
 	var sid string
 	if s.cfg.RevocationMode == config.RevocationModeSession {
@@ -2397,4 +2395,20 @@ func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error 
 		s.audit.Log(ctx, audit.EventLogout, audit.WithActor(userID))
 	}
 	return nil
+}
+
+// stampTokenScope sets the claims every minted token carries beside its
+// subject: the issuer, and the audiences — the deployment's configured one
+// and, under GATEWAY_JWT_PROJECT_AUDIENCE, the minting project's id, so a
+// verifier serving one project can refuse another project's token with a
+// standard aud check. claims.Project must already be set.
+func (s *AuthService) stampTokenScope(claims *jwt.Claims) {
+	claims.Issuer = s.cfg.JWTIssuer
+	claims.Audience = nil
+	if s.cfg.JWTAudience != "" {
+		claims.Audience = append(claims.Audience, s.cfg.JWTAudience)
+	}
+	if s.cfg.JWTProjectAudience && claims.Project != "" && claims.Project != s.cfg.JWTAudience {
+		claims.Audience = append(claims.Audience, claims.Project)
+	}
 }

@@ -102,9 +102,7 @@ func (s *AuthService) signPurposeTicket(ctx context.Context, claims jwt.Claims, 
 	purpose := claims.Purpose
 	claims.Tenant = s.tenantID(ctx)
 	claims.Project = s.projectID(ctx)
-	if s.cfg.JWTAudience != "" {
-		claims.Audience = []string{s.cfg.JWTAudience}
-	}
+	s.stampTokenScope(&claims)
 	ticket, err := s.signer.SignAccessToken(ctx, claims, ttl)
 	if err != nil {
 		return "", fmt.Errorf("minting %s ticket: %w", purpose, err)

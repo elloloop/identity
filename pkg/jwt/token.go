@@ -47,6 +47,11 @@ type Claims struct {
 	Anonymous bool     `json:"anonymous,omitempty"`
 	SID       string   `json:"sid,omitempty"`
 	Audience  []string `json:"aud,omitempty"`
+	// Issuer is the "iss" claim: the deployment's configured issuer
+	// (GATEWAY_JWT_ISSUER), so a verifier can pin who minted the token.
+	// Omitted when unset, so tokens from a deployment without one are
+	// byte-identical to before.
+	Issuer string `json:"iss,omitempty"`
 	// Purpose marks a token as a single-purpose bearer credential rather
 	// than a session access token (e.g. "dob_completion" for the
 	// required-DOB completion ticket). Empty on every normal access token.
@@ -109,6 +114,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if len(c.Audience) > 0 {
 		m["aud"] = c.Audience
+	}
+	if c.Issuer != "" {
+		m["iss"] = c.Issuer
 	}
 	return m
 }
@@ -279,6 +287,7 @@ func verifyToken(tokenStr string, kp KeyProvider, expectedTenant, expectedAudien
 		claims.Anonymous, _ = v.(bool)
 	}
 	claims.Audience = tok.Audience()
+	claims.Issuer = tok.Issuer()
 
 	if expectedTenant != "" && claims.Tenant != expectedTenant {
 		return nil, fmt.Errorf("tenant mismatch: token tenant=%q expected=%q", claims.Tenant, expectedTenant)
