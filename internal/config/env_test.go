@@ -386,3 +386,43 @@ func TestAccountMergeReauthMaxAge(t *testing.T) {
 		t.Fatalf("the cap itself is allowed: %v", err)
 	}
 }
+
+func TestAgentsPerOwnerLimit(t *testing.T) {
+	c := &Config{}
+	if got := c.AgentsPerOwnerLimit(); got != DefaultAgentsMaxPerOwner {
+		t.Fatalf("unset: got %d, want the default", got)
+	}
+	c.AgentsMaxPerOwner = 7
+	if got := c.AgentsPerOwnerLimit(); got != 7 {
+		t.Fatalf("set: got %d", got)
+	}
+	c.AgentsMaxPerOwner = MaxAgentsMaxPerOwner + 1
+	if got := c.AgentsPerOwnerLimit(); got != MaxAgentsMaxPerOwner {
+		t.Fatalf("over the cap: got %d, want the cap", got)
+	}
+	c = Load()
+	for _, v := range []int{-1, MaxAgentsMaxPerOwner + 1} {
+		c.AgentsMaxPerOwner = v
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_AGENTS_MAX_PER_OWNER") {
+			t.Fatalf("%d must be refused, got %v", v, err)
+		}
+	}
+	for _, v := range []int{0, MaxAgentsMaxPerOwner} {
+		c.AgentsMaxPerOwner = v
+		if err := c.Validate(); err != nil {
+			t.Fatalf("%d is allowed: %v", v, err)
+		}
+	}
+}
+
+// Agent accounts are opt-in.
+func TestAgentsEnabled_DefaultsOff(t *testing.T) {
+	t.Setenv("GATEWAY_AGENTS_ENABLED", "")
+	if Load().AgentsEnabled {
+		t.Fatal("agent accounts must default off")
+	}
+	t.Setenv("GATEWAY_AGENTS_ENABLED", "true")
+	if !Load().AgentsEnabled {
+		t.Fatal("GATEWAY_AGENTS_ENABLED=true must turn agent accounts on")
+	}
+}

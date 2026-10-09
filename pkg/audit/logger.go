@@ -257,6 +257,23 @@ const (
 	EventGuardianChildDeactivated     EventType = "guardian_child_deactivated"
 	EventGuardianChildReactivated     EventType = "guardian_child_reactivated"
 	EventGuardianChildDeleted         EventType = "guardian_child_deleted"
+
+	// Agent accounts (non-human accounts owned by a person): one event type
+	// per management operation, actor the caller (the owner or a project
+	// admin) and target the agent. A refused attempt is logged with
+	// success=false and a `step` detail naming the failing check, so probing
+	// someone else's agent is as visible as managing one's own. A refused
+	// interactive sign-in into an agent account is EventAgentSignInRefused.
+	// EventAgentsListed records a refused listing and an admin listing
+	// another owner's agents; an owner listing their own is not logged.
+	EventAgentCreated       EventType = "agent_created"
+	EventAgentUpdated       EventType = "agent_updated"
+	EventAgentTransferred   EventType = "agent_transferred"
+	EventAgentDeactivated   EventType = "agent_deactivated"
+	EventAgentReactivated   EventType = "agent_reactivated"
+	EventAgentDeleted       EventType = "agent_deleted"
+	EventAgentSignInRefused EventType = "agent_sign_in_refused"
+	EventAgentsListed       EventType = "agents_listed"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -317,6 +334,14 @@ var validEventTypes = map[EventType]struct{}{
 	EventGuardianChildDeactivated:      {},
 	EventGuardianChildReactivated:      {},
 	EventGuardianChildDeleted:          {},
+	EventAgentCreated:                  {},
+	EventAgentUpdated:                  {},
+	EventAgentTransferred:              {},
+	EventAgentDeactivated:              {},
+	EventAgentReactivated:              {},
+	EventAgentDeleted:                  {},
+	EventAgentSignInRefused:            {},
+	EventAgentsListed:                  {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

@@ -435,7 +435,7 @@ func (s *AuthService) RevokeParentalConsent(
 		}); err != nil {
 			return nil, "", fmt.Errorf("re-gate child account: %w", err)
 		}
-		if err := revokeAllUserSessions(ctx, repo, childUserID, now); err != nil {
+		if err := RevokeUserAccess(ctx, repo, childUserID, now); err != nil {
 			return nil, "", fmt.Errorf("revoke child sessions: %w", err)
 		}
 		childStatus = StatusPendingParentalConsent

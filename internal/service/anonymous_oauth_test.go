@@ -471,7 +471,7 @@ func TestRefuseAnonymousCredentialAttach_FailsClosedOnLookupError(t *testing.T) 
 	svc := newTestAuthService(t, repo)
 	repo.getUserErr = errors.New("connection reset")
 
-	if err := svc.refuseAnonymousCredentialAttach(context.Background(), "some-user"); err == nil {
+	if err := svc.refuseCredentialAttach(context.Background(), "some-user"); err == nil {
 		t.Fatal("a lookup failure admitted the credential attach")
 	}
 }

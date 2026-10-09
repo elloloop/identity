@@ -330,6 +330,34 @@ func (b *grpcBridge) DeleteManagedChildAccount(ctx context.Context, in *identity
 	return invoke(ctx, b, in, b.h.DeleteManagedChildAccount)
 }
 
+func (b *grpcBridge) CreateAgent(ctx context.Context, in *identitypb.CreateAgentRequest) (*identitypb.CreateAgentResponse, error) {
+	return invoke(ctx, b, in, b.h.CreateAgent)
+}
+
+func (b *grpcBridge) ListAgents(ctx context.Context, in *identitypb.ListAgentsRequest) (*identitypb.ListAgentsResponse, error) {
+	return invoke(ctx, b, in, b.h.ListAgents)
+}
+
+func (b *grpcBridge) UpdateAgent(ctx context.Context, in *identitypb.UpdateAgentRequest) (*identitypb.UpdateAgentResponse, error) {
+	return invoke(ctx, b, in, b.h.UpdateAgent)
+}
+
+func (b *grpcBridge) TransferAgent(ctx context.Context, in *identitypb.TransferAgentRequest) (*identitypb.TransferAgentResponse, error) {
+	return invoke(ctx, b, in, b.h.TransferAgent)
+}
+
+func (b *grpcBridge) DeactivateAgent(ctx context.Context, in *identitypb.DeactivateAgentRequest) (*identitypb.DeactivateAgentResponse, error) {
+	return invoke(ctx, b, in, b.h.DeactivateAgent)
+}
+
+func (b *grpcBridge) ReactivateAgent(ctx context.Context, in *identitypb.ReactivateAgentRequest) (*identitypb.ReactivateAgentResponse, error) {
+	return invoke(ctx, b, in, b.h.ReactivateAgent)
+}
+
+func (b *grpcBridge) DeleteAgent(ctx context.Context, in *identitypb.DeleteAgentRequest) (*identitypb.DeleteAgentResponse, error) {
+	return invoke(ctx, b, in, b.h.DeleteAgent)
+}
+
 func (b *grpcBridge) ChangePassword(ctx context.Context, in *identitypb.ChangePasswordRequest) (*identitypb.ChangePasswordResponse, error) {
 	return invoke(ctx, b, in, b.h.ChangePassword)
 }

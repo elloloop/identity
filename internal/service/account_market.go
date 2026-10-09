@@ -105,7 +105,7 @@ func (s *AuthService) SetAccountMarket(ctx context.Context, userID, market strin
 	// account whose old tokens still work.
 	if !isActiveStatus(u.Status) {
 		if strings.EqualFold(u.Status, StatusPendingParentalConsent) {
-			if err := revokeAllUserSessions(ctx, repo, userID, now); err != nil {
+			if err := RevokeUserAccess(ctx, repo, userID, now); err != nil {
 				return nil, fmt.Errorf("revoke sessions: %w", err)
 			}
 		}
@@ -127,7 +127,7 @@ func (s *AuthService) SetAccountMarket(ctx context.Context, userID, market strin
 	}); err != nil {
 		return nil, fmt.Errorf("re-gate account: %w", err)
 	}
-	if err := revokeAllUserSessions(ctx, repo, userID, now); err != nil {
+	if err := RevokeUserAccess(ctx, repo, userID, now); err != nil {
 		return nil, fmt.Errorf("revoke sessions: %w", err)
 	}
 	u.Status = StatusPendingParentalConsent

@@ -883,6 +883,12 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
+		if !filter.IncludeAgents && u.IsAgent() {
+			continue
+		}
+		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
+			continue
+		}
 		cp := *u
 		matched = append(matched, &cp)
 	}
@@ -923,6 +929,12 @@ func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (
 		// accounts have no email, so a surface presenting users by address
 		// must not receive them unless it opts in.
 		if !filter.IncludeAnonymous && u.IsAnonymous {
+			continue
+		}
+		if !filter.IncludeAgents && u.IsAgent() {
+			continue
+		}
+		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
 			continue
 		}
 		n++
@@ -1001,6 +1013,9 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 		id = r.nextID()
 	}
 	u.ID = id
+	if u.Kind == "" {
+		u.Kind = service.UserKindPerson
+	}
 	cp := *u
 	r.users[id] = &cp
 	return id, nil
@@ -1240,6 +1255,8 @@ func applyUserStringField(u *service.User, key string, v any) bool {
 		u.AccountAddress = s
 	case "merged_into_user_id":
 		u.MergedIntoUserID = s
+	case "owner_user_id":
+		u.OwnerUserID = s
 	default:
 		return false
 	}
@@ -1250,7 +1267,7 @@ func isUserStringField(key string) bool {
 	switch key {
 	case "name", "email", "avatar_url", "password_hash", "status",
 		"recovery_email", "external_id", "phone_number", "market", "username",
-		"account_address", "merged_into_user_id":
+		"account_address", "merged_into_user_id", "owner_user_id":
 		return true
 	}
 	return false
@@ -3050,6 +3067,11 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 	// A missing account is nil, which ApplyToUsers refuses.
 	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
+	}
+	for _, u := range r.users {
+		if u.OwnerUserID == m.OtherID {
+			u.OwnerUserID = m.SurvivorID
+		}
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {

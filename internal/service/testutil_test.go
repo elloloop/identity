@@ -326,8 +326,26 @@ func (r *fakeRepo) ListUsers(_ context.Context, filter UserListFilter) ([]*User,
 		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
+		if !filter.IncludeAgents && u.IsAgent() {
+			continue
+		}
+		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
+			continue
+		}
 		cp := *u
 		out = append(out, &cp)
+	}
+	// Page the way the drivers do, in a stable order, so a caller that
+	// walks pages terminates and sees every row once.
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if filter.Offset > 0 {
+		if filter.Offset >= len(out) {
+			return nil, nil
+		}
+		out = out[filter.Offset:]
+	}
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
 	}
 	return out, nil
 }
@@ -376,6 +394,12 @@ func (r *fakeRepo) CountUsers(_ context.Context, filter UserListFilter) (int, er
 		// accounts have no email, so a surface presenting users by address
 		// must not receive them unless it opts in.
 		if !filter.IncludeAnonymous && u.IsAnonymous {
+			continue
+		}
+		if !filter.IncludeAgents && u.IsAgent() {
+			continue
+		}
+		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
 			continue
 		}
 		n++
@@ -561,6 +585,8 @@ func applyUserFields(u *User, fields map[string]any) {
 			u.AccountAddress = v.(string)
 		case "merged_into_user_id":
 			u.MergedIntoUserID = v.(string)
+		case "owner_user_id":
+			u.OwnerUserID = v.(string)
 		case "date_of_birth_ms":
 			switch x := v.(type) {
 			case int64:
@@ -2494,6 +2520,11 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m AccountMerge) error {
 	// A missing account is nil, which ApplyToUsers refuses.
 	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
+	}
+	for _, u := range r.users {
+		if u.OwnerUserID == m.OtherID {
+			u.OwnerUserID = m.SurvivorID
+		}
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {

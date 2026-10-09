@@ -195,6 +195,35 @@ func TestBuildRateLimits_AssurancePathsLimited(t *testing.T) {
 	}
 }
 
+// TestBuildRateLimits_AgentCreationLimited asserts CreateAgent is metered on
+// its own budget: every admitted call inserts a user row.
+func TestBuildRateLimits_AgentCreationLimited(t *testing.T) {
+	cfg := &config.Config{
+		RateLimitWindowSeconds: 60,
+		RateLimitSignupPerIP:   2,
+		RateLimitLoginPerIP:    5,
+		RateLimitResetPerIP:    5,
+		RateLimitVerifyPerIP:   20,
+
+		RateLimitPasswordlessPerIP: 5,
+		RateLimitPhonePerIP:        5,
+		RateLimitBootstrapPerIP:    5,
+	}
+	limits := buildRateLimits(cfg)
+	var tag string
+	for _, l := range limits {
+		if l.PathPrefix == "/identity.v1.IdentityService/CreateAgent" {
+			tag = l.Tag
+		}
+	}
+	require.Equal(t, "agent_create", tag, "CreateAgent must carry its own rate limit")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, "/identity.v1.IdentityService/CreateAgent", "7.7.7.8", 2)
+}
+
 // TestBuildRateLimits_ManagedMinorPathsLimited asserts the endpoints the
 // managed-minor epic added are metered. Two distinct hazards: every one of
 // them verifies a step-up password (a bcrypt) before it can refuse, so an

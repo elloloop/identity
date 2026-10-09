@@ -44,9 +44,10 @@ func (s *AdminService) SetUserQuota(ctx context.Context, actorID, targetUserID s
 }
 
 // ListUsers returns a paginated list of users, optionally filtered by
-// status and/or search substring.
+// status and/or search substring. Agent accounts are left out unless
+// includeAgents is set.
 func (s *AdminService) ListUsers(
-	ctx context.Context, actorID, statusFilter, search, cursor string, limit int,
+	ctx context.Context, actorID, statusFilter, search, cursor string, limit int, includeAgents bool,
 ) ([]*User, string, int, error) {
 	if _, err := s.requireAdmin(ctx, actorID); err != nil {
 		return nil, "", 0, err
@@ -74,6 +75,9 @@ func (s *AdminService) ListUsers(
 	var filtered []*graph.Node
 	for _, n := range nodes {
 		u := userFromNode(n)
+		if u.IsAgent() && !includeAgents {
+			continue
+		}
 		if statusFilter != "" && !strings.EqualFold(u.Status, statusFilter) {
 			continue
 		}
@@ -192,6 +196,17 @@ func (s *AdminService) UpdateUser(ctx context.Context, actorID, userID, name, ro
 	}
 	if userID == "" {
 		return nil, errors.New("user_id is required")
+	}
+
+	// An agent is edited through UpdateAgent, which validates its profile,
+	// audits and announces the change; its role is fixed at member, since
+	// what an agent may do is its owner's application's to decide.
+	target, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch user: %w", err)
+	}
+	if target != nil && userFromNode(target).IsAgent() {
+		return nil, fmt.Errorf("%w: an agent account is edited with UpdateAgent", ErrInvalidArgument)
 	}
 
 	patch := map[string]any{ufUpdatedAt: nowMs()}

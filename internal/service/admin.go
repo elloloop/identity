@@ -291,7 +291,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		return fmt.Errorf("deactivate user: %w", err)
 	}
 
-	if err := revokeAllUserSessions(ctx, s.repo(ctx), targetUserID, now); err != nil {
+	if err := RevokeUserAccess(ctx, s.repo(ctx), targetUserID, now); err != nil {
 		return fmt.Errorf("deactivate user: %w", err)
 	}
 
@@ -374,6 +374,10 @@ func (s *AdminService) ResetUserPassword(
 	}
 	if node == nil {
 		return nil, errors.New("user not found")
+	}
+	// An agent account has no sign-in method, and a password would be one.
+	if userFromNode(node).IsAgent() {
+		return nil, ErrAgentCredential
 	}
 	// The sixth door onto the same invariant: attaching a password here
 	// would leave is_anonymous set, so the account becomes password-loginable

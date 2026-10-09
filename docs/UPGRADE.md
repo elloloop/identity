@@ -1,5 +1,45 @@
 # Upgrade guide
 
+## v4.13.0 → next — agent accounts
+
+**Migration 0038** (SQLite 0021) adds `users.kind` (`'person'` or
+`'agent'`) and `users.owner_user_id`, both with constant defaults
+(catalog-only), two `NOT VALID` CHECK constraints, and a partial index on
+`(project_id, owner_user_id)` that indexes no existing row
+(`lock_timeout = 10s`; on timeout confirm `kind` is absent, then
+`identity migrate force 37` and `identity migrate`). Every existing account
+becomes a person.
+
+- **Agent accounts (new, off by default).** A non-human account a person
+  owns, with no way to sign in. `CreateAgent`, `ListAgents`, `UpdateAgent`,
+  `TransferAgent`, `DeactivateAgent`, `ReactivateAgent` and `DeleteAgent`
+  serve the owner and a project admin once `GATEWAY_AGENTS_ENABLED=true`
+  (new, default `false`); until then each answers `FAILED_PRECONDITION`.
+  At most `GATEWAY_AGENTS_MAX_PER_OWNER` (new, default 25, 1 to 500; 0
+  selects the default and anything else outside the range is refused at
+  boot) per owner. See *Agent accounts* in the docs and
+  [ADR-0014](./adr/0014-agent-accounts.md).
+- **`User` gains `kind` and `owner_user_id`.** Every existing account
+  reports `USER_KIND_PERSON`. A client that treats every user as a person
+  should check `kind` before showing an account as one.
+- **An access token issued to an agent carries `"kind": "agent"`.** No path
+  issues one from outside the service yet (delegation is follow-up work). A
+  person's token carries no `kind`, so verifiers see no change.
+- **The admin `ListUsers` leaves agents out** unless the new
+  `include_agents` is set. The directory lookup and SCIM never return them.
+- **Webhook payloads for an agent carry `kind` and `owner_user_id`.** A
+  person's payload is unchanged.
+- **Deactivating or deleting a person also revokes their agents' sessions**,
+  and an agent's token is refused at refresh while its owner is not active.
+  Deleting a person does not delete their agents: an admin transfers or
+  deletes them (`ListAgents` with the deleted owner's id finds them).
+- **Merging moves the retired account's agents to the survivor.** An agent
+  account cannot itself be merged.
+- **The admin `UpdateUser` refuses an agent**; edit one with `UpdateAgent`.
+- **Eight new audit event types:** `agent_created`, `agent_updated`,
+  `agent_transferred`, `agent_deactivated`, `agent_reactivated`,
+  `agent_deleted`, `agents_listed`, `agent_sign_in_refused`.
+
 ## v4.12.2 → v4.13.0 — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); an optional `iss` claim and per-project token audience
 
 No schema change and no migration.

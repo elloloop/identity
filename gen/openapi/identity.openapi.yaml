@@ -1094,6 +1094,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ConfirmPasswordResetResponse'
+  /identity.v1.IdentityService/CreateAgent:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CreateAgent
+      description: |-
+        Agent accounts — non-human accounts a person owns. Each RPC is
+         authorized for the agent's owner or a project admin; a caller who is
+         neither gets the same PERMISSION_DENIED whether or not the agent exists.
+         An agent never signs in. Deactivating or deleting its owner makes it
+         unusable at once (its sessions end), and every token issued to an agent
+         checks the owner again. Off unless GATEWAY_AGENTS_ENABLED is set.
+      operationId: identity.v1.IdentityService.CreateAgent
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CreateAgentRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CreateAgentResponse'
   /identity.v1.IdentityService/CreateAssuranceChallenge:
     post:
       tags:
@@ -1379,6 +1421,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.CreateUserResponse'
+  /identity.v1.IdentityService/DeactivateAgent:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: DeactivateAgent
+      operationId: identity.v1.IdentityService.DeactivateAgent
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.DeactivateAgentRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.DeactivateAgentResponse'
   /identity.v1.IdentityService/DeactivateManagedChildAccount:
     post:
       tags:
@@ -1449,6 +1526,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.DeactivateUserResponse'
+  /identity.v1.IdentityService/DeleteAgent:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: DeleteAgent
+      operationId: identity.v1.IdentityService.DeleteAgent
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.DeleteAgentRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.DeleteAgentResponse'
   /identity.v1.IdentityService/DeleteGroup:
     post:
       tags:
@@ -2212,6 +2324,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.LinkIdentityResponse'
+  /identity.v1.IdentityService/ListAgents:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListAgents
+      operationId: identity.v1.IdentityService.ListAgents
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListAgentsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListAgentsResponse'
   /identity.v1.IdentityService/ListAuditEvents:
     post:
       tags:
@@ -3020,6 +3167,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.PollQrLoginResponse'
+  /identity.v1.IdentityService/ReactivateAgent:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ReactivateAgent
+      operationId: identity.v1.IdentityService.ReactivateAgent
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ReactivateAgentRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ReactivateAgentResponse'
   /identity.v1.IdentityService/ReactivateManagedChildAccount:
     post:
       tags:
@@ -4097,6 +4279,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.SubmitDateOfBirthResponse'
+  /identity.v1.IdentityService/TransferAgent:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: TransferAgent
+      operationId: identity.v1.IdentityService.TransferAgent
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.TransferAgentRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.TransferAgentResponse'
   /identity.v1.IdentityService/UnlinkIdentity:
     post:
       tags:
@@ -4132,6 +4349,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.UnlinkIdentityResponse'
+  /identity.v1.IdentityService/UpdateAgent:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UpdateAgent
+      operationId: identity.v1.IdentityService.UpdateAgent
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UpdateAgentRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UpdateAgentResponse'
   /identity.v1.IdentityService/UpdateGroup:
     post:
       tags:
@@ -5752,6 +6004,33 @@ components:
          granted parental consent for a specific child account. It is retained as a
          compliance/audit record and survives deletion of either referenced user,
          matching the audit-trail retention posture.
+    identity.v1.CreateAgentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          title: name
+          description: name is the agent's display name. Required.
+        avatarUrl:
+          type: string
+          title: avatar_url
+        ownerUserId:
+          type: string
+          title: owner_user_id
+          description: |-
+            owner_user_id names the person who will own the agent. Empty means the
+             caller. Naming anyone else requires the admin role. The owner must be an
+             active person, not an anonymous account.
+      title: CreateAgentRequest
+      additionalProperties: false
+    identity.v1.CreateAgentResponse:
+      type: object
+      properties:
+        agent:
+          title: agent
+          $ref: '#/components/schemas/identity.v1.User'
+      title: CreateAgentResponse
+      additionalProperties: false
     identity.v1.CreateAssuranceChallengeRequest:
       type: object
       properties:
@@ -6087,6 +6366,25 @@ components:
         DOBRequiredDetails is the error detail attached to the `dob_required`
          refusal returned by any session-issuing RPC when
          GATEWAY_AGEGATE_REQUIRE_DOB is on and the account has no date of birth.
+    identity.v1.DeactivateAgentRequest:
+      type: object
+      properties:
+        agentUserId:
+          type: string
+          title: agent_user_id
+        reason:
+          type: string
+          title: reason
+          description: reason is optional free text, retained for the audit trail only.
+      title: DeactivateAgentRequest
+      additionalProperties: false
+      description: |-
+        DeactivateAgentRequest suspends the agent, reversibly, and ends its
+         sessions at once.
+    identity.v1.DeactivateAgentResponse:
+      type: object
+      title: DeactivateAgentResponse
+      additionalProperties: false
     identity.v1.DeactivateManagedChildAccountRequest:
       type: object
       properties:
@@ -6123,6 +6421,22 @@ components:
     identity.v1.DeactivateUserResponse:
       type: object
       title: DeactivateUserResponse
+      additionalProperties: false
+    identity.v1.DeleteAgentRequest:
+      type: object
+      properties:
+        agentUserId:
+          type: string
+          title: agent_user_id
+      title: DeleteAgentRequest
+      additionalProperties: false
+      description: |-
+        DeleteAgentRequest erases the agent the way DeleteUser erases an account:
+         its sessions end, then the account and what it holds are deleted. The
+         audit trail survives.
+    identity.v1.DeleteAgentResponse:
+      type: object
+      title: DeleteAgentResponse
       additionalProperties: false
     identity.v1.DeleteGroupRequest:
       type: object
@@ -6884,6 +7198,31 @@ components:
       title: LinkedIdentity
       additionalProperties: false
       description: LinkedIdentity is one connected provider identity for the authenticated user.
+    identity.v1.ListAgentsRequest:
+      type: object
+      properties:
+        ownerUserId:
+          type: string
+          title: owner_user_id
+          description: |-
+            owner_user_id names the owner whose agents to list. Empty means the
+             caller. Naming anyone else requires the admin role.
+      title: ListAgentsRequest
+      additionalProperties: false
+    identity.v1.ListAgentsResponse:
+      type: object
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.User'
+          title: agents
+      title: ListAgentsResponse
+      additionalProperties: false
+      description: |-
+        ListAgentsResponse lists every agent of the owner. Creation stops at
+         GATEWAY_AGENTS_MAX_PER_OWNER, but a merge can carry an owner past it, so
+         the list is complete rather than capped.
     identity.v1.ListAuditEventsRequest:
       type: object
       properties:
@@ -7201,6 +7540,12 @@ components:
           type: string
           title: search
           description: optional substring match on email, name or username
+        includeAgents:
+          type: boolean
+          title: include_agents
+          description: |-
+            include_agents lists agent accounts too. Without it only people are
+             listed.
       title: ListUsersRequest
       additionalProperties: false
       description: |-
@@ -8015,6 +8360,21 @@ components:
         - QR_LOGIN_STATUS_REJECTED
         - QR_LOGIN_STATUS_EXPIRED
         - QR_LOGIN_STATUS_CONSUMED
+    identity.v1.ReactivateAgentRequest:
+      type: object
+      properties:
+        agentUserId:
+          type: string
+          title: agent_user_id
+      title: ReactivateAgentRequest
+      additionalProperties: false
+      description: |-
+        ReactivateAgentRequest restores a deactivated agent. It is usable again
+         only while its owner is active.
+    identity.v1.ReactivateAgentResponse:
+      type: object
+      title: ReactivateAgentResponse
+      additionalProperties: false
     identity.v1.ReactivateManagedChildAccountRequest:
       type: object
       properties:
@@ -8832,6 +9192,29 @@ components:
       description: |-
         TenantMembership is a user's materialized relationship to a Tenant within
          the caller's Project.
+    identity.v1.TransferAgentRequest:
+      type: object
+      properties:
+        agentUserId:
+          type: string
+          title: agent_user_id
+        newOwnerUserId:
+          type: string
+          title: new_owner_user_id
+      title: TransferAgentRequest
+      additionalProperties: false
+      description: |-
+        TransferAgentRequest gives the agent to another active person in the same
+         project. The agent's sessions end: whatever its previous owner approved
+         for it does not carry over to the new one.
+    identity.v1.TransferAgentResponse:
+      type: object
+      properties:
+        agent:
+          title: agent
+          $ref: '#/components/schemas/identity.v1.User'
+      title: TransferAgentResponse
+      additionalProperties: false
     identity.v1.UnlinkIdentityRequest:
       type: object
       properties:
@@ -8852,6 +9235,32 @@ components:
     identity.v1.UnlinkIdentityResponse:
       type: object
       title: UnlinkIdentityResponse
+      additionalProperties: false
+    identity.v1.UpdateAgentRequest:
+      type: object
+      properties:
+        agentUserId:
+          type: string
+          title: agent_user_id
+        name:
+          type: string
+          title: name
+          description: name is required.
+        avatarUrl:
+          type: string
+          title: avatar_url
+      title: UpdateAgentRequest
+      additionalProperties: false
+      description: |-
+        UpdateAgentRequest replaces the agent's name and avatar. Both are written:
+         an empty avatar_url clears it.
+    identity.v1.UpdateAgentResponse:
+      type: object
+      properties:
+        agent:
+          title: agent
+          $ref: '#/components/schemas/identity.v1.User'
+      title: UpdateAgentResponse
       additionalProperties: false
     identity.v1.UpdateGroupRequest:
       type: object
@@ -9248,8 +9657,30 @@ components:
              create_immediately, ResetUserPassword with generate_temp_password). A
              PasswordLogin with it is refused `password_change_required` until the
              user chooses their own password through CompleteRequiredPasswordChange.
+        kind:
+          title: kind
+          description: kind is PERSON for every account except an agent.
+          $ref: '#/components/schemas/identity.v1.UserKind'
+        ownerUserId:
+          type: string
+          title: owner_user_id
+          description: |-
+            owner_user_id is set on an agent: the person in the same project who
+             owns it. Empty on a person. It can name an account that no longer exists
+             once the owner was deleted; such an agent is unusable until it is
+             transferred (TransferAgent) to a new owner.
       title: User
       additionalProperties: false
+    identity.v1.UserKind:
+      type: string
+      title: UserKind
+      enum:
+        - USER_KIND_UNSPECIFIED
+        - USER_KIND_PERSON
+        - USER_KIND_AGENT
+      description: |-
+        UserKind says what an account is. Every account is a PERSON unless it was
+         created as an AGENT: a non-human account a person owns (see CreateAgent).
     identity.v1.UserStatus:
       type: string
       title: UserStatus

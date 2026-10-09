@@ -318,3 +318,21 @@ func TestCreateAndVerify_IssuerClaim(t *testing.T) {
 	_, has := tok.Get("iss")
 	assert.False(t, has, "no issuer configured, no iss claim")
 }
+
+// kind round-trips for an agent and is absent for a person, so a person's
+// token is unchanged by the claim's existence.
+func TestClaims_KindRoundTrip(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+	tok, err := s.SignAccessToken(context.Background(), Claims{Sub: "a", Kind: "agent"}, time.Minute)
+	require.NoError(t, err)
+	claims, err := VerifyAccessToken(tok, s, "", "", false)
+	require.NoError(t, err)
+	assert.Equal(t, "agent", claims.Kind)
+
+	tok, err = s.SignAccessToken(context.Background(), Claims{Sub: "u"}, time.Minute)
+	require.NoError(t, err)
+	claims, err = VerifyAccessToken(tok, s, "", "", false)
+	require.NoError(t, err)
+	assert.Empty(t, claims.Kind)
+	assert.NotContains(t, Claims{Sub: "u"}.ClaimsMap(time.Now(), time.Minute), "kind")
+}

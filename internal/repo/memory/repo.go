@@ -284,6 +284,12 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
+		if !filter.IncludeAgents && u.IsAgent() {
+			continue
+		}
+		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
+			continue
+		}
 		cp := *u
 		matched = append(matched, &cp)
 	}
@@ -362,6 +368,12 @@ func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int
 		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
+		if !filter.IncludeAgents && u.IsAgent() {
+			continue
+		}
+		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
+			continue
+		}
 		n++
 	}
 	return n, nil
@@ -403,6 +415,9 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 		return "", fmt.Errorf("user id %q: %w", id, service.ErrAlreadyExists)
 	}
 	u.ID = id
+	if u.Kind == "" {
+		u.Kind = service.UserKindPerson
+	}
 	cp := *u
 	r.users[id] = &cp
 	return id, nil
@@ -661,6 +676,7 @@ var (
 		"username":            func(u *service.User) *string { return &u.Username },
 		"account_address":     func(u *service.User) *string { return &u.AccountAddress },
 		"merged_into_user_id": func(u *service.User) *string { return &u.MergedIntoUserID },
+		"owner_user_id":       func(u *service.User) *string { return &u.OwnerUserID },
 	}
 
 	userBoolFields = map[string]func(*service.User) *bool{
@@ -1836,6 +1852,9 @@ func (r *Repo) CreateManagedChildAccount(_ context.Context, u *service.User, edg
 		return fmt.Errorf("user id %q: %w", id, service.ErrAlreadyExists)
 	}
 	u.ID = id
+	if u.Kind == "" {
+		u.Kind = service.UserKindPerson
+	}
 	cp := *u
 	r.users[id] = &cp
 
@@ -2343,6 +2362,11 @@ func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) erro
 	// A missing account is nil, which ApplyToUsers refuses.
 	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
+	}
+	for _, u := range r.users {
+		if u.OwnerUserID == m.OtherID {
+			u.OwnerUserID = m.SurvivorID
+		}
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {

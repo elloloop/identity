@@ -68,6 +68,11 @@ const (
 	// ufUsername carries a username account's username, so the admin
 	// surfaces (GetUser, ListUsers) show it and can find the account by it.
 	ufUsername = "24"
+	// ufKind and ufOwnerUserID carry an agent account's kind and owner, so
+	// the admin surfaces tell an agent from a person and can leave agents
+	// out of ListUsers unless they are asked for.
+	ufKind        = "25"
+	ufOwnerUserID = "26"
 )
 
 // ── WorkingGroup field IDs (type_id 2) ─────────────────────────────
