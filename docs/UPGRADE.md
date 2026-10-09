@@ -7,7 +7,8 @@ No schema change and no migration.
 - **`GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS` must be at most 3600.**
   A larger value let an hours-old session count as a recent sign-in, and is
   now refused at boot. A deployment that never set it, or set it within the
-  range, sees no change.
+  range, sees no change. Lower a larger value before upgrading, or the new
+  version will not start.
 - **Merging relies on webhooks.** A merge retires an account, and
   applications learn about it only through the `user.merged` event: before
   turning on `GATEWAY_ACCOUNT_MERGE_ENABLED`, turn on
@@ -15,7 +16,8 @@ No schema change and no migration.
   under user ids to `user.merged`; the admin `MergeUsers` announces its merges
   the same way. Identity already logs `account_merge_without_webhooks` at boot
   (since v4.12) when self-service merging is on and webhooks are off.
-- **Built with Go 1.26.9 and `golang.org/x/net` v0.60.0**, which fix the
+- **Built with Go 1.26.9 and `golang.org/x/net` v0.60.0** (with `x/crypto`
+  v0.57.0, `x/sync` v0.23.0, `x/sys` v0.48.0 and `x/text` v0.42.0), which fix the
   `net/http` and http2 advisories GO-2026-6609 to GO-2026-6613 and
   GO-2026-6617. The published image carries the fix; anyone building identity
   or embedding its `pkg/` libraries should build on Go 1.26.9 or later.
