@@ -1870,6 +1870,10 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// was verified since) receives its address at its next session, however
 	// long-lived. After the gates above, so a refused session writes nothing.
 	// A no-op once issued.
+	//
+	// The stored email is moved to its canonical spelling first, so an
+	// address derived from it is derived from the form every lookup uses.
+	s.ensureCanonicalEmail(ctx, user)
 	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	claims := jwt.Claims{
