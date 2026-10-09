@@ -290,6 +290,9 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
 			continue
 		}
+		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
+			continue
+		}
 		cp := *u
 		matched = append(matched, &cp)
 	}
@@ -372,6 +375,9 @@ func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int
 			continue
 		}
 		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
+			continue
+		}
+		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
 			continue
 		}
 		n++
@@ -664,19 +670,20 @@ func fieldInt64(v any) (int64, bool) {
 // ok=false and the field is left out of the UPDATE).
 var (
 	userStringFields = map[string]func(*service.User) *string{
-		"name":                func(u *service.User) *string { return &u.Name },
-		"email":               func(u *service.User) *string { return &u.Email },
-		"avatar_url":          func(u *service.User) *string { return &u.AvatarURL },
-		"password_hash":       func(u *service.User) *string { return &u.PasswordHash },
-		"status":              func(u *service.User) *string { return &u.Status },
-		"recovery_email":      func(u *service.User) *string { return &u.RecoveryEmail },
-		"external_id":         func(u *service.User) *string { return &u.ExternalID },
-		"phone_number":        func(u *service.User) *string { return &u.PhoneNumber },
-		"market":              func(u *service.User) *string { return &u.Market },
-		"username":            func(u *service.User) *string { return &u.Username },
-		"account_address":     func(u *service.User) *string { return &u.AccountAddress },
-		"merged_into_user_id": func(u *service.User) *string { return &u.MergedIntoUserID },
-		"owner_user_id":       func(u *service.User) *string { return &u.OwnerUserID },
+		"name":                  func(u *service.User) *string { return &u.Name },
+		"email":                 func(u *service.User) *string { return &u.Email },
+		"avatar_url":            func(u *service.User) *string { return &u.AvatarURL },
+		"password_hash":         func(u *service.User) *string { return &u.PasswordHash },
+		"status":                func(u *service.User) *string { return &u.Status },
+		"recovery_email":        func(u *service.User) *string { return &u.RecoveryEmail },
+		"external_id":           func(u *service.User) *string { return &u.ExternalID },
+		"phone_number":          func(u *service.User) *string { return &u.PhoneNumber },
+		"market":                func(u *service.User) *string { return &u.Market },
+		"username":              func(u *service.User) *string { return &u.Username },
+		"account_address":       func(u *service.User) *string { return &u.AccountAddress },
+		"merged_into_user_id":   func(u *service.User) *string { return &u.MergedIntoUserID },
+		"owner_user_id":         func(u *service.User) *string { return &u.OwnerUserID },
+		"pending_owner_user_id": func(u *service.User) *string { return &u.PendingOwnerUserID },
 	}
 
 	userBoolFields = map[string]func(*service.User) *bool{
@@ -2354,6 +2361,26 @@ func (r *Repo) AssignAccountAddress(_ context.Context, userID, address string) (
 	return address, nil
 }
 
+// SettleAgentTransfer settles the transfer under the store's lock, only while
+// it still waits on pendingOwnerID.
+func (r *Repo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error) {
+	if agentID == "" || pendingOwnerID == "" {
+		return false, errors.New("memory: SettleAgentTransfer: missing agent or pending owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[agentID]
+	if !ok || !u.IsAgent() || u.PendingOwnerUserID == "" || u.PendingOwnerUserID != pendingOwnerID {
+		return false, nil
+	}
+	if accept {
+		u.OwnerUserID = u.PendingOwnerUserID
+	}
+	u.PendingOwnerUserID = ""
+	u.UpdatedAt = time.UnixMilli(atMs)
+	return true, nil
+}
+
 // ApplyAccountMerge is the merge under the store's lock: the records change
 // through AccountMerge.ApplyToUsers, then the side tables follow.
 func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
@@ -2366,6 +2393,14 @@ func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) erro
 	for _, u := range r.users {
 		if u.OwnerUserID == m.OtherID {
 			u.OwnerUserID = m.SurvivorID
+		}
+	}
+	for _, u := range r.users {
+		if u.PendingOwnerUserID == m.OtherID {
+			u.PendingOwnerUserID = m.SurvivorID
+			if u.OwnerUserID == m.SurvivorID {
+				u.PendingOwnerUserID = ""
+			}
 		}
 	}
 	for _, oi := range r.oauthIdentities {

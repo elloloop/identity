@@ -73,6 +73,9 @@ const (
 	// out of ListUsers unless they are asked for.
 	ufKind        = "25"
 	ufOwnerUserID = "26"
+	// ufPendingOwnerUserID carries the recipient an agent's transfer waits
+	// on, so the admin surfaces show a transfer in flight.
+	ufPendingOwnerUserID = "27"
 )
 
 // ── WorkingGroup field IDs (type_id 2) ─────────────────────────────

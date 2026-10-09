@@ -266,6 +266,11 @@ const (
 	// interactive sign-in into an agent account is EventAgentSignInRefused.
 	// EventAgentsListed records a refused listing and an admin listing
 	// another owner's agents; an owner listing their own is not logged.
+	// A transfer is an offer the recipient answers: the offer is
+	// EventAgentTransferRequested, its acceptance (or an admin reassigning
+	// an orphaned agent, which needs no answer) is EventAgentTransferred,
+	// and EventAgentTransferDeclined / EventAgentTransferCancelled close it
+	// without a change of owner.
 	EventAgentCreated       EventType = "agent_created"
 	EventAgentUpdated       EventType = "agent_updated"
 	EventAgentTransferred   EventType = "agent_transferred"
@@ -274,6 +279,10 @@ const (
 	EventAgentDeleted       EventType = "agent_deleted"
 	EventAgentSignInRefused EventType = "agent_sign_in_refused"
 	EventAgentsListed       EventType = "agents_listed"
+
+	EventAgentTransferRequested EventType = "agent_transfer_requested"
+	EventAgentTransferDeclined  EventType = "agent_transfer_declined"
+	EventAgentTransferCancelled EventType = "agent_transfer_cancelled"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -342,6 +351,9 @@ var validEventTypes = map[EventType]struct{}{
 	EventAgentDeleted:                  {},
 	EventAgentSignInRefused:            {},
 	EventAgentsListed:                  {},
+	EventAgentTransferRequested:        {},
+	EventAgentTransferDeclined:         {},
+	EventAgentTransferCancelled:        {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

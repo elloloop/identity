@@ -37,7 +37,8 @@ Two things are deliberately out of scope here:
 `users.owner_user_id` names an agent's owner and is empty on a person. A
 CHECK constraint holds the two together. Downstream services key data on the
 user id exactly as before and need no second code path. `User.kind` and
-`User.owner_user_id` are on the wire; the proto enum's zero value is
+`User.owner_user_id` are on the wire (with `User.pending_owner_user_id`,
+below); the proto enum's zero value is
 unspecified, and the server always sets one of the two kinds.
 
 The owner is an active, non-anonymous, non-merged person **in the same
@@ -71,6 +72,19 @@ nothing about whether the owner still stands behind their agents.
 
 Introspection, when it lands, reuses the same check.
 
+### An agent is admitted as its owner is
+
+An agent can never do more than its owner. It has no email or username for
+a project's access mode or deny layer to judge, so the access check judges
+its owner instead: in an `allowlist` or `closed` project, or under a deny
+rule that blocks the owner's address, the agent is refused whenever the
+owner would be. Where the deployment requires identity verification, the
+owner's verification is the one that counts; an agent cannot verify anyone.
+Both checks run with the standing check at every token issue, so the
+token-issuing path for agents inherits them rather than having to remember
+them. (Before this rule an agent was judged as the empty address, which
+refused it under every allowlist whatever its owner's standing.)
+
 ### The token says it is an agent
 
 An agent's access token carries `"kind": "agent"`. A person's token carries
@@ -80,8 +94,9 @@ a claim to check without a lookup.
 
 ### Owner and admin manage, with one guard
 
-Seven RPCs (create, list, update, transfer, deactivate, reactivate, delete)
-admit the agent's owner or a project admin at one chokepoint. Everyone else
+The management RPCs (create, list, update, transfer, cancel a transfer,
+deactivate, reactivate, delete) admit the agent's owner or a project admin
+at one chokepoint. Everyone else
 gets one indistinguishable `PERMISSION_DENIED`, whether the id names an
 agent, a person or nothing, so the surface is not an oracle for which ids are
 agents. Separate admin RPCs were rejected: they would duplicate the
@@ -93,6 +108,38 @@ can mint. The cap is checked before the write and is not transactional; the
 rate limit bounds the overshoot. A merge can carry an owner past the cap, so
 listing and the revocation cascade page through every agent rather than
 assuming one page.
+
+An agent's role is always `member`. Its role in an application is the
+application's to decide.
+
+### A transfer needs the recipient's consent
+
+Ownership is responsibility for what the agent does, so it cannot be handed
+to someone who did not agree to take it. `TransferAgent` records an offer
+(`users.pending_owner_user_id`); the agent stays with its owner, usable and
+managed by them, until the recipient answers. `AcceptAgentTransfer` and
+`DeclineAgentTransfer` are the recipient's alone (an admin cannot accept on
+someone's behalf), and `CancelAgentTransfer` is the owner's or an admin's.
+`ListIncomingAgentTransfers` lists what waits on the caller. A new offer
+replaces a pending one.
+
+The per-owner cap is checked at acceptance, when the recipient's count is
+known, not at the offer. Acceptance and refusal are one conditional write
+that settles only the offer the caller read (`SettleAgentTransfer`), so an
+acceptance never lands on an offer that was cancelled or replaced in
+between. Accepting ends the agent's sessions: whatever the previous owner
+approved for it does not carry over. A merge re-points offers made to the
+retired account at the survivor, and drops one the survivor would make to
+itself. Recipients answer with the same uniform `PERMISSION_DENIED` as the
+management RPCs, so the answer RPCs are not an oracle either.
+
+**Orphans are the exception.** An agent whose owner no longer exists has
+nobody left to hand it over, so a project admin's transfer of it takes
+effect at once, within the recipient's cap, and ends its sessions. Requiring
+an acceptance there would leave the admin, the only party able to act, with
+no way to finish. An owner who is suspended or scheduled for deletion still
+exists and may return, so their agents are not orphans and a transfer of
+them is an offer.
 
 ### Off until a deployment turns it on
 
@@ -114,18 +161,21 @@ an agent.
 ### Deleting the owner does not delete the agents
 
 `owner_user_id` carries no foreign key. Deleting the owner leaves the agents
-naming them, unusable by the standing check, until an admin transfers or
-deletes them. Deleting them with the owner was rejected as destroying data
+naming them, unusable by the standing check, until an admin transfers them
+(at once, as above) or deletes them. Deleting them with the owner was rejected as destroying data
 applications may hold under the agent's id with no chance to hand it over;
 it can be revisited once there is a product answer for orphans.
 
 ## Consequences
 
-- Every repository driver and test fake carries the two columns and the
-  list filters; the conformance suite pins the round trip, the default
-  exclusion, the owner update and the merge behaviour on every driver.
-- Webhook payloads for an agent carry `kind` and `owner_user_id`; a
-  person's payload is unchanged.
+- Every repository driver and test fake carries the three columns, the
+  list filters and the conditional settle; the conformance suite pins the
+  round trip, the default exclusion, the owner and pending-owner updates,
+  the settle (accepted, declined, stale) and the merge behaviour on every
+  driver.
+- Webhook payloads for an agent carry `kind` and `owner_user_id`, and
+  `pending_owner_user_id` while a transfer is pending; a person's payload
+  is unchanged.
 - The token-issuing path for agents (delegation) and the RPCs an agent token
   may call are follow-up work; both will run the standing check this ADR
   introduces.

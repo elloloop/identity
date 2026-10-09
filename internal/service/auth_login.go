@@ -1346,7 +1346,9 @@ func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr
 		return fmt.Errorf("%w: account is %s", ErrAccountNotActive, status)
 	}
 
-	if s.cfg != nil && s.cfg.IDVRequired && !user.IDVVerified {
+	// An agent is never verified itself: its owner's verification is the
+	// one that counts, judged by checkAgentStanding at every token issue.
+	if s.cfg != nil && s.cfg.IDVRequired && !user.IDVVerified && !user.IsAgent() {
 		return ErrIDVRequired
 	}
 	return nil

@@ -47,7 +47,7 @@ func toEventUser(u *User) events.User {
 		MergedIntoUserID: u.MergedIntoUserID,
 	}
 	if u.IsAgent() {
-		e.Kind, e.OwnerUserID = UserKindAgent, u.OwnerUserID
+		e.Kind, e.OwnerUserID, e.PendingOwnerUserID = UserKindAgent, u.OwnerUserID, u.PendingOwnerUserID
 	}
 	return e
 }

@@ -152,6 +152,10 @@ type User struct {
 	// it. Empty on a person. It keeps naming a deleted owner, which leaves the
 	// agent unusable until it is transferred.
 	OwnerUserID string
+	// PendingOwnerUserID is set on an agent while a transfer waits for the
+	// recipient it names to accept or decline it; the agent stays with
+	// OwnerUserID until then. Empty otherwise, and always on a person.
+	PendingOwnerUserID string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
 	// deletion. Set when the owner requests deletion; cleared on cancel or a
@@ -214,6 +218,10 @@ type UserListFilter struct {
 	// OwnerUserID, when non-empty, matches only the agents that account owns.
 	// It needs IncludeAgents to match anything.
 	OwnerUserID string
+	// PendingOwnerUserID, when non-empty, matches only the agents whose
+	// pending transfer waits on that account. It needs IncludeAgents to match
+	// anything.
+	PendingOwnerUserID string
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -715,8 +723,20 @@ type Repository interface {
 	// its own (else ErrMergeConflict); the other account's linked provider
 	// identities move to the survivor (passkeys stay: they are bound to the
 	// account they were registered for); its refresh tokens are deleted and
-	// its sessions revoked. Any failure rolls all of it back.
+	// its sessions revoked. The agents the other account owns move to the
+	// survivor, and a transfer waiting on the other account waits on the
+	// survivor instead (or is dropped, when the survivor already owns the
+	// agent). Any failure rolls all of it back.
 	ApplyAccountMerge(ctx context.Context, m AccountMerge) error
+
+	// SettleAgentTransfer ends the pending transfer of agentID if, and only
+	// if, it still waits on pendingOwnerID: accept makes that account the
+	// owner, otherwise the transfer is dropped. Either way the pending owner
+	// is cleared and updated_at set to atMs, in one conditional statement, so
+	// an acceptance cannot land on a transfer that was cancelled or replaced
+	// after it was read. It reports whether a transfer was settled. An empty
+	// agentID or pendingOwnerID is an error.
+	SettleAgentTransfer(ctx context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error)
 
 	// OAuth identities — links a (provider, provider_user_id) pair to a
 	// local User so OAuth login can survive provider-side email changes.
@@ -1864,9 +1884,10 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		sessionStart = now
 	}
 
-	// An agent's standing is derived from its owner's, re-checked on every
-	// issue (refresh included) so an owner's suspension or deletion ends the
-	// agent's sessions at their next rotation. Before any state is written.
+	// An agent's standing and admission are derived from its owner's,
+	// re-checked on every issue (refresh included) so an owner's suspension,
+	// deletion or loss of access ends the agent's sessions at their next
+	// rotation. Before any state is written.
 	if user.IsAgent() {
 		if err := s.checkAgentStanding(ctx, user); err != nil {
 			return "", "", err

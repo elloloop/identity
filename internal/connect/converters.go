@@ -67,6 +67,7 @@ func userToProto(u *service.User) *identitypb.User {
 		PasswordChangeRequired: u.PasswordChangeRequired,
 		Kind:                   userKindToProto(u),
 		OwnerUserId:            u.OwnerUserID,
+		PendingOwnerUserId:     u.PendingOwnerUserID,
 	}
 	if !u.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(u.CreatedAt)

@@ -76,7 +76,8 @@ func (h *IdentityHandler) UpdateAgent(
 	return connect.NewResponse(&identitypb.UpdateAgentResponse{Agent: userToProto(agent)}), nil
 }
 
-// TransferAgent hands an agent to another owner and ends its sessions.
+// TransferAgent offers an agent to another owner, or reassigns an orphaned
+// agent at once when a project admin asks.
 func (h *IdentityHandler) TransferAgent(
 	ctx context.Context,
 	req *connect.Request[identitypb.TransferAgentRequest],
@@ -94,6 +95,79 @@ func (h *IdentityHandler) TransferAgent(
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.TransferAgentResponse{Agent: userToProto(agent)}), nil
+}
+
+// AcceptAgentTransfer takes ownership of an agent offered to the caller.
+func (h *IdentityHandler) AcceptAgentTransfer(
+	ctx context.Context,
+	req *connect.Request[identitypb.AcceptAgentTransferRequest],
+) (*connect.Response[identitypb.AcceptAgentTransferResponse], error) {
+	callerID := authenticatedUserID(req.Header())
+	if callerID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	agent, err := h.auth.AcceptAgentTransfer(
+		ctx, callerID, req.Msg.GetAgentUserId(),
+		clientIP(req.Header()), clientUserAgent(req.Header()),
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AcceptAgentTransferResponse{Agent: userToProto(agent)}), nil
+}
+
+// DeclineAgentTransfer refuses an agent offered to the caller.
+func (h *IdentityHandler) DeclineAgentTransfer(
+	ctx context.Context,
+	req *connect.Request[identitypb.DeclineAgentTransferRequest],
+) (*connect.Response[identitypb.DeclineAgentTransferResponse], error) {
+	callerID := authenticatedUserID(req.Header())
+	if callerID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	agent, err := h.auth.DeclineAgentTransfer(
+		ctx, callerID, req.Msg.GetAgentUserId(),
+		clientIP(req.Header()), clientUserAgent(req.Header()),
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.DeclineAgentTransferResponse{Agent: userToProto(agent)}), nil
+}
+
+// CancelAgentTransfer withdraws an agent's pending transfer.
+func (h *IdentityHandler) CancelAgentTransfer(
+	ctx context.Context,
+	req *connect.Request[identitypb.CancelAgentTransferRequest],
+) (*connect.Response[identitypb.CancelAgentTransferResponse], error) {
+	callerID := authenticatedUserID(req.Header())
+	if callerID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	agent, err := h.auth.CancelAgentTransfer(
+		ctx, callerID, req.Msg.GetAgentUserId(),
+		clientIP(req.Header()), clientUserAgent(req.Header()),
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.CancelAgentTransferResponse{Agent: userToProto(agent)}), nil
+}
+
+// ListIncomingAgentTransfers returns the agents offered to the caller.
+func (h *IdentityHandler) ListIncomingAgentTransfers(
+	ctx context.Context,
+	req *connect.Request[identitypb.ListIncomingAgentTransfersRequest],
+) (*connect.Response[identitypb.ListIncomingAgentTransfersResponse], error) {
+	callerID := authenticatedUserID(req.Header())
+	if callerID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	agents, err := h.auth.ListIncomingAgentTransfers(ctx, callerID)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.ListIncomingAgentTransfersResponse{Agents: usersToProto(agents)}), nil
 }
 
 // DeactivateAgent suspends an agent and ends its sessions.

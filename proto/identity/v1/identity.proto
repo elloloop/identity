@@ -127,9 +127,14 @@ message User {
   UserKind kind = 32;
   // owner_user_id is set on an agent: the person in the same project who
   // owns it. Empty on a person. It can name an account that no longer exists
-  // once the owner was deleted; such an agent is unusable until it is
-  // transferred (TransferAgent) to a new owner.
+  // once the owner was deleted; such an agent (an orphan) is unusable until
+  // a project admin transfers it (TransferAgent) to a new owner.
   string owner_user_id = 33;
+  // pending_owner_user_id is set on an agent while a transfer to that
+  // person awaits their answer (AcceptAgentTransfer, DeclineAgentTransfer).
+  // The agent stays with owner_user_id until it is accepted. Empty when no
+  // transfer is pending, and always empty on a person.
+  string pending_owner_user_id = 34;
 }
 
 message MergeUsersRequest {
@@ -1057,8 +1062,11 @@ message RevokeParentalConsentResponse {
 // alongside people in an application. It has a name, an avatar, a project and
 // a status like any account, but no sign-in method of any kind — no password,
 // passkey, linked provider, email, phone or username. Every RPC here is
-// authorized for the agent's owner or a project admin: the caller is always
-// the session user, and only an admin may name another owner. The surface is
+// authorized for the agent's owner or a project admin, except answering a
+// transfer, which only its recipient may do: the caller is always the session
+// user, and only an admin may name another owner. An agent's role is always
+// member, and it is admitted to a project exactly as its owner is: an agent
+// can never do more than its owner. The surface is
 // off unless the server enables it (GATEWAY_AGENTS_ENABLED); while off, every
 // RPC answers FAILED_PRECONDITION. What an agent may do is the application's
 // decision, not Identity's.
@@ -1103,16 +1111,66 @@ message UpdateAgentResponse {
   User agent = 1;
 }
 
-// TransferAgentRequest gives the agent to another active person in the same
-// project. The agent's sessions end: whatever its previous owner approved
-// for it does not carry over to the new one.
+// TransferAgentRequest offers the agent to another active person in the
+// same project. Ownership changes only when the recipient accepts
+// (AcceptAgentTransfer); until then the agent stays with its owner and
+// carries the recipient in pending_owner_user_id. A new offer replaces a
+// pending one. The recipient's per-owner cap is checked when they accept.
+//
+// One exception: a project admin's transfer of an orphan (an agent whose
+// owner no longer exists) takes effect at once, under the recipient's cap,
+// because nobody is left to hand the agent over. Its sessions end.
 message TransferAgentRequest {
   string agent_user_id = 1;
   string new_owner_user_id = 2;
 }
 
+// TransferAgentResponse returns the agent: with pending_owner_user_id set
+// for an offer, or with its new owner_user_id for an orphan's reassignment.
 message TransferAgentResponse {
   User agent = 1;
+}
+
+// AcceptAgentTransferRequest takes ownership of an agent offered to the
+// caller. Only the recipient may accept; an admin cannot accept on their
+// behalf. Refused with RESOURCE_EXHAUSTED when the caller already holds the
+// per-owner cap. The agent's sessions end: whatever its previous owner
+// approved for it does not carry over to the new one.
+message AcceptAgentTransferRequest {
+  string agent_user_id = 1;
+}
+
+message AcceptAgentTransferResponse {
+  User agent = 1;
+}
+
+// DeclineAgentTransferRequest refuses an agent offered to the caller. The
+// agent stays with its owner.
+message DeclineAgentTransferRequest {
+  string agent_user_id = 1;
+}
+
+message DeclineAgentTransferResponse {
+  User agent = 1;
+}
+
+// CancelAgentTransferRequest withdraws the agent's pending offer. The owner
+// or a project admin may cancel. An agent with no pending offer is returned
+// unchanged.
+message CancelAgentTransferRequest {
+  string agent_user_id = 1;
+}
+
+message CancelAgentTransferResponse {
+  User agent = 1;
+}
+
+// ListIncomingAgentTransfersRequest lists the agents offered to the caller
+// and not yet answered.
+message ListIncomingAgentTransfersRequest {}
+
+message ListIncomingAgentTransfersResponse {
+  repeated User agents = 1;
 }
 
 // DeactivateAgentRequest suspends the agent, reversibly, and ends its
@@ -2773,15 +2831,20 @@ service IdentityService {
   rpc DeleteManagedChildAccount(DeleteManagedChildAccountRequest) returns (DeleteManagedChildAccountResponse);
 
   // Agent accounts — non-human accounts a person owns. Each RPC is
-  // authorized for the agent's owner or a project admin; a caller who is
-  // neither gets the same PERMISSION_DENIED whether or not the agent exists.
-  // An agent never signs in. Deactivating or deleting its owner makes it
+  // authorized for the agent's owner or a project admin, and answering a
+  // transfer for its recipient alone; any other caller gets the same
+  // PERMISSION_DENIED whether or not the agent exists. A transfer is an
+  // offer the recipient accepts or declines. An agent never signs in. Deactivating or deleting its owner makes it
   // unusable at once (its sessions end), and every token issued to an agent
   // checks the owner again. Off unless GATEWAY_AGENTS_ENABLED is set.
   rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
   rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse);
   rpc TransferAgent(TransferAgentRequest) returns (TransferAgentResponse);
+  rpc AcceptAgentTransfer(AcceptAgentTransferRequest) returns (AcceptAgentTransferResponse);
+  rpc DeclineAgentTransfer(DeclineAgentTransferRequest) returns (DeclineAgentTransferResponse);
+  rpc CancelAgentTransfer(CancelAgentTransferRequest) returns (CancelAgentTransferResponse);
+  rpc ListIncomingAgentTransfers(ListIncomingAgentTransfersRequest) returns (ListIncomingAgentTransfersResponse);
   rpc DeactivateAgent(DeactivateAgentRequest) returns (DeactivateAgentResponse);
   rpc ReactivateAgent(ReactivateAgentRequest) returns (ReactivateAgentResponse);
   rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse);

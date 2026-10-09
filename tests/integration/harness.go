@@ -889,6 +889,9 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
 			continue
 		}
+		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
+			continue
+		}
 		cp := *u
 		matched = append(matched, &cp)
 	}
@@ -935,6 +938,9 @@ func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (
 			continue
 		}
 		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
+			continue
+		}
+		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
 			continue
 		}
 		n++
@@ -1257,6 +1263,8 @@ func applyUserStringField(u *service.User, key string, v any) bool {
 		u.MergedIntoUserID = s
 	case "owner_user_id":
 		u.OwnerUserID = s
+	case "pending_owner_user_id":
+		u.PendingOwnerUserID = s
 	default:
 		return false
 	}
@@ -1267,7 +1275,7 @@ func isUserStringField(key string) bool {
 	switch key {
 	case "name", "email", "avatar_url", "password_hash", "status",
 		"recovery_email", "external_id", "phone_number", "market", "username",
-		"account_address", "merged_into_user_id", "owner_user_id":
+		"account_address", "merged_into_user_id", "owner_user_id", "pending_owner_user_id":
 		return true
 	}
 	return false
@@ -3061,6 +3069,24 @@ func (r *MemRepo) AssignAccountAddress(_ context.Context, userID, address string
 
 // ApplyAccountMerge is the merge under the store's lock: the records change
 // through AccountMerge.ApplyToUsers, then the side tables follow.
+func (r *MemRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error) {
+	if agentID == "" || pendingOwnerID == "" {
+		return false, errors.New("SettleAgentTransfer: missing agent or pending owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[agentID]
+	if !ok || !u.IsAgent() || u.PendingOwnerUserID == "" || u.PendingOwnerUserID != pendingOwnerID {
+		return false, nil
+	}
+	if accept {
+		u.OwnerUserID = u.PendingOwnerUserID
+	}
+	u.PendingOwnerUserID = ""
+	u.UpdatedAt = time.UnixMilli(atMs)
+	return true, nil
+}
+
 func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -3071,6 +3097,14 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 	for _, u := range r.users {
 		if u.OwnerUserID == m.OtherID {
 			u.OwnerUserID = m.SurvivorID
+		}
+	}
+	for _, u := range r.users {
+		if u.PendingOwnerUserID == m.OtherID {
+			u.PendingOwnerUserID = m.SurvivorID
+			if u.OwnerUserID == m.SurvivorID {
+				u.PendingOwnerUserID = ""
+			}
 		}
 	}
 	for _, oi := range r.oauthIdentities {
