@@ -1742,7 +1742,7 @@ func (s *AuthService) maybeAutoFormTenant(ctx context.Context, user *User) {
 		return
 	}
 	// Split on the last '@' (via emailDomain) so the auto-formed tenant keys on
-	// the same domain CanonicalizeEmail produced — a quoted local part with '@'
+	// the same domain emailaddr.Canonicalize produced — a quoted local part with '@'
 	// must not yield a bogus domain and spawn a spurious tenant.
 	domain := emailDomain(user.Email)
 	if domain == "" || s.cfg.IsPublicEmailDomain(domain) {
@@ -2104,7 +2104,7 @@ func passwordIssuesToErr(issues []string) error {
 	return nil
 }
 
-// validateEmailFormat + CanonicalizeEmail live in email_canonicalize.go
+// validateEmailFormat + emailaddr.Canonicalize live in email_canonicalize.go
 // so the surface they cover (format, length, reserved TLDs, disposable
 // providers, Gmail-style normalization) is in one place.
 

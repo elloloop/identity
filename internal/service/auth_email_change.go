@@ -9,6 +9,7 @@ import (
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/emailaddr"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -66,7 +67,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 
 	// Reject a new address sign-in already resolves to this account (the same
 	// canonical form). Avoids creating a pointless token + emails.
-	if CanonicalizeEmail(user.Email) == newEmail {
+	if emailaddr.Canonicalize(user.Email) == newEmail {
 		return fmt.Errorf("%w: new email matches current email", ErrInvalidArgument)
 	}
 

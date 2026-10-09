@@ -14,6 +14,7 @@ import (
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/emailaddr"
 	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/scim"
 )
@@ -203,7 +204,7 @@ func (h *scimHandler) refuse(ctx context.Context, w http.ResponseWriter, r *http
 
 // repoSCIMStore adapts service.Repository to scim.Store. It maps the SCIM
 // User core schema onto the host User model: userName ⇒ email (canonicalized
-// as sign-up canonicalizes it, service.CanonicalizeEmail, so a provisioned
+// as sign-up canonicalizes it, emailaddr.Canonicalize, so a provisioned
 // account is the one sign-in and a later self-sign-up resolve), externalId ⇒
 // ExternalID, name ⇒ a single Name field is not stored (the host has only a
 // display Name), so given/family are joined into Name and split back out on
@@ -612,7 +613,7 @@ func scimEmail(raw string) (string, error) {
 // so missing it would create a second account for the same mailbox. The next
 // PUT or PATCH of that account rewrites it in canonical form.
 func (s *repoSCIMStore) filterEmail(ctx context.Context, raw string) (string, error) {
-	canonical := service.CanonicalizeEmail(raw)
+	canonical := emailaddr.Canonicalize(raw)
 	asSent := strings.TrimSpace(raw)
 	if service.FoldEmail(asSent) == service.FoldEmail(canonical) {
 		return canonical, nil

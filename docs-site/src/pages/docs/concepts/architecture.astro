@@ -48,6 +48,7 @@ import { Code } from "astro-expressive-code/components";
     <li><code>pkg/passkeys</code> — WebAuthn (<code>go-webauthn/webauthn</code>) wrapper.</li>
     <li><code>pkg/totp</code> — RFC 6238 TOTP + AES-GCM encryption for secrets at rest.</li>
     <li><code>pkg/audit</code> — append-only logger that records <code>AuditEvent</code> rows through the repository.</li>
+    <li><code>pkg/emailaddr</code> — the one rule for when two spellings of an email address name the same mailbox (case, <code>+tag</code>, Gmail dots, <code>googlemail.com</code>, IDN domains). Every account address is stored and looked up in this form; a service keying its own records on an account email compares through it too.</li>
   </ul>
 
   <h2>Middleware chain</h2>

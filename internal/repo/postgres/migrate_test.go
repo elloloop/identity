@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/emailaddr"
 )
 
 // TestMigrate_EmptyDSN_Errors runs without a database: an empty DSN must
@@ -247,7 +247,7 @@ func hasColumn(ctx context.Context, t *testing.T, conn *pgx.Conn, table, column 
 
 // TestMigrate_0034CanonicalizesPendingInvitations: pending invitations stored
 // before the service canonicalized carry the address as typed. 0034 rewrites
-// each all-ASCII one in exactly the form service.CanonicalizeEmail gives,
+// each all-ASCII one in exactly the form emailaddr.Canonicalize gives,
 // revokes all but the newest of any that then name one mailbox, and leaves
 // non-ASCII addresses and settled invitations as they are.
 func TestMigrate_0034CanonicalizesPendingInvitations(t *testing.T) {
@@ -319,8 +319,8 @@ func TestMigrate_0034CanonicalizesPendingInvitations(t *testing.T) {
 				original = s.email
 			}
 		}
-		require.Equal(t, [2]string{service.CanonicalizeEmail(original), "pending"}, got[id],
-			"%s: the migration's canonical form must be CanonicalizeEmail's", id)
+		require.Equal(t, [2]string{emailaddr.Canonicalize(original), "pending"}, got[id],
+			"%s: the migration's canonical form must be emailaddr.Canonicalize's", id)
 	}
 	require.Equal(t, [2]string{"zoé+x@corp.com", "pending"}, got["non-ascii"])
 	require.Equal(t, [2]string{"\u212aate@corp.com", "pending"}, got["kelvin"])

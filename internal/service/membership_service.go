@@ -10,6 +10,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/emailaddr"
 )
 
 // MembershipService implements the redesign's tenant-membership and
@@ -172,7 +173,7 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 //
 // Email-match policy: a leaked token must not let the wrong account join. The
 // caller is looked up and their email compared to the invitation email, both
-// canonicalized as sign-in canonicalizes an address (CanonicalizeEmail); a
+// canonicalized as sign-in canonicalizes an address (emailaddr.Canonicalize); a
 // mismatch is PermissionDenied. An expired invitation is marked expired and
 // rejected; an unknown/revoked/already-accepted token is
 // rejected without mutation.
@@ -221,7 +222,7 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
-	if CanonicalizeEmail(caller.Email) != CanonicalizeEmail(inv.Email) {
+	if emailaddr.Canonicalize(caller.Email) != emailaddr.Canonicalize(inv.Email) {
 		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
 	}
 

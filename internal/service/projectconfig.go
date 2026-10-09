@@ -10,6 +10,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/origin"
+	"github.com/elloloop/identity/pkg/emailaddr"
 )
 
 // ProjectConfig is the typed view of a project's config_json blob. It is the
@@ -591,12 +592,12 @@ type ProjectAccessConfig struct {
 
 	// AllowedEmails is the explicit per-address allowlist for AccessModeAllowlist.
 	// Entries are validated as well-formed emails and canonicalized
-	// (CanonicalizeEmail) at parse time, so a listed alice.smith+tag@gmail.com
+	// (emailaddr.Canonicalize) at parse time, so a listed alice.smith+tag@gmail.com
 	// matches a login as alicesmith@gmail.com.
 	AllowedEmails []string `json:"allowed_emails"`
 
 	// AllowedDomains is the allowlist of email domains (the part after '@') for
-	// AccessModeAllowlist. Entries are canonicalized (canonicalizeDomain —
+	// AccessModeAllowlist. Entries are canonicalized (emailaddr.CanonicalizeDomain —
 	// lower-cased, IDN-punycoded, googlemail.com folded to gmail.com) at parse
 	// time. A user whose email domain is listed is permitted even when their
 	// exact address is absent from AllowedEmails.
@@ -831,7 +832,7 @@ func validateEmailEntries(field string, entries []string) error {
 // validateDomainEntries applies the one rule for "what makes a configured
 // domain entry valid", shared by allowed_domains and blocked_domains.
 //
-// The decisive check is the last one: an entry must survive canonicalizeDomain
+// The decisive check is the last one: an entry must survive emailaddr.CanonicalizeDomain
 // UNCHANGED. Matching compares a config entry against an address's canonical
 // domain, so an entry that canonicalization cannot normalize into that form can
 // never equal anything — "*.rival.example", ".rival.example", "rival..example"
@@ -852,7 +853,7 @@ func validateDomainEntries(field string, entries []string) error {
 		if !strings.Contains(d, ".") {
 			return fmt.Errorf("%s entry %q must be a domain containing a dot", field, raw)
 		}
-		if !isBareDomainName(canonicalizeDomain(d)) {
+		if !isBareDomainName(emailaddr.CanonicalizeDomain(d)) {
 			return fmt.Errorf(
 				"%s entry %q is not a bare domain name — it cannot match any address and would silently do nothing "+
 					"(no wildcards, leading/doubled dots, scheme or path)", field, raw,
@@ -871,7 +872,7 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 	if len(a.AllowedEmails) > 0 {
 		out.AllowedEmails = make([]string, 0, len(a.AllowedEmails))
 		for _, e := range a.AllowedEmails {
-			out.AllowedEmails = append(out.AllowedEmails, CanonicalizeEmail(e))
+			out.AllowedEmails = append(out.AllowedEmails, emailaddr.Canonicalize(e))
 		}
 	}
 	if len(a.AllowedDomains) > 0 {
@@ -884,7 +885,7 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 	if len(a.ExemptEmails) > 0 {
 		out.ExemptEmails = make([]string, 0, len(a.ExemptEmails))
 		for _, e := range a.ExemptEmails {
-			out.ExemptEmails = append(out.ExemptEmails, CanonicalizeEmail(e))
+			out.ExemptEmails = append(out.ExemptEmails, emailaddr.Canonicalize(e))
 		}
 	}
 	return out
@@ -895,9 +896,9 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 // them, no empty or over-long label, no leading or trailing hyphen.
 //
 // It is checked against the canonical form rather than the raw entry because
-// canonicalizeDomain punycodes IDN labels — "café.example" is a legitimate
+// emailaddr.CanonicalizeDomain punycodes IDN labels — "café.example" is a legitimate
 // entry whose canonical form is ASCII. It also means an entry idna could not
-// convert (canonicalizeDomain returns such input unchanged) is caught here
+// convert (emailaddr.CanonicalizeDomain returns such input unchanged) is caught here
 // rather than stored as a rule that matches nothing.
 func isBareDomainName(d string) bool {
 	if d == "" || len(d) > 253 {
@@ -933,7 +934,7 @@ func isBareDomainName(d string) bool {
 func canonicalizeDomains(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, d := range in {
-		out = append(out, canonicalizeDomain(d))
+		out = append(out, emailaddr.CanonicalizeDomain(d))
 	}
 	return out
 }
