@@ -172,7 +172,11 @@ import { Code } from "astro-expressive-code/components";
     once — never by position. Its
     <code>email</code> is the address the account has on file, which can
     differ from the spelling you sent in case, a <code>+tag</code> or Gmail
-    dots.
+    dots. A Go service that stores the addresses it looks up can key them by
+    <code>emailaddr.Canonicalize</code> from
+    <code>github.com/elloloop/identity/pkg/emailaddr</code>, the same rule
+    the lookup applies, so a stored spelling and the account it names always
+    compare equal.
   </p>
   <p>
     A missing, wrong, revoked or non-directory key is

@@ -98,7 +98,7 @@ func (a ProjectAccountsConfig) canonicalized() ProjectAccountsConfig {
 }
 
 // canonicalAccountDomain lower-cases and trims a domain, drops a trailing
-// dot and punycodes IDN labels. Unlike canonicalizeDomain it folds no
+// dot and punycodes IDN labels. Unlike emailaddr.CanonicalizeDomain it folds no
 // provider aliases: this is the project's own domain, not one to match a
 // login address against.
 func canonicalAccountDomain(domain string) string {

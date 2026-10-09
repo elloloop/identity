@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/emailaddr"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -704,14 +705,14 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 		return nil, ErrUnimplemented
 	}
 	if s.disableFirstAdminBootstrap {
-		s.recordBootstrapBlocked(ctx, CanonicalizeEmail(email), bootstrapBlockedDisabled)
+		s.recordBootstrapBlocked(ctx, emailaddr.Canonicalize(email), bootstrapBlockedDisabled)
 		return nil, ErrFirstAdminBootstrapDisabled
 	}
 	// When an admin secret is configured the bootstrap is gated on it too, so a
 	// fresh internet-exposed deployment cannot have an anonymous caller win the
 	// first-admin race. TOFU stays zero-config ONLY when no secret is set.
 	if s.secret != "" && subtle.ConstantTimeCompare([]byte(secret), []byte(s.secret)) != 1 {
-		s.recordBootstrapBlocked(ctx, CanonicalizeEmail(email), bootstrapBlockedSecretDenied)
+		s.recordBootstrapBlocked(ctx, emailaddr.Canonicalize(email), bootstrapBlockedSecretDenied)
 		return nil, ErrPermissionDenied
 	}
 	email = strings.TrimSpace(email)
