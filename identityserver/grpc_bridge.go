@@ -346,6 +346,22 @@ func (b *grpcBridge) TransferAgent(ctx context.Context, in *identitypb.TransferA
 	return invoke(ctx, b, in, b.h.TransferAgent)
 }
 
+func (b *grpcBridge) AcceptAgentTransfer(ctx context.Context, in *identitypb.AcceptAgentTransferRequest) (*identitypb.AcceptAgentTransferResponse, error) {
+	return invoke(ctx, b, in, b.h.AcceptAgentTransfer)
+}
+
+func (b *grpcBridge) DeclineAgentTransfer(ctx context.Context, in *identitypb.DeclineAgentTransferRequest) (*identitypb.DeclineAgentTransferResponse, error) {
+	return invoke(ctx, b, in, b.h.DeclineAgentTransfer)
+}
+
+func (b *grpcBridge) CancelAgentTransfer(ctx context.Context, in *identitypb.CancelAgentTransferRequest) (*identitypb.CancelAgentTransferResponse, error) {
+	return invoke(ctx, b, in, b.h.CancelAgentTransfer)
+}
+
+func (b *grpcBridge) ListIncomingAgentTransfers(ctx context.Context, in *identitypb.ListIncomingAgentTransfersRequest) (*identitypb.ListIncomingAgentTransfersResponse, error) {
+	return invoke(ctx, b, in, b.h.ListIncomingAgentTransfers)
+}
+
 func (b *grpcBridge) DeactivateAgent(ctx context.Context, in *identitypb.DeactivateAgentRequest) (*identitypb.DeactivateAgentResponse, error) {
 	return invoke(ctx, b, in, b.h.DeactivateAgent)
 }

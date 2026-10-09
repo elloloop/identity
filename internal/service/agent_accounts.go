@@ -87,13 +87,18 @@ type agentOperation struct {
 }
 
 var (
-	agentOpCreate     = agentOperation{audit.EventAgentCreated}
-	agentOpUpdate     = agentOperation{audit.EventAgentUpdated}
-	agentOpTransfer   = agentOperation{audit.EventAgentTransferred}
-	agentOpDeactivate = agentOperation{audit.EventAgentDeactivated}
-	agentOpReactivate = agentOperation{audit.EventAgentReactivated}
-	agentOpDelete     = agentOperation{audit.EventAgentDeleted}
-	agentOpList       = agentOperation{audit.EventAgentsListed}
+	agentOpCreate   = agentOperation{audit.EventAgentCreated}
+	agentOpUpdate   = agentOperation{audit.EventAgentUpdated}
+	agentOpTransfer = agentOperation{audit.EventAgentTransferred}
+	// The offer, decline and cancel steps of a transfer; the transfer
+	// itself (an accepted offer, or an orphan reassigned) is agentOpTransfer.
+	agentOpTransferRequest = agentOperation{audit.EventAgentTransferRequested}
+	agentOpTransferDecline = agentOperation{audit.EventAgentTransferDeclined}
+	agentOpTransferCancel  = agentOperation{audit.EventAgentTransferCancelled}
+	agentOpDeactivate      = agentOperation{audit.EventAgentDeactivated}
+	agentOpReactivate      = agentOperation{audit.EventAgentReactivated}
+	agentOpDelete          = agentOperation{audit.EventAgentDeleted}
+	agentOpList            = agentOperation{audit.EventAgentsListed}
 )
 
 // auditAgentAction records one agent management operation. Refusals carry
@@ -126,26 +131,48 @@ func isEligibleAgentOwner(u *User) bool {
 	return isPermanentPerson(u) && isActiveStatus(u.Status)
 }
 
-// checkAgentStanding returns nil when the agent may hold a session now, and
-// ErrAccountNotActive otherwise: the agent itself is not active, or its
-// owner is missing, not active, merged away, anonymous or not a person. It
-// is evaluated on every token issue, so an owner's suspension or deletion
-// takes effect at the agent's next refresh at the latest.
+// checkAgentStanding returns nil when the agent may hold a session now. It
+// refuses (ErrAccountNotActive) when the agent itself is not active or its
+// owner is missing, not active, merged away, anonymous or not a person.
+//
+// An agent can never do more than its owner, so it is ADMITTED as its owner
+// is: the project's access mode and deny layer judge the owner, and where
+// the deployment requires identity verification the owner's verification
+// is the one that counts (an agent cannot verify anyone). It is evaluated on
+// every token issue, so a change to the owner's standing or admission takes
+// effect at the agent's next refresh at the latest.
 func (s *AuthService) checkAgentStanding(ctx context.Context, agent *User) error {
 	if !isActiveStatus(agent.Status) {
 		return ErrAccountNotActive
 	}
+	owner, err := s.agentOwner(ctx, agent)
+	if err != nil {
+		return err
+	}
+	if err := s.enforceAccountAccessLogin(ctx, owner); err != nil {
+		return err
+	}
+	if s.cfg != nil && s.cfg.IDVRequired && !owner.IDVVerified {
+		return fmt.Errorf("%w: the agent's owner has not completed identity verification", ErrIDVRequired)
+	}
+	return nil
+}
+
+// agentOwner returns the agent's owner when that owner may stand behind a
+// session now (an active permanent person), and errAgentOwnerNotActive
+// otherwise.
+func (s *AuthService) agentOwner(ctx context.Context, agent *User) (*User, error) {
 	if agent.OwnerUserID == "" {
-		return errAgentOwnerNotActive
+		return nil, errAgentOwnerNotActive
 	}
 	owner, err := s.repo(ctx).GetUser(ctx, agent.OwnerUserID)
 	if err != nil {
-		return fmt.Errorf("fetch agent owner: %w", err)
+		return nil, fmt.Errorf("fetch agent owner: %w", err)
 	}
 	if !isEligibleAgentOwner(owner) {
-		return errAgentOwnerNotActive
+		return nil, errAgentOwnerNotActive
 	}
-	return nil
+	return owner, nil
 }
 
 // refuseAgentSignIn is the interactive sign-in refusal, run at the sign-in
@@ -368,10 +395,20 @@ func (s *AuthService) UpdateAgent(
 	return agent, nil
 }
 
-// TransferAgent hands an agent to another owner: an active person in this
-// project, under the per-owner cap. The agent's sessions end, so nothing
-// the previous owner set up keeps acting under the new owner's standing.
-// Transferring to the current owner is a no-op.
+// TransferAgent offers an agent to another owner: an active person in this
+// project. Ownership does not change here. The offer is recorded as the
+// agent's pending owner, and the agent stays with its current owner, usable
+// under their standing, until the recipient accepts it (AcceptAgentTransfer)
+// or declines it, or the owner or a project admin cancels it. A new offer
+// replaces an earlier one. The per-owner cap is checked when the recipient
+// accepts, not here, because the recipient's count can change in between.
+//
+// The one exception is an orphan: an agent whose owner no longer exists.
+// Nobody is left to make or take part in the handover, so a project admin's
+// transfer of an orphan takes effect at once, under the recipient's cap.
+//
+// Transferring to the current owner is a no-op and leaves any pending offer
+// as it is.
 func (s *AuthService) TransferAgent(
 	ctx context.Context, callerID, agentID, newOwnerID, ip, userAgent string,
 ) (*User, error) {
@@ -398,15 +435,64 @@ func (s *AuthService) TransferAgent(
 			map[string]any{"step": "owner_not_eligible"})
 		return nil, errAgentOwnerNotEligible
 	}
-	if err := s.checkAgentCapacity(ctx, newOwner.ID); err != nil {
-		s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
-			map[string]any{"step": "limit_reached", "owner_user_id": newOwner.ID})
+	orphan, err := s.isOrphanAgent(ctx, agent)
+	if err != nil {
 		return nil, err
+	}
+	// authorizeAgentAction admitted the caller as the owner or an admin; an
+	// orphan has no owner, so only an admin reaches this branch.
+	if orphan {
+		return s.reassignOrphanAgent(ctx, callerID, agent, newOwner.ID, ip, userAgent)
 	}
 	now := s.nowMs()
 	if err := repo.UpdateUser(ctx, agent.ID, map[string]any{
-		"owner_user_id": newOwner.ID,
-		"updated_at":    now,
+		"pending_owner_user_id": newOwner.ID,
+		"updated_at":            now,
+	}); err != nil {
+		return nil, fmt.Errorf("offer agent transfer: %w", err)
+	}
+	replaced := agent.PendingOwnerUserID
+	agent.PendingOwnerUserID, agent.UpdatedAt = newOwner.ID, time.UnixMilli(now)
+	details := map[string]any{"owner_user_id": agent.OwnerUserID, "pending_owner_user_id": newOwner.ID}
+	if replaced != "" && replaced != newOwner.ID {
+		details["replaced_pending_owner_user_id"] = replaced
+	}
+	s.auditAgentAction(ctx, agentOpTransferRequest, callerID, agent.ID, true, ip, userAgent, details)
+	s.emitAgentEvent(ctx, events.EventUserUpdated, agent)
+	return agent, nil
+}
+
+// isOrphanAgent reports whether the agent's owner no longer exists as a
+// person in this project. A suspended or deletion-scheduled owner still
+// exists (and may come back), so their agents are not orphans.
+func (s *AuthService) isOrphanAgent(ctx context.Context, agent *User) (bool, error) {
+	if agent.OwnerUserID == "" {
+		return true, nil
+	}
+	owner, err := s.repo(ctx).GetUser(ctx, agent.OwnerUserID)
+	if err != nil {
+		return false, fmt.Errorf("fetch agent owner: %w", err)
+	}
+	return !isPermanentPerson(owner), nil
+}
+
+// reassignOrphanAgent gives an orphaned agent to newOwnerID at once. It
+// clears any pending offer and ends the agent's sessions, so nothing set up
+// before the reassignment acts under the new owner's standing.
+func (s *AuthService) reassignOrphanAgent(
+	ctx context.Context, callerID string, agent *User, newOwnerID, ip, userAgent string,
+) (*User, error) {
+	if err := s.checkAgentCapacity(ctx, newOwnerID); err != nil {
+		s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
+			map[string]any{"step": "limit_reached", "owner_user_id": newOwnerID})
+		return nil, err
+	}
+	repo := s.repo(ctx)
+	now := s.nowMs()
+	if err := repo.UpdateUser(ctx, agent.ID, map[string]any{
+		"owner_user_id":         newOwnerID,
+		"pending_owner_user_id": "",
+		"updated_at":            now,
 	}); err != nil {
 		return nil, fmt.Errorf("transfer agent: %w", err)
 	}
@@ -414,11 +500,140 @@ func (s *AuthService) TransferAgent(
 		return nil, fmt.Errorf("transfer agent: %w", err)
 	}
 	previous := agent.OwnerUserID
-	agent.OwnerUserID, agent.UpdatedAt = newOwner.ID, time.UnixMilli(now)
+	agent.OwnerUserID, agent.PendingOwnerUserID, agent.UpdatedAt = newOwnerID, "", time.UnixMilli(now)
 	s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, true, ip, userAgent,
-		map[string]any{"previous_owner_user_id": previous, "owner_user_id": newOwner.ID})
+		map[string]any{"previous_owner_user_id": previous, "owner_user_id": newOwnerID, "orphan": true})
 	s.emitAgentEvent(ctx, events.EventUserUpdated, agent)
 	return agent, nil
+}
+
+// pendingTransferTo resolves an agent offered to the caller. Every other
+// case (no such agent, not an agent, no offer, an offer to someone else)
+// gets the identical ErrPermissionDenied, so the recipient operations are
+// not an enumeration oracle either. A project admin cannot answer an offer
+// on someone else's behalf: consent is the recipient's.
+func (s *AuthService) pendingTransferTo(
+	ctx context.Context, op agentOperation, callerID, agentID, ip, userAgent string,
+) (*User, *User, error) {
+	agentID = strings.TrimSpace(agentID)
+	caller, _, err := s.agentCaller(ctx, op, callerID, agentID, ip, userAgent)
+	if err != nil {
+		return nil, nil, err
+	}
+	if agentID == "" {
+		return nil, nil, fmt.Errorf("%w: agent_user_id is required", ErrInvalidArgument)
+	}
+	agent, err := s.repo(ctx).GetUser(ctx, agentID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch agent: %w", err)
+	}
+	if !agent.IsAgent() || agent.PendingOwnerUserID == "" || agent.PendingOwnerUserID != caller.ID {
+		s.auditAgentAction(ctx, op, callerID, agentID, false, ip, userAgent,
+			map[string]any{"step": "not_permitted"})
+		return nil, nil, fmt.Errorf("%w: %s", ErrPermissionDenied, agentRefusalNotAllowed)
+	}
+	return caller, agent, nil
+}
+
+// settleAgentTransfer applies the recipient's or the sender's answer to an
+// offer as one conditional write. It fails with the uniform refusal when
+// the offer changed since it was read (cancelled, replaced or answered by a
+// concurrent request), so an answer never lands on an offer it did not see.
+func (s *AuthService) settleAgentTransfer(
+	ctx context.Context, op agentOperation, callerID string, agent *User, accept bool, now int64, ip, userAgent string,
+) error {
+	ok, err := s.repo(ctx).SettleAgentTransfer(ctx, agent.ID, agent.PendingOwnerUserID, accept, now)
+	if err != nil {
+		return fmt.Errorf("settle agent transfer: %w", err)
+	}
+	if !ok {
+		s.auditAgentAction(ctx, op, callerID, agent.ID, false, ip, userAgent,
+			map[string]any{"step": "offer_changed"})
+		return fmt.Errorf("%w: %s", ErrPermissionDenied, agentRefusalNotAllowed)
+	}
+	return nil
+}
+
+// AcceptAgentTransfer takes ownership of an agent offered to the caller,
+// under the caller's per-owner cap. The agent's sessions end, so nothing
+// the previous owner set up keeps acting under the new owner's standing.
+func (s *AuthService) AcceptAgentTransfer(ctx context.Context, callerID, agentID, ip, userAgent string) (*User, error) {
+	caller, agent, err := s.pendingTransferTo(ctx, agentOpTransfer, callerID, agentID, ip, userAgent)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkAgentCapacity(ctx, caller.ID); err != nil {
+		s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
+			map[string]any{"step": "limit_reached", "owner_user_id": caller.ID})
+		return nil, err
+	}
+	now := s.nowMs()
+	if err := s.settleAgentTransfer(ctx, agentOpTransfer, callerID, agent, true, now, ip, userAgent); err != nil {
+		return nil, err
+	}
+	if err := revokeAllUserSessions(ctx, s.repo(ctx), agent.ID, now); err != nil {
+		return nil, fmt.Errorf("transfer agent: %w", err)
+	}
+	previous := agent.OwnerUserID
+	agent.OwnerUserID, agent.PendingOwnerUserID, agent.UpdatedAt = caller.ID, "", time.UnixMilli(now)
+	s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, true, ip, userAgent,
+		map[string]any{"previous_owner_user_id": previous, "owner_user_id": caller.ID})
+	s.emitAgentEvent(ctx, events.EventUserUpdated, agent)
+	return agent, nil
+}
+
+// DeclineAgentTransfer refuses an agent offered to the caller. The agent
+// stays with its owner.
+func (s *AuthService) DeclineAgentTransfer(ctx context.Context, callerID, agentID, ip, userAgent string) (*User, error) {
+	_, agent, err := s.pendingTransferTo(ctx, agentOpTransferDecline, callerID, agentID, ip, userAgent)
+	if err != nil {
+		return nil, err
+	}
+	now := s.nowMs()
+	if err := s.settleAgentTransfer(ctx, agentOpTransferDecline, callerID, agent, false, now, ip, userAgent); err != nil {
+		return nil, err
+	}
+	declined := agent.PendingOwnerUserID
+	agent.PendingOwnerUserID, agent.UpdatedAt = "", time.UnixMilli(now)
+	s.auditAgentAction(ctx, agentOpTransferDecline, callerID, agent.ID, true, ip, userAgent,
+		map[string]any{"owner_user_id": agent.OwnerUserID, "pending_owner_user_id": declined})
+	s.emitAgentEvent(ctx, events.EventUserUpdated, agent)
+	return agent, nil
+}
+
+// CancelAgentTransfer withdraws an agent's pending offer. The owner and a
+// project admin may cancel; an agent with no offer is returned as it is.
+func (s *AuthService) CancelAgentTransfer(ctx context.Context, callerID, agentID, ip, userAgent string) (*User, error) {
+	agent, err := s.authorizeAgentAction(ctx, agentOpTransferCancel, callerID, agentID, ip, userAgent)
+	if err != nil {
+		return nil, err
+	}
+	if agent.PendingOwnerUserID == "" {
+		s.auditAgentAction(ctx, agentOpTransferCancel, callerID, agent.ID, true, ip, userAgent,
+			map[string]any{"unchanged": true})
+		return agent, nil
+	}
+	now := s.nowMs()
+	if err := s.settleAgentTransfer(ctx, agentOpTransferCancel, callerID, agent, false, now, ip, userAgent); err != nil {
+		return nil, err
+	}
+	cancelled := agent.PendingOwnerUserID
+	agent.PendingOwnerUserID, agent.UpdatedAt = "", time.UnixMilli(now)
+	s.auditAgentAction(ctx, agentOpTransferCancel, callerID, agent.ID, true, ip, userAgent,
+		map[string]any{"owner_user_id": agent.OwnerUserID, "pending_owner_user_id": cancelled})
+	s.emitAgentEvent(ctx, events.EventUserUpdated, agent)
+	return agent, nil
+}
+
+// ListIncomingAgentTransfers returns the agents offered to the caller and
+// not yet answered. It lists only the caller's own offers, so it is not
+// logged, like an owner listing their own agents.
+func (s *AuthService) ListIncomingAgentTransfers(ctx context.Context, callerID string) ([]*User, error) {
+	caller, _, err := s.agentCaller(ctx, agentOpList, callerID, "", "", "")
+	if err != nil {
+		return nil, err
+	}
+	return listAgents(ctx, s.repo(ctx), UserListFilter{PendingOwnerUserID: caller.ID})
 }
 
 // DeactivateAgent suspends an agent and ends its sessions at once. It is
@@ -537,20 +752,24 @@ func RevokeUserAccess(ctx context.Context, repo Repository, userID string, nowMs
 	return nil
 }
 
-// listOwnedAgents returns every agent ownerID owns, page by page: a merge
-// can leave an owner holding more than the per-owner cap, so no single page
-// is assumed to be all of them.
+// listOwnedAgents returns every agent ownerID owns.
 func listOwnedAgents(ctx context.Context, repo Repository, ownerID string) ([]*User, error) {
+	return listAgents(ctx, repo, UserListFilter{OwnerUserID: ownerID})
+}
+
+// listAgents returns every agent matching filter (an owner or a pending
+// owner), page by page: a merge can leave an account holding more than the
+// per-owner cap, so no single page is assumed to be all of them.
+func listAgents(ctx context.Context, repo Repository, filter UserListFilter) ([]*User, error) {
+	// An agent is never anonymous; including anonymous accounts keeps the
+	// query to the owner indexes alone.
+	filter.IncludeAgents, filter.IncludeAnonymous, filter.Limit = true, true, MaxUserListLimit
 	var out []*User
 	for {
-		page, err := repo.ListUsers(ctx, UserListFilter{
-			// An agent is never anonymous; including anonymous accounts
-			// keeps the query to the owner index alone.
-			IncludeAgents: true, IncludeAnonymous: true, OwnerUserID: ownerID,
-			Offset: len(out), Limit: MaxUserListLimit,
-		})
+		filter.Offset = len(out)
+		page, err := repo.ListUsers(ctx, filter)
 		if err != nil {
-			return nil, fmt.Errorf("list owned agents: %w", err)
+			return nil, fmt.Errorf("list agents: %w", err)
 		}
 		out = append(out, page...)
 		if len(page) < MaxUserListLimit {

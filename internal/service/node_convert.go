@@ -34,6 +34,7 @@ func userFromNode(n *graph.Node) *User {
 		Username:               pstr(p, ufUsername),
 		Kind:                   pstrOr(p, ufKind, UserKindPerson),
 		OwnerUserID:            pstr(p, ufOwnerUserID),
+		PendingOwnerUserID:     pstr(p, ufPendingOwnerUserID),
 	}
 }
 

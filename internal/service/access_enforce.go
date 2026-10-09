@@ -117,7 +117,18 @@ func (s *AuthService) enforceProjectAccess(ctx context.Context, email canonicalE
 // child keeps signing in under every mode: whether it may exist was settled by
 // its guardian's standing (CreateManagedChildAccount succeeds under
 // invite/closed), and its guardian edge is what identifies it.
+//
+// An agent account has neither an email nor a username: it is admitted
+// exactly as its owner is, because an agent can never do more than its
+// owner. An agent whose owner may not hold a session is refused outright.
 func (s *AuthService) enforceAccountAccessLogin(ctx context.Context, user *User) error {
+	if user.IsAgent() {
+		owner, err := s.agentOwner(ctx, user)
+		if err != nil {
+			return err
+		}
+		return s.enforceAccountAccessLogin(ctx, owner)
+	}
 	if user.Email != "" || user.Username == "" {
 		return s.enforceProjectAccessLogin(ctx, canonicalize(user.Email))
 	}

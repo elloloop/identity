@@ -263,6 +263,10 @@ func allAgentOps() []agentOpCase {
 			_, err := f.svc.TransferAgent(ctx, c, a, f.admin.ID, "", "")
 			return err
 		}},
+		{"cancel_transfer", func(f *agentFixture, c, a string) error {
+			_, err := f.svc.CancelAgentTransfer(ctx, c, a, "", "")
+			return err
+		}},
 		{"deactivate", func(f *agentFixture, c, a string) error {
 			return f.svc.DeactivateAgent(ctx, c, a, "", "", "")
 		}},
@@ -444,7 +448,9 @@ func TestUpdateAgent_ReplacesNameAndAvatar(t *testing.T) {
 
 // ── TransferAgent ──────────────────────────────────────────────────────
 
-func TestTransferAgent(t *testing.T) {
+// A transfer is an offer: the agent stays with its owner, usable under
+// their standing, until the recipient accepts.
+func TestTransferAgent_IsAnOffer(t *testing.T) {
 	f := newAgentFixture(t)
 	ctx := context.Background()
 	agent := seedAgent(f.repo, f.owner.ID)
@@ -452,18 +458,196 @@ func TestTransferAgent(t *testing.T) {
 
 	got, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
-	assert.Equal(t, f.stranger.ID, got.OwnerUserID)
+	assert.Equal(t, f.owner.ID, got.OwnerUserID)
+	assert.Equal(t, f.stranger.ID, got.PendingOwnerUserID)
 	stored, _ := f.repo.GetUser(ctx, agent.ID)
-	assert.Equal(t, f.stranger.ID, stored.OwnerUserID)
-	assert.False(t, liveSessions(f.repo, agent.ID), "a transfer ends the agent's sessions")
+	assert.Equal(t, f.owner.ID, stored.OwnerUserID, "ownership waits for the recipient")
+	assert.Equal(t, f.stranger.ID, stored.PendingOwnerUserID)
+	assert.True(t, liveSessions(f.repo, agent.ID), "an offer leaves the agent's sessions alone")
+	assert.Equal(t, 1, f.writer.countByEventTypeActorTarget(string(audit.EventAgentTransferRequested), f.owner.ID, agent.ID))
+	assert.Zero(t, f.writer.countByEventTypeActorTarget(string(audit.EventAgentTransferred), f.owner.ID, agent.ID))
 
-	// The previous owner has lost it.
-	_, err = f.svc.UpdateAgent(ctx, f.owner.ID, agent.ID, "Mine", "", "", "")
+	// The owner still manages it; the recipient does not yet.
+	_, err = f.svc.UpdateAgent(ctx, f.owner.ID, agent.ID, "Still mine", "", "", "")
+	require.NoError(t, err)
+	_, err = f.svc.UpdateAgent(ctx, f.stranger.ID, agent.ID, "Mine", "", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 
-	// To the current owner: a no-op.
-	_, err = f.svc.TransferAgent(ctx, f.stranger.ID, agent.ID, f.stranger.ID, "", "")
+	// To the current owner: a no-op that leaves the offer standing.
+	_, err = f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.owner.ID, "", "")
 	require.NoError(t, err)
+	stored, _ = f.repo.GetUser(ctx, agent.ID)
+	assert.Equal(t, f.stranger.ID, stored.PendingOwnerUserID)
+}
+
+func TestAcceptAgentTransfer(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	agent := seedAgent(f.repo, f.owner.ID)
+	seedChildSession(t, f.repo, agent.ID)
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	require.NoError(t, err)
+
+	incoming, err := f.svc.ListIncomingAgentTransfers(ctx, f.stranger.ID)
+	require.NoError(t, err)
+	require.Len(t, incoming, 1)
+	assert.Equal(t, agent.ID, incoming[0].ID)
+
+	got, err := f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, f.stranger.ID, got.OwnerUserID)
+	assert.Empty(t, got.PendingOwnerUserID)
+	stored, _ := f.repo.GetUser(ctx, agent.ID)
+	assert.Equal(t, f.stranger.ID, stored.OwnerUserID)
+	assert.Empty(t, stored.PendingOwnerUserID)
+	assert.False(t, liveSessions(f.repo, agent.ID), "an accepted transfer ends the agent's sessions")
+	assert.Equal(t, 1, f.writer.countByEventTypeActorTarget(string(audit.EventAgentTransferred), f.stranger.ID, agent.ID))
+
+	incoming, err = f.svc.ListIncomingAgentTransfers(ctx, f.stranger.ID)
+	require.NoError(t, err)
+	assert.Empty(t, incoming)
+
+	// The previous owner has lost it; accepting again is refused.
+	_, err = f.svc.UpdateAgent(ctx, f.owner.ID, agent.ID, "Mine", "", "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+}
+
+// Only the recipient may answer an offer; everyone else, a project admin
+// and the owner included, gets the uniform refusal, and nothing changes.
+func TestAgentTransferAnswer_OnlyTheRecipient(t *testing.T) {
+	answers := map[string]func(f *agentFixture, caller, agentID string) error{
+		"accept": func(f *agentFixture, c, a string) error {
+			_, err := f.svc.AcceptAgentTransfer(context.Background(), c, a, "", "")
+			return err
+		},
+		"decline": func(f *agentFixture, c, a string) error {
+			_, err := f.svc.DeclineAgentTransfer(context.Background(), c, a, "", "")
+			return err
+		},
+	}
+	for name, answer := range answers {
+		t.Run(name, func(t *testing.T) {
+			f := newAgentFixture(t)
+			ctx := context.Background()
+			agent := seedAgent(f.repo, f.owner.ID)
+			unoffered := seedAgent(f.repo, f.owner.ID)
+			sibling := seedAgent(f.repo, f.owner.ID)
+			_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+			require.NoError(t, err)
+
+			var msgs []string
+			for _, tc := range []struct{ caller, target string }{
+				{f.owner.ID, agent.ID},
+				{f.admin.ID, agent.ID},
+				{sibling.ID, agent.ID},
+				{f.stranger.ID, unoffered.ID},
+				{f.stranger.ID, f.owner.ID},
+				{f.stranger.ID, "no-such-user"},
+			} {
+				err := answer(f, tc.caller, tc.target)
+				require.ErrorIs(t, err, ErrPermissionDenied, tc)
+				msgs = append(msgs, err.Error())
+			}
+			for _, m := range msgs[1:] {
+				assert.Equal(t, msgs[0], m)
+			}
+			require.ErrorIs(t, answer(f, "", agent.ID), ErrUnauthenticated)
+			require.ErrorIs(t, answer(f, f.stranger.ID, " "), ErrInvalidArgument)
+
+			stored, _ := f.repo.GetUser(ctx, agent.ID)
+			assert.Equal(t, f.owner.ID, stored.OwnerUserID)
+			assert.Equal(t, f.stranger.ID, stored.PendingOwnerUserID)
+		})
+	}
+}
+
+func TestDeclineAgentTransfer(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	agent := seedAgent(f.repo, f.owner.ID)
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	require.NoError(t, err)
+
+	got, err := f.svc.DeclineAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, f.owner.ID, got.OwnerUserID)
+	assert.Empty(t, got.PendingOwnerUserID)
+	stored, _ := f.repo.GetUser(ctx, agent.ID)
+	assert.Equal(t, f.owner.ID, stored.OwnerUserID)
+	assert.Empty(t, stored.PendingOwnerUserID)
+	assert.Equal(t, 1, f.writer.countByEventTypeActorTarget(string(audit.EventAgentTransferDeclined), f.stranger.ID, agent.ID))
+
+	_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied, "a declined offer cannot be accepted")
+}
+
+func TestCancelAgentTransfer(t *testing.T) {
+	for _, who := range []string{"owner", "admin"} {
+		t.Run(who, func(t *testing.T) {
+			f := newAgentFixture(t)
+			ctx := context.Background()
+			agent := seedAgent(f.repo, f.owner.ID)
+			_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+			require.NoError(t, err)
+			caller := f.owner.ID
+			if who == "admin" {
+				caller = f.admin.ID
+			}
+
+			got, err := f.svc.CancelAgentTransfer(ctx, caller, agent.ID, "", "")
+			require.NoError(t, err)
+			assert.Empty(t, got.PendingOwnerUserID)
+			stored, _ := f.repo.GetUser(ctx, agent.ID)
+			assert.Equal(t, f.owner.ID, stored.OwnerUserID)
+			assert.Empty(t, stored.PendingOwnerUserID)
+			assert.Equal(t, 1, f.writer.countByEventTypeActorTarget(string(audit.EventAgentTransferCancelled), caller, agent.ID))
+
+			_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
+			require.ErrorIs(t, err, ErrPermissionDenied, "a cancelled offer cannot be accepted")
+			// Cancelling again: nothing pending, the agent comes back as it is.
+			_, err = f.svc.CancelAgentTransfer(ctx, caller, agent.ID, "", "")
+			require.NoError(t, err)
+		})
+	}
+}
+
+// A new offer replaces a pending one: the first recipient can no longer
+// accept.
+func TestTransferAgent_ReplacesAPendingOffer(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	agent := seedAgent(f.repo, f.owner.ID)
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	require.NoError(t, err)
+	_, err = f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.admin.ID, "", "")
+	require.NoError(t, err)
+
+	_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	got, err := f.svc.AcceptAgentTransfer(ctx, f.admin.ID, agent.ID, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, f.admin.ID, got.OwnerUserID)
+}
+
+// An answer lands only on the offer it read: an offer withdrawn between the
+// read and the write is refused, not applied.
+func TestAcceptAgentTransfer_StaleOfferRefused(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	agent := seedAgent(f.repo, f.owner.ID)
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	require.NoError(t, err)
+	stale, _ := f.repo.GetUser(ctx, agent.ID)
+	staleCopy := *stale
+	_, err = f.svc.CancelAgentTransfer(ctx, f.owner.ID, agent.ID, "", "")
+	require.NoError(t, err)
+
+	err = f.svc.settleAgentTransfer(ctx, agentOpTransfer, f.stranger.ID, &staleCopy, true, f.svc.nowMs(), "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	stored, _ := f.repo.GetUser(ctx, agent.ID)
+	assert.Equal(t, f.owner.ID, stored.OwnerUserID)
 }
 
 func TestTransferAgent_RecipientMustBeEligible(t *testing.T) {
@@ -489,14 +673,94 @@ func TestTransferAgent_RecipientMustBeEligible(t *testing.T) {
 	assert.Equal(t, f.owner.ID, stored.OwnerUserID, "a refused transfer changes nothing")
 }
 
-func TestTransferAgent_RespectsRecipientCap(t *testing.T) {
+// The recipient's cap is checked when they accept, not when the offer is
+// made: their count can change in between.
+func TestAcceptAgentTransfer_RespectsRecipientCap(t *testing.T) {
 	f := newAgentFixture(t)
 	f.svc.cfg.AgentsMaxPerOwner = 1
+	ctx := context.Background()
+	agent := seedAgent(f.repo, f.owner.ID)
+	held := seedAgent(f.repo, f.stranger.ID)
+
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	require.NoError(t, err, "the offer is not capped")
+	_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
+	require.ErrorIs(t, err, ErrAgentLimitReached)
+	stored, _ := f.repo.GetUser(ctx, agent.ID)
+	assert.Equal(t, f.owner.ID, stored.OwnerUserID)
+	assert.Equal(t, f.stranger.ID, stored.PendingOwnerUserID, "a capped accept leaves the offer to retry")
+
+	require.NoError(t, f.svc.DeleteAgent(ctx, f.stranger.ID, held.ID, "", ""))
+	_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
+	require.NoError(t, err)
+}
+
+// An orphan (its owner no longer exists) has nobody to hand it over, so a
+// project admin's transfer takes effect at once, under the recipient's cap.
+func TestTransferAgent_OrphanReassignedByAdmin(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	agent := seedAgent(f.repo, f.owner.ID)
+	seedChildSession(t, f.repo, agent.ID)
+	require.NoError(t, f.repo.DeleteUser(ctx, f.owner.ID))
+
+	got, err := f.svc.TransferAgent(ctx, f.admin.ID, agent.ID, f.stranger.ID, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, f.stranger.ID, got.OwnerUserID)
+	assert.Empty(t, got.PendingOwnerUserID)
+	stored, _ := f.repo.GetUser(ctx, agent.ID)
+	assert.Equal(t, f.stranger.ID, stored.OwnerUserID)
+	assert.Empty(t, stored.PendingOwnerUserID)
+	assert.False(t, liveSessions(f.repo, agent.ID))
+	assert.Equal(t, 1, f.writer.countByEventTypeActorTarget(string(audit.EventAgentTransferred), f.admin.ID, agent.ID))
+	issueAgentTokens(t, f, stored)
+}
+
+func TestTransferAgent_OrphanRespectsRecipientCap(t *testing.T) {
+	f := newAgentFixture(t)
+	f.svc.cfg.AgentsMaxPerOwner = 1
+	ctx := context.Background()
 	agent := seedAgent(f.repo, f.owner.ID)
 	seedAgent(f.repo, f.stranger.ID)
+	require.NoError(t, f.repo.DeleteUser(ctx, f.owner.ID))
 
-	_, err := f.svc.TransferAgent(context.Background(), f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	_, err := f.svc.TransferAgent(ctx, f.admin.ID, agent.ID, f.stranger.ID, "", "")
 	require.ErrorIs(t, err, ErrAgentLimitReached)
+	stored, _ := f.repo.GetUser(ctx, agent.ID)
+	assert.Equal(t, f.owner.ID, stored.OwnerUserID)
+}
+
+// An agent whose owner is suspended is not an orphan: the owner exists and
+// may come back, so an admin's transfer is still an offer.
+func TestTransferAgent_SuspendedOwnerIsNotAnOrphan(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	agent := seedAgent(f.repo, f.owner.ID)
+	f.setStatus(f.owner.ID, StatusDeactivated)
+
+	got, err := f.svc.TransferAgent(ctx, f.admin.ID, agent.ID, f.stranger.ID, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, f.owner.ID, got.OwnerUserID)
+	assert.Equal(t, f.stranger.ID, got.PendingOwnerUserID)
+}
+
+// A merge re-points the offers made to the merged-away account at the
+// survivor, and clears one the survivor would make to itself.
+func TestAccountMerge_RepointsPendingTransfers(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	toOther := seedAgent(f.repo, f.owner.ID)
+	ownedBySurvivor := seedAgent(f.repo, f.admin.ID)
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, toOther.ID, f.stranger.ID, "", "")
+	require.NoError(t, err)
+	_, err = f.svc.TransferAgent(ctx, f.admin.ID, ownedBySurvivor.ID, f.stranger.ID, "", "")
+	require.NoError(t, err)
+
+	require.NoError(t, f.repo.ApplyAccountMerge(ctx, AccountMerge{SurvivorID: f.admin.ID, OtherID: f.stranger.ID, AtMs: 1}))
+	stored, _ := f.repo.GetUser(ctx, toOther.ID)
+	assert.Equal(t, f.admin.ID, stored.PendingOwnerUserID)
+	stored, _ = f.repo.GetUser(ctx, ownedBySurvivor.ID)
+	assert.Empty(t, stored.PendingOwnerUserID)
 }
 
 // ── Deactivate / reactivate / delete ───────────────────────────────────
@@ -639,6 +903,69 @@ func TestAgentStanding_RestoredWithTheOwner(t *testing.T) {
 
 	f.setStatus(f.owner.ID, StatusActive)
 	issueAgentTokens(t, f, agent)
+}
+
+// ── Admission: an agent is admitted as its owner is ──────────────────
+
+// agentAccessScope is a resolved project with the given access config.
+func agentAccessScope(t *testing.T, cfg ProjectAccessConfig) context.Context {
+	t.Helper()
+	access, err := NewProjectAccessConfig(cfg)
+	require.NoError(t, err)
+	return WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-a", Access: access})
+}
+
+// Under every access mode, an agent refreshes exactly when its owner could:
+// the agent has no address of its own for the mode to judge, and can never
+// do more than its owner.
+func TestAgentAdmission_FollowsTheOwner(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cfg   ProjectAccessConfig
+		admit bool
+	}{
+		{"open", ProjectAccessConfig{Mode: AccessModeOpen}, true},
+		{"invite", ProjectAccessConfig{Mode: AccessModeInvite}, true},
+		{"allowlist_owner_listed", ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"owner@example.com"}}, true},
+		{"allowlist_owner_not_listed", ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"stranger@example.com"}}, false},
+		{"open_owner_domain_blocked", ProjectAccessConfig{Mode: AccessModeOpen, BlockedDomains: []string{"example.com"}}, false},
+		{"closed", ProjectAccessConfig{Mode: AccessModeClosed}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAgentFixture(t)
+			agent := seedAgent(f.repo, f.owner.ID)
+			_, refresh := issueAgentTokens(t, f, agent)
+
+			ctx := agentAccessScope(t, tc.cfg)
+			_, _, _, err := f.svc.RefreshToken(ctx, refresh, "", "")
+			if tc.admit {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, ErrAccessNotAllowed)
+			_, _, err = f.svc.issueTokensWithSessionStart(ctx, agent, "", "", 0, 0)
+			require.ErrorIs(t, err, ErrAccessNotAllowed, "the token chokepoint refuses too")
+		})
+	}
+}
+
+// Where identity verification is required, the owner's verification is the
+// one that counts: an agent cannot verify anyone.
+func TestAgentAdmission_IdentityVerificationIsTheOwners(t *testing.T) {
+	f := newAgentFixture(t)
+	agent := seedAgent(f.repo, f.owner.ID)
+	_, refresh := issueAgentTokens(t, f, agent)
+	f.svc.cfg.IDVRequired = true
+
+	_, _, _, err := f.svc.RefreshToken(context.Background(), refresh, "", "")
+	require.ErrorIs(t, err, ErrIDVRequired, "an unverified owner's agent is refused")
+
+	f.repo.mu.Lock()
+	f.repo.users[f.owner.ID].IDVVerified = true
+	f.repo.mu.Unlock()
+	_, refresh = issueAgentTokens(t, f, agent)
+	_, _, _, err = f.svc.RefreshToken(context.Background(), refresh, "", "")
+	require.NoError(t, err, "a verified owner's agent is admitted, unverified itself")
 }
 
 // ── Cascade: a change to the owner's standing cuts the agents off ──────
@@ -970,11 +1297,13 @@ func TestDirectory_NeverReturnsAgents(t *testing.T) {
 // Kind and owner ride on an agent's event only; a person's payload is
 // unchanged.
 func TestToEventUser_KindAndOwner(t *testing.T) {
-	ev := toEventUser(&User{ID: "a", Kind: UserKindAgent, OwnerUserID: "p"})
+	ev := toEventUser(&User{ID: "a", Kind: UserKindAgent, OwnerUserID: "p", PendingOwnerUserID: "q"})
 	assert.Equal(t, UserKindAgent, ev.Kind)
 	assert.Equal(t, "p", ev.OwnerUserID)
+	assert.Equal(t, "q", ev.PendingOwnerUserID)
 
 	ev = toEventUser(&User{ID: "p", Kind: UserKindPerson})
 	assert.Empty(t, ev.Kind)
 	assert.Empty(t, ev.OwnerUserID)
+	assert.Empty(t, ev.PendingOwnerUserID)
 }

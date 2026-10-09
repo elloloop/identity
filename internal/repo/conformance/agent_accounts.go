@@ -17,9 +17,16 @@ import (
 //   - ListUsers and CountUsers leave agents out unless IncludeAgents is set,
 //     and OwnerUserID narrows to one owner's agents (so the per-owner cap
 //     and the owner's access cut-off see the same rows);
-//   - owner_user_id is writable through UpdateUser (a transfer);
-//   - ApplyAccountMerge refuses an agent on either side and re-points the
-//     retired account's agents to the survivor.
+//   - owner_user_id and pending_owner_user_id are writable through
+//     UpdateUser (an orphan's reassignment, a transfer offer), and
+//     PendingOwnerUserID narrows to the agents offered to one person;
+//   - SettleAgentTransfer applies an answer only to the offer it names:
+//     accepting moves the owner, declining keeps it, and both clear the
+//     offer; a stale or absent offer, or a person, changes nothing, and
+//     naming no agent or no pending owner is an error;
+//   - ApplyAccountMerge refuses an agent on either side, re-points the
+//     retired account's agents to the survivor, and re-points offers made to
+//     the retired account (clearing one the survivor would make to itself).
 func runAgentAccountsConformance(t *testing.T, driver Driver) {
 	t.Helper()
 
@@ -147,6 +154,99 @@ func runAgentAccountsConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("PendingOwnerRoundTripAndFilter", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			alice := newPerson(t, ctx, r, "alice-pending@example.com")
+			bob := newPerson(t, ctx, r, "bob-pending@example.com")
+			offered := newAgent(t, ctx, r, alice, "Offered")
+			newAgent(t, ctx, r, alice, "Kept")
+
+			if err := r.UpdateUser(ctx, offered, map[string]any{"pending_owner_user_id": bob}); err != nil {
+				t.Fatalf("UpdateUser(pending_owner_user_id): %v", err)
+			}
+			got, err := r.GetUser(ctx, offered)
+			if err != nil || got == nil || got.PendingOwnerUserID != bob || got.OwnerUserID != alice {
+				t.Fatalf("after offer = (%#v, %v), want owner %q pending %q", got, err, alice, bob)
+			}
+			if p, _ := r.GetUser(ctx, bob); p == nil || p.PendingOwnerUserID != "" {
+				t.Fatalf("person reads back a pending owner: %#v", p)
+			}
+			for _, c := range []struct {
+				name   string
+				filter service.UserListFilter
+				want   []string
+			}{
+				{"pending_bob", service.UserListFilter{IncludeAgents: true, PendingOwnerUserID: bob}, sorted(offered)},
+				{"pending_alice", service.UserListFilter{IncludeAgents: true, PendingOwnerUserID: alice}, nil},
+			} {
+				list, err := r.ListUsers(ctx, c.filter)
+				if err != nil {
+					t.Fatalf("%s: ListUsers: %v", c.name, err)
+				}
+				if !equal(ids(list), c.want) {
+					t.Errorf("%s: ListUsers = %v, want %v", c.name, ids(list), c.want)
+				}
+				if n, err := r.CountUsers(ctx, c.filter); err != nil || n != len(c.want) {
+					t.Errorf("%s: CountUsers = %d, %v, want %d", c.name, n, err, len(c.want))
+				}
+			}
+		})
+
+		t.Run("SettleAgentTransfer", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			alice := newPerson(t, ctx, r, "alice-settle@example.com")
+			bob := newPerson(t, ctx, r, "bob-settle@example.com")
+			carol := newPerson(t, ctx, r, "carol-settle@example.com")
+			offer := func(t *testing.T, agent, to string) {
+				t.Helper()
+				if err := r.UpdateUser(ctx, agent, map[string]any{"pending_owner_user_id": to}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			expect := func(t *testing.T, agent, owner, pending string) {
+				t.Helper()
+				got, err := r.GetUser(ctx, agent)
+				if err != nil || got == nil || got.OwnerUserID != owner || got.PendingOwnerUserID != pending {
+					t.Fatalf("agent = (%#v, %v), want owner %q pending %q", got, err, owner, pending)
+				}
+			}
+			settle := func(t *testing.T, agent, pending string, accept, want bool) {
+				t.Helper()
+				ok, err := r.SettleAgentTransfer(ctx, agent, pending, accept, 5000)
+				if err != nil || ok != want {
+					t.Fatalf("SettleAgentTransfer(%s, %s, %v) = (%v, %v), want %v", agent, pending, accept, ok, err, want)
+				}
+			}
+
+			accepted := newAgent(t, ctx, r, alice, "Accepted")
+			offer(t, accepted, bob)
+			settle(t, accepted, carol, true, false) // names a stale offer
+			expect(t, accepted, alice, bob)
+			settle(t, accepted, bob, true, true)
+			expect(t, accepted, bob, "")
+			if got, _ := r.GetUser(ctx, accepted); got.UpdatedAt.UnixMilli() != 5000 {
+				t.Errorf("updated_at = %d, want 5000", got.UpdatedAt.UnixMilli())
+			}
+			settle(t, accepted, bob, true, false) // already answered
+
+			declined := newAgent(t, ctx, r, alice, "Declined")
+			offer(t, declined, bob)
+			settle(t, declined, bob, false, true)
+			expect(t, declined, alice, "")
+
+			never := newAgent(t, ctx, r, alice, "Never offered")
+			if _, err := r.SettleAgentTransfer(ctx, never, "", true, 5000); err == nil {
+				t.Fatal("SettleAgentTransfer with no pending owner named: want an error")
+			}
+			settle(t, never, bob, true, false)
+			expect(t, never, alice, "")
+
+			settle(t, bob, alice, true, false) // a person is never settled
+			settle(t, "no-such-agent", bob, true, false)
+		})
+
 		t.Run("MergeRefusesAgentsAndMovesThemToSurvivor", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
@@ -157,6 +257,13 @@ func runAgentAccountsConformance(t *testing.T, driver Driver) {
 			}
 			agent := newAgent(t, ctx, r, other, "Follows")
 			bystander := newAgent(t, ctx, r, survivor, "Stays")
+			third := newPerson(t, ctx, r, "merge-third@example.com")
+			offeredToOther := newAgent(t, ctx, r, third, "Offered to the retired account")
+			for _, a := range []string{offeredToOther, bystander} {
+				if err := r.UpdateUser(ctx, a, map[string]any{"pending_owner_user_id": other}); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			for _, m := range []service.AccountMerge{
 				{SurvivorID: survivor, OtherID: agent, AtMs: 1000},
@@ -179,6 +286,12 @@ func runAgentAccountsConformance(t *testing.T, driver Driver) {
 			}
 			if want := sorted(agent, bystander); !equal(ids(got), want) {
 				t.Fatalf("survivor owns %v after merge, want %v", ids(got), want)
+			}
+			if a, _ := r.GetUser(ctx, offeredToOther); a == nil || a.PendingOwnerUserID != survivor || a.OwnerUserID != third {
+				t.Fatalf("an offer to the retired account = %#v, want it re-pointed at the survivor", a)
+			}
+			if a, _ := r.GetUser(ctx, bystander); a == nil || a.PendingOwnerUserID != "" {
+				t.Fatalf("an offer the survivor would make to itself = %#v, want it cleared", a)
 			}
 		})
 	})

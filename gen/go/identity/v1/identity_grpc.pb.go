@@ -71,6 +71,10 @@ const (
 	IdentityService_ListAgents_FullMethodName                      = "/identity.v1.IdentityService/ListAgents"
 	IdentityService_UpdateAgent_FullMethodName                     = "/identity.v1.IdentityService/UpdateAgent"
 	IdentityService_TransferAgent_FullMethodName                   = "/identity.v1.IdentityService/TransferAgent"
+	IdentityService_AcceptAgentTransfer_FullMethodName             = "/identity.v1.IdentityService/AcceptAgentTransfer"
+	IdentityService_DeclineAgentTransfer_FullMethodName            = "/identity.v1.IdentityService/DeclineAgentTransfer"
+	IdentityService_CancelAgentTransfer_FullMethodName             = "/identity.v1.IdentityService/CancelAgentTransfer"
+	IdentityService_ListIncomingAgentTransfers_FullMethodName      = "/identity.v1.IdentityService/ListIncomingAgentTransfers"
 	IdentityService_DeactivateAgent_FullMethodName                 = "/identity.v1.IdentityService/DeactivateAgent"
 	IdentityService_ReactivateAgent_FullMethodName                 = "/identity.v1.IdentityService/ReactivateAgent"
 	IdentityService_DeleteAgent_FullMethodName                     = "/identity.v1.IdentityService/DeleteAgent"
@@ -277,15 +281,20 @@ type IdentityServiceClient interface {
 	ReactivateManagedChildAccount(ctx context.Context, in *ReactivateManagedChildAccountRequest, opts ...grpc.CallOption) (*ReactivateManagedChildAccountResponse, error)
 	DeleteManagedChildAccount(ctx context.Context, in *DeleteManagedChildAccountRequest, opts ...grpc.CallOption) (*DeleteManagedChildAccountResponse, error)
 	// Agent accounts — non-human accounts a person owns. Each RPC is
-	// authorized for the agent's owner or a project admin; a caller who is
-	// neither gets the same PERMISSION_DENIED whether or not the agent exists.
-	// An agent never signs in. Deactivating or deleting its owner makes it
+	// authorized for the agent's owner or a project admin, and answering a
+	// transfer for its recipient alone; any other caller gets the same
+	// PERMISSION_DENIED whether or not the agent exists. A transfer is an
+	// offer the recipient accepts or declines. An agent never signs in. Deactivating or deleting its owner makes it
 	// unusable at once (its sessions end), and every token issued to an agent
 	// checks the owner again. Off unless GATEWAY_AGENTS_ENABLED is set.
 	CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*CreateAgentResponse, error)
 	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
 	UpdateAgent(ctx context.Context, in *UpdateAgentRequest, opts ...grpc.CallOption) (*UpdateAgentResponse, error)
 	TransferAgent(ctx context.Context, in *TransferAgentRequest, opts ...grpc.CallOption) (*TransferAgentResponse, error)
+	AcceptAgentTransfer(ctx context.Context, in *AcceptAgentTransferRequest, opts ...grpc.CallOption) (*AcceptAgentTransferResponse, error)
+	DeclineAgentTransfer(ctx context.Context, in *DeclineAgentTransferRequest, opts ...grpc.CallOption) (*DeclineAgentTransferResponse, error)
+	CancelAgentTransfer(ctx context.Context, in *CancelAgentTransferRequest, opts ...grpc.CallOption) (*CancelAgentTransferResponse, error)
+	ListIncomingAgentTransfers(ctx context.Context, in *ListIncomingAgentTransfersRequest, opts ...grpc.CallOption) (*ListIncomingAgentTransfersResponse, error)
 	DeactivateAgent(ctx context.Context, in *DeactivateAgentRequest, opts ...grpc.CallOption) (*DeactivateAgentResponse, error)
 	ReactivateAgent(ctx context.Context, in *ReactivateAgentRequest, opts ...grpc.CallOption) (*ReactivateAgentResponse, error)
 	DeleteAgent(ctx context.Context, in *DeleteAgentRequest, opts ...grpc.CallOption) (*DeleteAgentResponse, error)
@@ -991,6 +1000,46 @@ func (c *identityServiceClient) TransferAgent(ctx context.Context, in *TransferA
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TransferAgentResponse)
 	err := c.cc.Invoke(ctx, IdentityService_TransferAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AcceptAgentTransfer(ctx context.Context, in *AcceptAgentTransferRequest, opts ...grpc.CallOption) (*AcceptAgentTransferResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AcceptAgentTransferResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AcceptAgentTransfer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) DeclineAgentTransfer(ctx context.Context, in *DeclineAgentTransferRequest, opts ...grpc.CallOption) (*DeclineAgentTransferResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeclineAgentTransferResponse)
+	err := c.cc.Invoke(ctx, IdentityService_DeclineAgentTransfer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) CancelAgentTransfer(ctx context.Context, in *CancelAgentTransferRequest, opts ...grpc.CallOption) (*CancelAgentTransferResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelAgentTransferResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CancelAgentTransfer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListIncomingAgentTransfers(ctx context.Context, in *ListIncomingAgentTransfersRequest, opts ...grpc.CallOption) (*ListIncomingAgentTransfersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListIncomingAgentTransfersResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListIncomingAgentTransfers_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1939,15 +1988,20 @@ type IdentityServiceServer interface {
 	ReactivateManagedChildAccount(context.Context, *ReactivateManagedChildAccountRequest) (*ReactivateManagedChildAccountResponse, error)
 	DeleteManagedChildAccount(context.Context, *DeleteManagedChildAccountRequest) (*DeleteManagedChildAccountResponse, error)
 	// Agent accounts — non-human accounts a person owns. Each RPC is
-	// authorized for the agent's owner or a project admin; a caller who is
-	// neither gets the same PERMISSION_DENIED whether or not the agent exists.
-	// An agent never signs in. Deactivating or deleting its owner makes it
+	// authorized for the agent's owner or a project admin, and answering a
+	// transfer for its recipient alone; any other caller gets the same
+	// PERMISSION_DENIED whether or not the agent exists. A transfer is an
+	// offer the recipient accepts or declines. An agent never signs in. Deactivating or deleting its owner makes it
 	// unusable at once (its sessions end), and every token issued to an agent
 	// checks the owner again. Off unless GATEWAY_AGENTS_ENABLED is set.
 	CreateAgent(context.Context, *CreateAgentRequest) (*CreateAgentResponse, error)
 	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
 	UpdateAgent(context.Context, *UpdateAgentRequest) (*UpdateAgentResponse, error)
 	TransferAgent(context.Context, *TransferAgentRequest) (*TransferAgentResponse, error)
+	AcceptAgentTransfer(context.Context, *AcceptAgentTransferRequest) (*AcceptAgentTransferResponse, error)
+	DeclineAgentTransfer(context.Context, *DeclineAgentTransferRequest) (*DeclineAgentTransferResponse, error)
+	CancelAgentTransfer(context.Context, *CancelAgentTransferRequest) (*CancelAgentTransferResponse, error)
+	ListIncomingAgentTransfers(context.Context, *ListIncomingAgentTransfersRequest) (*ListIncomingAgentTransfersResponse, error)
 	DeactivateAgent(context.Context, *DeactivateAgentRequest) (*DeactivateAgentResponse, error)
 	ReactivateAgent(context.Context, *ReactivateAgentRequest) (*ReactivateAgentResponse, error)
 	DeleteAgent(context.Context, *DeleteAgentRequest) (*DeleteAgentResponse, error)
@@ -2294,6 +2348,18 @@ func (UnimplementedIdentityServiceServer) UpdateAgent(context.Context, *UpdateAg
 }
 func (UnimplementedIdentityServiceServer) TransferAgent(context.Context, *TransferAgentRequest) (*TransferAgentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TransferAgent not implemented")
+}
+func (UnimplementedIdentityServiceServer) AcceptAgentTransfer(context.Context, *AcceptAgentTransferRequest) (*AcceptAgentTransferResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AcceptAgentTransfer not implemented")
+}
+func (UnimplementedIdentityServiceServer) DeclineAgentTransfer(context.Context, *DeclineAgentTransferRequest) (*DeclineAgentTransferResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeclineAgentTransfer not implemented")
+}
+func (UnimplementedIdentityServiceServer) CancelAgentTransfer(context.Context, *CancelAgentTransferRequest) (*CancelAgentTransferResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelAgentTransfer not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListIncomingAgentTransfers(context.Context, *ListIncomingAgentTransfersRequest) (*ListIncomingAgentTransfersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListIncomingAgentTransfers not implemented")
 }
 func (UnimplementedIdentityServiceServer) DeactivateAgent(context.Context, *DeactivateAgentRequest) (*DeactivateAgentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeactivateAgent not implemented")
@@ -3494,6 +3560,78 @@ func _IdentityService_TransferAgent_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).TransferAgent(ctx, req.(*TransferAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AcceptAgentTransfer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcceptAgentTransferRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AcceptAgentTransfer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AcceptAgentTransfer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AcceptAgentTransfer(ctx, req.(*AcceptAgentTransferRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_DeclineAgentTransfer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeclineAgentTransferRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).DeclineAgentTransfer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_DeclineAgentTransfer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).DeclineAgentTransfer(ctx, req.(*DeclineAgentTransferRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_CancelAgentTransfer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelAgentTransferRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CancelAgentTransfer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CancelAgentTransfer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CancelAgentTransfer(ctx, req.(*CancelAgentTransferRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListIncomingAgentTransfers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListIncomingAgentTransfersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListIncomingAgentTransfers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListIncomingAgentTransfers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListIncomingAgentTransfers(ctx, req.(*ListIncomingAgentTransfersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5188,6 +5326,22 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TransferAgent",
 			Handler:    _IdentityService_TransferAgent_Handler,
+		},
+		{
+			MethodName: "AcceptAgentTransfer",
+			Handler:    _IdentityService_AcceptAgentTransfer_Handler,
+		},
+		{
+			MethodName: "DeclineAgentTransfer",
+			Handler:    _IdentityService_DeclineAgentTransfer_Handler,
+		},
+		{
+			MethodName: "CancelAgentTransfer",
+			Handler:    _IdentityService_CancelAgentTransfer_Handler,
+		},
+		{
+			MethodName: "ListIncomingAgentTransfers",
+			Handler:    _IdentityService_ListIncomingAgentTransfers_Handler,
 		},
 		{
 			MethodName: "DeactivateAgent",

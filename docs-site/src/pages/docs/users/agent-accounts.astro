@@ -74,9 +74,8 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       <code>UpdateUser</code> refuses an agent.
     </li>
     <li>
-      <code>TransferAgent</code>: gives the agent to another active person in
-      the project, within that person's limit, and ends the agent's sessions.
-      The previous owner loses it at once.
+      <code>TransferAgent</code>: offers the agent to another active person in
+      the project. See <a href="#transfers">Transferring an agent</a>.
     </li>
     <li>
       <code>DeactivateAgent</code> and <code>ReactivateAgent</code>: suspend
@@ -87,6 +86,51 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       erases an account.
     </li>
   </ul>
+  <h2 id="transfers">Transferring an agent</h2>
+  <p>
+    A transfer needs the recipient's consent. <code>TransferAgent</code>
+    records an offer: the agent's <code>pending_owner_user_id</code> names the
+    recipient, and the agent stays with its owner, usable and managed by them
+    as before, until the offer is answered.
+  </p>
+  <ul>
+    <li>
+      <code>ListIncomingAgentTransfers</code>: the agents offered to the
+      caller and not yet answered.
+    </li>
+    <li>
+      <code>AcceptAgentTransfer</code>: the recipient takes ownership. The
+      per-owner limit is checked now, not when the offer was made; past it the
+      call answers <code>RESOURCE_EXHAUSTED</code> and the offer stays open.
+      The agent's sessions end, so nothing the previous owner approved for it
+      carries over, and the previous owner loses it.
+    </li>
+    <li>
+      <code>DeclineAgentTransfer</code>: the recipient refuses; the agent
+      stays with its owner.
+    </li>
+    <li>
+      <code>CancelAgentTransfer</code>: the owner or a project admin withdraws
+      the offer. Cancelling when nothing is pending returns the agent
+      unchanged.
+    </li>
+  </ul>
+  <p>
+    Only the recipient can accept or decline; an admin cannot answer on
+    their behalf. A new offer replaces a pending one, and an answer applies
+    only to the offer it was given for, so accepting an offer that was
+    cancelled or replaced in the meantime is refused. When the recipient's
+    account is merged into another, the offer moves to the survivor.
+  </p>
+  <p>
+    <strong>Orphans are the one exception.</strong> An agent whose owner was
+    deleted has nobody left to hand it over, so when a project admin
+    transfers it the transfer takes effect at once, without an acceptance,
+    within the recipient's limit, and its sessions end. An agent whose owner
+    is suspended or scheduled for deletion is not an orphan: its owner can
+    come back, so a transfer of it is an offer like any other.
+  </p>
+
   <p>
     Anyone else gets the same <code>PERMISSION_DENIED</code> whether the id
     names an agent, a person or nothing, so the RPCs cannot be used to find
@@ -106,10 +150,25 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
   </p>
   <p>
     Deleting an owner does <strong>not</strong> delete their agents. They keep
-    naming the deleted owner and stay unusable until an admin transfers or
-    deletes them; <code>ListAgents</code> with the deleted owner's id finds
+    naming the deleted owner and stay unusable until an admin transfers
+    (with no acceptance needed, see above) or deletes them; <code>ListAgents</code> with the deleted owner's id finds
     them. When an owner is merged into another account, their agents move to
     the survivor. An agent itself is never merged.
+  </p>
+
+  <h2>An agent never does more than its owner</h2>
+  <p>
+    An agent has no email or username for a project's access rules to
+    judge, so it is admitted exactly as its owner is. In a project whose
+    access mode is <code>allowlist</code> or <code>closed</code>, or whose
+    deny layer blocks the owner's address, the agent is refused whenever its
+    owner would be. Where the deployment requires identity verification
+    (<code>GATEWAY_IDV_REQUIRED</code>), the owner's verification is the one
+    that counts: an agent of a verified owner is admitted, and one of an
+    unverified owner is refused with <code>identity verification
+    required</code>. This is checked every time a token is issued for the
+    agent, refresh included, so a change to the owner's access takes effect
+    at the agent's next refresh.
   </p>
 
   <h2>Tokens</h2>
@@ -134,9 +193,11 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     <li>SCIM does not see them.</li>
     <li>
       Webhook payloads for an agent carry <code>kind</code> and
-      <code>owner_user_id</code>. A person's payload is unchanged.
-      <code>CreateAgent</code> sends <code>user.created</code>; transferring,
-      renaming or reactivating sends <code>user.updated</code>; deactivating
+      <code>owner_user_id</code>, and <code>pending_owner_user_id</code>
+      while a transfer is pending. A person's payload is unchanged.
+      <code>CreateAgent</code> sends <code>user.created</code>; offering,
+      accepting, declining or cancelling a transfer, renaming or reactivating
+      sends <code>user.updated</code>; deactivating
       sends <code>user.deactivated</code>; deleting sends the same events as
       deleting any account.
     </li>
@@ -148,7 +209,12 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     <code>agent_updated</code>, <code>agent_transferred</code>,
     <code>agent_deactivated</code>, <code>agent_reactivated</code> and
     <code>agent_deleted</code>, with the caller as actor and the agent as
-    target, and refusals as failures. <code>agents_listed</code> records an
+    target, and refusals as failures. A transfer is recorded in steps:
+    <code>agent_transfer_requested</code> for the offer,
+    <code>agent_transferred</code> when it is accepted (or an orphan is
+    reassigned), and <code>agent_transfer_declined</code> or
+    <code>agent_transfer_cancelled</code> when it is closed without a change
+    of owner. <code>agents_listed</code> records an
     admin listing another person's agents (the owner as target) and a
     refused listing; listing your own is not recorded. A refused sign-in is
     <code>agent_sign_in_refused</code>.

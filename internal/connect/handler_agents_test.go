@@ -28,12 +28,28 @@ func agentCalls() []agentCall {
 			_, err := h.client.ListAgents(ctx, authedReq(connect.NewRequest(&identitypb.ListAgentsRequest{}), c))
 			return err
 		}},
+		{"ListIncomingAgentTransfers", func(h *testHarness, c, _ string) error {
+			_, err := h.client.ListIncomingAgentTransfers(ctx, authedReq(connect.NewRequest(&identitypb.ListIncomingAgentTransfersRequest{}), c))
+			return err
+		}},
 		{"UpdateAgent", func(h *testHarness, c, a string) error {
 			_, err := h.client.UpdateAgent(ctx, authedReq(connect.NewRequest(&identitypb.UpdateAgentRequest{AgentUserId: a, Name: "B"}), c))
 			return err
 		}},
 		{"TransferAgent", func(h *testHarness, c, a string) error {
 			_, err := h.client.TransferAgent(ctx, authedReq(connect.NewRequest(&identitypb.TransferAgentRequest{AgentUserId: a, NewOwnerUserId: c}), c))
+			return err
+		}},
+		{"AcceptAgentTransfer", func(h *testHarness, c, a string) error {
+			_, err := h.client.AcceptAgentTransfer(ctx, authedReq(connect.NewRequest(&identitypb.AcceptAgentTransferRequest{AgentUserId: a}), c))
+			return err
+		}},
+		{"DeclineAgentTransfer", func(h *testHarness, c, a string) error {
+			_, err := h.client.DeclineAgentTransfer(ctx, authedReq(connect.NewRequest(&identitypb.DeclineAgentTransferRequest{AgentUserId: a}), c))
+			return err
+		}},
+		{"CancelAgentTransfer", func(h *testHarness, c, a string) error {
+			_, err := h.client.CancelAgentTransfer(ctx, authedReq(connect.NewRequest(&identitypb.CancelAgentTransferRequest{AgentUserId: a}), c))
 			return err
 		}},
 		{"DeactivateAgent", func(h *testHarness, c, a string) error {
@@ -83,7 +99,8 @@ func TestHandler_AgentSurface_RequiresSession(t *testing.T) {
 }
 
 // The full lifecycle over the wire: the owner creates, lists, renames,
-// pauses, resumes, transfers and deletes; a stranger is refused; the User
+// pauses, resumes and offers it; the recipient accepts and deletes it; a
+// stranger is refused; the User
 // message carries the kind and the owner.
 func TestHandler_AgentLifecycle(t *testing.T) {
 	ctx := context.Background()
@@ -111,7 +128,8 @@ func TestHandler_AgentLifecycle(t *testing.T) {
 		t.Fatalf("ListAgents = %v, %v", listed, err)
 	}
 
-	for _, op := range agentCalls()[2:] {
+	// Every call on an existing agent (all but the create and the two lists).
+	for _, op := range agentCalls()[3:] {
 		if got := connectCodeOf(op.call(h, stranger, agent.GetId())); got != connect.CodePermissionDenied {
 			t.Fatalf("%s by a stranger: code = %v, want PermissionDenied", op.name, got)
 		}
@@ -132,8 +150,19 @@ func TestHandler_AgentLifecycle(t *testing.T) {
 	moved, err := h.client.TransferAgent(ctx, authedReq(connect.NewRequest(&identitypb.TransferAgentRequest{
 		AgentUserId: agent.GetId(), NewOwnerUserId: recipient,
 	}), owner))
-	if err != nil || moved.Msg.GetAgent().GetOwnerUserId() != recipient {
-		t.Fatalf("TransferAgent = %v, %v", moved, err)
+	if err != nil || moved.Msg.GetAgent().GetOwnerUserId() != owner || moved.Msg.GetAgent().GetPendingOwnerUserId() != recipient {
+		t.Fatalf("TransferAgent = %v, %v, want an offer to the recipient", moved, err)
+	}
+	incoming, err := h.client.ListIncomingAgentTransfers(ctx, authedReq(connect.NewRequest(&identitypb.ListIncomingAgentTransfersRequest{}), recipient))
+	if err != nil || len(incoming.Msg.GetAgents()) != 1 || incoming.Msg.GetAgents()[0].GetId() != agent.GetId() {
+		t.Fatalf("ListIncomingAgentTransfers = %v, %v", incoming, err)
+	}
+	if _, err := h.client.AcceptAgentTransfer(ctx, authedReq(connect.NewRequest(&identitypb.AcceptAgentTransferRequest{AgentUserId: agent.GetId()}), owner)); connectCodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("AcceptAgentTransfer by the sender: %v, want PermissionDenied", err)
+	}
+	accepted, err := h.client.AcceptAgentTransfer(ctx, authedReq(connect.NewRequest(&identitypb.AcceptAgentTransferRequest{AgentUserId: agent.GetId()}), recipient))
+	if err != nil || accepted.Msg.GetAgent().GetOwnerUserId() != recipient || accepted.Msg.GetAgent().GetPendingOwnerUserId() != "" {
+		t.Fatalf("AcceptAgentTransfer = %v, %v", accepted, err)
 	}
 	if _, err := h.client.DeleteAgent(ctx, authedReq(connect.NewRequest(&identitypb.DeleteAgentRequest{AgentUserId: agent.GetId()}), owner)); connectCodeOf(err) != connect.CodePermissionDenied {
 		t.Fatalf("DeleteAgent by the previous owner: %v, want PermissionDenied", err)
