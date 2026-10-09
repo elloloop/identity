@@ -670,20 +670,18 @@ func fieldInt64(v any) (int64, bool) {
 // ok=false and the field is left out of the UPDATE).
 var (
 	userStringFields = map[string]func(*service.User) *string{
-		"name":                  func(u *service.User) *string { return &u.Name },
-		"email":                 func(u *service.User) *string { return &u.Email },
-		"avatar_url":            func(u *service.User) *string { return &u.AvatarURL },
-		"password_hash":         func(u *service.User) *string { return &u.PasswordHash },
-		"status":                func(u *service.User) *string { return &u.Status },
-		"recovery_email":        func(u *service.User) *string { return &u.RecoveryEmail },
-		"external_id":           func(u *service.User) *string { return &u.ExternalID },
-		"phone_number":          func(u *service.User) *string { return &u.PhoneNumber },
-		"market":                func(u *service.User) *string { return &u.Market },
-		"username":              func(u *service.User) *string { return &u.Username },
-		"account_address":       func(u *service.User) *string { return &u.AccountAddress },
-		"merged_into_user_id":   func(u *service.User) *string { return &u.MergedIntoUserID },
-		"owner_user_id":         func(u *service.User) *string { return &u.OwnerUserID },
-		"pending_owner_user_id": func(u *service.User) *string { return &u.PendingOwnerUserID },
+		"name":                func(u *service.User) *string { return &u.Name },
+		"email":               func(u *service.User) *string { return &u.Email },
+		"avatar_url":          func(u *service.User) *string { return &u.AvatarURL },
+		"password_hash":       func(u *service.User) *string { return &u.PasswordHash },
+		"status":              func(u *service.User) *string { return &u.Status },
+		"recovery_email":      func(u *service.User) *string { return &u.RecoveryEmail },
+		"external_id":         func(u *service.User) *string { return &u.ExternalID },
+		"phone_number":        func(u *service.User) *string { return &u.PhoneNumber },
+		"market":              func(u *service.User) *string { return &u.Market },
+		"username":            func(u *service.User) *string { return &u.Username },
+		"account_address":     func(u *service.User) *string { return &u.AccountAddress },
+		"merged_into_user_id": func(u *service.User) *string { return &u.MergedIntoUserID },
 	}
 
 	userBoolFields = map[string]func(*service.User) *bool{
@@ -2381,6 +2379,23 @@ func (r *Repo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID st
 	return true, nil
 }
 
+// SetAgentOwnership writes the agent's owners under the store's lock, only
+// while expectedOwnerID still owns it.
+func (r *Repo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error) {
+	if agentID == "" || expectedOwnerID == "" || ownerID == "" {
+		return false, errors.New("memory: SetAgentOwnership: missing agent or owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[agentID]
+	if !ok || !u.IsAgent() || u.OwnerUserID != expectedOwnerID {
+		return false, nil
+	}
+	u.OwnerUserID, u.PendingOwnerUserID = ownerID, pendingOwnerID
+	u.UpdatedAt = time.UnixMilli(atMs)
+	return true, nil
+}
+
 // ApplyAccountMerge is the merge under the store's lock: the records change
 // through AccountMerge.ApplyToUsers, then the side tables follow.
 func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
@@ -2396,7 +2411,7 @@ func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) erro
 		}
 	}
 	for _, u := range r.users {
-		if u.PendingOwnerUserID == m.OtherID {
+		if u.PendingOwnerUserID == m.OtherID || u.PendingOwnerUserID == m.SurvivorID {
 			u.PendingOwnerUserID = m.SurvivorID
 			if u.OwnerUserID == m.SurvivorID {
 				u.PendingOwnerUserID = ""

@@ -127,10 +127,15 @@ The per-owner cap is checked at acceptance, when the recipient's count is
 known, not at the offer. Acceptance and refusal are one conditional write
 that settles only the offer the caller read (`SettleAgentTransfer`), so an
 acceptance never lands on an offer that was cancelled or replaced in
-between. Accepting ends the agent's sessions: whatever the previous owner
+between. The offer itself is written the same way (`SetAgentOwnership`),
+only while the agent still has the owner the call was authorized against,
+so a former owner acting on a stale read cannot plant an offer on an agent
+that has since changed hands; an orphan's reassignment uses the same
+write. Accepting ends the agent's sessions: whatever the previous owner
 approved for it does not carry over. A merge re-points offers made to the
-retired account at the survivor, and drops one the survivor would make to
-itself. Recipients answer with the same uniform `PERMISSION_DENIED` as the
+retired account at the survivor, and drops any offer that would leave an
+agent offered to its own owner (one the survivor made to the retired
+account, or one the retired account made to the survivor). Recipients answer with the same uniform `PERMISSION_DENIED` as the
 management RPCs, so the answer RPCs are not an oracle either.
 
 **Orphans are the exception.** An agent whose owner no longer exists has
@@ -169,8 +174,9 @@ it can be revisited once there is a product answer for orphans.
 ## Consequences
 
 - Every repository driver and test fake carries the three columns, the
-  list filters and the conditional settle; the conformance suite pins the
-  round trip, the default exclusion, the owner and pending-owner updates,
+  list filters, the conditional ownership write and the conditional settle;
+  the conformance suite pins the round trip, the default exclusion, the
+  ownership write (including a stale expected owner),
   the settle (accepted, declined, stale) and the merge behaviour on every
   driver.
 - Webhook payloads for an agent carry `kind` and `owner_user_id`, and

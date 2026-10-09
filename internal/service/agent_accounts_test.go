@@ -631,6 +631,32 @@ func TestTransferAgent_ReplacesAPendingOffer(t *testing.T) {
 	assert.Equal(t, f.admin.ID, got.OwnerUserID)
 }
 
+// An offer authorized against an owner the agent no longer has (an earlier
+// offer accepted in between) is refused, not planted on the new owner's
+// agent; so is an orphan reassignment that raced a change of owner.
+func TestTransferAgent_OwnerChangedSinceReadRefused(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	agent := seedAgent(f.repo, f.owner.ID)
+	stale, _ := f.repo.GetUser(ctx, agent.ID)
+	staleCopy := *stale
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	require.NoError(t, err)
+	_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
+	require.NoError(t, err)
+
+	err = f.svc.setAgentOwnership(ctx, agentOpTransferRequest, f.owner.ID, &staleCopy, staleCopy.OwnerUserID, f.admin.ID, f.svc.nowMs(), "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	stored, _ := f.repo.GetUser(ctx, agent.ID)
+	assert.Equal(t, f.stranger.ID, stored.OwnerUserID)
+	assert.Empty(t, stored.PendingOwnerUserID, "no offer the new owner did not make")
+
+	_, err = f.svc.reassignOrphanAgent(ctx, f.admin.ID, &staleCopy, f.admin.ID, "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	stored, _ = f.repo.GetUser(ctx, agent.ID)
+	assert.Equal(t, f.stranger.ID, stored.OwnerUserID)
+}
+
 // An answer lands only on the offer it read: an offer withdrawn between the
 // read and the write is refused, not applied.
 func TestAcceptAgentTransfer_StaleOfferRefused(t *testing.T) {
@@ -745,13 +771,17 @@ func TestTransferAgent_SuspendedOwnerIsNotAnOrphan(t *testing.T) {
 }
 
 // A merge re-points the offers made to the merged-away account at the
-// survivor, and clears one the survivor would make to itself.
+// survivor, and drops every offer that would leave an agent offered to its
+// own owner.
 func TestAccountMerge_RepointsPendingTransfers(t *testing.T) {
 	f := newAgentFixture(t)
 	ctx := context.Background()
 	toOther := seedAgent(f.repo, f.owner.ID)
 	ownedBySurvivor := seedAgent(f.repo, f.admin.ID)
-	_, err := f.svc.TransferAgent(ctx, f.owner.ID, toOther.ID, f.stranger.ID, "", "")
+	ownedByOther := seedAgent(f.repo, f.stranger.ID)
+	_, err := f.svc.TransferAgent(ctx, f.stranger.ID, ownedByOther.ID, f.admin.ID, "", "")
+	require.NoError(t, err)
+	_, err = f.svc.TransferAgent(ctx, f.owner.ID, toOther.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
 	_, err = f.svc.TransferAgent(ctx, f.admin.ID, ownedBySurvivor.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
@@ -761,6 +791,9 @@ func TestAccountMerge_RepointsPendingTransfers(t *testing.T) {
 	assert.Equal(t, f.admin.ID, stored.PendingOwnerUserID)
 	stored, _ = f.repo.GetUser(ctx, ownedBySurvivor.ID)
 	assert.Empty(t, stored.PendingOwnerUserID)
+	stored, _ = f.repo.GetUser(ctx, ownedByOther.ID)
+	assert.Equal(t, f.admin.ID, stored.OwnerUserID)
+	assert.Empty(t, stored.PendingOwnerUserID, "the retired account's offer to the survivor is moot")
 }
 
 // ── Deactivate / reactivate / delete ───────────────────────────────────
@@ -963,9 +996,8 @@ func TestAgentAdmission_IdentityVerificationIsTheOwners(t *testing.T) {
 	f.repo.mu.Lock()
 	f.repo.users[f.owner.ID].IDVVerified = true
 	f.repo.mu.Unlock()
-	_, refresh = issueAgentTokens(t, f, agent)
 	_, _, _, err = f.svc.RefreshToken(context.Background(), refresh, "", "")
-	require.NoError(t, err, "a verified owner's agent is admitted, unverified itself")
+	require.NoError(t, err, "the refused token was not consumed, and a verified owner's agent is admitted, unverified itself")
 }
 
 // ── Cascade: a change to the owner's standing cuts the agents off ──────

@@ -445,11 +445,8 @@ func (s *AuthService) TransferAgent(
 		return s.reassignOrphanAgent(ctx, callerID, agent, newOwner.ID, ip, userAgent)
 	}
 	now := s.nowMs()
-	if err := repo.UpdateUser(ctx, agent.ID, map[string]any{
-		"pending_owner_user_id": newOwner.ID,
-		"updated_at":            now,
-	}); err != nil {
-		return nil, fmt.Errorf("offer agent transfer: %w", err)
+	if err := s.setAgentOwnership(ctx, agentOpTransferRequest, callerID, agent, agent.OwnerUserID, newOwner.ID, now, ip, userAgent); err != nil {
+		return nil, err
 	}
 	replaced := agent.PendingOwnerUserID
 	agent.PendingOwnerUserID, agent.UpdatedAt = newOwner.ID, time.UnixMilli(now)
@@ -489,12 +486,8 @@ func (s *AuthService) reassignOrphanAgent(
 	}
 	repo := s.repo(ctx)
 	now := s.nowMs()
-	if err := repo.UpdateUser(ctx, agent.ID, map[string]any{
-		"owner_user_id":         newOwnerID,
-		"pending_owner_user_id": "",
-		"updated_at":            now,
-	}); err != nil {
-		return nil, fmt.Errorf("transfer agent: %w", err)
+	if err := s.setAgentOwnership(ctx, agentOpTransfer, callerID, agent, newOwnerID, "", now, ip, userAgent); err != nil {
+		return nil, err
 	}
 	if err := revokeAllUserSessions(ctx, repo, agent.ID, now); err != nil {
 		return nil, fmt.Errorf("transfer agent: %w", err)
@@ -505,6 +498,26 @@ func (s *AuthService) reassignOrphanAgent(
 		map[string]any{"previous_owner_user_id": previous, "owner_user_id": newOwnerID, "orphan": true})
 	s.emitAgentEvent(ctx, events.EventUserUpdated, agent)
 	return agent, nil
+}
+
+// setAgentOwnership writes the agent's owner and pending owner only while
+// the agent is still owned by the owner the caller was authorized against.
+// When the owner changed in between (an offer accepted concurrently), the
+// write is refused with the uniform refusal: the caller's authority came
+// from an owner the agent no longer has.
+func (s *AuthService) setAgentOwnership(
+	ctx context.Context, op agentOperation, callerID string, agent *User, ownerID, pendingOwnerID string, now int64, ip, userAgent string,
+) error {
+	ok, err := s.repo(ctx).SetAgentOwnership(ctx, agent.ID, agent.OwnerUserID, ownerID, pendingOwnerID, now)
+	if err != nil {
+		return fmt.Errorf("write agent owner: %w", err)
+	}
+	if !ok {
+		s.auditAgentAction(ctx, op, callerID, agent.ID, false, ip, userAgent,
+			map[string]any{"step": "owner_changed"})
+		return fmt.Errorf("%w: %s", ErrPermissionDenied, agentRefusalNotAllowed)
+	}
+	return nil
 }
 
 // pendingTransferTo resolves an agent offered to the caller. Every other

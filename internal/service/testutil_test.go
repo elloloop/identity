@@ -591,10 +591,6 @@ func applyUserFields(u *User, fields map[string]any) {
 			u.AccountAddress = v.(string)
 		case "merged_into_user_id":
 			u.MergedIntoUserID = v.(string)
-		case "owner_user_id":
-			u.OwnerUserID = v.(string)
-		case "pending_owner_user_id":
-			u.PendingOwnerUserID = v.(string)
 		case "date_of_birth_ms":
 			switch x := v.(type) {
 			case int64:
@@ -2520,8 +2516,8 @@ func (r *fakeRepo) AssignAccountAddress(_ context.Context, userID, address strin
 	return address, nil
 }
 
-// ApplyAccountMerge is the merge under the store's lock: the records change
-// through AccountMerge.ApplyToUsers, then the side tables follow.
+// SettleAgentTransfer settles the transfer under the store's lock, only
+// while it still waits on pendingOwnerID.
 func (r *fakeRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error) {
 	if agentID == "" || pendingOwnerID == "" {
 		return false, errors.New("SettleAgentTransfer: missing agent or pending owner id")
@@ -2540,6 +2536,25 @@ func (r *fakeRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerI
 	return true, nil
 }
 
+// SetAgentOwnership writes the agent's owners under the store's lock, only
+// while expectedOwnerID still owns it.
+func (r *fakeRepo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error) {
+	if agentID == "" || expectedOwnerID == "" || ownerID == "" {
+		return false, errors.New("SetAgentOwnership: missing agent or owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[agentID]
+	if !ok || !u.IsAgent() || u.OwnerUserID != expectedOwnerID {
+		return false, nil
+	}
+	u.OwnerUserID, u.PendingOwnerUserID = ownerID, pendingOwnerID
+	u.UpdatedAt = time.UnixMilli(atMs)
+	return true, nil
+}
+
+// ApplyAccountMerge is the merge under the store's lock: the records change
+// through AccountMerge.ApplyToUsers, then the side tables follow.
 func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m AccountMerge) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -2553,7 +2568,7 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m AccountMerge) error {
 		}
 	}
 	for _, u := range r.users {
-		if u.PendingOwnerUserID == m.OtherID {
+		if u.PendingOwnerUserID == m.OtherID || u.PendingOwnerUserID == m.SurvivorID {
 			u.PendingOwnerUserID = m.SurvivorID
 			if u.OwnerUserID == m.SurvivorID {
 				u.PendingOwnerUserID = ""

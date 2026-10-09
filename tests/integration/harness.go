@@ -1261,10 +1261,6 @@ func applyUserStringField(u *service.User, key string, v any) bool {
 		u.AccountAddress = s
 	case "merged_into_user_id":
 		u.MergedIntoUserID = s
-	case "owner_user_id":
-		u.OwnerUserID = s
-	case "pending_owner_user_id":
-		u.PendingOwnerUserID = s
 	default:
 		return false
 	}
@@ -1275,7 +1271,7 @@ func isUserStringField(key string) bool {
 	switch key {
 	case "name", "email", "avatar_url", "password_hash", "status",
 		"recovery_email", "external_id", "phone_number", "market", "username",
-		"account_address", "merged_into_user_id", "owner_user_id", "pending_owner_user_id":
+		"account_address", "merged_into_user_id":
 		return true
 	}
 	return false
@@ -3067,8 +3063,8 @@ func (r *MemRepo) AssignAccountAddress(_ context.Context, userID, address string
 	return address, nil
 }
 
-// ApplyAccountMerge is the merge under the store's lock: the records change
-// through AccountMerge.ApplyToUsers, then the side tables follow.
+// SettleAgentTransfer settles the transfer under the store's lock, only
+// while it still waits on pendingOwnerID.
 func (r *MemRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error) {
 	if agentID == "" || pendingOwnerID == "" {
 		return false, errors.New("SettleAgentTransfer: missing agent or pending owner id")
@@ -3087,6 +3083,25 @@ func (r *MemRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID
 	return true, nil
 }
 
+// SetAgentOwnership writes the agent's owners under the store's lock, only
+// while expectedOwnerID still owns it.
+func (r *MemRepo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error) {
+	if agentID == "" || expectedOwnerID == "" || ownerID == "" {
+		return false, errors.New("SetAgentOwnership: missing agent or owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[agentID]
+	if !ok || !u.IsAgent() || u.OwnerUserID != expectedOwnerID {
+		return false, nil
+	}
+	u.OwnerUserID, u.PendingOwnerUserID = ownerID, pendingOwnerID
+	u.UpdatedAt = time.UnixMilli(atMs)
+	return true, nil
+}
+
+// ApplyAccountMerge is the merge under the store's lock: the records change
+// through AccountMerge.ApplyToUsers, then the side tables follow.
 func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -3100,7 +3115,7 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 		}
 	}
 	for _, u := range r.users {
-		if u.PendingOwnerUserID == m.OtherID {
+		if u.PendingOwnerUserID == m.OtherID || u.PendingOwnerUserID == m.SurvivorID {
 			u.PendingOwnerUserID = m.SurvivorID
 			if u.OwnerUserID == m.SurvivorID {
 				u.PendingOwnerUserID = ""

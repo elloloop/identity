@@ -725,8 +725,8 @@ type Repository interface {
 	// account they were registered for); its refresh tokens are deleted and
 	// its sessions revoked. The agents the other account owns move to the
 	// survivor, and a transfer waiting on the other account waits on the
-	// survivor instead (or is dropped, when the survivor already owns the
-	// agent). Any failure rolls all of it back.
+	// survivor instead, and one that would leave an agent offered to its own
+	// owner is dropped. Any failure rolls all of it back.
 	ApplyAccountMerge(ctx context.Context, m AccountMerge) error
 
 	// SettleAgentTransfer ends the pending transfer of agentID if, and only
@@ -737,6 +737,15 @@ type Repository interface {
 	// after it was read. It reports whether a transfer was settled. An empty
 	// agentID or pendingOwnerID is an error.
 	SettleAgentTransfer(ctx context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error)
+
+	// SetAgentOwnership writes an agent's owner and pending owner if, and
+	// only if, the agent is still owned by expectedOwnerID, and sets
+	// updated_at to atMs, in one conditional statement: an offer or a
+	// reassignment authorized on a read cannot land on an agent whose owner
+	// changed since (an offer accepted in between). It reports whether the
+	// agent was written. An empty agentID, expectedOwnerID or ownerID is an
+	// error; an empty pendingOwnerID clears the pending owner.
+	SetAgentOwnership(ctx context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error)
 
 	// OAuth identities — links a (provider, provider_user_id) pair to a
 	// local User so OAuth login can survive provider-side email changes.
@@ -2359,7 +2368,15 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// authoritative check still runs after rotation below; this one exists only
 	// so a denial does not destroy the credential on its way out. Anonymous
 	// accounts carry no email to judge, and their own refusals run above.
-	if !timeoutUser.IsAnonymous {
+	// An agent's whole admission (its owner's standing, access and identity
+	// verification) is checked here too: an agent cannot sign in again to
+	// recover a burnt token.
+	switch {
+	case timeoutUser.IsAgent():
+		if err := s.checkAgentStanding(ctx, timeoutUser); err != nil {
+			return nil, "", "", err
+		}
+	case !timeoutUser.IsAnonymous:
 		if err := s.enforceAccountAccessLogin(ctx, timeoutUser); err != nil {
 			return nil, "", "", err
 		}

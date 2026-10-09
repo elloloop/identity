@@ -425,8 +425,6 @@ var userFieldColumns = map[string]struct {
 	"account_address":          {"account_address", "string"},
 	"merged_into_user_id":      {"merged_into_user_id", "string"},
 	"password_change_required": {"password_change_required", "bool"},
-	"owner_user_id":            {"owner_user_id", "string"},
-	"pending_owner_user_id":    {"pending_owner_user_id", "string"},
 }
 
 func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
@@ -822,6 +820,24 @@ func (r *pgRepository) SettleAgentTransfer(ctx context.Context, agentID, pending
 	return tag.RowsAffected() == 1, nil
 }
 
+func (r *pgRepository) SetAgentOwnership(ctx context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error) {
+	if agentID == "" || expectedOwnerID == "" || ownerID == "" {
+		return false, errors.New("postgres: SetAgentOwnership: missing agent or owner id")
+	}
+	// One conditional statement: it writes only while the agent is still
+	// owned by the owner the caller authorized against.
+	const q = `
+		UPDATE users
+		   SET owner_user_id = $4, pending_owner_user_id = $5, updated_at_ms = $6
+		 WHERE project_id = $1 AND id = $2 AND kind = 'agent'
+		   AND owner_user_id <> '' AND owner_user_id = $3`
+	tag, err := r.pool.Exec(ctx, q, r.projectID, agentID, expectedOwnerID, ownerID, pendingOwnerID, atMs)
+	if err != nil {
+		return false, wrapPgErr("SetAgentOwnership", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 func (r *pgRepository) ApplyAccountMerge(ctx context.Context, m service.AccountMerge) error {
 	if m.SurvivorID == "" || m.OtherID == "" || m.SurvivorID == m.OtherID {
 		return errors.New("postgres: ApplyAccountMerge: two distinct account ids are required")
@@ -945,10 +961,13 @@ func (r *pgRepository) ApplyAccountMerge(ctx context.Context, m service.AccountM
 	}
 	// A transfer waiting on the retired account waits on the survivor, unless
 	// the survivor now owns that agent, when there is nothing left to accept.
+	// The second arm drops the offer the retired account made to the
+	// survivor of an agent the survivor now owns.
 	if _, err := tx.Exec(ctx, `
 		UPDATE users
 		   SET pending_owner_user_id = CASE WHEN owner_user_id = $3 THEN '' ELSE $3 END
-		 WHERE project_id = $1 AND pending_owner_user_id <> '' AND pending_owner_user_id = $2`,
+		 WHERE project_id = $1 AND pending_owner_user_id <> ''
+		   AND (pending_owner_user_id = $2 OR (pending_owner_user_id = $3 AND owner_user_id = $3))`,
 		r.projectID, m.OtherID, m.SurvivorID); err != nil {
 		return wrapPgErr("ApplyAccountMerge(agent transfers)", err)
 	}
