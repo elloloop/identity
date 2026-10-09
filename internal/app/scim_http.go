@@ -598,7 +598,7 @@ func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]sci
 // email: its canonical form, refused as an invalid value when that is not a
 // mailbox an account can hold (a bare "+tag" local part, no domain).
 func scimEmail(raw string) (string, error) {
-	email, usable := service.CanonicalMailbox(raw)
+	email, usable := emailaddr.Mailbox(raw)
 	if !usable {
 		return "", fmt.Errorf("%w: %q is not a usable email address", scim.ErrInvalidValue, raw)
 	}

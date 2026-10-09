@@ -229,27 +229,6 @@ func TestRequestEmailChange_InvalidNewEmailRejected(t *testing.T) {
 	}
 }
 
-func TestCanonicalMailboxRejectsUnusableAddresses(t *testing.T) {
-	t.Parallel()
-	cases := map[string]bool{
-		"alice@example.com":       true,
-		"alice@example":           false,
-		"alice example@test.com":  false,
-		"alice@example.com\nbcc":  false,
-		"@example.com":            false,
-		"alice@":                  false,
-		"alice@sub.example.com":   true,
-		"alice+label@example.com": true,
-		"+label@example.com":      false, // nothing left of the local part once the tag is dropped
-		"+@example.com":           false,
-	}
-	for addr, want := range cases {
-		if _, got := CanonicalMailbox(addr); got != want {
-			t.Fatalf("CanonicalMailbox(%q) usable = %v, want %v", addr, got, want)
-		}
-	}
-}
-
 func TestRequestEmailChange_UnknownUser(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newAuthSvcWithMailer(t)

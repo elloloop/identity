@@ -328,3 +328,19 @@ func TestWorker_RunDeliversThenStops(t *testing.T) {
 		t.Fatalf("Run returned %v", err)
 	}
 }
+
+func TestMemoryOutbox_PendingAndFailed(t *testing.T) {
+	ctx := context.Background()
+	o := NewMemoryOutbox()
+	for _, id := range []string{"a", "b"} {
+		if err := o.EnqueueDelivery(ctx, &Delivery{ID: id, EventID: "e-" + id, SubscriptionID: "s", Status: StatusPending}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := o.MarkFailed(ctx, "a", 1, "refused"); err != nil {
+		t.Fatal(err)
+	}
+	if o.Pending() != 1 || o.Failed() != 1 {
+		t.Fatalf("pending = %d, failed = %d; want 1 and 1", o.Pending(), o.Failed())
+	}
+}

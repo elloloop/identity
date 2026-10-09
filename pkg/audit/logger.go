@@ -109,9 +109,18 @@ const (
 	EventUserReactivated   EventType = "user_reactivated"
 	EventUserDeleted       EventType = "user_deleted"
 	// EventAccountMerged records one account merged into another. The actor
-	// is whoever asked (the survivor's owner or an admin), the target the
-	// retired account; details name the survivor.
+	// is whoever asked (the survivor's owner or an admin), or none for the
+	// operator's `identity repair-emails` run; the target is the retired
+	// account; details name the survivor and the `source` (self, admin or
+	// email_repair).
 	EventAccountMerged EventType = "account_merged"
+	// EventEmailCanonicalized records an account's stored email moved to the
+	// canonical spelling of the same mailbox (an address stored before every
+	// write path canonicalized). The target is the account. Details carry what
+	// prompted it (`source`: sign_in; session, a refresh of an older session;
+	// or repair) and, when an account merged into it gave the spelling up,
+	// that account (`freed_from`). Never the address.
+	EventEmailCanonicalized EventType = "email_canonicalized"
 
 	// EventAnonymousSignIn records the creation of a credential-less
 	// account. EventAnonymousUpgraded records that account gaining a

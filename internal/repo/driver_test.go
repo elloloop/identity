@@ -47,6 +47,9 @@ func assertNoGovernancePlane(t *testing.T, built *Built, driver string) {
 	if np := built.NativeProjectLookup(); np != nil {
 		t.Errorf("Build %s: NativeProjectLookup() = %v, want true nil", driver, np)
 	}
+	if pl := built.ProjectLister(); pl != nil {
+		t.Errorf("Build %s: ProjectLister() = %v, want true nil", driver, pl)
+	}
 	if g := built.LoginGovernance(); g != nil {
 		t.Errorf("Build %s: LoginGovernance() = %v, want true nil", driver, g)
 	}

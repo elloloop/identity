@@ -266,6 +266,24 @@ func (m *MemoryOutbox) ListActiveSubscriptions(_ context.Context, projectID stri
 	return out, nil
 }
 
+// Pending returns how many deliveries still await an attempt or a retry.
+func (m *MemoryOutbox) Pending() int { return m.count(StatusPending) }
+
+// Failed returns how many deliveries the worker gave up on.
+func (m *MemoryOutbox) Failed() int { return m.count(StatusFailed) }
+
+func (m *MemoryOutbox) count(status DeliveryStatus) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, d := range m.deliveries {
+		if d.Status == status {
+			n++
+		}
+	}
+	return n
+}
+
 // Get returns a copy of a delivery by ID — a test/inspection seam.
 func (m *MemoryOutbox) Get(id string) (Delivery, bool) {
 	m.mu.Lock()

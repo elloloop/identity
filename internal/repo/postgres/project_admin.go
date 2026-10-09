@@ -23,6 +23,10 @@ var _ service.NativeOAuthProjectStore = (*ProjectStore)(nil)
 // the credential read the directory lookup authenticates against.
 var _ service.DirectoryCredentialStore = (*ProjectStore)(nil)
 
+// The ProjectStore is also the postgres driver's service.ProjectLister: the
+// project listing the stored-email repair walks.
+var _ service.ProjectLister = (*ProjectStore)(nil)
+
 // ActiveProjectByID resolves an ACTIVE control-plane project by id as the
 // driver-agnostic service.AdminProject, or (nil, nil) when no such active
 // project exists. It delegates to GetProjectByID and treats a suspended

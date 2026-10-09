@@ -222,7 +222,7 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
-	if emailaddr.Canonicalize(caller.Email) != emailaddr.Canonicalize(inv.Email) {
+	if !emailaddr.SameMailbox(caller.Email, inv.Email) {
 		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
 	}
 
@@ -449,10 +449,10 @@ func (s *MembershipService) requireTenantAdmin(ctx context.Context, projectID, t
 
 // normalizeInvitationEmail canonicalizes an invitation email as sign-up
 // canonicalizes an account's, rejecting a blank one or one that is not a
-// usable mailbox (CanonicalMailbox). Full RFC validation lives upstream; this
+// usable mailbox (emailaddr.Mailbox). Full RFC validation lives upstream; this
 // is the minimal sanity gate the store and email-match rely on.
 func normalizeInvitationEmail(emailAddr string) (string, error) {
-	e, usable := CanonicalMailbox(emailAddr)
+	e, usable := emailaddr.Mailbox(emailAddr)
 	if e == "" {
 		return "", fmt.Errorf("%w: missing email", ErrInvalidArgument)
 	}

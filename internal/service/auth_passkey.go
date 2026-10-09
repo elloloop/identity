@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/emailaddr"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -250,7 +251,7 @@ func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (stri
 	// Looked up by the canonical form accounts are stored under. An address
 	// with no mailbox once canonical names nobody, so it takes the same path
 	// as an unknown one: an empty allow list.
-	if canonical, usable := CanonicalMailbox(email); usable {
+	if canonical, usable := emailaddr.Mailbox(email); usable {
 		user, err := s.repo(ctx).FindUserByEmail(ctx, canonical)
 		if err != nil {
 			return "", "", err

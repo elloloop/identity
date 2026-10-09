@@ -111,4 +111,31 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     <li>An admin's own account, by that admin.</li>
   </ul>
   <p>These refusals answer <code>FAILED_PRECONDITION</code>.</p>
+
+  <h2>Two accounts for one mailbox</h2>
+  <p>
+    Every address is stored in canonical form (lower case, no
+    <code>+tag</code>, no Gmail dots). An older release could store another
+    spelling, such as <code>first.last@gmail.com</code>. Such an account is
+    found only by that spelling, so signing in with
+    <code>firstlast@gmail.com</code> by code or password created a second
+    account. Each sign-in now moves its account's stored email to the
+    canonical form, unless another live account already holds it.
+  </p>
+  <p>
+    <code>identity repair-emails</code> handles the rest, once, across every
+    project, deciding per mailbox. Without arguments it is a dry run that logs
+    what it would do, by account id. With <code>--apply</code> it does exactly
+    that: it rewrites each email whose canonical form is free, and merges two
+    active accounts of one Gmail mailbox when both have a verified email,
+    neither is managed by an identity provider and exactly one is linked to a
+    sign-in provider (such as Google), keeping that one. Its merges follow
+    every rule on this page, are audited, notify the person and emit
+    <code>user.merged</code>, which the run delivers before it exits.
+    Anything else is reported with the reason and left for
+    <code>MergeUsers</code>: an unverified account (it may not be the
+    mailbox owner's), a <code>+tag</code> difference outside Gmail (it may be
+    another person's mailbox), more than two accounts, an inactive account,
+    both or neither linked to a provider, or a pair this page's rules refuse.
+  </p>
 </DocsLayout>

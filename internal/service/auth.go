@@ -1870,6 +1870,10 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// was verified since) receives its address at its next session, however
 	// long-lived. After the gates above, so a refused session writes nothing.
 	// A no-op once issued.
+	//
+	// The stored email is moved to its canonical spelling first, so an
+	// address derived from it is derived from the form every lookup uses.
+	s.ensureCanonicalEmail(ctx, user, authTimeMs)
 	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	claims := jwt.Claims{
@@ -2102,9 +2106,9 @@ func passwordIssuesToErr(issues []string) error {
 	return nil
 }
 
-// validateEmailFormat + emailaddr.Canonicalize live in email_canonicalize.go
-// so the surface they cover (format, length, reserved TLDs, disposable
-// providers, Gmail-style normalization) is in one place.
+// validateEmailFormat lives in email_canonicalize.go and the canonical form in
+// pkg/emailaddr, so each rule (format, length, reserved TLDs, disposable
+// providers; Gmail-style normalization) is in one place.
 
 // friendlyDeviceName collapses a User-Agent string into a short display name.
 func friendlyDeviceName(userAgent string) string {

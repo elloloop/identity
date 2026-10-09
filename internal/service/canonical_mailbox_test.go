@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/elloloop/identity/pkg/emailaddr"
 )
 
 // tagOnlyAddress passes the raw-address checks (validateEmailFormat) but has
@@ -17,7 +19,7 @@ const tagOnlyAddress = "+x@corp.com"
 
 func TestCanonicalMailbox_RefusesATagOnlyLocalPartThatPassesRawValidation(t *testing.T) {
 	require.NoError(t, validateEmailFormat(tagOnlyAddress), "the raw check alone lets it through")
-	got, usable := CanonicalMailbox(tagOnlyAddress)
+	got, usable := emailaddr.Mailbox(tagOnlyAddress)
 	require.Equal(t, "@corp.com", got)
 	require.False(t, usable)
 }
