@@ -7,7 +7,7 @@ package service
 // with the addresses that asked for them under it.
 //
 // It is not the service's normalization. The service canonicalizes an
-// address before it reaches a store (CanonicalizeEmail, which also lowers
+// address before it reaches a store (emailaddr.Canonicalize, which also lowers
 // non-ASCII letters); FoldEmail only makes the stores agree on the addresses
 // they are given. It is ASCII-only because that is the one fold all three
 // stores evaluate identically: Postgres lower() folds by the database's

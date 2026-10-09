@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"golang.org/x/net/idna"
+
+	"github.com/elloloop/identity/pkg/emailaddr"
 )
 
 // RFC-5321 caps. Stored here rather than inlined so a future tuning is
@@ -53,54 +55,7 @@ var disposableDomains = map[string]struct{}{
 	"mailnesia.com":     {},
 }
 
-// gmailDomains are the addresses that share the @gmail.com inbox.
-// Dot-stripping in the local part only applies here — most non-Google
-// SMTP servers treat dots as significant.
-var gmailDomains = map[string]bool{
-	"gmail.com":      true,
-	"googlemail.com": true,
-}
-
-// CanonicalizeEmail returns the canonical form used for duplicate
-// detection and lookup. It implements Gmail's normalization rules:
-//
-//   - Lowercase + trim (always).
-//   - Strip everything from '+' onward in the local part (universal —
-//     virtually every provider supports +addressing and the un-tagged
-//     form is always deliverable).
-//   - For @gmail.com / @googlemail.com only: strip dots from the local
-//     part and collapse googlemail.com → gmail.com.
-//   - Punycode IDN domains via golang.org/x/net/idna so visually-
-//     equivalent unicode domains compare equal.
-//
-// The function is intentionally permissive on malformed input — it
-// returns the input unchanged when there's no '@' to split on so
-// callers can run it before validateEmailFormat without a panic.
-// Production code runs validation FIRST, canonicalization SECOND.
-func CanonicalizeEmail(addr string) string {
-	addr = strings.TrimSpace(strings.ToLower(addr))
-	at := strings.LastIndex(addr, "@")
-	if at < 0 {
-		return addr
-	}
-	local := addr[:at]
-	domain := canonicalizeDomain(addr[at+1:])
-
-	// Strip plus-tag from local part (universal).
-	if i := strings.Index(local, "+"); i >= 0 {
-		local = local[:i]
-	}
-
-	// canonicalizeDomain has already folded @googlemail.com to @gmail.com, so
-	// this single check covers both shared-inbox domains; dot-stripping in the
-	// local part applies only to them.
-	if domain == "gmail.com" {
-		local = strings.ReplaceAll(local, ".", "")
-	}
-	return local + "@" + domain
-}
-
-// CanonicalMailbox canonicalizes addr (CanonicalizeEmail) and reports whether
+// CanonicalMailbox canonicalizes addr (emailaddr.Canonicalize) and reports whether
 // the result is a mailbox an account can hold: a non-empty local part, a
 // domain containing a dot, and no whitespace. Every path that stores or looks
 // up an account's address from caller or provider input checks it:
@@ -108,7 +63,7 @@ func CanonicalizeEmail(addr string) string {
 // ("+x@corp.com") has no local part left, whatever the raw address's own
 // validation said.
 func CanonicalMailbox(addr string) (string, bool) {
-	c := CanonicalizeEmail(addr)
+	c := emailaddr.Canonicalize(addr)
 	return c, isUsableMailbox(c)
 }
 
@@ -136,7 +91,7 @@ func isUsableMailbox(s string) bool {
 	return !strings.ContainsAny(s, " \t\r\n")
 }
 
-// canonicalEmail is an email address that has been through CanonicalizeEmail
+// canonicalEmail is an email address that has been through emailaddr.Canonicalize
 // (via canonicalize). It is the ONLY thing the per-project access gate accepts,
 // so the compiler rejects a raw, possibly-non-canonical string at the gate
 // boundary: the "canonicalize once, at the caller, then compare like-for-like"
@@ -145,7 +100,7 @@ func isUsableMailbox(s string) bool {
 type canonicalEmail string
 
 // canonicalize is the sole constructor for canonicalEmail: it runs
-// CanonicalizeEmail and tags the result canonical. Call it exactly once per
+// emailaddr.Canonicalize and tags the result canonical. Call it exactly once per
 // request at the entry point and reuse the value for BOTH the access gate and
 // the DB/user operations (string(cemail)), so a request canonicalizes once
 // rather than once per consumer. It is idempotent — re-wrapping an
@@ -153,30 +108,7 @@ type canonicalEmail string
 // challenge/token email) yields the same value and self-heals a legacy
 // non-canonical row.
 func canonicalize(raw string) canonicalEmail {
-	return canonicalEmail(CanonicalizeEmail(raw))
-}
-
-// canonicalizeDomain returns the canonical form of a bare email domain,
-// mirroring the domain handling inside CanonicalizeEmail so a domain compared on
-// its own resolves identically to the domain of a canonicalized address (IDN
-// punycoding makes visually-equivalent unicode domains compare equal). A domain
-// that cannot be punycoded is returned unchanged — validateEmailFormat rejects
-// malformed inputs upstream.
-func canonicalizeDomain(domain string) string {
-	domain = strings.TrimSpace(strings.ToLower(domain))
-	// Strip the trailing FQDN dot: "example.com." and "example.com" name the
-	// same domain, and an address's domain never carries one (validateEmailFormat
-	// rejects a trailing dot). A configured entry that kept it could therefore
-	// never match anything — silently weakening a deny rule, and silently
-	// narrowing an allowlist.
-	domain = strings.TrimSuffix(domain, ".")
-	if ascii, err := idna.Lookup.ToASCII(domain); err == nil {
-		domain = ascii
-	}
-	if gmailDomains[domain] {
-		return "gmail.com"
-	}
-	return domain
+	return canonicalEmail(emailaddr.Canonicalize(raw))
 }
 
 // validateEmailFormat is the gate every email-bearing RPC runs before
@@ -193,7 +125,7 @@ func canonicalizeDomain(domain string) string {
 //     and friends — the top free-tier abuse vector).
 //
 // On success, returns nil. The caller usually pairs this with
-// CanonicalizeEmail to get the storage/lookup form.
+// emailaddr.Canonicalize to get the storage/lookup form.
 func validateEmailFormat(addr string) error {
 	if addr == "" {
 		return errors.New("email is required")

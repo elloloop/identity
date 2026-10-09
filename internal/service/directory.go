@@ -99,7 +99,7 @@ func NewDirectoryService(credentials DirectoryCredentialStore, users Repository,
 
 // LookupUsers resolves emails to the ACTIVE accounts they name in the project
 // presentedKey belongs to, in request order. Each address is canonicalized
-// as sign-in canonicalizes the address it is given (CanonicalizeEmail), so
+// as sign-in canonicalizes the address it is given (emailaddr.Canonicalize), so
 // the lookup finds exactly the account sign-in with that address would; an
 // address naming no active account — or, when verified email is required,
 // only an unverified one — is simply absent.
