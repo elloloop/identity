@@ -86,6 +86,13 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       erases an account.
     </li>
   </ul>
+  <p>
+    Anyone else gets the same <code>PERMISSION_DENIED</code> whether the id
+    names an agent, a person or nothing, so the RPCs cannot be used to find
+    out which ids are agents. An agent cannot manage agents, and neither can
+    an anonymous account.
+  </p>
+
   <h2 id="transfers">Transferring an agent</h2>
   <p>
     A transfer needs the recipient's consent. <code>TransferAgent</code>
@@ -119,8 +126,16 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     Only the recipient can accept or decline; an admin cannot answer on
     their behalf. A new offer replaces a pending one, and an answer applies
     only to the offer it was given for, so accepting an offer that was
-    cancelled or replaced in the meantime is refused. When the recipient's
-    account is merged into another, the offer moves to the survivor.
+    cancelled or replaced in the meantime is refused. An offer is likewise
+    written only while the agent still has the owner it was authorized
+    against, so an offer made from a stale read, after the agent changed
+    hands, is refused rather than planted on the new owner's agent. A
+    refusal of either kind answers <code>PERMISSION_DENIED</code>: list the
+    agent again and retry. An offer stays open until it is answered,
+    cancelled or replaced, even when the recipient leaves the project; the
+    owner cancels it then. When the recipient's account is merged into
+    another, the offer moves to the survivor, and an offer that would leave
+    an agent offered to its own owner is dropped.
   </p>
   <p>
     <strong>Orphans are the one exception.</strong> An agent whose owner was
@@ -129,13 +144,6 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     within the recipient's limit, and its sessions end. An agent whose owner
     is suspended or scheduled for deletion is not an orphan: its owner can
     come back, so a transfer of it is an offer like any other.
-  </p>
-
-  <p>
-    Anyone else gets the same <code>PERMISSION_DENIED</code> whether the id
-    names an agent, a person or nothing, so the RPCs cannot be used to find
-    out which ids are agents. An agent cannot manage agents, and neither can
-    an anonymous account.
   </p>
 
   <h2>An agent stands with its owner</h2>
@@ -214,7 +222,12 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     <code>agent_transferred</code> when it is accepted (or an orphan is
     reassigned), and <code>agent_transfer_declined</code> or
     <code>agent_transfer_cancelled</code> when it is closed without a change
-    of owner. <code>agents_listed</code> records an
+    of owner. A <code>TransferAgent</code> refused before an offer is
+    written (an unauthorized caller, an ineligible recipient) and a refused
+    <code>AcceptAgentTransfer</code> are recorded as a failed
+    <code>agent_transferred</code>; an offer refused because the agent
+    changed hands meanwhile is a failed
+    <code>agent_transfer_requested</code>. <code>agents_listed</code> records an
     admin listing another person's agents (the owner as target) and a
     refused listing; listing your own is not recorded. A refused sign-in is
     <code>agent_sign_in_refused</code>.

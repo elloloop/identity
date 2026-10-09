@@ -1116,6 +1116,9 @@ message UpdateAgentResponse {
 // (AcceptAgentTransfer); until then the agent stays with its owner and
 // carries the recipient in pending_owner_user_id. A new offer replaces a
 // pending one. The recipient's per-owner cap is checked when they accept.
+// The offer is written only while the agent still has the owner the call
+// was authorized against; one that raced a change of owner is refused with
+// PERMISSION_DENIED, and the caller re-reads the agent.
 //
 // One exception: a project admin's transfer of an orphan (an agent whose
 // owner no longer exists) takes effect at once, under the recipient's cap,
@@ -1134,7 +1137,9 @@ message TransferAgentResponse {
 // AcceptAgentTransferRequest takes ownership of an agent offered to the
 // caller. Only the recipient may accept; an admin cannot accept on their
 // behalf. Refused with RESOURCE_EXHAUSTED when the caller already holds the
-// per-owner cap. The agent's sessions end: whatever its previous owner
+// per-owner cap. An offer cancelled or replaced since the caller read it is
+// refused with PERMISSION_DENIED; re-list the incoming offers. The agent's
+// sessions end: whatever its previous owner
 // approved for it does not carry over to the new one.
 message AcceptAgentTransferRequest {
   string agent_user_id = 1;

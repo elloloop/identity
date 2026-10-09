@@ -26,7 +26,9 @@ becomes a person.
 - **A transfer is an offer the recipient accepts.** `TransferAgent` sets the
   agent's `pending_owner_user_id`; ownership moves only on
   `AcceptAgentTransfer`, which checks the recipient's limit then. The agent
-  stays with its owner meanwhile. A project admin's transfer of an orphan
+  stays with its owner meanwhile. An offer or an answer that raced a change
+  (the agent changed hands, or the offer was cancelled or replaced) is
+  refused with `PERMISSION_DENIED`; re-read and retry. A project admin's transfer of an orphan
   (an agent whose owner was deleted) takes effect at once, with no
   acceptance, because nobody is left to hand it over.
 - **An agent is admitted as its owner is.** In an `allowlist` or `closed`
