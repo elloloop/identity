@@ -192,21 +192,34 @@ func (r *fakeRepo) FindUserByUsername(_ context.Context, username string) (*serv
 	return nil, nil
 }
 
+// fakeListFilterMatches mirrors the drivers' list predicates. Anonymous
+// accounts and agents have no email, so a surface presenting users by
+// address receives neither unless it opts in; an owner filter selects the
+// agents one account owns.
+func fakeListFilterMatches(filter service.UserListFilter, u *service.User) bool {
+	switch {
+	case filter.Email != "" && !strings.EqualFold(u.Email, filter.Email):
+		return false
+	case filter.ExternalID != "" && u.ExternalID != filter.ExternalID:
+		return false
+	case !filter.IncludeAnonymous && u.IsAnonymous:
+		return false
+	case !filter.IncludeAgents && u.IsAgent():
+		return false
+	case filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID:
+		return false
+	case filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID:
+		return false
+	}
+	return true
+}
+
 func (r *fakeRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []*service.User
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
+		if !fakeListFilterMatches(filter, u) {
 			continue
 		}
 		cp := *u
@@ -220,16 +233,7 @@ func (r *fakeRepo) CountUsers(_ context.Context, filter service.UserListFilter) 
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
+		if !fakeListFilterMatches(filter, u) {
 			continue
 		}
 		n++
@@ -2489,6 +2493,43 @@ func (r *fakeRepo) AssignAccountAddress(_ context.Context, userID, address strin
 	}
 	u.AccountAddress = address
 	return address, nil
+}
+
+// SettleAgentTransfer settles the transfer under the store's lock, only
+// while it still waits on pendingOwnerID.
+func (r *fakeRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error) {
+	if agentID == "" || pendingOwnerID == "" {
+		return false, errors.New("SettleAgentTransfer: missing agent or pending owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[agentID]
+	if !ok || !u.IsAgent() || u.PendingOwnerUserID == "" || u.PendingOwnerUserID != pendingOwnerID {
+		return false, nil
+	}
+	if accept {
+		u.OwnerUserID = u.PendingOwnerUserID
+	}
+	u.PendingOwnerUserID = ""
+	u.UpdatedAt = time.UnixMilli(atMs)
+	return true, nil
+}
+
+// SetAgentOwnership writes the agent's owners under the store's lock, only
+// while expectedOwnerID still owns it.
+func (r *fakeRepo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error) {
+	if agentID == "" || expectedOwnerID == "" || ownerID == "" {
+		return false, errors.New("SetAgentOwnership: missing agent or owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[agentID]
+	if !ok || !u.IsAgent() || u.OwnerUserID != expectedOwnerID {
+		return false, nil
+	}
+	u.OwnerUserID, u.PendingOwnerUserID = ownerID, pendingOwnerID
+	u.UpdatedAt = time.UnixMilli(atMs)
+	return true, nil
 }
 
 // ApplyAccountMerge is the merge under the store's lock: the records change

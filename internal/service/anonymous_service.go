@@ -25,7 +25,7 @@ var (
 
 	// ErrAnonymousMustUpgrade: an anonymous caller tried to attach a
 	// permanent credential through a path that cannot also clear the
-	// anonymous flag. See refuseAnonymousCredentialAttach.
+	// anonymous flag. See refuseCredentialAttach.
 	ErrAnonymousMustUpgrade = errors.New("anonymous accounts gain credentials through UpgradeAnonymousAccount")
 
 	// ErrAnonymousRefreshDisabled: the project turned anonymous sign-in off
@@ -247,9 +247,8 @@ func (s *AuthService) touchAnonymousActivity(ctx context.Context, u *User) {
 	}
 }
 
-// refuseAnonymousCredentialAttach blocks a permanent credential from being
-// attached to an anonymous account by any path other than
-// UpgradeAnonymousAccount.
+// refuseCredentialAttach blocks a permanent credential from being attached
+// to an anonymous account by any path other than UpgradeAnonymousAccount.
 //
 // The retention sweep keys on is_anonymous, and every other credential
 // endpoint (LinkIdentity, passkey registration, phone verification) is
@@ -264,14 +263,21 @@ func (s *AuthService) touchAnonymousActivity(ctx context.Context, u *User) {
 // A lookup failure refuses too: guessing "probably not anonymous" is the
 // direction that loses data.
 //
+// An agent account is refused too, with ErrAgentCredential: it has no
+// sign-in method by construction, and a credential attached to it would be
+// one.
+//
 // BeginIdentityVerification enforces the same refusal inside its own service
 // (it cannot reach this helper): not a credential, but a paid provider call
 // that would pin a verified identity to an account the sweep can still
 // hard-delete.
-func (s *AuthService) refuseAnonymousCredentialAttach(ctx context.Context, userID string) error {
+func (s *AuthService) refuseCredentialAttach(ctx context.Context, userID string) error {
 	u, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return err
+	}
+	if u.IsAgent() {
+		return ErrAgentCredential
 	}
 	if u != nil && u.IsAnonymous {
 		return fmt.Errorf(

@@ -25,15 +25,16 @@ const msPerDay int64 = 24 * 60 * 60 * 1000
 // principal, distinct from any end-user or admin.
 const accountDeletionSweeperActor = "system:account-deletion-sweeper"
 
-// revokeAllUserSessions immediately invalidates a user's access by deleting
-// their refresh tokens and revoking their active sessions, so a status change
-// (admin deactivation, self-service deletion request, hard delete) takes effect
-// at once rather than at the next token's natural expiry. Callers pass the same
-// nowMs used for the surrounding mutation so the revocation timestamp matches.
+// revokeAllUserSessions immediately invalidates one account's sessions by
+// deleting its refresh tokens and revoking its active sessions, so a change
+// takes effect at once rather than at the next token's natural expiry.
+// Callers pass the same nowMs used for the surrounding mutation so the
+// revocation timestamp matches.
 //
-// It is the one implementation of the "cut off access now" step, shared by
-// AdminService.DeactivateUser, the delete cascade, and
-// ProfileService.DeleteMyAccount, so the three never drift.
+// It is the one implementation of the "cut off this account's sessions now"
+// step. A change to an account's standing (deactivation, a deletion request,
+// a hard delete) goes through RevokeUserAccess, which also reaches the
+// agents the account owns.
 func revokeAllUserSessions(ctx context.Context, repo Repository, userID string, nowMs int64) error {
 	if err := repo.DeleteRefreshTokensForUser(ctx, userID); err != nil {
 		return fmt.Errorf("revoke refresh tokens: %w", err)
@@ -109,7 +110,7 @@ func (s *ProfileService) DeleteMyAccount(ctx context.Context, actorID, reason st
 		return 0, fmt.Errorf("schedule account deletion: %w", err)
 	}
 
-	if err := revokeAllUserSessions(ctx, repo, actorID, now); err != nil {
+	if err := RevokeUserAccess(ctx, repo, actorID, now); err != nil {
 		return 0, fmt.Errorf("schedule account deletion: %w", err)
 	}
 
@@ -242,7 +243,7 @@ func (s *AdminService) PurgeAccount(ctx context.Context, actorUserID string, u *
 // access token dies immediately.
 func (s *AdminService) purgeUser(ctx context.Context, auditActorID string, u *User) error {
 	now := nowMs()
-	if err := revokeAllUserSessions(ctx, s.repo(ctx), u.ID, now); err != nil {
+	if err := RevokeUserAccess(ctx, s.repo(ctx), u.ID, now); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	// Group membership is a graph MEMBER_OF edge, not a Repository record, so

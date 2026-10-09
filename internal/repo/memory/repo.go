@@ -284,6 +284,15 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
+		if !filter.IncludeAgents && u.IsAgent() {
+			continue
+		}
+		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
+			continue
+		}
+		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
+			continue
+		}
 		cp := *u
 		matched = append(matched, &cp)
 	}
@@ -362,6 +371,15 @@ func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int
 		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
+		if !filter.IncludeAgents && u.IsAgent() {
+			continue
+		}
+		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
+			continue
+		}
+		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
+			continue
+		}
 		n++
 	}
 	return n, nil
@@ -403,6 +421,9 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 		return "", fmt.Errorf("user id %q: %w", id, service.ErrAlreadyExists)
 	}
 	u.ID = id
+	if u.Kind == "" {
+		u.Kind = service.UserKindPerson
+	}
 	cp := *u
 	r.users[id] = &cp
 	return id, nil
@@ -1836,6 +1857,9 @@ func (r *Repo) CreateManagedChildAccount(_ context.Context, u *service.User, edg
 		return fmt.Errorf("user id %q: %w", id, service.ErrAlreadyExists)
 	}
 	u.ID = id
+	if u.Kind == "" {
+		u.Kind = service.UserKindPerson
+	}
 	cp := *u
 	r.users[id] = &cp
 
@@ -2335,6 +2359,43 @@ func (r *Repo) AssignAccountAddress(_ context.Context, userID, address string) (
 	return address, nil
 }
 
+// SettleAgentTransfer settles the transfer under the store's lock, only while
+// it still waits on pendingOwnerID.
+func (r *Repo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error) {
+	if agentID == "" || pendingOwnerID == "" {
+		return false, errors.New("memory: SettleAgentTransfer: missing agent or pending owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[agentID]
+	if !ok || !u.IsAgent() || u.PendingOwnerUserID == "" || u.PendingOwnerUserID != pendingOwnerID {
+		return false, nil
+	}
+	if accept {
+		u.OwnerUserID = u.PendingOwnerUserID
+	}
+	u.PendingOwnerUserID = ""
+	u.UpdatedAt = time.UnixMilli(atMs)
+	return true, nil
+}
+
+// SetAgentOwnership writes the agent's owners under the store's lock, only
+// while expectedOwnerID still owns it.
+func (r *Repo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error) {
+	if agentID == "" || expectedOwnerID == "" || ownerID == "" {
+		return false, errors.New("memory: SetAgentOwnership: missing agent or owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[agentID]
+	if !ok || !u.IsAgent() || u.OwnerUserID != expectedOwnerID {
+		return false, nil
+	}
+	u.OwnerUserID, u.PendingOwnerUserID = ownerID, pendingOwnerID
+	u.UpdatedAt = time.UnixMilli(atMs)
+	return true, nil
+}
+
 // ApplyAccountMerge is the merge under the store's lock: the records change
 // through AccountMerge.ApplyToUsers, then the side tables follow.
 func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
@@ -2343,6 +2404,19 @@ func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) erro
 	// A missing account is nil, which ApplyToUsers refuses.
 	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
+	}
+	for _, u := range r.users {
+		if u.OwnerUserID == m.OtherID {
+			u.OwnerUserID = m.SurvivorID
+		}
+	}
+	for _, u := range r.users {
+		if u.PendingOwnerUserID == m.OtherID || u.PendingOwnerUserID == m.SurvivorID {
+			u.PendingOwnerUserID = m.SurvivorID
+			if u.OwnerUserID == m.SurvivorID {
+				u.PendingOwnerUserID = ""
+			}
+		}
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {

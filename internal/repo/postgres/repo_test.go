@@ -550,6 +550,45 @@ func TestPostgres_DBAtomicPasswordChangeRequired(t *testing.T) {
 	require.Equal(t, "own", u.PasswordHash)
 }
 
+// The admin surfaces read users through the graph layer: an agent's kind and
+// owner travel with it, and a person reads back as a person.
+func TestPostgres_DBUserNodeCarriesAgentKindAndOwner(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping postgres DB coverage test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	projectID := fmt.Sprintf("agent-project-%d", time.Now().UnixNano())
+	repo, err := New(ctx, Config{DSN: dsn, MaxConns: 5, ConnTimeout: 5 * time.Second, AutoMigrate: true, ProjectID: projectID})
+	require.NoError(t, err)
+	defer repo.Close()
+	seedProject(ctx, t, repo, projectID)
+
+	now := time.Now()
+	owner, err := repo.CreateUser(ctx, &service.User{Email: "owner@example.com", Status: "active", Role: "member", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	recipient, err := repo.CreateUser(ctx, &service.User{Email: "recipient@example.com", Status: "active", Role: "member", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	agent, err := repo.CreateUser(ctx, &service.User{
+		Name: "Helper", Status: "active", Role: "member", CreatedAt: now, UpdatedAt: now,
+		Kind: service.UserKindAgent, OwnerUserID: owner, PendingOwnerUserID: recipient,
+	})
+	require.NoError(t, err)
+
+	node, err := repo.GetNode(ctx, projectID, "actor", dbTypeUser, agent)
+	require.NoError(t, err)
+	require.Equal(t, service.UserKindAgent, node.Payload[dbUfKind])
+	require.Equal(t, owner, node.Payload[dbUfOwnerUserID])
+	require.Equal(t, recipient, node.Payload[dbUfPendingOwnerUserID])
+	node, err = repo.GetNode(ctx, projectID, "actor", dbTypeUser, owner)
+	require.NoError(t, err)
+	require.Equal(t, service.UserKindPerson, node.Payload[dbUfKind])
+	require.Equal(t, "", node.Payload[dbUfOwnerUserID])
+	require.Equal(t, "", node.Payload[dbUfPendingOwnerUserID])
+}
+
 // The admin surfaces read users through the graph layer: a username account's
 // username travels with it.
 func TestPostgres_DBUserNodeCarriesUsername(t *testing.T) {

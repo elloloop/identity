@@ -176,6 +176,39 @@ const (
 	// IdentityServiceDeleteManagedChildAccountProcedure is the fully-qualified name of the
 	// IdentityService's DeleteManagedChildAccount RPC.
 	IdentityServiceDeleteManagedChildAccountProcedure = "/identity.v1.IdentityService/DeleteManagedChildAccount"
+	// IdentityServiceCreateAgentProcedure is the fully-qualified name of the IdentityService's
+	// CreateAgent RPC.
+	IdentityServiceCreateAgentProcedure = "/identity.v1.IdentityService/CreateAgent"
+	// IdentityServiceListAgentsProcedure is the fully-qualified name of the IdentityService's
+	// ListAgents RPC.
+	IdentityServiceListAgentsProcedure = "/identity.v1.IdentityService/ListAgents"
+	// IdentityServiceUpdateAgentProcedure is the fully-qualified name of the IdentityService's
+	// UpdateAgent RPC.
+	IdentityServiceUpdateAgentProcedure = "/identity.v1.IdentityService/UpdateAgent"
+	// IdentityServiceTransferAgentProcedure is the fully-qualified name of the IdentityService's
+	// TransferAgent RPC.
+	IdentityServiceTransferAgentProcedure = "/identity.v1.IdentityService/TransferAgent"
+	// IdentityServiceAcceptAgentTransferProcedure is the fully-qualified name of the IdentityService's
+	// AcceptAgentTransfer RPC.
+	IdentityServiceAcceptAgentTransferProcedure = "/identity.v1.IdentityService/AcceptAgentTransfer"
+	// IdentityServiceDeclineAgentTransferProcedure is the fully-qualified name of the IdentityService's
+	// DeclineAgentTransfer RPC.
+	IdentityServiceDeclineAgentTransferProcedure = "/identity.v1.IdentityService/DeclineAgentTransfer"
+	// IdentityServiceCancelAgentTransferProcedure is the fully-qualified name of the IdentityService's
+	// CancelAgentTransfer RPC.
+	IdentityServiceCancelAgentTransferProcedure = "/identity.v1.IdentityService/CancelAgentTransfer"
+	// IdentityServiceListIncomingAgentTransfersProcedure is the fully-qualified name of the
+	// IdentityService's ListIncomingAgentTransfers RPC.
+	IdentityServiceListIncomingAgentTransfersProcedure = "/identity.v1.IdentityService/ListIncomingAgentTransfers"
+	// IdentityServiceDeactivateAgentProcedure is the fully-qualified name of the IdentityService's
+	// DeactivateAgent RPC.
+	IdentityServiceDeactivateAgentProcedure = "/identity.v1.IdentityService/DeactivateAgent"
+	// IdentityServiceReactivateAgentProcedure is the fully-qualified name of the IdentityService's
+	// ReactivateAgent RPC.
+	IdentityServiceReactivateAgentProcedure = "/identity.v1.IdentityService/ReactivateAgent"
+	// IdentityServiceDeleteAgentProcedure is the fully-qualified name of the IdentityService's
+	// DeleteAgent RPC.
+	IdentityServiceDeleteAgentProcedure = "/identity.v1.IdentityService/DeleteAgent"
 	// IdentityServiceRequestAdminHelpProcedure is the fully-qualified name of the IdentityService's
 	// RequestAdminHelp RPC.
 	IdentityServiceRequestAdminHelpProcedure = "/identity.v1.IdentityService/RequestAdminHelp"
@@ -533,6 +566,24 @@ type IdentityServiceClient interface {
 	DeactivateManagedChildAccount(context.Context, *connect.Request[v1.DeactivateManagedChildAccountRequest]) (*connect.Response[v1.DeactivateManagedChildAccountResponse], error)
 	ReactivateManagedChildAccount(context.Context, *connect.Request[v1.ReactivateManagedChildAccountRequest]) (*connect.Response[v1.ReactivateManagedChildAccountResponse], error)
 	DeleteManagedChildAccount(context.Context, *connect.Request[v1.DeleteManagedChildAccountRequest]) (*connect.Response[v1.DeleteManagedChildAccountResponse], error)
+	// Agent accounts — non-human accounts a person owns. Each RPC is
+	// authorized for the agent's owner or a project admin, and answering a
+	// transfer for its recipient alone; any other caller gets the same
+	// PERMISSION_DENIED whether or not the agent exists. A transfer is an
+	// offer the recipient accepts or declines. An agent never signs in. Deactivating or deleting its owner makes it
+	// unusable at once (its sessions end), and every token issued to an agent
+	// checks the owner again. Off unless GATEWAY_AGENTS_ENABLED is set.
+	CreateAgent(context.Context, *connect.Request[v1.CreateAgentRequest]) (*connect.Response[v1.CreateAgentResponse], error)
+	ListAgents(context.Context, *connect.Request[v1.ListAgentsRequest]) (*connect.Response[v1.ListAgentsResponse], error)
+	UpdateAgent(context.Context, *connect.Request[v1.UpdateAgentRequest]) (*connect.Response[v1.UpdateAgentResponse], error)
+	TransferAgent(context.Context, *connect.Request[v1.TransferAgentRequest]) (*connect.Response[v1.TransferAgentResponse], error)
+	AcceptAgentTransfer(context.Context, *connect.Request[v1.AcceptAgentTransferRequest]) (*connect.Response[v1.AcceptAgentTransferResponse], error)
+	DeclineAgentTransfer(context.Context, *connect.Request[v1.DeclineAgentTransferRequest]) (*connect.Response[v1.DeclineAgentTransferResponse], error)
+	CancelAgentTransfer(context.Context, *connect.Request[v1.CancelAgentTransferRequest]) (*connect.Response[v1.CancelAgentTransferResponse], error)
+	ListIncomingAgentTransfers(context.Context, *connect.Request[v1.ListIncomingAgentTransfersRequest]) (*connect.Response[v1.ListIncomingAgentTransfersResponse], error)
+	DeactivateAgent(context.Context, *connect.Request[v1.DeactivateAgentRequest]) (*connect.Response[v1.DeactivateAgentResponse], error)
+	ReactivateAgent(context.Context, *connect.Request[v1.ReactivateAgentRequest]) (*connect.Response[v1.ReactivateAgentResponse], error)
+	DeleteAgent(context.Context, *connect.Request[v1.DeleteAgentRequest]) (*connect.Response[v1.DeleteAgentResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[v1.RequestAdminHelpRequest]) (*connect.Response[v1.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[v1.ListHelpRequestsRequest]) (*connect.Response[v1.ListHelpRequestsResponse], error)
@@ -1010,6 +1061,72 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceDeleteManagedChildAccountProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("DeleteManagedChildAccount")),
+			connect.WithClientOptions(opts...),
+		),
+		createAgent: connect.NewClient[v1.CreateAgentRequest, v1.CreateAgentResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateAgentProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateAgent")),
+			connect.WithClientOptions(opts...),
+		),
+		listAgents: connect.NewClient[v1.ListAgentsRequest, v1.ListAgentsResponse](
+			httpClient,
+			baseURL+IdentityServiceListAgentsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListAgents")),
+			connect.WithClientOptions(opts...),
+		),
+		updateAgent: connect.NewClient[v1.UpdateAgentRequest, v1.UpdateAgentResponse](
+			httpClient,
+			baseURL+IdentityServiceUpdateAgentProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UpdateAgent")),
+			connect.WithClientOptions(opts...),
+		),
+		transferAgent: connect.NewClient[v1.TransferAgentRequest, v1.TransferAgentResponse](
+			httpClient,
+			baseURL+IdentityServiceTransferAgentProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("TransferAgent")),
+			connect.WithClientOptions(opts...),
+		),
+		acceptAgentTransfer: connect.NewClient[v1.AcceptAgentTransferRequest, v1.AcceptAgentTransferResponse](
+			httpClient,
+			baseURL+IdentityServiceAcceptAgentTransferProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AcceptAgentTransfer")),
+			connect.WithClientOptions(opts...),
+		),
+		declineAgentTransfer: connect.NewClient[v1.DeclineAgentTransferRequest, v1.DeclineAgentTransferResponse](
+			httpClient,
+			baseURL+IdentityServiceDeclineAgentTransferProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DeclineAgentTransfer")),
+			connect.WithClientOptions(opts...),
+		),
+		cancelAgentTransfer: connect.NewClient[v1.CancelAgentTransferRequest, v1.CancelAgentTransferResponse](
+			httpClient,
+			baseURL+IdentityServiceCancelAgentTransferProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CancelAgentTransfer")),
+			connect.WithClientOptions(opts...),
+		),
+		listIncomingAgentTransfers: connect.NewClient[v1.ListIncomingAgentTransfersRequest, v1.ListIncomingAgentTransfersResponse](
+			httpClient,
+			baseURL+IdentityServiceListIncomingAgentTransfersProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListIncomingAgentTransfers")),
+			connect.WithClientOptions(opts...),
+		),
+		deactivateAgent: connect.NewClient[v1.DeactivateAgentRequest, v1.DeactivateAgentResponse](
+			httpClient,
+			baseURL+IdentityServiceDeactivateAgentProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DeactivateAgent")),
+			connect.WithClientOptions(opts...),
+		),
+		reactivateAgent: connect.NewClient[v1.ReactivateAgentRequest, v1.ReactivateAgentResponse](
+			httpClient,
+			baseURL+IdentityServiceReactivateAgentProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ReactivateAgent")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteAgent: connect.NewClient[v1.DeleteAgentRequest, v1.DeleteAgentResponse](
+			httpClient,
+			baseURL+IdentityServiceDeleteAgentProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DeleteAgent")),
 			connect.WithClientOptions(opts...),
 		),
 		requestAdminHelp: connect.NewClient[v1.RequestAdminHelpRequest, v1.RequestAdminHelpResponse](
@@ -1539,6 +1656,17 @@ type identityServiceClient struct {
 	deactivateManagedChildAccount   *connect.Client[v1.DeactivateManagedChildAccountRequest, v1.DeactivateManagedChildAccountResponse]
 	reactivateManagedChildAccount   *connect.Client[v1.ReactivateManagedChildAccountRequest, v1.ReactivateManagedChildAccountResponse]
 	deleteManagedChildAccount       *connect.Client[v1.DeleteManagedChildAccountRequest, v1.DeleteManagedChildAccountResponse]
+	createAgent                     *connect.Client[v1.CreateAgentRequest, v1.CreateAgentResponse]
+	listAgents                      *connect.Client[v1.ListAgentsRequest, v1.ListAgentsResponse]
+	updateAgent                     *connect.Client[v1.UpdateAgentRequest, v1.UpdateAgentResponse]
+	transferAgent                   *connect.Client[v1.TransferAgentRequest, v1.TransferAgentResponse]
+	acceptAgentTransfer             *connect.Client[v1.AcceptAgentTransferRequest, v1.AcceptAgentTransferResponse]
+	declineAgentTransfer            *connect.Client[v1.DeclineAgentTransferRequest, v1.DeclineAgentTransferResponse]
+	cancelAgentTransfer             *connect.Client[v1.CancelAgentTransferRequest, v1.CancelAgentTransferResponse]
+	listIncomingAgentTransfers      *connect.Client[v1.ListIncomingAgentTransfersRequest, v1.ListIncomingAgentTransfersResponse]
+	deactivateAgent                 *connect.Client[v1.DeactivateAgentRequest, v1.DeactivateAgentResponse]
+	reactivateAgent                 *connect.Client[v1.ReactivateAgentRequest, v1.ReactivateAgentResponse]
+	deleteAgent                     *connect.Client[v1.DeleteAgentRequest, v1.DeleteAgentResponse]
 	requestAdminHelp                *connect.Client[v1.RequestAdminHelpRequest, v1.RequestAdminHelpResponse]
 	listHelpRequests                *connect.Client[v1.ListHelpRequestsRequest, v1.ListHelpRequestsResponse]
 	resolveHelpRequest              *connect.Client[v1.ResolveHelpRequestRequest, v1.ResolveHelpRequestResponse]
@@ -1858,6 +1986,61 @@ func (c *identityServiceClient) ReactivateManagedChildAccount(ctx context.Contex
 // DeleteManagedChildAccount calls identity.v1.IdentityService.DeleteManagedChildAccount.
 func (c *identityServiceClient) DeleteManagedChildAccount(ctx context.Context, req *connect.Request[v1.DeleteManagedChildAccountRequest]) (*connect.Response[v1.DeleteManagedChildAccountResponse], error) {
 	return c.deleteManagedChildAccount.CallUnary(ctx, req)
+}
+
+// CreateAgent calls identity.v1.IdentityService.CreateAgent.
+func (c *identityServiceClient) CreateAgent(ctx context.Context, req *connect.Request[v1.CreateAgentRequest]) (*connect.Response[v1.CreateAgentResponse], error) {
+	return c.createAgent.CallUnary(ctx, req)
+}
+
+// ListAgents calls identity.v1.IdentityService.ListAgents.
+func (c *identityServiceClient) ListAgents(ctx context.Context, req *connect.Request[v1.ListAgentsRequest]) (*connect.Response[v1.ListAgentsResponse], error) {
+	return c.listAgents.CallUnary(ctx, req)
+}
+
+// UpdateAgent calls identity.v1.IdentityService.UpdateAgent.
+func (c *identityServiceClient) UpdateAgent(ctx context.Context, req *connect.Request[v1.UpdateAgentRequest]) (*connect.Response[v1.UpdateAgentResponse], error) {
+	return c.updateAgent.CallUnary(ctx, req)
+}
+
+// TransferAgent calls identity.v1.IdentityService.TransferAgent.
+func (c *identityServiceClient) TransferAgent(ctx context.Context, req *connect.Request[v1.TransferAgentRequest]) (*connect.Response[v1.TransferAgentResponse], error) {
+	return c.transferAgent.CallUnary(ctx, req)
+}
+
+// AcceptAgentTransfer calls identity.v1.IdentityService.AcceptAgentTransfer.
+func (c *identityServiceClient) AcceptAgentTransfer(ctx context.Context, req *connect.Request[v1.AcceptAgentTransferRequest]) (*connect.Response[v1.AcceptAgentTransferResponse], error) {
+	return c.acceptAgentTransfer.CallUnary(ctx, req)
+}
+
+// DeclineAgentTransfer calls identity.v1.IdentityService.DeclineAgentTransfer.
+func (c *identityServiceClient) DeclineAgentTransfer(ctx context.Context, req *connect.Request[v1.DeclineAgentTransferRequest]) (*connect.Response[v1.DeclineAgentTransferResponse], error) {
+	return c.declineAgentTransfer.CallUnary(ctx, req)
+}
+
+// CancelAgentTransfer calls identity.v1.IdentityService.CancelAgentTransfer.
+func (c *identityServiceClient) CancelAgentTransfer(ctx context.Context, req *connect.Request[v1.CancelAgentTransferRequest]) (*connect.Response[v1.CancelAgentTransferResponse], error) {
+	return c.cancelAgentTransfer.CallUnary(ctx, req)
+}
+
+// ListIncomingAgentTransfers calls identity.v1.IdentityService.ListIncomingAgentTransfers.
+func (c *identityServiceClient) ListIncomingAgentTransfers(ctx context.Context, req *connect.Request[v1.ListIncomingAgentTransfersRequest]) (*connect.Response[v1.ListIncomingAgentTransfersResponse], error) {
+	return c.listIncomingAgentTransfers.CallUnary(ctx, req)
+}
+
+// DeactivateAgent calls identity.v1.IdentityService.DeactivateAgent.
+func (c *identityServiceClient) DeactivateAgent(ctx context.Context, req *connect.Request[v1.DeactivateAgentRequest]) (*connect.Response[v1.DeactivateAgentResponse], error) {
+	return c.deactivateAgent.CallUnary(ctx, req)
+}
+
+// ReactivateAgent calls identity.v1.IdentityService.ReactivateAgent.
+func (c *identityServiceClient) ReactivateAgent(ctx context.Context, req *connect.Request[v1.ReactivateAgentRequest]) (*connect.Response[v1.ReactivateAgentResponse], error) {
+	return c.reactivateAgent.CallUnary(ctx, req)
+}
+
+// DeleteAgent calls identity.v1.IdentityService.DeleteAgent.
+func (c *identityServiceClient) DeleteAgent(ctx context.Context, req *connect.Request[v1.DeleteAgentRequest]) (*connect.Response[v1.DeleteAgentResponse], error) {
+	return c.deleteAgent.CallUnary(ctx, req)
 }
 
 // RequestAdminHelp calls identity.v1.IdentityService.RequestAdminHelp.
@@ -2375,6 +2558,24 @@ type IdentityServiceHandler interface {
 	DeactivateManagedChildAccount(context.Context, *connect.Request[v1.DeactivateManagedChildAccountRequest]) (*connect.Response[v1.DeactivateManagedChildAccountResponse], error)
 	ReactivateManagedChildAccount(context.Context, *connect.Request[v1.ReactivateManagedChildAccountRequest]) (*connect.Response[v1.ReactivateManagedChildAccountResponse], error)
 	DeleteManagedChildAccount(context.Context, *connect.Request[v1.DeleteManagedChildAccountRequest]) (*connect.Response[v1.DeleteManagedChildAccountResponse], error)
+	// Agent accounts — non-human accounts a person owns. Each RPC is
+	// authorized for the agent's owner or a project admin, and answering a
+	// transfer for its recipient alone; any other caller gets the same
+	// PERMISSION_DENIED whether or not the agent exists. A transfer is an
+	// offer the recipient accepts or declines. An agent never signs in. Deactivating or deleting its owner makes it
+	// unusable at once (its sessions end), and every token issued to an agent
+	// checks the owner again. Off unless GATEWAY_AGENTS_ENABLED is set.
+	CreateAgent(context.Context, *connect.Request[v1.CreateAgentRequest]) (*connect.Response[v1.CreateAgentResponse], error)
+	ListAgents(context.Context, *connect.Request[v1.ListAgentsRequest]) (*connect.Response[v1.ListAgentsResponse], error)
+	UpdateAgent(context.Context, *connect.Request[v1.UpdateAgentRequest]) (*connect.Response[v1.UpdateAgentResponse], error)
+	TransferAgent(context.Context, *connect.Request[v1.TransferAgentRequest]) (*connect.Response[v1.TransferAgentResponse], error)
+	AcceptAgentTransfer(context.Context, *connect.Request[v1.AcceptAgentTransferRequest]) (*connect.Response[v1.AcceptAgentTransferResponse], error)
+	DeclineAgentTransfer(context.Context, *connect.Request[v1.DeclineAgentTransferRequest]) (*connect.Response[v1.DeclineAgentTransferResponse], error)
+	CancelAgentTransfer(context.Context, *connect.Request[v1.CancelAgentTransferRequest]) (*connect.Response[v1.CancelAgentTransferResponse], error)
+	ListIncomingAgentTransfers(context.Context, *connect.Request[v1.ListIncomingAgentTransfersRequest]) (*connect.Response[v1.ListIncomingAgentTransfersResponse], error)
+	DeactivateAgent(context.Context, *connect.Request[v1.DeactivateAgentRequest]) (*connect.Response[v1.DeactivateAgentResponse], error)
+	ReactivateAgent(context.Context, *connect.Request[v1.ReactivateAgentRequest]) (*connect.Response[v1.ReactivateAgentResponse], error)
+	DeleteAgent(context.Context, *connect.Request[v1.DeleteAgentRequest]) (*connect.Response[v1.DeleteAgentResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[v1.RequestAdminHelpRequest]) (*connect.Response[v1.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[v1.ListHelpRequestsRequest]) (*connect.Response[v1.ListHelpRequestsResponse], error)
@@ -2848,6 +3049,72 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceDeleteManagedChildAccountProcedure,
 		svc.DeleteManagedChildAccount,
 		connect.WithSchema(identityServiceMethods.ByName("DeleteManagedChildAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceCreateAgentHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateAgentProcedure,
+		svc.CreateAgent,
+		connect.WithSchema(identityServiceMethods.ByName("CreateAgent")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListAgentsHandler := connect.NewUnaryHandler(
+		IdentityServiceListAgentsProcedure,
+		svc.ListAgents,
+		connect.WithSchema(identityServiceMethods.ByName("ListAgents")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUpdateAgentHandler := connect.NewUnaryHandler(
+		IdentityServiceUpdateAgentProcedure,
+		svc.UpdateAgent,
+		connect.WithSchema(identityServiceMethods.ByName("UpdateAgent")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceTransferAgentHandler := connect.NewUnaryHandler(
+		IdentityServiceTransferAgentProcedure,
+		svc.TransferAgent,
+		connect.WithSchema(identityServiceMethods.ByName("TransferAgent")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAcceptAgentTransferHandler := connect.NewUnaryHandler(
+		IdentityServiceAcceptAgentTransferProcedure,
+		svc.AcceptAgentTransfer,
+		connect.WithSchema(identityServiceMethods.ByName("AcceptAgentTransfer")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDeclineAgentTransferHandler := connect.NewUnaryHandler(
+		IdentityServiceDeclineAgentTransferProcedure,
+		svc.DeclineAgentTransfer,
+		connect.WithSchema(identityServiceMethods.ByName("DeclineAgentTransfer")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceCancelAgentTransferHandler := connect.NewUnaryHandler(
+		IdentityServiceCancelAgentTransferProcedure,
+		svc.CancelAgentTransfer,
+		connect.WithSchema(identityServiceMethods.ByName("CancelAgentTransfer")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListIncomingAgentTransfersHandler := connect.NewUnaryHandler(
+		IdentityServiceListIncomingAgentTransfersProcedure,
+		svc.ListIncomingAgentTransfers,
+		connect.WithSchema(identityServiceMethods.ByName("ListIncomingAgentTransfers")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDeactivateAgentHandler := connect.NewUnaryHandler(
+		IdentityServiceDeactivateAgentProcedure,
+		svc.DeactivateAgent,
+		connect.WithSchema(identityServiceMethods.ByName("DeactivateAgent")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceReactivateAgentHandler := connect.NewUnaryHandler(
+		IdentityServiceReactivateAgentProcedure,
+		svc.ReactivateAgent,
+		connect.WithSchema(identityServiceMethods.ByName("ReactivateAgent")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDeleteAgentHandler := connect.NewUnaryHandler(
+		IdentityServiceDeleteAgentProcedure,
+		svc.DeleteAgent,
+		connect.WithSchema(identityServiceMethods.ByName("DeleteAgent")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceRequestAdminHelpHandler := connect.NewUnaryHandler(
@@ -3422,6 +3689,28 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceReactivateManagedChildAccountHandler.ServeHTTP(w, r)
 		case IdentityServiceDeleteManagedChildAccountProcedure:
 			identityServiceDeleteManagedChildAccountHandler.ServeHTTP(w, r)
+		case IdentityServiceCreateAgentProcedure:
+			identityServiceCreateAgentHandler.ServeHTTP(w, r)
+		case IdentityServiceListAgentsProcedure:
+			identityServiceListAgentsHandler.ServeHTTP(w, r)
+		case IdentityServiceUpdateAgentProcedure:
+			identityServiceUpdateAgentHandler.ServeHTTP(w, r)
+		case IdentityServiceTransferAgentProcedure:
+			identityServiceTransferAgentHandler.ServeHTTP(w, r)
+		case IdentityServiceAcceptAgentTransferProcedure:
+			identityServiceAcceptAgentTransferHandler.ServeHTTP(w, r)
+		case IdentityServiceDeclineAgentTransferProcedure:
+			identityServiceDeclineAgentTransferHandler.ServeHTTP(w, r)
+		case IdentityServiceCancelAgentTransferProcedure:
+			identityServiceCancelAgentTransferHandler.ServeHTTP(w, r)
+		case IdentityServiceListIncomingAgentTransfersProcedure:
+			identityServiceListIncomingAgentTransfersHandler.ServeHTTP(w, r)
+		case IdentityServiceDeactivateAgentProcedure:
+			identityServiceDeactivateAgentHandler.ServeHTTP(w, r)
+		case IdentityServiceReactivateAgentProcedure:
+			identityServiceReactivateAgentHandler.ServeHTTP(w, r)
+		case IdentityServiceDeleteAgentProcedure:
+			identityServiceDeleteAgentHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestAdminHelpProcedure:
 			identityServiceRequestAdminHelpHandler.ServeHTTP(w, r)
 		case IdentityServiceListHelpRequestsProcedure:
@@ -3779,6 +4068,50 @@ func (UnimplementedIdentityServiceHandler) ReactivateManagedChildAccount(context
 
 func (UnimplementedIdentityServiceHandler) DeleteManagedChildAccount(context.Context, *connect.Request[v1.DeleteManagedChildAccountRequest]) (*connect.Response[v1.DeleteManagedChildAccountResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeleteManagedChildAccount is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CreateAgent(context.Context, *connect.Request[v1.CreateAgentRequest]) (*connect.Response[v1.CreateAgentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateAgent is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListAgents(context.Context, *connect.Request[v1.ListAgentsRequest]) (*connect.Response[v1.ListAgentsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListAgents is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UpdateAgent(context.Context, *connect.Request[v1.UpdateAgentRequest]) (*connect.Response[v1.UpdateAgentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpdateAgent is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) TransferAgent(context.Context, *connect.Request[v1.TransferAgentRequest]) (*connect.Response[v1.TransferAgentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.TransferAgent is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AcceptAgentTransfer(context.Context, *connect.Request[v1.AcceptAgentTransferRequest]) (*connect.Response[v1.AcceptAgentTransferResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AcceptAgentTransfer is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DeclineAgentTransfer(context.Context, *connect.Request[v1.DeclineAgentTransferRequest]) (*connect.Response[v1.DeclineAgentTransferResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeclineAgentTransfer is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CancelAgentTransfer(context.Context, *connect.Request[v1.CancelAgentTransferRequest]) (*connect.Response[v1.CancelAgentTransferResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CancelAgentTransfer is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListIncomingAgentTransfers(context.Context, *connect.Request[v1.ListIncomingAgentTransfersRequest]) (*connect.Response[v1.ListIncomingAgentTransfersResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListIncomingAgentTransfers is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DeactivateAgent(context.Context, *connect.Request[v1.DeactivateAgentRequest]) (*connect.Response[v1.DeactivateAgentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeactivateAgent is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ReactivateAgent(context.Context, *connect.Request[v1.ReactivateAgentRequest]) (*connect.Response[v1.ReactivateAgentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ReactivateAgent is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DeleteAgent(context.Context, *connect.Request[v1.DeleteAgentRequest]) (*connect.Response[v1.DeleteAgentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeleteAgent is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) RequestAdminHelp(context.Context, *connect.Request[v1.RequestAdminHelpRequest]) (*connect.Response[v1.RequestAdminHelpResponse], error) {

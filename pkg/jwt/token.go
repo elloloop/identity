@@ -44,9 +44,15 @@ type Claims struct {
 	// assumes a verified human: an anonymous sub is cheap to mint, and
 	// `email` is empty rather than absent-because-unverified. Firebase
 	// carries the same signal as sign_in_provider="anonymous".
-	Anonymous bool     `json:"anonymous,omitempty"`
-	SID       string   `json:"sid,omitempty"`
-	Audience  []string `json:"aud,omitempty"`
+	Anonymous bool `json:"anonymous,omitempty"`
+	// Kind is "agent" on a token whose subject is an agent account (a
+	// non-human account a person owns) and empty otherwise, so tokens for
+	// people are byte-identical to before: an absent kind means a person.
+	// Downstream services MUST read it before granting anything that assumes
+	// a human at the keyboard.
+	Kind     string   `json:"kind,omitempty"`
+	SID      string   `json:"sid,omitempty"`
+	Audience []string `json:"aud,omitempty"`
 	// Issuer is the "iss" claim: the deployment's configured issuer
 	// (GATEWAY_JWT_ISSUER), so a verifier can pin who minted the token.
 	// Omitted when unset, so tokens from a deployment without one are
@@ -99,6 +105,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if c.Anonymous {
 		m["anonymous"] = true
+	}
+	if c.Kind != "" {
+		m["kind"] = c.Kind
 	}
 	if c.SID != "" {
 		m["sid"] = c.SID
@@ -285,6 +294,9 @@ func verifyToken(tokenStr string, kp KeyProvider, expectedTenant, expectedAudien
 	}
 	if v, ok := tok.Get("anonymous"); ok {
 		claims.Anonymous, _ = v.(bool)
+	}
+	if v, ok := tok.Get("kind"); ok {
+		claims.Kind, _ = v.(string)
 	}
 	claims.Audience = tok.Audience()
 	claims.Issuer = tok.Issuer()

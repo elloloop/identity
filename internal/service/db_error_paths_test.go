@@ -218,7 +218,7 @@ func TestAdminListUsers_QueryFails(t *testing.T) {
 	db.failQueryNodes = true
 	svc := newAdminWithDB(db)
 
-	_, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "", "", 50)
+	_, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "", "", 50, false)
 	require.Error(t, err)
 }
 

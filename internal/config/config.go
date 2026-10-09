@@ -142,6 +142,14 @@ const DefaultPostgresConnTimeoutMs = 5000
 // clamp) so the boundary default matches the service's own fallback.
 const DefaultExportMaxAuditEvents = 1000
 
+// DefaultAgentsMaxPerOwner is the default cap on how many agent accounts one
+// person may own when GATEWAY_AGENTS_MAX_PER_OWNER is unset or 0.
+const DefaultAgentsMaxPerOwner = 25
+
+// MaxAgentsMaxPerOwner is the largest GATEWAY_AGENTS_MAX_PER_OWNER accepted:
+// one listing page, so ListAgents always returns every agent an owner has.
+const MaxAgentsMaxPerOwner = 500
+
 // DefaultAuditRetentionDays is the default audit-log retention window in days
 // (730 = 24 months). Audit events record security-relevant actions together
 // with the caller's IP address and user-agent, so retaining them forever holds
@@ -1075,8 +1083,8 @@ type Config struct {
 	// RateLimitSignupPerIP is the per-IP request cap per window on the
 	// account-creating RPCs. PasswordSignup and UsernameSignup share one
 	// budget; SignInAnonymously, UpgradeAnonymousAccount,
-	// CreateManagedChildAccount and BeginPasskeySignup each get their own
-	// budget of the same size.
+	// CreateManagedChildAccount, BeginPasskeySignup and CreateAgent each get
+	// their own budget of the same size.
 	RateLimitSignupPerIP int
 	// RateLimitUsernameTakenPerIP caps how many "that username is taken"
 	// answers UsernameSignup gives one client IP per rate-limit window
@@ -1192,6 +1200,17 @@ type Config struct {
 	// unbounded log. Driven by GATEWAY_EXPORT_MAX_AUDIT_EVENTS (default 1000);
 	// a non-positive value falls back to the safe default.
 	ExportMaxAuditEvents int
+
+	// AgentsEnabled turns on agent accounts: non-human accounts a person
+	// owns, managed by their owner or a project admin through CreateAgent
+	// and the other agent RPCs. Off, those RPCs answer FAILED_PRECONDITION;
+	// agents created while it was on stay as they are and still cannot sign
+	// in. Driven by GATEWAY_AGENTS_ENABLED (default false).
+	AgentsEnabled bool
+	// AgentsMaxPerOwner caps how many agent accounts one person may own, from
+	// 0 to 500 (0 selects the default, 25); creating or transferring an
+	// agent past it is refused. Driven by GATEWAY_AGENTS_MAX_PER_OWNER.
+	AgentsMaxPerOwner int
 
 	// AuditRetentionDays is the audit-log retention window in days: on each tick
 	// the background sweeper deletes audit events whose occurred-at instant is
@@ -1560,6 +1579,8 @@ func loadFromEnv() *Config {
 
 		AccountDeletionGraceDays: envInt("GATEWAY_ACCOUNT_DELETION_GRACE_DAYS", 30),
 		ExportMaxAuditEvents:     envInt("GATEWAY_EXPORT_MAX_AUDIT_EVENTS", DefaultExportMaxAuditEvents),
+		AgentsEnabled:            envBool("GATEWAY_AGENTS_ENABLED", false),
+		AgentsMaxPerOwner:        envInt("GATEWAY_AGENTS_MAX_PER_OWNER", DefaultAgentsMaxPerOwner),
 		AuditRetentionDays:       envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
 
 		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
@@ -2024,6 +2045,12 @@ func (c *Config) Validate() error {
 	}
 	if c.RateLimitUsernameTakenPerIP < 0 {
 		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitUsernameTakenPerIP)
+	}
+	if c.AgentsMaxPerOwner < 0 || c.AgentsMaxPerOwner > MaxAgentsMaxPerOwner {
+		return fmt.Errorf(
+			"config: GATEWAY_AGENTS_MAX_PER_OWNER=%d must be between 0 and %d (0 selects the default, %d)",
+			c.AgentsMaxPerOwner, MaxAgentsMaxPerOwner, DefaultAgentsMaxPerOwner,
+		)
 	}
 	if c.AccountMergeReauthMaxAgeSeconds < 0 || c.AccountMergeReauthMaxAgeSeconds > MaxAccountMergeReauthMaxAgeSeconds {
 		return fmt.Errorf(
@@ -2661,6 +2688,21 @@ const DefaultAccountMergeReauthMaxAgeSeconds = 300
 // MaxAccountMergeReauthMaxAgeSeconds caps the window: a sign-in an hour old is
 // as recent as "recent" gets. Beyond it the check stops meaning anything.
 const MaxAccountMergeReauthMaxAgeSeconds = 3600
+
+// AgentsPerOwnerLimit is how many agent accounts one person may own: the
+// configured value, or the default when unset.
+func (c *Config) AgentsPerOwnerLimit() int {
+	switch {
+	case c.AgentsMaxPerOwner <= 0:
+		return DefaultAgentsMaxPerOwner
+	case c.AgentsMaxPerOwner > MaxAgentsMaxPerOwner:
+		// Validate refuses this at boot; a Config built in code without it
+		// still never lists fewer agents than an owner holds.
+		return MaxAgentsMaxPerOwner
+	default:
+		return c.AgentsMaxPerOwner
+	}
+}
 
 // AccountMergeReauthMaxAge is how recent the kept account's sign-in must be
 // for MergeAccounts: the configured value, or the default when unset.

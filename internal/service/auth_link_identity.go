@@ -37,7 +37,7 @@ func (s *AuthService) LinkIdentity(
 	// sessions. UpgradeAnonymousAccount is the one door that attaches a
 	// credential AND clears the flag AND applies the project access mode;
 	// everything else refuses, so there is exactly one path to guard.
-	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
+	if err := s.refuseCredentialAttach(ctx, userID); err != nil {
 		return nil, err
 	}
 	provider = strings.ToLower(strings.TrimSpace(provider))

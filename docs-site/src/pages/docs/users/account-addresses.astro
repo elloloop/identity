@@ -18,7 +18,9 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>Which accounts a project has, and who creates them</h2>
   <p>
-    A project has two kinds of account, and chooses for each who creates it:
+    A project has two kinds of sign-in account, and chooses for each who
+    creates it (<a href="/identity/docs/users/agent-accounts">agent accounts</a>,
+    which cannot sign in, are created by their owner):
   </p>
   <ul>
     <li>
@@ -274,6 +276,11 @@ import { Code } from "astro-expressive-code/components";
     address as a handle and key on the user id. Failing to
     store an address never blocks a sign-in: the server logs it and tries again
     at the next sign-in.
+  </p>
+  <p>
+    An <a href="/identity/docs/users/agent-accounts">agent account</a> never
+    gets an address: it has no email or username to spell one from, and it
+    never signs in.
   </p>
 
   <h2>Where it appears</h2>

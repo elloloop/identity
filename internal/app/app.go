@@ -393,6 +393,15 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
+			// Agent creation is account creation by an authenticated person:
+			// each admitted call inserts a user row. The per-owner cap bounds
+			// how many an owner holds, not how fast rows churn through
+			// create and delete. Its own budget, the size of the signup
+			// budget, for the same reason as the parent-creates-child path.
+			PathPrefix: "/identity.v1.IdentityService/CreateAgent", Tag: "agent_create",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
 			// The completion half of a login: unauthenticated (it carries a
 			// purpose ticket, not a session) and it mints a token pair, so it
 			// is bound by the same per-IP budget as the login paths.

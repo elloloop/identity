@@ -386,6 +386,14 @@ func (StubRepository) ApplyAccountMerge(context.Context, AccountMerge) error {
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) SettleAgentTransfer(context.Context, string, string, bool, int64) (bool, error) {
+	return false, ErrServiceUnavailable
+}
+
+func (StubRepository) SetAgentOwnership(context.Context, string, string, string, string, int64) (bool, error) {
+	return false, ErrServiceUnavailable
+}
+
 func (StubRepository) FindUserByProviderID(context.Context, string, string) (*User, error) {
 	return nil, ErrServiceUnavailable
 }

@@ -29,6 +29,7 @@ const userColumns = `
 	is_anonymous, anonymous_last_seen_ms,
 	market, username, account_address, merged_into_user_id,
 	password_change_required,
+	kind, owner_user_id, pending_owner_user_id,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed qualifies every column with the given table alias so
@@ -72,6 +73,7 @@ func scanUser(s scanner) (*service.User, error) {
 		&isAnonymous, &anonymousLastSeenMs,
 		&market, &username, &accountAddress, &mergedInto,
 		&passwordChangeRequired,
+		&u.Kind, &u.OwnerUserID, &u.PendingOwnerUserID,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -250,6 +252,20 @@ func (r *sqliteRepository) userFilterWhere(filter service.UserListFilter) (where
 		// than by the caller so ListUsers and CountUsers agree.
 		where = append(where, "NOT is_anonymous")
 	}
+	if !filter.IncludeAgents {
+		where = append(where, "kind <> 'agent'")
+	}
+	if filter.OwnerUserID != "" {
+		// The redundant owner_user_id <> '' repeats the owner index's
+		// predicate, so the planner can use that partial index.
+		args = append(args, filter.OwnerUserID)
+		where = append(where, fmt.Sprintf("owner_user_id <> '' AND owner_user_id = $%d", len(args)))
+	}
+	if filter.PendingOwnerUserID != "" {
+		// As above, for the pending-owner index.
+		args = append(args, filter.PendingOwnerUserID)
+		where = append(where, fmt.Sprintf("pending_owner_user_id <> '' AND pending_owner_user_id = $%d", len(args)))
+	}
 	return where, args
 }
 
@@ -271,6 +287,7 @@ const insertUserQuery = `
 		is_anonymous, anonymous_last_seen_ms,
 		market, username, account_address, merged_into_user_id,
 		password_change_required,
+		kind, owner_user_id, pending_owner_user_id,
 		created_at_ms, updated_at_ms
 	) VALUES (
 		$1, $2, $3, $4, $5, $6, $7,
@@ -286,7 +303,8 @@ const insertUserQuery = `
 		$25, $26,
 		$27, $28, $29, $30,
 		$31,
-		$32, $33
+		$32, $33, $34,
+		$35, $36
 	)`
 
 // insertUserArgs renders the bind args for insertUserQuery in column order.
@@ -306,12 +324,13 @@ func insertUserArgs(projectID, id, role, status string, u *service.User) []any {
 		u.IsAnonymous, u.AnonymousLastSeenMs,
 		u.Market, u.Username, u.AccountAddress, u.MergedIntoUserID,
 		u.PasswordChangeRequired,
+		u.Kind, u.OwnerUserID, u.PendingOwnerUserID,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	}
 }
 
 // defaultNewUserFields fills the zero-value fields of a user about to be
-// inserted (timestamps, id, role, status), shared by CreateUser and
+// inserted (timestamps, id, role, status, kind), shared by CreateUser and
 // CreateManagedChildAccount.
 func defaultNewUserFields(u *service.User) (id, role, status string) {
 	now := nowMs()
@@ -332,6 +351,9 @@ func defaultNewUserFields(u *service.User) (id, role, status string) {
 	status = u.Status
 	if status == "" {
 		status = "active"
+	}
+	if u.Kind == "" {
+		u.Kind = service.UserKindPerson
 	}
 	return id, role, status
 }
@@ -746,6 +768,44 @@ func (r *sqliteRepository) AssignAccountAddress(ctx context.Context, userID, add
 	return current, nil
 }
 
+func (r *sqliteRepository) SettleAgentTransfer(ctx context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error) {
+	if agentID == "" || pendingOwnerID == "" {
+		return false, errors.New("sqlite: SettleAgentTransfer: missing agent or pending owner id")
+	}
+	// One conditional statement: it settles only the transfer the caller
+	// read, so a cancel or a newer transfer that landed since wins.
+	const q = `
+		UPDATE users
+		   SET owner_user_id = CASE WHEN $4 THEN pending_owner_user_id ELSE owner_user_id END,
+		       pending_owner_user_id = '',
+		       updated_at_ms = $5
+		 WHERE project_id = $1 AND id = $2 AND kind = 'agent'
+		   AND pending_owner_user_id <> '' AND pending_owner_user_id = $3`
+	tag, err := r.db.Exec(ctx, q, r.projectID, agentID, pendingOwnerID, accept, atMs)
+	if err != nil {
+		return false, wrapErr("SettleAgentTransfer", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r *sqliteRepository) SetAgentOwnership(ctx context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error) {
+	if agentID == "" || expectedOwnerID == "" || ownerID == "" {
+		return false, errors.New("sqlite: SetAgentOwnership: missing agent or owner id")
+	}
+	// One conditional statement: it writes only while the agent is still
+	// owned by the owner the caller authorized against.
+	const q = `
+		UPDATE users
+		   SET owner_user_id = $4, pending_owner_user_id = $5, updated_at_ms = $6
+		 WHERE project_id = $1 AND id = $2 AND kind = 'agent'
+		   AND owner_user_id <> '' AND owner_user_id = $3`
+	tag, err := r.db.Exec(ctx, q, r.projectID, agentID, expectedOwnerID, ownerID, pendingOwnerID, atMs)
+	if err != nil {
+		return false, wrapErr("SetAgentOwnership", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.AccountMerge) error {
 	if m.SurvivorID == "" || m.OtherID == "" || m.SurvivorID == m.OtherID {
 		return errors.New("sqlite: ApplyAccountMerge: two distinct account ids are required")
@@ -758,7 +818,7 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 
 	const mergeable = `SELECT username, password_hash, email, email_verified, email_verified_at_ms, account_address
 		FROM users
-		WHERE project_id = $1 AND id = $2 AND status = 'active' AND merged_into_user_id = ''`
+		WHERE project_id = $1 AND id = $2 AND status = 'active' AND merged_into_user_id = '' AND kind = 'person'`
 	var (
 		oUsername, oPassword, oEmail, oAddress string
 		sUsername, sPassword, sEmail, sAddress string
@@ -811,7 +871,7 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 	}
 	// Every write is guarded on the state read above, so a concurrent merge
 	// or deactivation that got in between makes this one a conflict.
-	const guard = ` AND status = 'active' AND merged_into_user_id = ''`
+	const guard = ` AND status = 'active' AND merged_into_user_id = '' AND kind = 'person'`
 	tag, err := tx.Exec(ctx, `
 		UPDATE users
 		   SET status = 'deactivated', merged_into_user_id = $3,
@@ -861,6 +921,24 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 	if _, err := tx.Exec(ctx, `UPDATE oauth_identities SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
 		r.projectID, m.OtherID, m.SurvivorID); err != nil {
 		return wrapErr("ApplyAccountMerge(oauth identities)", err)
+	}
+	// The survivor is the same person, so it owns the retired account's
+	// agents. owner_user_id <> '' matches the owner index's predicate.
+	if _, err := tx.Exec(ctx, `UPDATE users SET owner_user_id = $3 WHERE project_id = $1 AND owner_user_id <> '' AND owner_user_id = $2`,
+		r.projectID, m.OtherID, m.SurvivorID); err != nil {
+		return wrapErr("ApplyAccountMerge(agents)", err)
+	}
+	// A transfer waiting on the retired account waits on the survivor, unless
+	// the survivor now owns that agent, when there is nothing left to accept.
+	// The second arm drops the offer the retired account made to the
+	// survivor of an agent the survivor now owns.
+	if _, err := tx.Exec(ctx, `
+		UPDATE users
+		   SET pending_owner_user_id = CASE WHEN owner_user_id = $3 THEN '' ELSE $3 END
+		 WHERE project_id = $1 AND pending_owner_user_id <> ''
+		   AND (pending_owner_user_id = $2 OR (pending_owner_user_id = $3 AND owner_user_id = $3))`,
+		r.projectID, m.OtherID, m.SurvivorID); err != nil {
+		return wrapErr("ApplyAccountMerge(agent transfers)", err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = $2`, r.projectID, m.OtherID); err != nil {
 		return wrapErr("ApplyAccountMerge(refresh tokens)", err)

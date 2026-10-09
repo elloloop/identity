@@ -52,7 +52,11 @@ const (
 	dbUfPasswordChangeRequired = "23"
 	// dbUfUsername is read-only on the graph path: usernames are written only
 	// by CreateUser and the username RPCs, never through ExecuteAtomic.
-	dbUfUsername = "24"
+	dbUfUsername    = "24"
+	dbUfKind        = "25"
+	dbUfOwnerUserID = "26"
+	// dbUfPendingOwnerUserID is ufPendingOwnerUserID.
+	dbUfPendingOwnerUserID = "27"
 )
 
 const (
@@ -983,6 +987,9 @@ func userNodeFromRecord(u *service.User) *graph.Node {
 			dbUfEmailVerifiedAt:        u.EmailVerifiedAt,
 			dbUfPasswordChangeRequired: u.PasswordChangeRequired,
 			dbUfUsername:               u.Username,
+			dbUfKind:                   u.Kind,
+			dbUfOwnerUserID:            u.OwnerUserID,
+			dbUfPendingOwnerUserID:     u.PendingOwnerUserID,
 		},
 	}
 }

@@ -63,6 +63,10 @@ func TestToConnectError_SentinelMapping(t *testing.T) {
 		{"InvitationExpired", service.ErrInvitationExpired, connect.CodeFailedPrecondition},
 		{"QrLoginNotPending", service.ErrQrLoginNotPending, connect.CodeFailedPrecondition},
 		{"LocalAuthDisabled", service.ErrLocalAuthDisabled, connect.CodeUnavailable},
+		{"AgentSignIn", service.ErrAgentSignIn, connect.CodePermissionDenied},
+		{"AgentCredential", service.ErrAgentCredential, connect.CodeFailedPrecondition},
+		{"AgentLimitReached", service.ErrAgentLimitReached, connect.CodeResourceExhausted},
+		{"AgentsDisabled", service.ErrAgentsDisabled, connect.CodeFailedPrecondition},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -357,7 +357,9 @@ func (s *repoSCIMStore) loadSCIMAddressable(ctx context.Context, id string) (*se
 	if err != nil {
 		return nil, mapStoreErr(err)
 	}
-	if u == nil || u.IsAnonymous || u.MergedIntoUserID != "" {
+	// An agent account is not provisioned by an IdP and has no userName, so
+	// it is no more addressable here than it is listed.
+	if u == nil || u.IsAnonymous || u.MergedIntoUserID != "" || u.IsAgent() {
 		return nil, scim.ErrNotFound
 	}
 	return u, nil
@@ -427,15 +429,13 @@ func (s *repoSCIMStore) followEmailChange(ctx context.Context, before, after *se
 	service.ReissueAddressAfterEmailChange(ctx, s.repo, s.logger, after)
 }
 
-// revokeUserAccess kills a user's live sessions and refresh tokens so a
-// deactivation takes effect at once rather than at token expiry. It mirrors
-// AdminService.DeactivateUser and backs both the PATCH active:false and the
-// PUT (ReplaceUser) deactivation paths.
+// revokeUserAccess kills a user's live sessions and refresh tokens, and
+// those of the agents they own, so a deactivation or deletion takes effect at
+// once rather than at token expiry. It is service.RevokeUserAccess, the one
+// implementation the admin and self-service paths use, and backs the PATCH
+// active:false, the PUT (ReplaceUser) deactivation and the DELETE paths.
 func (s *repoSCIMStore) revokeUserAccess(ctx context.Context, id string) error {
-	if err := s.repo.DeleteRefreshTokensForUser(ctx, id); err != nil {
-		return mapStoreErr(err)
-	}
-	if err := s.repo.RevokeSessionsForUser(ctx, id, time.Now().UnixMilli()); err != nil {
+	if err := service.RevokeUserAccess(ctx, s.repo, id, time.Now().UnixMilli()); err != nil {
 		return mapStoreErr(err)
 	}
 	return nil
@@ -524,6 +524,11 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 func (s *repoSCIMStore) DeleteUser(ctx context.Context, id string) error {
 	existing, err := s.loadSCIMAddressable(ctx, id)
 	if err != nil {
+		return err
+	}
+	// Before the delete, so the agents the user owns are cut off too: the
+	// delete cascade reaches the user's own sessions, not theirs.
+	if err := s.revokeUserAccess(ctx, id); err != nil {
 		return err
 	}
 	if err := s.repo.DeleteUser(ctx, id); err != nil {
