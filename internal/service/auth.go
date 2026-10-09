@@ -146,6 +146,13 @@ type User struct {
 	// stored password is one an admin issued; every write of a password the
 	// user chose, or of no password, clears it.
 	PasswordChangeRequired bool
+	// Kind is UserKindAgent on an agent account and UserKindPerson on every
+	// other account. Fixed at creation.
+	Kind string
+	// OwnerUserID is set on an agent: the person in the same project who owns
+	// it. Empty on a person. It keeps naming a deleted owner, which leaves the
+	// agent unusable until it is transferred.
+	OwnerUserID string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
 	// deletion. Set when the owner requests deletion; cleared on cancel or a
@@ -202,6 +209,12 @@ type UserListFilter struct {
 	// an empty userName. Excluded in the DRIVER, not the caller, so a
 	// paginated count matches the rows returned.
 	IncludeAnonymous bool
+	// IncludeAgents admits agent accounts, which are excluded by default for
+	// the same reason: no email, and no IdP that provisions them.
+	IncludeAgents bool
+	// OwnerUserID, when non-empty, matches only the agents that account owns.
+	// It needs IncludeAgents to match anything.
+	OwnerUserID string
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -1928,6 +1941,11 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // one place a sign-in is recorded as the account's last login, once the
 // session is issued: a sign-in refused on the way is not a login.
 func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+	// An agent account has no sign-in method. Refused here, before anything
+	// is written, so no credential a corrupt row might hold opens one.
+	if err := s.refuseAgentSignIn(ctx, user, ipAddr, userAgent); err != nil {
+		return "", "", err
+	}
 	// The verified-email gate for every sign-in, and every step that
 	// continues one, refusing with a verification email so the user has a
 	// way forward. The refresh path runs it before consuming its token.
@@ -2040,6 +2058,15 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	sessionStart := sessionStartedAtMs
 	if sessionStart <= 0 {
 		sessionStart = now
+	}
+
+	// An agent's standing is derived from its owner's, re-checked on every
+	// issue (refresh included) so an owner's suspension or deletion ends the
+	// agent's sessions at their next rotation. Before any state is written.
+	if user.IsAgent() {
+		if err := s.checkAgentStanding(ctx, user); err != nil {
+			return "", "", err
+		}
 	}
 
 	// Stamp the derived minor flag from the stored DOB so the token carries
@@ -2628,6 +2655,9 @@ func (s *AuthService) accessTokenClaims(ctx context.Context, user *User, authTim
 		IsMinor:       user.IsMinor,
 		Anonymous:     user.IsAnonymous,
 		AuthTime:      authTimeMs / 1000,
+	}
+	if user.IsAgent() {
+		claims.Kind = UserKindAgent
 	}
 	s.stampTokenScope(&claims)
 	return claims

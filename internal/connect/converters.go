@@ -65,6 +65,8 @@ func userToProto(u *service.User) *identitypb.User {
 		AccountAddress:         u.AccountAddress,
 		MergedIntoUserId:       u.MergedIntoUserID,
 		PasswordChangeRequired: u.PasswordChangeRequired,
+		Kind:                   userKindToProto(u),
+		OwnerUserId:            u.OwnerUserID,
 	}
 	if !u.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(u.CreatedAt)
@@ -73,6 +75,15 @@ func userToProto(u *service.User) *identitypb.User {
 		pb.UpdatedAt = timestamppb.New(u.UpdatedAt)
 	}
 	return pb
+}
+
+// userKindToProto reports an account's kind. Every account that is not an
+// agent is a person, including a row written before kinds existed.
+func userKindToProto(u *service.User) identitypb.UserKind {
+	if u.IsAgent() {
+		return identitypb.UserKind_USER_KIND_AGENT
+	}
+	return identitypb.UserKind_USER_KIND_PERSON
 }
 
 func userStatusToProto(s string) identitypb.UserStatus {

@@ -192,21 +192,32 @@ func (r *fakeRepo) FindUserByUsername(_ context.Context, username string) (*serv
 	return nil, nil
 }
 
+// fakeListFilterMatches mirrors the drivers' list predicates. Anonymous
+// accounts and agents have no email, so a surface presenting users by
+// address receives neither unless it opts in; an owner filter selects the
+// agents one account owns.
+func fakeListFilterMatches(filter service.UserListFilter, u *service.User) bool {
+	switch {
+	case filter.Email != "" && !strings.EqualFold(u.Email, filter.Email):
+		return false
+	case filter.ExternalID != "" && u.ExternalID != filter.ExternalID:
+		return false
+	case !filter.IncludeAnonymous && u.IsAnonymous:
+		return false
+	case !filter.IncludeAgents && u.IsAgent():
+		return false
+	case filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID:
+		return false
+	}
+	return true
+}
+
 func (r *fakeRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []*service.User
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
+		if !fakeListFilterMatches(filter, u) {
 			continue
 		}
 		cp := *u
@@ -220,16 +231,7 @@ func (r *fakeRepo) CountUsers(_ context.Context, filter service.UserListFilter) 
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
+		if !fakeListFilterMatches(filter, u) {
 			continue
 		}
 		n++
@@ -324,6 +326,8 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 			u.Market = v.(string)
 		case "username":
 			u.Username = v.(string)
+		case "owner_user_id":
+			u.OwnerUserID = v.(string)
 		case "deletion_scheduled_at_ms":
 			switch x := v.(type) {
 			case int64:

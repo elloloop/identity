@@ -351,7 +351,7 @@ func TestAdminService_ListUsers_WithFilter(t *testing.T) {
 	db.addUser("user-2", "bob@test.com", "Bob", "member", "deactivated")
 	svc := newTestAdminService(db)
 
-	users, _, total, err := svc.ListUsers(context.Background(), "admin-1", "active", "", "", 50)
+	users, _, total, err := svc.ListUsers(context.Background(), "admin-1", "active", "", "", 50, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -788,7 +788,7 @@ func TestAdminService_UsernameAccountsInTheAdminSurfaces(t *testing.T) {
 	db.nodes["user-1"].Payload[ufUsername] = "rob.smith"
 	svc := newTestAdminService(db)
 
-	users, _, total, err := svc.ListUsers(context.Background(), "admin-1", "", "rob.sm", "", 50)
+	users, _, total, err := svc.ListUsers(context.Background(), "admin-1", "", "rob.sm", "", 50, false)
 	if err != nil {
 		t.Fatalf("ListUsers: %v", err)
 	}

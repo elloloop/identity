@@ -1127,7 +1127,7 @@ func TestAdminService_ListUsers_NonAdminDenied(t *testing.T) {
 	db.addUser("member-1", "m@test.com", "M", "member", "active")
 	svc := newTestAdminService(db)
 
-	_, _, _, err := svc.ListUsers(context.Background(), "member-1", "", "", "", 50)
+	_, _, _, err := svc.ListUsers(context.Background(), "member-1", "", "", "", 50, false)
 	require.Error(t, err)
 }
 
@@ -1139,24 +1139,24 @@ func TestAdminService_ListUsers_Pagination(t *testing.T) {
 	}
 	svc := newTestAdminService(db)
 
-	users, cursor, total, err := svc.ListUsers(context.Background(), "admin-1", "", "", "", 2)
+	users, cursor, total, err := svc.ListUsers(context.Background(), "admin-1", "", "", "", 2, false)
 	require.NoError(t, err)
 	assert.Len(t, users, 2)
 	assert.NotEmpty(t, cursor)
 	assert.GreaterOrEqual(t, total, 6)
 
 	// Page 2.
-	users2, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "", cursor, 2)
+	users2, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "", cursor, 2, false)
 	require.NoError(t, err)
 	assert.NotEmpty(t, users2)
 
 	// limit 0 → defaults to 50.
-	users3, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "", "", 0)
+	users3, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "", "", 0, false)
 	require.NoError(t, err)
 	assert.NotEmpty(t, users3)
 
 	// limit > 500 → capped.
-	users4, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "", "", 1000)
+	users4, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "", "", 1000, false)
 	require.NoError(t, err)
 	assert.NotEmpty(t, users4)
 }
@@ -1168,7 +1168,7 @@ func TestAdminService_ListUsers_SearchFilter(t *testing.T) {
 	db.addUser("u2", "bob@test.com", "Bob", "member", "active")
 	svc := newTestAdminService(db)
 
-	users, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "alice", "", 50)
+	users, _, _, err := svc.ListUsers(context.Background(), "admin-1", "", "alice", "", 50, false)
 	require.NoError(t, err)
 	assert.NotEmpty(t, users)
 	for _, u := range users {

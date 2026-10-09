@@ -35,11 +35,11 @@ type AccountMerge struct {
 // that holds them in memory (the memory driver and the test stores): the
 // guards the SQL drivers apply in their transaction, then the moves. It
 // changes nothing and returns ErrMergeConflict when either account is no
-// longer active and unmerged, or a move would overwrite a field the survivor
-// has filled. The caller re-points the other account's linked providers and
-// ends its sessions under the same lock.
+// longer active, unmerged people, or a move would overwrite a field the
+// survivor has filled. The caller re-points the other account's linked
+// providers and agents and ends its sessions under the same lock.
 func (m AccountMerge) ApplyToUsers(survivor, other *User) error {
-	mergeable := func(u *User) bool { return u.Status == StatusActive && u.MergedIntoUserID == "" }
+	mergeable := func(u *User) bool { return u.Status == StatusActive && u.MergedIntoUserID == "" && !u.IsAgent() }
 	if survivor == nil || other == nil || m.OtherID == m.SurvivorID || !mergeable(other) || !mergeable(survivor) {
 		return ErrMergeConflict
 	}
@@ -112,8 +112,11 @@ var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in
 // it would not sign in to the survivor. The person registers passkeys again
 // on the survivor.
 //
+// The retired account's agents move to the survivor in the same transaction:
+// they belong to the person, whichever account the person keeps.
+//
 // Refused: merging an account with itself; an account that is not active;
-// an anonymous account (upgrade it instead); a managed child's account (it
+// an anonymous account (upgrade it instead); an agent; a managed child's account (it
 // stays with its guardian), and an account that is any child's guardian
 // (its children's guardian edges would point at a retired account).
 
@@ -291,6 +294,9 @@ func checkMergeable(ctx context.Context, repo Repository, survivor, other *User)
 	if other.IsAnonymous {
 		return fmt.Errorf("%w: upgrade an anonymous account instead of merging it", ErrMergeRefused)
 	}
+	if other.IsAgent() {
+		return errAgentMerge
+	}
 	// A password an administrator issued would arrive on the survivor as an
 	// ordinary one, skipping the change its user still owes.
 	if other.PasswordChangeRequired {
@@ -309,14 +315,21 @@ func checkMergeable(ctx context.Context, repo Repository, survivor, other *User)
 	return nil
 }
 
+// errAgentMerge refuses a merge on either side of which is an agent: an agent
+// is not a person's other account, and holds no sign-in to move.
+var errAgentMerge = fmt.Errorf("%w: an agent account cannot be merged", ErrMergeRefused)
+
 // checkSurvivor refuses an account that cannot take another one in: not
-// active, already merged, anonymous, or a managed child.
+// active, already merged, anonymous, an agent, or a managed child.
 func checkSurvivor(ctx context.Context, repo Repository, survivor *User) error {
 	if survivor.Status != StatusActive || survivor.MergedIntoUserID != "" {
 		return fmt.Errorf("%w: both accounts must be active", ErrMergeRefused)
 	}
 	if survivor.IsAnonymous {
 		return fmt.Errorf("%w: upgrade an anonymous account instead of merging into it", ErrMergeRefused)
+	}
+	if survivor.IsAgent() {
+		return errAgentMerge
 	}
 	return refuseManagedChild(ctx, repo, survivor)
 }

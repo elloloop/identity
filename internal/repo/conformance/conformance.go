@@ -2785,6 +2785,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runMergedIntoConformance(t, driver)
 	runPasswordChangeRequiredConformance(t, driver)
 	runAccountMergeConformance(t, driver)
+	runAgentAccountsConformance(t, driver)
 }
 
 // uniqueHash returns a per-call unique token-hash string. Tests use

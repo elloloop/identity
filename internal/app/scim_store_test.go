@@ -24,8 +24,13 @@ type scimFakeRepo struct {
 	errDelRefresh error
 	errRevoke     error
 
+	// agents are the accounts ListUsers reports as owned by any user.
+	agents []*service.User
+
 	delRefreshCalled bool
 	revokeCalled     bool
+	// revokedIDs records every account whose sessions were revoked.
+	revokedIDs []string
 	// updateCalled / deleteCalled make "the row was not mutated" assertable.
 	// A refusal that still wrote would return the same error as one that
 	// did not, so asserting the error alone proves nothing.
@@ -62,9 +67,57 @@ func (r *scimFakeRepo) DeleteRefreshTokensForUser(context.Context, string) error
 	return r.errDelRefresh
 }
 
-func (r *scimFakeRepo) RevokeSessionsForUser(context.Context, string, int64) error {
+func (r *scimFakeRepo) RevokeSessionsForUser(_ context.Context, id string, _ int64) error {
 	r.revokeCalled = true
+	r.revokedIDs = append(r.revokedIDs, id)
 	return r.errRevoke
+}
+
+// ListUsers answers the owned-agent lookup the access revocation makes.
+func (r *scimFakeRepo) ListUsers(_ context.Context, f service.UserListFilter) ([]*service.User, error) {
+	if !f.IncludeAgents || f.OwnerUserID == "" || f.Offset > 0 {
+		return nil, nil
+	}
+	return r.agents, nil
+}
+
+// TestRepoSCIMStore_AgentsHiddenAndCutOff pins the two agent rules of the
+// SCIM surface: an agent account is not addressable by id, and deprovisioning
+// a person (PATCH active:false or DELETE) also ends the sessions of the
+// agents they own.
+func TestRepoSCIMStore_AgentsHiddenAndCutOff(t *testing.T) {
+	ctx := context.Background()
+
+	agent := &service.User{ID: "agent-1", Kind: service.UserKindAgent, OwnerUserID: "owner-1"}
+	s := &repoSCIMStore{repo: &scimFakeRepo{user: agent}}
+	if _, err := s.GetUser(ctx, "agent-1"); !errors.Is(err, scim.ErrNotFound) {
+		t.Fatalf("GetUser(agent) → %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteUser(ctx, "agent-1"); !errors.Is(err, scim.ErrNotFound) {
+		t.Fatalf("DeleteUser(agent) → %v, want ErrNotFound", err)
+	}
+
+	owner := &service.User{ID: "owner-1", Kind: service.UserKindPerson, Status: "active"}
+	fr := &scimFakeRepo{user: owner, agents: []*service.User{agent}}
+	s = &repoSCIMStore{repo: fr}
+	if _, err := s.PatchUser(ctx, "owner-1", scim.UserPatch{Active: boolPtr(false)}); err != nil {
+		t.Fatalf("PatchUser deactivate: %v", err)
+	}
+	if got := fr.revokedIDs; len(got) != 2 || got[0] != "owner-1" || got[1] != "agent-1" {
+		t.Fatalf("revoked %v, want the owner then the owned agent", got)
+	}
+
+	fr = &scimFakeRepo{user: owner, agents: []*service.User{agent}}
+	s = &repoSCIMStore{repo: fr}
+	if err := s.DeleteUser(ctx, "owner-1"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	if got := fr.revokedIDs; len(got) != 2 || got[1] != "agent-1" {
+		t.Fatalf("revoked %v, want the owned agent cut off on delete", got)
+	}
+	if !fr.deleteCalled {
+		t.Fatal("DeleteUser must still delete the owner")
+	}
 }
 
 func TestMapStoreErr(t *testing.T) {

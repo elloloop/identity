@@ -77,6 +77,11 @@ type User struct {
 	// MergedIntoUserID is set on user.merged: the account this one was
 	// merged into.
 	MergedIntoUserID string `json:"merged_into_user_id,omitempty"`
+	// Kind is "agent" for an agent account (a non-human account a person
+	// owns) and empty for a person, so payloads about people are unchanged.
+	Kind string `json:"kind,omitempty"`
+	// OwnerUserID is set with Kind "agent": the person who owns the agent.
+	OwnerUserID string `json:"owner_user_id,omitempty"`
 }
 
 // Event is the typed payload emitted by the service layer and delivered to

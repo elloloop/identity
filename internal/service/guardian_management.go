@@ -336,7 +336,7 @@ func (s *AuthService) DeactivateManagedChildAccount(
 		// and then failed to revoke. Re-run the revocation (it is idempotent)
 		// rather than reporting success on a child whose old token still
 		// works: session-mode auth reads the session row, not the status.
-		if err := revokeAllUserSessions(ctx, s.repo(ctx), child.ID, s.nowMs()); err != nil {
+		if err := RevokeUserAccess(ctx, s.repo(ctx), child.ID, s.nowMs()); err != nil {
 			return fmt.Errorf("deactivate managed child account: %w", err)
 		}
 		s.auditGuardianAction(ctx, guardianOpDeactivate, guardianUserID, child.ID, true, ip, userAgent,
@@ -356,7 +356,7 @@ func (s *AuthService) DeactivateManagedChildAccount(
 	}); err != nil {
 		return fmt.Errorf("deactivate managed child account: %w", err)
 	}
-	if err := revokeAllUserSessions(ctx, repo, child.ID, now); err != nil {
+	if err := RevokeUserAccess(ctx, repo, child.ID, now); err != nil {
 		return fmt.Errorf("deactivate managed child account: %w", err)
 	}
 	s.auditGuardianAction(ctx, guardianOpDeactivate, guardianUserID, child.ID, true, ip, userAgent,

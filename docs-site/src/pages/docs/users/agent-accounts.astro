@@ -1,0 +1,156 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Agent accounts">
+  <h1>Agent accounts</h1>
+  <p>
+    An <strong>agent account</strong> is a non-human account that a person
+    owns: an assistant, a bot, or an automation that acts in your applications
+    under its own user id. Applications can show it, mention it and attribute
+    work to it like any other account. Identity records two things about it:
+    that it is an agent, and who owns it. What an agent may do in your
+    applications is decided there, not here.
+  </p>
+
+  <h2>Turning it on</h2>
+  <p>
+    Agent accounts are off until the deployment sets
+    <code>GATEWAY_AGENTS_ENABLED=true</code>. While off, every RPC on this page
+    answers <code>FAILED_PRECONDITION</code>. The sign-in refusals below hold
+    either way.
+  </p>
+
+  <h2>What an agent is</h2>
+  <ul>
+    <li>
+      A user row with <code>kind</code> set to <code>USER_KIND_AGENT</code> and
+      <code>owner_user_id</code> naming its owner, an active person in the same
+      project. Every other account reports <code>USER_KIND_PERSON</code> and no
+      owner.
+    </li>
+    <li>
+      It has a <strong>name</strong> and an optional <strong>avatar URL</strong>
+      (an absolute <code>https</code> URL). It has no email, no
+      username and no account address, and its role is always
+      <code>member</code>.
+    </li>
+    <li>
+      It has <strong>no way to sign in</strong>. Password, email code, magic
+      link, provider sign-in (web, native and hosted), passkey, two-step, QR
+      approval and invitations all refuse an agent with
+      <code>PERMISSION_DENIED</code>, and identity records an
+      <code>agent_sign_in_refused</code> audit entry. A credential cannot be
+      attached to one either: passkeys, linked providers, phone numbers,
+      two-step, identity verification and an admin password reset answer
+      <code>FAILED_PRECONDITION</code>. How an agent obtains tokens is not part
+      of this release.
+    </li>
+  </ul>
+
+  <h2>Managing agents</h2>
+  <p>
+    The owner manages their agents from their own session. A project
+    <strong>admin</strong> can manage anyone's, with the same RPCs.
+  </p>
+  <ul>
+    <li>
+      <code>CreateAgent</code>: name and avatar. The caller owns the new agent;
+      an admin may set <code>owner_user_id</code> to create one for another
+      person. A person owns at most
+      <code>GATEWAY_AGENTS_MAX_PER_OWNER</code> agents (default 25, at most
+      500); past that
+      the call answers <code>RESOURCE_EXHAUSTED</code>. Creation is
+      rate-limited per IP at the sign-up rate.
+    </li>
+    <li>
+      <code>ListAgents</code>: the caller's agents, or, for an admin, those of
+      the account named in <code>owner_user_id</code>, including one that has
+      been deleted. The list is complete: a merge can leave an owner with more
+      agents than the limit.
+    </li>
+    <li>
+      <code>UpdateAgent</code>: replaces the name and avatar. The admin
+      <code>UpdateUser</code> refuses an agent.
+    </li>
+    <li>
+      <code>TransferAgent</code>: gives the agent to another active person in
+      the project, within that person's limit, and ends the agent's sessions.
+      The previous owner loses it at once.
+    </li>
+    <li>
+      <code>DeactivateAgent</code> and <code>ReactivateAgent</code>: suspend
+      and restore it. Deactivating ends its sessions. Both are idempotent.
+    </li>
+    <li>
+      <code>DeleteAgent</code>: erases it the way <code>DeleteUser</code>
+      erases an account.
+    </li>
+  </ul>
+  <p>
+    Anyone else gets the same <code>PERMISSION_DENIED</code> whether the id
+    names an agent, a person or nothing, so the RPCs cannot be used to find
+    out which ids are agents. An agent cannot manage agents, and neither can
+    an anonymous account.
+  </p>
+
+  <h2>An agent stands with its owner</h2>
+  <p>
+    An agent is usable only while it is active <strong>and</strong> its owner
+    is an active person. This is checked every time a token is issued for the
+    agent, refresh included, so it holds even for an owner who is suspended
+    some other way. When the owner is deactivated, scheduled for deletion,
+    deleted or deprovisioned by SCIM, their agents' sessions are
+    revoked along with their own. Reactivating the owner makes the agents
+    usable again; nothing was written to them.
+  </p>
+  <p>
+    Deleting an owner does <strong>not</strong> delete their agents. They keep
+    naming the deleted owner and stay unusable until an admin transfers or
+    deletes them; <code>ListAgents</code> with the deleted owner's id finds
+    them. When an owner is merged into another account, their agents move to
+    the survivor. An agent itself is never merged.
+  </p>
+
+  <h2>Tokens</h2>
+  <p>
+    An agent's access token carries <code>"kind": "agent"</code>. A person's
+    token carries no <code>kind</code> claim, so it is unchanged. An
+    application that must never treat an agent as a person checks this claim,
+    or the <code>kind</code> on the <code>User</code>.
+  </p>
+
+  <h2>Where agents appear</h2>
+  <ul>
+    <li>
+      The admin <code>ListUsers</code> leaves agents out unless
+      <code>include_agents</code> is set; <code>GetUser</code> returns one by
+      id.
+    </li>
+    <li>
+      The <a href="/identity/docs/users/directory-lookup">directory lookup</a> never returns
+      them: it resolves email addresses, and an agent has none.
+    </li>
+    <li>SCIM does not see them.</li>
+    <li>
+      Webhook payloads for an agent carry <code>kind</code> and
+      <code>owner_user_id</code>. A person's payload is unchanged.
+      <code>CreateAgent</code> sends <code>user.created</code>; transferring,
+      renaming or reactivating sends <code>user.updated</code>; deactivating
+      sends <code>user.deactivated</code>; deleting sends the same events as
+      deleting any account.
+    </li>
+  </ul>
+
+  <h2>Audit</h2>
+  <p>
+    Every change is recorded: <code>agent_created</code>,
+    <code>agent_updated</code>, <code>agent_transferred</code>,
+    <code>agent_deactivated</code>, <code>agent_reactivated</code> and
+    <code>agent_deleted</code>, with the caller as actor and the agent as
+    target, and refusals as failures. <code>agents_listed</code> records an
+    admin listing another person's agents (the owner as target) and a
+    refused listing; listing your own is not recorded. A refused sign-in is
+    <code>agent_sign_in_refused</code>.
+  </p>
+</DocsLayout>

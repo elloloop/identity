@@ -96,7 +96,7 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 	if user == nil {
 		return nil, ErrNotFound
 	}
-	// The one-door invariant refuseAnonymousCredentialAttach enforces on the
+	// The one-door invariant refuseCredentialAttach enforces on the
 	// credential surfaces extends here: an anonymous access token carries a
 	// sub and role:member like any other, but the account it names can still
 	// be hard-deleted by the retention sweep — which would orphan the
@@ -109,6 +109,10 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 			"%w: identity verification is refused while the account can still be "+
 				"hard-deleted by the anonymous retention sweep", ErrAnonymousMustUpgrade,
 		)
+	}
+	// An agent account is not a person, so there is no identity to verify.
+	if user.IsAgent() {
+		return nil, ErrAgentCredential
 	}
 	// COPPA data-minimization: never collect identity documents from a
 	// CHILD-band account when minimization is enabled. No provider session
