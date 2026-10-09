@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.12.2 → v4.13.0 — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); `pkg/emailaddr`; an optional `iss` claim and per-project token audience
+## v4.12.2 → v4.13.0 — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); an optional `iss` claim and per-project token audience
 
 No schema change and no migration.
 
@@ -11,9 +11,17 @@ No schema change and no migration.
   a verifier can pin who minted it. `GATEWAY_JWT_PROJECT_AUDIENCE=true` adds
   the minting project's id to the token's `aud`, next to `GATEWAY_JWT_AUDIENCE`
   when that is set, so a verifier serving one project can refuse another
-  project's token with a standard audience check. With it on, a verifier
-  that requires `aud` to be exactly one string must accept a list, or keep
-  `GATEWAY_JWT_AUDIENCE` unset.
+  project's token with a standard audience check. `aud` is always a JSON
+  array and, with both set, holds two values, and a token minted without
+  `GATEWAY_JWT_AUDIENCE` now carries an `aud`: a verifier must check that its
+  own value is a member, not read the first entry or require a string. The
+  settings isolate projects only once each verifier expects its own project
+  id as the audience and pins `iss`; identity's `pkg/jwt` verifier does not
+  check `iss` itself, so compare `Claims.Issuer` in your code.
+- **`pkg/emailaddr` gains `Mailbox`** (the canonical form, and whether a
+  mailbox is left once a `+tag` is dropped), and `SameMailbox` is false
+  unless both addresses are mailboxes: two empty or tag-only addresses are no
+  longer "the same mailbox".
 - **A sign-in stores the account's email in canonical form (behaviour
   change).** An account stored under another spelling of its mailbox (a
   dotted Gmail address, capitals or a `+tag`, saved by a release before every
@@ -82,15 +90,7 @@ No schema change and no migration.
   skipped mailboxes. It replaces the manual SQL under
   [One email comparison rule](#one-email-comparison-rule). Take a database
   backup before `--apply`: a merge cannot be undone.
-- **`pkg/emailaddr` (additive).** The canonical form is now a public package:
-  `Canonicalize`, `CanonicalizeDomain`, `Mailbox` (the canonical form and
-  whether a mailbox is left) and `SameMailbox`. A service that stores emails
-  it compares with identity's should key them by `emailaddr.Canonicalize`,
-  from the identity version it runs against; a change to the rule will be
-  announced here, since keys stored under the old rule would need
-  recomputing.
-
-## v4.12.1 → v4.12.2 — the recent-sign-in window for merging is capped (behaviour change); Go 1.26.9 for the net/http and http2 advisories
+## v4.12.1 → v4.12.2 — the recent-sign-in window for merging is capped (behaviour change); Go 1.26.9 for the net/http and http2 advisories; `pkg/emailaddr`
 
 No schema change and no migration.
 
@@ -113,6 +113,13 @@ No schema change and no migration.
   or embedding its `pkg/` libraries should build on Go 1.26.9 or later.
 - The graph `SearchNodes` query on Postgres matches usernames as well as
   emails and names (internal; no API change).
+
+- **`pkg/emailaddr` (additive).** The canonical form is now a public
+  package: `Canonicalize`, `CanonicalizeDomain` and `SameMailbox`. A service that stores emails
+  it compares with identity's should key them by `emailaddr.Canonicalize`,
+  from the identity version it runs against; a change to the rule will be
+  announced here, since keys stored under the old rule would need
+  recomputing.
 
 ## v4.12.0 → v4.12.1 — the admin user view shows usernames (fix)
 
