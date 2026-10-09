@@ -174,9 +174,10 @@ import { Code } from "astro-expressive-code/components";
     differ from the spelling you sent in case, a <code>+tag</code> or Gmail
     dots. A Go service that stores the addresses it looks up can key them by
     <code>emailaddr.Canonicalize</code> from
-    <code>github.com/elloloop/identity/pkg/emailaddr</code>, the same rule
-    the lookup applies, so a stored spelling and the account it names always
-    compare equal.
+    <code>github.com/elloloop/identity/pkg/emailaddr</code> at the version of
+    identity it runs against: the same rule the lookup applies, so a stored
+    spelling and the account it names compare equal. A change to the rule is
+    announced in the upgrade guide.
   </p>
   <p>
     A missing, wrong, revoked or non-directory key is

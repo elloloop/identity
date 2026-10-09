@@ -332,3 +332,25 @@ func TestTokens_AuthTimeIsTheSignIn(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, claims.AuthTime, "a refresh is not a sign-in")
 }
+
+// Two spellings of one Gmail mailbox reach one inbox, so the person gets one
+// notice, not two.
+func TestMergeAccounts_OneNoticeForTwoSpellingsOfOneMailbox(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.cfg.AccountMergeEnabled = true
+	ctx := accountsScope(t, "accounts.example.test")
+	survivor := seedUser(repo, "first.last@gmail.com", "", StatusActive)
+	verified(seedUser(repo, "firstlast@gmail.com", hashPW(t, accessTestPassword), StatusActive))
+
+	_, err := svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "firstlast@gmail.com", accessTestPassword, "203.0.113.4", "agent", false)
+	require.NoError(t, err)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	notices := 0
+	for _, m := range rec.sent {
+		if m.Subject == AccountMergedSubject {
+			notices++
+		}
+	}
+	require.Equal(t, 1, notices)
+}

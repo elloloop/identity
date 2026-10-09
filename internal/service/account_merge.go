@@ -11,6 +11,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/emailaddr"
 	"github.com/elloloop/identity/pkg/events"
 )
 
@@ -173,8 +174,7 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, auth
 		return nil, err
 	}
 	s.auditMerge(ctx, survivor.ID, retired.ID, ipAddr, userAgent, true, "")
-	notifyMerge(ctx, s.cfg, s.mailer, s.logger, other, merged)
-	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserMerged, retired)
+	announceMerge(ctx, mergeAnnouncer{s.cfg, s.mailer, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx)}, other, merged, retired)
 	return merged, nil
 }
 
@@ -218,9 +218,31 @@ func (s *AdminService) MergeUsers(ctx context.Context, actorID, survivorID, othe
 	s.audit.Log(ctx, audit.EventAccountMerged,
 		audit.WithActor(actorID), audit.WithTarget(retired.ID), audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"survivor": survivor.ID, "source": "admin"}))
-	notifyMerge(ctx, s.cfg, s.mailer, s.logger, other, merged)
-	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserMerged, retired)
+	announceMerge(ctx, s.mergeAnnouncer(ctx), other, merged, retired)
 	return merged, nil
+}
+
+// mergeAnnouncer is what announcing a merge needs: the notice's branding and
+// transport, and the publisher with the project and tenant the event names.
+type mergeAnnouncer struct {
+	cfg                 *config.Config
+	mailer              email.Transport
+	publisher           events.Publisher
+	logger              *zap.Logger
+	projectID, tenantID string
+}
+
+func (s *AdminService) mergeAnnouncer(ctx context.Context) mergeAnnouncer {
+	return mergeAnnouncer{s.cfg, s.mailer, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID}
+}
+
+// announceMerge tells everyone a merge concerns that it happened: the person,
+// at every address either account had (notifyMerge), and the applications,
+// with user.merged for the retired account. retiredBefore is the retired
+// account as read before the merge, which still holds its own address.
+func announceMerge(ctx context.Context, a mergeAnnouncer, retiredBefore, merged, retiredAfter *User) {
+	notifyMerge(ctx, a.cfg, a.mailer, a.logger, retiredBefore, merged)
+	EmitUserEvent(ctx, a.publisher, a.logger, a.projectID, a.tenantID, events.EventUserMerged, retiredAfter)
 }
 
 // mergeAccounts checks the pair, applies the merge in one transaction and
@@ -348,7 +370,8 @@ func notifyMerge(ctx context.Context, cfg *config.Config, mailer email.Transport
 		}
 	}
 	send(retired.Email, retired, true)
-	if survivor.Email != retired.Email {
+	// Two spellings of one mailbox reach one inbox: one notice is enough.
+	if !emailaddr.SameMailbox(survivor.Email, retired.Email) {
 		send(survivor.Email, survivor, false)
 	}
 }

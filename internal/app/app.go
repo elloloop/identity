@@ -109,6 +109,12 @@ type Deps struct {
 	// login accepts only the product that resolves to the default project.
 	NativeOAuthProjects service.NativeOAuthProjectStore
 
+	// Projects lists every control-plane project for the stored-email repair
+	// (RepairStoredEmails). Non-nil ONLY for the postgres driver; when nil the
+	// repair covers the default project alone, the only one such a
+	// deployment has.
+	Projects service.ProjectLister
+
 	// PlatformAdminStore backs the trust-on-first-use first-admin bootstrap
 	// (CreateFirstPlatformAdmin). Non-nil ONLY for the postgres driver; when
 	// nil the bootstrap RPC returns Unimplemented. The bootstrap stays
@@ -220,6 +226,9 @@ type Built struct {
 	ConnectHandler *identityconnect.IdentityHandler
 	RateLimits     []middleware.PathLimit
 	TrustedProxies []*net.IPNet
+
+	repairEmails func(ctx context.Context, apply bool) (*service.EmailRepairReport, error)
+	drainEvents  func(ctx context.Context) (int, error)
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -686,7 +695,7 @@ func New(deps Deps) (*Built, error) {
 	// (the service treats nil as the no-op path) and nil lifecycle hooks; enabled,
 	// an outbox-backed publisher plus a background worker deliver signed webhooks.
 	// Extracted to buildEventing so New's wiring stays flat.
-	eventPublisher, startEvents, stopEvents, err := buildEventing(deps, logger)
+	eventPublisher, startEvents, stopEvents, drainEvents, err := buildEventing(deps, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -906,7 +915,45 @@ func New(deps Deps) (*Built, error) {
 		TrustedProxies: trustedProxies,
 		startWork:      startWork,
 		stopWork:       stopWork,
+		repairEmails:   emailRepair(deps, adminSvc),
+		drainEvents:    drainEvents,
 	}, nil
+}
+
+// emailRepair binds the stored-email repair to every project: the control
+// plane's, or the default project alone on a driver without one.
+func emailRepair(deps Deps, adminSvc *service.AdminService) func(ctx context.Context, apply bool) (*service.EmailRepairReport, error) {
+	return func(ctx context.Context, apply bool) (*service.EmailRepairReport, error) {
+		projectIDs := []string{deps.Config.DefaultProjectID}
+		if deps.Projects != nil {
+			ids, err := deps.Projects.ListProjectIDs(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("list projects: %w", err)
+			}
+			projectIDs = ids
+		}
+		return adminSvc.RepairStoredEmails(ctx, projectIDs, apply)
+	}
+}
+
+// RepairStoredEmails runs the stored-email repair over every project (see
+// service.AdminService.RepairStoredEmails). With apply false it writes nothing
+// and reports what it would do.
+func (b *Built) RepairStoredEmails(ctx context.Context, apply bool) (*service.EmailRepairReport, error) {
+	return b.repairEmails(ctx, apply)
+}
+
+// DrainEvents delivers the webhook events already queued, retrying as the
+// worker does, until none is left or ctx ends, and returns how many were not
+// delivered: still queued, or abandoned after the worker's last attempt. It is for a process that emits events and then exits, such as
+// a one-shot repair run, which would otherwise drop what its in-memory outbox
+// holds; a serving process delivers with the background worker Start runs.
+// With webhooks off there is nothing to deliver.
+func (b *Built) DrainEvents(ctx context.Context) (int, error) {
+	if b.drainEvents == nil {
+		return 0, nil
+	}
+	return b.drainEvents(ctx)
 }
 
 // buildConnectHandlerOptions returns the otelconnect interceptor
@@ -933,11 +980,13 @@ func buildConnectHandlerOptions(cfg *config.Config) ([]connect.HandlerOption, er
 // a nil publisher — the service treats nil as the no-op events.Discard — and nil
 // start/stop hooks so no worker runs. Enabled, it returns an outbox-backed
 // publisher plus start/stop hooks that gate a background webhook worker
-// (retry/backoff), so the embedding host controls when its goroutine runs. The
-// in-memory outbox backs the single-node tier; a durable SQL outbox is a follow-up.
-func buildEventing(deps Deps, logger *zap.Logger) (events.Publisher, func(), func(), error) {
+// (retry/backoff), so the embedding host controls when its goroutine runs, and
+// a drain that delivers what is queued without that goroutine (Built.DrainEvents).
+// The in-memory outbox backs the single-node tier; a durable SQL outbox is a
+// follow-up.
+func buildEventing(deps Deps, logger *zap.Logger) (events.Publisher, func(), func(), func(context.Context) (int, error), error) {
 	if !deps.Config.WebhooksEnabled {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 	outbox := events.NewMemoryOutbox()
 	// Config.Validate (in New) already parsed these; the error is threaded only
@@ -945,7 +994,7 @@ func buildEventing(deps Deps, logger *zap.Logger) (events.Publisher, func(), fun
 	// running with an empty outbox.
 	subscriptions, err := deps.Config.WebhookSubscriptionList()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	seedWebhookSubscriptions(outbox, subscriptions, deps.Config.DefaultProjectID, logger)
 	pub := events.NewOutboxPublisher(outbox, randomEventID, time.Now, logger)
@@ -970,8 +1019,30 @@ func buildEventing(deps Deps, logger *zap.Logger) (events.Publisher, func(), fun
 			}
 		}()
 	}
-	return pub, start, cancel, nil
+	// undelivered counts what is still queued and what the worker gave up on:
+	// either way the receiver never got it.
+	undelivered := func() int { return outbox.Pending() + outbox.Failed() }
+	drain := func(ctx context.Context) (int, error) {
+		for {
+			if err := worker.ProcessOnce(ctx); err != nil {
+				return undelivered(), err
+			}
+			if outbox.Pending() == 0 {
+				return undelivered(), nil
+			}
+			select {
+			case <-ctx.Done():
+				return undelivered(), ctx.Err()
+			case <-time.After(drainPollInterval):
+			}
+		}
+	}
+	return pub, start, cancel, drain, nil
 }
+
+// drainPollInterval is how often DrainEvents looks for deliveries whose retry
+// is due.
+const drainPollInterval = time.Second
 
 // buildDomainService returns the wired DomainService backing the tenant
 // domain-verification RPCs, or nil when the governance stores are absent

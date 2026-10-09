@@ -56,10 +56,21 @@ func main() {
 		syncLogger(logger)
 		os.Exit(code)
 	}
+	if repairEmailsRequested(os.Args) {
+		apply, err := parseRepairEmailsCommand(os.Args)
+		if err != nil {
+			logger.Error("identity_repair_emails_bad_arguments", zap.Error(err), zap.String("usage", repairEmailsUsage))
+			syncLogger(logger)
+			os.Exit(2)
+		}
+		code := runRepairEmails(opts, apply, logger)
+		syncLogger(logger)
+		os.Exit(code)
+	}
 	if unknownSubcommand(os.Args) {
 		logger.Error("identity_unknown_subcommand",
 			zap.String("arg", os.Args[1]),
-			zap.String("usage", "identity [migrate [force <version>]]"))
+			zap.String("usage", "identity [migrate [force <version>] | "+repairEmailsSubcommand+" ["+repairEmailsApplyArg+"]]"))
 		syncLogger(logger)
 		os.Exit(2)
 	}

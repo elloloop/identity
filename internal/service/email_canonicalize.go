@@ -55,41 +55,15 @@ var disposableDomains = map[string]struct{}{
 	"mailnesia.com":     {},
 }
 
-// CanonicalMailbox canonicalizes addr (emailaddr.Canonicalize) and reports whether
-// the result is a mailbox an account can hold: a non-empty local part, a
-// domain containing a dot, and no whitespace. Every path that stores or looks
-// up an account's address from caller or provider input checks it:
-// canonicalizing drops a "+tag", so an address that was nothing but one
-// ("+x@corp.com") has no local part left, whatever the raw address's own
-// validation said.
-func CanonicalMailbox(addr string) (string, bool) {
-	c := emailaddr.Canonicalize(addr)
-	return c, isUsableMailbox(c)
-}
-
-// canonicalMailbox is CanonicalMailbox for the paths that go on to the access
+// canonicalMailbox is emailaddr.Mailbox for the paths that go on to the access
 // gate, which takes the canonicalEmail type.
 func canonicalMailbox(addr string) (canonicalEmail, bool) {
-	c, usable := CanonicalMailbox(addr)
+	c, usable := emailaddr.Mailbox(addr)
 	return canonicalEmail(c), usable
 }
 
 // errNoUsableMailbox refuses an address with no mailbox left once canonical.
 var errNoUsableMailbox = fmt.Errorf("%w: email has no mailbox once its +tag is removed", ErrInvalidArgument)
-
-// isUsableMailbox is CanonicalMailbox's check on an already-canonical
-// address: a minimal syntactic one, since the mailbox itself is proven only
-// when its owner acts on a message sent to it.
-func isUsableMailbox(s string) bool {
-	at := strings.LastIndexByte(s, '@')
-	if at <= 0 || at == len(s)-1 {
-		return false
-	}
-	if strings.IndexByte(s[at+1:], '.') < 0 {
-		return false
-	}
-	return !strings.ContainsAny(s, " \t\r\n")
-}
 
 // canonicalEmail is an email address that has been through emailaddr.Canonicalize
 // (via canonicalize). It is the ONLY thing the per-project access gate accepts,

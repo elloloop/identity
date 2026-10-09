@@ -133,6 +133,15 @@ func (b *Built) ControlPlaneStore() service.ControlPlaneProjectStore {
 	return b.ProjectStore
 }
 
+// ProjectLister returns the control-plane project listing, or a true nil when
+// this build has no control plane (memory, sqlite).
+func (b *Built) ProjectLister() service.ProjectLister {
+	if b.ProjectStore == nil {
+		return nil
+	}
+	return b.ProjectStore
+}
+
 // DirectoryCredentialStore returns the control-plane credential read the
 // directory lookup authenticates against, or a true nil when this build has no
 // control plane (memory, sqlite) — avoiding the typed-nil trap.

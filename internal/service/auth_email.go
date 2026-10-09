@@ -11,6 +11,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/emailaddr"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -88,7 +89,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	// Canonicalize to the key accounts are stored under (gmail dot/+ stripping,
 	// IDN punycode) so a reset request with non-canonical casing/dots finds the
 	// account instead of silently reporting "unknown email".
-	emailAddr, usable := CanonicalMailbox(emailAddr)
+	emailAddr, usable := emailaddr.Mailbox(emailAddr)
 	if !usable {
 		// Even the trivial "missing email" case is silent; the proto
 		// guarantees no enumeration. We still log so operators can

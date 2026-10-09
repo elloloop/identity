@@ -183,6 +183,19 @@ func (s *ProjectStore) createProject(ctx context.Context, p *Project) (string, e
 	return id, nil
 }
 
+// ListProjectIDs returns the id of every project, in id order.
+func (s *ProjectStore) ListProjectIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM projects ORDER BY id`)
+	if err != nil {
+		return nil, wrapPgErr("ListProjectIDs", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, wrapPgErr("ListProjectIDs", err)
+	}
+	return ids, nil
+}
+
 // GetProjectByID returns the project with the given id, or (nil, nil) when
 // no such project exists.
 func (s *ProjectStore) GetProjectByID(ctx context.Context, projectID string) (*Project, error) {

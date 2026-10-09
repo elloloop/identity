@@ -131,6 +131,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var invitationStore service.InvitationStore
 	var controlPlaneStore service.ControlPlaneProjectStore
 	var nativeOAuthProjects service.NativeOAuthProjectStore
+	var projectLister service.ProjectLister
 	var directoryCredentials service.DirectoryCredentialStore
 	var platformAdminStore service.PlatformAdminStore
 	var loginPolicyStore service.LoginPolicyStore
@@ -166,6 +167,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		invitationStore = built.InvitationStoreIface()
 		controlPlaneStore = built.ControlPlaneStore()
 		nativeOAuthProjects = built.NativeProjectLookup()
+		projectLister = built.ProjectLister()
 		directoryCredentials = built.DirectoryCredentialStore()
 		platformAdminStore = built.PlatformAdminStoreIface()
 		loginPolicyStore = built.LoginPolicyStoreIface()
@@ -229,6 +231,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		InvitationStore:      invitationStore,
 		ControlPlaneStore:    controlPlaneStore,
 		NativeOAuthProjects:  nativeOAuthProjects,
+		Projects:             projectLister,
 		DirectoryCredentials: directoryCredentials,
 		PlatformAdminStore:   platformAdminStore,
 		LoginPolicyStore:     loginPolicyStore,

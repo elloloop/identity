@@ -1,5 +1,85 @@
 # Upgrade guide
 
+## v4.12.2 → next — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); `pkg/emailaddr`
+
+No schema change and no migration.
+
+- **A sign-in stores the account's email in canonical form (behaviour
+  change).** An account stored under another spelling of its mailbox (a
+  dotted Gmail address, capitals or a `+tag`, saved by a release before every
+  write path canonicalized, or by SCIM before v4.9) was found only by that
+  spelling: a code or password sign-in with the canonical spelling created a
+  second account, and `LookupUsers` never found it. Now every token identity
+  issues for such an account, at a sign-in (a provider sign-in that finds the
+  account by its provider id included) or at a refresh of an older session,
+  first moves the stored email to the canonical form. It keeps the email's
+  verified state: the canonical form is the same mailbox, the one sign-in
+  already treats it as. Two spellings are left as they are, because the
+  account's proof does not carry over to the canonical form: one with no
+  mailbox left once its `+tag` is dropped (`+x@example.com`), and one whose
+  `+tag` outside Gmail would be dropped (some providers deliver a `+tag` to
+  another mailbox). SCIM-provisioned accounts are rewritten like any other,
+  as a SCIM `PUT` or `PATCH` already does. Consequences:
+  - The access token's `email` claim, `GetUser` and `LookupUsers` carry the
+    canonical spelling from then on. Key your records on the user id (`sub`),
+    not on the email; to compare an email you stored, canonicalize it with
+    `pkg/emailaddr` (below).
+  - No `user.updated` webhook is emitted for the rewrite. The audit log
+    records `email_canonicalized` (`source`: `sign_in`, or `session` for a
+    refresh) without the address.
+  - When an account merged into this one still holds the canonical spelling,
+    it gives it up: its email is cleared and marked unverified.
+  - When another live account holds the canonical spelling (two accounts for
+    one mailbox), nothing is rewritten; each sign-in logs
+    `email_canonical_form_held` (warning) with the account id, and
+    `identity repair-emails` below merges the pair or tells you why not.
+  - The rewrite keeps no copy of the old spelling. If you need one, list the
+    accounts the query under [One email comparison rule](#one-email-comparison-rule)
+    finds before upgrading.
+- **`identity repair-emails` repairs the rest, once.** Accounts that never
+  sign in keep their old spelling, and a sign-in never merges. Run the
+  subcommand with the server's environment after upgrading. Plain
+  `identity repair-emails` is a dry run: it logs one
+  `identity_repair_emails_item` line per mailbox that holds a non-canonical
+  spelling (account ids only, never addresses) and an
+  `identity_repair_emails_done` summary. `identity repair-emails --apply`
+  then does exactly what the dry run listed, in every project:
+  - one account under a non-canonical spelling: its email is rewritten;
+  - two active accounts of one **Gmail** mailbox, **both with a verified
+    email**, neither managed by an identity provider (SCIM), exactly one
+    linked to a sign-in provider (Google, Apple, …): merged into the
+    provider-linked account under every rule of `MergeUsers`, audited as
+    `account_merged` (`source: email_repair`, no actor), announced to the
+    person with the merge notice and emitted as `user.merged`; then the
+    survivor's email is rewritten;
+  - anything else — an unverified account (it may not be the mailbox
+    owner's), a `+tag` difference outside Gmail (it may be another person's
+    mailbox), a spelling the sign-in rewrite also leaves (above), more than
+    two accounts, an inactive account, both or neither provider-linked, a
+    pair the merge rules refuse, or a canonical spelling held by an account
+    merged into a different one — is logged with its reason and left for
+    `MergeUsers`.
+
+  Turn webhooks on first if your applications keep data under user ids: the
+  run delivers the `user.merged` events it queues before it exits, even when
+  it stops part-way, waits up to five minutes for them, and exits 1 if any
+  is still queued or was abandoned after the retry policy's last attempt
+  (`identity_repair_emails_events_undelivered`); a re-run does not re-emit
+  them, so deliver those by hand. With
+  webhooks off it logs `identity_repair_emails_without_webhooks`. A run that
+  completes exits 0, skips included; a store failure on a mailbox exits 1
+  and leaves that mailbox for the next run. Running it again lists only the
+  skipped mailboxes. It replaces the manual SQL under
+  [One email comparison rule](#one-email-comparison-rule). Take a database
+  backup before `--apply`: a merge cannot be undone.
+- **`pkg/emailaddr` (additive).** The canonical form is now a public package:
+  `Canonicalize`, `CanonicalizeDomain`, `Mailbox` (the canonical form and
+  whether a mailbox is left) and `SameMailbox`. A service that stores emails
+  it compares with identity's should key them by `emailaddr.Canonicalize`,
+  from the identity version it runs against; a change to the rule will be
+  announced here, since keys stored under the old rule would need
+  recomputing.
+
 ## v4.12.1 → v4.12.2 — the recent-sign-in window for merging is capped (behaviour change); Go 1.26.9 for the net/http and http2 advisories
 
 No schema change and no migration.

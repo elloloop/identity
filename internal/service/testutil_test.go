@@ -428,6 +428,14 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 			}
 		}
 	}
+	// Mirrors the drivers' (project_id, email_fold) partial unique index.
+	if addr, _ := fields["email"].(string); addr != "" {
+		for id, other := range r.users {
+			if id != userID && other.Email != "" && FoldEmail(other.Email) == FoldEmail(addr) {
+				return fmt.Errorf("%w: email already exists", ErrAlreadyExists)
+			}
+		}
+	}
 	applyUserFields(u, fields)
 	return nil
 }

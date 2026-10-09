@@ -38,7 +38,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 	}
 	// Stored in the canonical form sign-in resolves an account by, so the
 	// changed address is the one sign-in, the directory and SCIM find.
-	newEmail, usable := CanonicalMailbox(newEmail)
+	newEmail, usable := emailaddr.Mailbox(newEmail)
 	if newEmail == "" {
 		return fmt.Errorf("%w: new email is required", ErrInvalidArgument)
 	}

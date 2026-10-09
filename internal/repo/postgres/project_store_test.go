@@ -308,6 +308,14 @@ func runEnsureDefaultProjectSmoke(t *testing.T, dsn string) {
 	p2, err := store.EnsureDefaultProject(ctx, "default", "local", "Default Project")
 	require.NoError(t, err)
 	require.Equal(t, p1.ID, p2.ID)
+	ids, err := store.ListProjectIDs(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"default"}, ids, "ListProjectIDs lists the one project once")
+	_, err = store.EnsureDefaultProject(ctx, "another", "another-scope", "Another")
+	require.NoError(t, err)
+	ids, err = store.ListProjectIDs(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"another", "default"}, ids, "every project, in id order")
 
 	// A different id but the same storage scope resolves the existing project
 	// (storage_scope_id is globally unique) rather than failing or duplicating.

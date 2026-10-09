@@ -22,7 +22,7 @@ func migrateRequested(args []string) bool {
 // silently starting the long-running server — which would hang a one-shot
 // migrate Job (restartPolicy: Never).
 func unknownSubcommand(args []string) bool {
-	return len(args) > 1 && args[1] != "migrate"
+	return len(args) > 1 && args[1] != "migrate" && args[1] != repairEmailsSubcommand
 }
 
 // migrateForceArg selects `identity migrate force <version>`.

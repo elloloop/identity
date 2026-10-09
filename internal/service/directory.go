@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/emailaddr"
 )
 
 // MaxDirectoryLookupEmails bounds one LookupUsers batch. More addresses take
@@ -202,7 +203,7 @@ func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret st
 
 // directoryLookupEmails validates a lookup batch and returns its addresses
 // de-duplicated by canonical form, first occurrence first. An address that is
-// not a mailbox an account can hold once canonical (CanonicalMailbox — "alice",
+// not a mailbox an account can hold once canonical (emailaddr.Mailbox — "alice",
 // "+x@corp.com") names nobody, so it is left out rather than looked up.
 func directoryLookupEmails(emails []string) ([]directoryAddress, error) {
 	if len(emails) == 0 {
@@ -223,7 +224,7 @@ func directoryLookupEmails(emails []string) ([]directoryAddress, error) {
 			return nil, fmt.Errorf("%w: an email in the lookup is longer than %d bytes",
 				ErrInvalidArgument, MaxDirectoryLookupEmailLength)
 		}
-		canonical, usable := CanonicalMailbox(e)
+		canonical, usable := emailaddr.Mailbox(e)
 		if !usable {
 			continue
 		}

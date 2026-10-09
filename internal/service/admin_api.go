@@ -719,7 +719,7 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 	if err := validateEmailFormat(email); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
-	canonicalEmail, usable := CanonicalMailbox(email)
+	canonicalEmail, usable := emailaddr.Mailbox(email)
 	if !usable {
 		return nil, errNoUsableMailbox
 	}
