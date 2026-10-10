@@ -423,7 +423,7 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 	// external proof. New accounts are already created verified, so the helper
 	// is a no-op for them.
 	if !isNew {
-		s.markEmailVerifiedViaExternalProof(ctx, user, emailStr, s.nowMs(), "passwordless")
+		s.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: emailStr, method: "passwordless"}, s.nowMs())
 	}
 
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {

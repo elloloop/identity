@@ -1043,6 +1043,26 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	if err != nil {
 		return nil, false, err
 	}
+	// An existing account is the provider's only when the provider proved the
+	// account's own address. A tagged address outside Gmail canonicalizes to
+	// the account's but is not provably the same mailbox, so it neither signs
+	// in nor links here; the owner links such a provider while signed in.
+	if !isNew && !ProofCarriesTo(identity.Email, user.Email) {
+		s.logger.Info("oauth_login_refused",
+			zap.String("reason", "provider_address_does_not_prove_account"),
+			zap.String("user_id", user.ID),
+			zap.String("provider", identity.Provider))
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
+			audit.WithActor(user.ID),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{
+				"reason":   "provider_address_does_not_prove_account",
+				"provider": identity.Provider,
+			}),
+		)
+		return nil, false, fmt.Errorf("%w: sign in and link this provider to use it", ErrUnauthenticated)
+	}
 	if !isNew {
 		s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now)
 	}
@@ -1141,11 +1161,25 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	return newUser, true, nil
 }
 
+// externalProof is a sign-in method outside identity proving control of an
+// address: a provider's assertion, or an emailed code or link the user
+// redeemed.
+type externalProof struct {
+	// address is the address proven.
+	address string
+	// method names the proof in logs and the audit trail: "oauth" or
+	// "passwordless".
+	method string
+	// provider and providerUserID name the provider link that presented the
+	// proof, which is kept; both are empty for an emailed proof.
+	provider, providerUserID string
+}
+
 // markEmailVerifiedViaExternalProof flips the account to verified because an
 // external method (OAuth provider assertion, or an emailed OTP/magic-link the
-// user redeemed) proved control of the address `proven`. It does nothing
-// unless that proof carries to the account's own address (ProofCarriesTo): an
-// account found by a linked provider id may hold a different address, or none.
+// user redeemed) proved control of proof.address. It does nothing unless that
+// proof carries to the account's own address (ProofCarriesTo): an account
+// found by a linked provider id may hold a different address, or none.
 // Any credential on the account was established BEFORE this proof — possibly
 // by a different party (account pre-hijacking) — so the untrusted ones are
 // voided:
@@ -1155,13 +1189,17 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 //     unverified is exactly as untrustworthy as a planted password: passkey
 //     login does not pass through the email-verification gate, so without this
 //     an attacker who passkey-first-signed-up an unverified address would keep
-//     a working credential after the real owner takes the account over.
+//     a working credential after the real owner takes the account over;
+//   - every provider link but the one presenting the proof is deleted. A link
+//     signs in by provider id alone, so one added to the unverified account
+//     (by whoever held it, or by a sign-in from a +tag address outside Gmail
+//     that only resembles this one) would otherwise outlive the proof.
 //
 // It is a no-op when the email is already verified (the proof adds nothing).
 // Best-effort: a persistence failure is logged, not fatal — the user has
 // already authenticated via the external proof.
-func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proven string, nowMs int64, method string) {
-	if user == nil || user.EmailVerified || !ProofCarriesTo(proven, user.Email) {
+func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proof externalProof, nowMs int64) {
+	if user == nil || user.EmailVerified || !ProofCarriesTo(proof.address, user.Email) {
 		return
 	}
 	patch := map[string]any{
@@ -1186,7 +1224,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	if err := s.repo(ctx).UpdateUser(ctx, user.ID, patch); err != nil {
 		s.logger.Warn("email_verified_external_persist_failed",
 			zap.String("user_id", user.ID),
-			zap.String("method", method),
+			zap.String("method", proof.method),
 			zap.Error(err))
 		return
 	}
@@ -1197,17 +1235,19 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	passkeysCleared := false
 	if existing, err := s.repo(ctx).ListPasskeyCredentials(ctx, user.ID); err != nil {
 		s.logger.Warn("email_verified_external_passkey_list_failed",
-			zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+			zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
 	} else if len(existing) > 0 {
 		if err := s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
 			s.logger.Warn("email_verified_external_passkey_clear_failed",
-				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
 		} else {
 			passkeysCleared = true
 		}
 	}
 
-	if passwordCleared || passkeysCleared {
+	linksCleared := s.voidPlantedProviderLinks(ctx, user.ID, proof)
+
+	if passwordCleared || passkeysCleared || linksCleared > 0 {
 		// The cleared credentials are void, so revoke any sessions too —
 		// mirroring ConfirmPasswordReset — so a session established with a now-
 		// voided credential cannot outlive it. With the verification gate on,
@@ -1215,26 +1255,65 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		// is NOT (passkey login skips the gate), so this matters either way.
 		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
 			s.logger.Warn("email_verified_external_revoke_failed",
-				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
 		}
 		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
 		s.logger.Info("email_verified_external_credentials_cleared",
 			zap.String("user_id", user.ID),
-			zap.String("method", method),
+			zap.String("method", proof.method),
 			zap.Bool("password_cleared", passwordCleared),
-			zap.Bool("passkeys_cleared", passkeysCleared))
+			zap.Bool("passkeys_cleared", passkeysCleared),
+			zap.Int("provider_links_cleared", linksCleared))
 		s.audit.Log(
 			ctx, audit.EventPasswordChanged,
 			audit.WithActor(user.ID),
 			audit.WithSuccess(true),
 			audit.WithDetails(map[string]any{
-				"reason":           "planted_credentials_cleared_on_external_email_verification",
-				"method":           method,
-				"password_cleared": passwordCleared,
-				"passkeys_cleared": passkeysCleared,
+				"reason":                 "planted_credentials_cleared_on_external_email_verification",
+				"method":                 proof.method,
+				"password_cleared":       passwordCleared,
+				"passkeys_cleared":       passkeysCleared,
+				"provider_links_cleared": linksCleared,
 			}),
 		)
 	}
+}
+
+// voidPlantedProviderLinks deletes every provider link on the account but the
+// one presenting proof, and returns how many it deleted. Each is audited as an
+// unlink. Failures are logged, not fatal, like the rest of the sweep.
+func (s *AuthService) voidPlantedProviderLinks(ctx context.Context, userID string, proof externalProof) int {
+	links, err := s.repo(ctx).ListOAuthIdentitiesForUser(ctx, userID)
+	if err != nil {
+		s.logger.Warn("email_verified_external_link_list_failed",
+			zap.String("user_id", userID), zap.String("method", proof.method), zap.Error(err))
+		return 0
+	}
+	cleared := 0
+	for _, link := range links {
+		if link.Provider == proof.provider && link.ProviderUserID == proof.providerUserID {
+			continue
+		}
+		if err := s.repo(ctx).DeleteOAuthIdentity(ctx, userID, link.Provider, link.ProviderUserID); err != nil {
+			s.logger.Warn("email_verified_external_link_clear_failed",
+				zap.String("user_id", userID), zap.String("method", proof.method),
+				zap.String("provider", link.Provider), zap.Error(err))
+			continue
+		}
+		cleared++
+		s.audit.Log(
+			ctx, audit.EventIdentityUnlinked,
+			audit.WithActor(userID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{
+				"provider":         link.Provider,
+				"provider_user_id": link.ProviderUserID,
+				"reason":           "planted_link_cleared_on_external_email_verification",
+				"method":           proof.method,
+			}),
+		)
+	}
+	return cleared
 }
 
 // applyOAuthProfileUpdates patches the local user record with any new
@@ -1257,7 +1336,12 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 	// clear any password planted while it was still unverified
 	// (anti-pre-hijacking). This runs its own persistence, so it is
 	// intentionally NOT folded into the name/avatar patch below.
-	s.markEmailVerifiedViaExternalProof(ctx, u, identity.Email, nowMs, "oauth")
+	s.markEmailVerifiedViaExternalProof(ctx, u, externalProof{
+		address:        identity.Email,
+		method:         "oauth",
+		provider:       identity.Provider,
+		providerUserID: identity.ProviderUserID,
+	}, nowMs)
 	// Provider-asserted email changes are NOT auto-applied to the local
 	// account. A compromised provider account (or a provider that lets
 	// admins change member emails) would otherwise let an attacker
