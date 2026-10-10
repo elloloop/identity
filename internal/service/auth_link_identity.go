@@ -70,18 +70,6 @@ func (s *AuthService) LinkIdentity(
 		return nil, fmt.Errorf("%w: provider returned no stable subject", ErrUnauthenticated)
 	}
 
-	// Reject linking a provider identity that already belongs to someone —
-	// including the caller. A duplicate link is not silently swallowed here
-	// (unlike the best-effort login path) because the user explicitly asked
-	// to connect it and deserves to know it is already connected.
-	existing, err := s.repo(ctx).FindUserByProviderID(ctx, identity.Provider, identity.ProviderUserID)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		return nil, fmt.Errorf("%w: provider identity already linked", ErrAlreadyExists)
-	}
-
 	email := strings.TrimSpace(strings.ToLower(identity.Email))
 	oi := &OAuthIdentity{
 		UserID:          userID,
@@ -90,9 +78,15 @@ func (s *AuthService) LinkIdentity(
 		EmailAtLinkTime: email,
 		CreatedAt:       s.nowMs(),
 	}
+	// The store's uniqueness on (provider, provider_user_id) is the one guard,
+	// so concurrent links of one identity, to one account or to several,
+	// leave exactly one. A link that already exists — including the caller's
+	// own — is reported rather than swallowed, since the user asked for it.
 	if err := s.repo(ctx).CreateOAuthIdentity(ctx, oi); err != nil {
-		// A racing create that beat us to the unique (provider, sub) pair.
-		return nil, fmt.Errorf("%w: provider identity already linked", ErrAlreadyExists)
+		if errors.Is(err, ErrAlreadyExists) {
+			return nil, fmt.Errorf("%w: provider identity already linked", ErrAlreadyExists)
+		}
+		return nil, err
 	}
 
 	s.audit.Log(
