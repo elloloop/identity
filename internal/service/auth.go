@@ -2455,9 +2455,9 @@ func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error 
 // authTimeMs as its auth_time (0 for a token no sign-in issued).
 //
 // email_verified is the account's stored verified state, which every flow
-// keeps true only for an address its owner proved control of and resets
-// whenever the address changes, so it vouches for exactly the address in
-// the email claim.
+// keeps true only for an address whose mailbox its owner proved control of
+// and resets whenever the address moves to another mailbox, so it vouches
+// for the mailbox in the email claim.
 func (s *AuthService) accessTokenClaims(ctx context.Context, user *User, authTimeMs int64) jwt.Claims {
 	claims := jwt.Claims{
 		Sub:           user.ID,

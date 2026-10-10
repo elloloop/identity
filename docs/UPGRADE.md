@@ -112,9 +112,10 @@ No schema change and no migration.
   signing in by its provider id.
 - **Access tokens carry an `email_verified` claim (additive).** Every access
   token that carries an `email` now also carries `email_verified`: `true`
-  only when the account's owner proved control of exactly that address (a
-  verification link, a passwordless email code or magic link, a passkey
-  sign-up code, or a provider asserting that same address), `false`
+  only when the account's owner proved control of the mailbox in `email`
+  (that address or another spelling of the same mailbox: a verification
+  link, a passwordless email code or magic link, a passkey sign-up code, or
+  a provider asserting that same mailbox), `false`
   otherwise. It is absent when `email` is (anonymous and username-only
   accounts). The value is read from the account at every issue, refresh
   included. With `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` on (the default) no
