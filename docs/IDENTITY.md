@@ -336,7 +336,9 @@ derivation, and only then is a session issued. A CHILD-band result lands in
 `USER_STATUS_PENDING_PARENTAL_CONSENT` with no tokens — the correct dead
 end on a self-signup path, where a child was never supposed to arrive
 unaccompanied. The DOB can be set exactly once through this RPC; an account
-that already has one gets `FAILED_PRECONDITION`.
+that already has one gets `FAILED_PRECONDITION`. The account's status and,
+with `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL`, its verified email are checked
+again before the DOB is stored, so a refused submission stores nothing.
 
 Three deliberate consequences:
 

@@ -186,6 +186,12 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
+	// Before the date is stored: a submission the verified-email gate
+	// refuses must leave the account as it found it, and a child-band one,
+	// which issues no session, is not exempt from the gate.
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+		return nil, err
+	}
 
 	gate := s.determinerForUser(ctx, user)
 	dec := gate.Determine(dobMs, s.nowFunc())

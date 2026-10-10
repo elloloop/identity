@@ -742,3 +742,37 @@ func TestSubmitDateOfBirth_IsSetOnce(t *testing.T) {
 	require.Equal(t, dobAgeMs(8), stored.DateOfBirthMs, "the losing submission must not overwrite the date")
 	require.Equal(t, StatusPendingParentalConsent, stored.Status, "the account must stay gated")
 }
+
+// An address that became unverified after the ticket was minted refuses the
+// submission before the date is stored, whichever band it would land in.
+func TestSubmitDateOfBirth_UnverifiedAddressRefusedWithoutStoring(t *testing.T) {
+	for name, dob := range map[string]int64{"adult": dobAgeMs(30), "child": dobAgeMs(8)} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newTestAuthService(t, repo)
+			enableAgeGate(t, svc, true)
+			ctx := context.Background()
+			ticket := dobTicketFor(t, svc, repo, "unverified@example.com")
+
+			svc.cfg.AuthRequireVerifiedEmail = true
+			u, err := repo.FindUserByEmail(ctx, "unverified@example.com")
+			require.NoError(t, err)
+			repo.mu.Lock()
+			repo.users[u.ID].EmailVerified = false
+			repo.mu.Unlock()
+
+			res, err := svc.SubmitDateOfBirth(ctx, ticket, dob, "1.2.3.4", "agent")
+			require.ErrorIs(t, err, ErrEmailVerificationRequired)
+			require.Nil(t, res)
+
+			stored, err := repo.GetUser(ctx, u.ID)
+			require.NoError(t, err)
+			assert.Zero(t, stored.DateOfBirthMs, "a refused submission must not store the date")
+			assert.Equal(t, "active", stored.Status, "a refused submission must not gate the account")
+			repo.mu.Lock()
+			refreshRows := len(repo.refreshTokens)
+			repo.mu.Unlock()
+			assert.Zero(t, refreshRows)
+		})
+	}
+}
