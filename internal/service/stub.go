@@ -286,8 +286,8 @@ func (StubRepository) MarkEmailVerificationTokenConsumed(context.Context, string
 	return ErrServiceUnavailable
 }
 
-func (StubRepository) SetUserEmailVerified(context.Context, string, string, int64, bool) (bool, error) {
-	return false, ErrServiceUnavailable
+func (StubRepository) SetUserEmailVerified(context.Context, string, string, int64, bool) (bool, bool, error) {
+	return false, false, ErrServiceUnavailable
 }
 
 func (StubRepository) SetUserIDVVerified(context.Context, string, int64) error {

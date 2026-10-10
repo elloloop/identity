@@ -1226,10 +1226,10 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		return s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
 	}
 	plantedLinks := proof.voidedAmong(links, user.Email)
-	passwordCleared := user.PasswordHash != ""
+	hadPassword := user.PasswordHash != ""
 	passkeysCleared := len(passkeys) > 0
 
-	if passwordCleared || passkeysCleared || len(plantedLinks) > 0 {
+	if hadPassword || passkeysCleared || len(plantedLinks) > 0 {
 		// Sessions go first, as ConfirmPasswordReset ends them for a replaced
 		// password: one opened with a voided credential must not outlive it.
 		// Doing it before the deletions means a failure further on leaves the
@@ -1250,7 +1250,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 
 	// The password predates the proof of email control, so it cannot be
 	// trusted to belong to the verified owner. It is cleared with the flag.
-	verified, err := repo.SetUserEmailVerified(ctx, user.ID, user.Email, nowMs, passwordCleared)
+	verified, passwordCleared, err := repo.SetUserEmailVerified(ctx, user.ID, user.Email, nowMs, hadPassword)
 	if err != nil {
 		return s.externalProofSweepFailed(user.ID, proof, "mark_verified", err)
 	}
@@ -1262,7 +1262,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	}
 	user.EmailVerified = true
 	user.EmailVerifiedAt = nowMs
-	if passwordCleared {
+	if hadPassword {
 		user.PasswordHash = ""
 		user.PasswordChangeRequired = false
 	}

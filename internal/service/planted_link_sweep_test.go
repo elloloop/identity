@@ -221,3 +221,29 @@ func TestExternalProof_AuditsTheVoidedCredentials(t *testing.T) {
 	assert.Zero(t, writer.countByEventType(string(audit.EventPasswordChanged)), "the sweep is not a password change")
 	assert.Equal(t, 1, writer.countByEventTypeAndDetail(string(audit.EventIdentityUnlinked), "provider_user_id", "sub-planter"))
 }
+
+// The audit reports the password the verified write cleared, not the one the
+// proof read: a password already gone when the write lands, as after a
+// concurrent proof of the same address, is not reported as cleared.
+func TestExternalProof_AuditsThePasswordTheWriteCleared(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	ctx := context.Background()
+	owner := seedUser(repo, "owner@example.com", hashPW(t, "Planted-Passw0rd!"), StatusActive)
+	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
+		UserID: owner.ID, Provider: "github", ProviderUserID: "sub-planter",
+		EmailAtLinkTime: "owner@example.com", CreatedAt: 1,
+	}))
+	repo.listOAuthIdentitiesHook = func() {
+		repo.listOAuthIdentitiesHook = nil
+		require.NoError(t, repo.UpdateUser(ctx, owner.ID, map[string]any{"password_hash": ""}))
+	}
+
+	oauthLoginAs(t, svc, "owner@example.com")
+
+	details := writer.detailsOf(string(audit.EventUnprovenCredentialsVoided))
+	require.Len(t, details, 1)
+	assert.Equal(t, false, details[0]["password_cleared"])
+	assert.EqualValues(t, 1, details[0]["provider_links_cleared"])
+}

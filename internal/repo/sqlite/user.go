@@ -664,21 +664,44 @@ func (r *sqliteRepository) SetUserLockedUntil(ctx context.Context, userID string
 	return nil
 }
 
-func (r *sqliteRepository) SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+func (r *sqliteRepository) SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (verified, passwordCleared bool, err error) {
 	if userID == "" || email == "" {
-		return false, errors.New("sqlite: SetUserEmailVerified: missing user id or email")
+		return false, false, errors.New("sqlite: SetUserEmailVerified: missing user id or email")
+	}
+	// SQLite's RETURNING sees only the updated row, so the password is
+	// cleared by its own statement, in the same transaction, to learn
+	// whether there was one.
+	t, err := r.db.Begin(ctx)
+	if err != nil {
+		return false, false, wrapErr("SetUserEmailVerified", err)
+	}
+	defer func() { _ = t.Rollback(ctx) }()
+	if clearPassword {
+		const clear = `
+			UPDATE users SET password_hash = ''
+			 WHERE project_id = $1 AND id = $2 AND email = $3 AND password_hash <> ''`
+		tag, err := t.Exec(ctx, clear, r.projectID, userID, email)
+		if err != nil {
+			return false, false, wrapErr("SetUserEmailVerified", err)
+		}
+		passwordCleared = tag.RowsAffected() == 1
 	}
 	const q = `
 		UPDATE users
 		   SET email_verified = 1, email_verified_at_ms = $4, updated_at_ms = $4,
-		       password_hash = CASE WHEN $5 THEN '' ELSE password_hash END,
 		       password_change_required = CASE WHEN $5 THEN 0 ELSE password_change_required END
 		 WHERE project_id = $1 AND id = $2 AND email = $3`
-	tag, err := r.db.Exec(ctx, q, r.projectID, userID, email, atMs, clearPassword)
+	tag, err := t.Exec(ctx, q, r.projectID, userID, email, atMs, clearPassword)
 	if err != nil {
-		return false, wrapErr("SetUserEmailVerified", err)
+		return false, false, wrapErr("SetUserEmailVerified", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	if tag.RowsAffected() != 1 {
+		return false, false, nil
+	}
+	if err := t.Commit(ctx); err != nil {
+		return false, false, wrapErr("SetUserEmailVerified", err)
+	}
+	return true, passwordCleared, nil
 }
 
 func (r *sqliteRepository) SetUserIDVVerified(ctx context.Context, userID string, atMs int64) error {

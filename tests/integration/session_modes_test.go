@@ -194,7 +194,7 @@ func TestModeSession_RefusedRefreshRevokesAccessToken(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	userID := signup.Msg.GetUser().GetId()
-	verified, err := h.Repo.SetUserEmailVerified(ctx, userID, "refused-refresh@example.com", 1, false)
+	verified, _, err := h.Repo.SetUserEmailVerified(ctx, userID, "refused-refresh@example.com", 1, false)
 	require.NoError(t, err)
 	require.True(t, verified)
 	resp, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&pb.PasswordLoginRequest{
