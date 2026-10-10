@@ -19,6 +19,12 @@ No schema change and no migration.
     unverified, and with `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` the directory
     hides them. Offer them the email-verification flow
     (`SendEmailVerification`) if you gate features on a verified email.
+- **A verification link proves only the address it was mailed to (behaviour
+  change).** `VerifyEmail` used to mark the account's current address
+  verified whatever address the link was sent to. Once the account holds
+  another address (after a SCIM write, say), a link mailed to the old
+  one is refused with `unauthenticated` and spent; send a new one. Another
+  spelling of the same mailbox still verifies.
 
 ## v4.12.2 → v4.13.0 — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); an optional `iss` claim and per-project token audience
 

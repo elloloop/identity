@@ -345,7 +345,9 @@ func (s *AuthService) sendEmailVerification(ctx context.Context, userID string, 
 // VerifyEmail consumes a verification token and marks the user's
 // email as verified. Idempotent — re-verifying an already-verified
 // user still consumes the supplied token but does not change state.
-// Returns the updated user.
+// The token proves only the address it was mailed to: once the account
+// holds another address it is refused (and consumed). Returns the
+// updated user.
 func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, error) {
 	if token == "" {
 		return nil, fmt.Errorf("%w: token is required", ErrInvalidArgument)
@@ -375,6 +377,14 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 	}
 
 	now := s.nowMs()
+	if !proofCarriesTo(rec.Email, user.Email) {
+		if err := s.repo(ctx).MarkEmailVerificationTokenConsumed(ctx, rec.NodeID, now); err != nil {
+			s.logger.Warn("email_verification_consume_failed",
+				zap.String("user_id", user.ID), zap.Error(err))
+		}
+		s.logger.Info("email_verification_address_changed", zap.String("user_id", user.ID))
+		return nil, fmt.Errorf("%w: verification token was sent to another address", ErrUnauthenticated)
+	}
 	if !user.EmailVerified {
 		if err := s.repo(ctx).SetUserEmailVerified(ctx, user.ID, now); err != nil {
 			return nil, fmt.Errorf("setting email verified: %w", err)

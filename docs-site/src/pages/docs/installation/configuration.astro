@@ -346,6 +346,13 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     serve those paths.
   </p>
   <p>
+    A verification link proves only the address it was mailed to. Once the
+    account holds another address, <code>VerifyEmail</code> refuses the link
+    with <code>unauthenticated</code> and spends it; send a new one to the
+    current address. Another spelling of the same mailbox (capitals, or a
+    dotted Gmail address) still verifies.
+  </p>
+  <p>
     When the pages live somewhere else, such as a sign-in hub that serves
     several products, set <code>GATEWAY_EMAIL_LINK_BASE_URL</code>. The links
     become <code>&lt;base&gt;/reset-password?token=…</code> and
