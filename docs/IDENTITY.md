@@ -643,7 +643,11 @@ policy.
 
 **QR login** is gated at completion rather than at approval: polling mints an
 independent session for the scanning device, which outlives the approval that
-authorized it, so the approval alone cannot stand in for the check.
+authorized it, so the approval alone cannot stand in for the check. The poll
+runs the checks every sign-in runs (account status and lockout, project access,
+the verified-email gate) before it consumes the hand-off, so a refused poll
+leaves the session approved and a later poll completes once the account is
+eligible. An approved session expires with its window like a pending one.
 
 **SCIM provisioning** is deliberately outside the gate. It writes user records
 on an operator's instruction rather than an end user's, so an IdP can create or

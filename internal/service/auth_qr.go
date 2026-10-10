@@ -200,8 +200,10 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	now := s.nowMs()
 	status := session.Status
 
-	// Expiry check for pending sessions.
-	if status == "pending" && session.ExpiresAt < now {
+	// An approved session expires too: a sign-in refused below leaves it
+	// approved, and the hand-off must not outlive its window waiting for the
+	// account to become eligible.
+	if (status == "pending" || status == "approved") && session.ExpiresAt < now {
 		_ = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 			"status": "expired", "updated_at": now,
 		})
@@ -225,6 +227,34 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 		return nil, errors.New("approved session has no user")
 	}
 
+	user, err := s.repo(ctx).GetUser(ctx, session.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+
+	// QR completion mints an INDEPENDENT session for the scanning device, so it
+	// is its own door and needs its own gates: the approval only proves the
+	// approver was admitted when they approved, and the token pair issued here
+	// outlives that. Without them, an account deactivated or locked after
+	// approving, or a project that tightened its access policy, would keep
+	// receiving sessions through QR. They run before the consume so a refusal
+	// leaves the hand-off approved: once the account is eligible (its address
+	// verified, say) the device's next poll within the window completes.
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return nil, err
+	}
+	if !user.IsAnonymous {
+		if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+		return nil, err
+	}
+
 	// Serialize approved→consumed at the repository layer. Two replicas
 	// observing the same approved session race here; exactly one wins
 	// and proceeds to mint tokens. The loser sees ErrQrLoginNotPending
@@ -235,26 +265,6 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 			return &PollQrResult{Status: "consumed"}, nil
 		}
 		return nil, fmt.Errorf("consuming QR login session: %w", err)
-	}
-
-	user, err := s.repo(ctx).GetUser(ctx, session.UserID)
-	if err != nil {
-		return nil, err
-	}
-	if user == nil {
-		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
-	}
-
-	// QR completion mints an INDEPENDENT session for the scanning device, so it
-	// is its own door and needs its own gate: the approval only proves the
-	// approver was admitted when they approved, and the token pair issued here
-	// outlives that. Without this, a project that tightened its access policy
-	// would keep handing out sessions through QR until every pre-existing
-	// approval expired. Login context — the account already exists.
-	if !user.IsAnonymous {
-		if err := s.enforceAccountAccessLogin(ctx, user); err != nil {
-			return nil, err
-		}
 	}
 
 	// A QR handoff proves no credential on this device: the session it opens
