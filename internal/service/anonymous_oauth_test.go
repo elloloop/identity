@@ -720,3 +720,29 @@ func TestUpgradeAnonymousWithPassword_RefusedWhenDOBRequired(t *testing.T) {
 		t.Fatalf("gate-on-but-DOB-optional refused the upgrade: %v", err)
 	}
 }
+
+// An anonymous account upgraded with a provider whose address had a "+tag"
+// outside Gmail dropped to canonicalize it holds an address the provider
+// never asserted, so it is not marked verified.
+func TestUpgradeAnonymousWithOAuth_TaggedAddressElsewhereIsUnverified(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := anonCtx(true, AccessModeOpen)
+
+	res, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+	cred := oauthCred()
+	cred.Code = fakeOAuthCode("someone+news@example.com", "Some One", "", testOAuthProvider)
+	up, err := svc.UpgradeAnonymousWithOAuth(ctx, res.User.ID, cred)
+	if err != nil {
+		t.Fatalf("UpgradeAnonymousWithOAuth: %v", err)
+	}
+	if up.User.Email != "someone@example.com" {
+		t.Fatalf("email = %q, want the canonical someone@example.com", up.User.Email)
+	}
+	if up.User.EmailVerified {
+		t.Error("the provider asserted a tagged address, not the stored one")
+	}
+}

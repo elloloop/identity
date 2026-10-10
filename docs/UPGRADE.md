@@ -1,5 +1,25 @@
 # Upgrade guide
 
+## v4.13.0 → next — a provider sign-in verifies only the address it asserted (behaviour change)
+
+No schema change and no migration.
+
+- **A provider sign-in verifies an account's email only when the provider
+  asserted that address (behaviour change).** Before, every OAuth sign-in
+  marked the account's email verified and voided a password or passkey set
+  while it was unverified, whatever address the provider asserted. Now:
+  - An account found by its linked provider id whose stored address differs
+    from the provider's, or that has no address (a username account), keeps
+    its verified state, its password and its passkeys.
+  - A new account, or an anonymous account upgraded through a provider,
+    created from a `+tag` address outside Gmail (stored without the tag)
+    starts unverified: a dropped tag is provably the same mailbox only at
+    Gmail.
+  - Consequence: `GetUser`, `LookupUsers` and webhooks report such accounts
+    unverified, and with `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` the directory
+    hides them. Offer them the email-verification flow
+    (`SendEmailVerification`) if you gate features on a verified email.
+
 ## v4.12.2 → v4.13.0 — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); an optional `iss` claim and per-project token audience
 
 No schema change and no migration.

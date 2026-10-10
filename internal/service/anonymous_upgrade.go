@@ -279,11 +279,17 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 			return nil, err
 		}
 	}
+	// A federated address is provider-verified, unlike a typed one, when the
+	// address the provider asserted is the one stored.
+	verifiedAt := int64(0)
+	verified := proofCarriesTo(identity.Email, string(email))
+	if verified {
+		verifiedAt = s.nowMs()
+	}
 	if err := s.UpgradeAnonymousUser(ctx, userID, map[string]any{
-		"email": string(email),
-		// Federated addresses are provider-verified, unlike a typed one.
-		"email_verified":    true,
-		"email_verified_at": s.nowMs(),
+		"email":             string(email),
+		"email_verified":    verified,
+		"email_verified_at": verifiedAt,
 		"name":              fallbackDisplayName(string(email), identity.Name),
 	}); err != nil {
 		// Compensate: drop the identity we just created so the account does
