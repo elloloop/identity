@@ -178,4 +178,40 @@ func TestModeSession_RefreshTokenReplayRevokesAccessToken(t *testing.T) {
 	require.Error(t, err, "replay detection must invalidate the legitimate access token too")
 }
 
+// TestModeSession_RefusedRefreshRevokesAccessToken: a refresh refused because
+// the account's address became unverified ends the access token issued with
+// that refresh token, rather than leaving it working until its expiry.
+func TestModeSession_RefusedRefreshRevokesAccessToken(t *testing.T) {
+	h := StartServer(t, WithConfig(func(cfg *config.Config) {
+		cfg.RevocationMode = config.RevocationModeSession
+		cfg.SessionCacheTTLSeconds = 0
+		cfg.AuthRequireVerifiedEmail = true
+	}))
+
+	ctx := context.Background()
+	signup, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&pb.PasswordSignupRequest{
+		Email: "refused-refresh@example.com", Password: strongPassword,
+	}))
+	require.NoError(t, err)
+	userID := signup.Msg.GetUser().GetId()
+	require.NoError(t, h.Repo.SetUserEmailVerified(ctx, userID, 1))
+	resp, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&pb.PasswordLoginRequest{
+		Email: "refused-refresh@example.com", Password: strongPassword,
+	}))
+	require.NoError(t, err)
+	authed := h.AuthedClient(resp.Msg.AccessToken)
+	_, err = authed.GetCurrentUser(ctx, connect.NewRequest(&pb.GetCurrentUserRequest{}))
+	require.NoError(t, err)
+
+	require.NoError(t, h.Repo.UpdateUser(ctx, userID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
+	_, err = h.Client.RefreshToken(ctx, connect.NewRequest(&pb.RefreshTokenRequest{
+		RefreshToken: resp.Msg.RefreshToken,
+	}))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+
+	_, err = authed.GetCurrentUser(ctx, connect.NewRequest(&pb.GetCurrentUserRequest{}))
+	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err),
+		"the access token issued with a refused refresh token must stop working")
+}
+
 const strongPassword = "Tr0ub4dor&3-MixedC4se!"

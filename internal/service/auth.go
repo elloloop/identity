@@ -2038,9 +2038,10 @@ func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userI
 // revokeSessionIfModeSession revokes exactly the access session identified by
 // sid when the deployment runs mode=session, leaving the user's other sessions
 // untouched. It is paired with every path that invalidates a single refresh
-// token — logout, natural-expiry cleanup, and a session-timeout breach — so the
-// still-valid access token stops working immediately rather than lingering to
-// its natural (uncapped in mode=session) expiry.
+// token — logout, natural-expiry cleanup, and a session-timeout breach — and
+// with a refresh refused over the account's own state, so the still-valid
+// access token stops working immediately rather than lingering to its natural
+// (uncapped in mode=session) expiry.
 //
 // A legacy refresh row written before the sid link existed carries an empty
 // sid, making the scoped revoke impossible; it fails CLOSED by falling back to
@@ -2329,7 +2330,11 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// address became unverified (a SCIM email change, say) keeps its token,
 	// and rotates normally once the address is verified. It runs before the
 	// DOB step, which could not yield a session while the address is unproven.
+	// The access token minted with this refresh token ends here: the account
+	// may hold no session until its address is proven, and under mode=session
+	// that token would otherwise outlive the refusal until its natural expiry.
 	if err := s.enforceVerifiedEmail(ctx, timeoutUser, ipAddr, userAgent, verifiedEmailGateRefresh); err != nil {
+		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "email_not_verified")
 		return nil, "", "", err
 	}
 
@@ -2383,7 +2388,13 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// able to mint fresh access tokens by replaying a still-valid
 	// refresh token. A hard-deleted user is already covered above (the
 	// refresh row is gone, so the lookup returns nil → unauthenticated).
+	// The refused account's access session ends with it. A lockout is the
+	// exception: anyone can trigger one by guessing at the password, and it
+	// says nothing against the sessions the account already holds.
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		if !errors.Is(err, ErrAccountLocked) {
+			s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "account_not_active")
+		}
 		return nil, "", "", err
 	}
 
