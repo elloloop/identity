@@ -39,6 +39,7 @@ func TestIssueTokens_VerifiedEmailGate(t *testing.T) {
 			if !tc.wantErr {
 				require.NoError(t, err)
 				assert.NotEmpty(t, access)
+				assert.Empty(t, rec.Sent(), "a session issued sends no verification email")
 				return
 			}
 			require.ErrorIs(t, err, ErrEmailVerificationRequired)
@@ -206,4 +207,26 @@ func TestVerifiedEmailGate_RefusesBeforeTheSecondFactor(t *testing.T) {
 	res, err := svc.requireSecondFactor(ctx, user, false, "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Nil(t, res)
+}
+
+// A refresh for an account that is both unverified and missing a date of
+// birth is refused for the address, before the DOB step: completing that step
+// could not yield a session. The token is kept.
+func TestRefreshToken_VerifiedEmailGateRunsBeforeTheDOBStep(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := context.Background()
+	user := seedUser(repo, "nodob@example.com", "", StatusActive)
+	user.EmailVerified = true
+	_, refresh, err := svc.issueTokens(ctx, user, "", "")
+	require.NoError(t, err)
+
+	svc.cfg.AuthRequireVerifiedEmail = true
+	svc.cfg.AgeGateRequireDOB = true
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
+
+	for range 2 {
+		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
+		require.ErrorIs(t, err, ErrEmailVerificationRequired)
+		require.False(t, errors.Is(err, ErrDOBRequired))
+	}
 }

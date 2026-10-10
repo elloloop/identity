@@ -67,8 +67,10 @@ No schema change and no migration.
     is verified through `SendEmailVerification` and its link (a passwordless
     code, magic link or provider sign-in, as the first proof, ends the
     account's sessions instead). A client that gets this error from
-    `RefreshToken` should stop retrying and ask the user to verify, offering
-    `SendEmailVerification`. Each refused refresh is one `login_failure`
+    `RefreshToken` should stop retrying and ask the user to verify: call
+    `SendEmailVerification` while its access token is still valid, or else
+    send the user to sign in again, which is refused but mails a
+    verification link. Each refused refresh is one `login_failure`
     row with `gate: refresh`; exclude those from failed-sign-in alerting
     during a bulk email migration.
   - Sessions that exist at upgrade for accounts with an unverified address

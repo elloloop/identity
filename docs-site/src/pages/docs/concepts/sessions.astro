@@ -27,9 +27,11 @@ import { Code } from "astro-expressive-code/components";
       client uses theirs. With <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code>
       on, a refresh for an account whose address is unverified is refused
       with <code>FailedPrecondition</code> ("email verification required")
-      before the token is consumed: stop retrying, ask the user to verify
-      (offering <code>SendEmailVerification</code>), and the same token
-      rotates again once the link is redeemed.
+      before the token is consumed. Stop retrying and ask the user to verify:
+      call <code>SendEmailVerification</code> while the access token is
+      still valid, or else send the user to sign in again, which is refused
+      but mails a verification link. The same refresh token rotates again
+      once the link is redeemed.
     </li>
     <li>
       <strong>Revoke.</strong>
