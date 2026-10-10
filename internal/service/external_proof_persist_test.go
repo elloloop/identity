@@ -20,7 +20,7 @@ func TestExternalProof_FailedWriteLeavesUserUnverified(t *testing.T) {
 	seeded := seedUser(repo, "owner@example.com", hashPW(t, strongPW), "active")
 	user, err := repo.GetUser(ctx, seeded.ID)
 	require.NoError(t, err)
-	repo.updateUserErr = errVerifiedWriteFailed
+	repo.setEmailVerifiedErr = errVerifiedWriteFailed
 
 	err = svc.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: user.Email, method: "oauth"}, nowMs())
 
@@ -38,7 +38,7 @@ func TestExternalProof_FailedWriteFailsTheSignIn(t *testing.T) {
 		svc := newTestAuthService(t, repo)
 		svc.cfg.AuthRequireVerifiedEmail = false
 		seedUser(repo, "owner@example.com", "", "active")
-		repo.updateUserErr = errVerifiedWriteFailed
+		repo.setEmailVerifiedErr = errVerifiedWriteFailed
 
 		res, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{
 			Code: fakeOAuthCode("owner@example.com", "Owner", "", "google"), Provider: "google",
@@ -55,7 +55,7 @@ func TestExternalProof_FailedWriteFailsTheSignIn(t *testing.T) {
 		seedUser(repo, "owner@example.com", "", "active")
 		require.NoError(t, svc.RequestEmailLoginCode(ctx, "owner@example.com"))
 		code := extractCodeFromEmail(t, rec.Sent()[0].Text)
-		repo.updateUserErr = errVerifiedWriteFailed
+		repo.setEmailVerifiedErr = errVerifiedWriteFailed
 
 		res, err := svc.VerifyEmailLoginCode(ctx, "owner@example.com", code, "", "")
 

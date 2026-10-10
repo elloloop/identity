@@ -1152,7 +1152,9 @@ type externalProof struct {
 // external method (OAuth provider assertion, or an emailed OTP/magic-link the
 // user redeemed) proved control of proof.address. It does nothing unless that
 // proof carries to the account's own address (ProofCarriesTo): an account
-// found by a linked provider id may hold a different address, or none.
+// found by a linked provider id may hold a different address, or none. The
+// write lands only while the account still holds the address checked, so an
+// email change racing the proof leaves the new address unverified.
 // Any credential on the account was established BEFORE this proof — possibly
 // by a different party (account pre-hijacking) — so the untrusted ones are
 // voided:
@@ -1176,28 +1178,22 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	if user == nil || user.EmailVerified || !ProofCarriesTo(proof.address, user.Email) {
 		return nil
 	}
-	patch := map[string]any{
-		"email_verified":    true,
-		"email_verified_at": nowMs,
-		"updated_at":        nowMs,
-	}
+	// The password predates the proof of email control, so it cannot be
+	// trusted to belong to the verified owner. It is cleared with the flag.
 	passwordCleared := user.PasswordHash != ""
-	if passwordCleared {
-		// The password predates the proof of email control, so it cannot be
-		// trusted to belong to the verified owner. Clear it.
-		patch["password_hash"] = ""
-		patch["password_change_required"] = false
-	}
-
-	if err := s.repo(ctx).UpdateUser(ctx, user.ID, patch); err != nil {
+	verified, err := s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, nowMs, true)
+	if err != nil {
 		return fmt.Errorf("persisting email verified by %s: %w", proof.method, err)
+	}
+	if !verified {
+		s.logger.Info("email_verified_external_address_changed",
+			zap.String("user_id", user.ID), zap.String("method", proof.method))
+		return nil
 	}
 	user.EmailVerified = true
 	user.EmailVerifiedAt = nowMs
-	if passwordCleared {
-		user.PasswordHash = ""
-		user.PasswordChangeRequired = false
-	}
+	user.PasswordHash = ""
+	user.PasswordChangeRequired = false
 
 	// Void any passkeys planted while the address was unverified. Detect first
 	// (so the audit/session-revocation only fires when there was something to
