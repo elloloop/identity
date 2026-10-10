@@ -2360,7 +2360,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	}
 
 	// Project access, checked BEFORE the token is consumed for the same reason
-	// the two refusals above are: a post-consume refusal burns the token, and
+	// the refusals above are: a post-consume refusal burns the token, and
 	// the retry an SDK makes on a failed rotation then lands on replay
 	// detection — which deletes every refresh token the user has and signs them
 	// out everywhere. That matters most for the deny layer, the one access rule

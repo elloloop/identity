@@ -151,3 +151,44 @@ func TestAcceptInvitation_UnprovenInviteeGetsVerificationNotSession(t *testing.T
 	require.NoError(t, err)
 	assert.NotEmpty(t, login.AccessToken)
 }
+
+// A provider sign-in that does not prove the account's address (a provider
+// linked under another address) is refused end to end, audited at the
+// sign-in gate, and sent a verification email.
+func TestVerifiedEmailGate_ProviderSignInWithoutProofIsRefused(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	svc.cfg.AuthRequireVerifiedEmail = true
+	ctx := context.Background()
+	user := seedUser(repo, "unproven@example.com", "", StatusActive)
+	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
+		UserID: user.ID, Provider: "google", ProviderUserID: "sub-linker@example.com", CreatedAt: 1,
+	}))
+
+	_, err := svc.OAuthLogin(ctx, OAuthLoginParams{
+		Code:        fakeOAuthCode("linker@example.com", "Linker", "", "google"),
+		Provider:    "google",
+		RedirectURI: "https://app/cb",
+	})
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	assert.Equal(t, 1, writer.countByEventTypeAndDetail("login_failure", "gate", "sign_in"))
+	repo.mu.Lock()
+	stored := len(repo.refreshTokens)
+	repo.mu.Unlock()
+	assert.Zero(t, stored)
+}
+
+// The backstop where sessions are minted refuses an unproven address on its
+// own, silently: the audited gates run before it on every current path.
+func TestIssueTokensWithSessionStart_VerifiedEmailBackstop(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	svc.cfg.AuthRequireVerifiedEmail = true
+	user := seedUser(repo, "backstop@example.com", "", StatusActive)
+
+	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", 0, 0)
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	assert.Zero(t, writer.countByEventType("login_failure"))
+}

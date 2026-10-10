@@ -178,11 +178,17 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
   </p>
   <ul>
     <li>
-      <strong>OAuth</strong> — the address is provider-verified, so the
-      response carries a <strong>new token pair</strong>. The reissue is
-      required, not a convenience: your old access token still asserts
+      <strong>OAuth</strong> — when the address the provider asserted is
+      the one stored, it is provider-verified, so the response carries a
+      <strong>new token pair</strong>. The reissue is required, not a
+      convenience: your old access token still asserts
       <code>anonymous: true</code> and downstream services would keep
-      believing it until it expired. Discard the old pair.
+      believing it until it expired. Discard the old pair. When it is not
+      (a <code>+tag</code> outside Gmail is stored without the tag), the
+      address is unproven and, with
+      <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> on, the response is
+      the password arm's below: empty tokens, a verification email, and the
+      anonymous session revoked.
     </li>
     <li>
       <strong>Password, with <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code>

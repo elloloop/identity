@@ -64,11 +64,19 @@ No schema change and no migration.
     renewed. The refusal comes before the refresh token is consumed: a
     client retrying it gets the same error rather than a replay that signs
     the account out everywhere, and the token works again once the address
-    is verified.
+    is verified through `SendEmailVerification` and its link (a passwordless
+    code, magic link or provider sign-in, as the first proof, ends the
+    account's sessions instead). A client that gets this error from
+    `RefreshToken` should stop retrying and ask the user to verify, offering
+    `SendEmailVerification`. Each refused refresh is one `login_failure`
+    row with `gate: refresh`; exclude those from failed-sign-in alerting
+    during a bulk email migration.
   - Sessions that exist at upgrade for accounts with an unverified address
-    (an accepted invitation, a passkey or provider account) end at their
-    next refresh. When upgrading with the flag on, expect
-    those users to be asked to verify.
+    (an accepted invitation, a passkey or provider account) cannot be
+    renewed: they end at their next refresh (an access token already issued
+    under `GATEWAY_REVOCATION_MODE=session` lasts until its session is
+    revoked). When upgrading with the flag on, expect those users to be
+    asked to verify.
   - `AcceptInvitation` for an unverified invitee activates the account and
     returns the user with empty tokens, as `PasswordSignup` does, and sends
     a verification email; the invitee signs in once it is redeemed. The
