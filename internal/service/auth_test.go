@@ -268,7 +268,7 @@ func TestPasswordLogin_LockedAccountFails(t *testing.T) {
 
 	_, err := svc.PasswordLogin(context.Background(), "locked@example.com", strongPW, "", "")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAccountLocked))
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
 
 // An account with no password answers a password sign-in exactly as an

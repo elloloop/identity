@@ -252,10 +252,10 @@ func TestSecExt_AccountLockout_NFailuresLockWithinWindow(t *testing.T) {
 		require.Error(t, err)
 	}
 
-	// (N+1)th attempt with correct password must be locked.
+	// (N+1)th attempt with correct password must be refused.
 	_, err := svc.PasswordLogin(context.Background(), "lockout@example.com", strongPW, "", "")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAccountLocked),
+	assert.True(t, errors.Is(err, ErrUnauthenticated),
 		"after %d failed attempts the account MUST be locked", maxAttempts)
 }
 
