@@ -1047,7 +1047,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	// account's own address. A tagged address outside Gmail canonicalizes to
 	// the account's but is not provably the same mailbox, so it neither signs
 	// in nor links here; the owner links such a provider while signed in.
-	if !isNew && !proofCarriesTo(identity.Email, user.Email) {
+	if !isNew && !ProofCarriesTo(identity.Email, user.Email) {
 		s.logger.Info("oauth_login_refused",
 			zap.String("reason", "provider_address_does_not_prove_account"),
 			zap.String("user_id", user.ID),
@@ -1177,11 +1177,8 @@ type externalProof struct {
 
 // markEmailVerifiedViaExternalProof flips the account to verified because an
 // external method (OAuth provider assertion, or an emailed OTP/magic-link the
-// user redeemed) proved control of the address `proven`. It does nothing
-// unless that proof carries to the account's own address (ProofCarriesTo): an
-// account found by a linked provider id may hold a different address, or none.
 // user redeemed) proved control of proof.address. It does nothing unless that
-// proof carries to the account's own address (proofCarriesTo): an account
+// proof carries to the account's own address (ProofCarriesTo): an account
 // found by a linked provider id may hold a different address, or none.
 // Any credential on the account was established BEFORE this proof — possibly
 // by a different party (account pre-hijacking) — so the untrusted ones are
@@ -1201,10 +1198,8 @@ type externalProof struct {
 // It is a no-op when the email is already verified (the proof adds nothing).
 // Best-effort: a persistence failure is logged, not fatal — the user has
 // already authenticated via the external proof.
-func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proven string, nowMs int64, method string) {
-	if user == nil || user.EmailVerified || !ProofCarriesTo(proven, user.Email) {
 func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proof externalProof, nowMs int64) {
-	if user == nil || user.EmailVerified || !proofCarriesTo(proof.address, user.Email) {
+	if user == nil || user.EmailVerified || !ProofCarriesTo(proof.address, user.Email) {
 		return
 	}
 	patch := map[string]any{
