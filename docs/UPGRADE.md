@@ -1,5 +1,25 @@
 # Upgrade guide
 
+## v4.14.0 → next — a QR sign-in checks the account before completing (behaviour change)
+
+No schema change and no migration.
+
+- **A QR sign-in runs the account checks every sign-in runs, before it
+  consumes the hand-off (behaviour change).** `PollQrLogin` issued a session
+  to an approved hand-off whatever the approving account's state: a
+  deactivated, invited or locked account still signed the device in. Now:
+  - It is refused like a password or passkey sign-in, with the same codes:
+    `failed_precondition` for a deactivated account, a pending invitation or
+    (with identity verification required) an unverified identity, and
+    `resource_exhausted` for an account locked by failed sign-ins. The
+    access-policy and verified-email refusals are unchanged.
+  - A refused poll leaves the hand-off approved instead of spending it, so
+    once the account is eligible (its address verified, say) the device's
+    next poll completes without a new QR code.
+  - An approved hand-off now expires at the end of its window
+    (`GATEWAY_QR_LOGIN_EXPIRY_SECONDS`) like a pending one; a poll after it
+    reports `expired`.
+
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 
 No schema change and no migration.
