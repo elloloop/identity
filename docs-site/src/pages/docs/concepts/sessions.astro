@@ -95,6 +95,7 @@ curl -sX POST http://localhost/identity.v1.IdentityService/SignOutEverywhere \\
     a session timeout, an expired refresh token, refresh-token replay, and a
     refresh refused because the account's address is unverified or the
     account is no longer active all revoke it. A refresh refused because the
-    account is locked out after failed sign-ins does not.
+    account is locked out after failed sign-ins does not, and keeps its
+    refresh token, which rotates normally once the lockout ends.
   </p>
 </DocsLayout>

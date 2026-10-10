@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.14.0 → next — a refresh refused over the account's state ends its access token under `GATEWAY_REVOCATION_MODE=session`; a replayed refused refresh is audited once per window (behaviour changes)
+## v4.14.0 → next — a refresh refused over the account's state ends its access token under `GATEWAY_REVOCATION_MODE=session`; a replayed refused refresh is audited once per window; a refresh refused over a lockout keeps its token (behaviour changes)
 
 No schema change and no migration.
 
@@ -33,6 +33,26 @@ No schema change and no migration.
   - The `dob_required` row now carries `gate` (`sign_in` or `refresh`), as
     `email_not_verified` does. Alerting that counts refused refreshes counts
     accounts per window, not attempts.
+- **A refresh refused because the account is locked out keeps its refresh
+  token (behaviour change).** The lockout was checked after the refresh token
+  was consumed, so the refusal burnt the token, and the retry a client makes
+  on a failed refresh was taken for refresh-token replay: every refresh token
+  the account held was deleted and, under `GATEWAY_REVOCATION_MODE=session`,
+  every session revoked. Anyone guessing at an account's password until it
+  locked could sign it out on every device. The lockout is now checked before
+  the token is consumed: the refresh is still refused with the same error,
+  but the token survives, a retry is refused the same way rather than
+  treated as a replay, and the token rotates normally once the lockout ends.
+  - A client that discarded its session on the lockout refusal can now keep
+    the refresh token and retry after the lockout instead of sending the user
+    back to sign in.
+  - Like the other refusals that keep the token, its `login_locked` row is
+    recorded at most once per 10 minutes per account on refresh (on each
+    replica); a locked-out sign-in is still recorded every time.
+  - Refreshes refused because the account is deactivated, suspended, back to
+    invited or failing a required identity verification are unchanged: they
+    still spend the refresh token and, under `GATEWAY_REVOCATION_MODE=session`,
+    end its session.
 
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 
