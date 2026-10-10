@@ -121,6 +121,12 @@ const (
 	// under /scim/v2/ when GATEWAY_RATE_LIMIT_SCIM_PER_IP is unset.
 	DefaultRateLimitSCIMPerIP = 300
 
+	// DefaultRateLimitQrPollPerIP is the per-IP cap per window on PollQrLogin
+	// when GATEWAY_RATE_LIMIT_QR_POLL_PER_IP is unset: a device polling every
+	// half second, or two behind one address polling every second, stays
+	// within it.
+	DefaultRateLimitQrPollPerIP = 120
+
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
 	DefaultAgeGateChildMaxAge = 12
@@ -1122,6 +1128,11 @@ type Config struct {
 	// guessed at line rate and refused attempts cannot flood the audit trail.
 	// Zero disables it.
 	RateLimitSCIMPerIP int
+	// RateLimitQrPollPerIP is the per-IP cap per window on PollQrLogin. It is
+	// apart from the login budget because a waiting device polls by design,
+	// many times a minute; each poll reads the hand-off, and the one that
+	// collects it mints a session. Zero disables it.
+	RateLimitQrPollPerIP int
 
 	// Postgres (the primary persistence driver).
 
@@ -1539,6 +1550,7 @@ func loadFromEnv() *Config {
 		RateLimitBootstrapPerIP:     envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 		RateLimitDirectoryPerIP:     envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
 		RateLimitSCIMPerIP:          envInt("GATEWAY_RATE_LIMIT_SCIM_PER_IP", DefaultRateLimitSCIMPerIP),
+		RateLimitQrPollPerIP:        envInt("GATEWAY_RATE_LIMIT_QR_POLL_PER_IP", DefaultRateLimitQrPollPerIP),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
@@ -2022,6 +2034,9 @@ func (c *Config) Validate() error {
 	}
 	if c.RateLimitSCIMPerIP < 0 {
 		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_SCIM_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitSCIMPerIP)
+	}
+	if c.RateLimitQrPollPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_QR_POLL_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitQrPollPerIP)
 	}
 	if c.RateLimitUsernameTakenPerIP < 0 {
 		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitUsernameTakenPerIP)

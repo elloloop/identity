@@ -658,7 +658,10 @@ eligible. Because a refused poll can be replayed at will, its audit row
 (`gate: qr_poll`) is written at most once per account and reason per 10
 minutes. An approved session expires with its window like a pending one, plus
 a 30-second grace so an approval landing just before the window closes can
-still be collected by the device's next poll.
+still be collected by the device's next poll. `InitiateQrLogin` counts against the per-IP
+login limit, and `PollQrLogin` against its own per-IP limit,
+`GATEWAY_RATE_LIMIT_QR_POLL_PER_IP` (default 120 per window), sized for a
+device that polls by design.
 
 **SCIM provisioning** is deliberately outside the gate. It writes user records
 on an operator's instruction rather than an end user's, so an IdP can create or

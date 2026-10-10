@@ -446,6 +446,18 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
+			// QR sign-in is unauthenticated at both ends the new device
+			// calls: initiating writes a session row, so it is held to the
+			// login budget like the other sign-in starts; polling is
+			// frequent by design and has its own, larger budget.
+			PathPrefix: identityconnectgen.IdentityServiceInitiateQrLoginProcedure, Tag: "qr_initiate",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			PathPrefix: identityconnectgen.IdentityServicePollQrLoginProcedure, Tag: "qr_poll",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitQrPollPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.v1.IdentityService/VerifyTotp", Tag: "totp_verify",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},

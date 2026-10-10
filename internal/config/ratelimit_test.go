@@ -8,6 +8,7 @@ import (
 const (
 	directoryRateLimitEnv = "GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP"
 	scimRateLimitEnv      = "GATEWAY_RATE_LIMIT_SCIM_PER_IP"
+	qrPollRateLimitEnv    = "GATEWAY_RATE_LIMIT_QR_POLL_PER_IP"
 )
 
 // The directory cap is parsed like every other GATEWAY_* integer: a positive
@@ -88,5 +89,33 @@ func TestRateLimitSCIMPerIP_RejectsNegative(t *testing.T) {
 	err := Load().Validate()
 	if err == nil || !strings.Contains(err.Error(), scimRateLimitEnv+"=-1") {
 		t.Fatalf("Validate = %v, want an error naming %s=-1", err, scimRateLimitEnv)
+	}
+}
+
+func TestRateLimitQrPollPerIP_FromEnv(t *testing.T) {
+	for raw, want := range map[string]int{
+		"":    DefaultRateLimitQrPollPerIP,
+		"abc": DefaultRateLimitQrPollPerIP,
+		"0":   0,
+		"50":  50,
+	} {
+		t.Run("env="+raw, func(t *testing.T) {
+			t.Setenv(qrPollRateLimitEnv, raw)
+			cfg := Load()
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			if cfg.RateLimitQrPollPerIP != want {
+				t.Fatalf("RateLimitQrPollPerIP = %d, want %d", cfg.RateLimitQrPollPerIP, want)
+			}
+		})
+	}
+}
+
+func TestRateLimitQrPollPerIP_RejectsNegative(t *testing.T) {
+	t.Setenv(qrPollRateLimitEnv, "-1")
+	err := Load().Validate()
+	if err == nil || !strings.Contains(err.Error(), qrPollRateLimitEnv+"=-1") {
+		t.Fatalf("Validate = %v, want an error naming %s=-1", err, qrPollRateLimitEnv)
 	}
 }

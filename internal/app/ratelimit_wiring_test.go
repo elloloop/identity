@@ -400,3 +400,34 @@ func TestBuildRateLimits_MergeAccountsLimited(t *testing.T) {
 	assert.Equal(t, http.StatusOK, call())
 	assert.Equal(t, http.StatusTooManyRequests, call())
 }
+
+// The two RPCs a new device calls during a QR sign-in are unauthenticated, so
+// both carry a per-IP quota: initiating on the login budget like the other
+// sign-in starts, polling on its own budget, sized for a device that polls by
+// design. Each is its own budget, and a zero poll quota switches it off.
+func TestBuildRateLimits_QrLoginLimited(t *testing.T) {
+	const (
+		initiate = "/identity.v1.IdentityService/InitiateQrLogin"
+		poll     = "/identity.v1.IdentityService/PollQrLogin"
+	)
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitLoginPerIP: 2, RateLimitQrPollPerIP: 3}
+	limits := buildRateLimits(cfg)
+	for path, tag := range map[string]string{initiate: "qr_initiate", poll: "qr_poll"} {
+		pl, ok := middleware.MatchPathLimit(limits, path)
+		require.True(t, ok, "%s must carry a rate limit", path)
+		require.Equal(t, tag, pl.Tag)
+	}
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, initiate, "9.9.9.9", 2)
+	assertQuotaExhausts(t, handler, poll, "9.9.9.9", 3)
+
+	cfg.RateLimitQrPollPerIP = 0
+	pl, _ := middleware.MatchPathLimit(buildRateLimits(cfg), poll)
+	now := time.Now()
+	for i := range 50 {
+		require.True(t, pl.Allow("9.9.9.9", now), "a zero quota admits poll %d", i+1)
+	}
+}
