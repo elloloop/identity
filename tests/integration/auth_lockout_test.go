@@ -20,7 +20,7 @@ import (
 //  2. Five PasswordLogin attempts with the wrong password each return
 //     CodeUnauthenticated.
 //  3. The sixth attempt — even with the CORRECT password — returns
-//     CodeResourceExhausted (the gRPC code we map ErrAccountLocked to).
+//     CodeUnauthenticated, as a wrong password or an unknown address does.
 //  4. After the lockout window has passed, login with the correct
 //     password succeeds.
 //
@@ -65,8 +65,8 @@ func TestLockout_FiveFailuresLockAccountThenUnlocks(t *testing.T) {
 	if err == nil {
 		t.Fatalf("locked account with correct password: expected error, got nil")
 	}
-	if got := connect.CodeOf(err); got != connect.CodeResourceExhausted {
-		t.Fatalf("locked-account code = %v, want ResourceExhausted (err=%v)", got, err)
+	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("locked-account code = %v, want Unauthenticated (err=%v)", got, err)
 	}
 
 	// Force-shorten the lockout window so the test does not have to wait

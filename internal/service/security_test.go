@@ -120,7 +120,7 @@ func TestSecurity_AccountLockout_After5Failures(t *testing.T) {
 	// The account should now be locked even with correct password.
 	_, err := svc.PasswordLogin(context.Background(), "lockme@example.com", strongPW, "", "")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAccountLocked))
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
 
 // ── Lockout expires after configured time ──────────────────────────────

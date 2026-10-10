@@ -549,11 +549,15 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
-	// Lockout check. While locked, the account is blocked regardless of
-	// password correctness — emit a dedicated `login_locked` audit event
-	// so operators can distinguish "tried during lockout" from
+	// While locked, the account is refused whatever the password, and as an
+	// unknown identifier is, at the same cost: only the password could earn
+	// the caller the reason, and checking it during the lockout would hand
+	// back the guessing the lockout stops. A distinct answer would also let
+	// anyone confirm the account by tripping the lockout. The dedicated
+	// `login_locked` audit event tells operators "tried during lockout" from
 	// "threshold tripped".
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
+		_ = passwords.Verify(password, getDummyPasswordHash())
 		s.audit.Log(
 			ctx, audit.EventLoginLocked,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
@@ -563,7 +567,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 				"locked_until": user.LockedUntil,
 			}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: account temporarily locked due to too many failed attempts", ErrAccountLocked)
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
 	// Lockout window has passed. Reset count + LockedUntil before
