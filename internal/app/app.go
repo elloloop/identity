@@ -725,7 +725,9 @@ func New(deps Deps) (*Built, error) {
 	// latency cannot time the gated send/no-send decision. Tests that read the
 	// mailer synchronously opt out via Deps.SynchronousEmailSend.
 	if !deps.SynchronousEmailSend {
-		authSvc = authSvc.WithAsyncEmailDispatch()
+		if authSvc, err = authSvc.WithAsyncEmailDispatch(deps.MetricsRegistry); err != nil {
+			return nil, err
+		}
 	}
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)

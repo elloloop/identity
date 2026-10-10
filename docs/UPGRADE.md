@@ -93,9 +93,12 @@ No schema change and no migration.
 - **Credential emails sent in the background are capped (behaviour
   change).** Password-reset, email sign-in code and magic-link mails now run
   at most 128 at once per instance. A request arriving while all 128 are in
-  flight still gets its usual answer, but its mail is dropped and logged as
-  `email_send_dropped_at_capacity` (WARN, with the `op`). Alert on that log
-  line if you need to know when mail is being shed.
+  flight still gets its usual answer, but its mail is dropped. Every drop is
+  counted in the new **`identity_email_send_dropped_total{op}`** metric
+  (`op` is `password_reset`, `email_login_code` or `magic_link`); alert on it
+  to learn when mail is being shed. The drops are also logged as
+  `email_send_dropped_at_capacity` (WARN), at most once per `op` per minute,
+  with the number `dropped` since that `op`'s previous line.
 - **`SynchronousEmailSend` is for tests only.** With
   `identityserver.Options.SynchronousEmailSend` set, reset, code and
   magic-link responses take as long as the account lookup and send they

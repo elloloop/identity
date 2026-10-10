@@ -82,6 +82,15 @@ curl -sf http://localhost/healthz`} lang="bash" />
     runtime metrics (heap, goroutines, GC) are exported by default; HTTP
     request metrics are added via the middleware chain.
   </p>
+  <p>
+    Credential emails (password reset, sign-in code, magic link) are sent in
+    the background, at most 128 at once per instance. One requested while
+    all 128 are in flight is dropped, though the request still gets its usual
+    answer. <code>identity_email_send_dropped_total&#123;op&#125;</code> counts every
+    drop; the <code>email_send_dropped_at_capacity</code> warning is logged
+    at most once per <code>op</code> per minute, with the number
+    <code>dropped</code> since its previous line.
+  </p>
   <Code code={`curl -s http://localhost:9090/metrics | head`} lang="bash" />
 
   <h2>Recommended dashboards</h2>
@@ -97,6 +106,7 @@ curl -sf http://localhost/healthz`} lang="bash" />
     <li><strong>Auto-generated key in prod.</strong> Alert on any occurrence of <code>jwt_signer_dev_key_generated</code> or <code>using_dev_totp_encryption_key</code> in production logs.</li>
     <li><strong>Wrong backend in prod.</strong> Alert if <code>repo_driver_selected</code> reports anything other than <code>postgres</code> in production — <code>sqlite</code> is single-node only and <code>memory</code> is non-durable.</li>
     <li><strong>Spike in lockouts.</strong> A burst of <code>login_failure</code> followed by <code>account_locked</code> on multiple users typically means a credential-stuffing attack.</li>
+    <li><strong>Credential mail shed.</strong> Alert when <code>identity_email_send_dropped_total</code> increases: users asked for a reset, code or link that was never sent, usually because a flood of requests from many addresses is filling the send slots.</li>
     <li><strong>Datastore unreachable.</strong> Repeated <code>identity_server_init_failed</code> at boot is a hard outage; the process exits and the orchestrator restarts.</li>
   </ul>
 </DocsLayout>

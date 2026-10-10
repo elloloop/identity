@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
@@ -1400,6 +1401,10 @@ type AuthService struct {
 	// inline, so a directly-constructed service (tests, embedders) observes
 	// sends deterministically; app.New sets it via WithAsyncEmailDispatch.
 	emailSendSlots chan struct{}
+	// emailSendsDropped counts the sends dropped with every slot taken, by
+	// op; emailDropReports paces the log line that reports them.
+	emailSendsDropped *prometheus.CounterVec
+	emailDropReports  droppedSendReports
 
 	// autoFormer, when set (postgres driver only), auto-forms a tenant from
 	// a new user's company email domain at signup. nil disables the
@@ -1621,11 +1626,23 @@ func NewAuthServiceWithOAuth(
 // WithAsyncEmailDispatch switches request-phase credential-email sends to run
 // on detached background goroutines, so the RPC response time is independent
 // of the gated send/no-send decision (closing the timing oracle). app.New
-// enables this for the served deployment; it is a set-once option that returns
-// the receiver for chaining.
-func (s *AuthService) WithAsyncEmailDispatch() *AuthService {
+// enables this for the served deployment; it is a set-once option. The sends
+// it drops at capacity are counted as identity_email_send_dropped_total{op},
+// registered with reg (nil registers with a fresh registry, for tests).
+func (s *AuthService) WithAsyncEmailDispatch(reg prometheus.Registerer) (*AuthService, error) {
+	if reg == nil {
+		reg = prometheus.NewRegistry()
+	}
+	dropped := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "identity_email_send_dropped_total",
+		Help: "Credential emails dropped because every background send slot was taken, labelled by op.",
+	}, []string{"op"})
+	if err := reg.Register(dropped); err != nil {
+		return nil, fmt.Errorf("email send metrics: %w", err)
+	}
 	s.emailSendSlots = make(chan struct{}, maxInFlightEmailSends)
-	return s
+	s.emailSendsDropped = dropped
+	return s, nil
 }
 
 // WithReturnAllowlist sets the return_to allowlist the magic-link flow checks.
@@ -1683,9 +1700,45 @@ func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send fun
 			run()
 		}()
 	default:
-		s.logger.Warn("email_send_dropped_at_capacity",
-			zap.String("op", op), zap.Int("in_flight", maxInFlightEmailSends))
+		s.emailSendsDropped.WithLabelValues(op).Inc()
+		if n := s.emailDropReports.add(op, s.nowMs()); n > 0 {
+			s.logger.Warn("email_send_dropped_at_capacity",
+				zap.String("op", op), zap.Int("dropped", n), zap.Int("in_flight", maxInFlightEmailSends))
+		}
 	}
+}
+
+// emailDropReportInterval is how often each op's dropped sends are logged. A
+// flood that fills every slot drops mail at its own rate, and one line per
+// drop would let it drive the log volume too; the counter has every drop.
+const emailDropReportInterval = time.Minute
+
+// droppedSendReports paces the log line for sends dropped at capacity: at
+// most one per op per emailDropReportInterval, carrying the drops since the
+// op's previous line. The ops are a fixed set, so the maps stay small.
+type droppedSendReports struct {
+	mu         sync.Mutex
+	reportedAt map[string]int64
+	unreported map[string]int
+}
+
+// add records one dropped send of op and returns how many to report now: 0
+// while op's previous line is under emailDropReportInterval old.
+func (r *droppedSendReports) add(op string, nowMs int64) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.reportedAt == nil {
+		r.reportedAt = map[string]int64{}
+		r.unreported = map[string]int{}
+	}
+	r.unreported[op]++
+	if last, ok := r.reportedAt[op]; ok && nowMs-last < emailDropReportInterval.Milliseconds() {
+		return 0
+	}
+	n := r.unreported[op]
+	r.unreported[op] = 0
+	r.reportedAt[op] = nowMs
+	return n
 }
 
 // buildDefaultProjectAccess parses the env-configured default project's access

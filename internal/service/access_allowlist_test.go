@@ -662,7 +662,7 @@ func TestProjectAccess_RefreshToken_RevalidatesMode(t *testing.T) {
 // send/no-send decision. The send still runs (on a detached context).
 func TestProjectAccess_RequestEmailLoginCode_AsyncDoesNotBlock(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
-	svc.WithAsyncEmailDispatch()
+	enableAsyncEmailDispatch(t, svc)
 	mailer := &blockingTransport{release: make(chan struct{}), sent: make(chan struct{})}
 	svc.mailer = mailer
 	ctx := accessScope(t, `{"access":{"mode":"open"}}`)
