@@ -79,6 +79,37 @@ func TestAccessToken_EmailVerifiedAfterVerification(t *testing.T) {
 	login, err := svc.PasswordLogin(ctx, "late@example.com", strongPW, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, true, tokenPayload(t, login.AccessToken)["email_verified"])
+
+	// A refresh token minted before the proof also picks it up: refresh
+	// reads the claim from the account, not from the session it rotates.
+	_, access, _, err := svc.RefreshToken(ctx, signup.RefreshToken, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, true, tokenPayload(t, access)["email_verified"])
+}
+
+// A refresh after the address moves to another mailbox carries the new
+// address unproven, even though the session began on a proven one.
+func TestAccessToken_EmailVerifiedFollowsAnEmailChangeOnRefresh(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := context.Background()
+
+	user := seedUser(repo, "before@example.com", "", StatusActive)
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true}))
+	user, err := repo.GetUser(ctx, user.ID)
+	require.NoError(t, err)
+	_, refresh, err := svc.issueTokens(ctx, user, "", "")
+	require.NoError(t, err)
+
+	// The write a directory sync makes when it moves the address elsewhere.
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{
+		"email": "after@example.com", "email_verified": false, "email_verified_at": int64(0),
+	}))
+
+	_, access, _, err := svc.RefreshToken(ctx, refresh, "", "")
+	require.NoError(t, err)
+	claims := tokenPayload(t, access)
+	assert.Equal(t, "after@example.com", claims["email"])
+	assert.Equal(t, false, claims["email_verified"])
 }
 
 // The duplicate-signup decoy carries the email_verified a genuine sign-up's

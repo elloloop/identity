@@ -24,10 +24,11 @@ type Claims struct {
 	Sub   string `json:"sub"`
 	Email string `json:"email"`
 	// EmailVerified is the "email_verified" claim: true only when the
-	// account's owner has proven control of exactly the address in Email.
-	// It is present whenever Email is non-empty, true or false, and absent
-	// with Email, so a verifier gating on proof of the address reads an
-	// absent claim (a token minted before the claim existed) as unproven.
+	// account's owner has proven control of the mailbox in Email. It is
+	// present whenever Email is non-empty, true or false, and absent with
+	// Email (ClaimsMap is the canonical serialization, not this json tag),
+	// so a verifier gating on proof of the address reads an absent claim (a
+	// token minted before the claim existed) as unproven.
 	EmailVerified bool   `json:"email_verified"`
 	Name          string `json:"name"`
 	Role          string `json:"role"`

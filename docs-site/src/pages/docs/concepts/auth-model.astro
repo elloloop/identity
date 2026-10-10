@@ -50,27 +50,33 @@ import { Code } from "astro-expressive-code/components";
 }`} lang="json" />
   <p>
     <code>email_verified</code> is <code>true</code> only when the account's
-    owner has proven control of exactly the address in <code>email</code>:
-    by redeeming a verification link, a passwordless email code or magic
-    link, or a passkey sign-up code sent to it, or by signing in with a
-    provider that asserts that same address. It is <code>false</code> for an
-    address nobody has proven yet: a password sign-up before its link is
-    redeemed, an invited or SCIM-provisioned account, a provider sign-in
-    whose address differs from the account's, or a <code>+tag</code>
-    address outside Gmail. It goes back to <code>false</code> whenever the
-    address changes to another mailbox, until the new one is proven. The
-    claim is read from the account at every issue, refresh included, so a
-    refreshed token reflects a change. With
+    owner has proven control of the mailbox in <code>email</code> (the
+    address itself, or another spelling of the same mailbox): by redeeming a
+    verification link, a passwordless email code or magic link, or a passkey
+    sign-up code sent to it, or by signing in with a provider that asserts
+    that same mailbox.
+  </p>
+  <p>
+    It is <code>false</code> for an address nobody has proven yet: a
+    password sign-up before its link is redeemed, an invited or
+    SCIM-provisioned account, a provider sign-in whose address differs from
+    the account's, or an account created through a provider that asserted a
+    <code>+tag</code> address outside Gmail (stored without the tag, so the
+    provider did not prove the stored address). It goes back to
+    <code>false</code> whenever the address changes to another mailbox,
+    until the new one is proven. The claim is read from the account at every
+    issue, refresh included, so a refreshed token reflects a change.
+  </p>
+  <p>
+    It is present on every token that carries an <code>email</code> and
+    absent with it (anonymous and username-only accounts). With
     <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> on (the default) no
     session is issued for an unproven address, so <code>false</code> appears
     on a named account's token only with that flag off; the claim lets a
     verifier check this itself instead of relying on the issuer's
-    configuration. It is present on every token that
-    carries an <code>email</code> and absent with it (anonymous and
-    username-only accounts). A service that grants anything on the strength
-    of an email address should require <code>email_verified: true</code>,
-    and treat a token without the claim (minted by an earlier release) as
-    unproven.
+    configuration. A service that grants anything on the strength of an
+    email address should require <code>email_verified: true</code>, and treat
+    a token without the claim (minted by an earlier release) as unproven.
   </p>
   <p>
     Access tokens intentionally carry identity and a coarse
