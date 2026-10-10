@@ -61,6 +61,20 @@ No schema change and no migration.
   [callback errors](oauth.md#callback-errors). A page at `return_to` that
   only looks for `code` should handle `error`. A callback whose state token
   or CSRF cookie does not verify still answers `400`.
+## v4.14.0 → next — a password sign-in into an account with no password is refused as for an unknown address (behaviour change)
+
+No schema change and no migration.
+
+- **`PasswordLogin` no longer says an account has no password (behaviour
+  change).** A password sign-in into an account created through a provider or
+  passwordless sign-in answered `failed_precondition` ("no password set for
+  this account") without checking anything, which told any caller the account
+  exists. It now gets the `unauthenticated` "invalid email or password" an
+  unknown address gets, after the same password-check cost. A client that
+  showed "sign in with your provider" on that error can offer the provider
+  and passwordless options, and password reset, beside every
+  invalid-credentials message instead. `ChangePassword` and the other
+  signed-in calls still return `no password set`.
 
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 

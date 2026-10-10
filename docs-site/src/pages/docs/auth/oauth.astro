@@ -445,9 +445,9 @@ message NativeOAuthLoginResponse {
     <li>
       <strong>New user.</strong> Created with status
       <code>USER_STATUS_ACTIVE</code> and role <code>member</code>.
-      No password hash is stored — subsequent <code>PasswordLogin</code>
-      attempts return <code>no password set for this account</code> until
-      they set one.
+      No password hash is stored — a <code>PasswordLogin</code> is refused
+      as for an unknown address (<code>unauthenticated</code>) until they set
+      one.
     </li>
   </ul>
   <p>
