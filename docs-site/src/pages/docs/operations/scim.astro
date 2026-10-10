@@ -120,9 +120,10 @@ GATEWAY_SCIM_PROJECT_ID=<project-id>`}
   </p>
   <p>
     With <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> (on by default),
-    such an account is hidden from the directory and its password sign-in
-    is refused, with a verification email sent, until the new email is
-    verified. <code>SendEmailVerification</code> and the link it mails
+    such an account is hidden from the directory, and its sign-ins (a
+    password, a passkey, or a provider that does not assert the new address)
+    and session refreshes are refused, a refused sign-in being sent a
+    verification email, until the new email is verified. <code>SendEmailVerification</code> and the link it mails
     verify the address and keep the user's credentials. A passwordless
     email code or magic link, or a provider sign-in, verifies it too, but
     as the first proof of an unverified address it voids the account's

@@ -1251,8 +1251,8 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		// The cleared credentials are void, so revoke any sessions too —
 		// mirroring ConfirmPasswordReset — so a session established with a now-
 		// voided credential cannot outlive it. With the verification gate on,
-		// a planted-password session is impossible; a planted-passkey session
-		// is NOT (passkey login skips the gate), so this matters either way.
+		// no session is issued while the address is unproven; with it off, a
+		// planted credential's session would otherwise survive the proof.
 		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
 			s.logger.Warn("email_verified_external_revoke_failed",
 				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
