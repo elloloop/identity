@@ -53,6 +53,7 @@
   "totp_disabled",
   "totp_enabled",
   "totp_verified",
+  "unproven_credentials_voided",
   "user_deactivated",
   "user_deleted",
   "user_invited",

@@ -1262,11 +1262,10 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 			zap.Bool("passkeys_cleared", passkeysCleared),
 			zap.Int("provider_links_cleared", len(plantedLinks)))
 		s.audit.Log(
-			ctx, audit.EventPasswordChanged,
+			ctx, audit.EventUnprovenCredentialsVoided,
 			audit.WithActor(user.ID),
 			audit.WithSuccess(true),
 			audit.WithDetails(map[string]any{
-				"reason":                 "planted_credentials_cleared_on_external_email_verification",
 				"method":                 proof.method,
 				"password_cleared":       passwordCleared,
 				"passkeys_cleared":       passkeysCleared,

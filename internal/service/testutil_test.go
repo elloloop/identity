@@ -107,6 +107,24 @@ func (w *recordingAuditWriter) countByEventTypeAndDetail(eventType, key, want st
 	return n
 }
 
+// detailsOf returns the decoded WithDetails map of every recorded event of
+// eventType, in order.
+func (w *recordingAuditWriter) detailsOf(eventType string) []map[string]any {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out []map[string]any
+	for i, et := range w.events {
+		if et != eventType {
+			continue
+		}
+		var m map[string]any
+		if json.Unmarshal([]byte(w.details[i]), &m) == nil {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // newTestAuthServiceWithAudit builds an AuthService whose audit logger
 // writes to the supplied recordingAuditWriter so tests can assert on
 // emitted audit events.

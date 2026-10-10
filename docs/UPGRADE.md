@@ -12,6 +12,14 @@ No schema change and no migration.
   succeed and verify the address anyway, leaving what it could not void.
   It now fails with `unavailable` and leaves the address unproven, so the
   next proof voids them; start the sign-in again.
+- **The voided credentials have their own audit event.** That cleanup was
+  recorded as `password_changed` (reason
+  `planted_credentials_cleared_on_external_email_verification`), even when
+  no password was cleared. It is now `unproven_credentials_voided`, with the
+  proof `method` (`passwordless` or `oauth`) and `password_cleared`,
+  `passkeys_cleared` and `provider_links_cleared`; each voided provider link
+  is still recorded as `identity_unlinked`. Update any alert or report that
+  keyed on the old `password_changed` reason.
 
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 

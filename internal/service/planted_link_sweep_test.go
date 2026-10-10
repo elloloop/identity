@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/elloloop/identity/pkg/audit"
 )
 
 func linkedProviders(t *testing.T, repo *fakeRepo, userID string) []string {
@@ -192,4 +194,30 @@ func oauthSignIn(addr string) func(*testing.T, *AuthService, *recordingTransport
 			RedirectURI: "https://app/cb",
 		})
 	}
+}
+
+// Voiding what was added while the address was unproven is its own audit
+// event, carrying what the proof voided, not a password change.
+func TestExternalProof_AuditsTheVoidedCredentials(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	ctx := context.Background()
+	owner := seedUser(repo, "owner@example.com", hashPW(t, "Planted-Passw0rd!"), StatusActive)
+	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
+		UserID: owner.ID, Provider: "github", ProviderUserID: "sub-planter",
+		EmailAtLinkTime: "owner@example.com", CreatedAt: 1,
+	}))
+
+	oauthLoginAs(t, svc, "owner@example.com")
+
+	require.Equal(t, 1, writer.countByEventTypeActorTarget(string(audit.EventUnprovenCredentialsVoided), owner.ID, owner.ID))
+	require.Equal(t, 1, writer.countByEventTypeAndDetail(string(audit.EventUnprovenCredentialsVoided), "method", "oauth"))
+	details := writer.detailsOf(string(audit.EventUnprovenCredentialsVoided))
+	require.Len(t, details, 1)
+	assert.Equal(t, true, details[0]["password_cleared"])
+	assert.Equal(t, false, details[0]["passkeys_cleared"])
+	assert.EqualValues(t, 1, details[0]["provider_links_cleared"])
+	assert.Zero(t, writer.countByEventType(string(audit.EventPasswordChanged)), "the sweep is not a password change")
+	assert.Equal(t, 1, writer.countByEventTypeAndDetail(string(audit.EventIdentityUnlinked), "provider_user_id", "sub-planter"))
 }
