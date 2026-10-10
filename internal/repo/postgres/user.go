@@ -691,11 +691,12 @@ func (r *pgRepository) SetUserEmailVerified(ctx context.Context, userID, email s
 		return false, false, errors.New("postgres: SetUserEmailVerified: missing user id or email")
 	}
 	// RETURNING sees the updated row; prev locks the row first and keeps the
-	// password the write replaces.
+	// password the write replaces. It locks only a row whose address matches,
+	// so a write the address check refuses waits on no one.
 	const q = `
 		WITH prev AS (
 		    SELECT id, password_hash FROM users
-		     WHERE project_id = $1 AND id = $2
+		     WHERE project_id = $1 AND id = $2 AND email = $3
 		       FOR UPDATE
 		)
 		UPDATE users

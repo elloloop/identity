@@ -670,7 +670,9 @@ func (r *sqliteRepository) SetUserEmailVerified(ctx context.Context, userID, ema
 	}
 	// SQLite's RETURNING sees only the updated row, so the password is
 	// cleared by its own statement, in the same transaction, to learn
-	// whether there was one.
+	// whether there was one. A deferred transaction is enough: its first
+	// statement is an UPDATE, which takes the write lock before it reads, so
+	// no other writer can change the row between the two statements.
 	t, err := r.db.Begin(ctx)
 	if err != nil {
 		return false, false, wrapErr("SetUserEmailVerified", err)
