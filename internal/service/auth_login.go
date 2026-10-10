@@ -989,15 +989,8 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	emailStr := string(email)
 
 	// 1. (provider, sub) lookup — survives provider-side email change.
-	if identity.ProviderUserID != "" {
-		linked, err := s.repo(ctx).FindUserByProviderID(ctx, identity.Provider, identity.ProviderUserID)
-		if err != nil {
-			return nil, false, err
-		}
-		if linked != nil {
-			s.applyOAuthProfileUpdates(ctx, linked, identity, emailStr, now)
-			return linked, false, nil
-		}
+	if linked, err := s.findLinkedOAuthUser(ctx, identity, emailStr, now); err != nil || linked != nil {
+		return linked, false, err
 	}
 
 	// 2 & 3. Email-based lookup, then create. Shared with passwordless
@@ -1020,6 +1013,12 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	// the account's but is not provably the same mailbox, so it neither signs
 	// in nor links here; the owner links such a provider while signed in.
 	if !isNew && !ProofCarriesTo(identity.Email, user.Email) {
+		// A concurrent sign-in by this same identity may have created the
+		// account, and linked it, after the lookup above: the request that
+		// lost that race is answered as the sign-in arriving after it is.
+		if linked, err := s.findLinkedOAuthUser(ctx, identity, emailStr, now); err != nil || linked != nil {
+			return linked, false, err
+		}
 		s.logger.Info("oauth_login_refused",
 			zap.String("reason", "provider_address_does_not_prove_account"),
 			zap.String("user_id", user.ID),
@@ -1048,6 +1047,22 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		)
 	}
 	return user, isNew, nil
+}
+
+// findLinkedOAuthUser returns the account the provider identity is linked to,
+// with the provider's profile applied, or nil when it is linked to none.
+func (s *AuthService) findLinkedOAuthUser(ctx context.Context, identity *oauth.Identity, email string, nowMs int64) (*User, error) {
+	var linked *User
+	if identity.ProviderUserID != "" {
+		var err error
+		if linked, err = s.repo(ctx).FindUserByProviderID(ctx, identity.Provider, identity.ProviderUserID); err != nil {
+			return nil, err
+		}
+	}
+	if linked != nil {
+		s.applyOAuthProfileUpdates(ctx, linked, identity, email, nowMs)
+	}
+	return linked, nil
 }
 
 // resolveOrCreateOpts carries the optional profile fields a create path
