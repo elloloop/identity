@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -274,4 +275,112 @@ func TestRedeemOAuthCode_EmptyCode(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
 	_, err := svc.RedeemOAuthCode(context.Background(), "", "", "")
 	assert.True(t, errors.Is(err, ErrOAuthCodeInvalid))
+}
+
+// A sign-in refused after the state token verified names the refusal for the
+// app at the verified return_to; a refusal over an account the provider did
+// not prove reads like any failed exchange.
+func TestHostedOAuth_Complete_RefusalCarriesErrorCode(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		seed  func(t *testing.T, repo *fakeRepo)
+		code  string
+		want  string
+		cause error
+	}{
+		{
+			name: "unverified address",
+			seed: func(t *testing.T, repo *fakeRepo) {
+				user := seedUser(repo, "unproven@example.com", "", StatusActive)
+				require.NoError(t, repo.CreateOAuthIdentity(context.Background(), &OAuthIdentity{
+					UserID: user.ID, Provider: "google", ProviderUserID: "sub-linker@example.com", CreatedAt: 1,
+				}))
+			},
+			code:  fakeOAuthCode("linker@example.com", "Linker", "", "google"),
+			want:  HostedOAuthErrorEmailNotVerified,
+			cause: ErrEmailVerificationRequired,
+		},
+		{
+			name: "deactivated account",
+			seed: func(_ *testing.T, repo *fakeRepo) {
+				seedUser(repo, "gone@example.com", "", StatusDeactivated).EmailVerified = true
+			},
+			code:  fakeOAuthCode("gone@example.com", "Gone", "", "google"),
+			want:  HostedOAuthErrorAccountDisabled,
+			cause: ErrAccountNotActive,
+		},
+		{
+			name: "locked account",
+			seed: func(_ *testing.T, repo *fakeRepo) {
+				u := seedUser(repo, "locked@example.com", "", StatusActive)
+				u.EmailVerified = true
+				u.LockedUntil = time.Now().Add(time.Hour).UnixMilli()
+			},
+			code:  fakeOAuthCode("locked@example.com", "Locked", "", "google"),
+			want:  HostedOAuthErrorAccountLocked,
+			cause: ErrAccountLocked,
+		},
+		{
+			name:  "provider did not verify its address",
+			code:  "unverified|someone@example.com",
+			want:  HostedOAuthErrorAccessDenied,
+			cause: ErrUnauthenticated,
+		},
+		{
+			name:  "failed exchange",
+			code:  "err|bad-code",
+			want:  HostedOAuthErrorAccessDenied,
+			cause: ErrUnauthenticated,
+		},
+		{
+			name: "another account the provider address does not prove",
+			seed: func(_ *testing.T, repo *fakeRepo) {
+				u := seedUser(repo, "owner@example.com", "", StatusDeactivated)
+				u.EmailVerified = false
+			},
+			code:  fakeOAuthCode("owner+tag@example.com", "Tagged", "", "google"),
+			want:  HostedOAuthErrorAccessDenied,
+			cause: ErrUnauthenticated,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newTestAuthService(t, repo)
+			svc.cfg.AuthRequireVerifiedEmail = true
+			if tc.seed != nil {
+				tc.seed(t, repo)
+			}
+			ctx := withProject("proj-1")
+
+			begin, err := svc.BeginHostedOAuth(ctx, "google",
+				"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+			require.NoError(t, err)
+
+			_, err = svc.CompleteHostedOAuth(ctx, "google", tc.code,
+				stateTokenFromAuthURL(t, begin.AuthorizationURL), "", "1.2.3.4", "test-agent", []string{"csrf-123"})
+			var refusal *HostedOAuthRefusal
+			require.ErrorAs(t, err, &refusal)
+			assert.Equal(t, tc.want, refusal.Code)
+			assert.Equal(t, "https://app.test/finish", refusal.ReturnTo)
+			assert.Equal(t, "csrf-123", refusal.CSRFToken)
+			assert.ErrorIs(t, err, tc.cause)
+		})
+	}
+}
+
+// A failure before the state token verified has no trusted return_to, so it
+// is never a refusal the callback could redirect with.
+func TestHostedOAuth_Complete_UnverifiedStateIsNoRefusal(t *testing.T) {
+	svc := newTestAuthService(t, newFakeRepo())
+	_, err := svc.CompleteHostedOAuth(withProject("proj-1"), "google",
+		fakeOAuthCode("hosted@example.com", "Hosted", "", "google"),
+		"not-a-state-token", "", "", "", []string{"csrf-123"})
+	var refusal *HostedOAuthRefusal
+	assert.False(t, errors.As(err, &refusal))
+	assert.ErrorIs(t, err, ErrUnauthenticated)
+}
+
+func TestHostedOAuthErrorCode_UnexpectedFailureIsServerError(t *testing.T) {
+	assert.Equal(t, HostedOAuthErrorServer, hostedOAuthErrorCode(errors.New("database unavailable")))
+	assert.Equal(t, HostedOAuthErrorUnavailable, hostedOAuthErrorCode(ErrOAuthDisabled))
 }

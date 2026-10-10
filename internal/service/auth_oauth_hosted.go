@@ -135,6 +135,8 @@ type HostedOAuthCallbackResult struct {
 // runs the same OAuthLogin exchange the headless flow uses, then mints a
 // single-use one-time code bound to the authenticated user. The caller
 // (the HTTP handler) 302-redirects to result.ReturnTo?code=result.Code.
+// A failure after the state token verified is a *HostedOAuthRefusal, which
+// the caller redirects to ReturnTo?error=Code.
 //
 // stateToken is the OAuth `state` value the provider echoed back;
 // providerFromPath is the provider segment from the callback path, used
@@ -174,6 +176,9 @@ func (s *AuthService) CompleteHostedOAuth(
 		return nil, fmt.Errorf("%w: project mismatch", ErrUnauthenticated)
 	}
 
+	// From here the state token has proven ReturnTo, so a refusal goes back to
+	// the app as an error code instead of a dead end on this origin.
+	//
 	// Reuse the headless exchange end to end: same state-token-free path
 	// (we already verified the hosted token), passing the recovered
 	// verifier so PKCE completes. OAuthLogin upserts the user and mints
@@ -191,15 +196,77 @@ func (s *AuthService) CompleteHostedOAuth(
 		UserAgent:        userAgent,
 	})
 	if err != nil {
-		return nil, err
+		return nil, &HostedOAuthRefusal{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: hostedOAuthErrorCode(err), Err: err}
 	}
 
 	otc, err := s.mintOAuthOneTimeCode(ctx, result.User.ID)
 	if err != nil {
-		return nil, err
+		return nil, &HostedOAuthRefusal{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: HostedOAuthErrorServer, Err: err}
 	}
 
 	return &HostedOAuthCallbackResult{ReturnTo: claims.ReturnTo, Code: otc, CSRFToken: claims.CSRFToken}, nil
+}
+
+// The error codes the hosted callback hands back to the app as
+// return_to?error=<code>. The three account codes are given only for the
+// account the provider proved, so they say nothing about any other account;
+// access_denied, server_error and temporarily_unavailable are the RFC 6749
+// codes. They are part of the wire contract.
+const (
+	HostedOAuthErrorEmailNotVerified = "email_not_verified"
+	HostedOAuthErrorAccountDisabled  = "account_disabled"
+	HostedOAuthErrorAccountLocked    = "account_locked"
+	HostedOAuthErrorAccessDenied     = "access_denied"
+	HostedOAuthErrorServer           = "server_error"
+	HostedOAuthErrorUnavailable      = "temporarily_unavailable"
+)
+
+// HostedOAuthRefusal is CompleteHostedOAuth's error once the state token has
+// proven ReturnTo: the callback redirects there with Code as error=. Err is
+// for the server's log only.
+type HostedOAuthRefusal struct {
+	ReturnTo  string
+	CSRFToken string
+	Code      string
+	Err       error
+}
+
+func (r *HostedOAuthRefusal) Error() string {
+	return "hosted oauth refused (" + r.Code + "): " + r.Err.Error()
+}
+
+func (r *HostedOAuthRefusal) Unwrap() error { return r.Err }
+
+// hostedOAuthErrorCode names a refused hosted sign-in for the app. Every
+// refusal without a code of its own is access_denied, so a refusal over
+// another account (a provider address that does not prove it) reads like a
+// failed exchange; only an unexpected failure is server_error.
+func hostedOAuthErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrEmailVerificationRequired):
+		return HostedOAuthErrorEmailNotVerified
+	case errors.Is(err, ErrAccountNotActive):
+		return HostedOAuthErrorAccountDisabled
+	case errors.Is(err, ErrAccountLocked):
+		return HostedOAuthErrorAccountLocked
+	case errors.Is(err, ErrOAuthDisabled):
+		return HostedOAuthErrorUnavailable
+	case errors.Is(err, ErrUnauthenticated),
+		errors.Is(err, ErrInvalidArgument),
+		errors.Is(err, ErrPermissionDenied),
+		errors.Is(err, ErrAccessNotAllowed),
+		errors.Is(err, ErrSignupByInvitationOnly),
+		errors.Is(err, ErrSignupDisabled),
+		errors.Is(err, ErrAccountKindOff),
+		errors.Is(err, ErrInvitationPending),
+		errors.Is(err, ErrIDVRequired),
+		errors.Is(err, ErrSSORequired),
+		errors.Is(err, ErrProductAgeRestricted),
+		errors.Is(err, ErrDOBRequired):
+		return HostedOAuthErrorAccessDenied
+	default:
+		return HostedOAuthErrorServer
+	}
 }
 
 // mintOAuthOneTimeCode generates an opaque code, stores its hash bound

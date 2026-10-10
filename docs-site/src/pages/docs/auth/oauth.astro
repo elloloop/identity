@@ -518,6 +518,48 @@ message NativeOAuthLoginResponse {
     60s window or a single redeem.
   </p>
 
+  <h3 id="hosted-callback-errors">Callback errors</h3>
+  <p>
+    A callback whose signed state token (or its CSRF cookie) does not verify
+    has no trusted <code>return_to</code>, so it answers HTTP 400 on the
+    identity origin. Once the state token verifies, every refused sign-in is
+    302-redirected to <code>return_to?error=&lt;code&gt;</code>, with no
+    <code>code</code> parameter, so the app can tell the user what to do:
+  </p>
+  <ul>
+    <li>
+      <code>email_not_verified</code> — the account's address is unverified
+      and <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> is on. A
+      verification email has been sent (throttled); ask the user to follow
+      it, then sign in again.
+    </li>
+    <li>
+      <code>account_disabled</code> — the account is deactivated or
+      suspended.
+    </li>
+    <li>
+      <code>account_locked</code> — the account is temporarily locked after
+      too many failed attempts; try again later.
+    </li>
+    <li>
+      <code>access_denied</code> — any other refusal: the provider exchange
+      failed or the provider did not verify its address, the project or the
+      tenant's login policy does not admit this sign-in, or the provider's
+      address does not prove the account it matches.
+    </li>
+    <li>
+      <code>temporarily_unavailable</code> — OAuth is not configured for the
+      project.
+    </li>
+    <li><code>server_error</code> — an unexpected failure; retry.</li>
+  </ul>
+  <p>
+    The three account codes are given only for the account the provider
+    proved, so they say nothing about any other account. The redirect
+    carries no description; the reason is logged server-side as
+    <code>hosted_oauth_callback_failed</code>.
+  </p>
+
   <h3>Enabling the hosted flow</h3>
   <p>
     The hosted flow is <strong>off by default</strong>. Enable it by
