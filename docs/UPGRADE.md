@@ -1,8 +1,11 @@
 # Upgrade guide
 
-## v4.14.0 → next — a GitHub sign-in needs a verified GitHub address (behaviour change)
+## v4.14.0 → v4.15.0 — sign-in hardening (behaviour changes); an `email_unverified` and an `unproven_credentials_voided` audit event (additive)
 
-No schema change and no migration.
+No schema change and no migration. `password_reset_tokens.email`, empty until
+now, records the address a reset link was mailed to (see below).
+
+### A GitHub sign-in needs a verified GitHub address (behaviour change)
 
 - **A GitHub sign-in needs a verified address from `/user/emails`
   (behaviour change).** When GitHub listed no verified address, or
@@ -12,9 +15,8 @@ No schema change and no migration.
   verified. That sign-in is now refused with `unauthenticated`. A user who
   hits this verifies an address at GitHub and signs in again. The verified
   primary address is still preferred, then the first verified one.
-## v4.14.0 → next — a QR sign-in checks the account before completing (behaviour change)
 
-No schema change and no migration.
+### A QR sign-in checks the account before completing (behaviour change)
 
 - **A QR sign-in runs the account checks every sign-in runs, before it
   consumes the hand-off (behaviour change).** `PollQrLogin` issued a session
@@ -31,10 +33,8 @@ No schema change and no migration.
   - An approved hand-off now expires at the end of its window
     (`GATEWAY_QR_LOGIN_EXPIRY_SECONDS`) like a pending one; a poll after it
     reports `expired`.
-## Unreleased — a password-reset link works only while the account holds the address it was issued for (behaviour change)
 
-No schema change and no migration: `password_reset_tokens.email`, until now
-always empty, records the address.
+### A password-reset link works only while the account holds the address it was issued for (behaviour change)
 
 - **A reset link is bound to the address it was mailed to (behaviour
   change).** `ConfirmPasswordReset` used to reset the password of the
@@ -48,9 +48,8 @@ always empty, records the address.
   with an email address. They carry no address, so they cannot show the
   account still holds one, and are refused the same way. Users with an outstanding link request a new one; an admin
   re-issues a `ResetUserPassword` token.
-## v4.14.0 → next — a refused hosted OAuth callback redirects to `return_to` with an error code (behaviour change)
 
-No schema change and no migration.
+### A refused hosted OAuth callback redirects to `return_to` with an error code (behaviour change)
 
 - **A refused hosted OAuth sign-in returns to the app (behaviour change).**
   `/oauth/callback/{provider}` answered every failure with a bare `400` on the
@@ -61,9 +60,8 @@ No schema change and no migration.
   [callback errors](oauth.md#callback-errors). A page at `return_to` that
   only looks for `code` should handle `error`. A callback whose state token
   or CSRF cookie does not verify still answers `400`.
-## v4.14.0 → next — a password sign-in into an account with no password is refused as for an unknown address (behaviour change)
 
-No schema change and no migration.
+### A password sign-in into an account with no password is refused as for an unknown address (behaviour change)
 
 - **`PasswordLogin` no longer says an account has no password (behaviour
   change).** A password sign-in into an account created through a provider or
@@ -75,9 +73,8 @@ No schema change and no migration.
   and passwordless options, and password reset, beside every
   invalid-credentials message instead. `ChangePassword` and the other
   signed-in calls still return `no password set`.
-## v4.14.0 → next — `RequestPasswordReset` returns before the account is looked up or mailed
 
-No schema change, no migration and no API change.
+### `RequestPasswordReset` returns before the account is looked up or mailed
 
 - **`RequestPasswordReset` no longer waits on the reset mail.** It looked up
   the account and minted and mailed its reset link before answering, so a
@@ -85,9 +82,8 @@ No schema change, no migration and no API change.
   unknown address. That work now runs off the request, as the passwordless
   code and magic-link requests already do; the answer is unchanged (always
   success), and a send failure is logged as before.
-## v4.14.0 → next — a password sign-in during lockout is refused as for an unknown address (behaviour change)
 
-No schema change and no migration.
+### A password sign-in during lockout is refused as for an unknown address (behaviour change)
 
 - **`PasswordLogin` no longer says an account is locked (behaviour change).**
   After `GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS` failures it answered
@@ -102,9 +98,8 @@ No schema change and no migration.
   invalid-credentials message instead. Paths that check lockout after the
   credential is proven (refresh, the required password change) still return
   `account temporarily locked`.
-## v4.14.0 → next — a refresh refused over the account's state ends its access token under `GATEWAY_REVOCATION_MODE=session`; a replayed refused refresh is audited once per window; a refresh refused over a lockout keeps its token (behaviour changes)
 
-No schema change and no migration.
+### A refresh refused over the account's state ends its access token under `GATEWAY_REVOCATION_MODE=session`; a replayed refused refresh is audited once per window; a refresh refused over a lockout keeps its token (behaviour changes)
 
 - **A refresh refused over the account's own state revokes its session
   (behaviour change, `GATEWAY_REVOCATION_MODE=session` only).** A refresh
@@ -155,9 +150,8 @@ No schema change and no migration.
     invited or failing a required identity verification are unchanged: they
     still spend the refresh token and, under `GATEWAY_REVOCATION_MODE=session`,
     end its session.
-## v4.14.0 → next — an `email_unverified` audit event (additive)
 
-No schema change and no migration.
+### An `email_unverified` audit event (additive)
 
 - **A SCIM write that leaves an email unverified is audited.** A SCIM `PUT`
   or `PATCH` that moves an account to another mailbox, and so leaves its
@@ -169,9 +163,7 @@ No schema change and no migration.
 - `account_merged` and `email_canonicalized` entries no longer log an
   `audit_unknown_event_type` warning when they are written.
 
-## v4.14.0 → next — a proof of an address that cannot void the credentials added before it fails the sign-in; a verification link voids what was added to an account a tagged provider address claimed; a link added while the address is being proven is voided too (behaviour changes)
-
-No schema change and no migration.
+### A proof of an address that cannot void the credentials added before it fails the sign-in; a verification link voids what was added to an account a tagged provider address claimed; a link added while the address is being proven is voided too (behaviour changes)
 
 - **A proof of an address that cannot void the credentials added before it
   fails the sign-in (behaviour change).** When a passwordless email code or
