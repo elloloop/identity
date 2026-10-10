@@ -46,6 +46,21 @@ func canonicalRewriteTarget(stored string) (string, error) {
 	return canonical, nil
 }
 
+// proofCarriesTo reports whether proving control of proven proves the account
+// address stored: both are provably the same mailbox, by the rule a canonical
+// rewrite keeps an account's verified state under.
+func proofCarriesTo(proven, stored string) bool {
+	if stored == "" {
+		return false
+	}
+	p, err := canonicalRewriteTarget(proven)
+	if err != nil {
+		return false
+	}
+	s, err := canonicalRewriteTarget(stored)
+	return err == nil && p == s
+}
+
 // canonicalEmailRewrite is what storeCanonicalEmail changed.
 type canonicalEmailRewrite struct {
 	// Rewritten is true when the account's stored email changed.

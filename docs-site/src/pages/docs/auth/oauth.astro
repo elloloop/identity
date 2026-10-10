@@ -429,6 +429,16 @@ message NativeOAuthLoginResponse {
       they set one.
     </li>
   </ul>
+  <p>
+    A provider's sign-in verifies the account's email only when the provider
+    asserted that same address. An account found by its provider id can hold
+    a different address (one a signed-in user linked the provider to) or none
+    (a username account); such a sign-in leaves the account's verified state
+    unchanged. A provider address whose <code>+tag</code> is dropped to reach
+    the account's address counts as the same only at Gmail, where the tag is
+    provably the same mailbox; a new account created from a tagged address
+    elsewhere starts unverified.
+  </p>
 
   <h2>OAuth + password coexistence</h2>
   <p>

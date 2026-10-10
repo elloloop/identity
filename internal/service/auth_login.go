@@ -1032,10 +1032,13 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	// login so OAuth, OTP, and magic link all converge on ONE account per
 	// email — an email-based first-time OAuth login links to a pre-existing
 	// password/passwordless account rather than duplicating it.
+	//
+	// The provider proved the address it asserted, which is the account's only
+	// when no "+tag" outside Gmail was dropped to reach it.
 	user, isNew, err := s.resolveOrCreateUserByEmail(ctx, email, resolveOrCreateOpts{
 		name:          identity.Name,
 		avatarURL:     identity.AvatarURL,
-		emailVerified: true, // a verified provider identity proves control
+		emailVerified: proofCarriesTo(identity.Email, emailStr),
 	})
 	if err != nil {
 		return nil, false, err
@@ -1140,7 +1143,9 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 
 // markEmailVerifiedViaExternalProof flips the account to verified because an
 // external method (OAuth provider assertion, or an emailed OTP/magic-link the
-// user redeemed) proved control of the address. Any credential on the account
+// user redeemed) proved control of proven. It does nothing unless that proof
+// carries to the account's own address (proofCarriesTo): an account found by
+// a linked provider id may hold a different address, or none. Any credential on the account
 // was established BEFORE this proof — possibly by a different party (account
 // pre-hijacking) — so the untrusted ones are voided:
 //
@@ -1154,8 +1159,8 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 // It is a no-op when the email is already verified (the proof adds nothing).
 // Best-effort: a persistence failure is logged, not fatal — the user has
 // already authenticated via the external proof.
-func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, nowMs int64, method string) {
-	if user == nil || user.EmailVerified {
+func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proven string, nowMs int64, method string) {
+	if user == nil || user.EmailVerified || !proofCarriesTo(proven, user.Email) {
 		return
 	}
 	patch := map[string]any{
@@ -1246,11 +1251,12 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 		patch["avatar_url"] = identity.AvatarURL
 		u.AvatarURL = identity.AvatarURL
 	}
-	// A verified provider identity proves control of the address. Flip the
-	// account to verified and clear any password planted while it was still
-	// unverified (anti-pre-hijacking). This runs its own persistence, so it is
+	// A verified provider identity proves control of the address it asserts.
+	// When that is the account's address, flip the account to verified and
+	// clear any password planted while it was still unverified
+	// (anti-pre-hijacking). This runs its own persistence, so it is
 	// intentionally NOT folded into the name/avatar patch below.
-	s.markEmailVerifiedViaExternalProof(ctx, u, nowMs, "oauth")
+	s.markEmailVerifiedViaExternalProof(ctx, u, identity.Email, nowMs, "oauth")
 	// Provider-asserted email changes are NOT auto-applied to the local
 	// account. A compromised provider account (or a provider that lets
 	// admins change member emails) would otherwise let an attacker
