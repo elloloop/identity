@@ -183,7 +183,7 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	// The ticket was minted after this same check passed on the login path,
 	// but up to dobCompletionTicketTTL may have elapsed since — a status
 	// change in that window must still win over the ticket.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 

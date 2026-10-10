@@ -74,3 +74,38 @@ func TestRefusedRefreshAudit_DOBStepPacedOnRefreshOnly(t *testing.T) {
 	assert.Equal(t, 1, writer.countByEventTypeAndDetail("login_failure", "gate", "refresh"))
 	assert.Equal(t, 2, writer.countByEventTypeAndDetail("login_failure", "gate", "sign_in"))
 }
+
+// A refresh refused over a lockout keeps its token too, so its login_locked
+// row is paced the same way; a refused sign-in is a fresh act and is audited
+// every time.
+func TestRefusedRefreshAudit_LockoutPacedOnRefreshOnly(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	ctx := context.Background()
+	now := time.Now()
+	svc.nowFunc = func() time.Time { return now }
+	user := seedUser(repo, "locked-replayer@example.com", "", StatusActive)
+	_, refresh, err := svc.issueTokens(ctx, user, "", "")
+	require.NoError(t, err)
+
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"locked_until": now.Add(time.Hour).UnixMilli()}))
+	for range 5 {
+		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
+		require.ErrorIs(t, err, ErrAccountLocked)
+	}
+	locked := func() int { return writer.countByEventType("login_locked") }
+	assert.Equal(t, 1, locked())
+
+	stored, err := repo.GetUser(ctx, user.ID)
+	require.NoError(t, err)
+	for range 2 {
+		require.ErrorIs(t, svc.checkAccountStatus(ctx, stored, "", "", sessionGateSignIn), ErrAccountLocked)
+	}
+	assert.Equal(t, 3, locked())
+
+	now = now.Add(refusedRefreshAuditWindow)
+	_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
+	require.ErrorIs(t, err, ErrAccountLocked)
+	assert.Equal(t, 4, locked(), "the next window records the refusal again")
+}

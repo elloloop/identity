@@ -130,7 +130,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		if enrolmentUser == nil {
 			return nil, nil, fmt.Errorf("%w: user not found", ErrNotFound)
 		}
-		if statusErr := s.checkAccountStatus(ctx, enrolmentUser, ipAddr, userAgent); statusErr != nil {
+		if statusErr := s.checkAccountStatus(ctx, enrolmentUser, ipAddr, userAgent, sessionGateSignIn); statusErr != nil {
 			return nil, nil, statusErr
 		}
 	}
@@ -220,7 +220,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 	if user == nil {
 		return nil, nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, nil, err
 	}
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
@@ -378,7 +378,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 	// Enforce account status + lockout before issuing tokens. Without
 	// this, an account locked by failed-password attempts would still
 	// be loginable via passkey, defeating the lockout entirely.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 

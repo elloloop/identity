@@ -1860,16 +1860,22 @@ const (
 
 // refusedRefreshAuditWindow is how often one account's refresh refused for
 // one reason is audited. A refusal that keeps the refresh token (an unproven
-// address, a missing date of birth) can be replayed at will, and every replay
-// would otherwise write a row.
+// address, a missing date of birth, a lockout) can be replayed at will, and
+// every replay would otherwise write a row.
 const refusedRefreshAuditWindow = 10 * time.Minute
 
+// refusalAuditDue reports whether a gate's refusal is to be audited: a
+// sign-in's always is; a refused refresh's at most once per account and
+// reason per refusedRefreshAuditWindow on each replica.
+func (s *AuthService) refusalAuditDue(user *User, gate sessionGate, reason string) bool {
+	return gate == sessionGateSignIn || s.refusedRefreshAudits.allow(user.ID+"\x00"+reason, s.nowMs())
+}
+
 // auditSessionRefusal records a gate's refusal to issue a session as
-// login_failure with its reason and the step that refused. A sign-in's is
-// always recorded; a refused refresh's at most once per account and reason
-// per refusedRefreshAuditWindow on each replica.
+// login_failure with its reason and the step that refused, when
+// refusalAuditDue.
 func (s *AuthService) auditSessionRefusal(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, reason string) {
-	if gate == sessionGateRefresh && !s.refusedRefreshAudits.allow(user.ID+"\x00"+reason, s.nowMs()) {
+	if !s.refusalAuditDue(user, gate, reason) {
 		return
 	}
 	s.audit.Log(
@@ -2395,7 +2401,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// land on replay detection and sign the account out on every device. Any
 	// other refusal here is over the account's own state and still spends the
 	// token, below.
-	statusErr := s.checkAccountStatus(ctx, timeoutUser, ipAddr, userAgent)
+	statusErr := s.checkAccountStatus(ctx, timeoutUser, ipAddr, userAgent, sessionGateRefresh)
 	if errors.Is(statusErr, ErrAccountLocked) {
 		return nil, "", "", statusErr
 	}
