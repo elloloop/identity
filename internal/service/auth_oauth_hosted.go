@@ -249,7 +249,9 @@ func hostedOAuthErrorCode(err error) string {
 		return HostedOAuthErrorAccountDisabled
 	case errors.Is(err, ErrAccountLocked):
 		return HostedOAuthErrorAccountLocked
-	case errors.Is(err, ErrOAuthDisabled):
+	case errors.Is(err, ErrOAuthDisabled),
+		errors.Is(err, ErrUnavailable),
+		errors.Is(err, ErrAssuranceUnavailable):
 		return HostedOAuthErrorUnavailable
 	case errors.Is(err, ErrUnauthenticated),
 		errors.Is(err, ErrInvalidArgument),

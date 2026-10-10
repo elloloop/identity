@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -384,4 +385,6 @@ func TestHostedOAuth_Complete_UnverifiedStateIsNoRefusal(t *testing.T) {
 func TestHostedOAuthErrorCode_UnexpectedFailureIsServerError(t *testing.T) {
 	assert.Equal(t, HostedOAuthErrorServer, hostedOAuthErrorCode(errors.New("database unavailable")))
 	assert.Equal(t, HostedOAuthErrorUnavailable, hostedOAuthErrorCode(ErrOAuthDisabled))
+	assert.Equal(t, HostedOAuthErrorUnavailable, hostedOAuthErrorCode(fmt.Errorf("%w: sweep", ErrUnavailable)))
+	assert.Equal(t, HostedOAuthErrorUnavailable, hostedOAuthErrorCode(ErrAssuranceUnavailable))
 }

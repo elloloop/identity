@@ -164,24 +164,37 @@ import { Code } from "astro-expressive-code/components";
     Failed-login lockout is configured by
     <code>GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS</code> (default <code>5</code>) and
     <code>GATEWAY_LOGIN_LOCKOUT_SECONDS</code> (default <code>900</code> = 15 min).
-    On the Nth failure within the window, <code>PasswordLogin</code>
-    returns <code>account temporarily locked</code> until the timer
-    expires; correct credentials reset the counter.
+    On the Nth failure within the window the account locks until the timer
+    expires. While it is locked, <code>PasswordLogin</code> refuses every
+    attempt, the correct password included, with the same
+    <code>unauthenticated</code> <code>invalid email or password</code> an
+    unknown address gets, so a lockout does not reveal that the account
+    exists; each refusal is audited as <code>login_locked</code>. A
+    successful sign-in resets the counter, and a password reset clears the
+    lock.
   </p>
 
   <h2>Email Verification Policy</h2>
   <p>
-    OAuth and local password accounts do not use the same verification gate.
+    With <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> on (the default), no
+    path issues or refreshes a session for an account whose email address is
+    unverified.
   </p>
   <ul>
     <li>
-      <strong>OAuth login</strong> requires the upstream provider to assert a
-      verified email address before Identity will mint a session.
+      <strong>OAuth login</strong> verifies the account's address only when
+      the provider asserts that same address as verified; otherwise the
+      account stays unverified and the sign-in is refused.
     </li>
     <li>
-      <strong>Password login</strong> does not block on
-      <code>email_verified</code>. A local user may sign in immediately after
-      signup and complete verification later in-app.
+      <strong>Password login</strong> into an unverified account is refused
+      with <code>email verification required</code> after the password is
+      proven, and a verification email is sent (throttled). A passwordless
+      code or magic link proves the address and signs in.
+    </li>
+    <li>
+      With the flag off, a local user may sign in immediately after signup and
+      complete verification later in-app.
     </li>
   </ul>
 

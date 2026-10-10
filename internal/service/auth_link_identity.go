@@ -142,7 +142,11 @@ func (s *AuthService) withdrawLinkIfAddressProven(ctx context.Context, oi *OAuth
 		return fmt.Errorf("%w: the provider could not be linked", ErrUnavailable)
 	}
 	if err != nil {
-		return err
+		s.logger.Error("identity_link_recheck_failed",
+			zap.String("user_id", oi.UserID),
+			zap.String("provider", oi.Provider),
+			zap.Error(err))
+		return fmt.Errorf("%w: the provider could not be linked", ErrUnavailable)
 	}
 	s.audit.Log(
 		ctx, audit.EventIdentityLinked,

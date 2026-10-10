@@ -549,7 +549,8 @@ message NativeOAuthLoginResponse {
     </li>
     <li>
       <code>temporarily_unavailable</code> — OAuth is not configured for the
-      project.
+      project, or a dependency the sign-in needs is briefly unavailable;
+      retry.
     </li>
     <li><code>server_error</code> — an unexpected failure; retry.</li>
   </ul>

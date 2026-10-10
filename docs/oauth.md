@@ -196,7 +196,7 @@ state token verifies, every refused sign-in is 302-redirected to
 | `account_disabled` | The account is deactivated or suspended. |
 | `account_locked` | The account is temporarily locked after too many failed attempts. |
 | `access_denied` | Any other refusal: the exchange failed or the provider did not verify its address, the project or the tenant's login policy does not admit the sign-in, or the provider's address does not prove the account it matches. |
-| `temporarily_unavailable` | OAuth is not configured for the project. |
+| `temporarily_unavailable` | OAuth is not configured for the project, or a dependency the sign-in needs is briefly unavailable; retry. |
 | `server_error` | An unexpected failure; retry. |
 
 The account codes are given only for the account the provider proved, so

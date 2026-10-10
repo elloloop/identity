@@ -237,6 +237,31 @@ func TestExternalProof_VoidsALinkAddedWhileItRuns(t *testing.T) {
 	assert.Nil(t, tok, "the session that could have added it ends")
 }
 
+// A sign-in with a planted password that lands between the proof's first
+// revocation and its verified write opens a session that revocation missed;
+// the proof ends it once the password is gone.
+func TestExternalProof_EndsASessionOpenedWhileItRuns(t *testing.T) {
+	svc, repo, rec := proofSvc(t)
+	ctx := context.Background()
+	victim := seedUser(repo, "victim@example.com", hashPW(t, "Planted-Passw0rd!x"), StatusActive)
+	const lateSession = "mid-proof-session-hash"
+	listings := 0
+	repo.listOAuthIdentitiesHook = func() {
+		listings++
+		if listings == 2 {
+			_, err := repo.CreateRefreshToken(ctx, &RefreshTokenRecord{TokenHash: lateSession, UserID: victim.ID, ExpiresAt: 1 << 62})
+			require.NoError(t, err)
+		}
+	}
+
+	res, err := passwordlessSignIn("victim@example.com")(t, svc, rec)
+	require.NoError(t, err)
+	assert.True(t, res.User.EmailVerified)
+	tok, err := repo.FindRefreshTokenByHash(ctx, lateSession)
+	require.NoError(t, err)
+	assert.Nil(t, tok, "a session opened while the proof ran ends with the voided password")
+}
+
 // A LinkIdentity call that began while the address was unproven withdraws its
 // link when the address is proven before its insert lands, since the proof's
 // listings may both have run before the insert.

@@ -22,10 +22,11 @@ now, records the address a reset link was mailed to (see below).
   consumes the hand-off (behaviour change).** `PollQrLogin` issued a session
   to an approved hand-off whatever the approving account's state: a
   deactivated, invited or locked account still signed the device in. Now:
-  - It is refused like a password or passkey sign-in, with the same codes:
+  - It is refused like a passkey sign-in, with the same codes:
     `failed_precondition` for a deactivated account, a pending invitation or
     (with identity verification required) an unverified identity, and
-    `resource_exhausted` for an account locked by failed sign-ins. The
+    `resource_exhausted` for an account locked by failed sign-ins (the
+    approver has already signed in, so naming the lock reveals nothing). The
     access-policy and verified-email refusals are unchanged.
   - A refused poll leaves the hand-off approved instead of spending it, so
     once the account is eligible (its address verified, say) the device's

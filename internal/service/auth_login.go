@@ -1276,13 +1276,18 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		return s.externalProofSweepFailed(user.ID, proof, "relist_provider_links", err)
 	}
 	if lateLinks := proof.voidedAmong(links, user.Email); len(lateLinks) > 0 {
-		if err := s.revokeSessionsForProof(ctx, user.ID, proof, nowMs); err != nil {
-			return err
-		}
 		if err := s.voidProviderLinks(ctx, user.ID, proof, lateLinks); err != nil {
 			return err
 		}
 		plantedLinks = append(plantedLinks, lateLinks...)
+	}
+	if passwordCleared || passkeysCleared || len(plantedLinks) > 0 {
+		// A sign-in with a voided credential that landed between the first
+		// revocation and the verified write opened a session that revocation
+		// missed; end it now that the credential is gone.
+		if err := s.revokeSessionsForProof(ctx, user.ID, proof, nowMs); err != nil {
+			return err
+		}
 	}
 
 	s.auditVoidedCredentials(ctx, user.ID, proof, passwordCleared, passkeysCleared, len(plantedLinks))
