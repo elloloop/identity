@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -498,4 +499,41 @@ func TestModeSession_RefreshRefusedNotForAccountState_KeepsAccessSession(t *test
 		require.Error(t, err)
 		assert.False(t, sessionRevoked(t, repo, sid))
 	})
+}
+
+// A lockout can be triggered by anyone guessing at the password, so a refresh
+// refused over one must not cost the account anything: the client's retry is
+// refused the same way rather than taken for a replay, none of the account's
+// sessions or refresh tokens are revoked, and every one rotates normally once
+// the lockout ends.
+func TestModeSession_RefreshRefusedForLockout_KeepsTokenForRetry(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	svc.cfg.RevocationMode = config.RevocationModeSession
+	ctx := context.Background()
+	now := time.Now()
+	svc.nowFunc = func() time.Time { return now }
+	user := seedUser(repo, "guessed-at@example.com", "", StatusActive)
+	refresh, sid := openSession(t, svc, user)
+	otherRefresh, otherSid := openSession(t, svc, user)
+
+	lockout := time.Minute
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"locked_until": now.Add(lockout).UnixMilli()}))
+	for range 3 {
+		_, _, _, err := svc.RefreshToken(ctx, refresh, "", "")
+		require.ErrorIs(t, err, ErrAccountLocked)
+	}
+	assert.Zero(t, writer.countByEventTypeAndDetail("login_failure", "reason", "refresh_token_replay"))
+	assert.False(t, sessionRevoked(t, repo, sid))
+	assert.False(t, sessionRevoked(t, repo, otherSid))
+
+	now = now.Add(lockout + time.Second)
+	for _, r := range []string{refresh, otherRefresh} {
+		_, access, _, err := svc.RefreshToken(ctx, r, "", "")
+		require.NoError(t, err)
+		claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
+		require.NoError(t, err)
+		assert.False(t, sessionRevoked(t, repo, claims.SID), "the rotated session is live")
+	}
 }

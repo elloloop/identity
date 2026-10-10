@@ -2389,6 +2389,17 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		}
 	}
 
+	// Account status, checked before the token is consumed so that a lockout
+	// leaves it intact. Anyone guessing at the password can trigger a lockout;
+	// were the token burnt by it, the retry an SDK makes on the refusal would
+	// land on replay detection and sign the account out on every device. Any
+	// other refusal here is over the account's own state and still spends the
+	// token, below.
+	statusErr := s.checkAccountStatus(ctx, timeoutUser, ipAddr, userAgent)
+	if errors.Is(statusErr, ErrAccountLocked) {
+		return nil, "", "", statusErr
+	}
+
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it
 	// only succeeds when the row's consumed_at is currently 0, so two
 	// concurrent rotations of the same token resolve to exactly one
@@ -2403,19 +2414,13 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 
 	user := timeoutUser
 
-	// Re-enforce account status on every refresh: a user deactivated
-	// (or locked, or IDV-revoked) after the original login must not be
-	// able to mint fresh access tokens by replaying a still-valid
-	// refresh token. A hard-deleted user is already covered above (the
-	// refresh row is gone, so the lookup returns nil → unauthenticated).
-	// The refused account's access session ends with it. A lockout is the
-	// exception: anyone can trigger one by guessing at the password, and it
-	// says nothing against the sessions the account already holds.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
-		if !errors.Is(err, ErrAccountLocked) {
-			s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "account_not_active")
-		}
-		return nil, "", "", err
+	// An account deactivated, suspended, back to invited or failing a required
+	// identity verification after its sign-in must not mint fresh access tokens
+	// from a still-valid refresh token, and its access session ends with the
+	// refusal.
+	if statusErr != nil {
+		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "account_not_active")
+		return nil, "", "", statusErr
 	}
 
 	// Re-enforce the project access mode (login context) on every refresh: a user
