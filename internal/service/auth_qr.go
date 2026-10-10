@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -177,6 +178,25 @@ func (s *AuthService) checkQrApprover(ctx context.Context, userID, ipAddr, userA
 	return s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn)
 }
 
+// qrApprovalCollectionGrace is how long past its window an approved hand-off
+// can still be collected. An approval may land just before the window closes,
+// and the device only sees it at its next poll; the grace covers a client's
+// poll interval with room to spare while keeping a refused hand-off from
+// outliving its window by much.
+const qrApprovalCollectionGrace = 30 * time.Second
+
+// qrCollectionClosed reports whether an open (pending or approved) session is
+// past the point a poll may collect it.
+func qrCollectionClosed(session *QrLoginSessionRecord, nowMs int64) bool {
+	switch session.Status {
+	case "pending":
+		return session.ExpiresAt < nowMs
+	case "approved":
+		return session.ExpiresAt+qrApprovalCollectionGrace.Milliseconds() < nowMs
+	}
+	return false
+}
+
 // ── PollQrLogin ────────────────────────────────────────────────────────
 
 // PollQrLogin polls a QR login session. When approved, atomically
@@ -216,9 +236,9 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	status := session.Status
 
 	// An approved session expires too: a sign-in refused below leaves it
-	// approved, and the hand-off must not outlive its window waiting for the
-	// account to become eligible.
-	if (status == "pending" || status == "approved") && session.ExpiresAt < now {
+	// approved, and the hand-off must not outlive its window (and its
+	// collection grace) waiting for the account to become eligible.
+	if qrCollectionClosed(session, now) {
 		_ = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 			"status": "expired", "updated_at": now,
 		})

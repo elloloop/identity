@@ -268,3 +268,47 @@ func TestApproveQrLogin_UnknownApproverRefused(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 	requireQrSessionStatus(ctx, t, repo, init.SessionID, "pending")
 }
+
+// An approval that lands just before the window closes can still be collected
+// by the device's next poll, for a short grace past the window; a pending
+// hand-off gets none, and an approved one expires once the grace is over.
+func TestPollQrLogin_ApprovalCollectableJustPastWindow(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	user := seedUser(repo, "qr-last-second@example.com", "", StatusActive)
+	ctx := context.Background()
+	start := time.Now()
+	window := time.Duration(svc.cfg.QRLoginExpirySeconds) * time.Second
+	at := func(d time.Duration) { svc.nowFunc = func() time.Time { return start.Add(d) } }
+
+	at(0)
+	pending, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
+	require.NoError(t, err)
+	collected, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
+	require.NoError(t, err)
+	late, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
+	require.NoError(t, err)
+
+	at(window - time.Second)
+	for _, id := range []string{collected.SessionID, late.SessionID} {
+		_, err = svc.ApproveQrLogin(ctx, id, true, user.ID, "10.0.0.2", "approver")
+		require.NoError(t, err)
+	}
+
+	at(window + qrApprovalCollectionGrace)
+	res, err := svc.PollQrLogin(ctx, collected.SessionID, collected.PollSecret, "10.0.0.1", "agent")
+	require.NoError(t, err)
+	assert.Equal(t, "approved", res.Status)
+	assert.NotEmpty(t, res.AccessToken)
+
+	res, err = svc.PollQrLogin(ctx, pending.SessionID, pending.PollSecret, "10.0.0.1", "agent")
+	require.NoError(t, err)
+	assert.Equal(t, "expired", res.Status)
+
+	at(window + qrApprovalCollectionGrace + time.Millisecond)
+	res, err = svc.PollQrLogin(ctx, late.SessionID, late.PollSecret, "10.0.0.1", "agent")
+	require.NoError(t, err)
+	assert.Equal(t, "expired", res.Status)
+	assert.Empty(t, res.AccessToken)
+	requireQrSessionStatus(ctx, t, repo, late.SessionID, "expired")
+}
