@@ -181,6 +181,9 @@ type fakeRepo struct {
 	// read and the write that follows it.
 	listOAuthIdentitiesHook func()
 	createOAuthIdentityHook func()
+	// createPasskeyCredentialHook, when set, runs at the start of
+	// CreatePasskeyCredential, before the insert, for the same purpose.
+	createPasskeyCredentialHook func()
 
 	// The following, when non-nil, make the corresponding read/write return
 	// that error so a test can exercise the caller's repo-error-propagation
@@ -809,6 +812,9 @@ func (r *fakeRepo) GetPasskeyCredentialByCredID(_ context.Context, credentialID 
 }
 
 func (r *fakeRepo) CreatePasskeyCredential(_ context.Context, rec *PasskeyCredRecord) (string, error) {
+	if r.createPasskeyCredentialHook != nil {
+		r.createPasskeyCredentialHook()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.createPasskeyCredErr != nil {

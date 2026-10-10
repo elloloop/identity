@@ -100,6 +100,14 @@ await fetch("/identity.v1.IdentityService/CompletePasskeyRegistration", {
     deviceName: "Alice's MacBook",
   }),
 });`} lang="javascript" />
+  <p>
+    A sign-in that first proves an unverified account's address (a verified
+    provider or an emailed sign-in code) deletes the passkeys added before it,
+    since whoever added them may not own the address. A registration that
+    began while the address was unproven and completes after such a proof
+    therefore withdraws its passkey and fails with
+    <code>UNAUTHENTICATED</code>: sign in again and register it once more.
+  </p>
 
   <h2>Passkey-first signup (unauthenticated)</h2>
   <p>
