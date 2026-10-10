@@ -70,10 +70,11 @@ func formatExpiresIn(d time.Duration) string {
 // carries the admitted params (see checkEmailLinkParams).
 //
 // Per OWASP guidance and the proto contract, every account-dependent
-// outcome returns nil — an unknown email included — and the response
-// time is kept roughly equivalent, so the endpoint cannot be used as an
-// email-enumeration oracle. Errors during token persistence or email
-// dispatch are logged internally; the caller is told nothing. The one
+// outcome returns nil — an unknown email included — and the account is
+// looked up and mailed through dispatchEmailSend, so neither the answer nor
+// (with async dispatch) its timing is an email-enumeration oracle. Errors
+// during token persistence or email dispatch are logged internally; the
+// caller is told nothing. The one
 // error it returns is ErrInvalidArgument for refused link params, which
 // are checked first and from the request alone, so that answer is the
 // same for every email.
@@ -97,12 +98,23 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		s.logger.Info("password_reset_requested_unusable_email")
 		return nil
 	}
+	// Everything that depends on the account runs off the request, so the
+	// response takes the same time whether or not a reset is mailed.
+	s.dispatchEmailSend(ctx, "password_reset", func(ctx context.Context) {
+		s.sendPasswordResetNow(ctx, emailAddr, link)
+	})
+	return nil
+}
 
+// sendPasswordResetNow is the body of RequestPasswordReset's dispatch: it
+// finds the account, mints its reset token and mails the link. Silent — every
+// outcome is logged, never surfaced.
+func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string, link emailLink) {
 	user, err := s.repo(ctx).FindUserByEmail(ctx, emailAddr)
 	if err != nil {
 		s.logger.Warn("password_reset_lookup_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
-		return nil
+		return
 	}
 	// A reset mail to an address the project refuses is spam the project pays
 	// for: the account it would restore cannot log in anyway, and the message
@@ -116,17 +128,17 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		!accessPermits(s.cfg, scope.Access, canonicalize(emailAddr), false) {
 		s.logger.Info("password_reset_send_suppressed_by_access",
 			zap.String("email", redactEmail(emailAddr)))
-		return nil
+		return
 	}
 
 	if user == nil {
 		s.logger.Info("password_reset_unknown_email", zap.String("email", redactEmail(emailAddr)))
-		return nil
+		return
 	}
 
 	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
 		s.logger.Info("password_reset_throttled", zap.String("email", redactEmail(emailAddr)))
-		return nil
+		return
 	}
 
 	rawToken := randomToken(32)
@@ -143,7 +155,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	}); err != nil {
 		s.logger.Warn("password_reset_token_create_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
-		return nil
+		return
 	}
 
 	brand := resolveBranding(ctx, s.cfg, link.product)
@@ -154,7 +166,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	}))
 	if err != nil {
 		s.logger.Warn("password_reset_render_failed", zap.Error(err))
-		return nil
+		return
 	}
 	msg := email.Message{
 		To:      user.Email,
@@ -175,7 +187,6 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"step": "requested"}),
 	)
-	return nil
 }
 
 // resetTokenBindsAddress reports whether the account still holds the address

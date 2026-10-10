@@ -955,3 +955,34 @@ func TestPasswordSignup_RefusedLinkParamsCreateNoAccount(t *testing.T) {
 		t.Fatalf("refused signup sent %d emails", got)
 	}
 }
+
+// With async dispatch (as the served deployment runs), a reset request for an
+// account returns without waiting on its token or its mail, as one for an
+// unknown address does: the response time says nothing about the account.
+func TestRequestPasswordReset_AsyncDoesNotBlockOnTheAccount(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	svc.WithAsyncEmailDispatch()
+	mailer := &blockingTransport{release: make(chan struct{}), sent: make(chan struct{})}
+	svc.mailer = mailer
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	seedUser(repo, "alice@test.com", pwHash, "active")
+
+	done := make(chan error, 1)
+	go func() { done <- svc.RequestPasswordReset(context.Background(), "alice@test.com", EmailLinkParams{}) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RequestPasswordReset: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		close(mailer.release)
+		t.Fatal("RequestPasswordReset waited on the reset mail")
+	}
+
+	close(mailer.release)
+	select {
+	case <-mailer.sent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the reset mail was not sent after the request returned")
+	}
+}
