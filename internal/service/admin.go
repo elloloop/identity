@@ -380,7 +380,8 @@ func (s *AdminService) ResetUserPassword(
 	// AND stays matched by the retention sweep, which hard-deletes it with
 	// its sessions. The account is not addressable by an admin anyway — it
 	// has no email and is excluded from the user listing.
-	if userFromNode(node).IsAnonymous {
+	target := userFromNode(node)
+	if target.IsAnonymous {
 		// Same sentinel as every other door, so one rule maps to one Connect
 		// code rather than this path answering InvalidArgument while its five
 		// siblings answer FailedPrecondition.
@@ -410,7 +411,7 @@ func (s *AdminService) ResetUserPassword(
 		op := graph.Operation{
 			Type: graph.OpCreateNode, TypeID: typePasswordReset,
 			Data: map[string]any{
-				prfTokenHash: tokenHash, prfUserID: targetUserID,
+				prfTokenHash: tokenHash, prfUserID: targetUserID, prfEmail: target.Email,
 				prfExpiresAt: now + int64(s.cfg.PasswordResetExpirySeconds)*1000,
 				prfCreatedAt: now,
 			},

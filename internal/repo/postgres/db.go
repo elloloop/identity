@@ -81,6 +81,7 @@ const (
 	dbPrfUserID    = "2"
 	dbPrfExpiresAt = "3"
 	dbPrfCreatedAt = "4"
+	dbPrfEmail     = "5"
 )
 
 const (
@@ -489,6 +490,7 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op graph
 		}
 		tokenHash, _ := nullableString(op.Data[dbPrfTokenHash])
 		userID, _ := nullableString(op.Data[dbPrfUserID])
+		email, _ := nullableString(op.Data[dbPrfEmail])
 		expiresAt, _ := nullableInt64(op.Data[dbPrfExpiresAt])
 		createdAt, _ := nullableInt64(op.Data[dbPrfCreatedAt])
 		if createdAt == 0 {
@@ -499,8 +501,8 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op graph
 			INSERT INTO password_reset_tokens (
 				id, project_id, token_hash, user_id, email,
 				expires_at_ms, created_at_ms, consumed_at_ms
-			) VALUES ($1, $2, $3, $4, '', $5, $6, 0)
-		`, id, r.projectID, tokenHash, userID, expiresAt, createdAt)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
+		`, id, r.projectID, tokenHash, userID, email, expiresAt, createdAt)
 		if err != nil {
 			return "", wrapPgErr("ExecuteAtomic(create password reset)", err)
 		}
@@ -806,11 +808,12 @@ func (r *pgRepository) queryRefreshTokenNodes(ctx context.Context, filter map[st
 }
 
 func (r *pgRepository) queryPasswordResetNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
-	query, args := buildSelectQuery(`SELECT id, token_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms FROM password_reset_tokens WHERE project_id = $1`, r.projectID, filter, map[string]dbFieldSpec{
+	query, args := buildSelectQuery(`SELECT id, token_hash, user_id, email, expires_at_ms, created_at_ms, consumed_at_ms FROM password_reset_tokens WHERE project_id = $1`, r.projectID, filter, map[string]dbFieldSpec{
 		dbPrfTokenHash: {col: "token_hash", kind: dbKindString},
 		dbPrfUserID:    {col: "user_id", kind: dbKindString},
 		dbPrfExpiresAt: {col: "expires_at_ms", kind: dbKindInt64},
 		dbPrfCreatedAt: {col: "created_at_ms", kind: dbKindInt64},
+		dbPrfEmail:     {col: "email", kind: dbKindString},
 	}, ` ORDER BY created_at_ms ASC, id ASC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1036,6 +1039,7 @@ func passwordResetNodeFromRecord(rec *service.PasswordResetToken) *graph.Node {
 			dbPrfUserID:    rec.UserID,
 			dbPrfExpiresAt: rec.ExpiresAt,
 			dbPrfCreatedAt: rec.CreatedAt,
+			dbPrfEmail:     rec.Email,
 		},
 	}
 }

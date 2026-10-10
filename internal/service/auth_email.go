@@ -137,6 +137,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	if err := s.repo(ctx).CreatePasswordResetToken(ctx, &PasswordResetToken{
 		TokenHash: tokenHash,
 		UserID:    user.ID,
+		Email:     user.Email,
 		ExpiresAt: now + int64(expiry/time.Millisecond),
 		CreatedAt: now,
 	}); err != nil {
@@ -177,12 +178,25 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	return nil
 }
 
+// resetTokenBindsAddress reports whether the account still holds the address
+// a reset token was issued for. An account without an address (a username
+// account an admin reset) is matched only by a token issued without one.
+func resetTokenBindsAddress(issuedFor, current string) bool {
+	if current == "" {
+		return issuedFor == ""
+	}
+	return ProofCarriesTo(issuedFor, current)
+}
+
 // ── ConfirmPasswordReset ───────────────────────────────────────────────
 
 // ConfirmPasswordReset consumes a password-reset token and sets the
 // user's new password.
 //
-// Token must be unconsumed and unexpired. On success, every refresh
+// Token must be unconsumed and unexpired, and the account must still hold
+// the address the token was issued for: whoever keeps a mailbox the account
+// has moved away from must not keep a way in. That refusal reads as an
+// invalid token and spends it. On success, every refresh
 // token belonging to the user is revoked — OAuth 2.1 §4.13 best
 // practice for any credential change forces re-login on all devices.
 func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPassword string) error {
@@ -219,6 +233,14 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	}
 	if user == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if !resetTokenBindsAddress(rec.Email, user.Email) {
+		if err := s.repo(ctx).MarkPasswordResetTokenConsumed(ctx, rec.NodeID, s.nowMs()); err != nil {
+			s.logger.Warn("password_reset_consume_failed",
+				zap.String("user_id", user.ID), zap.Error(err))
+		}
+		s.logger.Info("password_reset_address_changed", zap.String("user_id", user.ID))
+		return fmt.Errorf("%w: invalid reset token", ErrUnauthenticated)
 	}
 
 	// Enforce the user's tenant password policy now that the owning user

@@ -646,7 +646,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
 			userID := createTestUser(t, r, "prt@example.com")
-			tok := &service.PasswordResetToken{TokenHash: "p-1", UserID: userID, ExpiresAt: 1_000, CreatedAt: 100}
+			tok := &service.PasswordResetToken{TokenHash: "p-1", UserID: userID, Email: "prt@example.com", ExpiresAt: 1_000, CreatedAt: 100}
 			if err := r.CreatePasswordResetToken(ctx, tok); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -656,6 +656,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			got, err := r.FindPasswordResetTokenByHash(ctx, "p-1")
 			if err != nil || got == nil {
 				t.Fatalf("Find: %v %#v", err, got)
+			}
+			if got.Email != "prt@example.com" {
+				t.Fatalf("Find: email %q, want the address the token was issued for", got.Email)
 			}
 			if err := r.MarkPasswordResetTokenConsumed(ctx, got.NodeID, 200); err != nil {
 				t.Fatalf("MarkConsumed: %v", err)

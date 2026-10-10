@@ -221,6 +221,40 @@ func TestAdmin_ResetUserPassword_ResetToken(t *testing.T) {
 	}
 }
 
+// An admin-issued reset token is bound to the address the account held when
+// it was issued; once the account has moved to another mailbox it no longer
+// resets the password.
+func TestAdmin_ResetUserPassword_ResetTokenVoidedByEmailChange(t *testing.T) {
+	t.Parallel()
+
+	h := StartIssue3Server(t)
+	ctx := context.Background()
+	adminEmail := issue3Email(t, "admin@example.com")
+	memberEmail := issue3Email(t, "member@example.com")
+
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	memberID := seedIssue3User(t, h, memberEmail, "Member", "member", "active", issue3Password)
+
+	admin := h.AuthedClient(loginViaPassword(t, h, adminEmail, issue3Password).AccessToken)
+	reset, err := admin.ResetUserPassword(ctx, connect.NewRequest(&identitypb.ResetUserPasswordRequest{
+		UserId: memberID,
+	}))
+	if err != nil {
+		t.Fatalf("ResetUserPassword token: %v", err)
+	}
+	if err := h.Repo.UpdateUser(ctx, memberID, map[string]any{"email": issue3Email(t, "moved@example.com")}); err != nil {
+		t.Fatalf("change email: %v", err)
+	}
+
+	_, err = h.Client.ConfirmPasswordReset(ctx, connect.NewRequest(&identitypb.ConfirmPasswordResetRequest{
+		Token:       reset.Msg.ResetToken,
+		NewPassword: "Reset!Pass42",
+	}))
+	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("ConfirmPasswordReset after an email change code = %v, want Unauthenticated (err=%v)", got, err)
+	}
+}
+
 func TestAdmin_NonAdminDenied(t *testing.T) {
 	t.Parallel()
 

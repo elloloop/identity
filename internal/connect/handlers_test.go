@@ -1387,6 +1387,7 @@ func TestEmailRecoveryHandlers_ViaConnect(t *testing.T) {
 	if err := h.repo.CreatePasswordResetToken(ctx, &service.PasswordResetToken{
 		TokenHash: sha256Hex("reset-raw"),
 		UserID:    user.ID,
+		Email:     user.Email,
 		ExpiresAt: future,
 		CreatedAt: time.Now().UnixMilli(),
 	}); err != nil {
