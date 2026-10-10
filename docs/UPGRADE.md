@@ -1,5 +1,89 @@
 # Upgrade guide
 
+## v4.15.0 → v4.16.0 — sign-in hardening follow-ups (behaviour changes); `GATEWAY_RATE_LIMIT_QR_POLL_PER_IP` (additive)
+
+No schema change and no migration.
+
+### QR sign-in (behaviour changes)
+
+- **A refused QR poll is audited at its own gate, paced (behaviour change).**
+  A `PollQrLogin` refused for an unverified address or a lockout leaves the
+  hand-off approved, so the device replays the refusal on every poll, and each
+  poll wrote a row. The `login_failure` (`reason: email_not_verified`) and
+  `login_locked` rows of a refused poll now carry `gate: qr_poll` instead of
+  `gate: sign_in`, and are written at most once per account and reason per 10
+  minutes per replica, like a refused refresh. Every poll is still refused.
+  Alerting that counted QR refusals under `gate: sign_in` should add `qr_poll`.
+- **An account that could not sign in cannot approve a QR hand-off (behaviour
+  change).** `ApproveQrLogin` with `approve: true` is refused, with the codes a
+  sign-in uses, when the approving account is deactivated, has a pending
+  invitation, is locked by failed sign-ins (`resource_exhausted`, audited as
+  `login_locked`), or is unverified while identity verification is required;
+  the hand-off stays `pending`. An approver whose account no longer exists gets
+  `not_found`. Rejecting (`approve: false`) is unchanged. The poll still
+  re-checks the account at collection.
+- **An approved QR hand-off can be collected for 30 seconds past its window
+  (behaviour change).** v4.15.0 made an approved hand-off expire with
+  `GATEWAY_QR_LOGIN_EXPIRY_SECONDS` like a pending one, so an approval landing
+  in the device's last poll interval was reported `expired`. `PollQrLogin` now
+  collects an approved hand-off until 30 seconds after the window; a pending
+  one still expires at the window, and approval itself must still happen
+  within it. Clients should poll more often than every 30 seconds.
+- **QR sign-in RPCs are rate-limited per client IP (behaviour change).**
+  `InitiateQrLogin` now counts against `GATEWAY_RATE_LIMIT_LOGIN_PER_IP` (its
+  own budget of that size), and `PollQrLogin` against the new
+  **`GATEWAY_RATE_LIMIT_QR_POLL_PER_IP`** (default 120 per
+  `GATEWAY_RATE_LIMIT_WINDOW_SECONDS`; 0 disables it; negative refused at
+  boot). Over-limit calls get 429 / `resource_exhausted` with `Retry-After`.
+  A client polling faster than every half second from one address, or many
+  devices behind one NAT, should poll less often or raise the limit.
+
+### Proving an address voids credentials added while the proof runs (behaviour change)
+
+- The first proof of an unverified account's address (a verified provider
+  sign-in, an emailed sign-in code, or a verification link for an address a
+  provider claimed) now also voids credentials added *while the proof runs*:
+  it clears whatever password the account holds when it marks the address
+  verified (not only one it saw earlier), and lists the account's passkeys
+  again after that write, deleting any that escaped the first listing and
+  ending the account's sessions.
+- `CompletePasskeyRegistration` on an account whose address was unverified
+  when the call began now re-reads the account after storing the passkey. If
+  the address was proven in the meantime, the account's passkeys are deleted
+  and the call fails with `unauthenticated` ("the account's address was
+  proven while registering; sign in again"), audited as `passkey_added` with
+  `success=false` and `reason=address_proven_while_registering`. Clients
+  should prompt the user to sign in again and register the passkey once
+  more. This mirrors what `LinkIdentity` already does for provider links.
+- The `unproven_credentials_voided` audit event's `password_cleared` field
+  now reports whether the verified write actually cleared a password. A
+  proof racing another proof of the same address no longer reports a
+  password the other one already cleared.
+- In `GATEWAY_REVOCATION_MODE=ttl` (the default), an access token minted
+  before the proof stays valid for the rest of its lifetime (at most 15
+  minutes) and can still add a passkey or provider link after the proof
+  completes. Deployments that need that window closed should use
+  `GATEWAY_REVOCATION_MODE=session`, where the proof's session revocation
+  also ends those access tokens.
+
+### Credential mail and linking
+
+- **Credential emails sent in the background are capped (behaviour
+  change).** Password-reset, email sign-in code and magic-link mails now run
+  at most 128 at once per instance. A request arriving while all 128 are in
+  flight still gets its usual answer, but its mail is dropped and logged as
+  `email_send_dropped_at_capacity` (WARN, with the `op`). Alert on that log
+  line if you need to know when mail is being shed.
+- **`SynchronousEmailSend` is for tests only.** With
+  `identityserver.Options.SynchronousEmailSend` set, reset, code and
+  magic-link responses take as long as the account lookup and send they
+  trigger, so their timing tells a caller whether an address has an account.
+  Leave it false in any deployment.
+- **`LinkIdentity` on an account deleted mid-call returns `not_found`
+  (behaviour change).** It returned `unauthenticated` ("the account's address
+  was proven while linking") and wrote an `identity_linked` failure row with
+  reason `address_proven_while_linking`; it now writes no such row.
+
 ## v4.14.0 → v4.15.0 — sign-in hardening (behaviour changes); an `email_unverified` and an `unproven_credentials_voided` audit event (additive)
 
 No schema change and no migration. `password_reset_tokens.email`, empty until
@@ -22,12 +106,14 @@ now, records the address a reset link was mailed to (see below).
   consumes the hand-off (behaviour change).** `PollQrLogin` issued a session
   to an approved hand-off whatever the approving account's state: a
   deactivated, invited or locked account still signed the device in. Now:
-  - It is refused like a passkey sign-in, with the same codes:
+  - It is refused with the codes a passkey sign-in gets:
     `failed_precondition` for a deactivated account, a pending invitation or
     (with identity verification required) an unverified identity, and
     `resource_exhausted` for an account locked by failed sign-ins (the
-    approver has already signed in, so naming the lock reveals nothing). The
-    access-policy and verified-email refusals are unchanged.
+    approver has already signed in, so naming the lock reveals nothing). This
+    differs from `PasswordLogin`, which during a lockout now answers
+    `unauthenticated` like an unknown address. The access-policy and
+    verified-email refusals are unchanged.
   - A refused poll leaves the hand-off approved instead of spending it, so
     once the account is eligible (its address verified, say) the device's
     next poll completes without a new QR code.
