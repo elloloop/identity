@@ -25,6 +25,7 @@ func TestIssueTokens_VerifiedEmailGate(t *testing.T) {
 		{"proven address", "proven@example.com", true, false, false},
 		{"no address", "", false, false, false},
 		{"anonymous", "", false, true, false},
+		{"anonymous holding an address", "held@example.com", false, true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,9 +54,14 @@ func TestIssueTokens_VerifiedEmailGate(t *testing.T) {
 }
 
 // A session opened before an account's address became unproven cannot be
-// refreshed past the gate, and a refused refresh sends no email.
+// refreshed past the gate. The refusal comes before the token is consumed, so
+// a client retrying it is refused the same way rather than tripping replay
+// detection, and the token rotates normally once the address is verified. A
+// refused refresh sends no email, and is audited with the gate that refused.
 func TestRefreshToken_VerifiedEmailGate(t *testing.T) {
-	svc, repo, rec := newAuthSvcWithMailer(t)
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
 	ctx := context.Background()
 	user := seedUser(repo, "later@example.com", "", StatusActive)
 	user.EmailVerified = true
@@ -65,9 +71,50 @@ func TestRefreshToken_VerifiedEmailGate(t *testing.T) {
 	svc.cfg.AuthRequireVerifiedEmail = true
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
 
+	for range 2 {
+		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
+		require.ErrorIs(t, err, ErrEmailVerificationRequired, "a retry is refused the same way, not as a replay")
+	}
+	assert.Equal(t, 2, writer.countByEventTypeAndDetail("login_failure", "gate", "refresh"))
+
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": time.Now().UnixMilli()}))
+	_, access, rotated, err := svc.RefreshToken(ctx, refresh, "", "")
+	require.NoError(t, err)
+	assert.NotEmpty(t, access)
+	assert.NotEqual(t, refresh, rotated)
+}
+
+// A refused refresh sends no email: its user did not just sign in.
+func TestRefreshToken_VerifiedEmailGateSendsNoEmail(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	ctx := context.Background()
+	user := seedUser(repo, "quiet@example.com", "", StatusActive)
+	user.EmailVerified = true
+	_, refresh, err := svc.issueTokens(ctx, user, "", "")
+	require.NoError(t, err)
+
+	svc.cfg.AuthRequireVerifiedEmail = true
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
 	_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
-	assert.Empty(t, rec.Sent(), "a refresh is not a sign-in, so it sends no email")
+	assert.Empty(t, rec.Sent())
+}
+
+// A sign-in that proves the address is not refused: a one-time code mailed to
+// an unverified account's address verifies it, then signs it in.
+func TestVerifiedEmailGate_PasswordlessProofSignsIn(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.cfg.AuthRequireVerifiedEmail = true
+	ctx := context.Background()
+	user := seedUser(repo, "provenbycode@example.com", "", StatusActive)
+
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, user.Email))
+	sent := rec.Sent()
+	require.Len(t, sent, 1)
+	res, err := svc.VerifyEmailLoginCode(ctx, user.Email, extractCodeFromEmail(t, sent[0].Text), "", "")
+	require.NoError(t, err)
+	assert.NotEmpty(t, res.AccessToken)
+	assert.True(t, res.User.EmailVerified)
 }
 
 // Redeeming an invitation does not prove the address, since the token is

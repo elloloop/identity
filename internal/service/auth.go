@@ -1826,6 +1826,12 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // place to auto-cancel a pending self-service deletion: an owner who signs
 // back in during the grace window has reclaimed the account.
 func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+	// The verified-email gate for every sign-in, and every step that
+	// continues one, refusing with a verification email so the user has a
+	// way forward. The refresh path runs it before consuming its token.
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+		return "", "", err
+	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
 	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionStartedAtMs, authTimeMs)
 }
@@ -1839,23 +1845,33 @@ func (s *AuthService) needsEmailVerification(user *User) bool {
 		user.Email != "" && !user.EmailVerified && !user.IsAnonymous
 }
 
+// verifiedEmailGate is where the verified-email gate refuses: a sign-in is
+// sent a verification email, a refresh is not (its user did not just act).
+type verifiedEmailGate string
+
+const (
+	verifiedEmailGateSignIn  verifiedEmailGate = "sign_in"
+	verifiedEmailGateRefresh verifiedEmailGate = "refresh"
+)
+
 // enforceVerifiedEmail refuses a session to an account whose address is
-// unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on. A refused sign-in
-// (authTimeMs > 0) also sends a verification email, best-effort and
-// throttled, so the user has a way forward; a refused refresh sends none.
-func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, authTimeMs int64) error {
+// unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on, audited as
+// login_failure with reason email_not_verified and the gate that refused. A
+// refused sign-in also sends a verification email, best-effort and throttled:
+// a failure to send never changes the refusal.
+func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAddr, userAgent string, gate verifiedEmailGate) error {
 	if !s.needsEmailVerification(user) {
 		return nil
 	}
 	s.audit.Log(
 		ctx, audit.EventLoginFailure,
-		audit.WithActor(user.ID),
+		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(false),
-		audit.WithDetails(map[string]any{"reason": "email_not_verified"}),
+		audit.WithDetails(map[string]any{"reason": "email_not_verified", "gate": string(gate)}),
 	)
-	if authTimeMs > 0 {
+	if gate == verifiedEmailGateSignIn {
 		if err := s.sendEmailVerification(ctx, user.ID, emailLink{}); err != nil {
-			s.logger.Warn("session_verification_send_failed",
+			s.logger.Warn("login_verification_resend_failed",
 				zap.String("user_id", user.ID), zap.Error(err))
 		}
 	}
@@ -1872,11 +1888,11 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, auth
 // measuring from the original sign-in, and no auth_time: a refresh is not a
 // sign-in, and only the tokens a sign-in issues vouch for one.
 func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
-	// The verified-email gate, here so every path that issues a session (a
-	// sign-in, a step that continues one, a refresh, and any path added later)
-	// honours it, not only the ones that check it up front.
-	if err := s.enforceVerifiedEmail(ctx, user, authTimeMs); err != nil {
-		return "", "", err
+	// The verified-email gate's backstop: every path that mints a session (and
+	// any added later) honours it. Sign-ins and refreshes run the audited gate
+	// before reaching here, so this refuses silently.
+	if s.needsEmailVerification(user) {
+		return "", "", ErrEmailVerificationRequired
 	}
 
 	now := s.nowMs()
@@ -2333,6 +2349,13 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// exists only so the refusal is non-destructive and the client can
 	// complete the step and rotate normally.
 	if err := s.enforceDOBRequired(ctx, timeoutUser, 0, ipAddr, userAgent); err != nil {
+		return nil, "", "", err
+	}
+
+	// The verified-email gate, before the consume for the same reason: an
+	// account whose address became unverified (a SCIM email change, say)
+	// keeps its token, and rotates normally once the address is verified.
+	if err := s.enforceVerifiedEmail(ctx, timeoutUser, ipAddr, userAgent, verifiedEmailGateRefresh); err != nil {
 		return nil, "", "", err
 	}
 

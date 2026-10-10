@@ -49,22 +49,35 @@ No schema change and no migration.
   issues a session (behaviour change, flag on only).** The flag promised no
   session for an account with an unverified address, but only sign-up,
   password sign-in and the anonymous upgrade checked it. Now:
-  - A passkey sign-in, a provider sign-in, or a later sign-in step (TOTP,
-    required password change, date of birth) into an account whose address
-    is unverified is refused with `failed_precondition`
-    (`email verification required`), audited as `login_failure` with
-    `reason: email_not_verified`, and sent a verification email
+  - A passkey sign-in, a provider sign-in, a QR sign-in, or a later
+    sign-in step (TOTP, required password change, date of birth) into an
+    account whose address is unverified is refused with
+    `failed_precondition` (`email verification required`), audited as
+    `login_failure` with `reason: email_not_verified` and
+    `gate: sign_in`, and sent a verification email
     (best-effort, throttled). A sign-in that itself proves the address
     (a passwordless email code or magic link, or a provider asserting the
     account's own address) still succeeds.
-  - A refresh for such an account is refused the same way, without an
-    email, so a session issued before the address became unverified (for
-    example by a SCIM email change) cannot be renewed.
+  - A refresh for such an account is refused the same way (audited with
+    `gate: refresh`), without an email, so a session issued before the
+    address became unverified (for example by a SCIM email change) cannot be
+    renewed. The refusal comes before the refresh token is consumed: a
+    client retrying it gets the same error rather than a replay that signs
+    the account out everywhere, and the token works again once the address
+    is verified.
+  - Sessions that exist at upgrade for accounts with an unverified address
+    (an accepted invitation, a passkey or provider account) end at their
+    next refresh. When upgrading with the flag on, expect
+    those users to be asked to verify.
   - `AcceptInvitation` for an unverified invitee activates the account and
     returns the user with empty tokens, as `PasswordSignup` does, and sends
     a verification email; the invitee signs in once it is redeemed. The
     invitation token is shown to the inviting admin, so redeeming it does
     not prove the address.
+  - An anonymous upgrade through a provider whose address does not carry
+    to the stored one (a `+tag` outside Gmail) is held like a typed
+    address: the promoted account comes back with empty tokens, a
+    verification email is sent, and the anonymous session ends.
   - Username and anonymous accounts, which have no address to verify, are
     unaffected, as is every path with the flag off.
 - **Proving an account's address voids provider links added before it

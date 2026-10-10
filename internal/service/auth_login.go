@@ -243,9 +243,9 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	}
 
 	// When email verification is required, a freshly-created account is
-	// unverified and must NOT receive a live session — otherwise signup would
-	// auto-login past the very gate PasswordLogin enforces. Return the user
-	// (so the client can drive "check your email") with no tokens; the proto
+	// unverified and gets no session (issuing one would be refused). Sign-up
+	// is not a failed sign-in, so it returns the user (so the client can drive
+	// "check your email") with no tokens, audited as a success; the proto
 	// response shape is preserved, the tokens are simply empty.
 	if s.needsEmailVerification(user) {
 		s.audit.Log(
@@ -631,8 +631,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 	// the account rule after the password, so a refusal reveals nothing to a
 	// caller without it.
 	decision, err := s.postPasswordGates(ctx, user, postPasswordGateOpts{
-		checkAccess:        identifierKey == "username",
-		resendVerification: true,
+		checkAccess: identifierKey == "username",
 	}, ipAddr, userAgent)
 	if err != nil {
 		return nil, loginPolicyDecision{}, err
@@ -647,10 +646,6 @@ type postPasswordGateOpts struct {
 	// by email already passed the email-keyed gate before the lookup; a
 	// username sign-in, or a later step that re-checks, has not.
 	checkAccess bool
-	// resendVerification sends a fresh verification email when the gate
-	// refuses an unverified address: a sign-in is where the person is
-	// waiting for one.
-	resendVerification bool
 }
 
 // postPasswordGates is every gate a password sign-in applies once the
@@ -685,23 +680,8 @@ func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts po
 	// unusable (the flag defaults ON) — and there is no pre-hijacking vector
 	// to close, because there is no address for an attacker to plant a
 	// password against or for an owner to later verify.
-	if s.needsEmailVerification(user) {
-		s.audit.Log(
-			ctx, audit.EventLoginFailure,
-			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": "email_not_verified"}),
-		)
-		// Best-effort: resend the verification email so the user can complete
-		// verification and retry. Failures (throttle, transport) must not change
-		// the response — the gate result is the same either way.
-		if opts.resendVerification {
-			if sendErr := s.sendEmailVerification(ctx, user.ID, emailLink{}); sendErr != nil {
-				s.logger.Warn("login_verification_resend_failed",
-					zap.String("user_id", user.ID), zap.Error(sendErr))
-			}
-		}
-		return loginPolicyDecision{}, ErrEmailVerificationRequired
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+		return loginPolicyDecision{}, err
 	}
 
 	// Credentials are proven; consult the tenant's LoginPolicy. This runs
