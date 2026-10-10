@@ -102,6 +102,7 @@ const (
 	prfUserID    = "2"
 	prfExpiresAt = "3"
 	prfCreatedAt = "4"
+	prfEmail     = "5"
 )
 
 // ── PasskeyCredential field IDs (type_id 20) ───────────────────────

@@ -268,17 +268,22 @@ func TestPasswordLogin_LockedAccountFails(t *testing.T) {
 
 	_, err := svc.PasswordLogin(context.Background(), "locked@example.com", strongPW, "", "")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAccountLocked))
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
 
-func TestPasswordLogin_NoPasswordSetFails(t *testing.T) {
+// An account with no password answers a password sign-in exactly as an
+// unknown address does: the caller proved nothing, so it learns nothing.
+func TestPasswordLogin_NoPasswordSetIsRefusedLikeAnUnknownAddress(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	seedUser(repo, "oauth@example.com", "", "active") // no password hash
 
-	_, err := svc.PasswordLogin(context.Background(), "oauth@example.com", "anything", "", "")
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrNoPasswordSet))
+	_, noPasswordErr := svc.PasswordLogin(context.Background(), "oauth@example.com", "anything", "", "")
+	_, unknownErr := svc.PasswordLogin(context.Background(), "nobody@example.com", "anything", "", "")
+	require.ErrorIs(t, noPasswordErr, ErrUnauthenticated)
+	require.ErrorIs(t, unknownErr, ErrUnauthenticated)
+	assert.NotErrorIs(t, noPasswordErr, ErrNoPasswordSet)
+	assert.Equal(t, unknownErr.Error(), noPasswordErr.Error())
 }
 
 func TestPasswordLogin_DeactivatedAccountFails(t *testing.T) {
@@ -1004,7 +1009,7 @@ func TestPasswordSignup_PerEmailThrottle_ReturnsDecoy(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	svc.cfg.SignupEmailCooldownSeconds = 60
-	svc.signupThrottle = newEmailSendThrottle(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
+	svc.signupThrottle = newKeyCooldown(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
 
 	// First call: succeeds, user created.
 	res1, err := svc.PasswordSignup(context.Background(), "throttle@example.com", strongPW, "T", "", 0, "", EmailLinkParams{})
@@ -1038,7 +1043,7 @@ func TestPasswordSignup_PerEmailThrottle_DifferentEmails_Independent(t *testing.
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	svc.cfg.SignupEmailCooldownSeconds = 60
-	svc.signupThrottle = newEmailSendThrottle(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
+	svc.signupThrottle = newKeyCooldown(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
 
 	res1, err := svc.PasswordSignup(context.Background(), "a@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)

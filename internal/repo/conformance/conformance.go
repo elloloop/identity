@@ -263,8 +263,8 @@ func RunConformance(t *testing.T, driver Driver) {
 
 			// Verified and unverified accounts are both returned, each with
 			// its stored email-verified state: the directory discloses it.
-			if err := r.SetUserEmailVerified(ctx, a, 1_700_000_000_000); err != nil {
-				t.Fatalf("SetUserEmailVerified: %v", err)
+			if ok, err := r.SetUserEmailVerified(ctx, a, "batch-a@example.com", 1_700_000_000_000, false); err != nil || !ok {
+				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
 			}
 			got, err = r.FindUsersByEmails(ctx, []string{"batch-a@example.com", "batch-b@example.com"})
 			if err != nil {
@@ -646,7 +646,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
 			userID := createTestUser(t, r, "prt@example.com")
-			tok := &service.PasswordResetToken{TokenHash: "p-1", UserID: userID, ExpiresAt: 1_000, CreatedAt: 100}
+			tok := &service.PasswordResetToken{TokenHash: "p-1", UserID: userID, Email: "prt@example.com", ExpiresAt: 1_000, CreatedAt: 100}
 			if err := r.CreatePasswordResetToken(ctx, tok); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -656,6 +656,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			got, err := r.FindPasswordResetTokenByHash(ctx, "p-1")
 			if err != nil || got == nil {
 				t.Fatalf("Find: %v %#v", err, got)
+			}
+			if got.Email != "prt@example.com" {
+				t.Fatalf("Find: email %q, want the address the token was issued for", got.Email)
 			}
 			if err := r.MarkPasswordResetTokenConsumed(ctx, got.NodeID, 200); err != nil {
 				t.Fatalf("MarkConsumed: %v", err)
@@ -1601,13 +1604,12 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err := r.CreateOAuthIdentity(ctx, oi); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			// Composite uniqueness: a second link with same (provider, sub)
-			// must reject (the schema does not enforce this so the
-			// service layer must, and CreateOAuthIdentity is the
-			// designated guard).
+			// A (provider, sub) belongs to one account: the second link is
+			// refused with ErrAlreadyExists, which callers rely on to tell a
+			// lost race from a transient failure.
 			dup := &service.OAuthIdentity{UserID: otherUID, Provider: "google", ProviderUserID: "g-123", CreatedAt: 200}
-			if err := r.CreateOAuthIdentity(ctx, dup); err == nil {
-				t.Fatal("CreateOAuthIdentity duplicate: want error, got nil")
+			if err := r.CreateOAuthIdentity(ctx, dup); !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("CreateOAuthIdentity duplicate: want ErrAlreadyExists, got %v", err)
 			}
 			otherProvider := &service.OAuthIdentity{
 				UserID:          uid,
@@ -1778,16 +1780,65 @@ func RunConformance(t *testing.T, driver Driver) {
 		t.Run("SetUserEmailVerified", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
-			id, err := r.CreateUser(ctx, &service.User{Email: "ev@example.com", Status: "active"})
+			id, err := r.CreateUser(ctx, &service.User{
+				Email: "ev@example.com", Status: "active", PasswordHash: "hash", PasswordChangeRequired: true,
+			})
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
-			if err := r.SetUserEmailVerified(ctx, id, 555); err != nil {
-				t.Fatalf("SetUserEmailVerified: %v", err)
+			if ok, err := r.SetUserEmailVerified(ctx, id, "ev@example.com", 555, false); err != nil || !ok {
+				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
 			}
 			got, _ := r.GetUser(ctx, id)
-			if got == nil || !got.EmailVerified || got.EmailVerifiedAt != 555 {
+			if got == nil || !got.EmailVerified || got.EmailVerifiedAt != 555 || got.UpdatedAt.UnixMilli() != 555 ||
+				got.PasswordHash != "hash" || !got.PasswordChangeRequired {
 				t.Fatalf("after Set: %+v", got)
+			}
+		})
+
+		t.Run("SetUserEmailVerified_ClearsPassword", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{
+				Email: "evp@example.com", Status: "active", PasswordHash: "hash", PasswordChangeRequired: true,
+			})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			if ok, err := r.SetUserEmailVerified(ctx, id, "evp@example.com", 555, true); err != nil || !ok {
+				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || !got.EmailVerified || got.PasswordHash != "" || got.PasswordChangeRequired {
+				t.Fatalf("after Set: %+v", got)
+			}
+		})
+
+		// The write is a compare-and-set on the stored email: an account that
+		// holds another address than the one proven is left untouched, and
+		// the comparison is exact, not case-folded.
+		t.Run("SetUserEmailVerified_OnlyWhileTheEmailIsUnchanged", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{Email: "moved@example.com", Status: "active", PasswordHash: "hash"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			for _, proven := range []string{"before@example.com", "Moved@example.com"} {
+				ok, err := r.SetUserEmailVerified(ctx, id, proven, 555, true)
+				if err != nil || ok {
+					t.Fatalf("SetUserEmailVerified(%q) = %v %v, want false nil", proven, ok, err)
+				}
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || got.EmailVerified || got.EmailVerifiedAt != 0 || got.PasswordHash != "hash" {
+				t.Fatalf("after a refused Set: %+v", got)
+			}
+			if ok, err := r.SetUserEmailVerified(ctx, "no-such-user", "moved@example.com", 555, false); err != nil || ok {
+				t.Fatalf("missing user = %v %v, want false nil", ok, err)
+			}
+			if _, err := r.SetUserEmailVerified(ctx, id, "", 555, false); err == nil {
+				t.Fatal("empty email: want an error")
 			}
 		})
 

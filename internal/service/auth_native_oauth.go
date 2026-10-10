@@ -171,7 +171,7 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 
@@ -197,8 +197,6 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 	if err != nil {
 		return nil, err
 	}
-	// Stamped once the session is issued, not for a sign-in the gate refused.
-	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info(
 		"native_oauth_login_success",
 		zap.String("email", redactEmail(email)),

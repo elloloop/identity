@@ -217,7 +217,7 @@ func TestUsernameSignup_ChildIsAGuardiansToCreate(t *testing.T) {
 
 func TestUsernameSignup_Throttled(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
-	svc.signupThrottle = newEmailSendThrottle(60_000, 0)
+	svc.signupThrottle = newKeyCooldown(60_000, 0)
 	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
 
 	// Spend the username's bucket.
@@ -369,7 +369,7 @@ func TestProbeBudget_ReserveRefundWindow(t *testing.T) {
 func TestUsernameSignup_ParallelTakenAnswersStayWithinTheBudget(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	svc.usernameProbes = newProbeBudget(60_000, 3)
-	svc.signupThrottle = newEmailSendThrottle(0, 0)
+	svc.signupThrottle = newKeyCooldown(0, 0)
 	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
 	_, err := svc.UsernameSignup(ctx, "taken", accessTestPassword, "", 0, "", "")
 	require.NoError(t, err)

@@ -70,10 +70,11 @@ func formatExpiresIn(d time.Duration) string {
 // carries the admitted params (see checkEmailLinkParams).
 //
 // Per OWASP guidance and the proto contract, every account-dependent
-// outcome returns nil — an unknown email included — and the response
-// time is kept roughly equivalent, so the endpoint cannot be used as an
-// email-enumeration oracle. Errors during token persistence or email
-// dispatch are logged internally; the caller is told nothing. The one
+// outcome returns nil — an unknown email included — and the account is
+// looked up and mailed through dispatchEmailSend, so neither the answer nor
+// (with async dispatch) its timing is an email-enumeration oracle. Errors
+// during token persistence or email dispatch are logged internally; the
+// caller is told nothing. The one
 // error it returns is ErrInvalidArgument for refused link params, which
 // are checked first and from the request alone, so that answer is the
 // same for every email.
@@ -97,12 +98,23 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		s.logger.Info("password_reset_requested_unusable_email")
 		return nil
 	}
+	// Everything that depends on the account runs off the request, so the
+	// response takes the same time whether or not a reset is mailed.
+	s.dispatchEmailSend(ctx, "password_reset", func(ctx context.Context) {
+		s.sendPasswordResetNow(ctx, emailAddr, link)
+	})
+	return nil
+}
 
+// sendPasswordResetNow is the body of RequestPasswordReset's dispatch: it
+// finds the account, mints its reset token and mails the link. Silent — every
+// outcome is logged, never surfaced.
+func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string, link emailLink) {
 	user, err := s.repo(ctx).FindUserByEmail(ctx, emailAddr)
 	if err != nil {
 		s.logger.Warn("password_reset_lookup_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
-		return nil
+		return
 	}
 	// A reset mail to an address the project refuses is spam the project pays
 	// for: the account it would restore cannot log in anyway, and the message
@@ -116,17 +128,17 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		!accessPermits(s.cfg, scope.Access, canonicalize(emailAddr), false) {
 		s.logger.Info("password_reset_send_suppressed_by_access",
 			zap.String("email", redactEmail(emailAddr)))
-		return nil
+		return
 	}
 
 	if user == nil {
 		s.logger.Info("password_reset_unknown_email", zap.String("email", redactEmail(emailAddr)))
-		return nil
+		return
 	}
 
 	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
 		s.logger.Info("password_reset_throttled", zap.String("email", redactEmail(emailAddr)))
-		return nil
+		return
 	}
 
 	rawToken := randomToken(32)
@@ -137,12 +149,13 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	if err := s.repo(ctx).CreatePasswordResetToken(ctx, &PasswordResetToken{
 		TokenHash: tokenHash,
 		UserID:    user.ID,
+		Email:     user.Email,
 		ExpiresAt: now + int64(expiry/time.Millisecond),
 		CreatedAt: now,
 	}); err != nil {
 		s.logger.Warn("password_reset_token_create_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
-		return nil
+		return
 	}
 
 	brand := resolveBranding(ctx, s.cfg, link.product)
@@ -153,7 +166,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	}))
 	if err != nil {
 		s.logger.Warn("password_reset_render_failed", zap.Error(err))
-		return nil
+		return
 	}
 	msg := email.Message{
 		To:      user.Email,
@@ -174,7 +187,16 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"step": "requested"}),
 	)
-	return nil
+}
+
+// resetTokenBindsAddress reports whether the account still holds the address
+// a reset token was issued for. An account without an address (a username
+// account an admin reset) is matched only by a token issued without one.
+func resetTokenBindsAddress(issuedFor, current string) bool {
+	if current == "" {
+		return issuedFor == ""
+	}
+	return ProofCarriesTo(issuedFor, current)
 }
 
 // ── ConfirmPasswordReset ───────────────────────────────────────────────
@@ -182,7 +204,10 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 // ConfirmPasswordReset consumes a password-reset token and sets the
 // user's new password.
 //
-// Token must be unconsumed and unexpired. On success, every refresh
+// Token must be unconsumed and unexpired, and the account must still hold
+// the address the token was issued for: whoever keeps a mailbox the account
+// has moved away from must not keep a way in. That refusal reads as an
+// invalid token and spends it. On success, every refresh
 // token belonging to the user is revoked — OAuth 2.1 §4.13 best
 // practice for any credential change forces re-login on all devices.
 func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPassword string) error {
@@ -219,6 +244,14 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	}
 	if user == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if !resetTokenBindsAddress(rec.Email, user.Email) {
+		if err := s.repo(ctx).MarkPasswordResetTokenConsumed(ctx, rec.NodeID, s.nowMs()); err != nil {
+			s.logger.Warn("password_reset_consume_failed",
+				zap.String("user_id", user.ID), zap.Error(err))
+		}
+		s.logger.Info("password_reset_address_changed", zap.String("user_id", user.ID))
+		return fmt.Errorf("%w: invalid reset token", ErrUnauthenticated)
 	}
 
 	// Enforce the user's tenant password policy now that the owning user
@@ -343,7 +376,8 @@ func (s *AuthService) sendEmailVerification(ctx context.Context, userID string, 
 // ── VerifyEmail ────────────────────────────────────────────────────────
 
 // VerifyEmail consumes a verification token and marks the user's
-// email as verified. Idempotent — re-verifying an already-verified
+// email as verified, voiding what was added before it on an account a
+// provider claimed (addressClaimedByProvider). Idempotent — re-verifying an already-verified
 // user still consumes the supplied token but does not change state.
 // The token proves only the address it was mailed to: once the account
 // holds another address it is refused (and consumed). Returns the
@@ -377,7 +411,23 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 	}
 
 	now := s.nowMs()
-	if !ProofCarriesTo(rec.Email, user.Email) {
+	proven := ProofCarriesTo(rec.Email, user.Email)
+	if proven && !user.EmailVerified {
+		proof := externalProof{address: rec.Email, method: "verification_link", keepsAssertingLinks: true}
+		claimed, err := s.addressClaimedByProvider(ctx, user)
+		if err != nil {
+			return nil, s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
+		}
+		if claimed {
+			if err := s.markEmailVerifiedViaExternalProof(ctx, user, proof, now); err != nil {
+				return nil, err
+			}
+			proven = user.EmailVerified
+		} else if proven, err = s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, now, false); err != nil {
+			return nil, fmt.Errorf("setting email verified: %w", err)
+		}
+	}
+	if !proven {
 		if err := s.repo(ctx).MarkEmailVerificationTokenConsumed(ctx, rec.NodeID, now); err != nil {
 			s.logger.Warn("email_verification_consume_failed",
 				zap.String("user_id", user.ID), zap.Error(err))
@@ -386,9 +436,6 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 		return nil, fmt.Errorf("%w: verification token was sent to another address", ErrUnauthenticated)
 	}
 	if !user.EmailVerified {
-		if err := s.repo(ctx).SetUserEmailVerified(ctx, user.ID, now); err != nil {
-			return nil, fmt.Errorf("setting email verified: %w", err)
-		}
 		user.EmailVerified = true
 		user.EmailVerifiedAt = now
 	}
@@ -398,6 +445,27 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
 	return user, nil
+}
+
+// addressClaimedByProvider reports whether a provider link on the account
+// asserted a spelling of its address that does not prove it: a +tag outside
+// Gmail. Such an account is held unverified because its claim to the address
+// came from that provider, so whoever holds it may not own the mailbox, and
+// a verification link its owner redeems voids what was added before, as a
+// sign-in proof does. Any other account keeps its credentials: the link
+// completes the sign-up that set them.
+func (s *AuthService) addressClaimedByProvider(ctx context.Context, user *User) (bool, error) {
+	links, err := s.repo(ctx).ListOAuthIdentitiesForUser(ctx, user.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, link := range links {
+		asserted, _ := canonicalMailbox(link.EmailAtLinkTime)
+		if string(asserted) == user.Email && !ProofCarriesTo(link.EmailAtLinkTime, user.Email) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // displayNameOrEmail prefers the user's display name and falls back

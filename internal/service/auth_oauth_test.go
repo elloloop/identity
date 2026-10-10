@@ -166,7 +166,7 @@ func TestOAuthLogin_ClearsPlantedPasswordOnPreviouslyUnverifiedAccount(t *testin
 	// account no longer has a password set.
 	_, err = svc.PasswordLogin(context.Background(), "victim@example.com", plantedPW, "1.1.1.1", "agent")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrNoPasswordSet))
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
 
 	// (d) The pre-existing session is revoked alongside the cleared password,
 	// so an attacker's planted-password session cannot survive the verification.

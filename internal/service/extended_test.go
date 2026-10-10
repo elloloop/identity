@@ -1569,10 +1569,10 @@ func TestCheckAccountStatus_Branches(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	require.NoError(t, svc.checkAccountStatus(context.Background(), &User{Status: ""}, "", ""))
-	require.NoError(t, svc.checkAccountStatus(context.Background(), &User{Status: "ACTIVE"}, "", ""))
-	require.ErrorIs(t, svc.checkAccountStatus(context.Background(), &User{Status: "invited"}, "", ""), ErrInvitationPending)
-	require.ErrorIs(t, svc.checkAccountStatus(context.Background(), &User{Status: "suspended"}, "", ""), ErrAccountNotActive)
+	require.NoError(t, svc.checkAccountStatus(context.Background(), &User{Status: ""}, "", "", sessionGateSignIn))
+	require.NoError(t, svc.checkAccountStatus(context.Background(), &User{Status: "ACTIVE"}, "", "", sessionGateSignIn))
+	require.ErrorIs(t, svc.checkAccountStatus(context.Background(), &User{Status: "invited"}, "", "", sessionGateSignIn), ErrInvitationPending)
+	require.ErrorIs(t, svc.checkAccountStatus(context.Background(), &User{Status: "suspended"}, "", "", sessionGateSignIn), ErrAccountNotActive)
 }
 
 // ── Stub implementations - smoke test all error paths ──────────────────
@@ -1747,7 +1747,7 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if err := r.MarkEmailVerificationTokenConsumed(ctx, "", 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("MarkEmailVerificationTokenConsumed: %v", err)
 	}
-	if err := r.SetUserEmailVerified(ctx, "", 0); !errors.Is(err, ErrServiceUnavailable) {
+	if _, err := r.SetUserEmailVerified(ctx, "", "", 0, false); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("SetUserEmailVerified: %v", err)
 	}
 	if err := r.CreateEmailChangeToken(ctx, &EmailChangeToken{}); !errors.Is(err, ErrServiceUnavailable) {

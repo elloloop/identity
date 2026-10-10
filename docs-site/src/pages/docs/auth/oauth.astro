@@ -39,6 +39,17 @@ import { Code } from "astro-expressive-code/components";
 -e GATEWAY_OAUTH_APPLE_PRIVATE_KEY="..."`} lang="bash" />
 
   <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm mt-4">
+    <strong>GitHub email.</strong> GitHub issues no ID token, so identity reads
+    the user's addresses from <code>/user/emails</code> (the
+    <code>user:email</code> scope, which <code>BeginOAuthLogin</code> requests)
+    and signs the user in with the verified primary address, else the first
+    verified one. The profile's public email is never used: GitHub does not
+    verify it. A GitHub account with no verified address, or a token that
+    cannot read <code>/user/emails</code>, is refused with
+    <code>Unauthenticated</code>.
+  </div>
+
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm mt-4">
     <strong>Apple Configuration.</strong> Apple requires a Team ID, a Services ID (used as the Client ID), a Key ID, and an ECDSA private key (PEM or Base64).
     Unlike other providers, Apple sends this headless flow's callback via <code>POST</code>. Configure an application-owned HTTPS callback that accepts <code>code</code>, <code>state</code>, and the optional <code>user</code> payload, then forwards them to <code>OAuthLogin</code>. Configure <code>https://your-api.com/oauth/callback/apple</code> only when using the hosted flow below.
   </div>
@@ -434,9 +445,9 @@ message NativeOAuthLoginResponse {
     <li>
       <strong>New user.</strong> Created with status
       <code>USER_STATUS_ACTIVE</code> and role <code>member</code>.
-      No password hash is stored — subsequent <code>PasswordLogin</code>
-      attempts return <code>no password set for this account</code> until
-      they set one.
+      No password hash is stored — a <code>PasswordLogin</code> is refused
+      as for an unknown address (<code>unauthenticated</code>) until they set
+      one.
     </li>
   </ul>
   <p>
@@ -505,6 +516,49 @@ message NativeOAuthLoginResponse {
     rest — only the user id is stored alongside the
     <code>code_hash</code>, so a leaked code store is useless after the
     60s window or a single redeem.
+  </p>
+
+  <h3 id="hosted-callback-errors">Callback errors</h3>
+  <p>
+    A callback whose signed state token (or its CSRF cookie) does not verify
+    has no trusted <code>return_to</code>, so it answers HTTP 400 on the
+    identity origin. Once the state token verifies, every refused sign-in is
+    302-redirected to <code>return_to?error=&lt;code&gt;</code>, with no
+    <code>code</code> parameter, so the app can tell the user what to do:
+  </p>
+  <ul>
+    <li>
+      <code>email_not_verified</code> — the account's address is unverified
+      and <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> is on. A
+      verification email has been sent (throttled); ask the user to follow
+      it, then sign in again.
+    </li>
+    <li>
+      <code>account_disabled</code> — the account is deactivated or
+      suspended.
+    </li>
+    <li>
+      <code>account_locked</code> — the account is temporarily locked after
+      too many failed attempts; try again later.
+    </li>
+    <li>
+      <code>access_denied</code> — any other refusal: the provider exchange
+      failed or the provider did not verify its address, the project or the
+      tenant's login policy does not admit this sign-in, or the provider's
+      address does not prove the account it matches.
+    </li>
+    <li>
+      <code>temporarily_unavailable</code> — OAuth is not configured for the
+      project, or a dependency the sign-in needs is briefly unavailable;
+      retry.
+    </li>
+    <li><code>server_error</code> — an unexpected failure; retry.</li>
+  </ul>
+  <p>
+    The three account codes are given only for the account the provider
+    proved, so they say nothing about any other account. The redirect
+    carries no description; the reason is logged server-side as
+    <code>hosted_oauth_callback_failed</code>.
   </p>
 
   <h3>Enabling the hosted flow</h3>

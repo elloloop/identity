@@ -116,7 +116,11 @@ GATEWAY_SCIM_PROJECT_ID=<project-id>`}
     the same mailbox (a different letter case, or Gmail dots and
     <code>+tag</code>) keeps the verified state. SCIM stores an email
     without its <code>+tag</code>, so an account stored with a tag outside
-    Gmail reads unverified after its next SCIM write.
+    Gmail reads unverified after its next SCIM write. Each such write is
+    audited as <code>email_unverified</code> against the account, with
+    <code>source: scim</code> and whether the account was verified before
+    (<code>was_verified</code>) in its details; the entry never carries the
+    address.
   </p>
   <p>
     With <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> (on by default),

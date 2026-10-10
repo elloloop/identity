@@ -44,6 +44,16 @@ func dobTicketFrom(t *testing.T, err error) string {
 	return dobErr.Ticket
 }
 
+// requireNoLastLogin asserts the account holds no last login: the sign-in
+// was refused, so none happened.
+func requireNoLastLogin(t *testing.T, repo *fakeRepo, email string) {
+	t.Helper()
+	u, err := repo.FindUserByEmail(context.Background(), email)
+	require.NoError(t, err)
+	require.NotNil(t, u)
+	assert.Zero(t, u.LastLoginAtMs, "a refused sign-in is not a last login")
+}
+
 // dobTicketFor seeds a dob-less password account and drives a login into
 // the dob_required refusal, returning the completion ticket.
 func dobTicketFor(t *testing.T, svc *AuthService, repo *fakeRepo, email string) string {
@@ -110,6 +120,7 @@ func TestDOBRequired_PasswordLogin(t *testing.T) {
 
 	_, err := svc.PasswordLogin(context.Background(), "nodob@example.com", strongPW, "1.2.3.4", "agent")
 	requireDOBRefusal(t, svc, err)
+	requireNoLastLogin(t, repo, "nodob@example.com")
 }
 
 // PasswordSignup without a DOB under the flag is refused before any
@@ -205,7 +216,7 @@ func TestDOBRequired_RedeemOAuthCode(t *testing.T) {
 }
 
 func TestDOBRequired_VerifyEmailLoginCode(t *testing.T) {
-	svc, _, rec := passwordlessSvc(t)
+	svc, repo, rec := passwordlessSvc(t)
 	enableAgeGate(t, svc, true)
 	ctx := context.Background()
 
@@ -213,10 +224,11 @@ func TestDOBRequired_VerifyEmailLoginCode(t *testing.T) {
 	code := extractCodeFromEmail(t, rec.Sent()[0].Text)
 	_, err := svc.VerifyEmailLoginCode(ctx, "otp-nodob@test.com", code, "1.2.3.4", "agent")
 	requireDOBRefusal(t, svc, err)
+	requireNoLastLogin(t, repo, "otp-nodob@test.com")
 }
 
 func TestDOBRequired_RedeemMagicLink(t *testing.T) {
-	svc, _, rec := passwordlessSvc(t)
+	svc, repo, rec := passwordlessSvc(t)
 	enableAgeGate(t, svc, true)
 	ctx := context.Background()
 
@@ -224,6 +236,7 @@ func TestDOBRequired_RedeemMagicLink(t *testing.T) {
 	token := extractTokenFromLink(t, rec.Sent()[0].Text)
 	_, err := svc.RedeemMagicLink(ctx, token, "1.2.3.4", "agent")
 	requireDOBRefusal(t, svc, err)
+	requireNoLastLogin(t, repo, "ml-nodob@test.com")
 }
 
 func TestDOBRequired_CompletePasskeySignup(t *testing.T) {
@@ -300,6 +313,7 @@ func TestDOBRequired_VerifyTotp(t *testing.T) {
 
 	_, err = svc.VerifyTotp(context.Background(), "dob-totp-challenge", recoveryCode, "1.2.3.4", "agent")
 	requireDOBRefusal(t, svc, err)
+	requireNoLastLogin(t, repo, "totp-nodob@example.com")
 }
 
 func TestDOBRequired_PollQrLogin(t *testing.T) {
@@ -741,4 +755,55 @@ func TestSubmitDateOfBirth_IsSetOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, dobAgeMs(8), stored.DateOfBirthMs, "the losing submission must not overwrite the date")
 	require.Equal(t, StatusPendingParentalConsent, stored.Status, "the account must stay gated")
+}
+
+// An address that became unverified after the ticket was minted refuses the
+// submission before the date is stored, whichever band it would land in.
+func TestSubmitDateOfBirth_UnverifiedAddressRefusedWithoutStoring(t *testing.T) {
+	for name, dob := range map[string]int64{"adult": dobAgeMs(30), "child": dobAgeMs(8)} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newTestAuthService(t, repo)
+			enableAgeGate(t, svc, true)
+			ctx := context.Background()
+			ticket := dobTicketFor(t, svc, repo, "unverified@example.com")
+
+			svc.cfg.AuthRequireVerifiedEmail = true
+			u, err := repo.FindUserByEmail(ctx, "unverified@example.com")
+			require.NoError(t, err)
+			repo.mu.Lock()
+			repo.users[u.ID].EmailVerified = false
+			repo.mu.Unlock()
+
+			res, err := svc.SubmitDateOfBirth(ctx, ticket, dob, "1.2.3.4", "agent")
+			require.ErrorIs(t, err, ErrEmailVerificationRequired)
+			require.Nil(t, res)
+
+			stored, err := repo.GetUser(ctx, u.ID)
+			require.NoError(t, err)
+			assert.Zero(t, stored.DateOfBirthMs, "a refused submission must not store the date")
+			assert.Equal(t, "active", stored.Status, "a refused submission must not gate the account")
+			repo.mu.Lock()
+			refreshRows := len(repo.refreshTokens)
+			repo.mu.Unlock()
+			assert.Zero(t, refreshRows)
+		})
+	}
+}
+
+// A completion the product's age guardrail refuses at issuance stores the
+// date (the account has given it) but records no login.
+func TestSubmitDateOfBirth_RefusedIssuanceRecordsNoLastLogin(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	enableAgeGate(t, svc, true)
+	ctx := productScope(t, adultMinimumJSON, restrictedProduct)
+	u := seedUser(repo, "teen-nodob@example.com", hashPW(t, strongPW), StatusActive)
+	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: u.ID}, 0)
+	require.NoError(t, err)
+
+	res, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(15), "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrProductAgeRestricted)
+	require.Nil(t, res)
+	requireNoLastLogin(t, repo, "teen-nodob@example.com")
 }

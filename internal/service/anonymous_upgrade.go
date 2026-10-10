@@ -227,7 +227,7 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 			UserID:          userID,
 			Provider:        identity.Provider,
 			ProviderUserID:  identity.ProviderUserID,
-			EmailAtLinkTime: string(email),
+			EmailAtLinkTime: assertedAddress(identity),
 			CreatedAt:       s.nowMs(),
 		}); err != nil {
 			// Only a genuine uniqueness conflict is a racing link; anything
@@ -274,7 +274,7 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 			"provider":           identity.Provider,
 			"provider_user_id":   identity.ProviderUserID,
 			"source":             "anonymous_upgrade",
-			"email_at_link_time": string(email),
+			"email_at_link_time": assertedAddress(identity),
 		}),
 	)
 	// The provider just authenticated the person: a sign-in.

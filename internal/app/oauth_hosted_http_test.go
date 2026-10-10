@@ -22,7 +22,8 @@ import (
 // app-package handler tests can drive the full hosted flow without a
 // live provider.
 type appTestStubProvider struct {
-	err error
+	err   error
+	email string
 }
 
 func (p *appTestStubProvider) AuthorizationURL(_ context.Context, redirectURI, state, _ string) (string, error) {
@@ -38,16 +39,25 @@ func (p *appTestStubProvider) Exchange(_ context.Context, _ oauth.ExchangeParams
 	if p.err != nil {
 		return nil, p.err
 	}
+	email := p.email
+	if email == "" {
+		email = "app-hosted@example.com"
+	}
 	return &oauth.Identity{
 		Provider:       "google",
 		ProviderUserID: "app-hosted-user",
-		Email:          "app-hosted@example.com",
+		Email:          email,
 		EmailVerified:  true,
 		Name:           "App Hosted",
 	}, nil
 }
 
 func newHostedTestHandler(t *testing.T, allowlist string, reg *oauth.Registry) http.Handler {
+	t.Helper()
+	return newHostedTestHandlerWith(t, allowlist, reg, func(*config.Config) {})
+}
+
+func newHostedTestHandlerWith(t *testing.T, allowlist string, reg *oauth.Registry, configure func(*config.Config)) http.Handler {
 	t.Helper()
 	signer := jwttest.NewSigner(t, "hosted-app-test")
 	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{
@@ -57,23 +67,25 @@ func newHostedTestHandler(t *testing.T, allowlist string, reg *oauth.Registry) h
 		t.Fatalf("NewWebAuthnService: %v", err)
 	}
 	repo := memory.New()
+	cfg := &config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
+		DefaultTenantID: "tenant",
+		// Open the env default project so the hosted-OAuth flow exercises the
+		// handler chain rather than the access gate (default-DENY without this).
+		DefaultProjectAccessMode: service.AccessModeOpen,
+		AuthAllowLocal:           true,
+		AllowedOrigins:           "http://localhost:9002",
+		JWTExpirySeconds:         900,
+		RefreshExpirySeconds:     604800,
+		LoginMaxFailedAttempts:   5,
+		LoginLockoutSeconds:      900,
+		PasskeyRPID:              "localhost",
+		PasskeyRPName:            "Test",
+		PasskeyOrigin:            "http://localhost:9002",
+		OAuthAllowedReturnURLs:   allowlist,
+	}
+	configure(cfg)
 	built, err := New(Deps{
-		Config: &config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
-			DefaultTenantID: "tenant",
-			// Open the env default project so the hosted-OAuth flow exercises the
-			// handler chain rather than the access gate (default-DENY without this).
-			DefaultProjectAccessMode: service.AccessModeOpen,
-			AuthAllowLocal:           true,
-			AllowedOrigins:           "http://localhost:9002",
-			JWTExpirySeconds:         900,
-			RefreshExpirySeconds:     604800,
-			LoginMaxFailedAttempts:   5,
-			LoginLockoutSeconds:      900,
-			PasskeyRPID:              "localhost",
-			PasskeyRPName:            "Test",
-			PasskeyOrigin:            "http://localhost:9002",
-			OAuthAllowedReturnURLs:   allowlist,
-		},
+		Config:             cfg,
 		Logger:             zap.NewNop(),
 		Signer:             signer,
 		Repo:               repo,
@@ -301,6 +313,80 @@ func TestHostedHTTP_FullStartCallback_FormPost(t *testing.T) {
 	cb, _ := url.Parse(redir)
 	if cb.Query().Get("code") == "" {
 		t.Fatal("callback redirect carried no one-time code")
+	}
+}
+
+// hostedCallback runs /start then the callback for provider google and
+// returns the callback's response.
+func hostedCallback(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
+	t.Helper()
+	startRR := httptest.NewRecorder()
+	h.ServeHTTP(startRR, httptest.NewRequest(http.MethodGet,
+		"/oauth/start/google?return_to="+url.QueryEscape("https://app.test/finish?step=2"), nil))
+	loc, _ := url.Parse(startRR.Header().Get("Location"))
+	cbReq := httptest.NewRequest(http.MethodGet,
+		"/oauth/callback/google?state="+url.QueryEscape(loc.Query().Get("state"))+"&code=auth-xyz", nil)
+	for _, c := range startRR.Result().Cookies() {
+		cbReq.AddCookie(c)
+	}
+	cbRR := httptest.NewRecorder()
+	h.ServeHTTP(cbRR, cbReq)
+	return cbRR
+}
+
+// A sign-in refused after the state token verified goes back to the app's
+// return_to with error=<code> and no one-time code, and spends the flow's
+// CSRF token as a completed one does.
+func TestHostedHTTP_CallbackRefusalRedirectsWithErrorCode(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		provider  *appTestStubProvider
+		configure func(*config.Config)
+		want      string
+	}{
+		{
+			name:     "unverified address",
+			provider: &appTestStubProvider{email: "app-hosted+tag@example.com"},
+			configure: func(c *config.Config) {
+				c.AuthRequireVerifiedEmail = true
+			},
+			want: service.HostedOAuthErrorEmailNotVerified,
+		},
+		{
+			name:      "failed exchange",
+			provider:  &appTestStubProvider{err: oauth.ErrCodeExchangeFailed},
+			configure: func(*config.Config) {},
+			want:      service.HostedOAuthErrorAccessDenied,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHostedTestHandlerWith(t, "https://app.test/", hostedTestRegistry(tc.provider), tc.configure)
+			rr := hostedCallback(t, h)
+			if rr.Code != http.StatusFound {
+				t.Fatalf("callback status = %d, want 302; body=%q", rr.Code, rr.Body.String())
+			}
+			redir, err := url.Parse(rr.Header().Get("Location"))
+			if err != nil {
+				t.Fatalf("parse Location: %v", err)
+			}
+			if redir.Scheme != "https" || redir.Host != "app.test" || redir.Path != "/finish" {
+				t.Fatalf("callback redirect = %q", redir)
+			}
+			q := redir.Query()
+			if got := q.Get("error"); got != tc.want {
+				t.Fatalf("error = %q, want %q", got, tc.want)
+			}
+			if q.Get("code") != "" {
+				t.Fatal("a refused callback carried a one-time code")
+			}
+			if q.Get("step") != "2" {
+				t.Fatalf("return_to query lost: %q", redir)
+			}
+			cookies := rr.Result().Cookies()
+			if len(cookies) != 1 || cookies[0].MaxAge >= 0 {
+				t.Fatalf("csrf cookie not cleared: %#v", cookies)
+			}
+		})
 	}
 }
 

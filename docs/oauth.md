@@ -26,6 +26,13 @@ A provider is enabled when its required credentials are set (client id and secre
 | GitHub    | `GATEWAY_OAUTH_GITHUB_CLIENT_ID`     | `GATEWAY_OAUTH_GITHUB_CLIENT_SECRET`     |
 | Apple     | `GATEWAY_OAUTH_APPLE_CLIENT_ID`      | `GATEWAY_OAUTH_APPLE_PRIVATE_KEY` (along with TEAM_ID and KEY_ID) |
 
+GitHub issues no ID token, so identity reads the user's addresses from
+`/user/emails` (the `user:email` scope, requested by default) and signs the
+user in with the verified primary address, else the first verified one. The
+profile's public email is never used: GitHub does not verify it. A GitHub
+account with no verified address, or a token that cannot read
+`/user/emails`, is refused with `Unauthenticated`.
+
 Microsoft also accepts `GATEWAY_MICROSOFT_TENANT_ID` (optional). At
 startup identity logs the enabled providers (`oauth_providers_enabled`)
 or warns when none are configured.
@@ -171,10 +178,30 @@ Browser                 identity                       Provider
 2. **`GET/POST /oauth/callback/{provider}`** — the single registered redirect
    URI. Apple uses `POST`; others use `GET`. Recovers the state token, runs the code exchange + token mint,
    mints a single-use one-time code, and 302-redirects to
-   `return_to?code=<otc>`. On any failure it returns a generic `400`
-   (it cannot trust an unverified `return_to`) and logs server-side.
+   `return_to?code=<otc>`. A refused sign-in is redirected to
+   `return_to?error=<code>` instead ([callback errors](#callback-errors)).
 3. **`RedeemOAuthCode{code}`** (Connect RPC) — the SPA exchanges the
    one-time code for `{user, access_token, refresh_token, expires_in}`.
+
+### Callback errors
+
+A callback whose signed state token (or its CSRF cookie) does not verify has
+no trusted `return_to`, so it answers `400` on the identity origin. Once the
+state token verifies, every refused sign-in is 302-redirected to
+`return_to?error=<code>`, with no `code` parameter:
+
+| `error` | Meaning |
+| --- | --- |
+| `email_not_verified` | The account's address is unverified and `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` is on. A verification email has been sent (throttled); the user follows it, then signs in again. |
+| `account_disabled` | The account is deactivated or suspended. |
+| `account_locked` | The account is temporarily locked after too many failed attempts. |
+| `access_denied` | Any other refusal: the exchange failed or the provider did not verify its address, the project or the tenant's login policy does not admit the sign-in, or the provider's address does not prove the account it matches. |
+| `temporarily_unavailable` | OAuth is not configured for the project, or a dependency the sign-in needs is briefly unavailable; retry. |
+| `server_error` | An unexpected failure; retry. |
+
+The account codes are given only for the account the provider proved, so
+they say nothing about any other account. The redirect carries no
+description; the reason is logged as `hosted_oauth_callback_failed`.
 
 ### Central-hub routing for non-default projects (`GATEWAY_OAUTH_HUB_SHARING`)
 

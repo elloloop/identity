@@ -130,43 +130,61 @@ func runConcurrencyConformance(t *testing.T, driver Driver) {
 			}
 		})
 
-		// Composite uniqueness under contention: a graph backend may have no composite
-		// unique constraint, so CreateOAuthIdentity enforces (provider,
-		// provider_user_id) uniqueness with a non-atomic query-then-
-		// create. N goroutines racing the same (provider, sub) must still
-		// yield exactly one link — more than one is a uniqueness breach
-		// (two accounts could claim the same external identity). Memory
-		// (locked) and postgres (unique index) serialize this; a
-		// query-then-create guard without a serialization point does not.
+		// A provider subject belongs to one account, however many link it at
+		// once. Half the writers target one account and half each target their
+		// own, so a race onto the same account and a race across accounts are
+		// both exercised: exactly one link may land, every other writer must
+		// be told ErrAlreadyExists (not a transient error a caller would
+		// retry), and the subject must resolve to the winner.
 		t.Run("ConcurrentDuplicate_OAuthIdentity_SingleRow", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
-			uid := createTestUser(t, r, "conc-dup-oa@example.com")
+			shared := createTestUser(t, r, "conc-dup-oa@example.com")
+			owners := make([]string, concurrentWriters)
+			for i := range owners {
+				owners[i] = shared
+				if i%2 == 1 {
+					owners[i] = createTestUser(t, r, fmt.Sprintf("conc-dup-oa-%d@example.com", i))
+				}
+			}
 
 			var wg sync.WaitGroup
 			start := make(chan struct{})
+			var winner atomic.Value
 			var winners int64
-			for i := 0; i < concurrentWriters; i++ {
+			errs := make(chan error, concurrentWriters)
+			for _, uid := range owners {
 				wg.Add(1)
-				go func() {
+				go func(uid string) {
 					defer wg.Done()
 					<-start
-					if err := r.CreateOAuthIdentity(ctx, &service.OAuthIdentity{
+					err := r.CreateOAuthIdentity(ctx, &service.OAuthIdentity{
 						UserID: uid, Provider: "google", ProviderUserID: "dup-sub", CreatedAt: 100,
-					}); err == nil {
+					})
+					switch {
+					case err == nil:
 						atomic.AddInt64(&winners, 1)
+						winner.Store(uid)
+					case !errors.Is(err, service.ErrAlreadyExists):
+						errs <- err
 					}
-				}()
+				}(uid)
 			}
 			close(start)
 			wg.Wait()
-
-			list, err := r.ListOAuthIdentitiesForUser(ctx, uid)
-			if err != nil {
-				t.Fatalf("ListOAuthIdentitiesForUser: %v", err)
+			close(errs)
+			for err := range errs {
+				t.Fatalf("losing link: want ErrAlreadyExists, got %v", err)
 			}
-			if len(list) != 1 {
-				t.Fatalf("composite uniqueness breach: %d (google,dup-sub) links exist after concurrent create (winners reported=%d), want 1", len(list), atomic.LoadInt64(&winners))
+			if n := atomic.LoadInt64(&winners); n != 1 {
+				t.Fatalf("%d concurrent links of (google, dup-sub) succeeded, want exactly 1", n)
+			}
+			got, err := r.FindUserByProviderID(ctx, "google", "dup-sub")
+			if err != nil || got == nil {
+				t.Fatalf("FindUserByProviderID: %v %#v", err, got)
+			}
+			if got.ID != winner.Load().(string) {
+				t.Fatalf("(google, dup-sub) resolves to %q, want the winner %q", got.ID, winner.Load())
 			}
 		})
 

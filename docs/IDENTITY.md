@@ -336,7 +336,9 @@ derivation, and only then is a session issued. A CHILD-band result lands in
 `USER_STATUS_PENDING_PARENTAL_CONSENT` with no tokens — the correct dead
 end on a self-signup path, where a child was never supposed to arrive
 unaccompanied. The DOB can be set exactly once through this RPC; an account
-that already has one gets `FAILED_PRECONDITION`.
+that already has one gets `FAILED_PRECONDITION`. The account's status and,
+with `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL`, its verified email are checked
+again before the DOB is stored, so a refused submission stores nothing.
 
 Three deliberate consequences:
 
@@ -357,7 +359,9 @@ Three deliberate consequences:
   is refused outright (it cannot collect a DOB).
 
 Both the refusal and the completion are audit-logged (a `login_failure`
-with `reason: dob_required`, and a `login_success` with
+with `reason: dob_required` and the `gate` that refused, `sign_in` or
+`refresh`, a refused refresh at most once per account per 10 minutes, and a
+`login_success` with
 `method: dob_completion` plus the derived `age_band`). With the flag off,
 behaviour on every path is byte-identical to before.
 
@@ -643,7 +647,11 @@ policy.
 
 **QR login** is gated at completion rather than at approval: polling mints an
 independent session for the scanning device, which outlives the approval that
-authorized it, so the approval alone cannot stand in for the check.
+authorized it, so the approval alone cannot stand in for the check. The poll
+runs the checks every sign-in runs (account status and lockout, project access,
+the verified-email gate) before it consumes the hand-off, so a refused poll
+leaves the session approved and a later poll completes once the account is
+eligible. An approved session expires with its window like a pending one.
 
 **SCIM provisioning** is deliberately outside the gate. It writes user records
 on an operator's instruction rather than an end user's, so an IdP can create or
@@ -857,9 +865,10 @@ before you ship.
      `DeleteRefreshTokensForUser` additionally triggers
      `RevokeSessionsForUser`, so the existing replay-detection path
      also kills the access tokens. Logout, a per-tenant session-timeout
-     breach, and expired-refresh-token cleanup likewise revoke the
-     matching session (scoped to its `sid`), so an invalidated refresh
-     token never leaves its access token usable. Same-process
+     breach, expired-refresh-token cleanup, and a refresh refused over the
+     account's own state (an unverified address, an inactive account; not
+     a lockout) likewise revoke the matching session (scoped to its `sid`),
+     so an invalidated refresh token never leaves its access token usable. Same-process
      revocation is synchronous; cross-replica revocation is bounded by
      the cache TTL. Required for deployers handling sensitive data.
 

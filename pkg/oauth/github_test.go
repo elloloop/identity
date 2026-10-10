@@ -28,13 +28,7 @@ func TestGitHub_ExchangeSuccess(t *testing.T) {
 		{"email": "junk@example.com", "primary": false, "verified": false},
 	})
 
-	exch := NewGitHub(GitHubConfig{
-		ClientID:     "id",
-		ClientSecret: "sec",
-		TokenURL:     fp.URL("/token"),
-		UserURL:      fp.URL("/user"),
-		UserMailURL:  fp.URL("/user/emails"),
-	})
+	exch := newGitHubForTest(fp)
 	id, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
@@ -53,59 +47,88 @@ func TestGitHub_ExchangeSuccess(t *testing.T) {
 	}
 }
 
-func TestGitHub_FallsBackToProfileEmail(t *testing.T) {
-	t.Parallel()
-	fp := newFakeProvider(t)
-	fp.tokenHandler = jsonHandler(map[string]any{
-		"access_token": "gho_xxx",
-	})
-	fp.userHandler = jsonHandler(map[string]any{
-		"id":    1,
-		"login": "u",
-		"email": "fallback@example.com",
-	})
-	fp.emailHandler = func(w http.ResponseWriter, r *http.Request) {
-		// Simulate user:email scope missing.
-		w.WriteHeader(http.StatusForbidden)
-	}
-
-	exch := NewGitHub(GitHubConfig{
+func newGitHubForTest(fp *fakeProvider) Exchanger {
+	return NewGitHub(GitHubConfig{
 		ClientID:     "id",
 		ClientSecret: "sec",
 		TokenURL:     fp.URL("/token"),
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	id, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
-	if err != nil {
-		t.Fatalf("Exchange: %v", err)
-	}
-	if id.Email != "fallback@example.com" {
-		t.Errorf("email = %q", id.Email)
-	}
 }
 
-func TestGitHub_NoVerifiedEmailRejected(t *testing.T) {
+func TestGitHub_UsesFirstVerifiedWhenPrimaryUnverified(t *testing.T) {
 	t.Parallel()
 	fp := newFakeProvider(t)
 	fp.tokenHandler = jsonHandler(map[string]any{"access_token": "tok"})
 	fp.userHandler = jsonHandler(map[string]any{
-		"id":    7,
-		"login": "ghost",
+		"id":    3,
+		"login": "u",
+		"email": "public@example.com",
 	})
 	fp.emailHandler = jsonHandler([]map[string]any{
-		{"email": "u@example.com", "primary": true, "verified": false},
+		{"email": "primary@example.com", "primary": true, "verified": false},
+		{"email": "Second@Example.com", "primary": false, "verified": true},
+		{"email": "third@example.com", "primary": false, "verified": true},
 	})
-	exch := NewGitHub(GitHubConfig{
-		ClientID:     "id",
-		ClientSecret: "sec",
-		TokenURL:     fp.URL("/token"),
-		UserURL:      fp.URL("/user"),
-		UserMailURL:  fp.URL("/user/emails"),
+	id, err := newGitHubForTest(fp).Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	if id.Email != "second@example.com" {
+		t.Errorf("email = %q, want second@example.com", id.Email)
+	}
+}
+
+func TestGitHub_ProfileEmailNeverUsedWithoutVerifiedAddress(t *testing.T) {
+	t.Parallel()
+	fp := newFakeProvider(t)
+	fp.tokenHandler = jsonHandler(map[string]any{"access_token": "tok"})
+	fp.userHandler = jsonHandler(map[string]any{
+		"id":    1,
+		"login": "u",
+		"email": "victim@example.com",
 	})
-	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
-	if err == nil || !errors.Is(err, ErrEmailNotVerified) {
-		t.Fatalf("want ErrEmailNotVerified, got %v", err)
+	fp.emailHandler = jsonHandler([]map[string]any{
+		{"email": "victim@example.com", "primary": true, "verified": false},
+	})
+	id, err := newGitHubForTest(fp).Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if !errors.Is(err, ErrEmailNotVerified) {
+		t.Fatalf("want ErrEmailNotVerified, got id=%+v err=%v", id, err)
+	}
+}
+
+func TestGitHub_EmailsUnavailableRejected(t *testing.T) {
+	t.Parallel()
+	fp := newFakeProvider(t)
+	fp.tokenHandler = jsonHandler(map[string]any{"access_token": "tok"})
+	fp.userHandler = jsonHandler(map[string]any{
+		"id":    1,
+		"login": "u",
+		"email": "victim@example.com",
+	})
+	fp.emailHandler = func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}
+	id, err := newGitHubForTest(fp).Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if !errors.Is(err, ErrIdentityVerification) {
+		t.Fatalf("want ErrIdentityVerification, got id=%+v err=%v", id, err)
+	}
+}
+
+func TestGitHub_NoEmailsRejected(t *testing.T) {
+	t.Parallel()
+	fp := newFakeProvider(t)
+	fp.tokenHandler = jsonHandler(map[string]any{"access_token": "tok"})
+	fp.userHandler = jsonHandler(map[string]any{
+		"id":    1,
+		"login": "u",
+		"email": "victim@example.com",
+	})
+	fp.emailHandler = jsonHandler([]map[string]any{})
+	id, err := newGitHubForTest(fp).Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if !errors.Is(err, ErrEmailNotVerified) {
+		t.Fatalf("want ErrEmailNotVerified, got id=%+v err=%v", id, err)
 	}
 }
 
@@ -116,13 +139,7 @@ func TestGitHub_TokenError(t *testing.T) {
 		"error":             "bad_verification_code",
 		"error_description": "the code is bad",
 	})
-	exch := NewGitHub(GitHubConfig{
-		ClientID:     "id",
-		ClientSecret: "sec",
-		TokenURL:     fp.URL("/token"),
-		UserURL:      fp.URL("/user"),
-		UserMailURL:  fp.URL("/user/emails"),
-	})
+	exch := newGitHubForTest(fp)
 	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
@@ -135,13 +152,7 @@ func TestGitHub_TokenEndpoint500(t *testing.T) {
 	fp.tokenHandler = func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	exch := NewGitHub(GitHubConfig{
-		ClientID:     "id",
-		ClientSecret: "sec",
-		TokenURL:     fp.URL("/token"),
-		UserURL:      fp.URL("/user"),
-		UserMailURL:  fp.URL("/user/emails"),
-	})
+	exch := newGitHubForTest(fp)
 	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
@@ -155,13 +166,7 @@ func TestGitHub_UserEndpointFailure(t *testing.T) {
 	fp.userHandler = func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}
-	exch := NewGitHub(GitHubConfig{
-		ClientID:     "id",
-		ClientSecret: "sec",
-		TokenURL:     fp.URL("/token"),
-		UserURL:      fp.URL("/user"),
-		UserMailURL:  fp.URL("/user/emails"),
-	})
+	exch := newGitHubForTest(fp)
 	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)

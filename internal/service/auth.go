@@ -579,8 +579,14 @@ type Repository interface {
 	FindEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (*EmailVerificationToken, error)
 	MarkEmailVerificationTokenConsumed(ctx context.Context, tokenID string, atMs int64) error
 
-	// User email-verified update
-	SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error
+	// SetUserEmailVerified marks the account's email verified at atMs only
+	// while its stored email is exactly email, in one write, and reports
+	// whether it did. A proof checked against an earlier read therefore
+	// cannot verify an address that replaced the proven one in between.
+	// clearPassword clears password_hash and password_change_required in the
+	// same write. A missing account, or one holding another email, is
+	// (false, nil); an empty userID or email is an error.
+	SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error)
 
 	// User idv-verified update; called by IdentityVerificationService
 	// when a verification reaches APPROVED.
@@ -1002,6 +1008,7 @@ type PasswordResetToken struct {
 	NodeID     string
 	TokenHash  string
 	UserID     string
+	Email      string
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
@@ -1099,6 +1106,11 @@ var (
 	ErrPermissionDenied = errors.New("permission denied")
 	ErrInvalidArgument  = errors.New("invalid argument")
 	ErrNotFound         = errors.New("not found")
+	// ErrUnavailable is a transient failure of the store that a step the
+	// request cannot skip depends on, so it fails rather than proceeding
+	// without that step. Maps to CodeUnavailable: the caller may try again.
+	// The message is generic; the store's error is logged, not returned.
+	ErrUnavailable = errors.New("temporarily unavailable; try again")
 	// ErrAccessNotAllowed is returned when a project's access mode denies the
 	// authenticating email: an allowlist mode whose list omits the email, a
 	// closed mode, or an unset/unrecognized mode (the default-DENY posture). It
@@ -1346,12 +1358,15 @@ type AuthService struct {
 	// disables the corresponding assurance surface (ErrAssuranceDisabled).
 	assuranceResolver *AssuranceResolver
 	webAssurance      assurance.Verifier
-	emailThrottle     *emailSendThrottle
-	signupThrottle    *emailSendThrottle
+	emailThrottle     *keyCooldown
+	signupThrottle    *keyCooldown
+	// refusedRefreshAudits paces the audit rows of refused refreshes
+	// (refusedRefreshAuditWindow).
+	refusedRefreshAudits *keyCooldown
 	// usernameProbes caps "username taken" answers per client IP
 	// (config.RateLimitUsernameTakenPerIP).
 	usernameProbes *probeBudget
-	phoneThrottle  *emailSendThrottle
+	phoneThrottle  *keyCooldown
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
 	// OAuth flow uses. Injected with WithReturnAllowlist; the zero value
@@ -1589,10 +1604,11 @@ func NewAuthServiceWithOAuth(
 		smsSender:              smsSender,
 		logger:                 logger,
 		oauthResolver:          newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
-		emailThrottle:          newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
-		signupThrottle:         newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
+		emailThrottle:          newKeyCooldown(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
+		refusedRefreshAudits:   newKeyCooldown(refusedRefreshAuditWindow.Milliseconds(), 0),
+		signupThrottle:         newKeyCooldown(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		usernameProbes:         newProbeBudget(rateLimitWindowMs(cfg), cfg.RateLimitUsernameTakenPerIP),
-		phoneThrottle:          newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
+		phoneThrottle:          newKeyCooldown(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
 		nowFunc:                time.Now,
 		// Default to synchronous sends; app.New opts into async via
 		// WithAsyncEmailDispatch. A synchronous default keeps every
@@ -1824,16 +1840,23 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // fresh credential proof (issueTokens), an earlier sign-in's time for a step
 // that continues one, 0 for a flow that proves no credential. It is the one
 // place to auto-cancel a pending self-service deletion: an owner who signs
-// back in during the grace window has reclaimed the account.
+// back in during the grace window has reclaimed the account. It is also the
+// one place a sign-in is recorded as the account's last login, once the
+// session is issued: a sign-in refused on the way is not a login.
 func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
 	// The verified-email gate for every sign-in, and every step that
 	// continues one, refusing with a verification email so the user has a
 	// way forward. The refresh path runs it before consuming its token.
-	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return "", "", err
 	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionStartedAtMs, authTimeMs)
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs)
+	if err != nil {
+		return "", "", err
+	}
+	s.updateLastLogin(ctx, user.ID)
+	return accessToken, refreshToken, nil
 }
 
 // needsEmailVerification reports whether GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
@@ -1845,31 +1868,53 @@ func (s *AuthService) needsEmailVerification(user *User) bool {
 		user.Email != "" && !user.EmailVerified && !user.IsAnonymous
 }
 
-// verifiedEmailGate is where the verified-email gate refuses: a sign-in is
-// sent a verification email, a refresh is not (its user did not just act).
-type verifiedEmailGate string
+// sessionGate is the step a gate on issuing a session refuses at: a sign-in,
+// or the refresh of a session already issued.
+type sessionGate string
 
 const (
-	verifiedEmailGateSignIn  verifiedEmailGate = "sign_in"
-	verifiedEmailGateRefresh verifiedEmailGate = "refresh"
+	sessionGateSignIn  sessionGate = "sign_in"
+	sessionGateRefresh sessionGate = "refresh"
 )
 
-// enforceVerifiedEmail refuses a session to an account whose address is
-// unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on, audited as
-// login_failure with reason email_not_verified and the gate that refused. A
-// refused sign-in also sends a verification email, best-effort and throttled:
-// a failure to send never changes the refusal.
-func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAddr, userAgent string, gate verifiedEmailGate) error {
-	if !s.needsEmailVerification(user) {
-		return nil
+// refusedRefreshAuditWindow is how often one account's refresh refused for
+// one reason is audited. A refusal that keeps the refresh token (an unproven
+// address, a missing date of birth, a lockout) can be replayed at will, and
+// every replay would otherwise write a row.
+const refusedRefreshAuditWindow = 10 * time.Minute
+
+// refusalAuditDue reports whether a gate's refusal is to be audited: a
+// sign-in's always is; a refused refresh's at most once per account and
+// reason per refusedRefreshAuditWindow on each replica.
+func (s *AuthService) refusalAuditDue(user *User, gate sessionGate, reason string) bool {
+	return gate == sessionGateSignIn || s.refusedRefreshAudits.allow(user.ID+"\x00"+reason, s.nowMs())
+}
+
+// auditSessionRefusal records a gate's refusal to issue a session as
+// login_failure with its reason and the step that refused, when
+// refusalAuditDue.
+func (s *AuthService) auditSessionRefusal(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, reason string) {
+	if !s.refusalAuditDue(user, gate, reason) {
+		return
 	}
 	s.audit.Log(
 		ctx, audit.EventLoginFailure,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(false),
-		audit.WithDetails(map[string]any{"reason": "email_not_verified", "gate": string(gate)}),
+		audit.WithDetails(map[string]any{"reason": reason, "gate": string(gate)}),
 	)
-	if gate == verifiedEmailGateSignIn {
+}
+
+// enforceVerifiedEmail refuses a session to an account whose address is
+// unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on, audited with
+// reason email_not_verified. A refused sign-in also sends a verification email, best-effort and throttled:
+// a failure to send never changes the refusal.
+func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate) error {
+	if !s.needsEmailVerification(user) {
+		return nil
+	}
+	s.auditSessionRefusal(ctx, user, ipAddr, userAgent, gate, "email_not_verified")
+	if gate == sessionGateSignIn {
 		if err := s.sendEmailVerification(ctx, user.ID, emailLink{}); err != nil {
 			s.logger.Warn("login_verification_resend_failed",
 				zap.String("user_id", user.ID), zap.Error(err))
@@ -1887,7 +1932,7 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 // token's SessionStartedAt as the anchor, so the absolute timeout keeps
 // measuring from the original sign-in, and no auth_time: a refresh is not a
 // sign-in, and only the tokens a sign-in issues vouch for one.
-func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
 	// The verified-email gate's backstop: every path that mints a session (and
 	// any added later) honours it. Sign-ins and refreshes run the audited gate
 	// before reaching here, so this refuses silently.
@@ -1916,7 +1961,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// written. Like the product gate it lives here, at the chokepoint, so
 	// every session-issuing path — initial login, refresh, and any path
 	// added later — is covered by construction.
-	if err := s.enforceDOBRequired(ctx, user, authTimeMs, ipAddr, userAgent); err != nil {
+	if err := s.enforceDOBRequired(ctx, user, authTimeMs, ipAddr, userAgent, gate); err != nil {
 		return "", "", err
 	}
 
@@ -2038,9 +2083,10 @@ func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userI
 // revokeSessionIfModeSession revokes exactly the access session identified by
 // sid when the deployment runs mode=session, leaving the user's other sessions
 // untouched. It is paired with every path that invalidates a single refresh
-// token — logout, natural-expiry cleanup, and a session-timeout breach — so the
-// still-valid access token stops working immediately rather than lingering to
-// its natural (uncapped in mode=session) expiry.
+// token — logout, natural-expiry cleanup, and a session-timeout breach — and
+// with a refresh refused over the account's own state, so the still-valid
+// access token stops working immediately rather than lingering to its natural
+// (uncapped in mode=session) expiry.
 //
 // A legacy refresh row written before the sid link existed carries an empty
 // sid, making the scoped revoke impossible; it fails CLOSED by falling back to
@@ -2329,7 +2375,11 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// address became unverified (a SCIM email change, say) keeps its token,
 	// and rotates normally once the address is verified. It runs before the
 	// DOB step, which could not yield a session while the address is unproven.
-	if err := s.enforceVerifiedEmail(ctx, timeoutUser, ipAddr, userAgent, verifiedEmailGateRefresh); err != nil {
+	// The access token minted with this refresh token ends here: the account
+	// may hold no session until its address is proven, and under mode=session
+	// that token would otherwise outlive the refusal until its natural expiry.
+	if err := s.enforceVerifiedEmail(ctx, timeoutUser, ipAddr, userAgent, sessionGateRefresh); err != nil {
+		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "email_not_verified")
 		return nil, "", "", err
 	}
 
@@ -2343,7 +2393,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// issueTokensWithSessionStart (so nothing is bypassed); this early pass
 	// exists only so the refusal is non-destructive and the client can
 	// complete the step and rotate normally.
-	if err := s.enforceDOBRequired(ctx, timeoutUser, 0, ipAddr, userAgent); err != nil {
+	if err := s.enforceDOBRequired(ctx, timeoutUser, 0, ipAddr, userAgent, sessionGateRefresh); err != nil {
 		return nil, "", "", err
 	}
 
@@ -2364,6 +2414,17 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		}
 	}
 
+	// Account status, checked before the token is consumed so that a lockout
+	// leaves it intact. Anyone guessing at the password can trigger a lockout;
+	// were the token burnt by it, the retry an SDK makes on the refusal would
+	// land on replay detection and sign the account out on every device. Any
+	// other refusal here is over the account's own state and still spends the
+	// token, below.
+	statusErr := s.checkAccountStatus(ctx, timeoutUser, ipAddr, userAgent, sessionGateRefresh)
+	if errors.Is(statusErr, ErrAccountLocked) {
+		return nil, "", "", statusErr
+	}
+
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it
 	// only succeeds when the row's consumed_at is currently 0, so two
 	// concurrent rotations of the same token resolve to exactly one
@@ -2378,13 +2439,13 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 
 	user := timeoutUser
 
-	// Re-enforce account status on every refresh: a user deactivated
-	// (or locked, or IDV-revoked) after the original login must not be
-	// able to mint fresh access tokens by replaying a still-valid
-	// refresh token. A hard-deleted user is already covered above (the
-	// refresh row is gone, so the lookup returns nil → unauthenticated).
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
-		return nil, "", "", err
+	// An account deactivated, suspended, back to invited or failing a required
+	// identity verification after its sign-in must not mint fresh access tokens
+	// from a still-valid refresh token, and its access session ends with the
+	// refusal.
+	if statusErr != nil {
+		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "account_not_active")
+		return nil, "", "", statusErr
 	}
 
 	// Re-enforce the project access mode (login context) on every refresh: a user
@@ -2416,7 +2477,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// absolute timeout keeps measuring from the original login. A legacy row
 	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
 	// issueTokensWithSessionStart. No auth_time: a rotation is not a sign-in.
-	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, record.SessionStartedAt, 0)
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0)
 	if err != nil {
 		return nil, "", "", err
 	}

@@ -350,7 +350,9 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     account holds another address, <code>VerifyEmail</code> refuses the link
     with <code>unauthenticated</code> and spends it; send a new one to the
     current address. Another spelling of the same mailbox (capitals, or a
-    dotted Gmail address) still verifies.
+    dotted Gmail address) still verifies. A reset link is bound the same way:
+    once the account holds another address, <code>ConfirmPasswordReset</code>
+    refuses it as an invalid link and spends it.
   </p>
   <p>
     When the pages live somewhere else, such as a sign-in hub that serves

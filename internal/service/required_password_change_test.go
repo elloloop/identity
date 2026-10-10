@@ -342,7 +342,7 @@ func TestRequiredPasswordChange_ClearedWithAClearedPassword(t *testing.T) {
 	ctx := context.Background()
 	user := issuedPasswordUser(t, repo, "issued@example.com")
 	user.EmailVerified = false
-	svc.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: user.Email, method: "oauth"}, nowMs())
+	require.NoError(t, svc.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: user.Email, method: "oauth"}, nowMs()))
 	stored, _ := repo.GetUser(ctx, user.ID)
 	require.Empty(t, stored.PasswordHash)
 	require.False(t, stored.PasswordChangeRequired)
@@ -404,4 +404,18 @@ func TestRequiredPasswordChange_GatesRecheckedAtCompletion(t *testing.T) {
 			require.True(t, passwords.Verify(issuedPW, stored.PasswordHash))
 		})
 	}
+}
+
+// A completion refused when its session is issued (the account has no date
+// of birth on a deployment that requires one) records no login.
+func TestRequiredPasswordChange_RefusedIssuanceRecordsNoLastLogin(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	issuedPasswordUser(t, repo, "issued@example.com")
+	ticket := passwordChangeTicket(t, svc, "issued@example.com")
+	enableAgeGate(t, svc, true)
+
+	_, err := svc.CompleteRequiredPasswordChange(context.Background(), ticket, strongPW, "", "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrDOBRequired)
+	requireNoLastLogin(t, repo, "issued@example.com")
 }

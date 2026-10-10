@@ -2024,16 +2024,24 @@ func (r *MemRepo) SetUserIDVVerified(_ context.Context, userID string, atMs int6
 	return nil
 }
 
-func (r *MemRepo) SetUserEmailVerified(_ context.Context, userID string, atMs int64) error {
+func (r *MemRepo) SetUserEmailVerified(_ context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+	if userID == "" || email == "" {
+		return false, errors.New("SetUserEmailVerified: missing user id or email")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u, ok := r.users[userID]
-	if !ok {
-		return fmt.Errorf("user %s not found", userID)
+	if !ok || u.Email != email {
+		return false, nil
 	}
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
-	return nil
+	u.UpdatedAt = time.UnixMilli(atMs)
+	if clearPassword {
+		u.PasswordHash = ""
+		u.PasswordChangeRequired = false
+	}
+	return true, nil
 }
 
 // ── Email Change Tokens ───────────────────────────────────────────
@@ -2114,7 +2122,7 @@ func (r *MemRepo) CreateOAuthIdentity(_ context.Context, oi *service.OAuthIdenti
 	defer r.mu.Unlock()
 	for _, existing := range r.oauthIdentities {
 		if existing.Provider == oi.Provider && existing.ProviderUserID == oi.ProviderUserID {
-			return fmt.Errorf("oauth identity already linked: %s/%s", oi.Provider, oi.ProviderUserID)
+			return fmt.Errorf("oauth identity %s/%s: %w", oi.Provider, oi.ProviderUserID, service.ErrAlreadyExists)
 		}
 	}
 	id := r.nextID()

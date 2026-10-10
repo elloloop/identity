@@ -107,6 +107,24 @@ func (w *recordingAuditWriter) countByEventTypeAndDetail(eventType, key, want st
 	return n
 }
 
+// detailsOf returns the decoded WithDetails map of every recorded event of
+// eventType, in order.
+func (w *recordingAuditWriter) detailsOf(eventType string) []map[string]any {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out []map[string]any
+	for i, et := range w.events {
+		if et != eventType {
+			continue
+		}
+		var m map[string]any
+		if json.Unmarshal([]byte(w.details[i]), &m) == nil {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // newTestAuthServiceWithAudit builds an AuthService whose audit logger
 // writes to the supplied recordingAuditWriter so tests can assert on
 // emitted audit events.
@@ -152,6 +170,18 @@ type fakeRepo struct {
 	// uniqueness check exactly as a racing winner would.
 	createUserHook func()
 
+	// afterGetUserHook, when set, runs once GetUser has copied the record it
+	// returns, with the stored record, under the repo lock. A test uses it to
+	// land a concurrent write between a read and the write that follows it.
+	afterGetUserHook func(stored *User)
+
+	// listOAuthIdentitiesHook, when set, runs after ListOAuthIdentitiesForUser
+	// has read its result, and createOAuthIdentityHook at the start of
+	// CreateOAuthIdentity. Tests use them to land a concurrent write between a
+	// read and the write that follows it.
+	listOAuthIdentitiesHook func()
+	createOAuthIdentityHook func()
+
 	// The following, when non-nil, make the corresponding read/write return
 	// that error so a test can exercise the caller's repo-error-propagation
 	// path. Default nil (success).
@@ -162,7 +192,9 @@ type fakeRepo struct {
 	findUserByEmailErr     error
 	// updateUserErr, when set, fails every UpdateUser. Drives the
 	// partial-write path of the two-write anonymous OAuth upgrade.
-	updateUserErr        error
+	updateUserErr error
+	// setEmailVerifiedErr, when set, fails every SetUserEmailVerified.
+	setEmailVerifiedErr  error
 	createPasskeyCredErr error
 	getUserErr           error
 	getTotpCredentialErr error
@@ -171,6 +203,7 @@ type fakeRepo struct {
 	// corresponding repository call fail so a test can exercise the
 	// service's error-propagation branch. Default nil (success).
 	listPasskeyCredsErr    error // ListPasskeyCredentials fails
+	listOAuthIdentitiesErr error // ListOAuthIdentitiesForUser fails
 	getActiveConsentErr    error // GetActiveParentalConsentForChild fails
 	createConsentErr       error // CreateParentalConsent fails
 	markConsentRevokedErr  error // MarkParentalConsentRevoked fails
@@ -306,6 +339,9 @@ func (r *fakeRepo) GetUser(_ context.Context, userID string) (*User, error) {
 		return nil, nil
 	}
 	cp := *u
+	if r.afterGetUserHook != nil {
+		r.afterGetUserHook(u)
+	}
 	return &cp, nil
 }
 
@@ -1529,16 +1565,27 @@ func (r *fakeRepo) MarkEmailVerificationTokenConsumed(_ context.Context, id stri
 	return nil
 }
 
-func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID string, atMs int64) error {
+func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+	if userID == "" || email == "" {
+		return false, errors.New("SetUserEmailVerified: missing user id or email")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.setEmailVerifiedErr != nil {
+		return false, r.setEmailVerifiedErr
+	}
 	u, ok := r.users[userID]
-	if !ok {
-		return fmt.Errorf("user %s not found", userID)
+	if !ok || u.Email != email {
+		return false, nil
 	}
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
-	return nil
+	u.UpdatedAt = time.UnixMilli(atMs)
+	if clearPassword {
+		u.PasswordHash = ""
+		u.PasswordChangeRequired = false
+	}
+	return true, nil
 }
 
 func (r *fakeRepo) SetUserIDVVerified(_ context.Context, userID string, atMs int64) error {
@@ -1626,12 +1673,14 @@ func (r *fakeRepo) FindUserByProviderID(_ context.Context, provider, providerUse
 }
 
 func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *OAuthIdentity) error {
+	if r.createOAuthIdentityHook != nil {
+		r.createOAuthIdentityHook()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Application-enforced uniqueness: (provider, provider_user_id).
 	for _, existing := range r.oauthIdentities {
 		if existing.Provider == oi.Provider && existing.ProviderUserID == oi.ProviderUserID {
-			return fmt.Errorf("oauth identity already linked: %s/%s", oi.Provider, oi.ProviderUserID)
+			return fmt.Errorf("oauth identity %s/%s: %w", oi.Provider, oi.ProviderUserID, ErrAlreadyExists)
 		}
 	}
 	id := nextNodeID()
@@ -1643,13 +1692,21 @@ func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *OAuthIdentity) err
 
 func (r *fakeRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*OAuthIdentity, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r.listOAuthIdentitiesErr != nil {
+		r.mu.Unlock()
+		return nil, r.listOAuthIdentitiesErr
+	}
 	var out []*OAuthIdentity
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == userID {
 			cp := *oi
 			out = append(out, &cp)
 		}
+	}
+	hook := r.listOAuthIdentitiesHook
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
 	}
 	return out, nil
 }

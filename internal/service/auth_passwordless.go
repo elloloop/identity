@@ -423,10 +423,12 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 	// external proof. New accounts are already created verified, so the helper
 	// is a no-op for them.
 	if !isNew {
-		s.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: emailStr, method: "passwordless"}, s.nowMs())
+		if err := s.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: emailStr, method: "passwordless"}, s.nowMs()); err != nil {
+			return nil, err
+		}
 	}
 
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 
@@ -436,17 +438,15 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
 	}
 
-	s.updateLastLogin(ctx, user.ID)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	if err != nil {
+		return nil, err
+	}
 	s.logger.Info("passwordless_login_success",
 		zap.String("email", redactEmail(emailStr)),
 		zap.String("user_id", user.ID),
 		zap.String("method", method),
 		zap.Bool("new_user", isNew))
-
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
-	if err != nil {
-		return nil, err
-	}
 
 	s.audit.Log(ctx, audit.EventLoginSuccess,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),

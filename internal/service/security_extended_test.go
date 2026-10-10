@@ -252,10 +252,10 @@ func TestSecExt_AccountLockout_NFailuresLockWithinWindow(t *testing.T) {
 		require.Error(t, err)
 	}
 
-	// (N+1)th attempt with correct password must be locked.
+	// (N+1)th attempt with correct password must be refused.
 	_, err := svc.PasswordLogin(context.Background(), "lockout@example.com", strongPW, "", "")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAccountLocked),
+	assert.True(t, errors.Is(err, ErrUnauthenticated),
 		"after %d failed attempts the account MUST be locked", maxAttempts)
 }
 
@@ -343,4 +343,35 @@ func TestSecExt_ConcurrentLogin_NoInconsistentState(t *testing.T) {
 	repo.mu.Unlock()
 	assert.Equal(t, successes, rtCount,
 		"each successful login should produce exactly one refresh token")
+}
+
+// TestSecExt_LoginTiming_NoPasswordAccount: an account with no password pays
+// the password check an unknown address and a wrong password pay, so timing
+// does not tell a caller with no credential that the account exists.
+func TestSecExt_LoginTiming_NoPasswordAccount(t *testing.T) {
+	// Not parallel: this test measures wall-clock time.
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	seedUser(repo, "exists@example.com", hashPW(t, strongPW), "active")
+	seedUser(repo, "provider-only@example.com", "", "active")
+
+	const iters = 5
+	measure := func(email string) time.Duration {
+		var total time.Duration
+		for i := 0; i < iters; i++ {
+			start := time.Now()
+			_, _ = svc.PasswordLogin(context.Background(), email, "WrongP@ss1!", "", "")
+			total += time.Since(start)
+		}
+		return total / iters
+	}
+	_, _ = svc.PasswordLogin(context.Background(), "provider-only@example.com", "WrongP@ss1!", "", "")
+
+	avgWrongPW := measure("exists@example.com")
+	avgNoPassword := measure("provider-only@example.com")
+	t.Logf("Login avg wrong-pw=%v no-password=%v", avgWrongPW, avgNoPassword)
+	if avgWrongPW > 5*avgNoPassword {
+		t.Errorf("PasswordLogin is %.1fx slower for a wrong password than for an account with none",
+			float64(avgWrongPW)/float64(avgNoPassword))
+	}
 }

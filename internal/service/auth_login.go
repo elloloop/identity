@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
@@ -433,7 +434,10 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
 	}
 
-	s.updateLastLogin(ctx, user.ID)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	if err != nil {
+		return nil, err
+	}
 	s.logger.Info("local_login_success", zap.String(identifierKey, redactIdentifier(identifier)), zap.String("user_id", user.ID))
 	s.audit.Log(
 		ctx, audit.EventLoginSuccess,
@@ -441,11 +445,6 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"method": "password"}),
 	)
-
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
-	if err != nil {
-		return nil, err
-	}
 	return &LoginResult{
 		User:         user,
 		AccessToken:  accessToken,
@@ -549,11 +548,15 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
-	// Lockout check. While locked, the account is blocked regardless of
-	// password correctness — emit a dedicated `login_locked` audit event
-	// so operators can distinguish "tried during lockout" from
+	// While locked, the account is refused whatever the password, and as an
+	// unknown identifier is, at the same cost: only the password could earn
+	// the caller the reason, and checking it during the lockout would hand
+	// back the guessing the lockout stops. A distinct answer would also let
+	// anyone confirm the account by tripping the lockout. The dedicated
+	// `login_locked` audit event tells operators "tried during lockout" from
 	// "threshold tripped".
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
+		_ = passwords.Verify(password, getDummyPasswordHash())
 		s.audit.Log(
 			ctx, audit.EventLoginLocked,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
@@ -563,7 +566,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 				"locked_until": user.LockedUntil,
 			}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: account temporarily locked due to too many failed attempts", ErrAccountLocked)
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
 	// Lockout window has passed. Reset count + LockedUntil before
@@ -577,15 +580,18 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 		user.LockedUntil = 0
 	}
 
-	// No password set (OAuth-only user).
+	// An account with no password (a provider or passwordless one) can prove
+	// none, so it is refused as an unknown identifier is, at the same cost:
+	// saying so would tell a caller with no credential that it exists.
 	if user.PasswordHash == "" {
+		_ = passwords.Verify(password, getDummyPasswordHash())
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "no_password_set"}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: no password set for this account", ErrNoPasswordSet)
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
 	if !passwords.Verify(password, user.PasswordHash) {
@@ -645,7 +651,7 @@ type postPasswordGateOpts struct {
 // sign-in's.
 func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts postPasswordGateOpts, ipAddr, userAgent string) (loginPolicyDecision, error) {
 	// Account status (lockout / suspended / invited / IDV) is a hard gate.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return loginPolicyDecision{}, err
 	}
 	// The rule judges an account that also has an email by that email,
@@ -669,7 +675,7 @@ func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts po
 	// unusable (the flag defaults ON) — and there is no pre-hijacking vector
 	// to close, because there is no address for an attacker to plant a
 	// password against or for an owner to later verify.
-	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return loginPolicyDecision{}, err
 	}
 
@@ -819,7 +825,7 @@ func (s *AuthService) OAuthLogin(
 		return nil, err
 	}
 
-	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 
@@ -853,8 +859,6 @@ func (s *AuthService) OAuthLogin(
 	if err != nil {
 		return nil, err
 	}
-	// Stamped once the session is issued, not for a sign-in the gate refused.
-	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info(
 		"oauth_login_success",
 		zap.String("email", redactEmail(email)),
@@ -986,15 +990,8 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	emailStr := string(email)
 
 	// 1. (provider, sub) lookup — survives provider-side email change.
-	if identity.ProviderUserID != "" {
-		linked, err := s.repo(ctx).FindUserByProviderID(ctx, identity.Provider, identity.ProviderUserID)
-		if err != nil {
-			return nil, false, err
-		}
-		if linked != nil {
-			s.applyOAuthProfileUpdates(ctx, linked, identity, emailStr, now)
-			return linked, false, nil
-		}
+	if linked, err := s.findLinkedOAuthUser(ctx, identity, emailStr, now); err != nil || linked != nil {
+		return linked, false, err
 	}
 
 	// 2 & 3. Email-based lookup, then create. Shared with passwordless
@@ -1017,6 +1014,12 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	// the account's but is not provably the same mailbox, so it neither signs
 	// in nor links here; the owner links such a provider while signed in.
 	if !isNew && !ProofCarriesTo(identity.Email, user.Email) {
+		// A concurrent sign-in by this same identity may have created the
+		// account, and linked it, after the lookup above: the request that
+		// lost that race is answered as the sign-in arriving after it is.
+		if linked, err := s.findLinkedOAuthUser(ctx, identity, emailStr, now); err != nil || linked != nil {
+			return linked, false, err
+		}
 		s.logger.Info("oauth_login_refused",
 			zap.String("reason", "provider_address_does_not_prove_account"),
 			zap.String("user_id", user.ID),
@@ -1033,9 +1036,11 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		return nil, false, fmt.Errorf("%w: sign in and link this provider to use it", ErrUnauthenticated)
 	}
 	if !isNew {
-		s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now)
+		if err := s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now); err != nil {
+			return nil, false, err
+		}
 	}
-	s.linkOAuthIdentity(ctx, user.ID, identity, emailStr, now)
+	s.linkOAuthIdentity(ctx, user.ID, identity, now)
 	if isNew {
 		s.logger.Info(
 			"oauth_user_provisioned",
@@ -1045,6 +1050,24 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		)
 	}
 	return user, isNew, nil
+}
+
+// findLinkedOAuthUser returns the account the provider identity is linked to,
+// with the provider's profile applied, or nil when it is linked to none.
+func (s *AuthService) findLinkedOAuthUser(ctx context.Context, identity *oauth.Identity, email string, nowMs int64) (*User, error) {
+	var linked *User
+	if identity.ProviderUserID != "" {
+		var err error
+		if linked, err = s.repo(ctx).FindUserByProviderID(ctx, identity.Provider, identity.ProviderUserID); err != nil {
+			return nil, err
+		}
+	}
+	if linked != nil {
+		if err := s.applyOAuthProfileUpdates(ctx, linked, identity, email, nowMs); err != nil {
+			return nil, err
+		}
+	}
+	return linked, nil
 }
 
 // resolveOrCreateOpts carries the optional profile fields a create path
@@ -1130,25 +1153,42 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	return newUser, true, nil
 }
 
-// externalProof is a sign-in method outside identity proving control of an
-// address: a provider's assertion, or an emailed code or link the user
-// redeemed.
+// externalProof is a method outside identity proving control of an address:
+// a provider's assertion, an emailed code or link the user redeemed at sign-in,
+// or a verification link redeemed for an account whose address a provider
+// claimed without proving it.
 type externalProof struct {
 	// address is the address proven.
 	address string
-	// method names the proof in logs and the audit trail: "oauth" or
-	// "passwordless".
+	// method names the proof in logs and the audit trail: "oauth",
+	// "passwordless" or "verification_link".
 	method string
 	// provider and providerUserID name the provider link that presented the
 	// proof, which is kept; both are empty for an emailed proof.
 	provider, providerUserID string
+	// keepsAssertingLinks keeps the links whose provider asserted the
+	// account's own address. Only a verification link sets it: a sign-in
+	// proof also voids links recorded before links kept the asserted
+	// spelling, whose canonical form reads as the account's address even
+	// when the provider asserted a tagged one.
+	keepsAssertingLinks bool
+}
+
+// voids reports whether the proof voids link on an account holding
+// accountEmail.
+func (p externalProof) voids(link *OAuthIdentity, accountEmail string) bool {
+	if link.Provider == p.provider && link.ProviderUserID == p.providerUserID {
+		return false
+	}
+	return !p.keepsAssertingLinks || !ProofCarriesTo(link.EmailAtLinkTime, accountEmail)
 }
 
 // markEmailVerifiedViaExternalProof flips the account to verified because an
-// external method (OAuth provider assertion, or an emailed OTP/magic-link the
-// user redeemed) proved control of proof.address. It does nothing unless that
+// external method proved control of proof.address. It does nothing unless that
 // proof carries to the account's own address (ProofCarriesTo): an account
-// found by a linked provider id may hold a different address, or none.
+// found by a linked provider id may hold a different address, or none. The
+// write lands only while the account still holds the address checked, so an
+// email change racing the proof leaves the new address unverified.
 // Any credential on the account was established BEFORE this proof — possibly
 // by a different party (account pre-hijacking) — so the untrusted ones are
 // voided:
@@ -1159,117 +1199,157 @@ type externalProof struct {
 //     login does not pass through the email-verification gate, so without this
 //     an attacker who passkey-first-signed-up an unverified address would keep
 //     a working credential after the real owner takes the account over;
-//   - every provider link but the one presenting the proof is deleted. A link
+//   - every provider link the proof voids is deleted (see voids). A link
 //     signs in by provider id alone, so one added to the unverified account
 //     (by whoever held it, or by a sign-in from a +tag address outside Gmail
 //     that only resembles this one) would otherwise outlive the proof.
 //
 // It is a no-op when the email is already verified (the proof adds nothing).
-// Best-effort: a persistence failure is logged, not fatal — the user has
-// already authenticated via the external proof.
-func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proof externalProof, nowMs int64) {
+// It fails closed: if any step before the address is marked verified cannot
+// complete, the proof fails with ErrUnavailable and the address stays
+// unproven, so the next proof sweeps again. If the account's address changed
+// while the proof ran, nothing is verified and the proof signs in no further
+// than an unverified account would; what it voided was added to an account
+// whose address was unproven, so voiding it stands.
+func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proof externalProof, nowMs int64) error {
 	if user == nil || user.EmailVerified || !ProofCarriesTo(proof.address, user.Email) {
-		return
+		return nil
 	}
-	patch := map[string]any{
-		"email_verified":    true,
-		"email_verified_at": nowMs,
-		"updated_at":        nowMs,
+	repo := s.repo(ctx)
+
+	passkeys, err := repo.ListPasskeyCredentials(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "list_passkeys", err)
 	}
+	links, err := repo.ListOAuthIdentitiesForUser(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
+	}
+	plantedLinks := proof.voidedAmong(links, user.Email)
 	passwordCleared := user.PasswordHash != ""
-	if passwordCleared {
-		// The password predates the proof of email control, so it cannot be
-		// trusted to belong to the verified owner. Clear it.
-		patch["password_hash"] = ""
-		patch["password_change_required"] = false
+	passkeysCleared := len(passkeys) > 0
+
+	if passwordCleared || passkeysCleared || len(plantedLinks) > 0 {
+		// Sessions go first, as ConfirmPasswordReset ends them for a replaced
+		// password: one opened with a voided credential must not outlive it.
+		// Doing it before the deletions means a failure further on leaves the
+		// credentials in place, so the retried proof finds them and revokes
+		// again.
+		if err := s.revokeSessionsForProof(ctx, user.ID, proof, nowMs); err != nil {
+			return err
+		}
+	}
+	if passkeysCleared {
+		if err := repo.DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
+			return s.externalProofSweepFailed(user.ID, proof, "delete_passkeys", err)
+		}
+	}
+	if err := s.voidProviderLinks(ctx, user.ID, proof, plantedLinks); err != nil {
+		return err
 	}
 
+	// The password predates the proof of email control, so it cannot be
+	// trusted to belong to the verified owner. It is cleared with the flag.
+	verified, err := repo.SetUserEmailVerified(ctx, user.ID, user.Email, nowMs, passwordCleared)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "mark_verified", err)
+	}
+	if !verified {
+		s.logger.Info("email_verified_external_address_changed",
+			zap.String("user_id", user.ID), zap.String("method", proof.method))
+		s.auditVoidedCredentials(ctx, user.ID, proof, false, passkeysCleared, len(plantedLinks))
+		return nil
+	}
 	user.EmailVerified = true
 	user.EmailVerifiedAt = nowMs
 	if passwordCleared {
 		user.PasswordHash = ""
+		user.PasswordChangeRequired = false
 	}
 
-	if err := s.repo(ctx).UpdateUser(ctx, user.ID, patch); err != nil {
-		s.logger.Warn("email_verified_external_persist_failed",
-			zap.String("user_id", user.ID),
-			zap.String("method", proof.method),
-			zap.Error(err))
-		return
+	// A link a signed-in caller added after the listing above escaped it.
+	// LinkIdentity re-reads the account after its insert and withdraws a link
+	// added while the address was being proven; listing again now that the
+	// address is marked verified means one of the two sees the other.
+	links, err = repo.ListOAuthIdentitiesForUser(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "relist_provider_links", err)
 	}
-
-	// Void any passkeys planted while the address was unverified. Detect first
-	// (so the audit/session-revocation only fires when there was something to
-	// clear) then delete them all.
-	passkeysCleared := false
-	if existing, err := s.repo(ctx).ListPasskeyCredentials(ctx, user.ID); err != nil {
-		s.logger.Warn("email_verified_external_passkey_list_failed",
-			zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
-	} else if len(existing) > 0 {
-		if err := s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
-			s.logger.Warn("email_verified_external_passkey_clear_failed",
-				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
-		} else {
-			passkeysCleared = true
+	if lateLinks := proof.voidedAmong(links, user.Email); len(lateLinks) > 0 {
+		if err := s.voidProviderLinks(ctx, user.ID, proof, lateLinks); err != nil {
+			return err
+		}
+		plantedLinks = append(plantedLinks, lateLinks...)
+	}
+	if passwordCleared || passkeysCleared || len(plantedLinks) > 0 {
+		// A sign-in with a voided credential that landed between the first
+		// revocation and the verified write opened a session that revocation
+		// missed; end it now that the credential is gone.
+		if err := s.revokeSessionsForProof(ctx, user.ID, proof, nowMs); err != nil {
+			return err
 		}
 	}
 
-	linksCleared := s.voidPlantedProviderLinks(ctx, user.ID, proof)
-
-	if passwordCleared || passkeysCleared || linksCleared > 0 {
-		// The cleared credentials are void, so revoke any sessions too —
-		// mirroring ConfirmPasswordReset — so a session established with a now-
-		// voided credential cannot outlive it. With the verification gate on,
-		// no session is issued while the address is unproven; with it off, a
-		// planted credential's session would otherwise survive the proof.
-		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
-			s.logger.Warn("email_verified_external_revoke_failed",
-				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
-		}
-		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
-		s.logger.Info("email_verified_external_credentials_cleared",
-			zap.String("user_id", user.ID),
-			zap.String("method", proof.method),
-			zap.Bool("password_cleared", passwordCleared),
-			zap.Bool("passkeys_cleared", passkeysCleared),
-			zap.Int("provider_links_cleared", linksCleared))
-		s.audit.Log(
-			ctx, audit.EventPasswordChanged,
-			audit.WithActor(user.ID),
-			audit.WithSuccess(true),
-			audit.WithDetails(map[string]any{
-				"reason":                 "planted_credentials_cleared_on_external_email_verification",
-				"method":                 proof.method,
-				"password_cleared":       passwordCleared,
-				"passkeys_cleared":       passkeysCleared,
-				"provider_links_cleared": linksCleared,
-			}),
-		)
-	}
+	s.auditVoidedCredentials(ctx, user.ID, proof, passwordCleared, passkeysCleared, len(plantedLinks))
+	return nil
 }
 
-// voidPlantedProviderLinks deletes every provider link on the account but the
-// one presenting proof, and returns how many it deleted. Each is audited as an
-// unlink. Failures are logged, not fatal, like the rest of the sweep.
-func (s *AuthService) voidPlantedProviderLinks(ctx context.Context, userID string, proof externalProof) int {
-	links, err := s.repo(ctx).ListOAuthIdentitiesForUser(ctx, userID)
-	if err != nil {
-		s.logger.Warn("email_verified_external_link_list_failed",
-			zap.String("user_id", userID), zap.String("method", proof.method), zap.Error(err))
-		return 0
+// auditVoidedCredentials records what a proof voided, if anything.
+func (s *AuthService) auditVoidedCredentials(ctx context.Context, userID string, proof externalProof, passwordCleared, passkeysCleared bool, linksCleared int) {
+	if !passwordCleared && !passkeysCleared && linksCleared == 0 {
+		return
 	}
-	cleared := 0
+	s.logger.Info("email_verified_external_credentials_cleared",
+		zap.String("user_id", userID),
+		zap.String("method", proof.method),
+		zap.Bool("password_cleared", passwordCleared),
+		zap.Bool("passkeys_cleared", passkeysCleared),
+		zap.Int("provider_links_cleared", linksCleared))
+	s.audit.Log(
+		ctx, audit.EventUnprovenCredentialsVoided,
+		audit.WithActor(userID),
+		audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{
+			"method":                 proof.method,
+			"password_cleared":       passwordCleared,
+			"passkeys_cleared":       passkeysCleared,
+			"provider_links_cleared": linksCleared,
+		}),
+	)
+}
+
+// voidedAmong returns the links among links that the proof voids.
+func (p externalProof) voidedAmong(links []*OAuthIdentity, accountEmail string) []*OAuthIdentity {
+	var voided []*OAuthIdentity
 	for _, link := range links {
-		if link.Provider == proof.provider && link.ProviderUserID == proof.providerUserID {
-			continue
+		if p.voids(link, accountEmail) {
+			voided = append(voided, link)
 		}
+	}
+	return voided
+}
+
+// revokeSessionsForProof ends every session of the account the proof is
+// voiding credentials on.
+func (s *AuthService) revokeSessionsForProof(ctx context.Context, userID string, proof externalProof, nowMs int64) error {
+	repo := s.repo(ctx)
+	if err := repo.DeleteRefreshTokensForUser(ctx, userID); err != nil {
+		return s.externalProofSweepFailed(userID, proof, "revoke_refresh_tokens", err)
+	}
+	if s.cfg.RevocationMode == config.RevocationModeSession {
+		if err := repo.RevokeSessionsForUser(ctx, userID, nowMs); err != nil {
+			return s.externalProofSweepFailed(userID, proof, "revoke_sessions", err)
+		}
+	}
+	return nil
+}
+
+// voidProviderLinks deletes the links a proof voids, auditing each.
+func (s *AuthService) voidProviderLinks(ctx context.Context, userID string, proof externalProof, links []*OAuthIdentity) error {
+	for _, link := range links {
 		if err := s.repo(ctx).DeleteOAuthIdentity(ctx, userID, link.Provider, link.ProviderUserID); err != nil {
-			s.logger.Warn("email_verified_external_link_clear_failed",
-				zap.String("user_id", userID), zap.String("method", proof.method),
-				zap.String("provider", link.Provider), zap.Error(err))
-			continue
+			return s.externalProofSweepFailed(userID, proof, "delete_provider_link", err)
 		}
-		cleared++
 		s.audit.Log(
 			ctx, audit.EventIdentityUnlinked,
 			audit.WithActor(userID),
@@ -1282,15 +1362,26 @@ func (s *AuthService) voidPlantedProviderLinks(ctx context.Context, userID strin
 			}),
 		)
 	}
-	return cleared
+	return nil
+}
+
+// externalProofSweepFailed logs why the sweep stopped and returns the error
+// the proof fails with. The store's error stays in the log: these calls are
+// unauthenticated, so the caller learns only to try again.
+func (s *AuthService) externalProofSweepFailed(userID string, proof externalProof, step string, err error) error {
+	s.logger.Error("email_verified_external_sweep_failed",
+		zap.String("user_id", userID),
+		zap.String("method", proof.method),
+		zap.String("step", step),
+		zap.Error(err))
+	return fmt.Errorf("%w: the address could not be proven", ErrUnavailable)
 }
 
 // applyOAuthProfileUpdates patches the local user record with any new
-// fields from the provider (name, avatar, email-verified flag, and the
-// email itself when the provider's email has changed since the link was
-// first created). Failures are logged but don't fail the login — we
-// already authenticated the user.
-func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, identity *oauth.Identity, email string, nowMs int64) {
+// fields from the provider (name, avatar, and the email-verified flag when
+// the provider proved the account's address). Only a failure of that proof
+// fails the login; a failed profile patch is logged.
+func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, identity *oauth.Identity, email string, nowMs int64) error {
 	patch := make(map[string]any)
 	if identity.Name != "" && identity.Name != u.Name {
 		patch["name"] = identity.Name
@@ -1305,12 +1396,14 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 	// clear any password planted while it was still unverified
 	// (anti-pre-hijacking). This runs its own persistence, so it is
 	// intentionally NOT folded into the name/avatar patch below.
-	s.markEmailVerifiedViaExternalProof(ctx, u, externalProof{
+	if err := s.markEmailVerifiedViaExternalProof(ctx, u, externalProof{
 		address:        identity.Email,
 		method:         "oauth",
 		provider:       identity.Provider,
 		providerUserID: identity.ProviderUserID,
-	}, nowMs)
+	}, nowMs); err != nil {
+		return err
+	}
 	// Provider-asserted email changes are NOT auto-applied to the local
 	// account. A compromised provider account (or a provider that lets
 	// admins change member emails) would otherwise let an attacker
@@ -1325,12 +1418,13 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 		)
 	}
 	if len(patch) == 0 {
-		return
+		return nil
 	}
 	patch["updated_at"] = nowMs
 	if err := s.repo(ctx).UpdateUser(ctx, u.ID, patch); err != nil {
 		s.logger.Warn("oauth_upsert_update_failed", zap.Error(err))
 	}
+	return nil
 }
 
 // linkOAuthIdentity persists the (provider, sub) → user_id linkage and
@@ -1338,10 +1432,11 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 // fail the login since the user has already been authenticated. On a
 // duplicate-link race the duplicate is treated as success — the next
 // login will simply hit the fast path.
-func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, identity *oauth.Identity, email string, nowMs int64) {
+func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, identity *oauth.Identity, nowMs int64) {
 	if identity.ProviderUserID == "" || identity.Provider == "" {
 		return
 	}
+	email := assertedAddress(identity)
 	oi := &OAuthIdentity{
 		UserID:          userID,
 		Provider:        identity.Provider,
@@ -1379,17 +1474,20 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 // in lockout cannot bypass the limit by switching authentication method.
 // When cfg.IDVRequired is set, unverified users are blocked with
 // ErrIDVRequired so the client can route them to BeginIdentityVerification.
-func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr, userAgent string) error {
+// A refused lockout is audited as login_locked when refusalAuditDue.
+func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate) error {
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
-		s.audit.Log(
-			ctx, audit.EventLoginLocked,
-			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{
-				"reason":       "account_locked",
-				"locked_until": user.LockedUntil,
-			}),
-		)
+		if s.refusalAuditDue(user, gate, "account_locked") {
+			s.audit.Log(
+				ctx, audit.EventLoginLocked,
+				audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+				audit.WithSuccess(false),
+				audit.WithDetails(map[string]any{
+					"reason":       "account_locked",
+					"locked_until": user.LockedUntil,
+				}),
+			)
+		}
 		return fmt.Errorf("%w: account temporarily locked due to too many failed attempts", ErrAccountLocked)
 	}
 

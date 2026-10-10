@@ -1,5 +1,218 @@
 # Upgrade guide
 
+## v4.14.0 → v4.15.0 — sign-in hardening (behaviour changes); an `email_unverified` and an `unproven_credentials_voided` audit event (additive)
+
+No schema change and no migration. `password_reset_tokens.email`, empty until
+now, records the address a reset link was mailed to (see below).
+
+### A GitHub sign-in needs a verified GitHub address (behaviour change)
+
+- **A GitHub sign-in needs a verified address from `/user/emails`
+  (behaviour change).** When GitHub listed no verified address, or
+  `/user/emails` could not be read (a token without the `user:email`
+  scope), the sign-in fell back to the profile's public email, which GitHub
+  lets a user set to any address without proving it, and treated it as
+  verified. That sign-in is now refused with `unauthenticated`. A user who
+  hits this verifies an address at GitHub and signs in again. The verified
+  primary address is still preferred, then the first verified one.
+
+### A QR sign-in checks the account before completing (behaviour change)
+
+- **A QR sign-in runs the account checks every sign-in runs, before it
+  consumes the hand-off (behaviour change).** `PollQrLogin` issued a session
+  to an approved hand-off whatever the approving account's state: a
+  deactivated, invited or locked account still signed the device in. Now:
+  - It is refused like a passkey sign-in, with the same codes:
+    `failed_precondition` for a deactivated account, a pending invitation or
+    (with identity verification required) an unverified identity, and
+    `resource_exhausted` for an account locked by failed sign-ins (the
+    approver has already signed in, so naming the lock reveals nothing). The
+    access-policy and verified-email refusals are unchanged.
+  - A refused poll leaves the hand-off approved instead of spending it, so
+    once the account is eligible (its address verified, say) the device's
+    next poll completes without a new QR code.
+  - An approved hand-off now expires at the end of its window
+    (`GATEWAY_QR_LOGIN_EXPIRY_SECONDS`) like a pending one; a poll after it
+    reports `expired`.
+
+### A password-reset link works only while the account holds the address it was issued for (behaviour change)
+
+- **A reset link is bound to the address it was mailed to (behaviour
+  change).** `ConfirmPasswordReset` used to reset the password of the
+  account the token named, whatever address the account held by then. Once
+  the account holds another address (after `ConfirmEmailChange` or a SCIM
+  write), a link mailed to the old one is refused with `unauthenticated`,
+  exactly as an invalid link, and spent; request a new one. Another spelling
+  of the same mailbox still resets. A reset token from `ResetUserPassword` is
+  bound to the address the account held when the admin issued it.
+- **Reset links issued before the upgrade stop working** for every account
+  with an email address. They carry no address, so they cannot show the
+  account still holds one, and are refused the same way. Users with an outstanding link request a new one; an admin
+  re-issues a `ResetUserPassword` token.
+
+### A refused hosted OAuth callback redirects to `return_to` with an error code (behaviour change)
+
+- **A refused hosted OAuth sign-in returns to the app (behaviour change).**
+  `/oauth/callback/{provider}` answered every failure with a bare `400` on the
+  identity origin. Once the signed state token verifies, a refused sign-in is
+  now 302-redirected to `return_to?error=<code>` (no `code` parameter):
+  `email_not_verified`, `account_disabled`, `account_locked`, `access_denied`,
+  `temporarily_unavailable` or `server_error` — see
+  [callback errors](oauth.md#callback-errors). A page at `return_to` that
+  only looks for `code` should handle `error`. A callback whose state token
+  or CSRF cookie does not verify still answers `400`.
+
+### A password sign-in into an account with no password is refused as for an unknown address (behaviour change)
+
+- **`PasswordLogin` no longer says an account has no password (behaviour
+  change).** A password sign-in into an account created through a provider or
+  passwordless sign-in answered `failed_precondition` ("no password set for
+  this account") without checking anything, which told any caller the account
+  exists. It now gets the `unauthenticated` "invalid email or password" an
+  unknown address gets, after the same password-check cost. A client that
+  showed "sign in with your provider" on that error can offer the provider
+  and passwordless options, and password reset, beside every
+  invalid-credentials message instead. `ChangePassword` and the other
+  signed-in calls still return `no password set`.
+
+### `RequestPasswordReset` returns before the account is looked up or mailed
+
+- **`RequestPasswordReset` no longer waits on the reset mail.** It looked up
+  the account and minted and mailed its reset link before answering, so a
+  request for an existing account took measurably longer than one for an
+  unknown address. That work now runs off the request, as the passwordless
+  code and magic-link requests already do; the answer is unchanged (always
+  success), and a send failure is logged as before.
+
+### A password sign-in during lockout is refused as for an unknown address (behaviour change)
+
+- **`PasswordLogin` no longer says an account is locked (behaviour change).**
+  After `GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS` failures it answered
+  `resource_exhausted` ("account temporarily locked") before checking the
+  password, so anyone could confirm an address has an account by failing
+  against it a few times. It now gets the `unauthenticated` "invalid email or
+  password" an unknown address gets, after the same password-check cost. The
+  lockout itself is unchanged: the correct password is still refused until
+  `GATEWAY_LOGIN_LOCKOUT_SECONDS` pass, the `login_locked` audit event is
+  still written, and a password reset still lifts it. A client that showed a
+  "locked, try later" message should mention password reset beside every
+  invalid-credentials message instead. Paths that check lockout after the
+  credential is proven (refresh, the required password change) still return
+  `account temporarily locked`.
+
+### A refresh refused over the account's state ends its access token under `GATEWAY_REVOCATION_MODE=session`; a replayed refused refresh is audited once per window; a refresh refused over a lockout keeps its token (behaviour changes)
+
+- **A refresh refused over the account's own state revokes its session
+  (behaviour change, `GATEWAY_REVOCATION_MODE=session` only).** A refresh
+  refused because the account's address is unverified (with
+  `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL`) or because the account is no longer
+  active (deactivated, suspended, back to invited, or failing a required
+  identity verification) left the access token issued with that refresh
+  token working until its natural expiry. That session is now revoked, so
+  the access token is rejected at its next session check (within
+  `GATEWAY_SESSION_CACHE_TTL_SECONDS` on other replicas).
+  - An unverified account keeps its refresh token, which rotates into a new
+    session once the address is verified, but a client can no longer call
+    `SendEmailVerification` with the old access token after the refusal:
+    send the user to sign in again, which is refused but mails a
+    verification link.
+  - A refresh refused because the account is locked out after failed
+    sign-ins, or by a transient failure, does not revoke the session: a
+    lockout can be triggered by anyone guessing at the password.
+  - `GATEWAY_REVOCATION_MODE=ttl` (the default) is unchanged.
+- **A refused refresh is audited once per window, not on every replay
+  (behaviour change).** A refresh refused because the account's address is
+  unverified or because it has no date of birth on file
+  (`GATEWAY_AGEGATE_REQUIRE_DOB`) keeps its token, so a client could replay it
+  without limit and write one `login_failure` row per replay. Each account's
+  refused refresh is now recorded at most once per 10 minutes for each reason
+  (`email_not_verified`, `dob_required`) on each replica; every replay is
+  still refused the same way. Refused sign-ins are recorded every time.
+  - The `dob_required` row now carries `gate` (`sign_in` or `refresh`), as
+    `email_not_verified` does. Alerting that counts refused refreshes counts
+    accounts per window, not attempts.
+- **A refresh refused because the account is locked out keeps its refresh
+  token (behaviour change).** The lockout was checked after the refresh token
+  was consumed, so the refusal burnt the token, and the retry a client makes
+  on a failed refresh was taken for refresh-token replay: every refresh token
+  the account held was deleted and, under `GATEWAY_REVOCATION_MODE=session`,
+  every session revoked. Anyone guessing at an account's password until it
+  locked could sign it out on every device. The lockout is now checked before
+  the token is consumed: the refresh is still refused with the same error,
+  but the token survives, a retry is refused the same way rather than
+  treated as a replay, and the token rotates normally once the lockout ends.
+  - A client that discarded its session on the lockout refusal can now keep
+    the refresh token and retry after the lockout instead of sending the user
+    back to sign in.
+  - Like the other refusals that keep the token, its `login_locked` row is
+    recorded at most once per 10 minutes per account on refresh (on each
+    replica); a locked-out sign-in is still recorded every time.
+  - Refreshes refused because the account is deactivated, suspended, back to
+    invited or failing a required identity verification are unchanged: they
+    still spend the refresh token and, under `GATEWAY_REVOCATION_MODE=session`,
+    end its session.
+
+### An `email_unverified` audit event (additive)
+
+- **A SCIM write that leaves an email unverified is audited.** A SCIM `PUT`
+  or `PATCH` that moves an account to another mailbox, and so leaves its
+  email unverified, now records an `email_unverified` audit entry: actor
+  `system:scim`, target the account, details `source: scim` and
+  `was_verified` (whether the account read verified before the write). The
+  entry never carries the address. A consumer that rejects unknown audit
+  event types should accept it.
+- `account_merged` and `email_canonicalized` entries no longer log an
+  `audit_unknown_event_type` warning when they are written.
+
+### A proof of an address that cannot void the credentials added before it fails the sign-in; a verification link voids what was added to an account a tagged provider address claimed; a link added while the address is being proven is voided too (behaviour changes)
+
+- **A proof of an address that cannot void the credentials added before it
+  fails the sign-in (behaviour change).** When a passwordless email code or
+  magic link, or a provider sign-in, first proves an account's address,
+  identity voids the password, passkeys and provider links added while it
+  was unproven. If the store failed while doing so, the sign-in used to
+  succeed and verify the address anyway, leaving what it could not void.
+  It now fails with `unavailable` and leaves the address unproven, so the
+  next proof voids them; start the sign-in again.
+- **The voided credentials have their own audit event.** That cleanup was
+  recorded as `password_changed` (reason
+  `planted_credentials_cleared_on_external_email_verification`), even when
+  no password was cleared. It is now `unproven_credentials_voided`, with the
+  proof `method` (`passwordless`, `oauth` or `verification_link`) and
+  `password_cleared`, `passkeys_cleared` and `provider_links_cleared`; each
+  voided provider link is still recorded as `identity_unlinked`. Update any alert or report that
+  keyed on the old `password_changed` reason.
+- **A verification link voids what was added to an account a tagged
+  provider address claimed (behaviour change).** An account created, or an
+  anonymous account upgraded, through a provider that asserted a `+tag`
+  address outside Gmail holds the untagged address unproven, and whoever
+  signed in that way may not own that mailbox. Redeeming the
+  `SendEmailVerification` link for such an account now voids what was
+  added while the address was unproven, as a sign-in proof does: the
+  password, the passkeys and every provider link except one whose provider
+  asserted the account's own address, with its sessions revoked and
+  audited as `unproven_credentials_voided` with `method:
+  verification_link`. The owner then signs in with an email code or link,
+  or sets a password through `RequestPasswordReset`, and links the provider
+  again while signed in. On any other account the verification link still
+  keeps every credential: it completes the sign-up that set them. If the
+  voiding cannot be done, `VerifyEmail` fails with `unavailable` and the
+  link is not spent; redeem it again.
+  - Provider links now record the address the provider asserted, `+tag`
+    included, where sign-in and anonymous upgrade recorded it without the
+    tag. `ListLinkedIdentities` shows that spelling for links made from
+    now on. A link recorded before this release cannot be told apart, so an
+    account it claimed keeps its credentials on a verification link; a
+    sign-in proof still voids them.
+- **A provider link added while the address is being proven is voided too
+  (behaviour change).** A `LinkIdentity` call already in flight when an
+  account's address was first proven could insert its link after the proof
+  had listed the links it voids. The proof now lists them again once the
+  address is marked verified, and `LinkIdentity` on an account whose
+  address was unproven when the call began withdraws its link and fails
+  with `unauthenticated` if the address was proven before its insert
+  landed; sign in again and link the provider.
+
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 
 No schema change and no migration.
@@ -68,7 +281,8 @@ No schema change and no migration.
     code, magic link or provider sign-in, as the first proof, ends the
     account's sessions instead). A client that gets this error from
     `RefreshToken` should stop retrying and ask the user to verify: call
-    `SendEmailVerification` while its access token is still valid, or else
+    `SendEmailVerification` while its access token is still valid (under
+    `GATEWAY_REVOCATION_MODE=session` the refusal ends it), or else
     send the user to sign in again, which is refused but mails a
     verification link. Each refused refresh is one `login_failure`
     row with `gate: refresh`; exclude those from failed-sign-in alerting

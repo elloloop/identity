@@ -48,10 +48,12 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAnonymousMustUpgrade):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
-	case errors.Is(err, service.ErrAssuranceUnavailable):
-		// The evidence could not be judged (upstream provider unreachable) —
-		// retryable, and deliberately generic: the underlying error can carry
-		// provider response text and this RPC is unauthenticated.
+	// Retryable. An assurance failure means the evidence could not be judged
+	// (upstream provider unreachable); it stays generic because the
+	// underlying error can carry provider response text and this RPC is
+	// unauthenticated.
+	case errors.Is(err, service.ErrUnavailable),
+		errors.Is(err, service.ErrAssuranceUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
 
 	case errors.Is(err, service.ErrAlreadyExists),

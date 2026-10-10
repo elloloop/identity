@@ -257,10 +257,13 @@ func TestConfirmPasswordReset_Success(t *testing.T) {
 		t.Errorf("new password did not verify")
 	}
 
-	// Token consumed.
+	// Token consumed, and bound to the address it was mailed to.
 	stored, _ := repo.FindPasswordResetTokenByHash(context.Background(), sha256Hex(token))
 	if stored == nil || stored.ConsumedAt == 0 {
 		t.Errorf("expected token to be consumed; stored=%+v", stored)
+	}
+	if stored != nil && stored.Email != "alice@test.com" {
+		t.Errorf("stored token address = %q, want alice@test.com", stored.Email)
 	}
 
 	// Refresh tokens revoked.
@@ -322,6 +325,90 @@ func TestConfirmPasswordReset_ExpiredTokenRejected(t *testing.T) {
 	err := svc.ConfirmPasswordReset(context.Background(), tok, "NewStr0ng!Pass")
 	if !errors.Is(err, ErrTokenExpired) {
 		t.Errorf("expired token: want ErrTokenExpired, got %v", err)
+	}
+}
+
+// A reset link is bound to the address it was mailed to. Once the account
+// has moved to another mailbox, the old mailbox's link must not reset the
+// password; it is refused exactly like an invalid link, and spent.
+func TestConfirmPasswordReset_EmailChangedSinceSendIsRefused(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "before@test.com", "OldStr0ng!Pass")
+	resetTok := requestAndExtractResetToken(t, svc, rec, "before@test.com")
+
+	rec.Reset()
+	if err := svc.RequestEmailChange(ctx, user.ID, "after@test.com", "OldStr0ng!Pass"); err != nil {
+		t.Fatalf("RequestEmailChange: %v", err)
+	}
+	if _, err := svc.ConfirmEmailChange(ctx, extractChangeTokenFromBody(t, rec.Sent()[0].Text)); err != nil {
+		t.Fatalf("ConfirmEmailChange: %v", err)
+	}
+
+	err := svc.ConfirmPasswordReset(ctx, resetTok, "NewStr0ng!Pass")
+	invalid := svc.ConfirmPasswordReset(ctx, "deadbeef", "NewStr0ng!Pass")
+	if !errors.Is(err, ErrUnauthenticated) || err.Error() != invalid.Error() {
+		t.Fatalf("want the invalid-token error %q, got %v", invalid, err)
+	}
+	got, _ := repo.GetUser(ctx, user.ID)
+	if !passwords.Verify("OldStr0ng!Pass", got.PasswordHash) {
+		t.Errorf("a link mailed to the old address reset the password")
+	}
+	if stored, _ := repo.FindPasswordResetTokenByHash(ctx, sha256Hex(resetTok)); stored == nil || stored.ConsumedAt == 0 {
+		t.Errorf("the refused token should be consumed; stored=%+v", stored)
+	}
+}
+
+// A link mailed to another spelling of the same mailbox still resets it.
+func TestConfirmPasswordReset_SameMailboxSpellingResets(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "firstlast@gmail.com", "OldStr0ng!Pass")
+	tok := requestAndExtractResetToken(t, svc, rec, "firstlast@gmail.com")
+	if err := repo.UpdateUser(ctx, user.ID, map[string]any{"email": "First.Last@gmail.com"}); err != nil {
+		t.Fatalf("respell email: %v", err)
+	}
+
+	if err := svc.ConfirmPasswordReset(ctx, tok, "NewStr0ng!Pass"); err != nil {
+		t.Fatalf("ConfirmPasswordReset: %v", err)
+	}
+}
+
+// A token stored without the address it was issued for cannot prove the
+// account still holds it, so it is refused while the account has an address.
+func TestConfirmPasswordReset_TokenWithoutAddressIsRefused(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "alice@test.com", "OldStr0ng!Pass")
+	tok := "issued-without-address"
+	if err := repo.CreatePasswordResetToken(ctx, &PasswordResetToken{
+		TokenHash: sha256Hex(tok), UserID: user.ID,
+		ExpiresAt: nowMs() + 60_000, CreatedAt: nowMs(),
+	}); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+
+	if err := svc.ConfirmPasswordReset(ctx, tok, "NewStr0ng!Pass"); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("want ErrUnauthenticated, got %v", err)
+	}
+}
+
+func TestResetTokenBindsAddress(t *testing.T) {
+	cases := []struct {
+		issuedFor, current string
+		want               bool
+	}{
+		{"alice@example.com", "alice@example.com", true},
+		{"Alice@Example.com", "alice@example.com", true},
+		{"alice@example.com", "bob@example.com", false},
+		{"", "alice@example.com", false},
+		{"alice@example.com", "", false},
+		{"", "", true},
+	}
+	for _, tc := range cases {
+		if got := resetTokenBindsAddress(tc.issuedFor, tc.current); got != tc.want {
+			t.Errorf("resetTokenBindsAddress(%q, %q) = %v, want %v", tc.issuedFor, tc.current, got, tc.want)
+		}
 	}
 }
 
@@ -650,7 +737,7 @@ func (r *fakeRepo) refreshTokenSnapshot() ([]*RefreshTokenRecord, error) {
 func TestRequestPasswordReset_PerRecipientThrottle(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	svc.cfg.EmailSendCooldownSeconds = 60
-	svc.emailThrottle = newEmailSendThrottle(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
+	svc.emailThrottle = newKeyCooldown(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
 
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
 	seedUser(repo, "alice@test.com", pwHash, "active")
@@ -669,7 +756,7 @@ func TestRequestPasswordReset_PerRecipientThrottle(t *testing.T) {
 func TestSendEmailVerification_PerRecipientThrottle(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	svc.cfg.EmailSendCooldownSeconds = 60
-	svc.emailThrottle = newEmailSendThrottle(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
+	svc.emailThrottle = newKeyCooldown(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
 
 	u := seedUser(repo, "bob@test.com", "x", "active")
 
@@ -866,5 +953,36 @@ func TestPasswordSignup_RefusedLinkParamsCreateNoAccount(t *testing.T) {
 	}
 	if got := len(rec.Sent()); got != 0 {
 		t.Fatalf("refused signup sent %d emails", got)
+	}
+}
+
+// With async dispatch (as the served deployment runs), a reset request for an
+// account returns without waiting on its token or its mail, as one for an
+// unknown address does: the response time says nothing about the account.
+func TestRequestPasswordReset_AsyncDoesNotBlockOnTheAccount(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	svc.WithAsyncEmailDispatch()
+	mailer := &blockingTransport{release: make(chan struct{}), sent: make(chan struct{})}
+	svc.mailer = mailer
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	seedUser(repo, "alice@test.com", pwHash, "active")
+
+	done := make(chan error, 1)
+	go func() { done <- svc.RequestPasswordReset(context.Background(), "alice@test.com", EmailLinkParams{}) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RequestPasswordReset: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		close(mailer.release)
+		t.Fatal("RequestPasswordReset waited on the reset mail")
+	}
+
+	close(mailer.release)
+	select {
+	case <-mailer.sent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the reset mail was not sent after the request returned")
 	}
 }

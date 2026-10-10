@@ -3,6 +3,7 @@ package app
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -153,26 +154,36 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 		clientIPFromRequest(r), r.UserAgent(), csrfTokens,
 	)
 	if err != nil {
-		// We do not have a verified return_to here (the state token failed
-		// to verify or the exchange failed), so we cannot safely redirect
-		// to an attacker-suppliable URL. Surface a generic 400.
 		h.logger.Info("hosted_oauth_callback_failed",
 			zap.String("provider", provider), zap.Error(err))
-		http.Error(w, "oauth failed", http.StatusBadRequest)
+		var refusal *service.HostedOAuthRefusalError
+		if !errors.As(err, &refusal) {
+			// No verified return_to (the state token or its CSRF binding
+			// failed), so there is nowhere safe to send the browser.
+			http.Error(w, "oauth failed", http.StatusBadRequest)
+			return
+		}
+		h.finishCallback(w, r, provider, csrfTokens, refusal.CSRFToken,
+			appendQueryParam(refusal.ReturnTo, "error", refusal.Code))
 		return
 	}
+	h.finishCallback(w, r, provider, csrfTokens, result.CSRFToken,
+		appendQueryParam(result.ReturnTo, "code", result.Code))
+}
 
-	remainingCSRFTokens := removeHostedOAuthCSRFToken(csrfTokens, result.CSRFToken)
+// finishCallback spends the flow's CSRF token and redirects to target, a
+// return_to recovered from the signed, tamper-proof hosted state token whose
+// value was validated against GATEWAY_OAUTH_ALLOWED_RETURN_URLS at /start.
+func (h *hostedOAuthHandler) finishCallback(w http.ResponseWriter, r *http.Request, provider string, csrfTokens []string, spent, target string) {
+	remainingCSRFTokens := removeHostedOAuthCSRFToken(csrfTokens, spent)
 	maxAge := 900
 	if len(remainingCSRFTokens) == 0 {
 		maxAge = -1
 	}
 	http.SetCookie(w, hostedOAuthCSRFCookie(provider, remainingCSRFTokens, maxAge))
-	// #nosec G710 -- result.ReturnTo is recovered from the signed,
-	// tamper-proof hosted state token whose return_to was validated
-	// against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist at /start
-	// time. It is not raw request input.
-	http.Redirect(w, r, appendQueryParam(result.ReturnTo, "code", result.Code), http.StatusFound)
+	// #nosec G710 -- target is built on the state token's allowlisted
+	// return_to, not raw request input.
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 func hostedOAuthCSRFCookie(provider string, tokens []string, maxAge int) *http.Cookie {

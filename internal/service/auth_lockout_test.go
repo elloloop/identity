@@ -12,8 +12,7 @@ import (
 
 // TestLockout_NFailuresLockAccount verifies that exactly
 // LoginMaxFailedAttempts (5) failures with the wrong password trip the
-// lockout, after which a (correct) password attempt is rejected with
-// ErrAccountLocked.
+// lockout, after which a (correct) password attempt is refused.
 func TestLockout_NFailuresLockAccount(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -30,9 +29,23 @@ func TestLockout_NFailuresLockAccount(t *testing.T) {
 	// (N+1)th attempt with the CORRECT password is still rejected.
 	_, err := svc.PasswordLogin(context.Background(), "lock@example.com", strongPW, "", "")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAccountLocked),
-		"expected ErrAccountLocked after %d failures, got %v",
+	assert.True(t, errors.Is(err, ErrUnauthenticated),
+		"expected a refusal after %d failures, got %v",
 		svc.cfg.LoginMaxFailedAttempts, err)
+	assert.Equal(t, int64(1), int64(len(lockedUsers(repo))), "the account is locked")
+}
+
+// lockedUsers lists the accounts whose lockout is in force.
+func lockedUsers(repo *fakeRepo) []string {
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	var out []string
+	for _, u := range repo.users {
+		if u.LockedUntil > time.Now().UnixMilli() {
+			out = append(out, u.Email)
+		}
+	}
+	return out
 }
 
 // TestLockout_LockoutClearsAfterWindow verifies that once the lockout
@@ -50,9 +63,9 @@ func TestLockout_LockoutClearsAfterWindow(t *testing.T) {
 		_, _ = svc.PasswordLogin(context.Background(), "expire-lock@example.com", "Wrong-PW!9", "", "")
 	}
 
-	// Confirm we're locked.
+	// Confirm we're locked: the right password is refused.
 	_, err := svc.PasswordLogin(context.Background(), "expire-lock@example.com", strongPW, "", "")
-	require.True(t, errors.Is(err, ErrAccountLocked))
+	require.True(t, errors.Is(err, ErrUnauthenticated))
 
 	// Advance the clock past the lockout window.
 	now = now.Add(time.Duration(svc.cfg.LoginLockoutSeconds+1) * time.Second)
@@ -157,7 +170,8 @@ func TestLockout_RepoIncrementErrorPropagated(t *testing.T) {
 
 // TestLockout_LockedAccountWithCorrectPassword nails the explicit
 // invariant from the spec: while locked, the correct password is
-// rejected the same as the wrong one.
+// rejected the same as the wrong one — and as an unknown address is, so
+// tripping the lockout cannot confirm that an account exists.
 func TestLockout_LockedAccountWithCorrectPassword(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -168,10 +182,44 @@ func TestLockout_LockedAccountWithCorrectPassword(t *testing.T) {
 	future := time.Now().Add(time.Hour).UnixMilli()
 	require.NoError(t, repo.SetUserLockedUntil(context.Background(), u.ID, future))
 
-	_, err := svc.PasswordLogin(context.Background(), "still-locked@example.com", strongPW, "", "")
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAccountLocked),
-		"correct password must still be rejected while locked, got %v", err)
+	_, rightErr := svc.PasswordLogin(context.Background(), "still-locked@example.com", strongPW, "", "")
+	_, wrongErr := svc.PasswordLogin(context.Background(), "still-locked@example.com", "Wrong-PW!9", "", "")
+	_, unknownErr := svc.PasswordLogin(context.Background(), "nobody@example.com", strongPW, "", "")
+	require.ErrorIs(t, rightErr, ErrUnauthenticated, "correct password must still be rejected while locked")
+	assert.NotErrorIs(t, rightErr, ErrAccountLocked)
+	assert.Equal(t, unknownErr.Error(), rightErr.Error())
+	assert.Equal(t, unknownErr.Error(), wrongErr.Error())
+}
+
+// TestLockout_LockedRefusalCostsAPasswordCheck: a locked account answers in
+// the time a wrong password takes, so timing does not mark it either.
+func TestLockout_LockedRefusalCostsAPasswordCheck(t *testing.T) {
+	// Not parallel: this test measures wall-clock time.
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	seedUser(repo, "open@example.com", hashPW(t, strongPW), "active")
+	locked := seedUser(repo, "shut@example.com", hashPW(t, strongPW), "active")
+	require.NoError(t, repo.SetUserLockedUntil(context.Background(), locked.ID, time.Now().Add(time.Hour).UnixMilli()))
+
+	const iters = 5
+	measure := func(email string) time.Duration {
+		var total time.Duration
+		for i := 0; i < iters; i++ {
+			start := time.Now()
+			_, _ = svc.PasswordLogin(context.Background(), email, "Wrong-PW!9", "", "")
+			total += time.Since(start)
+		}
+		return total / iters
+	}
+	_, _ = svc.PasswordLogin(context.Background(), "shut@example.com", "Wrong-PW!9", "", "")
+
+	avgWrongPW := measure("open@example.com")
+	avgLocked := measure("shut@example.com")
+	t.Logf("Login avg wrong-pw=%v locked=%v", avgWrongPW, avgLocked)
+	if avgWrongPW > 5*avgLocked {
+		t.Errorf("PasswordLogin is %.1fx slower for a wrong password than for a locked account",
+			float64(avgWrongPW)/float64(avgLocked))
+	}
 }
 
 // TestLockout_AuditEventsEmitted asserts the four audit events that
@@ -198,7 +246,7 @@ func TestLockout_AuditEventsEmitted(t *testing.T) {
 
 	// Attempt-during-lockout emits login_locked, not login_failure.
 	_, err := svc.PasswordLogin(context.Background(), "audit-lock@example.com", strongPW, "", "")
-	require.True(t, errors.Is(err, ErrAccountLocked))
+	require.True(t, errors.Is(err, ErrUnauthenticated))
 	assert.Equal(t, 1, rec.countByEventType("login_locked"), "exactly one login_locked event")
 	assert.Equal(t, svc.cfg.LoginMaxFailedAttempts, rec.countByEventType("login_failure"),
 		"login_failure count should not increase during lockout")

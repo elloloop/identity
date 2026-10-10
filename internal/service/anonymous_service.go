@@ -124,7 +124,7 @@ func (s *AuthService) SignInAnonymously(ctx context.Context, ipAddr, userAgent s
 
 	// An anonymous account proves no credential: its session carries no
 	// auth_time, so it never counts as a recent sign-in.
-	access, refresh, err := s.issueTokensWithSessionStart(ctx, u, ipAddr, userAgent, s.nowMs(), 0)
+	access, refresh, err := s.issueTokensWithSessionStart(ctx, u, ipAddr, userAgent, sessionGateSignIn, s.nowMs(), 0)
 	if err != nil {
 		return nil, err
 	}

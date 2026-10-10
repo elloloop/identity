@@ -61,7 +61,8 @@ func TestIssueTokens_VerifiedEmailGate(t *testing.T) {
 // refreshed past the gate. The refusal comes before the token is consumed, so
 // a client retrying it is refused the same way rather than tripping replay
 // detection, and the token rotates normally once the address is verified. A
-// refused refresh sends no email, and is audited with the gate that refused.
+// refused refresh sends no email, and is audited with the gate that refused,
+// once in the audit window however often it is retried.
 func TestRefreshToken_VerifiedEmailGate(t *testing.T) {
 	repo := newFakeRepo()
 	writer := newRecordingAuditWriter()
@@ -79,7 +80,7 @@ func TestRefreshToken_VerifiedEmailGate(t *testing.T) {
 		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
 		require.ErrorIs(t, err, ErrEmailVerificationRequired, "a retry is refused the same way, not as a replay")
 	}
-	assert.Equal(t, 2, writer.countByEventTypeAndDetail("login_failure", "gate", "refresh"))
+	assert.Equal(t, 1, writer.countByEventTypeAndDetail("login_failure", "gate", "refresh"))
 
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": time.Now().UnixMilli()}))
 	_, access, rotated, err := svc.RefreshToken(ctx, refresh, "", "")
@@ -195,7 +196,7 @@ func TestIssueTokensWithSessionStart_VerifiedEmailBackstop(t *testing.T) {
 	svc.cfg.AuthRequireVerifiedEmail = true
 	user := seedUser(repo, "backstop@example.com", "", StatusActive)
 
-	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", 0, 0)
+	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", sessionGateSignIn, 0, 0)
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Zero(t, writer.countByEventType("login_failure"))
 }
