@@ -47,11 +47,17 @@ func canonicalRewriteTarget(stored string) (string, error) {
 }
 
 // proofCarriesTo reports whether proving control of proven proves the account
-// address stored: both are provably the same mailbox, by the rule a canonical
-// rewrite keeps an account's verified state under.
+// address stored: both are the same address, or provably the same mailbox by
+// the rule a canonical rewrite keeps an account's verified state under. An
+// address left in a spelling that rule refuses (a +tag outside Gmail) is
+// proven only by itself.
 func proofCarriesTo(proven, stored string) bool {
 	if stored == "" {
 		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(proven), strings.TrimSpace(stored)) {
+		_, usable := emailaddr.Mailbox(stored)
+		return usable
 	}
 	p, err := canonicalRewriteTarget(proven)
 	if err != nil {

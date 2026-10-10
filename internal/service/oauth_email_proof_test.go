@@ -110,6 +110,8 @@ func TestProofCarriesTo(t *testing.T) {
 		{"", "", false},
 		{"a+x@example.com", "a@example.com", false},
 		{"a@example.com", "a+x@example.com", false},
+		{"a+x@example.com", "a+x@example.com", true},
+		{"A+x@Example.com", "a+x@example.com", true},
 		{"+x@gmail.com", "+x@gmail.com", false},
 	}
 	for _, tc := range cases {

@@ -1143,11 +1143,12 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 
 // markEmailVerifiedViaExternalProof flips the account to verified because an
 // external method (OAuth provider assertion, or an emailed OTP/magic-link the
-// user redeemed) proved control of proven. It does nothing unless that proof
-// carries to the account's own address (proofCarriesTo): an account found by
-// a linked provider id may hold a different address, or none. Any credential on the account
-// was established BEFORE this proof — possibly by a different party (account
-// pre-hijacking) — so the untrusted ones are voided:
+// user redeemed) proved control of the address `proven`. It does nothing
+// unless that proof carries to the account's own address (proofCarriesTo): an
+// account found by a linked provider id may hold a different address, or none.
+// Any credential on the account was established BEFORE this proof — possibly
+// by a different party (account pre-hijacking) — so the untrusted ones are
+// voided:
 //
 //   - a planted password is cleared (the owner re-establishes it via reset);
 //   - any planted passkeys are deleted. A passkey enrolled while the email was
