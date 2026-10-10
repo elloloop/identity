@@ -1002,6 +1002,7 @@ type PasswordResetToken struct {
 	NodeID     string
 	TokenHash  string
 	UserID     string
+	Email      string
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed

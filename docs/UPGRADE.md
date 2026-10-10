@@ -1,5 +1,23 @@
 # Upgrade guide
 
+## Unreleased — a password-reset link works only while the account holds the address it was issued for (behaviour change)
+
+No schema change and no migration: `password_reset_tokens.email`, until now
+always empty, records the address.
+
+- **A reset link is bound to the address it was mailed to (behaviour
+  change).** `ConfirmPasswordReset` used to reset the password of the
+  account the token named, whatever address the account held by then. Once
+  the account holds another address (after `ConfirmEmailChange` or a SCIM
+  write), a link mailed to the old one is refused with `unauthenticated`,
+  exactly as an invalid link, and spent; request a new one. Another spelling
+  of the same mailbox still resets. A reset token from `ResetUserPassword` is
+  bound to the address the account held when the admin issued it.
+- **Reset links issued before the upgrade stop working** for every account
+  with an email address. They carry no address, so they cannot show the
+  account still holds one, and are refused the same way. Users with an outstanding link request a new one; an admin
+  re-issues a `ResetUserPassword` token.
+
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 
 No schema change and no migration.

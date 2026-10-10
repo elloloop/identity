@@ -12,7 +12,7 @@ import (
 func scanPasswordReset(row pgx.Row) (*service.PasswordResetToken, error) {
 	var t service.PasswordResetToken
 	if err := row.Scan(
-		&t.NodeID, &t.TokenHash, &t.UserID,
+		&t.NodeID, &t.TokenHash, &t.UserID, &t.Email,
 		&t.ExpiresAt, &t.CreatedAt, &t.ConsumedAt,
 	); err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func (r *pgRepository) CreatePasswordResetToken(ctx context.Context, t *service.
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.projectID, t.TokenHash, t.UserID, "",
+		id, r.projectID, t.TokenHash, t.UserID, t.Email,
 		t.ExpiresAt, t.CreatedAt, t.ConsumedAt,
 	)
 	if err != nil {
@@ -50,7 +50,7 @@ func (r *pgRepository) FindPasswordResetTokenByHash(ctx context.Context, tokenHa
 		return nil, nil
 	}
 	const q = `
-		SELECT id, token_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms
+		SELECT id, token_hash, user_id, email, expires_at_ms, created_at_ms, consumed_at_ms
 		  FROM password_reset_tokens
 		 WHERE project_id = $1 AND token_hash = $2
 		 LIMIT 1`

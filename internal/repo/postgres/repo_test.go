@@ -329,6 +329,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 				dbPrfUserID:    userID,
 				dbPrfExpiresAt: createdAt + 1000,
 				dbPrfCreatedAt: createdAt,
+				dbPrfEmail:     "reset@example.com",
 			},
 		},
 		{
@@ -443,7 +444,10 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	requireQueryCount(ctx, t, repo, dbTypeUser, map[string]any{dbUfEmail: "DB-USER@EXAMPLE.COM", dbUfTOTPRequired: true, dbUfFailedLoginCount: int64(2)}, 1)
 	requireQueryCount(ctx, t, repo, dbTypeWorkingGroup, map[string]any{dbGfName: "Core Team", dbGfCreatedAt: createdAt}, 1)
 	requireQueryCount(ctx, t, repo, dbTypeRefreshToken, map[string]any{dbRfTokenHash: "refresh-hash", dbRfUserID: userID}, 1)
-	requireQueryCount(ctx, t, repo, dbTypePasswordReset, map[string]any{dbPrfTokenHash: "reset-hash", dbPrfExpiresAt: createdAt + 1000}, 1)
+	requireQueryCount(ctx, t, repo, dbTypePasswordReset, map[string]any{dbPrfTokenHash: "reset-hash", dbPrfExpiresAt: createdAt + 1000, dbPrfEmail: "reset@example.com"}, 1)
+	reset, err := repo.FindPasswordResetTokenByHash(ctx, "reset-hash")
+	require.NoError(t, err)
+	require.Equal(t, "reset@example.com", reset.Email)
 	requireQueryCount(ctx, t, repo, dbTypePasskey, map[string]any{dbPkfCredentialID: "passkey-lookup-id", dbPkfDeviceName: "security key"}, 1)
 	requireQueryCount(ctx, t, repo, dbTypeAuditEvent, map[string]any{dbAfEventType: "user.created", dbAfSuccess: true}, 1)
 	requireQueryCount(ctx, t, repo, dbTypeAdminHelpReq, map[string]any{dbHfEmail: "HELP@EXAMPLE.COM", dbHfStatus: "pending"}, 1)

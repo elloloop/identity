@@ -58,6 +58,7 @@ const (
 	issue3PrfUserID    = "2"
 	issue3PrfExpiresAt = "3"
 	issue3PrfCreatedAt = "4"
+	issue3PrfEmail     = "5"
 
 	issue3InvTokenHash  = "1"
 	issue3InvEmail      = "2"
@@ -391,6 +392,7 @@ func (d *issue3DB) createNode(op graph.Operation) (string, error) {
 			NodeID:    id,
 			TokenHash: issue3String(op.Data[issue3PrfTokenHash]),
 			UserID:    issue3String(op.Data[issue3PrfUserID]),
+			Email:     issue3String(op.Data[issue3PrfEmail]),
 			ExpiresAt: issue3Int64(op.Data[issue3PrfExpiresAt]),
 			CreatedAt: issue3Int64(op.Data[issue3PrfCreatedAt]),
 		}
@@ -556,6 +558,7 @@ func issue3PasswordResetNode(reset *service.PasswordResetToken) *graph.Node {
 			issue3PrfUserID:    reset.UserID,
 			issue3PrfExpiresAt: reset.ExpiresAt,
 			issue3PrfCreatedAt: reset.CreatedAt,
+			issue3PrfEmail:     reset.Email,
 		},
 	}
 }
