@@ -45,6 +45,14 @@ No schema change and no migration.
     code or magic link, or a provider sign-in, also verifies the address,
     but as the first proof of an unverified address it voids the account's
     password and passkeys and ends its sessions.
+- **Proving an account's address voids provider links added before it
+  (behaviour change).** When an emailed code or link, or a provider sign-in,
+  first proves an account's address, identity already cleared the password
+  and passkeys set while it was unproven. It now also deletes every provider
+  link but the one signing in, each audited as `identity_unlinked` with
+  `reason: planted_link_cleared_on_external_email_verification`, and revokes
+  the account's sessions. A user who linked a provider to their own
+  unverified account signs in with it once more to re-link it.
 
 ## v4.12.2 → v4.13.0 — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); an optional `iss` claim and per-project token audience
 
