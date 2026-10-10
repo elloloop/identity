@@ -38,9 +38,12 @@ No schema change and no migration.
   own budget of that size), and `PollQrLogin` against the new
   **`GATEWAY_RATE_LIMIT_QR_POLL_PER_IP`** (default 120 per
   `GATEWAY_RATE_LIMIT_WINDOW_SECONDS`; 0 disables it; negative refused at
-  boot). Over-limit calls get 429 / `resource_exhausted` with `Retry-After`.
+  boot). An over-limit call gets HTTP 429 with a `Retry-After` header, which
+  Connect clients report as `unavailable`, as for the other per-IP limits.
   A client polling faster than every half second from one address, or many
-  devices behind one NAT, should poll less often or raise the limit.
+  devices behind one NAT, should poll less often or raise the limit. Like the
+  other sign-in limits, these are enforced on the HTTP surface only; a host
+  serving identity through `RegisterGRPC` must apply its own.
 
 ### Audit
 
