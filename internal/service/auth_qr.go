@@ -97,7 +97,7 @@ func (s *AuthService) GetQrLoginSession(ctx context.Context, sessionID string) (
 // ── ApproveQrLogin ─────────────────────────────────────────────────────
 
 // ApproveQrLogin approves or rejects a QR login session. Returns the new status.
-func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, approve bool, userID, userAgent string) (string, error) {
+func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, approve bool, userID, ipAddr, userAgent string) (string, error) {
 	if sessionID == "" {
 		return "", fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
 	}
@@ -126,6 +126,9 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 
 	var newStatus string
 	if approve {
+		if err := s.checkQrApprover(ctx, userID, ipAddr, userAgent); err != nil {
+			return "", err
+		}
 		newStatus = "approved"
 		err = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 			"status":               "approved",
@@ -160,6 +163,18 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 		zap.Bool("approved", approve),
 	)
 	return newStatus, nil
+}
+
+// checkQrApprover refuses an approval from an account that could not sign in
+// itself: a still-valid access token outlives a deactivation or a lockout, and
+// the approval is a sign-in for another device. The poll re-checks at
+// collection, since the account can change after approving.
+func (s *AuthService) checkQrApprover(ctx context.Context, userID, ipAddr, userAgent string) error {
+	user, err := s.GetCurrentUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn)
 }
 
 // ── PollQrLogin ────────────────────────────────────────────────────────

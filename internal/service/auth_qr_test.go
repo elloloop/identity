@@ -17,7 +17,7 @@ func approvedQrLogin(ctx context.Context, t *testing.T, svc *AuthService, user *
 	t.Helper()
 	init, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
 	require.NoError(t, err)
-	status, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "approver")
+	status, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "", "approver")
 	require.NoError(t, err)
 	require.Equal(t, "approved", status)
 	return init.SessionID, init.PollSecret
@@ -219,4 +219,52 @@ func TestPollQrLogin_RefusalAuditPaced(t *testing.T) {
 			assert.Equal(t, 2, tc.count(writer), "the next window records the refusal again")
 		})
 	}
+}
+
+// An account that could not sign in itself cannot approve a hand-off into
+// another device, and the refused approval leaves the hand-off pending. It
+// may still reject one.
+func TestApproveQrLogin_IneligibleApproverRefused(t *testing.T) {
+	cases := []struct {
+		name    string
+		refuse  map[string]any
+		wantErr error
+	}{
+		{name: "deactivated", refuse: map[string]any{"status": StatusDeactivated}, wantErr: ErrAccountNotActive},
+		{name: "invited", refuse: map[string]any{"status": StatusInvited}, wantErr: ErrInvitationPending},
+		{name: "locked", refuse: map[string]any{"locked_until": time.Now().Add(time.Hour).UnixMilli()}, wantErr: ErrAccountLocked},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newTestAuthService(t, repo)
+			ctx := context.Background()
+			user := seedUser(repo, "qr-approver@example.com", "", StatusActive)
+			require.NoError(t, repo.UpdateUser(ctx, user.ID, tc.refuse))
+			init, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
+			require.NoError(t, err)
+
+			status, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "10.0.0.2", "approver")
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Empty(t, status)
+			requireQrSessionStatus(ctx, t, repo, init.SessionID, "pending")
+
+			status, err = svc.ApproveQrLogin(ctx, init.SessionID, false, user.ID, "10.0.0.2", "approver")
+			require.NoError(t, err)
+			assert.Equal(t, "rejected", status)
+		})
+	}
+}
+
+// An approval from an account that no longer exists is refused.
+func TestApproveQrLogin_UnknownApproverRefused(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := context.Background()
+	init, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
+	require.NoError(t, err)
+
+	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, "ghost", "10.0.0.2", "approver")
+	require.ErrorIs(t, err, ErrNotFound)
+	requireQrSessionStatus(ctx, t, repo, init.SessionID, "pending")
 }

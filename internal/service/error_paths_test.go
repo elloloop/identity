@@ -436,7 +436,7 @@ func TestApproveQrLogin_FindErrors(t *testing.T) {
 	r.failFindQrLoginSession = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.ApproveQrLogin(context.Background(), "sid", true, "u", "")
+	_, err := svc.ApproveQrLogin(context.Background(), "sid", true, "u", "", "")
 	require.Error(t, err)
 }
 
@@ -456,7 +456,7 @@ func TestPollQrLogin_GetUserErrors(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
 	require.NoError(t, err)
 
 	r.failGetUser = true
@@ -471,7 +471,7 @@ func TestPollQrLogin_IssueTokensFails(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
 	require.NoError(t, err)
 
 	r.failCreateRefreshToken = true
@@ -499,14 +499,15 @@ func TestPollQrLogin_ExpiredCaseReached(t *testing.T) {
 
 func TestApproveQrLogin_UpdateErrors(t *testing.T) {
 	r := newErrorRepo()
+	user := seedUser(r.fakeRepo, "qrupd@example.com", "", "active")
 	svc := newTestAuthServiceErr(t, r)
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
 	r.failUpdateQrLoginSession = true
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, "u", "")
-	require.Error(t, err)
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
+	require.ErrorContains(t, err, "updating QR login session")
 }
 
 func TestApproveQrLogin_RejectUpdateErrors(t *testing.T) {
@@ -517,7 +518,7 @@ func TestApproveQrLogin_RejectUpdateErrors(t *testing.T) {
 	require.NoError(t, err)
 
 	r.failUpdateQrLoginSession = true
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, false, "u", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, false, "u", "", "")
 	require.Error(t, err)
 }
 

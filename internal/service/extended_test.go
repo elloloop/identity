@@ -878,7 +878,7 @@ func TestApproveQrLogin_EmptyID(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.ApproveQrLogin(context.Background(), "", true, "u", "")
+	_, err := svc.ApproveQrLogin(context.Background(), "", true, "u", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -887,7 +887,7 @@ func TestApproveQrLogin_NotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.ApproveQrLogin(context.Background(), "ghost", true, "u", "")
+	_, err := svc.ApproveQrLogin(context.Background(), "ghost", true, "u", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -900,7 +900,7 @@ func TestApproveQrLogin_ExpiredPending(t *testing.T) {
 	require.NoError(t, err)
 	svc.nowFunc = func() time.Time { return time.Now().Add(time.Hour) }
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, "u", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, "u", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrQrLoginExpired))
 }
@@ -912,11 +912,11 @@ func TestApproveQrLogin_AlreadyConsumed(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "", "")
 	require.NoError(t, err)
 
 	// Approving twice should fail with ErrQrLoginNotPending.
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrQrLoginNotPending))
 }
@@ -970,7 +970,7 @@ func TestPollQrLogin_ApprovedUserDeleted(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "", "")
 	require.NoError(t, err)
 
 	repo.mu.Lock()

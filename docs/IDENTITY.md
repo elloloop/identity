@@ -645,9 +645,12 @@ outlives the request that created it, and a project that tightens its policy in
 between would otherwise have every outstanding token as a hole in the new
 policy.
 
-**QR login** is gated at completion rather than at approval: polling mints an
+**QR login** is gated at completion as well as at approval: polling mints an
 independent session for the scanning device, which outlives the approval that
-authorized it, so the approval alone cannot stand in for the check. The poll
+authorized it, so the approval alone cannot stand in for the check. An approval
+is refused, with the codes a sign-in uses, from an account that could not sign
+in itself (deactivated, invited, locked, or unverified while identity
+verification is required); rejecting a hand-off is always allowed. The poll
 runs the checks every sign-in runs (account status and lockout, project access,
 the verified-email gate) before it consumes the hand-off, so a refused poll
 leaves the session approved and a later poll completes once the account is

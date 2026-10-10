@@ -517,7 +517,7 @@ func TestQrLogin_InitiateApproveAndPoll(t *testing.T) {
 	assert.Equal(t, "Pixel 8", info.NewDeviceInfo)
 
 	// Step 3: Approve.
-	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "ApproverAgent")
+	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "ApproverAgent")
 	require.NoError(t, err)
 	assert.Equal(t, "approved", status)
 
@@ -544,7 +544,7 @@ func TestQrLogin_PollWithoutSecret_AppearsExpired(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Pixel", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
 	require.NoError(t, err)
 
 	// Missing secret.
@@ -574,7 +574,7 @@ func TestQrLogin_RejectFlow(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, false, user.ID, "")
+	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, false, user.ID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "rejected", status)
 
@@ -623,7 +623,7 @@ func TestQrLogin_ConcurrentPollOfApprovedSession_SingleWinner(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
 	require.NoError(t, err)
 
 	const N = 16

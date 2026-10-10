@@ -325,7 +325,7 @@ func TestDOBRequired_PollQrLogin(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(ctx, "Pixel 8", "agent", "10.0.0.1")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "ApproverAgent")
+	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "", "ApproverAgent")
 	require.NoError(t, err)
 
 	_, err = svc.PollQrLogin(ctx, init.SessionID, init.PollSecret, "10.0.0.1", "agent")
