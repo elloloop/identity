@@ -2338,6 +2338,14 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		}
 	}
 
+	// The verified-email gate, early for the same reason: an account whose
+	// address became unverified (a SCIM email change, say) keeps its token,
+	// and rotates normally once the address is verified. It runs before the
+	// DOB step, which could not yield a session while the address is unproven.
+	if err := s.enforceVerifiedEmail(ctx, timeoutUser, ipAddr, userAgent, verifiedEmailGateRefresh); err != nil {
+		return nil, "", "", err
+	}
+
 	// Same reasoning for the required-DOB gate, and it applies to EVERY
 	// account, not only anonymous ones. Enabling GATEWAY_AGEGATE_REQUIRE_DOB
 	// makes every pre-existing dob-less session fail its next rotation; if
@@ -2349,13 +2357,6 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// exists only so the refusal is non-destructive and the client can
 	// complete the step and rotate normally.
 	if err := s.enforceDOBRequired(ctx, timeoutUser, 0, ipAddr, userAgent); err != nil {
-		return nil, "", "", err
-	}
-
-	// The verified-email gate, before the consume for the same reason: an
-	// account whose address became unverified (a SCIM email change, say)
-	// keeps its token, and rotates normally once the address is verified.
-	if err := s.enforceVerifiedEmail(ctx, timeoutUser, ipAddr, userAgent, verifiedEmailGateRefresh); err != nil {
 		return nil, "", "", err
 	}
 

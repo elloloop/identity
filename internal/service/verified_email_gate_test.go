@@ -192,3 +192,18 @@ func TestIssueTokensWithSessionStart_VerifiedEmailBackstop(t *testing.T) {
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Zero(t, writer.countByEventType("login_failure"))
 }
+
+// A sign-in that cannot yield a session is not asked for a second factor, so
+// no challenge is issued (and no recovery code can be spent on it).
+func TestVerifiedEmailGate_RefusesBeforeTheSecondFactor(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AuthRequireVerifiedEmail = true
+	ctx := context.Background()
+	user := seedUser(repo, "twofactor@example.com", "", StatusActive)
+	user.TotpRequired = true
+
+	res, err := svc.requireSecondFactor(ctx, user, false, "", "")
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	assert.Nil(t, res)
+}

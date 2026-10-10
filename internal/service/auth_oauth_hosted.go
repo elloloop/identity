@@ -263,7 +263,7 @@ func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAge
 		return nil, err
 	}
 	if user.TotpRequired || decision.RequireSecondFactor {
-		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor)
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
 	}
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)

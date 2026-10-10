@@ -24,7 +24,12 @@ import { Code } from "astro-expressive-code/components";
       verifies the hash, deletes the old node, and issues a new
       access/refresh pair. This is <strong>refresh-token rotation</strong>:
       a stolen refresh token is invalidated the moment the legitimate
-      client uses theirs.
+      client uses theirs. With <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code>
+      on, a refresh for an account whose address is unverified is refused
+      with <code>FailedPrecondition</code> ("email verification required")
+      before the token is consumed: stop retrying, ask the user to verify
+      (offering <code>SendEmailVerification</code>), and the same token
+      rotates again once the link is redeemed.
     </li>
     <li>
       <strong>Revoke.</strong>
