@@ -986,3 +986,48 @@ func TestRequestPasswordReset_AsyncDoesNotBlockOnTheAccount(t *testing.T) {
 		t.Fatal("the reset mail was not sent after the request returned")
 	}
 }
+
+// Async dispatch runs at most maxInFlightEmailSends sends at once: one more is
+// dropped, not queued and not waited for, and a freed slot admits the next.
+func TestDispatchEmailSend_CapsSendsInFlight(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithAsyncEmailDispatch()
+	release := make(chan struct{})
+	var started, finished sync.WaitGroup
+	started.Add(maxInFlightEmailSends)
+	finished.Add(maxInFlightEmailSends)
+	for range maxInFlightEmailSends {
+		svc.dispatchEmailSend(context.Background(), "test", func(context.Context) {
+			defer finished.Done()
+			started.Done()
+			<-release
+		})
+	}
+	started.Wait()
+
+	overflow := make(chan struct{}, 1)
+	svc.dispatchEmailSend(context.Background(), "test", func(context.Context) { overflow <- struct{}{} })
+	close(release)
+	finished.Wait()
+	select {
+	case <-overflow:
+		t.Fatal("a send beyond the cap ran")
+	default:
+	}
+
+	// A slot is released just after its send returns.
+	deadline := time.Now().Add(2 * time.Second)
+	for len(svc.emailSendSlots) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("finished sends did not release their slots")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	ran := make(chan struct{})
+	svc.dispatchEmailSend(context.Background(), "test", func(context.Context) { close(ran) })
+	select {
+	case <-ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a send after the in-flight ones finished did not run")
+	}
+}

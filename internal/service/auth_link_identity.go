@@ -129,12 +129,14 @@ func (s *AuthService) LinkIdentity(
 // between the two escapes the first listing. Reading the account after the
 // insert means either the second listing sees the link or this read sees the
 // proof. A read that fails withdraws the link too, so the call fails closed.
+// An account deleted meanwhile loses the link with it and is ErrNotFound.
 func (s *AuthService) withdrawLinkIfAddressProven(ctx context.Context, oi *OAuthIdentity) error {
 	account, err := s.repo(ctx).GetUser(ctx, oi.UserID)
 	if err == nil && account != nil && !account.EmailVerified {
 		return nil
 	}
-	if delErr := s.repo(ctx).DeleteOAuthIdentity(ctx, oi.UserID, oi.Provider, oi.ProviderUserID); delErr != nil {
+	delErr := s.repo(ctx).DeleteOAuthIdentity(ctx, oi.UserID, oi.Provider, oi.ProviderUserID)
+	if delErr != nil && !errors.Is(delErr, ErrNotFound) {
 		s.logger.Error("identity_link_withdraw_failed",
 			zap.String("user_id", oi.UserID),
 			zap.String("provider", oi.Provider),
@@ -147,6 +149,9 @@ func (s *AuthService) withdrawLinkIfAddressProven(ctx context.Context, oi *OAuth
 			zap.String("provider", oi.Provider),
 			zap.Error(err))
 		return fmt.Errorf("%w: the provider could not be linked", ErrUnavailable)
+	}
+	if account == nil {
+		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	s.audit.Log(
 		ctx, audit.EventIdentityLinked,

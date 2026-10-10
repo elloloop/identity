@@ -280,6 +280,23 @@ func TestLinkIdentity_WithdrawsALinkWhenTheAddressIsProvenMeanwhile(t *testing.T
 	assert.Empty(t, linkedProviders(t, repo, user.ID), "the link is withdrawn")
 }
 
+// An account deleted while LinkIdentity runs is not found: the call does not
+// report an address proven, and the link does not outlive the account.
+func TestLinkIdentity_AccountDeletedMeanwhileIsNotFound(t *testing.T) {
+	svc, repo, _ := proofSvc(t)
+	ctx := context.Background()
+	user := seedUser(repo, "gone@example.com", "", StatusActive)
+	repo.createOAuthIdentityHook = func() {
+		repo.createOAuthIdentityHook = nil
+		require.NoError(t, repo.DeleteUser(ctx, user.ID))
+	}
+
+	_, err := svc.LinkIdentity(ctx, user.ID, fakeOAuthCode("gone@example.org", "G", "", "github"), "github", "https://app/cb", "", "", "")
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.NotErrorIs(t, err, ErrUnauthenticated)
+	assert.Empty(t, linkedProviders(t, repo, user.ID), "the link is withdrawn")
+}
+
 // A LinkIdentity call on an unproven account that no proof races keeps its
 // link.
 func TestLinkIdentity_KeepsALinkOnAnUnprovenAccount(t *testing.T) {

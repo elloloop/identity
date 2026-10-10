@@ -196,11 +196,10 @@ type Deps struct {
 	MetricsRegistry prometheus.Registerer
 
 	// SynchronousEmailSend forces request-phase credential-email sends to run
-	// inline instead of on a detached goroutine. Production leaves it false, so
-	// New enables asynchronous dispatch (decoupling SMTP latency from RPC
-	// response time — the send timing oracle). Full-stack tests that read the
-	// recording mailer right after a request set it true for deterministic
-	// observation without polling.
+	// inline instead of on a detached goroutine, for full-stack tests that read
+	// the recording mailer right after a request. Production leaves it false:
+	// inline, the response time follows the account lookup and the SMTP send,
+	// and so tells a caller whether the address has an account.
 	SynchronousEmailSend bool
 }
 

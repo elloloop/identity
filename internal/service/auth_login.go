@@ -60,6 +60,21 @@ func getDummyPasswordHash() string {
 	return dummyPasswordHash
 }
 
+// errInvalidCredentials is the one answer a password sign-in gives whenever
+// the caller has not proven the password: the response must not tell an
+// unknown identifier from a wrong password.
+var errInvalidCredentials = fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+
+// refuseAsUnknownIdentifier answers a sign-in that must look exactly like one
+// naming no account: the same error, after the same bcrypt cost a wrong
+// password pays. Without the dummy check the refusal returns in microseconds
+// while a wrong password takes ~250ms, which tells the caller the account
+// exists.
+func refuseAsUnknownIdentifier(password string) error {
+	_ = passwords.Verify(password, getDummyPasswordHash())
+	return errInvalidCredentials
+}
+
 func finishPasswordSignupFloor(start time.Time) {
 	if wait := time.Until(start.Add(passwordSignupMinDuration)); wait > 0 {
 		time.Sleep(wait)
@@ -532,12 +547,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 	}
 
 	if user == nil {
-		// Run a dummy bcrypt verification so the response time for an
-		// unknown identifier is comparable to the wrong-password path. This
-		// closes the enumeration timing oracle (the bcrypt cost dominates
-		// wall time; without this, the no-user path returns in microseconds
-		// while the wrong-password path takes ~250ms).
-		_ = passwords.Verify(password, getDummyPasswordHash())
+		refusal := refuseAsUnknownIdentifier(password)
 		s.logger.Info("local_login_failed", zap.String("reason", "user_not_found"))
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
@@ -545,7 +555,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "user_not_found", identifierKey: identifier}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		return nil, loginPolicyDecision{}, refusal
 	}
 
 	// While locked, the account is refused whatever the password, and as an
@@ -556,7 +566,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 	// `login_locked` audit event tells operators "tried during lockout" from
 	// "threshold tripped".
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
-		_ = passwords.Verify(password, getDummyPasswordHash())
+		refusal := refuseAsUnknownIdentifier(password)
 		s.audit.Log(
 			ctx, audit.EventLoginLocked,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
@@ -566,7 +576,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 				"locked_until": user.LockedUntil,
 			}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		return nil, loginPolicyDecision{}, refusal
 	}
 
 	// Lockout window has passed. Reset count + LockedUntil before
@@ -584,14 +594,14 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 	// none, so it is refused as an unknown identifier is, at the same cost:
 	// saying so would tell a caller with no credential that it exists.
 	if user.PasswordHash == "" {
-		_ = passwords.Verify(password, getDummyPasswordHash())
+		refusal := refuseAsUnknownIdentifier(password)
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "no_password_set"}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		return nil, loginPolicyDecision{}, refusal
 	}
 
 	if !passwords.Verify(password, user.PasswordHash) {
@@ -600,7 +610,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 		// lockout (fail-closed).
 		_, lockedNow, recErr := s.recordFailedLogin(ctx, user)
 		if recErr != nil {
-			return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+			return nil, loginPolicyDecision{}, errInvalidCredentials
 		}
 		if lockedNow {
 			s.audit.Log(
@@ -619,7 +629,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "password_mismatch"}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		return nil, loginPolicyDecision{}, errInvalidCredentials
 	}
 
 	// A username sign-in skipped the email-keyed access gate above; it gets
