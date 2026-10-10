@@ -39,6 +39,13 @@ const eventTypes = auditEvents as string[];
     <li>Admin help requests: requested, resolved.</li>
     <li>Control-plane changes: login-policy upsert/delete, project-config update, platform-admin bootstrap blocked.</li>
   </ul>
+  <p>
+    A refused refresh that keeps its refresh token (an unverified address, a
+    missing date of birth, a lockout) is audited at most once per account and
+    reason every 10 minutes on each replica, a fixed window with no setting;
+    see <a href="/identity/docs/concepts/sessions#refused-refresh-audit">auditing
+    a refused refresh</a>. A refused sign-in is audited every time.
+  </p>
 
   <h2>Event types</h2>
   <p>
