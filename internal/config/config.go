@@ -969,7 +969,8 @@ type Config struct {
 
 	// AuthRequireVerifiedEmail blocks authentication until the account's email
 	// is verified, and keeps accounts with an unverified email out of
-	// LookupUsers results. Default ON. Closes an account pre-hijacking vector:
+	// LookupUsers results. Default ON. Enforced where every session is minted,
+	// so no sign-in or refresh path is exempt. Closes an account pre-hijacking vector:
 	// an attacker who plants a password account for an unverified address
 	// cannot use it, a session is never issued for an unverified account, and
 	// a directory lookup never presents the account as the address's owner.

@@ -247,7 +247,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	// auto-login past the very gate PasswordLogin enforces. Return the user
 	// (so the client can drive "check your email") with no tokens; the proto
 	// response shape is preserved, the tokens are simply empty.
-	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && !user.EmailVerified {
+	if s.needsEmailVerification(user) {
 		s.audit.Log(
 			ctx, audit.EventLoginSuccess,
 			audit.WithActor(userID),
@@ -685,7 +685,7 @@ func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts po
 	// unusable (the flag defaults ON) — and there is no pre-hijacking vector
 	// to close, because there is no address for an attacker to plant a
 	// password against or for an owner to later verify.
-	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && user.Email != "" && !user.EmailVerified {
+	if s.needsEmailVerification(user) {
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
@@ -1538,6 +1538,20 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 
 	user.Status = StatusActive
 	user.UpdatedAt = msToTime(now)
+
+	// The invitation token is shown to the inviting admin as well as mailed,
+	// so redeeming it proves nothing about the address. While verification is
+	// required, an unproven invitee gets no session: like a new sign-up, it is
+	// sent a verification email and signs in once that is redeemed.
+	if s.needsEmailVerification(user) {
+		if err := s.sendEmailVerification(ctx, user.ID, emailLink{}); err != nil {
+			s.logger.Warn("invitation_verification_email_failed",
+				zap.String("user_id", user.ID), zap.Error(err))
+		}
+		s.logger.Info("invitation_accepted", zap.String("user_id", user.ID),
+			zap.Bool("email_verification_required", true))
+		return &LoginResult{User: user}, nil
+	}
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {

@@ -1830,6 +1830,38 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionStartedAtMs, authTimeMs)
 }
 
+// needsEmailVerification reports whether GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
+// keeps user from a session: the account has an address and it is unproven.
+// An account with no address (a username account) or an anonymous one has
+// nothing to verify.
+func (s *AuthService) needsEmailVerification(user *User) bool {
+	return s.cfg != nil && s.cfg.AuthRequireVerifiedEmail &&
+		user.Email != "" && !user.EmailVerified && !user.IsAnonymous
+}
+
+// enforceVerifiedEmail refuses a session to an account whose address is
+// unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on. A refused sign-in
+// (authTimeMs > 0) also sends a verification email, best-effort and
+// throttled, so the user has a way forward; a refused refresh sends none.
+func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, authTimeMs int64) error {
+	if !s.needsEmailVerification(user) {
+		return nil
+	}
+	s.audit.Log(
+		ctx, audit.EventLoginFailure,
+		audit.WithActor(user.ID),
+		audit.WithSuccess(false),
+		audit.WithDetails(map[string]any{"reason": "email_not_verified"}),
+	)
+	if authTimeMs > 0 {
+		if err := s.sendEmailVerification(ctx, user.ID, emailLink{}); err != nil {
+			s.logger.Warn("session_verification_send_failed",
+				zap.String("user_id", user.ID), zap.Error(err))
+		}
+	}
+	return ErrEmailVerificationRequired
+}
+
 // issueTokensWithSessionStart mints a token pair, anchoring the session's
 // absolute lifetime at sessionStartedAtMs (<= 0 anchors a new session at
 // now) and stamping authTimeMs as the token's auth_time: the sign-in that
@@ -1840,6 +1872,13 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 // measuring from the original sign-in, and no auth_time: a refresh is not a
 // sign-in, and only the tokens a sign-in issues vouch for one.
 func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+	// The verified-email gate, here so every path that issues a session (a
+	// sign-in, a step that continues one, a refresh, and any path added later)
+	// honours it, not only the ones that check it up front.
+	if err := s.enforceVerifiedEmail(ctx, user, authTimeMs); err != nil {
+		return "", "", err
+	}
+
 	now := s.nowMs()
 	sessionStart := sessionStartedAtMs
 	if sessionStart <= 0 {
