@@ -357,7 +357,9 @@ Three deliberate consequences:
   is refused outright (it cannot collect a DOB).
 
 Both the refusal and the completion are audit-logged (a `login_failure`
-with `reason: dob_required`, and a `login_success` with
+with `reason: dob_required` and the `gate` that refused, `sign_in` or
+`refresh`, a refused refresh at most once per account per 10 minutes, and a
+`login_success` with
 `method: dob_completion` plus the derived `age_band`). With the flag off,
 behaviour on every path is byte-identical to before.
 

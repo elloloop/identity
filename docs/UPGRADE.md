@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.14.0 → next — a refresh refused over the account's state ends its access token under `GATEWAY_REVOCATION_MODE=session` (behaviour change)
+## v4.14.0 → next — a refresh refused over the account's state ends its access token under `GATEWAY_REVOCATION_MODE=session`; a replayed refused refresh is audited once per window (behaviour changes)
 
 No schema change and no migration.
 
@@ -22,6 +22,17 @@ No schema change and no migration.
     sign-ins, or by a transient failure, does not revoke the session: a
     lockout can be triggered by anyone guessing at the password.
   - `GATEWAY_REVOCATION_MODE=ttl` (the default) is unchanged.
+- **A refused refresh is audited once per window, not on every replay
+  (behaviour change).** A refresh refused because the account's address is
+  unverified or because it has no date of birth on file
+  (`GATEWAY_AGEGATE_REQUIRE_DOB`) keeps its token, so a client could replay it
+  without limit and write one `login_failure` row per replay. Each account's
+  refused refresh is now recorded at most once per 10 minutes for each reason
+  (`email_not_verified`, `dob_required`) on each replica; every replay is
+  still refused the same way. Refused sign-ins are recorded every time.
+  - The `dob_required` row now carries `gate` (`sign_in` or `refresh`), as
+    `email_not_verified` does. Alerting that counts refused refreshes counts
+    accounts per window, not attempts.
 
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 
