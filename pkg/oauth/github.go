@@ -88,7 +88,6 @@ type githubUser struct {
 	ID        int64  `json:"id"`
 	Login     string `json:"login"`
 	Name      string `json:"name"`
-	Email     string `json:"email"`
 	AvatarURL string `json:"avatar_url"`
 }
 
@@ -153,19 +152,9 @@ func (g *githubExchanger) Exchange(ctx context.Context, params ExchangeParams) (
 		return nil, err
 	}
 
-	email, err := g.fetchPrimaryEmail(ctx, tr.AccessToken)
+	email, err := g.fetchVerifiedEmail(ctx, tr.AccessToken)
 	if err != nil {
 		return nil, err
-	}
-	if email == "" {
-		// Fall back to the public profile email if the user has no
-		// verified address and a public one is set. Refuse to login
-		// if neither is available — we cannot identify the user.
-		if user.Email != "" {
-			email = user.Email
-		} else {
-			return nil, fmt.Errorf("%w: no verified primary email", ErrEmailNotVerified)
-		}
 	}
 
 	return &Identity{
@@ -215,9 +204,10 @@ func (g *githubExchanger) fetchUser(ctx context.Context, accessToken string) (*g
 	return &u, nil
 }
 
-// fetchPrimaryEmail returns the user's primary verified email, or
-// the empty string if no verified email is available.
-func (g *githubExchanger) fetchPrimaryEmail(ctx context.Context, accessToken string) (string, error) {
+// fetchVerifiedEmail returns the user's verified primary address, else
+// their first verified address. The profile's public email is never used:
+// GitHub lets a user set it to any address without proving it.
+func (g *githubExchanger) fetchVerifiedEmail(ctx context.Context, accessToken string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.cfg.UserMailURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("%w: build emails request: %w", ErrIdentityVerification, err)
@@ -231,10 +221,7 @@ func (g *githubExchanger) fetchPrimaryEmail(ctx context.Context, accessToken str
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		// Treat as "no emails available" rather than a hard failure
-		// so that PATs missing the user:email scope still degrade
-		// gracefully to the profile email path.
-		return "", nil
+		return "", fmt.Errorf("%w: emails HTTP %d", ErrIdentityVerification, resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -254,5 +241,5 @@ func (g *githubExchanger) fetchPrimaryEmail(ctx context.Context, accessToken str
 			return e.Email, nil
 		}
 	}
-	return "", nil
+	return "", fmt.Errorf("%w: no verified address", ErrEmailNotVerified)
 }

@@ -26,6 +26,13 @@ A provider is enabled when its required credentials are set (client id and secre
 | GitHub    | `GATEWAY_OAUTH_GITHUB_CLIENT_ID`     | `GATEWAY_OAUTH_GITHUB_CLIENT_SECRET`     |
 | Apple     | `GATEWAY_OAUTH_APPLE_CLIENT_ID`      | `GATEWAY_OAUTH_APPLE_PRIVATE_KEY` (along with TEAM_ID and KEY_ID) |
 
+GitHub issues no ID token, so identity reads the user's addresses from
+`/user/emails` (the `user:email` scope, requested by default) and signs the
+user in with the verified primary address, else the first verified one. The
+profile's public email is never used: GitHub does not verify it. A GitHub
+account with no verified address, or a token that cannot read
+`/user/emails`, is refused with `Unauthenticated`.
+
 Microsoft also accepts `GATEWAY_MICROSOFT_TENANT_ID` (optional). At
 startup identity logs the enabled providers (`oauth_providers_enabled`)
 or warns when none are configured.

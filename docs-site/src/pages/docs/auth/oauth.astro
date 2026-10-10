@@ -39,6 +39,17 @@ import { Code } from "astro-expressive-code/components";
 -e GATEWAY_OAUTH_APPLE_PRIVATE_KEY="..."`} lang="bash" />
 
   <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm mt-4">
+    <strong>GitHub email.</strong> GitHub issues no ID token, so identity reads
+    the user's addresses from <code>/user/emails</code> (the
+    <code>user:email</code> scope, which <code>BeginOAuthLogin</code> requests)
+    and signs the user in with the verified primary address, else the first
+    verified one. The profile's public email is never used: GitHub does not
+    verify it. A GitHub account with no verified address, or a token that
+    cannot read <code>/user/emails</code>, is refused with
+    <code>Unauthenticated</code>.
+  </div>
+
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm mt-4">
     <strong>Apple Configuration.</strong> Apple requires a Team ID, a Services ID (used as the Client ID), a Key ID, and an ECDSA private key (PEM or Base64).
     Unlike other providers, Apple sends this headless flow's callback via <code>POST</code>. Configure an application-owned HTTPS callback that accepts <code>code</code>, <code>state</code>, and the optional <code>user</code> payload, then forwards them to <code>OAuthLogin</code>. Configure <code>https://your-api.com/oauth/callback/apple</code> only when using the hosted flow below.
   </div>

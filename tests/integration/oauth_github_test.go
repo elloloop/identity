@@ -5,7 +5,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -176,85 +175,49 @@ func TestOAuthLogin_GitHub_VerifiedPrimaryEmail(t *testing.T) {
 	}
 }
 
-// TestOAuthLogin_GitHub_PrimaryUnverifiedFallsBackToProfileEmail mirrors
-// pkg/oauth's FallsBackToProfileEmail through the full RPC stack: when
-// /user/emails is unavailable (e.g. user:email scope missing → 403), the
-// provider degrades to the verified public profile email, and the user is
-// provisioned with that address.
-func TestOAuthLogin_GitHub_PrimaryUnverifiedFallsBackToProfileEmail(t *testing.T) {
+// TestOAuthLogin_GitHub_ProfileEmailNeverSignsIn: GitHub lets a user set
+// the profile's public email to any address without proving it, so with no
+// verified address from /user/emails the sign-in is refused and no account
+// is created under the profile address, whether the emails API lists only
+// unverified addresses or is unavailable (user:email scope missing).
+func TestOAuthLogin_GitHub_ProfileEmailNeverSignsIn(t *testing.T) {
 	t.Parallel()
 
-	m := newGithubMockServer(t)
-	m.tokenHandler = githubJSONHandler(map[string]any{
-		"access_token": "gho_fallback",
-	})
-	m.userHandler = githubJSONHandler(map[string]any{
-		"id":    13,
-		"login": "fallbackuser",
-		"email": "profile.fallback@example.com",
-	})
-	m.emailHandler = func(w http.ResponseWriter, _ *http.Request) {
-		// No verified primary available via the emails API.
-		w.WriteHeader(http.StatusForbidden)
+	cases := map[string]http.HandlerFunc{
+		"unverified primary": githubJSONHandler([]map[string]any{
+			{"email": "victim@example.com", "primary": true, "verified": false},
+		}),
+		"emails unavailable": func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+		},
 	}
+	for name, emails := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := newGithubMockServer(t)
+			m.tokenHandler = githubJSONHandler(map[string]any{
+				"access_token": "gho_profile",
+			})
+			m.userHandler = githubJSONHandler(map[string]any{
+				"id":    13,
+				"login": "claimant",
+				"email": "victim@example.com",
+			})
+			m.emailHandler = emails
 
-	h := StartServer(t, WithOAuthRegistry(githubRegistry(m)))
-	ctx := context.Background()
+			h := StartServer(t, WithOAuthRegistry(githubRegistry(m)))
 
-	resp, err := h.Client.OAuthLogin(ctx, connect.NewRequest(&identitypb.OAuthLoginRequest{
-		Code:        "code-fallback",
-		Provider:    "github",
-		RedirectUri: "https://app/callback",
-	}))
-	if err != nil {
-		t.Fatalf("OAuthLogin: %v", err)
-	}
-	if got := resp.Msg.GetUser().GetEmail(); got != "profile.fallback@example.com" {
-		t.Errorf("user email = %q, want profile.fallback@example.com", got)
-	}
-	if !resp.Msg.GetUser().GetEmailVerified() {
-		t.Error("user email_verified should be true")
-	}
-	if resp.Msg.AccessToken == "" {
-		t.Fatal("OAuthLogin returned empty access_token")
-	}
-}
-
-// TestOAuthLogin_GitHub_NoVerifiedEmailRejected mirrors pkg/oauth's
-// NoVerifiedEmailRejected through the RPC stack: with no verified email
-// anywhere (unverified primary, no profile email), the provider returns
-// ErrEmailNotVerified, which the service maps to Unauthenticated.
-func TestOAuthLogin_GitHub_NoVerifiedEmailRejected(t *testing.T) {
-	t.Parallel()
-
-	m := newGithubMockServer(t)
-	m.tokenHandler = githubJSONHandler(map[string]any{
-		"access_token": "gho_noemail",
-	})
-	m.userHandler = githubJSONHandler(map[string]any{
-		"id":    99,
-		"login": "ghostuser",
-		// No public profile email set.
-	})
-	m.emailHandler = githubJSONHandler([]map[string]any{
-		{"email": "ghost@example.com", "primary": true, "verified": false},
-	})
-
-	h := StartServer(t, WithOAuthRegistry(githubRegistry(m)))
-
-	_, err := h.Client.OAuthLogin(context.Background(), connect.NewRequest(&identitypb.OAuthLoginRequest{
-		Code:        "code-noemail",
-		Provider:    "github",
-		RedirectUri: "https://app/callback",
-	}))
-	if err == nil {
-		t.Fatal("expected error when no verified email is available")
-	}
-	var connErr *connect.Error
-	if !errors.As(err, &connErr) {
-		t.Fatalf("expected connect.Error, got %T", err)
-	}
-	if connErr.Code() != connect.CodeUnauthenticated {
-		t.Errorf("code = %v, want Unauthenticated", connErr.Code())
+			_, err := h.Client.OAuthLogin(context.Background(), connect.NewRequest(&identitypb.OAuthLoginRequest{
+				Code:        "code-profile",
+				Provider:    "github",
+				RedirectUri: "https://app/callback",
+			}))
+			if connect.CodeOf(err) != connect.CodeUnauthenticated {
+				t.Fatalf("OAuthLogin err = %v, want Unauthenticated", err)
+			}
+			if n := h.CountUsersByEmail(t, "victim@example.com"); n != 0 {
+				t.Fatalf("users with the profile address = %d, want 0", n)
+			}
+		})
 	}
 }
