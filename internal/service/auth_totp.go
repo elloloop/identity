@@ -150,7 +150,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 	// Re-checked before the code is spent: the address may have become
 	// unverified (a SCIM email change) since the challenge was issued, and a
 	// recovery code spent on a refused sign-in is lost.
-	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 

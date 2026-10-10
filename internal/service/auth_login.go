@@ -669,7 +669,7 @@ func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts po
 	// unusable (the flag defaults ON) — and there is no pre-hijacking vector
 	// to close, because there is no address for an attacker to plant a
 	// password against or for an owner to later verify.
-	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return loginPolicyDecision{}, err
 	}
 
