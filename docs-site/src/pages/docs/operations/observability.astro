@@ -83,8 +83,9 @@ curl -sf http://localhost/healthz`} lang="bash" />
     request metrics are added via the middleware chain.
   </p>
   <p>
-    Credential emails (password reset, sign-in code, magic link) are sent in
-    the background, at most 128 at once per instance. One requested while
+    Credential emails (password reset, sign-in code, magic link, and the
+    verification email a sign-in refused for an unverified address sends) are
+    sent in the background, at most 128 at once per instance. One requested while
     all 128 are in flight is dropped, though the request still gets its usual
     answer. <code>identity_email_send_dropped_total&#123;op&#125;</code> counts every
     drop; the <code>email_send_dropped_at_capacity</code> warning is logged

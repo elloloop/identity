@@ -95,10 +95,18 @@ No schema change and no migration.
   at most 128 at once per instance. A request arriving while all 128 are in
   flight still gets its usual answer, but its mail is dropped. Every drop is
   counted in the new **`identity_email_send_dropped_total{op}`** metric
-  (`op` is `password_reset`, `email_login_code` or `magic_link`); alert on it
-  to learn when mail is being shed. The drops are also logged as
+  (`op` is `password_reset`, `email_login_code`, `magic_link` or
+  `email_verification`); alert on it to learn when mail is being shed. The drops are also logged as
   `email_send_dropped_at_capacity` (WARN), at most once per `op` per minute,
   with the number `dropped` since that `op`'s previous line.
+- **The verification email a refused sign-in or QR poll sends goes out in
+  the background (behaviour change).** With
+  `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` on, a sign-in or `PollQrLogin`
+  refused for an unverified address sends a verification email, throttled
+  per address by `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS`. It used to send inline
+  before answering; it now sends like the other credential mail, under the
+  same cap (`op` `email_verification`), and a refusal whose resend is
+  throttled no longer reads the account again. The refusal is unchanged.
 - **`SynchronousEmailSend` is for tests only.** With
   `identityserver.Options.SynchronousEmailSend` set, reset, code and
   magic-link responses take as long as the account lookup and send they

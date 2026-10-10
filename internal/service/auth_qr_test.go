@@ -145,6 +145,62 @@ func TestPollQrLogin_UnverifiedAddressRefusedBeforeConsuming(t *testing.T) {
 	assert.Equal(t, "consumed", res.Status)
 }
 
+// A device replaying a poll refused for an unverified address costs only the
+// poll's own read once the address's resend is throttled: the throttle is
+// checked before the verification mail reads or writes anything.
+func TestPollQrLogin_ThrottledResendReadsNothing(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.cfg.AuthRequireVerifiedEmail = true
+	svc.emailThrottle = newKeyCooldown(time.Minute.Milliseconds(), 0)
+	ctx := context.Background()
+	user := seedUser(repo, "qr-replayer@example.com", "", StatusActive)
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
+	sessionID, secret := approvedQrLogin(ctx, t, svc, user)
+	_, err := svc.PollQrLogin(ctx, sessionID, secret, "10.0.0.1", "agent")
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	require.Len(t, rec.Sent(), 1)
+
+	reads := 0
+	repo.afterGetUserHook = func(*User) { reads++ }
+	_, err = svc.PollQrLogin(ctx, sessionID, secret, "10.0.0.1", "agent")
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	assert.Equal(t, 1, reads, "only the poll reads the account")
+	assert.Len(t, rec.Sent(), 1, "the resend is throttled")
+}
+
+// With async dispatch on, a poll refused for an unverified address returns
+// without waiting on the verification mail, which still goes out.
+func TestPollQrLogin_AsyncResendDoesNotBlock(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	enableAsyncEmailDispatch(t, svc)
+	mailer := &blockingTransport{release: make(chan struct{}), sent: make(chan struct{})}
+	svc.mailer = mailer
+	svc.cfg.AuthRequireVerifiedEmail = true
+	ctx := context.Background()
+	user := seedUser(repo, "qr-unverified@example.com", "", StatusActive)
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
+	sessionID, secret := approvedQrLogin(ctx, t, svc, user)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.PollQrLogin(ctx, sessionID, secret, "10.0.0.1", "agent")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	case <-time.After(2 * time.Second):
+		close(mailer.release)
+		t.Fatal("the refused poll waited on the verification mail")
+	}
+	close(mailer.release)
+	select {
+	case <-mailer.sent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the verification mail was not sent after the poll returned")
+	}
+}
+
 // An approved hand-off that was not redeemed within its window expires, so a
 // refused hand-off cannot wait indefinitely for its account to become
 // eligible.

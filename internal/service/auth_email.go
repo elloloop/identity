@@ -332,7 +332,12 @@ func (s *AuthService) sendEmailVerification(ctx context.Context, userID string, 
 		s.logger.Info("email_verification_throttled", zap.String("user_id", user.ID))
 		return nil
 	}
+	return s.mailEmailVerification(ctx, user, link)
+}
 
+// mailEmailVerification mints a verification token for user and mails its
+// link; the caller has already charged the address's send throttle.
+func (s *AuthService) mailEmailVerification(ctx context.Context, user *User, link emailLink) error {
 	rawToken := randomToken(32)
 	tokenHash := sha256Hex(rawToken)
 	now := s.nowMs()

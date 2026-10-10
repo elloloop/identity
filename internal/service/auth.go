@@ -1993,17 +1993,22 @@ func (s *AuthService) auditSessionRefusal(ctx context.Context, user *User, ipAdd
 // unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on, audited with
 // reason email_not_verified. A refused sign-in or QR poll also sends a
 // verification email, best-effort and throttled: a failure to send never
-// changes the refusal.
+// changes the refusal. The throttle is charged before anything else, since a
+// QR poll replays the refusal at will, and the mail goes out like the other
+// credential mail, off the request path when async dispatch is on.
 func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate) error {
 	if !s.needsEmailVerification(user) {
 		return nil
 	}
 	s.auditSessionRefusal(ctx, user, ipAddr, userAgent, gate, "email_not_verified")
-	if gate != sessionGateRefresh {
-		if err := s.sendEmailVerification(ctx, user.ID, emailLink{}); err != nil {
-			s.logger.Warn("login_verification_resend_failed",
-				zap.String("user_id", user.ID), zap.Error(err))
-		}
+	if gate != sessionGateRefresh && s.emailThrottle.allow(strings.ToLower(user.Email), s.nowMs()) {
+		recipient := *user
+		s.dispatchEmailSend(ctx, "email_verification", func(ctx context.Context) {
+			if err := s.mailEmailVerification(ctx, &recipient, emailLink{}); err != nil {
+				s.logger.Warn("login_verification_resend_failed",
+					zap.String("user_id", user.ID), zap.Error(err))
+			}
+		})
 	}
 	return ErrEmailVerificationRequired
 }
