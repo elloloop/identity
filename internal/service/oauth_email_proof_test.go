@@ -64,7 +64,9 @@ func TestOAuthLogin_LinkedProviderDoesNotVerifyAnAccountWithoutAddress(t *testin
 
 // The provider's proof carries to the account's address only when dropping a
 // "+tag" to canonicalize it is provably the same mailbox: always at Gmail,
-// never elsewhere, where a tagged address may be delivered somewhere else.
+// never elsewhere, where a tagged address may be delivered somewhere else. A
+// proof that does not carry creates an unverified account, and is refused
+// outright for an account that already exists.
 func TestOAuthLogin_TaggedAddressProofCarriesOnlyAtGmail(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -88,11 +90,20 @@ func TestOAuthLogin_TaggedAddressProofCarriesOnlyAtGmail(t *testing.T) {
 			repo2 := newFakeRepo()
 			svc2 := newTestAuthService(t, repo2)
 			existing := seedUser(repo2, tc.wantEmail, "", StatusActive)
+			if !tc.wantVerified {
+				// A proof that does not carry to an existing account's address
+				// does not sign in to it at all.
+				_, err := svc2.OAuthLogin(context.Background(), OAuthLoginParams{
+					Code: fakeOAuthCode(tc.providerEmail, "Someone", "", "google"), Provider: "google", RedirectURI: "https://app/cb",
+				})
+				require.ErrorIs(t, err, ErrUnauthenticated, "an existing account")
+				return
+			}
 			found := oauthLoginAs(t, svc2, tc.providerEmail)
 			require.Equal(t, existing.ID, found.User.ID)
 			stored, err := repo2.GetUser(context.Background(), existing.ID)
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantVerified, stored.EmailVerified, "an existing account")
+			assert.True(t, stored.EmailVerified, "an existing account")
 		})
 	}
 }

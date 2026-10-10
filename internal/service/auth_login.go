@@ -1043,6 +1043,26 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	if err != nil {
 		return nil, false, err
 	}
+	// An existing account is the provider's only when the provider proved the
+	// account's own address. A tagged address outside Gmail canonicalizes to
+	// the account's but is not provably the same mailbox, so it neither signs
+	// in nor links here; the owner links such a provider while signed in.
+	if !isNew && !proofCarriesTo(identity.Email, user.Email) {
+		s.logger.Info("oauth_login_refused",
+			zap.String("reason", "provider_address_does_not_prove_account"),
+			zap.String("user_id", user.ID),
+			zap.String("provider", identity.Provider))
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
+			audit.WithActor(user.ID),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{
+				"reason":   "provider_address_does_not_prove_account",
+				"provider": identity.Provider,
+			}),
+		)
+		return nil, false, fmt.Errorf("%w: sign in and link this provider to use it", ErrUnauthenticated)
+	}
 	if !isNew {
 		s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now)
 	}
@@ -1187,7 +1207,6 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	if user == nil || user.EmailVerified || !proofCarriesTo(proof.address, user.Email) {
 		return
 	}
-	method := proof.method
 	patch := map[string]any{
 		"email_verified":    true,
 		"email_verified_at": nowMs,
@@ -1210,7 +1229,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	if err := s.repo(ctx).UpdateUser(ctx, user.ID, patch); err != nil {
 		s.logger.Warn("email_verified_external_persist_failed",
 			zap.String("user_id", user.ID),
-			zap.String("method", method),
+			zap.String("method", proof.method),
 			zap.Error(err))
 		return
 	}
@@ -1221,11 +1240,11 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	passkeysCleared := false
 	if existing, err := s.repo(ctx).ListPasskeyCredentials(ctx, user.ID); err != nil {
 		s.logger.Warn("email_verified_external_passkey_list_failed",
-			zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+			zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
 	} else if len(existing) > 0 {
 		if err := s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
 			s.logger.Warn("email_verified_external_passkey_clear_failed",
-				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
 		} else {
 			passkeysCleared = true
 		}
@@ -1241,12 +1260,12 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		// is NOT (passkey login skips the gate), so this matters either way.
 		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
 			s.logger.Warn("email_verified_external_revoke_failed",
-				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
 		}
 		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
 		s.logger.Info("email_verified_external_credentials_cleared",
 			zap.String("user_id", user.ID),
-			zap.String("method", method),
+			zap.String("method", proof.method),
 			zap.Bool("password_cleared", passwordCleared),
 			zap.Bool("passkeys_cleared", passkeysCleared),
 			zap.Int("provider_links_cleared", linksCleared))
@@ -1256,7 +1275,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 			audit.WithSuccess(true),
 			audit.WithDetails(map[string]any{
 				"reason":                 "planted_credentials_cleared_on_external_email_verification",
-				"method":                 method,
+				"method":                 proof.method,
 				"password_cleared":       passwordCleared,
 				"passkeys_cleared":       passkeysCleared,
 				"provider_links_cleared": linksCleared,

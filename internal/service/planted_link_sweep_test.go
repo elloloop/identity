@@ -25,22 +25,33 @@ func linkedProviders(t *testing.T, repo *fakeRepo, userID string) []string {
 func TestPasswordlessProof_VoidsPlantedProviderLink(t *testing.T) {
 	svc, repo, rec := passwordlessSvc(t)
 	ctx := context.Background()
-	victim := seedUser(repo, "victim@test.com", "", StatusActive)
+	victim := seedUser(repo, "victim@example.com", "", StatusActive)
 	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
-		UserID: victim.ID, Provider: "google", ProviderUserID: "sub-planter@test.com",
-		EmailAtLinkTime: "victim@test.com", CreatedAt: 1,
+		UserID: victim.ID, Provider: "google", ProviderUserID: "sub-planter@example.com",
+		EmailAtLinkTime: "victim@example.com", CreatedAt: 1,
 	}))
+	// The account holds no password or passkey, so only the link is voided;
+	// that alone must revoke the sessions it could have opened.
+	const plantedSessionHash = "planted-link-session-hash"
+	_, err := repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
+		TokenHash: plantedSessionHash, UserID: victim.ID, ExpiresAt: 1 << 62,
+	})
+	require.NoError(t, err)
 
-	require.NoError(t, svc.RequestEmailLoginCode(ctx, "victim@test.com"))
-	res, err := svc.VerifyEmailLoginCode(ctx, "victim@test.com", extractCodeFromEmail(t, rec.Sent()[0].Text), "", "")
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, "victim@example.com"))
+	res, err := svc.VerifyEmailLoginCode(ctx, "victim@example.com", extractCodeFromEmail(t, rec.Sent()[0].Text), "", "")
 	require.NoError(t, err)
 	require.Equal(t, victim.ID, res.User.ID)
 	assert.True(t, res.User.EmailVerified)
 	assert.Empty(t, linkedProviders(t, repo, victim.ID), "the planted link is voided")
 
-	found, err := repo.FindUserByProviderID(ctx, "google", "sub-planter@test.com")
+	found, err := repo.FindUserByProviderID(ctx, "google", "sub-planter@example.com")
 	require.NoError(t, err)
 	assert.Nil(t, found, "the voided link no longer signs in to the account")
+
+	tok, err := repo.FindRefreshTokenByHash(ctx, plantedSessionHash)
+	require.NoError(t, err)
+	assert.Nil(t, tok, "a session the voided link could have opened is revoked")
 }
 
 // A provider sign-in that proves the address keeps its own link and voids
@@ -70,15 +81,35 @@ func TestOAuthProof_KeepsProvingLinkAndVoidsOthers(t *testing.T) {
 func TestExternalProof_VerifiedAccountKeepsItsLinks(t *testing.T) {
 	svc, repo, rec := passwordlessSvc(t)
 	ctx := context.Background()
-	user := seedUser(repo, "kept@test.com", "", StatusActive)
+	user := seedUser(repo, "kept@example.com", "", StatusActive)
 	user.EmailVerified = true
 	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
-		UserID: user.ID, Provider: "google", ProviderUserID: "sub-kept@test.com",
-		EmailAtLinkTime: "kept@test.com", CreatedAt: 1,
+		UserID: user.ID, Provider: "google", ProviderUserID: "sub-kept@example.com",
+		EmailAtLinkTime: "kept@example.com", CreatedAt: 1,
 	}))
 
-	require.NoError(t, svc.RequestEmailLoginCode(ctx, "kept@test.com"))
-	_, err := svc.VerifyEmailLoginCode(ctx, "kept@test.com", extractCodeFromEmail(t, rec.Sent()[0].Text), "", "")
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, "kept@example.com"))
+	_, err := svc.VerifyEmailLoginCode(ctx, "kept@example.com", extractCodeFromEmail(t, rec.Sent()[0].Text), "", "")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"google/sub-kept@test.com"}, linkedProviders(t, repo, user.ID))
+	assert.Equal(t, []string{"google/sub-kept@example.com"}, linkedProviders(t, repo, user.ID))
+}
+
+// A provider address with a "+tag" outside Gmail canonicalizes to an existing
+// account's address without proving it. Such a sign-in neither signs in to the
+// account nor links to it, or it would put back a link the proof just voided.
+func TestOAuthLogin_TaggedAddressDoesNotClaimExistingAccount(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := context.Background()
+	owner := seedUser(repo, "someone@example.com", "", StatusActive)
+	owner.EmailVerified = true
+
+	res, err := svc.OAuthLogin(ctx, OAuthLoginParams{
+		Code:        fakeOAuthCode("someone+x@example.com", "Someone", "", "google"),
+		Provider:    "google",
+		RedirectURI: "https://app/cb",
+	})
+	require.ErrorIs(t, err, ErrUnauthenticated)
+	assert.Nil(t, res)
+	assert.Empty(t, linkedProviders(t, repo, owner.ID), "the tagged provider account is not linked")
 }
