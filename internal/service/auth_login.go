@@ -1038,7 +1038,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	user, isNew, err := s.resolveOrCreateUserByEmail(ctx, email, resolveOrCreateOpts{
 		name:          identity.Name,
 		avatarURL:     identity.AvatarURL,
-		emailVerified: proofCarriesTo(identity.Email, emailStr),
+		emailVerified: ProofCarriesTo(identity.Email, emailStr),
 	})
 	if err != nil {
 		return nil, false, err
@@ -1144,7 +1144,7 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 // markEmailVerifiedViaExternalProof flips the account to verified because an
 // external method (OAuth provider assertion, or an emailed OTP/magic-link the
 // user redeemed) proved control of the address `proven`. It does nothing
-// unless that proof carries to the account's own address (proofCarriesTo): an
+// unless that proof carries to the account's own address (ProofCarriesTo): an
 // account found by a linked provider id may hold a different address, or none.
 // Any credential on the account was established BEFORE this proof — possibly
 // by a different party (account pre-hijacking) — so the untrusted ones are
@@ -1161,7 +1161,7 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 // Best-effort: a persistence failure is logged, not fatal — the user has
 // already authenticated via the external proof.
 func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proven string, nowMs int64, method string) {
-	if user == nil || user.EmailVerified || !proofCarriesTo(proven, user.Email) {
+	if user == nil || user.EmailVerified || !ProofCarriesTo(proven, user.Email) {
 		return
 	}
 	patch := map[string]any{

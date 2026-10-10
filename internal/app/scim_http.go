@@ -392,6 +392,7 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 		// Stamp updated_at so meta.lastModified reflects this write.
 		"updated_at": time.Now().UnixMilli(),
 	}
+	unverifyOnEmailChange(fields, existing, email)
 	if err := s.repo.UpdateUser(ctx, id, fields); err != nil {
 		return scim.User{}, mapStoreErr(err)
 	}
@@ -418,8 +419,25 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 	return toSCIMUser(updated), nil
 }
 
-// followEmailChange re-derives an email account's account address when a
-// SCIM write changed its email, as a confirmed self-service change does.
+// unverifyOnEmailChange marks the account's email unverified when a SCIM write
+// moves it to an address its earlier proof does not reach: the IdP asserts
+// the new address, it does not prove the user receives mail there. It clears
+// the flag whatever the read said, so a verification of the old address
+// landing between the read and this write cannot carry over to the new one.
+func unverifyOnEmailChange(fields map[string]any, before *service.User, email string) {
+	if service.ProofCarriesTo(before.Email, email) {
+		return
+	}
+	fields["email_verified"] = false
+	fields["email_verified_at"] = int64(0)
+}
+
+// followEmailChange releases the account address that spells the old email
+// when a SCIM write changed its spelling, and issues the one that spells the
+// new email while that is verified; an unverified email gets its address at
+// the account's first session after verification. The address follows the
+// spelling, so this compares spellings, while verification follows the
+// mailbox (unverifyOnEmailChange).
 func (s *repoSCIMStore) followEmailChange(ctx context.Context, before, after *service.User) {
 	if service.FoldEmail(before.Email) == service.FoldEmail(after.Email) {
 		return
@@ -468,6 +486,7 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 			return scim.User{}, err
 		}
 		fields["email"] = email
+		unverifyOnEmailChange(fields, existing, email)
 	}
 	if patch.ExternalID != nil {
 		fields["external_id"] = *patch.ExternalID

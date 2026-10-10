@@ -282,7 +282,7 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 	// A federated address is provider-verified, unlike a typed one, when the
 	// address the provider asserted is the one stored.
 	verifiedAt := int64(0)
-	verified := proofCarriesTo(identity.Email, string(email))
+	verified := ProofCarriesTo(identity.Email, string(email))
 	if verified {
 		verifiedAt = s.nowMs()
 	}

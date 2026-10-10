@@ -108,6 +108,26 @@ GATEWAY_SCIM_PROJECT_ID=<project-id>`}
       <code>/Schemas</code>, <code>/ResourceTypes</code> — discovery.
     </li>
   </ul>
+  <p>
+    SCIM writes an email; it does not prove that anyone controls it. A
+    <code>PUT</code> or <code>PATCH</code> that moves an account to another
+    mailbox therefore leaves its email unverified, the same as a newly
+    provisioned account, until its owner verifies it. A change that keeps
+    the same mailbox (a different letter case, or Gmail dots and
+    <code>+tag</code>) keeps the verified state. SCIM stores an email
+    without its <code>+tag</code>, so an account stored with a tag outside
+    Gmail reads unverified after its next SCIM write.
+  </p>
+  <p>
+    With <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> (on by default),
+    such an account is hidden from the directory and its password sign-in
+    is refused, with a verification email sent, until the new email is
+    verified. <code>SendEmailVerification</code> and the link it mails
+    verify the address and keep the user's credentials. A passwordless
+    email code or magic link, or a provider sign-in, verifies it too, but
+    as the first proof of an unverified address it voids the account's
+    password and passkeys and ends its sessions.
+  </p>
 
   <h2>Example: provision a user</h2>
   <Code

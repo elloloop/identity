@@ -377,7 +377,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 	}
 
 	now := s.nowMs()
-	if !proofCarriesTo(rec.Email, user.Email) {
+	if !ProofCarriesTo(rec.Email, user.Email) {
 		if err := s.repo(ctx).MarkEmailVerificationTokenConsumed(ctx, rec.NodeID, now); err != nil {
 			s.logger.Warn("email_verification_consume_failed",
 				zap.String("user_id", user.ID), zap.Error(err))
