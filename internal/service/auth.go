@@ -1940,6 +1940,7 @@ func (s *AuthService) auditSessionRefusal(ctx context.Context, user *User, ipAdd
 // unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on, audited with
 // reason email_not_verified. A refused sign-in or QR poll also sends a
 // verification email, best-effort and throttled: a failure to send never
+// changes the refusal.
 func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate) error {
 	if !s.needsEmailVerification(user) {
 		return nil
