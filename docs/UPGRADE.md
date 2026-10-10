@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.13.0 → next — a provider sign-in verifies only the address it asserted (behaviour change)
+## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 
 No schema change and no migration.
 
