@@ -1628,10 +1628,9 @@ func (r *fakeRepo) FindUserByProviderID(_ context.Context, provider, providerUse
 func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *OAuthIdentity) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Application-enforced uniqueness: (provider, provider_user_id).
 	for _, existing := range r.oauthIdentities {
 		if existing.Provider == oi.Provider && existing.ProviderUserID == oi.ProviderUserID {
-			return fmt.Errorf("oauth identity already linked: %s/%s", oi.Provider, oi.ProviderUserID)
+			return fmt.Errorf("oauth identity %s/%s: %w", oi.Provider, oi.ProviderUserID, ErrAlreadyExists)
 		}
 	}
 	id := nextNodeID()

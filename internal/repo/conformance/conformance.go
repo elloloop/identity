@@ -1604,13 +1604,12 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err := r.CreateOAuthIdentity(ctx, oi); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			// Composite uniqueness: a second link with same (provider, sub)
-			// must reject (the schema does not enforce this so the
-			// service layer must, and CreateOAuthIdentity is the
-			// designated guard).
+			// A (provider, sub) belongs to one account: the second link is
+			// refused with ErrAlreadyExists, which callers rely on to tell a
+			// lost race from a transient failure.
 			dup := &service.OAuthIdentity{UserID: otherUID, Provider: "google", ProviderUserID: "g-123", CreatedAt: 200}
-			if err := r.CreateOAuthIdentity(ctx, dup); err == nil {
-				t.Fatal("CreateOAuthIdentity duplicate: want error, got nil")
+			if err := r.CreateOAuthIdentity(ctx, dup); !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("CreateOAuthIdentity duplicate: want ErrAlreadyExists, got %v", err)
 			}
 			otherProvider := &service.OAuthIdentity{
 				UserID:          uid,

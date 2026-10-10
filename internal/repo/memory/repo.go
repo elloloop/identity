@@ -1528,7 +1528,7 @@ func (r *Repo) CreateOAuthIdentity(_ context.Context, oi *service.OAuthIdentity)
 	defer r.mu.Unlock()
 	for _, existing := range r.oauthIdentities {
 		if existing.Provider == oi.Provider && existing.ProviderUserID == oi.ProviderUserID {
-			return fmt.Errorf("oauth identity already linked: %s/%s", oi.Provider, oi.ProviderUserID)
+			return fmt.Errorf("oauth identity %s/%s: %w", oi.Provider, oi.ProviderUserID, service.ErrAlreadyExists)
 		}
 	}
 	id := r.nextID()
