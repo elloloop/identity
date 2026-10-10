@@ -107,6 +107,24 @@ func (w *recordingAuditWriter) countByEventTypeAndDetail(eventType, key, want st
 	return n
 }
 
+// detailsOf returns the decoded WithDetails map of every recorded event of
+// eventType, in order.
+func (w *recordingAuditWriter) detailsOf(eventType string) []map[string]any {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out []map[string]any
+	for i, et := range w.events {
+		if et != eventType {
+			continue
+		}
+		var m map[string]any
+		if json.Unmarshal([]byte(w.details[i]), &m) == nil {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // newTestAuthServiceWithAudit builds an AuthService whose audit logger
 // writes to the supplied recordingAuditWriter so tests can assert on
 // emitted audit events.
@@ -157,6 +175,13 @@ type fakeRepo struct {
 	// land a concurrent write between a read and the write that follows it.
 	afterGetUserHook func(stored *User)
 
+	// listOAuthIdentitiesHook, when set, runs after ListOAuthIdentitiesForUser
+	// has read its result, and createOAuthIdentityHook at the start of
+	// CreateOAuthIdentity. Tests use them to land a concurrent write between a
+	// read and the write that follows it.
+	listOAuthIdentitiesHook func()
+	createOAuthIdentityHook func()
+
 	// The following, when non-nil, make the corresponding read/write return
 	// that error so a test can exercise the caller's repo-error-propagation
 	// path. Default nil (success).
@@ -178,6 +203,7 @@ type fakeRepo struct {
 	// corresponding repository call fail so a test can exercise the
 	// service's error-propagation branch. Default nil (success).
 	listPasskeyCredsErr    error // ListPasskeyCredentials fails
+	listOAuthIdentitiesErr error // ListOAuthIdentitiesForUser fails
 	getActiveConsentErr    error // GetActiveParentalConsentForChild fails
 	createConsentErr       error // CreateParentalConsent fails
 	markConsentRevokedErr  error // MarkParentalConsentRevoked fails
@@ -1647,6 +1673,9 @@ func (r *fakeRepo) FindUserByProviderID(_ context.Context, provider, providerUse
 }
 
 func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *OAuthIdentity) error {
+	if r.createOAuthIdentityHook != nil {
+		r.createOAuthIdentityHook()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.oauthIdentities {
@@ -1663,13 +1692,21 @@ func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *OAuthIdentity) err
 
 func (r *fakeRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*OAuthIdentity, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r.listOAuthIdentitiesErr != nil {
+		r.mu.Unlock()
+		return nil, r.listOAuthIdentitiesErr
+	}
 	var out []*OAuthIdentity
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == userID {
 			cp := *oi
 			out = append(out, &cp)
 		}
+	}
+	hook := r.listOAuthIdentitiesHook
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
 	}
 	return out, nil
 }

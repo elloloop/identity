@@ -24,7 +24,8 @@ func TestExternalProof_FailedWriteLeavesUserUnverified(t *testing.T) {
 
 	err = svc.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: user.Email, method: "oauth"}, nowMs())
 
-	require.ErrorIs(t, err, errVerifiedWriteFailed)
+	require.ErrorIs(t, err, ErrUnavailable)
+	assert.NotContains(t, err.Error(), errVerifiedWriteFailed.Error())
 	assert.False(t, user.EmailVerified)
 	assert.Zero(t, user.EmailVerifiedAt)
 	assert.NotEmpty(t, user.PasswordHash)
@@ -45,7 +46,8 @@ func TestExternalProof_FailedWriteFailsTheSignIn(t *testing.T) {
 			RedirectURI: "https://app/cb",
 		})
 
-		require.ErrorIs(t, err, errVerifiedWriteFailed)
+		require.ErrorIs(t, err, ErrUnavailable)
+		assert.NotContains(t, err.Error(), errVerifiedWriteFailed.Error())
 		assert.Nil(t, res)
 	})
 	t.Run("passwordless", func(t *testing.T) {
@@ -59,7 +61,8 @@ func TestExternalProof_FailedWriteFailsTheSignIn(t *testing.T) {
 
 		res, err := svc.VerifyEmailLoginCode(ctx, "owner@example.com", code, "", "")
 
-		require.ErrorIs(t, err, errVerifiedWriteFailed)
+		require.ErrorIs(t, err, ErrUnavailable)
+		assert.NotContains(t, err.Error(), errVerifiedWriteFailed.Error())
 		assert.Nil(t, res)
 	})
 }

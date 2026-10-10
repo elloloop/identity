@@ -1106,6 +1106,11 @@ var (
 	ErrPermissionDenied = errors.New("permission denied")
 	ErrInvalidArgument  = errors.New("invalid argument")
 	ErrNotFound         = errors.New("not found")
+	// ErrUnavailable is a transient failure of the store that a step the
+	// request cannot skip depends on, so it fails rather than proceeding
+	// without that step. Maps to CodeUnavailable: the caller may try again.
+	// The message is generic; the store's error is logged, not returned.
+	ErrUnavailable = errors.New("temporarily unavailable; try again")
 	// ErrAccessNotAllowed is returned when a project's access mode denies the
 	// authenticating email: an allowlist mode whose list omits the email, a
 	// closed mode, or an unset/unrecognized mode (the default-DENY posture). It

@@ -376,7 +376,8 @@ func (s *AuthService) sendEmailVerification(ctx context.Context, userID string, 
 // ── VerifyEmail ────────────────────────────────────────────────────────
 
 // VerifyEmail consumes a verification token and marks the user's
-// email as verified. Idempotent — re-verifying an already-verified
+// email as verified, voiding what was added before it on an account a
+// provider claimed (addressClaimedByProvider). Idempotent — re-verifying an already-verified
 // user still consumes the supplied token but does not change state.
 // The token proves only the address it was mailed to: once the account
 // holds another address it is refused (and consumed). Returns the
@@ -412,8 +413,17 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 	now := s.nowMs()
 	proven := ProofCarriesTo(rec.Email, user.Email)
 	if proven && !user.EmailVerified {
-		proven, err = s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, now, false)
+		proof := externalProof{address: rec.Email, method: "verification_link", keepsAssertingLinks: true}
+		claimed, err := s.addressClaimedByProvider(ctx, user)
 		if err != nil {
+			return nil, s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
+		}
+		if claimed {
+			if err := s.markEmailVerifiedViaExternalProof(ctx, user, proof, now); err != nil {
+				return nil, err
+			}
+			proven = user.EmailVerified
+		} else if proven, err = s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, now, false); err != nil {
 			return nil, fmt.Errorf("setting email verified: %w", err)
 		}
 	}
@@ -435,6 +445,27 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
 	return user, nil
+}
+
+// addressClaimedByProvider reports whether a provider link on the account
+// asserted a spelling of its address that does not prove it: a +tag outside
+// Gmail. Such an account is held unverified because its claim to the address
+// came from that provider, so whoever holds it may not own the mailbox, and
+// a verification link its owner redeems voids what was added before, as a
+// sign-in proof does. Any other account keeps its credentials: the link
+// completes the sign-up that set them.
+func (s *AuthService) addressClaimedByProvider(ctx context.Context, user *User) (bool, error) {
+	links, err := s.repo(ctx).ListOAuthIdentitiesForUser(ctx, user.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, link := range links {
+		asserted, _ := canonicalMailbox(link.EmailAtLinkTime)
+		if string(asserted) == user.Email && !ProofCarriesTo(link.EmailAtLinkTime, user.Email) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // displayNameOrEmail prefers the user's display name and falls back

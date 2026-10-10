@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/oauth"
 )
 
 // LinkIdentity attaches a freshly-verified OAuth identity to an already
@@ -40,6 +41,14 @@ func (s *AuthService) LinkIdentity(
 	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
 		return nil, err
 	}
+	// Read before the insert: see withdrawLinkIfAddressProven.
+	holder, err := s.repo(ctx).GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if holder == nil {
+		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
 
 	identity, err := s.verifyOAuthExchange(ctx, OAuthLoginParams{
@@ -70,7 +79,7 @@ func (s *AuthService) LinkIdentity(
 		return nil, fmt.Errorf("%w: provider returned no stable subject", ErrUnauthenticated)
 	}
 
-	email := strings.TrimSpace(strings.ToLower(identity.Email))
+	email := assertedAddress(identity)
 	oi := &OAuthIdentity{
 		UserID:          userID,
 		Provider:        identity.Provider,
@@ -87,6 +96,11 @@ func (s *AuthService) LinkIdentity(
 			return nil, fmt.Errorf("%w: provider identity already linked", ErrAlreadyExists)
 		}
 		return nil, err
+	}
+	if !holder.EmailVerified {
+		if err := s.withdrawLinkIfAddressProven(ctx, oi); err != nil {
+			return nil, err
+		}
 	}
 
 	s.audit.Log(
@@ -106,4 +120,47 @@ func (s *AuthService) LinkIdentity(
 		zap.String("provider", identity.Provider),
 	)
 	return oi, nil
+}
+
+// withdrawLinkIfAddressProven deletes a link just added to an account whose
+// address was unproven when the call began, if it is proven now. The first
+// proof of an address voids the links added before it, listing them once
+// before marking the address verified and once after; a link inserted
+// between the two escapes the first listing. Reading the account after the
+// insert means either the second listing sees the link or this read sees the
+// proof. A read that fails withdraws the link too, so the call fails closed.
+func (s *AuthService) withdrawLinkIfAddressProven(ctx context.Context, oi *OAuthIdentity) error {
+	account, err := s.repo(ctx).GetUser(ctx, oi.UserID)
+	if err == nil && account != nil && !account.EmailVerified {
+		return nil
+	}
+	if delErr := s.repo(ctx).DeleteOAuthIdentity(ctx, oi.UserID, oi.Provider, oi.ProviderUserID); delErr != nil {
+		s.logger.Error("identity_link_withdraw_failed",
+			zap.String("user_id", oi.UserID),
+			zap.String("provider", oi.Provider),
+			zap.Error(delErr))
+		return fmt.Errorf("%w: the provider could not be linked", ErrUnavailable)
+	}
+	if err != nil {
+		return err
+	}
+	s.audit.Log(
+		ctx, audit.EventIdentityLinked,
+		audit.WithActor(oi.UserID),
+		audit.WithSuccess(false),
+		audit.WithDetails(map[string]any{
+			"provider":         oi.Provider,
+			"provider_user_id": oi.ProviderUserID,
+			"reason":           "address_proven_while_linking",
+		}),
+	)
+	return fmt.Errorf("%w: the account's address was proven while linking; sign in again", ErrUnauthenticated)
+}
+
+// assertedAddress is the address a provider asserted, as a link records it.
+// It is not canonicalized: whether a later proof of the account's address
+// keeps the link depends on the spelling the provider proved, and a +tag
+// outside Gmail is not the untagged mailbox.
+func assertedAddress(identity *oauth.Identity) string {
+	return strings.TrimSpace(strings.ToLower(identity.Email))
 }

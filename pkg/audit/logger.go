@@ -157,10 +157,22 @@ const (
 
 	// EventIdentityLinked records a provider identity being attached to a
 	// user — both implicit login-time auto-linking and the self-service
-	// LinkIdentity RPC. EventIdentityUnlinked records a self-service
-	// disconnect via UnlinkIdentity.
+	// LinkIdentity RPC. EventIdentityUnlinked records a link removed: a
+	// self-service disconnect via UnlinkIdentity, or a link voided by the
+	// first proof of the account's address.
 	EventIdentityLinked   EventType = "identity_linked"
 	EventIdentityUnlinked EventType = "identity_unlinked"
+
+	// EventUnprovenCredentialsVoided records the credentials added to an
+	// account while its address was unproven being voided by the first proof
+	// of that address (a passwordless email code or magic link, a provider
+	// asserting it, or a verification link for an account a provider claimed
+	// with a tagged address). Actor and target are the account; the details
+	// carry the proof's `method` (passwordless | oauth | verification_link)
+	// and what was voided (`password_cleared`, `passkeys_cleared`,
+	// `provider_links_cleared`).
+	// Each voided provider link is also recorded as identity_unlinked.
+	EventUnprovenCredentialsVoided EventType = "unproven_credentials_voided" //nolint:gosec // G101: an audit event name, not a credential
 
 	// EventPlatformAdminBootstrapBlocked records a first-admin bootstrap
 	// attempt that arrived AFTER the platform_admins table was no longer
@@ -304,6 +316,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventPlatformAdminBootstrapBlocked: {},
 	EventIdentityLinked:                {},
 	EventIdentityUnlinked:              {},
+	EventUnprovenCredentialsVoided:     {},
 	EventLoginPolicyUpserted:           {},
 	EventLoginPolicyDeleted:            {},
 	EventProjectConfigUpdated:          {},
