@@ -577,15 +577,18 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 		user.LockedUntil = 0
 	}
 
-	// No password set (OAuth-only user).
+	// An account with no password (a provider or passwordless one) can prove
+	// none, so it is refused as an unknown identifier is, at the same cost:
+	// saying so would tell a caller with no credential that it exists.
 	if user.PasswordHash == "" {
+		_ = passwords.Verify(password, getDummyPasswordHash())
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "no_password_set"}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: no password set for this account", ErrNoPasswordSet)
+		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
 	if !passwords.Verify(password, user.PasswordHash) {

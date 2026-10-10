@@ -135,7 +135,7 @@ func TestPasswordlessLogin_ClearsPlantedPassword(t *testing.T) {
 	// The attacker's password no longer works.
 	_, err = svc.PasswordLogin(ctx, "victim@test.com", plantedPW, "1.1.1.1", "agent")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrNoPasswordSet))
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
 
 func TestVerifyEmailLoginCode_WrongCodeFails(t *testing.T) {
