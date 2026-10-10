@@ -1,5 +1,19 @@
 # Upgrade guide
 
+## v4.14.0 → next — a refused hosted OAuth callback redirects to `return_to` with an error code (behaviour change)
+
+No schema change and no migration.
+
+- **A refused hosted OAuth sign-in returns to the app (behaviour change).**
+  `/oauth/callback/{provider}` answered every failure with a bare `400` on the
+  identity origin. Once the signed state token verifies, a refused sign-in is
+  now 302-redirected to `return_to?error=<code>` (no `code` parameter):
+  `email_not_verified`, `account_disabled`, `account_locked`, `access_denied`,
+  `temporarily_unavailable` or `server_error` — see
+  [callback errors](oauth.md#callback-errors). A page at `return_to` that
+  only looks for `code` should handle `error`. A callback whose state token
+  or CSRF cookie does not verify still answers `400`.
+
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 
 No schema change and no migration.
