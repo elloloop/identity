@@ -458,26 +458,21 @@ func coalesce(vals ...string) string {
 }
 
 // withdrawPasskeysIfAddressProven deletes the account's passkeys when its
-// address, unproven when the registration began, is proven now. The first
-// proof of an address deletes the passkeys registered before it, listing them
-// once before marking the address verified and once after; one inserted
-// between the two escapes both. Reading the account after the insert means
-// either the second listing sees the passkey or this read sees the proof.
-// The store deletes passkeys only per account, so one the owner registered
-// in the same instant after the proof goes too and is registered again. A
-// read that fails withdraws them as well, so the call fails closed.
+// address, unproven when the registration began, is proven now: see
+// withdrawIfAddressProven. The store deletes passkeys only per account, so
+// the passkeys registered before this one go with it, even when the proof
+// was a verification link that voids none.
 func (s *AuthService) withdrawPasskeysIfAddressProven(ctx context.Context, userID, credentialID string) error {
-	account, err := s.repo(ctx).GetUser(ctx, userID)
-	if err == nil && account != nil && !account.EmailVerified {
-		return nil
-	}
-	if delErr := s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, userID); delErr != nil {
-		s.logger.Error("passkey_withdraw_failed", zap.String("user_id", userID), zap.Error(delErr))
-		return fmt.Errorf("%w: the passkey could not be registered", ErrUnavailable)
-	}
-	if err != nil {
-		s.logger.Error("passkey_recheck_failed", zap.String("user_id", userID), zap.Error(err))
-		return fmt.Errorf("%w: the passkey could not be registered", ErrUnavailable)
+	withdrawn, err := s.withdrawIfAddressProven(ctx, userID, attachedCredential{
+		kind:    "passkey",
+		refusal: "the passkey could not be registered",
+		fields:  []zap.Field{zap.String("credential_id", credentialID)},
+		withdraw: func(ctx context.Context) error {
+			return s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, userID)
+		},
+	})
+	if err != nil || !withdrawn {
+		return err
 	}
 	s.audit.Log(
 		ctx, audit.EventPasskeyAdded,

@@ -199,8 +199,11 @@ type fakeRepo struct {
 	// setEmailVerifiedErr, when set, fails every SetUserEmailVerified.
 	setEmailVerifiedErr  error
 	createPasskeyCredErr error
-	getUserErr           error
-	getTotpCredentialErr error
+	// deletePasskeyCredsErr, when set, fails every
+	// DeletePasskeyCredentialsForUser.
+	deletePasskeyCredsErr error
+	getUserErr            error
+	getTotpCredentialErr  error
 
 	// Parental-consent error injections. Each, when non-nil, makes the
 	// corresponding repository call fail so a test can exercise the
@@ -846,6 +849,9 @@ func (r *fakeRepo) UpdatePasskeyCredential(_ context.Context, nodeID string, fie
 func (r *fakeRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.deletePasskeyCredsErr != nil {
+		return r.deletePasskeyCredsErr
+	}
 	for id, c := range r.passkeyCreds {
 		if c.UserID == userID {
 			delete(r.passkeyCreds, id)

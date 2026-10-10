@@ -104,9 +104,15 @@ await fetch("/identity.v1.IdentityService/CompletePasskeyRegistration", {
     A sign-in that first proves an unverified account's address (a verified
     provider or an emailed sign-in code) deletes the passkeys added before it,
     since whoever added them may not own the address. A registration that
-    began while the address was unproven and completes after such a proof
-    therefore withdraws its passkey and fails with
-    <code>UNAUTHENTICATED</code>: sign in again and register it once more.
+    began while the address was unproven and finds it proven when it
+    completes therefore fails with <code>UNAUTHENTICATED</code>: sign in again
+    and register it once more. It cannot tell which proof landed, so it
+    deletes the account's passkeys, not only the one it registered: a passkey
+    registered earlier goes too even when the proof was a verification link,
+    which deletes none, and must be registered again. A registration that
+    cannot re-read the account deletes them the same way and fails with
+    <code>UNAVAILABLE</code>; one whose account was deleted meanwhile fails
+    with <code>NOT_FOUND</code>.
   </p>
 
   <h2>Passkey-first signup (unauthenticated)</h2>

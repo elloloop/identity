@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -395,6 +396,66 @@ func TestCompletePasskeyRegistration_WithdrawsAPasskeyWhenTheAddressIsProvenMean
 
 	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
+	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Empty(t, creds, "the passkey is withdrawn")
+}
+
+// A passkey registration whose re-read of the account fails cannot tell
+// whether the address was proven meanwhile, so it withdraws the passkey and
+// fails as unavailable.
+func TestCompletePasskeyRegistration_FailedRecheckWithdrawsThePasskey(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+	user := seedUser(repo, "someone@example.com", "", StatusActive)
+	challengeID := registrationChallenge(t, repo, user.ID)
+	repo.createPasskeyCredentialHook = func() {
+		repo.createPasskeyCredentialHook = nil
+		repo.getUserErr = errors.New("connection reset")
+	}
+
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	require.ErrorIs(t, err, ErrUnavailable)
+	repo.getUserErr = nil
+	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Empty(t, creds, "the passkey is withdrawn")
+}
+
+// A passkey registration that must withdraw its passkey and cannot fails as
+// unavailable rather than reporting the address proven.
+func TestCompletePasskeyRegistration_FailedWithdrawIsUnavailable(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+	user := seedUser(repo, "victim@example.com", "", StatusActive)
+	challengeID := registrationChallenge(t, repo, user.ID)
+	repo.createPasskeyCredentialHook = func() {
+		repo.createPasskeyCredentialHook = nil
+		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
+		repo.deletePasskeyCredsErr = errors.New("connection reset")
+	}
+
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
+	require.ErrorIs(t, err, ErrUnavailable)
+	assert.NotErrorIs(t, err, ErrUnauthenticated)
+}
+
+// An account deleted while a passkey registration runs is not found: the
+// call does not report an address proven, and the passkey does not outlive
+// the account.
+func TestCompletePasskeyRegistration_AccountDeletedMeanwhileIsNotFound(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+	user := seedUser(repo, "gone@example.com", "", StatusActive)
+	challengeID := registrationChallenge(t, repo, user.ID)
+	repo.createPasskeyCredentialHook = func() {
+		repo.createPasskeyCredentialHook = nil
+		require.NoError(t, repo.DeleteUser(ctx, user.ID))
+	}
+
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.NotErrorIs(t, err, ErrUnauthenticated)
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
 	require.NoError(t, err)
 	assert.Empty(t, creds, "the passkey is withdrawn")
