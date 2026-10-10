@@ -664,18 +664,21 @@ func (r *sqliteRepository) SetUserLockedUntil(ctx context.Context, userID string
 	return nil
 }
 
-func (r *sqliteRepository) SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error {
-	if userID == "" {
-		return errors.New("sqlite: SetUserEmailVerified: missing user id")
+func (r *sqliteRepository) SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+	if userID == "" || email == "" {
+		return false, errors.New("sqlite: SetUserEmailVerified: missing user id or email")
 	}
 	const q = `
 		UPDATE users
-		   SET email_verified = 1, email_verified_at_ms = $3, updated_at_ms = $3
-		 WHERE project_id = $1 AND id = $2`
-	if _, err := r.db.Exec(ctx, q, r.projectID, userID, atMs); err != nil {
-		return wrapErr("SetUserEmailVerified", err)
+		   SET email_verified = 1, email_verified_at_ms = $4, updated_at_ms = $4,
+		       password_hash = CASE WHEN $5 THEN '' ELSE password_hash END,
+		       password_change_required = CASE WHEN $5 THEN 0 ELSE password_change_required END
+		 WHERE project_id = $1 AND id = $2 AND email = $3`
+	tag, err := r.db.Exec(ctx, q, r.projectID, userID, email, atMs, clearPassword)
+	if err != nil {
+		return false, wrapErr("SetUserEmailVerified", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 func (r *sqliteRepository) SetUserIDVVerified(ctx context.Context, userID string, atMs int64) error {

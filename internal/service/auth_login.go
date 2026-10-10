@@ -1035,7 +1035,9 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		return nil, false, fmt.Errorf("%w: sign in and link this provider to use it", ErrUnauthenticated)
 	}
 	if !isNew {
-		s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now)
+		if err := s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now); err != nil {
+			return nil, false, err
+		}
 	}
 	s.linkOAuthIdentity(ctx, user.ID, identity, emailStr, now)
 	if isNew {
@@ -1060,7 +1062,9 @@ func (s *AuthService) findLinkedOAuthUser(ctx context.Context, identity *oauth.I
 		}
 	}
 	if linked != nil {
-		s.applyOAuthProfileUpdates(ctx, linked, identity, email, nowMs)
+		if err := s.applyOAuthProfileUpdates(ctx, linked, identity, email, nowMs); err != nil {
+			return nil, err
+		}
 	}
 	return linked, nil
 }
@@ -1166,7 +1170,9 @@ type externalProof struct {
 // external method (OAuth provider assertion, or an emailed OTP/magic-link the
 // user redeemed) proved control of proof.address. It does nothing unless that
 // proof carries to the account's own address (ProofCarriesTo): an account
-// found by a linked provider id may hold a different address, or none.
+// found by a linked provider id may hold a different address, or none. The
+// write lands only while the account still holds the address checked, so an
+// email change racing the proof leaves the new address unverified.
 // Any credential on the account was established BEFORE this proof — possibly
 // by a different party (account pre-hijacking) — so the untrusted ones are
 // voided:
@@ -1183,38 +1189,29 @@ type externalProof struct {
 //     that only resembles this one) would otherwise outlive the proof.
 //
 // It is a no-op when the email is already verified (the proof adds nothing).
-// Best-effort: a persistence failure is logged, not fatal — the user has
-// already authenticated via the external proof.
-func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proof externalProof, nowMs int64) {
+// A failure to persist the verified flag is returned and user is left as it
+// was: the caller would otherwise mint a token claiming an address the store
+// still holds unverified. The credential sweep after it is best-effort.
+func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proof externalProof, nowMs int64) error {
 	if user == nil || user.EmailVerified || !ProofCarriesTo(proof.address, user.Email) {
-		return
+		return nil
 	}
-	patch := map[string]any{
-		"email_verified":    true,
-		"email_verified_at": nowMs,
-		"updated_at":        nowMs,
-	}
+	// The password predates the proof of email control, so it cannot be
+	// trusted to belong to the verified owner. It is cleared with the flag.
 	passwordCleared := user.PasswordHash != ""
-	if passwordCleared {
-		// The password predates the proof of email control, so it cannot be
-		// trusted to belong to the verified owner. Clear it.
-		patch["password_hash"] = ""
-		patch["password_change_required"] = false
+	verified, err := s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, nowMs, true)
+	if err != nil {
+		return fmt.Errorf("persisting email verified by %s: %w", proof.method, err)
 	}
-
+	if !verified {
+		s.logger.Info("email_verified_external_address_changed",
+			zap.String("user_id", user.ID), zap.String("method", proof.method))
+		return nil
+	}
 	user.EmailVerified = true
 	user.EmailVerifiedAt = nowMs
-	if passwordCleared {
-		user.PasswordHash = ""
-	}
-
-	if err := s.repo(ctx).UpdateUser(ctx, user.ID, patch); err != nil {
-		s.logger.Warn("email_verified_external_persist_failed",
-			zap.String("user_id", user.ID),
-			zap.String("method", proof.method),
-			zap.Error(err))
-		return
-	}
+	user.PasswordHash = ""
+	user.PasswordChangeRequired = false
 
 	// Void any passkeys planted while the address was unverified. Detect first
 	// (so the audit/session-revocation only fires when there was something to
@@ -1264,6 +1261,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 			}),
 		)
 	}
+	return nil
 }
 
 // voidPlantedProviderLinks deletes every provider link on the account but the
@@ -1304,11 +1302,10 @@ func (s *AuthService) voidPlantedProviderLinks(ctx context.Context, userID strin
 }
 
 // applyOAuthProfileUpdates patches the local user record with any new
-// fields from the provider (name, avatar, email-verified flag, and the
-// email itself when the provider's email has changed since the link was
-// first created). Failures are logged but don't fail the login — we
-// already authenticated the user.
-func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, identity *oauth.Identity, email string, nowMs int64) {
+// fields from the provider (name, avatar, and the email-verified flag when
+// the provider proved the account's address). Only a failure to record the provider's proof of the
+// address fails the login; a failed profile patch is logged.
+func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, identity *oauth.Identity, email string, nowMs int64) error {
 	patch := make(map[string]any)
 	if identity.Name != "" && identity.Name != u.Name {
 		patch["name"] = identity.Name
@@ -1323,12 +1320,14 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 	// clear any password planted while it was still unverified
 	// (anti-pre-hijacking). This runs its own persistence, so it is
 	// intentionally NOT folded into the name/avatar patch below.
-	s.markEmailVerifiedViaExternalProof(ctx, u, externalProof{
+	if err := s.markEmailVerifiedViaExternalProof(ctx, u, externalProof{
 		address:        identity.Email,
 		method:         "oauth",
 		provider:       identity.Provider,
 		providerUserID: identity.ProviderUserID,
-	}, nowMs)
+	}, nowMs); err != nil {
+		return err
+	}
 	// Provider-asserted email changes are NOT auto-applied to the local
 	// account. A compromised provider account (or a provider that lets
 	// admins change member emails) would otherwise let an attacker
@@ -1343,12 +1342,13 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 		)
 	}
 	if len(patch) == 0 {
-		return
+		return nil
 	}
 	patch["updated_at"] = nowMs
 	if err := s.repo(ctx).UpdateUser(ctx, u.ID, patch); err != nil {
 		s.logger.Warn("oauth_upsert_update_failed", zap.Error(err))
 	}
+	return nil
 }
 
 // linkOAuthIdentity persists the (provider, sub) → user_id linkage and

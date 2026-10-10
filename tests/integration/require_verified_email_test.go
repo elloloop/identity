@@ -55,7 +55,9 @@ func TestRequireVerifiedEmail_BlocksThenAllows(t *testing.T) {
 	// Verify the email, then the same login succeeds and returns a session.
 	// SetUserEmailVerified is on the service.Repository interface and
 	// implemented by every driver, so this release leg runs on all backends.
-	require.NoError(t, h.Repo.SetUserEmailVerified(ctx, userID, 1))
+	verified, err := h.Repo.SetUserEmailVerified(ctx, userID, email, 1, false)
+	require.NoError(t, err)
+	require.True(t, verified)
 
 	login, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
 		Email:    email,

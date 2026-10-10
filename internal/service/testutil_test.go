@@ -152,6 +152,11 @@ type fakeRepo struct {
 	// uniqueness check exactly as a racing winner would.
 	createUserHook func()
 
+	// afterGetUserHook, when set, runs once GetUser has copied the record it
+	// returns, with the stored record, under the repo lock. A test uses it to
+	// land a concurrent write between a read and the write that follows it.
+	afterGetUserHook func(stored *User)
+
 	// The following, when non-nil, make the corresponding read/write return
 	// that error so a test can exercise the caller's repo-error-propagation
 	// path. Default nil (success).
@@ -162,7 +167,9 @@ type fakeRepo struct {
 	findUserByEmailErr     error
 	// updateUserErr, when set, fails every UpdateUser. Drives the
 	// partial-write path of the two-write anonymous OAuth upgrade.
-	updateUserErr        error
+	updateUserErr error
+	// setEmailVerifiedErr, when set, fails every SetUserEmailVerified.
+	setEmailVerifiedErr  error
 	createPasskeyCredErr error
 	getUserErr           error
 	getTotpCredentialErr error
@@ -306,6 +313,9 @@ func (r *fakeRepo) GetUser(_ context.Context, userID string) (*User, error) {
 		return nil, nil
 	}
 	cp := *u
+	if r.afterGetUserHook != nil {
+		r.afterGetUserHook(u)
+	}
 	return &cp, nil
 }
 
@@ -1529,16 +1539,27 @@ func (r *fakeRepo) MarkEmailVerificationTokenConsumed(_ context.Context, id stri
 	return nil
 }
 
-func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID string, atMs int64) error {
+func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+	if userID == "" || email == "" {
+		return false, errors.New("SetUserEmailVerified: missing user id or email")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.setEmailVerifiedErr != nil {
+		return false, r.setEmailVerifiedErr
+	}
 	u, ok := r.users[userID]
-	if !ok {
-		return fmt.Errorf("user %s not found", userID)
+	if !ok || u.Email != email {
+		return false, nil
 	}
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
-	return nil
+	u.UpdatedAt = time.UnixMilli(atMs)
+	if clearPassword {
+		u.PasswordHash = ""
+		u.PasswordChangeRequired = false
+	}
+	return true, nil
 }
 
 func (r *fakeRepo) SetUserIDVVerified(_ context.Context, userID string, atMs int64) error {

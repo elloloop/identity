@@ -579,8 +579,14 @@ type Repository interface {
 	FindEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (*EmailVerificationToken, error)
 	MarkEmailVerificationTokenConsumed(ctx context.Context, tokenID string, atMs int64) error
 
-	// User email-verified update
-	SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error
+	// SetUserEmailVerified marks the account's email verified at atMs only
+	// while its stored email is exactly email, in one write, and reports
+	// whether it did. A proof checked against an earlier read therefore
+	// cannot verify an address that replaced the proven one in between.
+	// clearPassword clears password_hash and password_change_required in the
+	// same write. A missing account, or one holding another email, is
+	// (false, nil); an empty userID or email is an error.
+	SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error)
 
 	// User idv-verified update; called by IdentityVerificationService
 	// when a verification reaches APPROVED.

@@ -410,7 +410,14 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 	}
 
 	now := s.nowMs()
-	if !ProofCarriesTo(rec.Email, user.Email) {
+	proven := ProofCarriesTo(rec.Email, user.Email)
+	if proven && !user.EmailVerified {
+		proven, err = s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, now, false)
+		if err != nil {
+			return nil, fmt.Errorf("setting email verified: %w", err)
+		}
+	}
+	if !proven {
 		if err := s.repo(ctx).MarkEmailVerificationTokenConsumed(ctx, rec.NodeID, now); err != nil {
 			s.logger.Warn("email_verification_consume_failed",
 				zap.String("user_id", user.ID), zap.Error(err))
@@ -419,9 +426,6 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 		return nil, fmt.Errorf("%w: verification token was sent to another address", ErrUnauthenticated)
 	}
 	if !user.EmailVerified {
-		if err := s.repo(ctx).SetUserEmailVerified(ctx, user.ID, now); err != nil {
-			return nil, fmt.Errorf("setting email verified: %w", err)
-		}
 		user.EmailVerified = true
 		user.EmailVerifiedAt = now
 	}

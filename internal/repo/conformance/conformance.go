@@ -263,8 +263,8 @@ func RunConformance(t *testing.T, driver Driver) {
 
 			// Verified and unverified accounts are both returned, each with
 			// its stored email-verified state: the directory discloses it.
-			if err := r.SetUserEmailVerified(ctx, a, 1_700_000_000_000); err != nil {
-				t.Fatalf("SetUserEmailVerified: %v", err)
+			if ok, err := r.SetUserEmailVerified(ctx, a, "batch-a@example.com", 1_700_000_000_000, false); err != nil || !ok {
+				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
 			}
 			got, err = r.FindUsersByEmails(ctx, []string{"batch-a@example.com", "batch-b@example.com"})
 			if err != nil {
@@ -1780,16 +1780,65 @@ func RunConformance(t *testing.T, driver Driver) {
 		t.Run("SetUserEmailVerified", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
-			id, err := r.CreateUser(ctx, &service.User{Email: "ev@example.com", Status: "active"})
+			id, err := r.CreateUser(ctx, &service.User{
+				Email: "ev@example.com", Status: "active", PasswordHash: "hash", PasswordChangeRequired: true,
+			})
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
-			if err := r.SetUserEmailVerified(ctx, id, 555); err != nil {
-				t.Fatalf("SetUserEmailVerified: %v", err)
+			if ok, err := r.SetUserEmailVerified(ctx, id, "ev@example.com", 555, false); err != nil || !ok {
+				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
 			}
 			got, _ := r.GetUser(ctx, id)
-			if got == nil || !got.EmailVerified || got.EmailVerifiedAt != 555 {
+			if got == nil || !got.EmailVerified || got.EmailVerifiedAt != 555 || got.UpdatedAt.UnixMilli() != 555 ||
+				got.PasswordHash != "hash" || !got.PasswordChangeRequired {
 				t.Fatalf("after Set: %+v", got)
+			}
+		})
+
+		t.Run("SetUserEmailVerified_ClearsPassword", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{
+				Email: "evp@example.com", Status: "active", PasswordHash: "hash", PasswordChangeRequired: true,
+			})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			if ok, err := r.SetUserEmailVerified(ctx, id, "evp@example.com", 555, true); err != nil || !ok {
+				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || !got.EmailVerified || got.PasswordHash != "" || got.PasswordChangeRequired {
+				t.Fatalf("after Set: %+v", got)
+			}
+		})
+
+		// The write is a compare-and-set on the stored email: an account that
+		// holds another address than the one proven is left untouched, and
+		// the comparison is exact, not case-folded.
+		t.Run("SetUserEmailVerified_OnlyWhileTheEmailIsUnchanged", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{Email: "moved@example.com", Status: "active", PasswordHash: "hash"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			for _, proven := range []string{"before@example.com", "Moved@example.com"} {
+				ok, err := r.SetUserEmailVerified(ctx, id, proven, 555, true)
+				if err != nil || ok {
+					t.Fatalf("SetUserEmailVerified(%q) = %v %v, want false nil", proven, ok, err)
+				}
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || got.EmailVerified || got.EmailVerifiedAt != 0 || got.PasswordHash != "hash" {
+				t.Fatalf("after a refused Set: %+v", got)
+			}
+			if ok, err := r.SetUserEmailVerified(ctx, "no-such-user", "moved@example.com", 555, false); err != nil || ok {
+				t.Fatalf("missing user = %v %v, want false nil", ok, err)
+			}
+			if _, err := r.SetUserEmailVerified(ctx, id, "", 555, false); err == nil {
+				t.Fatal("empty email: want an error")
 			}
 		})
 

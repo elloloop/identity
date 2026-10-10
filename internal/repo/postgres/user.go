@@ -686,20 +686,23 @@ func (r *pgRepository) SetUserLockedUntil(ctx context.Context, userID string, lo
 	return nil
 }
 
-func (r *pgRepository) SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error {
-	if userID == "" {
-		return errors.New("postgres: SetUserEmailVerified: missing user id")
+func (r *pgRepository) SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+	if userID == "" || email == "" {
+		return false, errors.New("postgres: SetUserEmailVerified: missing user id or email")
 	}
 	const q = `
 		UPDATE users
 		   SET email_verified = TRUE,
-		       email_verified_at_ms = $3,
-		       updated_at_ms = $3
-		 WHERE project_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.projectID, userID, atMs); err != nil {
-		return wrapPgErr("SetUserEmailVerified", err)
+		       email_verified_at_ms = $4,
+		       updated_at_ms = $4,
+		       password_hash = CASE WHEN $5::boolean THEN '' ELSE password_hash END,
+		       password_change_required = CASE WHEN $5::boolean THEN FALSE ELSE password_change_required END
+		 WHERE project_id = $1 AND id = $2 AND email = $3`
+	tag, err := r.pool.Exec(ctx, q, r.projectID, userID, email, atMs, clearPassword)
+	if err != nil {
+		return false, wrapPgErr("SetUserEmailVerified", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 func (r *pgRepository) SetUserIDVVerified(ctx context.Context, userID string, atMs int64) error {

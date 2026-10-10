@@ -479,8 +479,8 @@ func TestDirectoryLookup_RequireVerifiedEmail(t *testing.T) {
 				t.Fatalf("before verification: LookupUsers = %+v, want %+v", got, want)
 			}
 
-			if err := f.repos.project(dirTestProjectA).SetUserEmailVerified(context.Background(), claimed, 1); err != nil {
-				t.Fatalf("verify: %v", err)
+			if ok, err := f.repos.project(dirTestProjectA).SetUserEmailVerified(context.Background(), claimed, "claimed@corp.test", 1, false); err != nil || !ok {
+				t.Fatalf("verify: %v %v", ok, err)
 			}
 			want = []DirectoryUser{
 				{ID: claimed, Email: "claimed@corp.test", Name: "Claimed", EmailVerified: true, RequestedEmails: []string{"claimed@corp.test"}},
