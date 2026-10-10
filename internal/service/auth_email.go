@@ -72,12 +72,12 @@ func formatExpiresIn(d time.Duration) string {
 // Per OWASP guidance and the proto contract, every account-dependent
 // outcome returns nil — an unknown email included — and the account is
 // looked up and mailed through dispatchEmailSend, so neither the answer nor
-// (with async dispatch) its timing is an email-enumeration oracle. Errors
-// during token persistence or email dispatch are logged internally; the
-// caller is told nothing. The one
-// error it returns is ErrInvalidArgument for refused link params, which
-// are checked first and from the request alone, so that answer is the
-// same for every email.
+// (with async dispatch, which app.New turns on unless SynchronousEmailSend
+// is set) its timing is an email-enumeration oracle. Errors during token
+// persistence or email dispatch are logged internally; the caller is told
+// nothing. The one error it returns is ErrInvalidArgument for refused link
+// params, which are checked first and from the request alone, so that
+// answer is the same for every email.
 func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string, params EmailLinkParams) error {
 	link, err := s.checkEmailLinkParams(params)
 	if err != nil {
