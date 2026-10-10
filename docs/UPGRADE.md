@@ -110,6 +110,22 @@ No schema change and no migration.
   and linking. The account's owner links such a provider with
   `LinkIdentity` while signed in; a provider account already linked keeps
   signing in by its provider id.
+- **Access tokens carry an `email_verified` claim (additive).** Every access
+  token that carries an `email` now also carries `email_verified`: `true`
+  only when the account's owner proved control of the mailbox in `email`
+  (that address or another spelling of the same mailbox: a verification
+  link, a passwordless email code or magic link, a passkey sign-up code, or
+  a provider asserting that same mailbox), `false`
+  otherwise. It is absent when `email` is (anonymous and username-only
+  accounts). The value is read from the account at every issue, refresh
+  included. With `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` on (the default) no
+  session is issued for an unproven address (see the entry above), so
+  `false` appears on a named account's token only with the flag off.
+  Verifiers that ignore unknown claims are unaffected; one that
+  gates on a proven address should require `email_verified: true` and treat
+  a token without the claim, minted by an earlier release and still within
+  its lifetime after the upgrade, as unproven. `pkg/jwt.Claims` gains the
+  `EmailVerified` field, parsed on verify.
 
 ## v4.12.2 → v4.13.0 — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); an optional `iss` claim and per-project token audience
 

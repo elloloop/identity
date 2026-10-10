@@ -14,7 +14,6 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/events"
-	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passwords"
 )
@@ -383,17 +382,7 @@ func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User
 	user.AccountAddress = predictedAccountAddress(ctx, user)
 	// The same claim set a real sign-up's token carries, or the decoy's
 	// shape would give the duplicate away.
-	decoyClaims := jwt.Claims{
-		Sub:      user.ID,
-		Email:    user.Email,
-		Name:     user.Name,
-		Role:     user.Role,
-		Tenant:   s.tenantID(ctx),
-		Project:  s.projectID(ctx),
-		AuthTime: s.nowMs() / 1000,
-	}
-	s.stampTokenScope(&decoyClaims)
-	accessToken, err := s.signer.SignAccessToken(ctx, decoyClaims, s.cfg.JWTExpiry())
+	accessToken, err := s.signer.SignAccessToken(ctx, s.accessTokenClaims(ctx, user, s.nowMs()), s.cfg.JWTExpiry())
 	if err != nil {
 		return nil, fmt.Errorf("creating duplicate-signup decoy token: %w", err)
 	}
