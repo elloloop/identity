@@ -342,7 +342,7 @@ func TestRequiredPasswordChange_ClearedWithAClearedPassword(t *testing.T) {
 	ctx := context.Background()
 	user := issuedPasswordUser(t, repo, "issued@example.com")
 	user.EmailVerified = false
-	svc.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: user.Email, method: "oauth"}, nowMs())
+	require.NoError(t, svc.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: user.Email, method: "oauth"}, nowMs()))
 	stored, _ := repo.GetUser(ctx, user.ID)
 	require.Empty(t, stored.PasswordHash)
 	require.False(t, stored.PasswordChangeRequired)
