@@ -1,5 +1,16 @@
 # Upgrade guide
 
+## v4.14.0 → next — `RequestPasswordReset` returns before the account is looked up or mailed
+
+No schema change, no migration and no API change.
+
+- **`RequestPasswordReset` no longer waits on the reset mail.** It looked up
+  the account and minted and mailed its reset link before answering, so a
+  request for an existing account took measurably longer than one for an
+  unknown address. That work now runs off the request, as the passwordless
+  code and magic-link requests already do; the answer is unchanged (always
+  success), and a send failure is logged as before.
+
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 
 No schema change and no migration.
