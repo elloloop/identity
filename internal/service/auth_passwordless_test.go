@@ -75,7 +75,7 @@ func TestRequestEmailLoginCode_PerEmailCooldown(t *testing.T) {
 	// Spam control: per-email send cooldown. A second request inside the
 	// window does not send.
 	svc, _, rec := passwordlessSvc(t)
-	svc.emailThrottle = newEmailSendThrottle(60_000, 0)
+	svc.emailThrottle = newKeyCooldown(60_000, 0)
 	ctx := context.Background()
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "victim@test.com"))
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "victim@test.com"))
@@ -297,7 +297,7 @@ func TestRequestMagicLink_RejectsDisallowedReturnTo(t *testing.T) {
 
 func TestRequestMagicLink_PerEmailCooldown(t *testing.T) {
 	svc, _, rec := passwordlessSvc(t)
-	svc.emailThrottle = newEmailSendThrottle(60_000, 0)
+	svc.emailThrottle = newKeyCooldown(60_000, 0)
 	ctx := context.Background()
 	require.NoError(t, svc.RequestMagicLink(ctx, "victim@test.com", "https://app.test/cb"))
 	require.NoError(t, svc.RequestMagicLink(ctx, "victim@test.com", "https://app.test/cb"))

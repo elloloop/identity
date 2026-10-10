@@ -1346,12 +1346,12 @@ type AuthService struct {
 	// disables the corresponding assurance surface (ErrAssuranceDisabled).
 	assuranceResolver *AssuranceResolver
 	webAssurance      assurance.Verifier
-	emailThrottle     *emailSendThrottle
-	signupThrottle    *emailSendThrottle
+	emailThrottle     *keyCooldown
+	signupThrottle    *keyCooldown
 	// usernameProbes caps "username taken" answers per client IP
 	// (config.RateLimitUsernameTakenPerIP).
 	usernameProbes *probeBudget
-	phoneThrottle  *emailSendThrottle
+	phoneThrottle  *keyCooldown
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
 	// OAuth flow uses. Injected with WithReturnAllowlist; the zero value
@@ -1589,10 +1589,10 @@ func NewAuthServiceWithOAuth(
 		smsSender:              smsSender,
 		logger:                 logger,
 		oauthResolver:          newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
-		emailThrottle:          newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
-		signupThrottle:         newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
+		emailThrottle:          newKeyCooldown(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
+		signupThrottle:         newKeyCooldown(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		usernameProbes:         newProbeBudget(rateLimitWindowMs(cfg), cfg.RateLimitUsernameTakenPerIP),
-		phoneThrottle:          newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
+		phoneThrottle:          newKeyCooldown(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
 		nowFunc:                time.Now,
 		// Default to synchronous sends; app.New opts into async via
 		// WithAsyncEmailDispatch. A synchronous default keeps every

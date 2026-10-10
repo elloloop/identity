@@ -16,7 +16,7 @@ const probeBudgetMaxSize = 100_000
 // the answer revealed nothing (refund). Once an IP's units are spent, every
 // further request from it in the window is refused the same way whatever it
 // asks about, so the refusal itself reveals nothing. In-memory and per
-// replica, keyed on the exact address, like emailSendThrottle.
+// replica, keyed on the exact address, like keyCooldown.
 type probeBudget struct {
 	mu       sync.Mutex
 	windowMs int64
@@ -75,7 +75,7 @@ func (b *probeBudget) refund(ip string, nowMs int64) {
 
 // evictLocked drops expired windows; if none expired it drops one arbitrary
 // entry, so the map stays bounded (bounded growth over perfect fairness, as
-// emailSendThrottle chooses).
+// keyCooldown chooses).
 func (b *probeBudget) evictLocked(nowMs int64) {
 	for k, v := range b.spent {
 		if nowMs-v.startMs >= b.windowMs {

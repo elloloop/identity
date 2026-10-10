@@ -650,7 +650,7 @@ func (r *fakeRepo) refreshTokenSnapshot() ([]*RefreshTokenRecord, error) {
 func TestRequestPasswordReset_PerRecipientThrottle(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	svc.cfg.EmailSendCooldownSeconds = 60
-	svc.emailThrottle = newEmailSendThrottle(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
+	svc.emailThrottle = newKeyCooldown(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
 
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
 	seedUser(repo, "alice@test.com", pwHash, "active")
@@ -669,7 +669,7 @@ func TestRequestPasswordReset_PerRecipientThrottle(t *testing.T) {
 func TestSendEmailVerification_PerRecipientThrottle(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	svc.cfg.EmailSendCooldownSeconds = 60
-	svc.emailThrottle = newEmailSendThrottle(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
+	svc.emailThrottle = newKeyCooldown(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
 
 	u := seedUser(repo, "bob@test.com", "x", "active")
 
