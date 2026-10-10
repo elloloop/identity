@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func linkedProviders(t *testing.T, repo *fakeRepo, userID string) []string {
@@ -112,4 +114,82 @@ func TestOAuthLogin_TaggedAddressDoesNotClaimExistingAccount(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	assert.Nil(t, res)
 	assert.Empty(t, linkedProviders(t, repo, owner.ID), "the tagged provider account is not linked")
+}
+
+// When the sweep cannot read what the account holds, the proof fails the
+// sign-in with a retryable error instead of verifying the address around the
+// credentials it could not see. The address stays unproven and nothing is
+// issued, so the next proof, once the store answers, sweeps them.
+func TestExternalProof_FailsClosedWhenTheSweepCannotRead(t *testing.T) {
+	storeDown := errors.New("connection reset by peer")
+	cases := map[string]struct {
+		fail    func(repo *fakeRepo, err error)
+		signIn  func(t *testing.T, svc *AuthService, rec *recordingTransport) (*LoginResult, error)
+		proving []string
+	}{
+		"passwordless, provider links unreadable": {
+			fail:   func(repo *fakeRepo, err error) { repo.listOAuthIdentitiesErr = err },
+			signIn: passwordlessSignIn("victim@example.com"),
+		},
+		"passwordless, passkeys unreadable": {
+			fail:   func(repo *fakeRepo, err error) { repo.listPasskeyCredsErr = err },
+			signIn: passwordlessSignIn("victim@example.com"),
+		},
+		"provider, provider links unreadable": {
+			fail:    func(repo *fakeRepo, err error) { repo.listOAuthIdentitiesErr = err },
+			signIn:  oauthSignIn("victim@example.com"),
+			proving: []string{"google/sub-victim@example.com"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc, repo, rec := passwordlessSvc(t)
+			svc.oauthResolver = newOAuthResolver(svc.cfg.DefaultProjectID, defaultTestOAuthRegistry(), svc.cfg.OAuthHubSharing, zap.NewNop())
+			ctx := context.Background()
+			victim := seedUser(repo, "victim@example.com", "", StatusActive)
+			require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
+				UserID: victim.ID, Provider: "github", ProviderUserID: "sub-planter",
+				EmailAtLinkTime: "victim@example.com", CreatedAt: 1,
+			}))
+
+			tc.fail(repo, storeDown)
+			res, err := tc.signIn(t, svc, rec)
+			require.ErrorIs(t, err, ErrUnavailable)
+			assert.NotContains(t, err.Error(), storeDown.Error(), "the store's error is not returned to the caller")
+			assert.Nil(t, res)
+			stored, err := repo.GetUser(ctx, victim.ID)
+			require.NoError(t, err)
+			assert.False(t, stored.EmailVerified, "the address stays unproven so the next proof sweeps again")
+			tc.fail(repo, nil)
+			assert.Contains(t, linkedProviders(t, repo, victim.ID), "github/sub-planter")
+
+			res, err = tc.signIn(t, svc, rec)
+			require.NoError(t, err)
+			assert.True(t, res.User.EmailVerified)
+			want := tc.proving
+			if want == nil {
+				want = []string{}
+			}
+			assert.ElementsMatch(t, want, linkedProviders(t, repo, victim.ID), "the retried proof voids the planted link")
+		})
+	}
+}
+
+func passwordlessSignIn(addr string) func(*testing.T, *AuthService, *recordingTransport) (*LoginResult, error) {
+	return func(t *testing.T, svc *AuthService, rec *recordingTransport) (*LoginResult, error) {
+		t.Helper()
+		require.NoError(t, svc.RequestEmailLoginCode(context.Background(), addr))
+		sent := rec.Sent()
+		return svc.VerifyEmailLoginCode(context.Background(), addr, extractCodeFromEmail(t, sent[len(sent)-1].Text), "", "")
+	}
+}
+
+func oauthSignIn(addr string) func(*testing.T, *AuthService, *recordingTransport) (*LoginResult, error) {
+	return func(_ *testing.T, svc *AuthService, _ *recordingTransport) (*LoginResult, error) {
+		return svc.OAuthLogin(context.Background(), OAuthLoginParams{
+			Code:        fakeOAuthCode(addr, "Someone", "", "google"),
+			Provider:    "google",
+			RedirectURI: "https://app/cb",
+		})
+	}
 }

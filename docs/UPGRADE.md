@@ -1,5 +1,18 @@
 # Upgrade guide
 
+## v4.14.0 → next — a proof of an address that cannot void the credentials added before it fails the sign-in (behaviour change)
+
+No schema change and no migration.
+
+- **A proof of an address that cannot void the credentials added before it
+  fails the sign-in (behaviour change).** When a passwordless email code or
+  magic link, or a provider sign-in, first proves an account's address,
+  identity voids the password, passkeys and provider links added while it
+  was unproven. If the store failed while doing so, the sign-in used to
+  succeed and verify the address anyway, leaving what it could not void.
+  It now fails with `unavailable` and leaves the address unproven, so the
+  next proof voids them; start the sign-in again.
+
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 
 No schema change and no migration.

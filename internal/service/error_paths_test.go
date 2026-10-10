@@ -568,11 +568,13 @@ func TestRegenerateRecoveryCodes_StoreErrors(t *testing.T) {
 
 func TestOAuthLogin_ExistingUserUpdateWarns(t *testing.T) {
 	r := newErrorRepo()
-	seedUser(r.fakeRepo, "ouw@example.com", "", "active")
+	// Verified already, so the sign-in proves nothing new and the only write
+	// that fails is the name/avatar patch.
+	seedUser(r.fakeRepo, "ouw@example.com", "", "active").EmailVerified = true
 	r.failUpdateUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	// Should still succeed because the update failure is logged but not propagated.
+	// Should still succeed because the profile patch failure is logged but not propagated.
 	code := fakeOAuthCode("ouw@example.com", "Different Name", "https://avatar.png", "google")
 	res, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.NoError(t, err)

@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
@@ -992,7 +993,9 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 			return nil, false, err
 		}
 		if linked != nil {
-			s.applyOAuthProfileUpdates(ctx, linked, identity, emailStr, now)
+			if err := s.applyOAuthProfileUpdates(ctx, linked, identity, emailStr, now); err != nil {
+				return nil, false, err
+			}
 			return linked, false, nil
 		}
 	}
@@ -1033,7 +1036,9 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		return nil, false, fmt.Errorf("%w: sign in and link this provider to use it", ErrUnauthenticated)
 	}
 	if !isNew {
-		s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now)
+		if err := s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now); err != nil {
+			return nil, false, err
+		}
 	}
 	s.linkOAuthIdentity(ctx, user.ID, identity, emailStr, now)
 	if isNew {
@@ -1165,114 +1170,61 @@ type externalProof struct {
 //     that only resembles this one) would otherwise outlive the proof.
 //
 // It is a no-op when the email is already verified (the proof adds nothing).
-// Best-effort: a persistence failure is logged, not fatal — the user has
-// already authenticated via the external proof.
-func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proof externalProof, nowMs int64) {
+// It fails closed: if any step cannot complete, the sign-in fails with
+// ErrUnavailable and the address stays unproven, so the next proof sweeps
+// again. The address is marked verified last because the sweep runs only
+// while it is unproven.
+func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proof externalProof, nowMs int64) error {
 	if user == nil || user.EmailVerified || !ProofCarriesTo(proof.address, user.Email) {
-		return
+		return nil
 	}
-	patch := map[string]any{
-		"email_verified":    true,
-		"email_verified_at": nowMs,
-		"updated_at":        nowMs,
+	repo := s.repo(ctx)
+
+	passkeys, err := repo.ListPasskeyCredentials(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "list_passkeys", err)
+	}
+	links, err := repo.ListOAuthIdentitiesForUser(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
+	}
+	var plantedLinks []*OAuthIdentity
+	for _, link := range links {
+		if link.Provider != proof.provider || link.ProviderUserID != proof.providerUserID {
+			plantedLinks = append(plantedLinks, link)
+		}
 	}
 	passwordCleared := user.PasswordHash != ""
-	if passwordCleared {
-		// The password predates the proof of email control, so it cannot be
-		// trusted to belong to the verified owner. Clear it.
-		patch["password_hash"] = ""
-		patch["password_change_required"] = false
-	}
+	passkeysCleared := len(passkeys) > 0
+	anyCleared := passwordCleared || passkeysCleared || len(plantedLinks) > 0
 
-	user.EmailVerified = true
-	user.EmailVerifiedAt = nowMs
-	if passwordCleared {
-		user.PasswordHash = ""
-	}
-
-	if err := s.repo(ctx).UpdateUser(ctx, user.ID, patch); err != nil {
-		s.logger.Warn("email_verified_external_persist_failed",
-			zap.String("user_id", user.ID),
-			zap.String("method", proof.method),
-			zap.Error(err))
-		return
-	}
-
-	// Void any passkeys planted while the address was unverified. Detect first
-	// (so the audit/session-revocation only fires when there was something to
-	// clear) then delete them all.
-	passkeysCleared := false
-	if existing, err := s.repo(ctx).ListPasskeyCredentials(ctx, user.ID); err != nil {
-		s.logger.Warn("email_verified_external_passkey_list_failed",
-			zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
-	} else if len(existing) > 0 {
-		if err := s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
-			s.logger.Warn("email_verified_external_passkey_clear_failed",
-				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
-		} else {
-			passkeysCleared = true
+	if anyCleared {
+		// Sessions go first, as ConfirmPasswordReset ends them for a replaced
+		// password: one opened with a voided credential must not outlive it.
+		// Doing it before the deletions means a failure further on leaves the
+		// credentials in place, so the retried proof finds them and revokes
+		// again.
+		if err := repo.DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
+			return s.externalProofSweepFailed(user.ID, proof, "revoke_refresh_tokens", err)
+		}
+		if s.cfg.RevocationMode == config.RevocationModeSession {
+			if err := repo.RevokeSessionsForUser(ctx, user.ID, nowMs); err != nil {
+				return s.externalProofSweepFailed(user.ID, proof, "revoke_sessions", err)
+			}
 		}
 	}
-
-	linksCleared := s.voidPlantedProviderLinks(ctx, user.ID, proof)
-
-	if passwordCleared || passkeysCleared || linksCleared > 0 {
-		// The cleared credentials are void, so revoke any sessions too —
-		// mirroring ConfirmPasswordReset — so a session established with a now-
-		// voided credential cannot outlive it. With the verification gate on,
-		// no session is issued while the address is unproven; with it off, a
-		// planted credential's session would otherwise survive the proof.
-		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
-			s.logger.Warn("email_verified_external_revoke_failed",
-				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
+	if passkeysCleared {
+		if err := repo.DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
+			return s.externalProofSweepFailed(user.ID, proof, "delete_passkeys", err)
 		}
-		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
-		s.logger.Info("email_verified_external_credentials_cleared",
-			zap.String("user_id", user.ID),
-			zap.String("method", proof.method),
-			zap.Bool("password_cleared", passwordCleared),
-			zap.Bool("passkeys_cleared", passkeysCleared),
-			zap.Int("provider_links_cleared", linksCleared))
-		s.audit.Log(
-			ctx, audit.EventPasswordChanged,
-			audit.WithActor(user.ID),
-			audit.WithSuccess(true),
-			audit.WithDetails(map[string]any{
-				"reason":                 "planted_credentials_cleared_on_external_email_verification",
-				"method":                 proof.method,
-				"password_cleared":       passwordCleared,
-				"passkeys_cleared":       passkeysCleared,
-				"provider_links_cleared": linksCleared,
-			}),
-		)
 	}
-}
-
-// voidPlantedProviderLinks deletes every provider link on the account but the
-// one presenting proof, and returns how many it deleted. Each is audited as an
-// unlink. Failures are logged, not fatal, like the rest of the sweep.
-func (s *AuthService) voidPlantedProviderLinks(ctx context.Context, userID string, proof externalProof) int {
-	links, err := s.repo(ctx).ListOAuthIdentitiesForUser(ctx, userID)
-	if err != nil {
-		s.logger.Warn("email_verified_external_link_list_failed",
-			zap.String("user_id", userID), zap.String("method", proof.method), zap.Error(err))
-		return 0
-	}
-	cleared := 0
-	for _, link := range links {
-		if link.Provider == proof.provider && link.ProviderUserID == proof.providerUserID {
-			continue
+	for _, link := range plantedLinks {
+		if err := repo.DeleteOAuthIdentity(ctx, user.ID, link.Provider, link.ProviderUserID); err != nil {
+			return s.externalProofSweepFailed(user.ID, proof, "delete_provider_link", err)
 		}
-		if err := s.repo(ctx).DeleteOAuthIdentity(ctx, userID, link.Provider, link.ProviderUserID); err != nil {
-			s.logger.Warn("email_verified_external_link_clear_failed",
-				zap.String("user_id", userID), zap.String("method", proof.method),
-				zap.String("provider", link.Provider), zap.Error(err))
-			continue
-		}
-		cleared++
 		s.audit.Log(
 			ctx, audit.EventIdentityUnlinked,
-			audit.WithActor(userID),
+			audit.WithActor(user.ID),
 			audit.WithSuccess(true),
 			audit.WithDetails(map[string]any{
 				"provider":         link.Provider,
@@ -1282,15 +1234,68 @@ func (s *AuthService) voidPlantedProviderLinks(ctx context.Context, userID strin
 			}),
 		)
 	}
-	return cleared
+
+	patch := map[string]any{
+		"email_verified":    true,
+		"email_verified_at": nowMs,
+		"updated_at":        nowMs,
+	}
+	if passwordCleared {
+		patch["password_hash"] = ""
+		patch["password_change_required"] = false
+	}
+	if err := repo.UpdateUser(ctx, user.ID, patch); err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "mark_verified", err)
+	}
+	user.EmailVerified = true
+	user.EmailVerifiedAt = nowMs
+	if passwordCleared {
+		user.PasswordHash = ""
+		user.PasswordChangeRequired = false
+	}
+
+	if anyCleared {
+		s.logger.Info("email_verified_external_credentials_cleared",
+			zap.String("user_id", user.ID),
+			zap.String("method", proof.method),
+			zap.Bool("password_cleared", passwordCleared),
+			zap.Bool("passkeys_cleared", passkeysCleared),
+			zap.Int("provider_links_cleared", len(plantedLinks)))
+		s.audit.Log(
+			ctx, audit.EventPasswordChanged,
+			audit.WithActor(user.ID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{
+				"reason":                 "planted_credentials_cleared_on_external_email_verification",
+				"method":                 proof.method,
+				"password_cleared":       passwordCleared,
+				"passkeys_cleared":       passkeysCleared,
+				"provider_links_cleared": len(plantedLinks),
+			}),
+		)
+	}
+	return nil
+}
+
+// externalProofSweepFailed logs why the sweep stopped and returns the error
+// the sign-in fails with. The store's error stays in the log: these sign-ins
+// are unauthenticated, so the caller learns only to try again.
+func (s *AuthService) externalProofSweepFailed(userID string, proof externalProof, step string, err error) error {
+	s.logger.Error("email_verified_external_sweep_failed",
+		zap.String("user_id", userID),
+		zap.String("method", proof.method),
+		zap.String("step", step),
+		zap.Error(err))
+	return fmt.Errorf("%w: the sign-in could not be completed", ErrUnavailable)
 }
 
 // applyOAuthProfileUpdates patches the local user record with any new
 // fields from the provider (name, avatar, email-verified flag, and the
 // email itself when the provider's email has changed since the link was
-// first created). Failures are logged but don't fail the login — we
-// already authenticated the user.
-func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, identity *oauth.Identity, email string, nowMs int64) {
+// first created). A failed profile patch is logged, not fatal — we already
+// authenticated the user — but a proof of the address that cannot void the
+// credentials planted before it fails the sign-in.
+func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, identity *oauth.Identity, email string, nowMs int64) error {
 	patch := make(map[string]any)
 	if identity.Name != "" && identity.Name != u.Name {
 		patch["name"] = identity.Name
@@ -1305,12 +1310,14 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 	// clear any password planted while it was still unverified
 	// (anti-pre-hijacking). This runs its own persistence, so it is
 	// intentionally NOT folded into the name/avatar patch below.
-	s.markEmailVerifiedViaExternalProof(ctx, u, externalProof{
+	if err := s.markEmailVerifiedViaExternalProof(ctx, u, externalProof{
 		address:        identity.Email,
 		method:         "oauth",
 		provider:       identity.Provider,
 		providerUserID: identity.ProviderUserID,
-	}, nowMs)
+	}, nowMs); err != nil {
+		return err
+	}
 	// Provider-asserted email changes are NOT auto-applied to the local
 	// account. A compromised provider account (or a provider that lets
 	// admins change member emails) would otherwise let an attacker
@@ -1325,12 +1332,13 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 		)
 	}
 	if len(patch) == 0 {
-		return
+		return nil
 	}
 	patch["updated_at"] = nowMs
 	if err := s.repo(ctx).UpdateUser(ctx, u.ID, patch); err != nil {
 		s.logger.Warn("oauth_upsert_update_failed", zap.Error(err))
 	}
+	return nil
 }
 
 // linkOAuthIdentity persists the (provider, sub) → user_id linkage and

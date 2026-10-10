@@ -171,6 +171,7 @@ type fakeRepo struct {
 	// corresponding repository call fail so a test can exercise the
 	// service's error-propagation branch. Default nil (success).
 	listPasskeyCredsErr    error // ListPasskeyCredentials fails
+	listOAuthIdentitiesErr error // ListOAuthIdentitiesForUser fails
 	getActiveConsentErr    error // GetActiveParentalConsentForChild fails
 	createConsentErr       error // CreateParentalConsent fails
 	markConsentRevokedErr  error // MarkParentalConsentRevoked fails
@@ -1644,6 +1645,9 @@ func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *OAuthIdentity) err
 func (r *fakeRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*OAuthIdentity, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.listOAuthIdentitiesErr != nil {
+		return nil, r.listOAuthIdentitiesErr
+	}
 	var out []*OAuthIdentity
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == userID {

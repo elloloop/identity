@@ -48,6 +48,9 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAnonymousMustUpgrade):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
+	case errors.Is(err, service.ErrUnavailable):
+		return connect.NewError(connect.CodeUnavailable, err)
+
 	case errors.Is(err, service.ErrAssuranceUnavailable):
 		// The evidence could not be judged (upstream provider unreachable) —
 		// retryable, and deliberately generic: the underlying error can carry
