@@ -44,7 +44,11 @@ const eventTypes = auditEvents as string[];
     missing date of birth, a lockout) is audited at most once per account and
     reason every 10 minutes on each replica, a fixed window with no setting;
     see <a href="/identity/docs/concepts/sessions#refused-refresh-audit">auditing
-    a refused refresh</a>. A refused sign-in is audited every time.
+    a refused refresh</a>. A refused sign-in is audited every time. A
+    <code>login_locked</code> row, like a refused session's
+    <code>login_failure</code> row, names the step that refused in its
+    <code>gate</code> detail: <code>sign_in</code>, <code>refresh</code> or
+    <code>qr_poll</code>.
   </p>
 
   <h2>Event types</h2>

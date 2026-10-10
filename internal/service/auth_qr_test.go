@@ -191,7 +191,9 @@ func TestPollQrLogin_RefusalAuditPaced(t *testing.T) {
 				return map[string]any{"locked_until": now.Add(time.Hour).UnixMilli()}
 			},
 			wantErr: ErrAccountLocked,
-			count:   func(w *recordingAuditWriter) int { return w.countByEventType("login_locked") },
+			count: func(w *recordingAuditWriter) int {
+				return w.countByEventTypeAndDetail("login_locked", "gate", "qr_poll")
+			},
 		},
 	}
 	for _, tc := range cases {

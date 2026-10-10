@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.15.0 → v4.16.0 — sign-in hardening follow-ups (behaviour changes); `GATEWAY_RATE_LIMIT_QR_POLL_PER_IP` (additive)
+## v4.15.0 → v4.16.0 — sign-in hardening follow-ups (behaviour changes); `GATEWAY_RATE_LIMIT_QR_POLL_PER_IP` and `gate` on `login_locked` audit rows (additive)
 
 No schema change and no migration.
 
@@ -9,11 +9,12 @@ No schema change and no migration.
 - **A refused QR poll is audited at its own gate, paced (behaviour change).**
   A `PollQrLogin` refused for an unverified address or a lockout leaves the
   hand-off approved, so the device replays the refusal on every poll, and each
-  poll wrote a row. The `login_failure` (`reason: email_not_verified`) and
-  `login_locked` rows of a refused poll now carry `gate: qr_poll` instead of
-  `gate: sign_in`, and are written at most once per account and reason per 10
-  minutes per replica, like a refused refresh. Every poll is still refused.
-  Alerting that counted QR refusals under `gate: sign_in` should add `qr_poll`.
+  poll wrote a row. The `login_failure` row (`reason: email_not_verified`) of
+  a refused poll now carries `gate: qr_poll` instead of `gate: sign_in`, and
+  its `login_locked` row carries `gate: qr_poll` (see below). Both are written
+  at most once per account and reason per 10 minutes per replica, like a
+  refused refresh. Every poll is still refused. Alerting that counted QR
+  refusals under `gate: sign_in` should add `qr_poll`.
 - **An account that could not sign in cannot approve a QR hand-off (behaviour
   change).** `ApproveQrLogin` with `approve: true` is refused, with the codes a
   sign-in uses, when the approving account is deactivated, has a pending
@@ -37,6 +38,16 @@ No schema change and no migration.
   boot). Over-limit calls get 429 / `resource_exhausted` with `Retry-After`.
   A client polling faster than every half second from one address, or many
   devices behind one NAT, should poll less often or raise the limit.
+
+### Audit
+
+- **`login_locked` rows name the gate that refused (additive).** A
+  `login_locked` row now carries a `gate` detail, as a refused session's
+  `login_failure` row already did: `sign_in` for a sign-in by any method,
+  `refresh` for a refresh, `qr_poll` for a QR poll. Rows written before the
+  upgrade have no `gate`. Filter on it to tell a lockout replayed through a
+  refresh or a QR poll, which is paced, from a sign-in attempt, which is
+  audited every time.
 
 ### Proving an address voids credentials added while the proof runs (behaviour change)
 

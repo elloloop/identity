@@ -107,7 +107,7 @@ curl -sX POST http://localhost/identity.v1.IdentityService/SignOutEverywhere \\
     replay it without limit. Each replay is refused, but its audit row
     (<code>login_failure</code> with <code>gate: refresh</code> and reason
     <code>email_not_verified</code> or <code>dob_required</code>, or
-    <code>login_locked</code>) is written at most once per account and reason
+    <code>login_locked</code> with <code>gate: refresh</code>) is written at most once per account and reason
     every <strong>10 minutes</strong> on each replica. The window is fixed: no
     setting changes it. A refused sign-in is audited every time. Alerting that
     counts refused refreshes therefore counts accounts per window, not

@@ -573,6 +573,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{
 				"reason":       "account_locked",
+				"gate":         string(sessionGateSignIn),
 				"locked_until": user.LockedUntil,
 			}),
 		)
@@ -1494,7 +1495,8 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 // in lockout cannot bypass the limit by switching authentication method.
 // When cfg.IDVRequired is set, unverified users are blocked with
 // ErrIDVRequired so the client can route them to BeginIdentityVerification.
-// A refused lockout is audited as login_locked when refusalAuditDue.
+// A refused lockout is audited as login_locked, with the gate that refused,
+// when refusalAuditDue.
 func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate) error {
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
 		if s.refusalAuditDue(user, gate, "account_locked") {
@@ -1504,6 +1506,7 @@ func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr
 				audit.WithSuccess(false),
 				audit.WithDetails(map[string]any{
 					"reason":       "account_locked",
+					"gate":         string(gate),
 					"locked_until": user.LockedUntil,
 				}),
 			)
