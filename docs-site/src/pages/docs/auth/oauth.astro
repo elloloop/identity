@@ -520,11 +520,30 @@ message NativeOAuthLoginResponse {
 
   <h3 id="hosted-callback-errors">Callback errors</h3>
   <p>
-    A callback whose signed state token (or its CSRF cookie) does not verify
-    has no trusted <code>return_to</code>, so it answers HTTP 400 on the
-    identity origin. Once the state token verifies, every refused sign-in is
-    302-redirected to <code>return_to?error=&lt;code&gt;</code>, with no
-    <code>code</code> parameter, so the app can tell the user what to do:
+    A callback without a trusted <code>return_to</code> answers HTTP 400 on
+    the identity origin, since there is nowhere safe to redirect. That is the
+    case when:
+  </p>
+  <ul>
+    <li>
+      the provider itself redirected back with an <code>error</code> (for
+      example the user declined consent), since the callback does not trust
+      <code>return_to</code> before the state token is checked;
+    </li>
+    <li>the signed state token or its CSRF cookie does not verify;</li>
+    <li>
+      the state token was minted for a different provider than the callback
+      path names; or
+    </li>
+    <li>
+      the state token was minted for a different project than the callback
+      request resolves to.
+    </li>
+  </ul>
+  <p>
+    Once all of these pass, every refused sign-in is 302-redirected to
+    <code>return_to?error=&lt;code&gt;</code>, with no <code>code</code>
+    parameter, so the app can tell the user what to do:
   </p>
   <ul>
     <li>
