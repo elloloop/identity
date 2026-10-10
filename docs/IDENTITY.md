@@ -857,9 +857,10 @@ before you ship.
      `DeleteRefreshTokensForUser` additionally triggers
      `RevokeSessionsForUser`, so the existing replay-detection path
      also kills the access tokens. Logout, a per-tenant session-timeout
-     breach, and expired-refresh-token cleanup likewise revoke the
-     matching session (scoped to its `sid`), so an invalidated refresh
-     token never leaves its access token usable. Same-process
+     breach, expired-refresh-token cleanup, and a refresh refused over the
+     account's own state (an unverified address, an inactive account; not
+     a lockout) likewise revoke the matching session (scoped to its `sid`),
+     so an invalidated refresh token never leaves its access token usable. Same-process
      revocation is synchronous; cross-replica revocation is bounded by
      the cache TTL. Required for deployers handling sensitive data.
 
