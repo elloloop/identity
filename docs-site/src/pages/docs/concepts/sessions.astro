@@ -29,9 +29,11 @@ import { Code } from "astro-expressive-code/components";
       with <code>FailedPrecondition</code> ("email verification required")
       before the token is consumed. Stop retrying and ask the user to verify:
       call <code>SendEmailVerification</code> while the access token is
-      still valid, or else send the user to sign in again, which is refused
-      but mails a verification link. The same refresh token rotates again
-      once the link is redeemed.
+      still valid, or else send the user to sign in again (a password,
+      passkey or provider sign-in is refused but mails a verification link;
+      a passwordless code or magic link proves the address and starts a
+      fresh session). The same refresh token rotates again once the link is
+      redeemed.
     </li>
     <li>
       <strong>Revoke.</strong>

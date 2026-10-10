@@ -193,6 +193,11 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, params.IPAddr, params.UserAgent)
 	}
 
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
+	if err != nil {
+		return nil, err
+	}
+	// Stamped once the session is issued, not for a sign-in the gate refused.
 	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info(
 		"native_oauth_login_success",
@@ -201,11 +206,6 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		zap.String("project", scope.ProjectID),
 		zap.String("user_id", user.ID),
 	)
-
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
-	if err != nil {
-		return nil, err
-	}
 
 	s.audit.Log(
 		ctx, audit.EventOAuthLogin,

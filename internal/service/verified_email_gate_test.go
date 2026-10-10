@@ -8,6 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elloloop/identity/pkg/secretcrypto"
+	"github.com/elloloop/identity/pkg/totp"
 )
 
 // With verification required, no path issues a session to an account whose
@@ -178,6 +181,9 @@ func TestVerifiedEmailGate_ProviderSignInWithoutProofIsRefused(t *testing.T) {
 	stored := len(repo.refreshTokens)
 	repo.mu.Unlock()
 	assert.Zero(t, stored)
+	after, err := repo.GetUser(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Zero(t, after.LastLoginAtMs, "a refused sign-in is not a last login")
 }
 
 // The backstop where sessions are minted refuses an unproven address on its
@@ -207,6 +213,10 @@ func TestVerifiedEmailGate_RefusesBeforeTheSecondFactor(t *testing.T) {
 	res, err := svc.requireSecondFactor(ctx, user, false, "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Nil(t, res)
+	repo.mu.Lock()
+	challenges := len(repo.loginChallenges)
+	repo.mu.Unlock()
+	assert.Zero(t, challenges, "no login challenge is issued")
 }
 
 // A refresh for an account that is both unverified and missing a date of
@@ -229,4 +239,41 @@ func TestRefreshToken_VerifiedEmailGateRunsBeforeTheDOBStep(t *testing.T) {
 		require.ErrorIs(t, err, ErrEmailVerificationRequired)
 		require.False(t, errors.Is(err, ErrDOBRequired))
 	}
+}
+
+// An address that becomes unverified while a login challenge is open is
+// refused at VerifyTotp before the code is checked, so a recovery code is not
+// spent on a sign-in that cannot succeed.
+func TestVerifyTotp_VerifiedEmailGateKeepsTheRecoveryCode(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	svc.cfg.AuthRequireVerifiedEmail = true
+	u := seedUser(repo, "totp-unproven@example.com", hashPW(t, strongPW), StatusActive)
+	u.TotpRequired = true
+
+	encrypted, err := secretcrypto.Encrypt("JBSWY3DPEHPK3PXP", testTotpKey())
+	require.NoError(t, err)
+	const recoveryCode = "ABCDEFGHJK"
+	repo.mu.Lock()
+	credID := nextNodeID()
+	repo.totpCreds[credID] = &TotpCredRecord{NodeID: credID, UserID: u.ID, SecretEncrypted: encrypted, Verified: true}
+	rcID := nextNodeID()
+	repo.recoveryCodes[rcID] = &RecoveryCodeRecord{
+		NodeID: rcID, UserID: u.ID, CodeHash: totp.HashRecoveryCode(recoveryCode, testTotpRecoveryPepper()),
+	}
+	lcID := nextNodeID()
+	repo.loginChallenges[lcID] = &LoginChallengeRecord{
+		NodeID: lcID, ChallengeID: "unproven-totp-challenge", UserID: u.ID,
+		ExpiresAt: time.Now().Add(5 * time.Minute).UnixMilli(), CreatedAt: time.Now().UnixMilli(),
+	}
+	repo.mu.Unlock()
+
+	_, err = svc.VerifyTotp(context.Background(), "unproven-totp-challenge", recoveryCode, "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	assert.Equal(t, 1, writer.countByEventTypeAndDetail("login_failure", "gate", "sign_in"))
+	repo.mu.Lock()
+	used := repo.recoveryCodes[rcID].Used
+	repo.mu.Unlock()
+	assert.False(t, used, "the recovery code is not spent on a refused sign-in")
 }

@@ -860,6 +860,11 @@ func (s *AuthService) OAuthLogin(
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, params.IPAddr, params.UserAgent)
 	}
 
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
+	if err != nil {
+		return nil, err
+	}
+	// Stamped once the session is issued, not for a sign-in the gate refused.
 	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info(
 		"oauth_login_success",
@@ -867,11 +872,6 @@ func (s *AuthService) OAuthLogin(
 		zap.String("provider", provider),
 		zap.String("user_id", user.ID),
 	)
-
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
-	if err != nil {
-		return nil, err
-	}
 
 	s.audit.Log(
 		ctx, audit.EventOAuthLogin,
