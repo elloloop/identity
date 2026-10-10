@@ -175,7 +175,7 @@ func (s *AuthService) checkQrApprover(ctx context.Context, userID, ipAddr, userA
 	if err != nil {
 		return err
 	}
-	return s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn)
+	return s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateQrApprove)
 }
 
 // qrApprovalCollectionGrace is how long past its window an approved hand-off

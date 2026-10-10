@@ -656,7 +656,8 @@ the verified-email gate) before it consumes the hand-off, so a refused poll
 leaves the session approved and a later poll completes once the account is
 eligible. Because a refused poll can be replayed at will, its audit row
 (`gate: qr_poll`) is written at most once per account and reason per 10
-minutes. An approved session expires with its window like a pending one, plus
+minutes, and so is a locked approver's (`gate: qr_approve`), which can repeat
+the approval with the access token it still holds. An approved session expires with its window like a pending one, plus
 a 30-second grace so an approval landing just before the window closes can
 still be collected by the device's next poll. `InitiateQrLogin` counts against the per-IP
 login limit, and `PollQrLogin` against its own per-IP limit,

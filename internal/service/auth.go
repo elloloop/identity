@@ -1894,21 +1894,23 @@ func (s *AuthService) needsEmailVerification(user *User) bool {
 }
 
 // sessionGate is the step a gate on issuing a session refuses at: a sign-in,
-// the refresh of a session already issued, or the poll that collects an
-// approved QR hand-off.
+// the refresh of a session already issued, the approval of a QR hand-off by
+// a signed-in account, or the poll that collects an approved hand-off.
 type sessionGate string
 
 const (
-	sessionGateSignIn  sessionGate = "sign_in"
-	sessionGateRefresh sessionGate = "refresh"
-	sessionGateQrPoll  sessionGate = "qr_poll"
+	sessionGateSignIn    sessionGate = "sign_in"
+	sessionGateRefresh   sessionGate = "refresh"
+	sessionGateQrApprove sessionGate = "qr_approve"
+	sessionGateQrPoll    sessionGate = "qr_poll"
 )
 
 // replayedRefusalAuditWindow is how often one account's refusal for one
-// reason at a replayable step (a refresh, a QR poll) is audited. A refusal
-// that keeps the refresh token or leaves the hand-off approved (an unproven
-// address, a missing date of birth, a lockout) can be replayed at will, and
-// every replay would otherwise write a row.
+// reason at a replayable step (a refresh, a QR approval or poll) is audited.
+// A refusal that keeps the refresh token, the approver's access token or the
+// approved hand-off (an unproven address, a missing date of birth, a
+// lockout) can be replayed at will, and every replay would otherwise write a
+// row.
 const replayedRefusalAuditWindow = 10 * time.Minute
 
 // refusalAuditDue reports whether a gate's refusal is to be audited: a

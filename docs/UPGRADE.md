@@ -19,8 +19,11 @@ No schema change and no migration.
   change).** `ApproveQrLogin` with `approve: true` is refused, with the codes a
   sign-in uses, when the approving account is deactivated, has a pending
   invitation, is locked by failed sign-ins (`resource_exhausted`, audited as
-  `login_locked`), or is unverified while identity verification is required;
-  the hand-off stays `pending`. An approver whose account no longer exists gets
+  `login_locked` with `gate: qr_approve`), or is unverified while identity
+  verification is required; the hand-off stays `pending`. A locked approver
+  keeps its access token and can repeat the approval, so its `login_locked`
+  row is written at most once per account per 10 minutes per replica, like a
+  refused poll's. An approver whose account no longer exists gets
   `not_found`. Rejecting (`approve: false`) is unchanged. The poll still
   re-checks the account at collection.
 - **An approved QR hand-off can be collected for 30 seconds past its window
@@ -44,10 +47,10 @@ No schema change and no migration.
 - **`login_locked` rows name the gate that refused (additive).** A
   `login_locked` row now carries a `gate` detail, as a refused session's
   `login_failure` row already did: `sign_in` for a sign-in by any method,
-  `refresh` for a refresh, `qr_poll` for a QR poll. Rows written before the
-  upgrade have no `gate`. Filter on it to tell a lockout replayed through a
-  refresh or a QR poll, which is paced, from a sign-in attempt, which is
-  audited every time.
+  `refresh` for a refresh, `qr_approve` for a QR approval, `qr_poll` for a QR
+  poll. Rows written before the upgrade have no `gate`. Filter on it to tell
+  a lockout replayed through a refresh or a QR approval or poll, which is
+  paced, from a sign-in attempt, which is audited every time.
 
 ### Proving an address voids credentials added while the proof runs (behaviour change)
 

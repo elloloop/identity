@@ -258,6 +258,36 @@ func TestApproveQrLogin_IneligibleApproverRefused(t *testing.T) {
 	}
 }
 
+// A locked approver keeps its access token, so it can repeat a refused
+// approval at will: the refusal is audited at the approval gate once per
+// window, and the next window records it again.
+func TestApproveQrLogin_LockedApproverAuditPaced(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	ctx := context.Background()
+	now := time.Now()
+	svc.nowFunc = func() time.Time { return now }
+	svc.cfg.QRLoginExpirySeconds = int(2 * replayedRefusalAuditWindow / time.Second)
+	user := seedUser(repo, "qr-locked-approver@example.com", "", StatusActive)
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"locked_until": now.Add(time.Hour).UnixMilli()}))
+	init, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
+	require.NoError(t, err)
+	locked := func() int { return writer.countByEventTypeAndDetail("login_locked", "gate", "qr_approve") }
+
+	for range 5 {
+		_, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "10.0.0.2", "approver")
+		require.ErrorIs(t, err, ErrAccountLocked)
+	}
+	assert.Equal(t, 1, locked())
+	assert.Equal(t, 1, writer.countByEventType("login_locked"))
+
+	now = now.Add(replayedRefusalAuditWindow)
+	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "10.0.0.2", "approver")
+	require.ErrorIs(t, err, ErrAccountLocked)
+	assert.Equal(t, 2, locked(), "the next window records the refusal again")
+}
+
 // An approval from an account that no longer exists is refused.
 func TestApproveQrLogin_UnknownApproverRefused(t *testing.T) {
 	repo := newFakeRepo()
