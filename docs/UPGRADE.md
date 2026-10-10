@@ -60,7 +60,7 @@ No schema change and no migration.
   (behaviour change).** A provider sign-in whose address reaches an existing
   account only by dropping a `+tag` outside Gmail (`someone+x@example.com`
   for `someone@example.com`) does not prove that account's address. It is
-  now refused with `Unauthenticated` (audited as `login_failure` with
+  now refused with `unauthenticated` (audited as `login_failure` with
   `reason: provider_address_does_not_prove_account`) instead of signing in
   and linking. The account's owner links such a provider with
   `LinkIdentity` while signed in; a provider account already linked keeps
