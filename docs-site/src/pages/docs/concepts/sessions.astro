@@ -113,4 +113,16 @@ curl -sX POST http://localhost/identity.v1.IdentityService/SignOutEverywhere \\
     counts refused refreshes therefore counts accounts per window, not
     attempts.
   </p>
+  <p>
+    QR sign-in is paced the same way, on the same window. A poll refused
+    because the account's address is unverified or the account is locked out
+    leaves the hand-off approved, so the device replays the refusal on every
+    poll; its row (<code>login_failure</code> with <code>gate: qr_poll</code>
+    and reason <code>email_not_verified</code>, or <code>login_locked</code>
+    with <code>gate: qr_poll</code>) is written at most once per account and
+    reason every 10 minutes on each replica. An approval refused because the
+    approving account is locked out can be repeated with the access token the
+    approver still holds; its <code>login_locked</code> row, with
+    <code>gate: qr_approve</code>, is paced the same way.
+  </p>
 </DocsLayout>
