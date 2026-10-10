@@ -66,8 +66,9 @@ func (e *DOBRequiredError) Unwrap() error { return ErrDOBRequired }
 //
 // authTimeMs is the sign-in behind the session being issued (0 for none);
 // the ticket carries it, so completing the step continues that session
-// rather than counting as a new sign-in.
-func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTimeMs int64, ipAddr, userAgent string) error {
+// rather than counting as a new sign-in. The refusal is audited with reason
+// dob_required and gate, the step that refused.
+func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTimeMs int64, ipAddr, userAgent string, gate sessionGate) error {
 	if !s.ageGate.Enabled() || !s.cfg.AgeGateRequireDOB || user == nil {
 		return nil
 	}
@@ -78,12 +79,7 @@ func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTi
 	if err != nil {
 		return err
 	}
-	s.audit.Log(
-		ctx, audit.EventLoginFailure,
-		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-		audit.WithSuccess(false),
-		audit.WithDetails(map[string]any{"reason": "dob_required"}),
-	)
+	s.auditSessionRefusal(ctx, user, ipAddr, userAgent, gate, "dob_required")
 	return &DOBRequiredError{Ticket: ticket}
 }
 
@@ -187,7 +183,7 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	// The ticket was minted after this same check passed on the login path,
 	// but up to dobCompletionTicketTTL may have elapsed since — a status
 	// change in that window must still win over the ticket.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 

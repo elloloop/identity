@@ -652,7 +652,7 @@ type postPasswordGateOpts struct {
 // sign-in's.
 func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts postPasswordGateOpts, ipAddr, userAgent string) (loginPolicyDecision, error) {
 	// Account status (lockout / suspended / invited / IDV) is a hard gate.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return loginPolicyDecision{}, err
 	}
 	// The rule judges an account that also has an email by that email,
@@ -676,7 +676,7 @@ func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts po
 	// unusable (the flag defaults ON) — and there is no pre-hijacking vector
 	// to close, because there is no address for an attacker to plant a
 	// password against or for an owner to later verify.
-	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return loginPolicyDecision{}, err
 	}
 
@@ -826,7 +826,7 @@ func (s *AuthService) OAuthLogin(
 		return nil, err
 	}
 
-	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 
@@ -1386,17 +1386,20 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 // in lockout cannot bypass the limit by switching authentication method.
 // When cfg.IDVRequired is set, unverified users are blocked with
 // ErrIDVRequired so the client can route them to BeginIdentityVerification.
-func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr, userAgent string) error {
+// A refused lockout is audited as login_locked when refusalAuditDue.
+func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate) error {
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
-		s.audit.Log(
-			ctx, audit.EventLoginLocked,
-			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{
-				"reason":       "account_locked",
-				"locked_until": user.LockedUntil,
-			}),
-		)
+		if s.refusalAuditDue(user, gate, "account_locked") {
+			s.audit.Log(
+				ctx, audit.EventLoginLocked,
+				audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+				audit.WithSuccess(false),
+				audit.WithDetails(map[string]any{
+					"reason":       "account_locked",
+					"locked_until": user.LockedUntil,
+				}),
+			)
+		}
 		return fmt.Errorf("%w: account temporarily locked due to too many failed attempts", ErrAccountLocked)
 	}
 

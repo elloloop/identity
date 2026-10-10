@@ -1009,7 +1009,7 @@ func TestPasswordSignup_PerEmailThrottle_ReturnsDecoy(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	svc.cfg.SignupEmailCooldownSeconds = 60
-	svc.signupThrottle = newEmailSendThrottle(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
+	svc.signupThrottle = newKeyCooldown(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
 
 	// First call: succeeds, user created.
 	res1, err := svc.PasswordSignup(context.Background(), "throttle@example.com", strongPW, "T", "", 0, "", EmailLinkParams{})
@@ -1043,7 +1043,7 @@ func TestPasswordSignup_PerEmailThrottle_DifferentEmails_Independent(t *testing.
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	svc.cfg.SignupEmailCooldownSeconds = 60
-	svc.signupThrottle = newEmailSendThrottle(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
+	svc.signupThrottle = newKeyCooldown(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
 
 	res1, err := svc.PasswordSignup(context.Background(), "a@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)

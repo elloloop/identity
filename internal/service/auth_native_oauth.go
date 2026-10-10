@@ -171,7 +171,7 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 

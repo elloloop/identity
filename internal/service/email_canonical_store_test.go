@@ -115,7 +115,7 @@ func TestSessionToken_StoresTheCanonicalEmail(t *testing.T) {
 	svc := newTestAuthServiceWithAudit(t, repo, writer)
 	legacy := legacyGmailAccount(t, repo)
 
-	_, _, err := svc.issueTokensWithSessionStart(context.Background(), legacy, "", "", 1, 0)
+	_, _, err := svc.issueTokensWithSessionStart(context.Background(), legacy, "", "", sessionGateSignIn, 1, 0)
 	require.NoError(t, err)
 	require.Equal(t, "firstlast@gmail.com", storedUserEmail(t, repo, legacy.ID))
 	require.Equal(t, 1, writer.countByEventTypeAndDetail("email_canonicalized", "source", "session"))

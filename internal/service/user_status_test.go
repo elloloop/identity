@@ -33,7 +33,7 @@ func TestIsActiveStatus(t *testing.T) {
 func TestCheckAccountStatus_RejectsPaddedStatus(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
 	for _, status := range []string{" active", "active ", "\tactive\n", " "} {
-		err := svc.checkAccountStatus(context.Background(), &User{Status: status}, "", "")
+		err := svc.checkAccountStatus(context.Background(), &User{Status: status}, "", "", sessionGateSignIn)
 		if !errors.Is(err, ErrAccountNotActive) {
 			t.Errorf("checkAccountStatus(%q) = %v, want ErrAccountNotActive", status, err)
 		}

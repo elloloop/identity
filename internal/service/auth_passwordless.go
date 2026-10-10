@@ -426,7 +426,7 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 		s.markEmailVerifiedViaExternalProof(ctx, user, externalProof{address: emailStr, method: "passwordless"}, s.nowMs())
 	}
 
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 

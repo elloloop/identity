@@ -336,7 +336,7 @@ func projectLoginControls(ctx context.Context) loginControls {
 // The verified-email gate runs first: a sign-in that cannot yield a session
 // is not asked for a second factor (which could spend a recovery code on it).
 func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, policyForced bool, ipAddr, userAgent string) (*LoginResult, error) {
-	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 	if err := s.ensureSecondFactorEnrolled(ctx, user, policyForced); err != nil {

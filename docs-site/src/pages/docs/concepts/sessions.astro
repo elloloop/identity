@@ -29,7 +29,8 @@ import { Code } from "astro-expressive-code/components";
       with <code>FailedPrecondition</code> ("email verification required")
       before the token is consumed. Stop retrying and ask the user to verify:
       call <code>SendEmailVerification</code> while the access token is
-      still valid, or else send the user to sign in again (a password,
+      still valid (under <code>GATEWAY_REVOCATION_MODE=session</code> the
+      refusal ends it), or else send the user to sign in again (a password,
       passkey or provider sign-in is refused but mails a verification link;
       a passwordless code or magic link proves the address and starts a
       fresh session). The same refresh token rotates again once the link is
@@ -84,11 +85,17 @@ curl -sX POST http://localhost/identity.v1.IdentityService/SignOutEverywhere \\
 
   <h2>Access-token revocation</h2>
   <p>
-    Revoking a session invalidates its <em>refresh</em> token. The associated
+    Revoking a session invalidates its <em>refresh</em> token. Under the
+    default <code>GATEWAY_REVOCATION_MODE=ttl</code> the associated
     <em>access</em> token continues to verify until <code>exp</code> — up to
-    15 minutes by default. If you need instant kill, lower
-    <code>GATEWAY_JWT_EXPIRY_SECONDS</code>; there is intentionally no
-    distributed access-token blocklist (downstream services should not have
-    to talk to Identity on every request).
+    15 minutes. Under <code>GATEWAY_REVOCATION_MODE=session</code> each
+    access token names its session, Identity's own API checks that session on every
+    request, and a revoked session's access token is rejected (within
+    <code>GATEWAY_SESSION_CACHE_TTL_SECONDS</code> on other replicas). Logout,
+    a session timeout, an expired refresh token, refresh-token replay, and a
+    refresh refused because the account's address is unverified or the
+    account is no longer active all revoke it. A refresh refused because the
+    account is locked out after failed sign-ins does not, and keeps its
+    refresh token, which rotates normally once the lockout ends.
   </p>
 </DocsLayout>

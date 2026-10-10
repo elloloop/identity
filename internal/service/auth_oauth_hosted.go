@@ -318,7 +318,7 @@ func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAge
 		return nil, ErrOAuthCodeInvalid
 	}
 
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
 

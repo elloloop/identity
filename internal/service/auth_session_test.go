@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -401,4 +402,138 @@ func TestModeSession_RevokeFailureIsBestEffort(t *testing.T) {
 	// Calling the helper directly (it's lower-case but reachable inside
 	// the package). A logged failure must not panic or propagate.
 	svc.revokeUserSessionsIfModeSession(context.Background(), user.ID, "test")
+}
+
+// ── mode=session: a refresh refused over the account's state ──────────
+
+// openSession issues a mode=session token pair for user and returns the
+// refresh token and the sid its access token carries.
+func openSession(t *testing.T, svc *AuthService, user *User) (string, string) {
+	t.Helper()
+	access, refresh, err := svc.issueTokens(context.Background(), user, "", "")
+	require.NoError(t, err)
+	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
+	require.NoError(t, err)
+	require.NotEmpty(t, claims.SID)
+	return refresh, claims.SID
+}
+
+func sessionRevoked(t *testing.T, repo Repository, sid string) bool {
+	t.Helper()
+	rec, err := repo.GetSessionBySid(context.Background(), sid)
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	return rec.RevokedAtMs != 0
+}
+
+// An account whose address became unverified is refused its refresh, and the
+// access token issued alongside that refresh token stops working with it. The
+// refresh token itself survives: it rotates into a new session once the
+// address is proven.
+func TestModeSession_RefreshRefusedForUnverifiedAddress_RevokesAccessSession(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSessionModeService(t, repo)
+	ctx := context.Background()
+	user := seedUser(repo, "unproven-later@example.com", "", StatusActive)
+	user.EmailVerified = true
+	refresh, sid := openSession(t, svc, user)
+
+	svc.cfg.AuthRequireVerifiedEmail = true
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
+	_, _, _, err := svc.RefreshToken(ctx, refresh, "", "")
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	assert.True(t, sessionRevoked(t, repo, sid), "the refused account's access session must end")
+
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
+	_, access, _, err := svc.RefreshToken(ctx, refresh, "", "")
+	require.NoError(t, err)
+	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
+	require.NoError(t, err)
+	assert.False(t, sessionRevoked(t, repo, claims.SID), "the rotated session is live")
+}
+
+// An account that is no longer active is refused its refresh, and its access
+// session ends with it.
+func TestModeSession_RefreshRefusedForInactiveAccount_RevokesAccessSession(t *testing.T) {
+	for _, status := range []string{"deactivated", "suspended", StatusInvited} {
+		t.Run(status, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newSessionModeService(t, repo)
+			ctx := context.Background()
+			user := seedUser(repo, "inactive@example.com", "", StatusActive)
+			refresh, sid := openSession(t, svc, user)
+
+			require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"status": status}))
+			_, _, _, err := svc.RefreshToken(ctx, refresh, "", "")
+			require.Error(t, err)
+			assert.True(t, sessionRevoked(t, repo, sid), "the refused account's access session must end")
+		})
+	}
+}
+
+// A refresh refused for a reason that says nothing against the account leaves
+// its access session alone: a lockout (which anyone guessing at the password
+// can trigger) and a failure of the store.
+func TestModeSession_RefreshRefusedNotForAccountState_KeepsAccessSession(t *testing.T) {
+	t.Run("locked", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newSessionModeService(t, repo)
+		ctx := context.Background()
+		user := seedUser(repo, "locked-out@example.com", "", StatusActive)
+		refresh, sid := openSession(t, svc, user)
+
+		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"locked_until": svc.nowMs() + 60_000}))
+		_, _, _, err := svc.RefreshToken(ctx, refresh, "", "")
+		require.ErrorIs(t, err, ErrAccountLocked)
+		assert.False(t, sessionRevoked(t, repo, sid))
+	})
+	t.Run("store failure", func(t *testing.T) {
+		repo := newErrorRepo()
+		svc := newTestAuthServiceErr(t, repo)
+		svc.cfg.RevocationMode = config.RevocationModeSession
+		user := seedUser(repo.fakeRepo, "transient@example.com", "", StatusActive)
+		refresh, sid := openSession(t, svc, user)
+
+		repo.failConsumeRefreshToken = true
+		_, _, _, err := svc.RefreshToken(context.Background(), refresh, "", "")
+		require.Error(t, err)
+		assert.False(t, sessionRevoked(t, repo, sid))
+	})
+}
+
+// A lockout can be triggered by anyone guessing at the password, so a refresh
+// refused over one must not cost the account anything: the client's retry is
+// refused the same way rather than taken for a replay, none of the account's
+// sessions or refresh tokens are revoked, and every one rotates normally once
+// the lockout ends.
+func TestModeSession_RefreshRefusedForLockout_KeepsTokenForRetry(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	svc.cfg.RevocationMode = config.RevocationModeSession
+	ctx := context.Background()
+	now := time.Now()
+	svc.nowFunc = func() time.Time { return now }
+	user := seedUser(repo, "guessed-at@example.com", "", StatusActive)
+	refresh, sid := openSession(t, svc, user)
+	otherRefresh, otherSid := openSession(t, svc, user)
+
+	lockout := time.Minute
+	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"locked_until": now.Add(lockout).UnixMilli()}))
+	for range 3 {
+		_, _, _, err := svc.RefreshToken(ctx, refresh, "", "")
+		require.ErrorIs(t, err, ErrAccountLocked)
+	}
+	assert.Zero(t, writer.countByEventTypeAndDetail("login_failure", "reason", "refresh_token_replay"))
+	assert.False(t, sessionRevoked(t, repo, sid))
+	assert.False(t, sessionRevoked(t, repo, otherSid))
+
+	now = now.Add(lockout + time.Second)
+	for _, r := range []string{refresh, otherRefresh} {
+		_, access, _, err := svc.RefreshToken(ctx, r, "", "")
+		require.NoError(t, err)
+		claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
+		require.NoError(t, err)
+		assert.False(t, sessionRevoked(t, repo, claims.SID), "the rotated session is live")
+	}
 }
