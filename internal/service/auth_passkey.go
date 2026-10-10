@@ -162,6 +162,15 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		return nil, nil, fmt.Errorf("%w: attestation verification failed", ErrInvalidArgument)
 	}
 
+	// Read before the insert: see withdrawPasskeysIfAddressProven.
+	holder, err := s.repo(ctx).GetUser(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if holder == nil {
+		return nil, nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+
 	now := s.nowMs()
 	_, err = s.repo(ctx).CreatePasskeyCredential(ctx, &PasskeyCredRecord{
 		CredentialID:   result.CredentialID,
@@ -182,6 +191,11 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 
 	// Single-use challenge -- delete it.
 	_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
+	if !holder.EmailVerified {
+		if err := s.withdrawPasskeysIfAddressProven(ctx, userID, result.CredentialID); err != nil {
+			return nil, nil, err
+		}
+	}
 
 	s.logger.Info(
 		"passkey_registered",
@@ -441,6 +455,40 @@ func coalesce(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// withdrawPasskeysIfAddressProven deletes the account's passkeys when its
+// address, unproven when the registration began, is proven now. The first
+// proof of an address deletes the passkeys registered before it, listing them
+// once before marking the address verified and once after; one inserted
+// between the two escapes both. Reading the account after the insert means
+// either the second listing sees the passkey or this read sees the proof.
+// The store deletes passkeys only per account, so one the owner registered
+// in the same instant after the proof goes too and is registered again. A
+// read that fails withdraws them as well, so the call fails closed.
+func (s *AuthService) withdrawPasskeysIfAddressProven(ctx context.Context, userID, credentialID string) error {
+	account, err := s.repo(ctx).GetUser(ctx, userID)
+	if err == nil && account != nil && !account.EmailVerified {
+		return nil
+	}
+	if delErr := s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, userID); delErr != nil {
+		s.logger.Error("passkey_withdraw_failed", zap.String("user_id", userID), zap.Error(delErr))
+		return fmt.Errorf("%w: the passkey could not be registered", ErrUnavailable)
+	}
+	if err != nil {
+		s.logger.Error("passkey_recheck_failed", zap.String("user_id", userID), zap.Error(err))
+		return fmt.Errorf("%w: the passkey could not be registered", ErrUnavailable)
+	}
+	s.audit.Log(
+		ctx, audit.EventPasskeyAdded,
+		audit.WithActor(userID),
+		audit.WithSuccess(false),
+		audit.WithDetails(map[string]any{
+			"credential_id": credentialID,
+			"reason":        "address_proven_while_registering",
+		}),
+	)
+	return fmt.Errorf("%w: the account's address was proven while registering; sign in again", ErrUnauthenticated)
 }
 
 // passkeysFor returns the WebAuthn relying-party instance to use for the

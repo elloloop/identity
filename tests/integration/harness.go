@@ -2024,24 +2024,25 @@ func (r *MemRepo) SetUserIDVVerified(_ context.Context, userID string, atMs int6
 	return nil
 }
 
-func (r *MemRepo) SetUserEmailVerified(_ context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+func (r *MemRepo) SetUserEmailVerified(_ context.Context, userID, email string, atMs int64, clearPassword bool) (verified, passwordCleared bool, err error) {
 	if userID == "" || email == "" {
-		return false, errors.New("SetUserEmailVerified: missing user id or email")
+		return false, false, errors.New("SetUserEmailVerified: missing user id or email")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u, ok := r.users[userID]
 	if !ok || u.Email != email {
-		return false, nil
+		return false, false, nil
 	}
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
 	u.UpdatedAt = time.UnixMilli(atMs)
+	passwordCleared = clearPassword && u.PasswordHash != ""
 	if clearPassword {
 		u.PasswordHash = ""
 		u.PasswordChangeRequired = false
 	}
-	return true, nil
+	return true, passwordCleared, nil
 }
 
 // ── Email Change Tokens ───────────────────────────────────────────

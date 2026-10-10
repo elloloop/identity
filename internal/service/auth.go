@@ -583,10 +583,15 @@ type Repository interface {
 	// while its stored email is exactly email, in one write, and reports
 	// whether it did. A proof checked against an earlier read therefore
 	// cannot verify an address that replaced the proven one in between.
-	// clearPassword clears password_hash and password_change_required in the
-	// same write. A missing account, or one holding another email, is
-	// (false, nil); an empty userID or email is an error.
-	SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error)
+	// With clearPassword the same write also empties password_hash and
+	// clears password_change_required, acting on whatever password the
+	// account holds at that write rather than at the caller's read;
+	// passwordCleared reports whether it found a non-empty password to
+	// clear. Without clearPassword both columns are left as they are and
+	// passwordCleared is false. A missing account, or one holding another
+	// email, is (false, false, nil) and nothing is written; an empty userID
+	// or email is an error.
+	SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (verified, passwordCleared bool, err error)
 
 	// User idv-verified update; called by IdentityVerificationService
 	// when a verification reaches APPROVED.

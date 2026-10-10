@@ -423,7 +423,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 				return nil, err
 			}
 			proven = user.EmailVerified
-		} else if proven, err = s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, now, false); err != nil {
+		} else if proven, _, err = s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, now, false); err != nil {
 			return nil, fmt.Errorf("setting email verified: %w", err)
 		}
 	}

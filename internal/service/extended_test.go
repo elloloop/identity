@@ -1747,7 +1747,7 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if err := r.MarkEmailVerificationTokenConsumed(ctx, "", 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("MarkEmailVerificationTokenConsumed: %v", err)
 	}
-	if _, err := r.SetUserEmailVerified(ctx, "", "", 0, false); !errors.Is(err, ErrServiceUnavailable) {
+	if _, _, err := r.SetUserEmailVerified(ctx, "", "", 0, false); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("SetUserEmailVerified: %v", err)
 	}
 	if err := r.CreateEmailChangeToken(ctx, &EmailChangeToken{}); !errors.Is(err, ErrServiceUnavailable) {

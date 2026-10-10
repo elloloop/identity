@@ -1226,10 +1226,10 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		return s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
 	}
 	plantedLinks := proof.voidedAmong(links, user.Email)
-	passwordCleared := user.PasswordHash != ""
+	hadPassword := user.PasswordHash != ""
 	passkeysCleared := len(passkeys) > 0
 
-	if passwordCleared || passkeysCleared || len(plantedLinks) > 0 {
+	if hadPassword || passkeysCleared || len(plantedLinks) > 0 {
 		// Sessions go first, as ConfirmPasswordReset ends them for a replaced
 		// password: one opened with a voided credential must not outlive it.
 		// Doing it before the deletions means a failure further on leaves the
@@ -1248,9 +1248,10 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		return err
 	}
 
-	// The password predates the proof of email control, so it cannot be
-	// trusted to belong to the verified owner. It is cleared with the flag.
-	verified, err := repo.SetUserEmailVerified(ctx, user.ID, user.Email, nowMs, passwordCleared)
+	// Any password the account holds at this write predates the proof of
+	// email control, including one set since the read above, so it cannot
+	// be trusted to belong to the verified owner. It is cleared with the flag.
+	verified, passwordCleared, err := repo.SetUserEmailVerified(ctx, user.ID, user.Email, nowMs, true)
 	if err != nil {
 		return s.externalProofSweepFailed(user.ID, proof, "mark_verified", err)
 	}
@@ -1262,15 +1263,24 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	}
 	user.EmailVerified = true
 	user.EmailVerifiedAt = nowMs
-	if passwordCleared {
-		user.PasswordHash = ""
-		user.PasswordChangeRequired = false
-	}
+	user.PasswordHash = ""
+	user.PasswordChangeRequired = false
 
-	// A link a signed-in caller added after the listing above escaped it.
-	// LinkIdentity re-reads the account after its insert and withdraws a link
-	// added while the address was being proven; listing again now that the
-	// address is marked verified means one of the two sees the other.
+	// A passkey or link a signed-in caller added after the listings above
+	// escaped them. CompletePasskeyRegistration and LinkIdentity re-read the
+	// account after their insert and withdraw what was added while the
+	// address was being proven; listing again now that the address is marked
+	// verified means one of the two sees the other.
+	passkeys, err = repo.ListPasskeyCredentials(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "relist_passkeys", err)
+	}
+	if len(passkeys) > 0 {
+		if err := repo.DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
+			return s.externalProofSweepFailed(user.ID, proof, "delete_passkeys", err)
+		}
+		passkeysCleared = true
+	}
 	links, err = repo.ListOAuthIdentitiesForUser(ctx, user.ID)
 	if err != nil {
 		return s.externalProofSweepFailed(user.ID, proof, "relist_provider_links", err)

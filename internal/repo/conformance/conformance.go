@@ -263,7 +263,7 @@ func RunConformance(t *testing.T, driver Driver) {
 
 			// Verified and unverified accounts are both returned, each with
 			// its stored email-verified state: the directory discloses it.
-			if ok, err := r.SetUserEmailVerified(ctx, a, "batch-a@example.com", 1_700_000_000_000, false); err != nil || !ok {
+			if ok, _, err := r.SetUserEmailVerified(ctx, a, "batch-a@example.com", 1_700_000_000_000, false); err != nil || !ok {
 				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
 			}
 			got, err = r.FindUsersByEmails(ctx, []string{"batch-a@example.com", "batch-b@example.com"})
@@ -1786,8 +1786,8 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
-			if ok, err := r.SetUserEmailVerified(ctx, id, "ev@example.com", 555, false); err != nil || !ok {
-				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
+			if ok, cleared, err := r.SetUserEmailVerified(ctx, id, "ev@example.com", 555, false); err != nil || !ok || cleared {
+				t.Fatalf("SetUserEmailVerified = %v %v %v, want true false nil", ok, cleared, err)
 			}
 			got, _ := r.GetUser(ctx, id)
 			if got == nil || !got.EmailVerified || got.EmailVerifiedAt != 555 || got.UpdatedAt.UnixMilli() != 555 ||
@@ -1805,11 +1805,32 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
-			if ok, err := r.SetUserEmailVerified(ctx, id, "evp@example.com", 555, true); err != nil || !ok {
-				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
+			if ok, cleared, err := r.SetUserEmailVerified(ctx, id, "evp@example.com", 555, true); err != nil || !ok || !cleared {
+				t.Fatalf("SetUserEmailVerified = %v %v %v, want true true nil", ok, cleared, err)
 			}
 			got, _ := r.GetUser(ctx, id)
 			if got == nil || !got.EmailVerified || got.PasswordHash != "" || got.PasswordChangeRequired {
+				t.Fatalf("after Set: %+v", got)
+			}
+			// The report is of what the write found, so a second write has no
+			// password left to clear.
+			if ok, cleared, err := r.SetUserEmailVerified(ctx, id, "evp@example.com", 556, true); err != nil || !ok || cleared {
+				t.Fatalf("second SetUserEmailVerified = %v %v %v, want true false nil", ok, cleared, err)
+			}
+		})
+
+		t.Run("SetUserEmailVerified_ClearsNoPasswordOnAPasswordlessAccount", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{Email: "evn@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			if ok, cleared, err := r.SetUserEmailVerified(ctx, id, "evn@example.com", 555, true); err != nil || !ok || cleared {
+				t.Fatalf("SetUserEmailVerified = %v %v %v, want true false nil", ok, cleared, err)
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || !got.EmailVerified || got.PasswordHash != "" {
 				t.Fatalf("after Set: %+v", got)
 			}
 		})
@@ -1825,19 +1846,19 @@ func RunConformance(t *testing.T, driver Driver) {
 				t.Fatalf("CreateUser: %v", err)
 			}
 			for _, proven := range []string{"before@example.com", "Moved@example.com"} {
-				ok, err := r.SetUserEmailVerified(ctx, id, proven, 555, true)
-				if err != nil || ok {
-					t.Fatalf("SetUserEmailVerified(%q) = %v %v, want false nil", proven, ok, err)
+				ok, cleared, err := r.SetUserEmailVerified(ctx, id, proven, 555, true)
+				if err != nil || ok || cleared {
+					t.Fatalf("SetUserEmailVerified(%q) = %v %v %v, want false false nil", proven, ok, cleared, err)
 				}
 			}
 			got, _ := r.GetUser(ctx, id)
 			if got == nil || got.EmailVerified || got.EmailVerifiedAt != 0 || got.PasswordHash != "hash" {
 				t.Fatalf("after a refused Set: %+v", got)
 			}
-			if ok, err := r.SetUserEmailVerified(ctx, "no-such-user", "moved@example.com", 555, false); err != nil || ok {
+			if ok, _, err := r.SetUserEmailVerified(ctx, "no-such-user", "moved@example.com", 555, false); err != nil || ok {
 				t.Fatalf("missing user = %v %v, want false nil", ok, err)
 			}
-			if _, err := r.SetUserEmailVerified(ctx, id, "", 555, false); err == nil {
+			if _, _, err := r.SetUserEmailVerified(ctx, id, "", 555, false); err == nil {
 				t.Fatal("empty email: want an error")
 			}
 		})

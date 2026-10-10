@@ -56,7 +56,7 @@ func runMutationConformance(t *testing.T, driver Driver) {
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
-			if ok, err := r.SetUserEmailVerified(ctx, id, "zero-ev@example.com", 555, false); err != nil || !ok {
+			if ok, _, err := r.SetUserEmailVerified(ctx, id, "zero-ev@example.com", 555, false); err != nil || !ok {
 				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
 			}
 			got, _ := r.GetUser(ctx, id)

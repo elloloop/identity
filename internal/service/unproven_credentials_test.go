@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -288,4 +289,111 @@ func TestLinkIdentity_KeepsALinkOnAnUnprovenAccount(t *testing.T) {
 	_, err := svc.LinkIdentity(context.Background(), user.ID, fakeOAuthCode("someone@example.org", "S", "", "github"), "github", "https://app/cb", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"github/sub-someone@example.org"}, linkedProviders(t, repo, user.ID))
+}
+
+// A passkey a signed-in caller registers after the proof has listed the
+// account's passkeys is still deleted, and the session that registered it
+// ends: the proof lists them again once the address is marked verified.
+func TestExternalProof_VoidsAPasskeyAddedWhileItRuns(t *testing.T) {
+	svc, repo, rec := proofSvc(t)
+	ctx := context.Background()
+	victim := seedUser(repo, "victim@example.com", "", StatusActive)
+	const lateSession = "late-passkey-session-hash"
+	repo.listOAuthIdentitiesHook = func() {
+		repo.listOAuthIdentitiesHook = nil
+		_, err := repo.CreatePasskeyCredential(ctx, &PasskeyCredRecord{
+			CredentialID: "late-cred", UserID: victim.ID, PublicKey: "pk", CreatedAt: 1,
+		})
+		require.NoError(t, err)
+		_, err = repo.CreateRefreshToken(ctx, &RefreshTokenRecord{TokenHash: lateSession, UserID: victim.ID, ExpiresAt: 1 << 62})
+		require.NoError(t, err)
+	}
+
+	res, err := passwordlessSignIn("victim@example.com")(t, svc, rec)
+	require.NoError(t, err)
+	assert.True(t, res.User.EmailVerified)
+	creds, err := repo.ListPasskeyCredentials(ctx, victim.ID)
+	require.NoError(t, err)
+	assert.Empty(t, creds, "the passkey added mid-proof is deleted")
+	tok, err := repo.FindRefreshTokenByHash(ctx, lateSession)
+	require.NoError(t, err)
+	assert.Nil(t, tok, "the session that could have added it ends")
+}
+
+// A password set on the account after the proof read it is cleared by the
+// verified write, reported as cleared, and the session it could have opened
+// ends.
+func TestExternalProof_ClearsAPasswordSetWhileItRuns(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	ctx := context.Background()
+	owner := seedUser(repo, "owner@example.com", "", StatusActive)
+	const lateSession = "late-password-session-hash"
+	repo.listOAuthIdentitiesHook = func() {
+		repo.listOAuthIdentitiesHook = nil
+		require.NoError(t, repo.UpdateUser(ctx, owner.ID, map[string]any{"password_hash": hashPW(t, "Planted-Passw0rd!x")}))
+		_, err := repo.CreateRefreshToken(ctx, &RefreshTokenRecord{TokenHash: lateSession, UserID: owner.ID, ExpiresAt: 1 << 62})
+		require.NoError(t, err)
+	}
+
+	oauthLoginAs(t, svc, "owner@example.com")
+
+	stored, err := repo.GetUser(ctx, owner.ID)
+	require.NoError(t, err)
+	assert.True(t, stored.EmailVerified)
+	assert.Empty(t, stored.PasswordHash, "the password set mid-proof is cleared")
+	tok, err := repo.FindRefreshTokenByHash(ctx, lateSession)
+	require.NoError(t, err)
+	assert.Nil(t, tok, "the session it could have opened ends")
+	details := writer.detailsOf(string(audit.EventUnprovenCredentialsVoided))
+	require.Len(t, details, 1)
+	assert.Equal(t, true, details[0]["password_cleared"])
+}
+
+// registrationChallenge stores a registration challenge for userID whose
+// value the spec attestation vector signs.
+func registrationChallenge(t *testing.T, repo *fakeRepo, userID string) string {
+	t.Helper()
+	id, err := repo.CreatePasskeyChallenge(context.Background(), &PasskeyChallengeRecord{
+		Challenge: pkB64URL(t, pkRegChallengeHex), UserID: userID, ChallengeType: "registration",
+		ExpiresAt: 1 << 62, CreatedAt: 1,
+	})
+	require.NoError(t, err)
+	return id
+}
+
+// A passkey registration that began while the address was unproven withdraws
+// the passkey when the address is proven before its insert lands, since the
+// proof's listings may both have run before the insert.
+func TestCompletePasskeyRegistration_WithdrawsAPasskeyWhenTheAddressIsProvenMeanwhile(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+	user := seedUser(repo, "victim@example.com", "", StatusActive)
+	challengeID := registrationChallenge(t, repo, user.ID)
+	repo.createPasskeyCredentialHook = func() {
+		repo.createPasskeyCredentialHook = nil
+		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
+	}
+
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
+	require.ErrorIs(t, err, ErrUnauthenticated)
+	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Empty(t, creds, "the passkey is withdrawn")
+}
+
+// A passkey registration on an unproven account that no proof races keeps
+// its passkey.
+func TestCompletePasskeyRegistration_KeepsAPasskeyOnAnUnprovenAccount(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+	user := seedUser(repo, "someone@example.com", "", StatusActive)
+	challengeID := registrationChallenge(t, repo, user.ID)
+
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	require.NoError(t, err)
+	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Len(t, creds, 1)
 }
