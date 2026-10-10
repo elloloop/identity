@@ -332,7 +332,13 @@ func projectLoginControls(ctx context.Context) loginControls {
 // tokens anyway would defeat the policy, so it returns ErrTotpRequired to
 // steer the user into enrollment rather than handing them a challenge they
 // cannot answer.
-func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, policyForced bool) (*LoginResult, error) {
+//
+// The verified-email gate runs first: a sign-in that cannot yield a session
+// is not asked for a second factor (which could spend a recovery code on it).
+func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, policyForced bool, ipAddr, userAgent string) (*LoginResult, error) {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+		return nil, err
+	}
 	if err := s.ensureSecondFactorEnrolled(ctx, user, policyForced); err != nil {
 		return nil, err
 	}

@@ -203,6 +203,13 @@ const complete = await fetch("/identity.v1.IdentityService/CompletePasskeyLogin"
 }).then(r => r.json());
 
 // complete.accessToken, complete.refreshToken, complete.user`} lang="javascript" />
+  <p>
+    With <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> on (the default), a
+    passkey sign-in into an account whose address is unverified (for example
+    one an administrator changed through SCIM) is rejected with
+    <code>FailedPrecondition</code> ("email verification required") and a
+    verification email is sent; route the user to verify.
+  </p>
 
   <h2>Managing passkeys</h2>
   <ul>

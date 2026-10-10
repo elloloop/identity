@@ -1826,8 +1826,56 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // place to auto-cancel a pending self-service deletion: an owner who signs
 // back in during the grace window has reclaimed the account.
 func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+	// The verified-email gate for every sign-in, and every step that
+	// continues one, refusing with a verification email so the user has a
+	// way forward. The refresh path runs it before consuming its token.
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+		return "", "", err
+	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
 	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionStartedAtMs, authTimeMs)
+}
+
+// needsEmailVerification reports whether GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
+// keeps user from a session: the account has an address and it is unproven.
+// An account with no address (a username account) or an anonymous one has
+// nothing to verify.
+func (s *AuthService) needsEmailVerification(user *User) bool {
+	return s.cfg != nil && s.cfg.AuthRequireVerifiedEmail &&
+		user.Email != "" && !user.EmailVerified && !user.IsAnonymous
+}
+
+// verifiedEmailGate is where the verified-email gate refuses: a sign-in is
+// sent a verification email, a refresh is not (its user did not just act).
+type verifiedEmailGate string
+
+const (
+	verifiedEmailGateSignIn  verifiedEmailGate = "sign_in"
+	verifiedEmailGateRefresh verifiedEmailGate = "refresh"
+)
+
+// enforceVerifiedEmail refuses a session to an account whose address is
+// unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on, audited as
+// login_failure with reason email_not_verified and the gate that refused. A
+// refused sign-in also sends a verification email, best-effort and throttled:
+// a failure to send never changes the refusal.
+func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAddr, userAgent string, gate verifiedEmailGate) error {
+	if !s.needsEmailVerification(user) {
+		return nil
+	}
+	s.audit.Log(
+		ctx, audit.EventLoginFailure,
+		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+		audit.WithSuccess(false),
+		audit.WithDetails(map[string]any{"reason": "email_not_verified", "gate": string(gate)}),
+	)
+	if gate == verifiedEmailGateSignIn {
+		if err := s.sendEmailVerification(ctx, user.ID, emailLink{}); err != nil {
+			s.logger.Warn("login_verification_resend_failed",
+				zap.String("user_id", user.ID), zap.Error(err))
+		}
+	}
+	return ErrEmailVerificationRequired
 }
 
 // issueTokensWithSessionStart mints a token pair, anchoring the session's
@@ -1840,6 +1888,13 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 // measuring from the original sign-in, and no auth_time: a refresh is not a
 // sign-in, and only the tokens a sign-in issues vouch for one.
 func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+	// The verified-email gate's backstop: every path that mints a session (and
+	// any added later) honours it. Sign-ins and refreshes run the audited gate
+	// before reaching here, so this refuses silently.
+	if s.needsEmailVerification(user) {
+		return "", "", ErrEmailVerificationRequired
+	}
+
 	now := s.nowMs()
 	sessionStart := sessionStartedAtMs
 	if sessionStart <= 0 {
@@ -2283,6 +2338,14 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		}
 	}
 
+	// The verified-email gate, early for the same reason: an account whose
+	// address became unverified (a SCIM email change, say) keeps its token,
+	// and rotates normally once the address is verified. It runs before the
+	// DOB step, which could not yield a session while the address is unproven.
+	if err := s.enforceVerifiedEmail(ctx, timeoutUser, ipAddr, userAgent, verifiedEmailGateRefresh); err != nil {
+		return nil, "", "", err
+	}
+
 	// Same reasoning for the required-DOB gate, and it applies to EVERY
 	// account, not only anonymous ones. Enabling GATEWAY_AGEGATE_REQUIRE_DOB
 	// makes every pre-existing dob-less session fail its next rotation; if
@@ -2298,7 +2361,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	}
 
 	// Project access, checked BEFORE the token is consumed for the same reason
-	// the two refusals above are: a post-consume refusal burns the token, and
+	// the refusals above are: a post-consume refusal burns the token, and
 	// the retry an SDK makes on a failed rotation then lands on replay
 	// detection — which deletes every refresh token the user has and signs them
 	// out everywhere. That matters most for the deny layer, the one access rule

@@ -36,8 +36,8 @@ No schema change and no migration.
   stores an email without its `+tag`, so an account stored with a tag
   outside Gmail reads unverified after its next SCIM write too.
   - With `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` (on by default) the
-    directory hides the account and a password sign-in is refused, with a
-    verification email sent, until the new email is verified. A bulk
+    directory hides the account and its sign-ins and session refreshes are
+    refused (see the next entry), until the new email is verified. A bulk
     identity-provider email or domain migration does this to every account
     it moves; plan to have those users verify.
   - The way to verify that keeps the user's credentials is
@@ -45,6 +45,51 @@ No schema change and no migration.
     code or magic link, or a provider sign-in, also verifies the address,
     but as the first proof of an unverified address it voids the account's
     password and passkeys and ends its sessions.
+- **`GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` now holds on every path that
+  issues a session (behaviour change, flag on only).** The flag promised no
+  session for an account with an unverified address, but only sign-up,
+  password sign-in and the anonymous upgrade checked it. Now:
+  - A passkey sign-in, a provider sign-in, a QR sign-in, or a later
+    sign-in step (TOTP, required password change, date of birth) into an
+    account whose address is unverified is refused with
+    `failed_precondition` (`email verification required`), audited as
+    `login_failure` with `reason: email_not_verified` and
+    `gate: sign_in`, and sent a verification email
+    (best-effort, throttled). A sign-in that itself proves the address
+    (a passwordless email code or magic link, or a provider asserting the
+    account's own address) still succeeds.
+  - A refresh for such an account is refused the same way (audited with
+    `gate: refresh`), without an email, so a session issued before the
+    address became unverified (for example by a SCIM email change) cannot be
+    renewed. The refusal comes before the refresh token is consumed: a
+    client retrying it gets the same error rather than a replay that signs
+    the account out everywhere, and the token works again once the address
+    is verified through `SendEmailVerification` and its link (a passwordless
+    code, magic link or provider sign-in, as the first proof, ends the
+    account's sessions instead). A client that gets this error from
+    `RefreshToken` should stop retrying and ask the user to verify: call
+    `SendEmailVerification` while its access token is still valid, or else
+    send the user to sign in again, which is refused but mails a
+    verification link. Each refused refresh is one `login_failure`
+    row with `gate: refresh`; exclude those from failed-sign-in alerting
+    during a bulk email migration.
+  - Sessions that exist at upgrade for accounts with an unverified address
+    (an accepted invitation, a passkey or provider account) cannot be
+    renewed: they end at their next refresh (an access token already issued
+    under `GATEWAY_REVOCATION_MODE=session` lasts until its session is
+    revoked). When upgrading with the flag on, expect those users to be
+    asked to verify.
+  - `AcceptInvitation` for an unverified invitee activates the account and
+    returns the user with empty tokens, as `PasswordSignup` does, and sends
+    a verification email; the invitee signs in once it is redeemed. The
+    invitation token is shown to the inviting admin, so redeeming it does
+    not prove the address.
+  - An anonymous upgrade through a provider whose address does not carry
+    to the stored one (a `+tag` outside Gmail) is held like a typed
+    address: the promoted account comes back with empty tokens, a
+    verification email is sent, and the anonymous session ends.
+  - Username and anonymous accounts, which have no address to verify, are
+    unaffected, as is every path with the flag off.
 - **Proving an account's address voids provider links added before it
   (behaviour change).** When a passwordless email code or magic link, or a
   provider sign-in, first proves an account's address, identity already

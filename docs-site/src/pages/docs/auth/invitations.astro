@@ -40,6 +40,14 @@ import { Code } from "astro-expressive-code/components";
     user <code>USER_STATUS_ACTIVE</code>, retires the invitation token,
     and returns a fresh access + refresh pair.
   </p>
+  <p>
+    The invitation token is shown to the inviting admin as well as mailed,
+    so redeeming it does not prove the invitee owns the address. With
+    <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> on (the default), an
+    invitee whose address is not yet verified gets the user back with
+    <strong>empty</strong> tokens and is sent a verification email; route
+    them to "check your email", then to a normal sign-in.
+  </p>
   <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/AcceptInvitation \\
   -H 'Content-Type: application/json' \\
   -d '{

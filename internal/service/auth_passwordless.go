@@ -433,7 +433,7 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 	// email_otp is a single-factor primary: a Require2FA tenant (or a user who
 	// enrolled TOTP) must complete a second factor before full tokens issue.
 	if user.TotpRequired || decision.RequireSecondFactor {
-		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor)
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
 	}
 
 	s.updateLastLogin(ctx, user.ID)

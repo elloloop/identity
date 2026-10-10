@@ -124,49 +124,9 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 		return nil, s.mapUpgradeConflict(err)
 	}
 
-	// Prove the address before it buys anything. GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
-	// defaults TRUE and is this codebase's anti-pre-hijacking control:
-	// PasswordSignup honours it by returning the user with no tokens, and
-	// PasswordLogin refuses an unverified account. Without the same gate here
-	// the upgrade was strictly more powerful than signup — an unauthenticated
-	// caller could chain SignInAnonymously into a live session whose JWT
-	// asserts someone else's address, with no verification mail and so no
-	// signal to its owner. Same shape as signup: promoted account, no tokens.
-	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail {
-		if err := s.sendEmailVerification(ctx, userID, emailLink{}); err != nil {
-			s.logger.Warn("anonymous_upgrade_verification_send_failed",
-				zap.String("user_id", userID), zap.Error(err))
-		}
-		u, err := s.repo(ctx).GetUser(ctx, userID)
-		if err != nil {
-			return nil, err
-		}
-		if u == nil {
-			return nil, ErrNotFound
-		}
-		// The anonymous session is deliberately revoked with the promotion:
-		// leaving it live would return exactly the session this gate exists
-		// to withhold, just under the previous credential.
-		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, userID); err != nil {
-			s.logger.Warn("anonymous_upgrade_session_revoke_failed",
-				zap.String("user_id", userID), zap.Error(err))
-		}
-		// Deleting refresh tokens alone does NOT end the session. Under
-		// GATEWAY_REVOCATION_MODE=session the access token's lifetime is
-		// uncapped and it is revocable only through its Session row, so both
-		// calls are required — otherwise the caller keeps a working token
-		// against a subject that now bears the address they just claimed,
-		// exactly the session this gate exists to withhold.
-		s.revokeUserSessionsIfModeSession(ctx, userID, "anonymous_upgrade_pending_verification")
-		return &LoginResult{User: u}, nil
-	}
-
-	if err := s.sendEmailVerification(ctx, userID, emailLink{}); err != nil {
-		s.logger.Warn("anonymous_upgrade_verification_send_failed",
-			zap.String("user_id", userID), zap.Error(err))
-	}
 	// A password the anonymous session just chose proves nothing beyond that
-	// session: the reissued token carries no auth_time.
+	// session: the reissued token carries no auth_time, and the typed address
+	// stays unproven until its verification link is redeemed.
 	return s.reissueAfterUpgrade(ctx, userID, cred.IPAddress, cred.UserAgent, 0)
 }
 
@@ -322,7 +282,8 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 }
 
 // reissueAfterUpgrade re-reads the promoted account and mints a fresh token
-// pair for it.
+// pair for it, or none while verification is required and its address is
+// unproven.
 //
 // The re-read is not incidental: the caller's in-memory copy still says
 // is_anonymous, and the new access token's `anonymous` claim is derived from
@@ -340,6 +301,36 @@ func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, u
 	}
 	if u == nil {
 		return nil, ErrNotFound
+	}
+	if !u.EmailVerified && u.Email != "" {
+		if err := s.sendEmailVerification(ctx, userID, emailLink{}); err != nil {
+			s.logger.Warn("anonymous_upgrade_verification_send_failed",
+				zap.String("user_id", userID), zap.Error(err))
+		}
+	}
+	// Prove the address before it buys anything. GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
+	// defaults TRUE and is this codebase's anti-pre-hijacking control: like
+	// PasswordSignup, an upgrade to an unproven address (a typed one, or a
+	// provider's that does not carry to the stored one) returns the promoted
+	// account with no tokens. Without it the upgrade was strictly more
+	// powerful than signup: an unauthenticated caller could chain
+	// SignInAnonymously into a live session whose JWT asserts someone else's
+	// address. The promotion is already committed, so this is a result, not
+	// an error a retry could never get past.
+	if s.needsEmailVerification(u) {
+		// The anonymous session is deliberately revoked with the promotion:
+		// leaving it live would return exactly the session this gate exists
+		// to withhold, just under the previous credential.
+		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, userID); err != nil {
+			s.logger.Warn("anonymous_upgrade_session_revoke_failed",
+				zap.String("user_id", userID), zap.Error(err))
+		}
+		// Deleting refresh tokens alone does NOT end the session. Under
+		// GATEWAY_REVOCATION_MODE=session the access token's lifetime is
+		// uncapped and it is revocable only through its Session row, so both
+		// calls are required.
+		s.revokeUserSessionsIfModeSession(ctx, userID, "anonymous_upgrade_pending_verification")
+		return &LoginResult{User: u}, nil
 	}
 	access, refresh, err := s.issueSignInTokens(ctx, u, ipAddr, userAgent, s.nowMs(), authTimeMs)
 	if err != nil {

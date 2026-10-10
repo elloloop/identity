@@ -194,8 +194,11 @@ import { Code } from "astro-expressive-code/components";
   <p>
     <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> (default
     <code>true</code>) is the deployment-wide rule that an unverified address
-    cannot be used: password sign-up issues no session until the address is
-    verified, and password sign-in is refused. The directory lookup follows
+    cannot be used: no sign-in or refresh issues a session to an account
+    whose address is unverified. Password sign-up and invitation acceptance
+    return empty tokens, and other sign-ins are refused, except one that
+    proves the address itself (a passwordless email code or magic link, or a
+    provider asserting that address). The directory lookup follows
     the same rule, so an account created by signing up with an address is not
     returned until its owner confirms the verification link.
   </p>

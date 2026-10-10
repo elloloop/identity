@@ -147,6 +147,12 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 	if user == nil {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
+	// Re-checked before the code is spent: the address may have become
+	// unverified (a SCIM email change) since the challenge was issued, and a
+	// recovery code spent on a refused sign-in is lost.
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+		return nil, err
+	}
 
 	method, err := s.verifySecondFactorCode(ctx, userID, code, ipAddr, userAgent)
 	if err != nil {

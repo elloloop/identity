@@ -243,11 +243,11 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	}
 
 	// When email verification is required, a freshly-created account is
-	// unverified and must NOT receive a live session — otherwise signup would
-	// auto-login past the very gate PasswordLogin enforces. Return the user
-	// (so the client can drive "check your email") with no tokens; the proto
+	// unverified and gets no session (issuing one would be refused). Sign-up
+	// is not a failed sign-in, so it returns the user (so the client can drive
+	// "check your email") with no tokens, audited as a success; the proto
 	// response shape is preserved, the tokens are simply empty.
-	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && !user.EmailVerified {
+	if s.needsEmailVerification(user) {
 		s.audit.Log(
 			ctx, audit.EventLoginSuccess,
 			audit.WithActor(userID),
@@ -441,7 +441,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// because the tenant's LoginPolicy mandates a second factor for this
 	// single-factor primary method.
 	if user.TotpRequired || decision.RequireSecondFactor {
-		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor)
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
 	}
 
 	s.updateLastLogin(ctx, user.ID)
@@ -631,8 +631,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 	// the account rule after the password, so a refusal reveals nothing to a
 	// caller without it.
 	decision, err := s.postPasswordGates(ctx, user, postPasswordGateOpts{
-		checkAccess:        identifierKey == "username",
-		resendVerification: true,
+		checkAccess: identifierKey == "username",
 	}, ipAddr, userAgent)
 	if err != nil {
 		return nil, loginPolicyDecision{}, err
@@ -647,10 +646,6 @@ type postPasswordGateOpts struct {
 	// by email already passed the email-keyed gate before the lookup; a
 	// username sign-in, or a later step that re-checks, has not.
 	checkAccess bool
-	// resendVerification sends a fresh verification email when the gate
-	// refuses an unverified address: a sign-in is where the person is
-	// waiting for one.
-	resendVerification bool
 }
 
 // postPasswordGates is every gate a password sign-in applies once the
@@ -685,23 +680,8 @@ func (s *AuthService) postPasswordGates(ctx context.Context, user *User, opts po
 	// unusable (the flag defaults ON) — and there is no pre-hijacking vector
 	// to close, because there is no address for an attacker to plant a
 	// password against or for an owner to later verify.
-	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && user.Email != "" && !user.EmailVerified {
-		s.audit.Log(
-			ctx, audit.EventLoginFailure,
-			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": "email_not_verified"}),
-		)
-		// Best-effort: resend the verification email so the user can complete
-		// verification and retry. Failures (throttle, transport) must not change
-		// the response — the gate result is the same either way.
-		if opts.resendVerification {
-			if sendErr := s.sendEmailVerification(ctx, user.ID, emailLink{}); sendErr != nil {
-				s.logger.Warn("login_verification_resend_failed",
-					zap.String("user_id", user.ID), zap.Error(sendErr))
-			}
-		}
-		return loginPolicyDecision{}, ErrEmailVerificationRequired
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, verifiedEmailGateSignIn); err != nil {
+		return loginPolicyDecision{}, err
 	}
 
 	// Credentials are proven; consult the tenant's LoginPolicy. This runs
@@ -877,9 +857,14 @@ func (s *AuthService) OAuthLogin(
 	// OAuth is a single-factor primary: a Require2FA tenant must complete a
 	// second factor before full tokens are minted.
 	if user.TotpRequired || decision.RequireSecondFactor {
-		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor)
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, params.IPAddr, params.UserAgent)
 	}
 
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
+	if err != nil {
+		return nil, err
+	}
+	// Stamped once the session is issued, not for a sign-in the gate refused.
 	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info(
 		"oauth_login_success",
@@ -887,11 +872,6 @@ func (s *AuthService) OAuthLogin(
 		zap.String("provider", provider),
 		zap.String("user_id", user.ID),
 	)
-
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
-	if err != nil {
-		return nil, err
-	}
 
 	s.audit.Log(
 		ctx, audit.EventOAuthLogin,
@@ -1251,8 +1231,8 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		// The cleared credentials are void, so revoke any sessions too —
 		// mirroring ConfirmPasswordReset — so a session established with a now-
 		// voided credential cannot outlive it. With the verification gate on,
-		// a planted-password session is impossible; a planted-passkey session
-		// is NOT (passkey login skips the gate), so this matters either way.
+		// no session is issued while the address is unproven; with it off, a
+		// planted credential's session would otherwise survive the proof.
 		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
 			s.logger.Warn("email_verified_external_revoke_failed",
 				zap.String("user_id", user.ID), zap.String("method", proof.method), zap.Error(err))
@@ -1538,6 +1518,20 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 
 	user.Status = StatusActive
 	user.UpdatedAt = msToTime(now)
+
+	// The invitation token is shown to the inviting admin as well as mailed,
+	// so redeeming it proves nothing about the address. While verification is
+	// required, an unproven invitee gets no session: like a new sign-up, it is
+	// sent a verification email and signs in once that is redeemed.
+	if s.needsEmailVerification(user) {
+		if err := s.sendEmailVerification(ctx, user.ID, emailLink{}); err != nil {
+			s.logger.Warn("invitation_verification_email_failed",
+				zap.String("user_id", user.ID), zap.Error(err))
+		}
+		s.logger.Info("invitation_accepted", zap.String("user_id", user.ID),
+			zap.Bool("email_verification_required", true))
+		return &LoginResult{User: user}, nil
+	}
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {

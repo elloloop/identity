@@ -413,6 +413,16 @@ message NativeOAuthLoginResponse {
       the OAuth claims.
     </li>
     <li>
+      <strong>Address unverified.</strong> With
+      <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> on (the default), a
+      sign-in into an account whose address is unverified, where the
+      provider did not assert that address, is rejected with
+      <code>FailedPrecondition</code> ("email verification required") and a
+      verification email is sent; route the user to verify. That includes
+      the first sign-in of a new account created from a tagged address
+      outside Gmail (below).
+    </li>
+    <li>
       <strong>Existing user, invited.</strong> The login is rejected with
       <code>FailedPrecondition</code> ("accept your invitation first")
       until they accept the invitation.

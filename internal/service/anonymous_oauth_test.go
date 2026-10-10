@@ -746,3 +746,43 @@ func TestUpgradeAnonymousWithOAuth_TaggedAddressElsewhereIsUnverified(t *testing
 		t.Error("the provider asserted a tagged address, not the stored one")
 	}
 }
+
+// With verification required, an upgrade through a provider whose address
+// does not carry to the stored one is held like a typed address: the promoted
+// account comes back with no tokens, and the anonymous session ends with it,
+// rather than an error after a promotion a retry could never get past.
+func TestUpgradeAnonymousWithOAuth_UnprovenAddressIsHeldForVerification(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AuthRequireVerifiedEmail = true
+	svc.cfg.RevocationMode = config.RevocationModeSession
+	ctx := anonCtx(true, AccessModeOpen)
+
+	signIn, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+	sid := decodeAccessTokenClaims(t, svc, signIn.AccessToken).SID
+	cred := oauthCred()
+	cred.Code = fakeOAuthCode("someone+news@example.com", "Some One", "", testOAuthProvider)
+	up, err := svc.UpgradeAnonymousWithOAuth(ctx, signIn.User.ID, cred)
+	if err != nil {
+		t.Fatalf("UpgradeAnonymousWithOAuth: %v", err)
+	}
+	if up.User.IsAnonymous || up.User.EmailVerified {
+		t.Fatalf("want a promoted, unverified account; got anonymous=%v verified=%v", up.User.IsAnonymous, up.User.EmailVerified)
+	}
+	if up.AccessToken != "" || up.RefreshToken != "" {
+		t.Fatal("an unproven address was given a session")
+	}
+	if _, _, _, err := svc.RefreshToken(ctx, signIn.RefreshToken, "", ""); err == nil {
+		t.Fatal("the anonymous refresh token survived the promotion")
+	}
+	sess, err := repo.GetSessionBySid(ctx, sid)
+	if err != nil {
+		t.Fatalf("GetSessionBySid: %v", err)
+	}
+	if sess != nil && sess.RevokedAtMs == 0 {
+		t.Fatal("the anonymous access session survived the promotion")
+	}
+}
