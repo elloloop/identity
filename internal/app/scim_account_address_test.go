@@ -12,8 +12,10 @@ import (
 )
 
 // A SCIM email change, through the real handler chain (bearer check and the
-// project scope it pins), re-derives an email account's account address.
-func TestSCIM_EmailChangeFollowsTheAccountAddress(t *testing.T) {
+// project scope it pins), releases the address derived from the old email. The
+// new email is unproven, so the account receives the address derived from it
+// at its first session once that email is verified.
+func TestSCIM_EmailChangeToAnotherMailboxReleasesTheAccountAddress(t *testing.T) {
 	repo := memory.New()
 	mux := http.NewServeMux()
 	(&scimHandler{
@@ -44,8 +46,8 @@ func TestSCIM_EmailChangeFollowsTheAccountAddress(t *testing.T) {
 	if err != nil || u == nil {
 		t.Fatalf("GetUser: %v %v", u, err)
 	}
-	if u.AccountAddress != "new-at-mail.example.test@accounts.example.test" {
-		t.Fatalf("address after a SCIM email change: %q", u.AccountAddress)
+	if u.AccountAddress != "" || u.EmailVerified {
+		t.Fatalf("after a SCIM email change: address %q, verified %v", u.AccountAddress, u.EmailVerified)
 	}
 }
 

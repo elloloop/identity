@@ -266,8 +266,10 @@ import { Code } from "astro-expressive-code/components";
     replaced behind the account's back, and changing the project's domain
     leaves issued addresses as they were. An address does follow a change of
     the identifier it came from, so it never goes on spelling out a name or
-    mailbox the person gave up: an email account's follows a change of email,
-    confirmed by the person or written by SCIM, and a managed child's follows
+    mailbox the person gave up: an email account's follows a change of email
+    the person confirmed; one SCIM writes to another mailbox releases the
+    address, and the account gets the new one at its first session after the
+    new email is verified; and a managed child's follows
     its guardian's rename. A project
     that stops issuing addresses keeps the ones it issued. An address released
     by an email change can later be issued to another account, so treat the

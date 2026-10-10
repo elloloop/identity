@@ -25,6 +25,26 @@ No schema change and no migration.
   another address (after a SCIM write, say), a link mailed to the old
   one is refused with `unauthenticated` and spent; send a new one. Another
   spelling of the same mailbox still verifies.
+- **A SCIM email change to another mailbox unverifies the email (behaviour
+  change).** A SCIM `PUT` or `PATCH` that changes an account's email to
+  another mailbox kept the account's verified state, though nobody had
+  proven the new address. The email is now unverified (`email_verified_at`
+  cleared) until its owner verifies it, and the account address that spells
+  the old email is released; a new one is issued at the account's first
+  session after the new email is verified. A change that keeps the same
+  mailbox (letter case, or Gmail dots and `+tag`) keeps it verified. SCIM
+  stores an email without its `+tag`, so an account stored with a tag
+  outside Gmail reads unverified after its next SCIM write too.
+  - With `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` (on by default) the
+    directory hides the account and a password sign-in is refused, with a
+    verification email sent, until the new email is verified. A bulk
+    identity-provider email or domain migration does this to every account
+    it moves; plan to have those users verify.
+  - The way to verify that keeps the user's credentials is
+    `SendEmailVerification` and the link it mails. A passwordless email
+    code or magic link, or a provider sign-in, also verifies the address,
+    but as the first proof of an unverified address it voids the account's
+    password and passkeys and ends its sessions.
 
 ## v4.12.2 → v4.13.0 — sign-in stores emails in canonical form and `identity repair-emails` merges duplicate accounts (behaviour changes); an optional `iss` claim and per-project token audience
 

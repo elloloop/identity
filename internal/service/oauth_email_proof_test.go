@@ -115,6 +115,6 @@ func TestProofCarriesTo(t *testing.T) {
 		{"+x@gmail.com", "+x@gmail.com", false},
 	}
 	for _, tc := range cases {
-		assert.Equal(t, tc.want, proofCarriesTo(tc.proven, tc.stored), "%q proves %q", tc.proven, tc.stored)
+		assert.Equal(t, tc.want, ProofCarriesTo(tc.proven, tc.stored), "%q proves %q", tc.proven, tc.stored)
 	}
 }
