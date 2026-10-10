@@ -520,11 +520,30 @@ message NativeOAuthLoginResponse {
 
   <h3 id="hosted-callback-errors">Callback errors</h3>
   <p>
-    A callback whose signed state token (or its CSRF cookie) does not verify
-    has no trusted <code>return_to</code>, so it answers HTTP 400 on the
-    identity origin. Once the state token verifies, every refused sign-in is
-    302-redirected to <code>return_to?error=&lt;code&gt;</code>, with no
-    <code>code</code> parameter, so the app can tell the user what to do:
+    A callback without a trusted <code>return_to</code> answers HTTP 400 on
+    the identity origin, since there is nowhere safe to redirect. That is the
+    case when:
+  </p>
+  <ul>
+    <li>
+      the provider itself redirected back with an <code>error</code> (for
+      example the user declined consent), since the callback does not trust
+      <code>return_to</code> before the state token is checked;
+    </li>
+    <li>the signed state token or its CSRF cookie does not verify;</li>
+    <li>
+      the state token was minted for a different provider than the callback
+      path names; or
+    </li>
+    <li>
+      the state token was minted for a different project than the callback
+      request resolves to.
+    </li>
+  </ul>
+  <p>
+    Once all of these pass, every refused sign-in is 302-redirected to
+    <code>return_to?error=&lt;code&gt;</code>, with no <code>code</code>
+    parameter, so the app can tell the user what to do:
   </p>
   <ul>
     <li>
@@ -620,15 +639,42 @@ window.location.href =
 //    Identity exchanges, links/creates the OAuthIdentity row, mints
 //    a one-time code, and redirects to return_to with ?code=otc_...
 
-// 3. /oauth/done in the SPA: exchange the otc for real tokens.
-const params = new URLSearchParams(window.location.search);
-const otc = params.get("code");
-const { user, accessToken, refreshToken } = await client.redeemOAuthCode({
-  code: otc,
-});
+//    A refused sign-in comes back as ?error=<code> instead, with no code.
 
-storeTokens(accessToken, refreshToken);
-window.location.replace("/dashboard");`} lang="typescript" />
+// 3. /oauth/done in the SPA: exchange the otc for real tokens, or tell
+//    the user why the sign-in was refused.
+const params = new URLSearchParams(window.location.search);
+const error = params.get("error");
+if (error) {
+  showSignInError(signInErrorMessage(error));
+} else {
+  const { user, accessToken, refreshToken } = await client.redeemOAuthCode({
+    code: params.get("code"),
+  });
+  storeTokens(accessToken, refreshToken);
+  window.location.replace("/dashboard");
+}
+
+function signInErrorMessage(code: string): string {
+  switch (code) {
+    case "email_not_verified":
+      return "Check your inbox for a verification link, then sign in again.";
+    case "account_disabled":
+      return "This account is disabled.";
+    case "account_locked":
+      return "Too many attempts. Try again later.";
+    case "temporarily_unavailable":
+    case "server_error":
+      return "Sign-in is unavailable right now. Try again.";
+    default: // access_denied, and any code added later
+      return "Sign-in was not allowed.";
+  }
+}`} lang="typescript" />
+  <p>
+    The <a href="#hosted-callback-errors">callback errors</a> section lists
+    what each <code>error</code> code means. Treat an unknown code like
+    <code>access_denied</code>.
+  </p>
   <p>
     See decision log §10 in <a href="https://github.com/elloloop/identity/blob/main/docs/IDENTITY.md"><code>docs/IDENTITY.md</code></a>
     for the design rationale (why a one-time code rather than a

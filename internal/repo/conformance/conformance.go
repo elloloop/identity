@@ -2704,7 +2704,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runPaginationConformance(t, driver)
 	runFreshTenantConformance(t, driver)
 	runRoundTripConformance(t, driver)
-	runConcurrencyConformance(t, driver)
+	RunConcurrencyConformance(t, driver)
 	runMutationConformance(t, driver)
 	runKeyFidelityConformance(t, driver)
 	runSweeperBoundaryConformance(t, driver)

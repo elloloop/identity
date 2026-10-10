@@ -19,11 +19,13 @@ import (
 // data-race bug) surfaces deterministically rather than only in CI.
 const concurrentWriters = 64
 
-// runConcurrencyConformance stresses the Repository under concurrent
+// RunConcurrencyConformance stresses the Repository under concurrent
 // writers: no write may be lost, and a write must still be visible to
 // the issuing goroutine's immediate read even while other writers load
-// the same backend.
-func runConcurrencyConformance(t *testing.T, driver Driver) {
+// the same backend. RunConformance runs it; it is exported for a driver
+// whose concurrency depends on how it is opened, to run it against each
+// configuration without repeating the whole suite.
+func RunConcurrencyConformance(t *testing.T, driver Driver) {
 	t.Helper()
 
 	t.Run(driver.Name+"/Concurrency", func(t *testing.T) {
