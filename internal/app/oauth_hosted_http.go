@@ -156,7 +156,7 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		h.logger.Info("hosted_oauth_callback_failed",
 			zap.String("provider", provider), zap.Error(err))
-		var refusal *service.HostedOAuthRefusal
+		var refusal *service.HostedOAuthRefusalError
 		if !errors.As(err, &refusal) {
 			// No verified return_to (the state token or its CSRF binding
 			// failed), so there is nowhere safe to send the browser.

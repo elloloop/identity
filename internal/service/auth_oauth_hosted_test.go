@@ -291,6 +291,7 @@ func TestHostedOAuth_Complete_RefusalCarriesErrorCode(t *testing.T) {
 		{
 			name: "unverified address",
 			seed: func(t *testing.T, repo *fakeRepo) {
+				t.Helper()
 				user := seedUser(repo, "unproven@example.com", "", StatusActive)
 				require.NoError(t, repo.CreateOAuthIdentity(context.Background(), &OAuthIdentity{
 					UserID: user.ID, Provider: "google", ProviderUserID: "sub-linker@example.com", CreatedAt: 1,
@@ -358,7 +359,7 @@ func TestHostedOAuth_Complete_RefusalCarriesErrorCode(t *testing.T) {
 
 			_, err = svc.CompleteHostedOAuth(ctx, "google", tc.code,
 				stateTokenFromAuthURL(t, begin.AuthorizationURL), "", "1.2.3.4", "test-agent", []string{"csrf-123"})
-			var refusal *HostedOAuthRefusal
+			var refusal *HostedOAuthRefusalError
 			require.ErrorAs(t, err, &refusal)
 			assert.Equal(t, tc.want, refusal.Code)
 			assert.Equal(t, "https://app.test/finish", refusal.ReturnTo)
@@ -375,7 +376,7 @@ func TestHostedOAuth_Complete_UnverifiedStateIsNoRefusal(t *testing.T) {
 	_, err := svc.CompleteHostedOAuth(withProject("proj-1"), "google",
 		fakeOAuthCode("hosted@example.com", "Hosted", "", "google"),
 		"not-a-state-token", "", "", "", []string{"csrf-123"})
-	var refusal *HostedOAuthRefusal
+	var refusal *HostedOAuthRefusalError
 	assert.False(t, errors.As(err, &refusal))
 	assert.ErrorIs(t, err, ErrUnauthenticated)
 }

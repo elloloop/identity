@@ -13,19 +13,19 @@ import (
 
 // approvedQrLogin initiates a QR login and approves it as user, returning the
 // session id and the poll secret the scanning device holds.
-func approvedQrLogin(t *testing.T, svc *AuthService, user *User) (string, string) {
+func approvedQrLogin(ctx context.Context, t *testing.T, svc *AuthService, user *User) (string, string) {
 	t.Helper()
-	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "agent", "10.0.0.1")
+	init, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
 	require.NoError(t, err)
-	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "approver")
+	status, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "approver")
 	require.NoError(t, err)
 	require.Equal(t, "approved", status)
 	return init.SessionID, init.PollSecret
 }
 
-func requireQrSessionStatus(t *testing.T, repo *fakeRepo, sessionID, want string) {
+func requireQrSessionStatus(ctx context.Context, t *testing.T, repo *fakeRepo, sessionID, want string) {
 	t.Helper()
-	session, err := repo.FindQrLoginSession(context.Background(), sessionID)
+	session, err := repo.FindQrLoginSession(ctx, sessionID)
 	require.NoError(t, err)
 	require.NotNil(t, session)
 	assert.Equal(t, want, session.Status)
@@ -48,38 +48,37 @@ func refreshTokenCount(repo *fakeRepo, userID string) int {
 // account is eligible again, the device's next poll in the window completes.
 func TestPollQrLogin_IneligibleAccountRefusedBeforeConsuming(t *testing.T) {
 	open := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "p", Access: ProjectAccessConfig{Mode: AccessModeOpen}})
-	closed := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "p", Access: ProjectAccessConfig{Mode: AccessModeClosed}})
 	cases := []struct {
 		name    string
 		refuse  map[string]any
 		restore map[string]any
-		ctx     context.Context
+		access  string
 		wantErr error
 	}{
 		{
 			name:    "deactivated",
 			refuse:  map[string]any{"status": StatusDeactivated},
 			restore: map[string]any{"status": StatusActive},
-			ctx:     open,
+			access:  AccessModeOpen,
 			wantErr: ErrAccountNotActive,
 		},
 		{
 			name:    "invited",
 			refuse:  map[string]any{"status": StatusInvited},
 			restore: map[string]any{"status": StatusActive},
-			ctx:     open,
+			access:  AccessModeOpen,
 			wantErr: ErrInvitationPending,
 		},
 		{
 			name:    "locked",
 			refuse:  map[string]any{"locked_until": time.Now().Add(time.Hour).UnixMilli()},
 			restore: map[string]any{"locked_until": int64(0)},
-			ctx:     open,
+			access:  AccessModeOpen,
 			wantErr: ErrAccountLocked,
 		},
 		{
 			name:    "project closed",
-			ctx:     closed,
+			access:  AccessModeClosed,
 			wantErr: ErrAccessNotAllowed,
 		},
 	}
@@ -88,27 +87,27 @@ func TestPollQrLogin_IneligibleAccountRefusedBeforeConsuming(t *testing.T) {
 			repo := newFakeRepo()
 			svc := newTestAuthService(t, repo)
 			user := seedUser(repo, "qr-gate@example.com", "", StatusActive)
-			sessionID, secret := approvedQrLogin(t, svc, user)
+			sessionID, secret := approvedQrLogin(open, t, svc, user)
 			if tc.refuse != nil {
-				require.NoError(t, repo.UpdateUser(context.Background(), user.ID, tc.refuse))
+				require.NoError(t, repo.UpdateUser(open, user.ID, tc.refuse))
 			}
 
 			for range 2 {
-				res, err := svc.PollQrLogin(tc.ctx, sessionID, secret, "10.0.0.1", "agent")
+				res, err := svc.PollQrLogin(WithProjectScope(open, &ProjectScope{ProjectID: "p", Access: ProjectAccessConfig{Mode: tc.access}}), sessionID, secret, "10.0.0.1", "agent")
 				require.ErrorIs(t, err, tc.wantErr, "a retry is refused the same way")
 				assert.Nil(t, res)
 			}
-			requireQrSessionStatus(t, repo, sessionID, "approved")
+			requireQrSessionStatus(open, t, repo, sessionID, "approved")
 			assert.Zero(t, refreshTokenCount(repo, user.ID), "a refused hand-off writes no session")
 
 			if tc.restore != nil {
-				require.NoError(t, repo.UpdateUser(context.Background(), user.ID, tc.restore))
+				require.NoError(t, repo.UpdateUser(open, user.ID, tc.restore))
 			}
 			res, err := svc.PollQrLogin(open, sessionID, secret, "10.0.0.1", "agent")
 			require.NoError(t, err)
 			assert.Equal(t, "approved", res.Status)
 			assert.NotEmpty(t, res.AccessToken)
-			requireQrSessionStatus(t, repo, sessionID, "consumed")
+			requireQrSessionStatus(open, t, repo, sessionID, "consumed")
 		})
 	}
 }
@@ -125,12 +124,12 @@ func TestPollQrLogin_UnverifiedAddressRefusedBeforeConsuming(t *testing.T) {
 	ctx := context.Background()
 	user := seedUser(repo, "qr-unverified@example.com", "", StatusActive)
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
-	sessionID, secret := approvedQrLogin(t, svc, user)
+	sessionID, secret := approvedQrLogin(ctx, t, svc, user)
 
 	res, err := svc.PollQrLogin(ctx, sessionID, secret, "10.0.0.1", "agent")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Nil(t, res)
-	requireQrSessionStatus(t, repo, sessionID, "approved")
+	requireQrSessionStatus(ctx, t, repo, sessionID, "approved")
 	assert.Zero(t, refreshTokenCount(repo, user.ID))
 	assert.Equal(t, 1, writer.countByEventTypeAndDetail("login_failure", "gate", "sign_in"))
 	assert.Len(t, rec.Sent(), 1, "a refused sign-in is sent a verification email")
@@ -153,13 +152,14 @@ func TestPollQrLogin_ApprovedSessionExpires(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	user := seedUser(repo, "qr-late@example.com", "", StatusActive)
-	sessionID, secret := approvedQrLogin(t, svc, user)
+	ctx := context.Background()
+	sessionID, secret := approvedQrLogin(ctx, t, svc, user)
 
 	svc.nowFunc = func() time.Time { return time.Now().Add(time.Hour) }
-	res, err := svc.PollQrLogin(context.Background(), sessionID, secret, "10.0.0.1", "agent")
+	res, err := svc.PollQrLogin(ctx, sessionID, secret, "10.0.0.1", "agent")
 	require.NoError(t, err)
 	assert.Equal(t, "expired", res.Status)
 	assert.Empty(t, res.AccessToken)
-	requireQrSessionStatus(t, repo, sessionID, "expired")
+	requireQrSessionStatus(ctx, t, repo, sessionID, "expired")
 	assert.Zero(t, refreshTokenCount(repo, user.ID))
 }

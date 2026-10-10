@@ -135,7 +135,7 @@ type HostedOAuthCallbackResult struct {
 // runs the same OAuthLogin exchange the headless flow uses, then mints a
 // single-use one-time code bound to the authenticated user. The caller
 // (the HTTP handler) 302-redirects to result.ReturnTo?code=result.Code.
-// A failure after the state token verified is a *HostedOAuthRefusal, which
+// A failure after the state token verified is a *HostedOAuthRefusalError, which
 // the caller redirects to ReturnTo?error=Code.
 //
 // stateToken is the OAuth `state` value the provider echoed back;
@@ -196,12 +196,12 @@ func (s *AuthService) CompleteHostedOAuth(
 		UserAgent:        userAgent,
 	})
 	if err != nil {
-		return nil, &HostedOAuthRefusal{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: hostedOAuthErrorCode(err), Err: err}
+		return nil, &HostedOAuthRefusalError{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: hostedOAuthErrorCode(err), Err: err}
 	}
 
 	otc, err := s.mintOAuthOneTimeCode(ctx, result.User.ID)
 	if err != nil {
-		return nil, &HostedOAuthRefusal{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: HostedOAuthErrorServer, Err: err}
+		return nil, &HostedOAuthRefusalError{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: HostedOAuthErrorServer, Err: err}
 	}
 
 	return &HostedOAuthCallbackResult{ReturnTo: claims.ReturnTo, Code: otc, CSRFToken: claims.CSRFToken}, nil
@@ -221,21 +221,21 @@ const (
 	HostedOAuthErrorUnavailable      = "temporarily_unavailable"
 )
 
-// HostedOAuthRefusal is CompleteHostedOAuth's error once the state token has
+// HostedOAuthRefusalError is CompleteHostedOAuth's error once the state token has
 // proven ReturnTo: the callback redirects there with Code as error=. Err is
 // for the server's log only.
-type HostedOAuthRefusal struct {
+type HostedOAuthRefusalError struct {
 	ReturnTo  string
 	CSRFToken string
 	Code      string
 	Err       error
 }
 
-func (r *HostedOAuthRefusal) Error() string {
+func (r *HostedOAuthRefusalError) Error() string {
 	return "hosted oauth refused (" + r.Code + "): " + r.Err.Error()
 }
 
-func (r *HostedOAuthRefusal) Unwrap() error { return r.Err }
+func (r *HostedOAuthRefusalError) Unwrap() error { return r.Err }
 
 // hostedOAuthErrorCode names a refused hosted sign-in for the app. Every
 // refusal without a code of its own is access_denied, so a refusal over

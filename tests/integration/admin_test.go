@@ -39,8 +39,10 @@ func TestAdmin_InviteAcceptLogin_E2E(t *testing.T) {
 		Email:    inviteeEmail,
 		Password: "Invited!Pass9",
 	}))
-	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
-		t.Fatalf("login before AcceptInvitation code = %v, want FailedPrecondition (err=%v)", got, err)
+	// The invitee has no password until they accept, and a password sign-in
+	// into a passwordless account is refused like an unknown address.
+	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("login before AcceptInvitation code = %v, want Unauthenticated (err=%v)", got, err)
 	}
 
 	accepted, err := h.Client.AcceptInvitation(ctx, connect.NewRequest(&identitypb.AcceptInvitationRequest{
