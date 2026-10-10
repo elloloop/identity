@@ -318,3 +318,38 @@ func TestCreateAndVerify_IssuerClaim(t *testing.T) {
 	_, has := tok.Get("iss")
 	assert.False(t, has, "no issuer configured, no iss claim")
 }
+
+// email_verified accompanies the address: present (true or false) whenever
+// the token carries an email, absent with it, and round-trips through
+// VerifyAccessToken.
+func TestCreateAndVerify_EmailVerifiedClaim(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+	cases := []struct {
+		name        string
+		claims      Claims
+		wantPresent bool
+	}{
+		{"proven address", Claims{Sub: "u1", Email: "a@example.com", EmailVerified: true}, true},
+		{"unproven address", Claims{Sub: "u2", Email: "b@example.com"}, true},
+		{"no address", Claims{Sub: "u3", EmailVerified: true}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tokenStr, err := s.SignAccessToken(context.Background(), tc.claims, 15*time.Minute)
+			require.NoError(t, err)
+			parsed, err := jwtoken.ParseInsecure([]byte(tokenStr))
+			require.NoError(t, err)
+			raw, present := parsed.Get("email_verified")
+			assert.Equal(t, tc.wantPresent, present)
+
+			got, err := VerifyAccessToken(tokenStr, s, "", "", false)
+			require.NoError(t, err)
+			if tc.wantPresent {
+				assert.Equal(t, tc.claims.EmailVerified, raw)
+				assert.Equal(t, tc.claims.EmailVerified, got.EmailVerified)
+			} else {
+				assert.False(t, got.EmailVerified)
+			}
+		})
+	}
+}

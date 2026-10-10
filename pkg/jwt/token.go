@@ -21,11 +21,17 @@ import (
 // cost). The claim is JSON-named `sid` so it lines up with OAuth /
 // OIDC tooling that already understands the `sid` convention.
 type Claims struct {
-	Sub    string `json:"sub"`
-	Email  string `json:"email"`
-	Name   string `json:"name"`
-	Role   string `json:"role"`
-	Tenant string `json:"tenant"`
+	Sub   string `json:"sub"`
+	Email string `json:"email"`
+	// EmailVerified is the "email_verified" claim: true only when the
+	// account's owner has proven control of exactly the address in Email.
+	// It is present whenever Email is non-empty, true or false, and absent
+	// with Email, so a verifier gating on proof of the address reads an
+	// absent claim (a token minted before the claim existed) as unproven.
+	EmailVerified bool   `json:"email_verified"`
+	Name          string `json:"name"`
+	Role          string `json:"role"`
+	Tenant        string `json:"tenant"`
 	// Project is the control-plane project the token was minted for. It
 	// scopes the token to one project so a token minted under project A is
 	// rejected on a request resolved to project B (cross-project reuse).
@@ -90,6 +96,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 		"avatar_url": c.AvatarURL,
 		"iat":        iat,
 		"exp":        exp,
+	}
+	if c.Email != "" {
+		m["email_verified"] = c.EmailVerified
 	}
 	if c.Project != "" {
 		m["project"] = c.Project
@@ -252,6 +261,9 @@ func verifyToken(tokenStr string, kp KeyProvider, expectedTenant, expectedAudien
 	}
 	if v, ok := tok.Get("email"); ok {
 		claims.Email, _ = v.(string)
+	}
+	if v, ok := tok.Get("email_verified"); ok {
+		claims.EmailVerified, _ = v.(bool)
 	}
 	if v, ok := tok.Get("name"); ok {
 		claims.Name, _ = v.(string)

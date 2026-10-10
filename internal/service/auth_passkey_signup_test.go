@@ -384,6 +384,9 @@ func TestPasskeySignup_DecoyTokenShapeParity(t *testing.T) {
 			assert.NotEmpty(t, newRes.RefreshToken)
 			assert.NotEmpty(t, exRes.AccessToken)
 			assert.NotEmpty(t, exRes.RefreshToken)
+			// The in-flow code proved the address, so both say so.
+			assert.Equal(t, true, tokenPayload(t, newRes.AccessToken)["email_verified"])
+			assert.Equal(t, true, tokenPayload(t, exRes.AccessToken)["email_verified"])
 		})
 	}
 }
