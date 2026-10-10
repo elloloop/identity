@@ -17,9 +17,10 @@ import (
 )
 
 // Graph data keys the audit logger writes (pkg/audit, unexported), read back
-// to assert what a refused SCIM request recorded.
+// to assert what a SCIM request recorded.
 const (
 	fieldActor     = "2"
+	fieldTarget    = "3"
 	fieldIPAddress = "4"
 	fieldUserAgent = "5"
 	fieldSuccess   = "6"

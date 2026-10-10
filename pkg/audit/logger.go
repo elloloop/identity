@@ -121,6 +121,12 @@ const (
 	// or repair) and, when an account merged into it gave the spelling up,
 	// that account (`freed_from`). Never the address.
 	EventEmailCanonicalized EventType = "email_canonicalized"
+	// EventEmailUnverified records an account's email left unverified because
+	// a write moved it to a mailbox nobody has proven: a SCIM PUT or PATCH to
+	// another mailbox. The target is the account. Details carry the `source`
+	// (scim) and whether the account read verified before the write
+	// (`was_verified`). Never the address.
+	EventEmailUnverified EventType = "email_unverified"
 
 	// EventAnonymousSignIn records the creation of a credential-less
 	// account. EventAnonymousUpgraded records that account gaining a
@@ -280,6 +286,9 @@ var validEventTypes = map[EventType]struct{}{
 	EventUserDeactivated:               {},
 	EventUserReactivated:               {},
 	EventUserDeleted:                   {},
+	EventAccountMerged:                 {},
+	EventEmailCanonicalized:            {},
+	EventEmailUnverified:               {},
 	EventAnonymousSignIn:               {},
 	EventAnonymousUpgraded:             {},
 	EventAccountDeletionRequested:      {},

@@ -392,9 +392,12 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 		// Stamp updated_at so meta.lastModified reflects this write.
 		"updated_at": time.Now().UnixMilli(),
 	}
-	unverifyOnEmailChange(fields, existing, email)
+	unverified := unverifyOnEmailChange(fields, existing, email)
 	if err := s.repo.UpdateUser(ctx, id, fields); err != nil {
 		return scim.User{}, mapStoreErr(err)
+	}
+	if unverified {
+		s.auditEmailUnverified(ctx, existing)
 	}
 	// A PUT that flips the user to inactive must take effect immediately, the
 	// same as a PATCH active:false — otherwise a deprovisioned account keeps
@@ -424,12 +427,24 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 // the new address, it does not prove the user receives mail there. It clears
 // the flag whatever the read said, so a verification of the old address
 // landing between the read and this write cannot carry over to the new one.
-func unverifyOnEmailChange(fields map[string]any, before *service.User, email string) {
+// It reports whether it cleared the flag.
+func unverifyOnEmailChange(fields map[string]any, before *service.User, email string) bool {
 	if service.ProofCarriesTo(before.Email, email) {
-		return
+		return false
 	}
 	fields["email_verified"] = false
 	fields["email_verified_at"] = int64(0)
+	return true
+}
+
+// auditEmailUnverified records that a SCIM write left the account's email
+// unverified. It is recorded for every such write, not only one that read
+// verified, because the write clears a verification that lands after the read.
+func (s *repoSCIMStore) auditEmailUnverified(ctx context.Context, before *service.User) {
+	s.logAudit(ctx, audit.EventEmailUnverified, before.ID, map[string]any{
+		"source":       scimAuditSource,
+		"was_verified": before.EmailVerified,
+	})
 }
 
 // followEmailChange releases the account address that spells the old email
@@ -472,6 +487,7 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 	}
 
 	fields := map[string]any{}
+	unverified := false
 	// userName and email both map to the host email column; an explicit email
 	// wins when both are present, and only the value that is stored is
 	// validated, so an IdP whose userName is not an address can still send
@@ -486,7 +502,7 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 			return scim.User{}, err
 		}
 		fields["email"] = email
-		unverifyOnEmailChange(fields, existing, email)
+		unverified = unverifyOnEmailChange(fields, existing, email)
 	}
 	if patch.ExternalID != nil {
 		fields["external_id"] = *patch.ExternalID
@@ -515,6 +531,9 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 
 	if err := s.repo.UpdateUser(ctx, id, fields); err != nil {
 		return scim.User{}, mapStoreErr(err)
+	}
+	if unverified {
+		s.auditEmailUnverified(ctx, existing)
 	}
 	if deactivate {
 		if err := s.revokeUserAccess(ctx, id); err != nil {
