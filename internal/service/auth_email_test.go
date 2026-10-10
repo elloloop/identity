@@ -430,6 +430,54 @@ func TestVerifyEmail_Success(t *testing.T) {
 	}
 }
 
+// A verification link proves only the address it was mailed to. Once the
+// account holds another address, redeeming it must not verify that address,
+// and the link is spent.
+func TestVerifyEmail_AddressChangedSinceSendIsRefused(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	user := seedUser(repo, "before@test.com", "x", "active")
+	if err := svc.SendEmailVerification(ctx, user.ID, EmailLinkParams{}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	tok := extractTokenFromLink(t, rec.Sent()[0].Text)
+	if err := repo.UpdateUser(ctx, user.ID, map[string]any{"email": "after@test.com"}); err != nil {
+		t.Fatalf("change email: %v", err)
+	}
+
+	if _, err := svc.VerifyEmail(ctx, tok); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("want ErrUnauthenticated, got %v", err)
+	}
+	if got, _ := repo.GetUser(ctx, user.ID); got.EmailVerified {
+		t.Errorf("the new address was verified by a link mailed to the old one")
+	}
+	if stored, _ := repo.FindEmailVerificationTokenByHash(ctx, sha256Hex(tok)); stored == nil || stored.ConsumedAt == 0 {
+		t.Errorf("the refused token should be consumed; stored=%+v", stored)
+	}
+}
+
+// A link mailed to another spelling of the same mailbox still verifies it.
+func TestVerifyEmail_SameMailboxSpellingVerifies(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	user := seedUser(repo, "First.Last@gmail.com", "x", "active")
+	if err := svc.SendEmailVerification(ctx, user.ID, EmailLinkParams{}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	tok := extractTokenFromLink(t, rec.Sent()[0].Text)
+	if err := repo.UpdateUser(ctx, user.ID, map[string]any{"email": "firstlast@gmail.com"}); err != nil {
+		t.Fatalf("canonicalize email: %v", err)
+	}
+
+	got, err := svc.VerifyEmail(ctx, tok)
+	if err != nil {
+		t.Fatalf("VerifyEmail: %v", err)
+	}
+	if !got.EmailVerified {
+		t.Errorf("the same mailbox should be verified")
+	}
+}
+
 func TestVerifyEmail_InvalidToken(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	_, err := svc.VerifyEmail(context.Background(), "deadbeef")
