@@ -158,7 +158,6 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 	if err != nil {
 		return nil, err
 	}
-	s.updateLastLogin(ctx, userID)
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {

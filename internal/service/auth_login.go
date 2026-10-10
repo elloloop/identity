@@ -433,7 +433,10 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
 	}
 
-	s.updateLastLogin(ctx, user.ID)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	if err != nil {
+		return nil, err
+	}
 	s.logger.Info("local_login_success", zap.String(identifierKey, redactIdentifier(identifier)), zap.String("user_id", user.ID))
 	s.audit.Log(
 		ctx, audit.EventLoginSuccess,
@@ -441,11 +444,6 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"method": "password"}),
 	)
-
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
-	if err != nil {
-		return nil, err
-	}
 	return &LoginResult{
 		User:         user,
 		AccessToken:  accessToken,
@@ -860,8 +858,6 @@ func (s *AuthService) OAuthLogin(
 	if err != nil {
 		return nil, err
 	}
-	// Stamped once the session is issued, not for a sign-in the gate refused.
-	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info(
 		"oauth_login_success",
 		zap.String("email", redactEmail(email)),

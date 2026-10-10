@@ -173,7 +173,6 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 
 	// The sign-in happened when the issued password was proven; the ticket
 	// carries that moment as the session's auth_time.
-	s.updateLastLogin(ctx, user.ID)
 	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, s.nowMs(), claims.AuthTime*1000)
 	if err != nil {
 		return nil, err

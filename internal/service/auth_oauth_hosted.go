@@ -338,7 +338,6 @@ func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAge
 		return nil, err
 	}
 
-	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info("oauth_code_redeemed", zap.String("user_id", user.ID))
 	s.audit.Log(
 		ctx, audit.EventOAuthLogin,
