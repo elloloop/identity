@@ -243,7 +243,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	// receiving sessions through QR. They run before the consume so a refusal
 	// leaves the hand-off approved: once the account is eligible (its address
 	// verified, say) the device's next poll within the window completes.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateQrPoll); err != nil {
 		return nil, err
 	}
 	if !user.IsAnonymous {
@@ -251,7 +251,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 			return nil, err
 		}
 	}
-	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateQrPoll); err != nil {
 		return nil, err
 	}
 

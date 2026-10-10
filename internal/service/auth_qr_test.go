@@ -113,7 +113,7 @@ func TestPollQrLogin_IneligibleAccountRefusedBeforeConsuming(t *testing.T) {
 }
 
 // With verification required, a QR hand-off into an account whose address is
-// unproven is refused before it is consumed, audited at the sign-in gate and
+// unproven is refused before it is consumed, audited at the QR poll gate and
 // sent a verification email; once the address is verified the same hand-off
 // completes.
 func TestPollQrLogin_UnverifiedAddressRefusedBeforeConsuming(t *testing.T) {
@@ -131,7 +131,7 @@ func TestPollQrLogin_UnverifiedAddressRefusedBeforeConsuming(t *testing.T) {
 	assert.Nil(t, res)
 	requireQrSessionStatus(ctx, t, repo, sessionID, "approved")
 	assert.Zero(t, refreshTokenCount(repo, user.ID))
-	assert.Equal(t, 1, writer.countByEventTypeAndDetail("login_failure", "gate", "sign_in"))
+	assert.Equal(t, 1, writer.countByEventTypeAndDetail("login_failure", "gate", "qr_poll"))
 	assert.Len(t, rec.Sent(), 1, "a refused sign-in is sent a verification email")
 
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": time.Now().UnixMilli()}))
@@ -162,4 +162,61 @@ func TestPollQrLogin_ApprovedSessionExpires(t *testing.T) {
 	assert.Empty(t, res.AccessToken)
 	requireQrSessionStatus(ctx, t, repo, sessionID, "expired")
 	assert.Zero(t, refreshTokenCount(repo, user.ID))
+}
+
+// A refused poll leaves the hand-off approved, so the device can replay it at
+// will: each account's refusal is audited once per window for each reason,
+// however often it polls, and the next window records it again.
+func TestPollQrLogin_RefusalAuditPaced(t *testing.T) {
+	cases := []struct {
+		name    string
+		refuse  func(svc *AuthService, now time.Time) map[string]any
+		wantErr error
+		count   func(w *recordingAuditWriter) int
+	}{
+		{
+			name: "unverified address",
+			refuse: func(svc *AuthService, _ time.Time) map[string]any {
+				svc.cfg.AuthRequireVerifiedEmail = true
+				return map[string]any{"email_verified": false, "email_verified_at": int64(0)}
+			},
+			wantErr: ErrEmailVerificationRequired,
+			count: func(w *recordingAuditWriter) int {
+				return w.countByEventTypeAndDetail("login_failure", "gate", "qr_poll")
+			},
+		},
+		{
+			name: "locked",
+			refuse: func(_ *AuthService, now time.Time) map[string]any {
+				return map[string]any{"locked_until": now.Add(time.Hour).UnixMilli()}
+			},
+			wantErr: ErrAccountLocked,
+			count:   func(w *recordingAuditWriter) int { return w.countByEventType("login_locked") },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			writer := newRecordingAuditWriter()
+			svc := newTestAuthServiceWithAudit(t, repo, writer)
+			ctx := context.Background()
+			now := time.Now()
+			svc.nowFunc = func() time.Time { return now }
+			svc.cfg.QRLoginExpirySeconds = int(2 * replayedRefusalAuditWindow / time.Second)
+			user := seedUser(repo, "qr-replayer@example.com", "", StatusActive)
+			sessionID, secret := approvedQrLogin(ctx, t, svc, user)
+			require.NoError(t, repo.UpdateUser(ctx, user.ID, tc.refuse(svc, now)))
+
+			for range 5 {
+				_, err := svc.PollQrLogin(ctx, sessionID, secret, "10.0.0.1", "agent")
+				require.ErrorIs(t, err, tc.wantErr)
+			}
+			assert.Equal(t, 1, tc.count(writer))
+
+			now = now.Add(replayedRefusalAuditWindow)
+			_, err := svc.PollQrLogin(ctx, sessionID, secret, "10.0.0.1", "agent")
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, 2, tc.count(writer), "the next window records the refusal again")
+		})
+	}
 }

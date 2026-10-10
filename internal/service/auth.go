@@ -1360,9 +1360,9 @@ type AuthService struct {
 	webAssurance      assurance.Verifier
 	emailThrottle     *keyCooldown
 	signupThrottle    *keyCooldown
-	// refusedRefreshAudits paces the audit rows of refused refreshes
-	// (refusedRefreshAuditWindow).
-	refusedRefreshAudits *keyCooldown
+	// replayedRefusalAudits paces the audit rows of refusals a caller can
+	// replay at will (replayedRefusalAuditWindow).
+	replayedRefusalAudits *keyCooldown
 	// usernameProbes caps "username taken" answers per client IP
 	// (config.RateLimitUsernameTakenPerIP).
 	usernameProbes *probeBudget
@@ -1605,7 +1605,7 @@ func NewAuthServiceWithOAuth(
 		logger:                 logger,
 		oauthResolver:          newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
 		emailThrottle:          newKeyCooldown(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
-		refusedRefreshAudits:   newKeyCooldown(refusedRefreshAuditWindow.Milliseconds(), 0),
+		replayedRefusalAudits:  newKeyCooldown(replayedRefusalAuditWindow.Milliseconds(), 0),
 		signupThrottle:         newKeyCooldown(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		usernameProbes:         newProbeBudget(rateLimitWindowMs(cfg), cfg.RateLimitUsernameTakenPerIP),
 		phoneThrottle:          newKeyCooldown(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
@@ -1869,25 +1869,29 @@ func (s *AuthService) needsEmailVerification(user *User) bool {
 }
 
 // sessionGate is the step a gate on issuing a session refuses at: a sign-in,
-// or the refresh of a session already issued.
+// the refresh of a session already issued, or the poll that collects an
+// approved QR hand-off.
 type sessionGate string
 
 const (
 	sessionGateSignIn  sessionGate = "sign_in"
 	sessionGateRefresh sessionGate = "refresh"
+	sessionGateQrPoll  sessionGate = "qr_poll"
 )
 
-// refusedRefreshAuditWindow is how often one account's refresh refused for
-// one reason is audited. A refusal that keeps the refresh token (an unproven
+// replayedRefusalAuditWindow is how often one account's refusal for one
+// reason at a replayable step (a refresh, a QR poll) is audited. A refusal
+// that keeps the refresh token or leaves the hand-off approved (an unproven
 // address, a missing date of birth, a lockout) can be replayed at will, and
 // every replay would otherwise write a row.
-const refusedRefreshAuditWindow = 10 * time.Minute
+const replayedRefusalAuditWindow = 10 * time.Minute
 
 // refusalAuditDue reports whether a gate's refusal is to be audited: a
-// sign-in's always is; a refused refresh's at most once per account and
-// reason per refusedRefreshAuditWindow on each replica.
+// sign-in's always is; a replayable step's at most once per account, step
+// and reason per replayedRefusalAuditWindow on each replica.
 func (s *AuthService) refusalAuditDue(user *User, gate sessionGate, reason string) bool {
-	return gate == sessionGateSignIn || s.refusedRefreshAudits.allow(user.ID+"\x00"+reason, s.nowMs())
+	return gate == sessionGateSignIn ||
+		s.replayedRefusalAudits.allow(user.ID+"\x00"+string(gate)+"\x00"+reason, s.nowMs())
 }
 
 // auditSessionRefusal records a gate's refusal to issue a session as
@@ -1907,14 +1911,15 @@ func (s *AuthService) auditSessionRefusal(ctx context.Context, user *User, ipAdd
 
 // enforceVerifiedEmail refuses a session to an account whose address is
 // unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on, audited with
-// reason email_not_verified. A refused sign-in also sends a verification email, best-effort and throttled:
-// a failure to send never changes the refusal.
+// reason email_not_verified. A refused sign-in or QR poll also sends a
+// verification email, best-effort and throttled: a failure to send never
+// changes the refusal.
 func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate) error {
 	if !s.needsEmailVerification(user) {
 		return nil
 	}
 	s.auditSessionRefusal(ctx, user, ipAddr, userAgent, gate, "email_not_verified")
-	if gate == sessionGateSignIn {
+	if gate != sessionGateRefresh {
 		if err := s.sendEmailVerification(ctx, user.ID, emailLink{}); err != nil {
 			s.logger.Warn("login_verification_resend_failed",
 				zap.String("user_id", user.ID), zap.Error(err))

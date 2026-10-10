@@ -651,7 +651,9 @@ authorized it, so the approval alone cannot stand in for the check. The poll
 runs the checks every sign-in runs (account status and lockout, project access,
 the verified-email gate) before it consumes the hand-off, so a refused poll
 leaves the session approved and a later poll completes once the account is
-eligible. An approved session expires with its window like a pending one.
+eligible. Because a refused poll can be replayed at will, its audit row
+(`gate: qr_poll`) is written at most once per account and reason per 10
+minutes. An approved session expires with its window like a pending one.
 
 **SCIM provisioning** is deliberately outside the gate. It writes user records
 on an operator's instruction rather than an end user's, so an IdP can create or

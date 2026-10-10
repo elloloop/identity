@@ -43,7 +43,7 @@ func TestRefusedRefreshAudit_OncePerAccountPerWindow(t *testing.T) {
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Equal(t, 2, refused(), "another account's refusal is its own")
 
-	now = now.Add(refusedRefreshAuditWindow)
+	now = now.Add(replayedRefusalAuditWindow)
 	_, _, _, err = svc.RefreshToken(ctx, refreshes[0], "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Equal(t, 3, refused(), "the next window records the refusal again")
@@ -104,7 +104,7 @@ func TestRefusedRefreshAudit_LockoutPacedOnRefreshOnly(t *testing.T) {
 	}
 	assert.Equal(t, 3, locked())
 
-	now = now.Add(refusedRefreshAuditWindow)
+	now = now.Add(replayedRefusalAuditWindow)
 	_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
 	require.ErrorIs(t, err, ErrAccountLocked)
 	assert.Equal(t, 4, locked(), "the next window records the refusal again")
