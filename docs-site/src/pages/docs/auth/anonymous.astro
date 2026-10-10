@@ -188,7 +188,10 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
       address is unproven and, with
       <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> on, the response is
       the password arm's below: empty tokens, a verification email, and the
-      anonymous session revoked.
+      anonymous session revoked. Redeeming that verification email voids the
+      provider link, since the tagged address did not prove the stored one:
+      the user then signs in with an email code or link, or a password reset,
+      and links the provider again while signed in.
     </li>
     <li>
       <strong>Password, with <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code>

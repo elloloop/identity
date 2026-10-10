@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.14.0 → next — a proof of an address that cannot void the credentials added before it fails the sign-in (behaviour change)
+## v4.14.0 → next — a proof of an address that cannot void the credentials added before it fails the sign-in; a verification link voids what was added to an account a tagged provider address claimed; a link added while the address is being proven is voided too (behaviour changes)
 
 No schema change and no migration.
 
@@ -16,10 +16,40 @@ No schema change and no migration.
   recorded as `password_changed` (reason
   `planted_credentials_cleared_on_external_email_verification`), even when
   no password was cleared. It is now `unproven_credentials_voided`, with the
-  proof `method` (`passwordless` or `oauth`) and `password_cleared`,
-  `passkeys_cleared` and `provider_links_cleared`; each voided provider link
-  is still recorded as `identity_unlinked`. Update any alert or report that
+  proof `method` (`passwordless`, `oauth` or `verification_link`) and
+  `password_cleared`, `passkeys_cleared` and `provider_links_cleared`; each
+  voided provider link is still recorded as `identity_unlinked`. Update any alert or report that
   keyed on the old `password_changed` reason.
+- **A verification link voids what was added to an account a tagged
+  provider address claimed (behaviour change).** An account created, or an
+  anonymous account upgraded, through a provider that asserted a `+tag`
+  address outside Gmail holds the untagged address unproven, and whoever
+  signed in that way may not own that mailbox. Redeeming the
+  `SendEmailVerification` link for such an account now voids what was
+  added while the address was unproven, as a sign-in proof does: the
+  password, the passkeys and every provider link except one whose provider
+  asserted the account's own address, with its sessions revoked and
+  audited as `unproven_credentials_voided` with `method:
+  verification_link`. The owner then signs in with an email code or link,
+  or sets a password through `RequestPasswordReset`, and links the provider
+  again while signed in. On any other account the verification link still
+  keeps every credential: it completes the sign-up that set them. If the
+  voiding cannot be done, `VerifyEmail` fails with `unavailable` and the
+  link is not spent; redeem it again.
+  - Provider links now record the address the provider asserted, `+tag`
+    included, where sign-in and anonymous upgrade recorded it without the
+    tag. `ListLinkedIdentities` shows that spelling for links made from
+    now on. A link recorded before this release cannot be told apart, so an
+    account it claimed keeps its credentials on a verification link; a
+    sign-in proof still voids them.
+- **A provider link added while the address is being proven is voided too
+  (behaviour change).** A `LinkIdentity` call already in flight when an
+  account's address was first proven could insert its link after the proof
+  had listed the links it voids. The proof now lists them again once the
+  address is marked verified, and `LinkIdentity` on an account whose
+  address was unproven when the call began withdraws its link and fails
+  with `unauthenticated` if the address was proven before its insert
+  landed; sign in again and link the provider.
 
 ## v4.13.0 → v4.14.0 — a provider sign-in verifies only the address it asserted; a verification link proves only the address it was mailed to; a SCIM email change to another mailbox unverifies; proving an address voids provider links added before it; a tagged provider address cannot sign in to an existing account; no session or refresh for an unverified address on any path (behaviour changes); an `email_verified` access-token claim (additive)
 

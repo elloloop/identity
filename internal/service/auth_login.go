@@ -1040,7 +1040,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 			return nil, false, err
 		}
 	}
-	s.linkOAuthIdentity(ctx, user.ID, identity, emailStr, now)
+	s.linkOAuthIdentity(ctx, user.ID, identity, now)
 	if isNew {
 		s.logger.Info(
 			"oauth_user_provisioned",
@@ -1135,23 +1135,38 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	return newUser, true, nil
 }
 
-// externalProof is a sign-in method outside identity proving control of an
-// address: a provider's assertion, or an emailed code or link the user
-// redeemed.
+// externalProof is a method outside identity proving control of an address:
+// a provider's assertion, an emailed code or link the user redeemed at sign-in,
+// or a verification link redeemed for an account whose address a provider
+// claimed without proving it.
 type externalProof struct {
 	// address is the address proven.
 	address string
-	// method names the proof in logs and the audit trail: "oauth" or
-	// "passwordless".
+	// method names the proof in logs and the audit trail: "oauth",
+	// "passwordless" or "verification_link".
 	method string
 	// provider and providerUserID name the provider link that presented the
 	// proof, which is kept; both are empty for an emailed proof.
 	provider, providerUserID string
+	// keepsAssertingLinks keeps the links whose provider asserted the
+	// account's own address. Only a verification link sets it: a sign-in
+	// proof also voids links recorded before links kept the asserted
+	// spelling, whose canonical form reads as the account's address even
+	// when the provider asserted a tagged one.
+	keepsAssertingLinks bool
+}
+
+// voids reports whether the proof voids link on an account holding
+// accountEmail.
+func (p externalProof) voids(link *OAuthIdentity, accountEmail string) bool {
+	if link.Provider == p.provider && link.ProviderUserID == p.providerUserID {
+		return false
+	}
+	return !p.keepsAssertingLinks || !ProofCarriesTo(link.EmailAtLinkTime, accountEmail)
 }
 
 // markEmailVerifiedViaExternalProof flips the account to verified because an
-// external method (OAuth provider assertion, or an emailed OTP/magic-link the
-// user redeemed) proved control of proof.address. It does nothing unless that
+// external method proved control of proof.address. It does nothing unless that
 // proof carries to the account's own address (ProofCarriesTo): an account
 // found by a linked provider id may hold a different address, or none.
 // Any credential on the account was established BEFORE this proof — possibly
@@ -1164,16 +1179,15 @@ type externalProof struct {
 //     login does not pass through the email-verification gate, so without this
 //     an attacker who passkey-first-signed-up an unverified address would keep
 //     a working credential after the real owner takes the account over;
-//   - every provider link but the one presenting the proof is deleted. A link
+//   - every provider link the proof voids is deleted (see voids). A link
 //     signs in by provider id alone, so one added to the unverified account
 //     (by whoever held it, or by a sign-in from a +tag address outside Gmail
 //     that only resembles this one) would otherwise outlive the proof.
 //
 // It is a no-op when the email is already verified (the proof adds nothing).
-// It fails closed: if any step cannot complete, the sign-in fails with
-// ErrUnavailable and the address stays unproven, so the next proof sweeps
-// again. The address is marked verified last because the sweep runs only
-// while it is unproven.
+// It fails closed: if any step before the address is marked verified cannot
+// complete, the proof fails with ErrUnavailable and the address stays
+// unproven, so the next proof sweeps again.
 func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, proof externalProof, nowMs int64) error {
 	if user == nil || user.EmailVerified || !ProofCarriesTo(proof.address, user.Email) {
 		return nil
@@ -1188,12 +1202,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	if err != nil {
 		return s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
 	}
-	var plantedLinks []*OAuthIdentity
-	for _, link := range links {
-		if link.Provider != proof.provider || link.ProviderUserID != proof.providerUserID {
-			plantedLinks = append(plantedLinks, link)
-		}
-	}
+	plantedLinks := proof.voidedAmong(links, user.Email)
 	passwordCleared := user.PasswordHash != ""
 	passkeysCleared := len(passkeys) > 0
 	anyCleared := passwordCleared || passkeysCleared || len(plantedLinks) > 0
@@ -1204,13 +1213,8 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		// Doing it before the deletions means a failure further on leaves the
 		// credentials in place, so the retried proof finds them and revokes
 		// again.
-		if err := repo.DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
-			return s.externalProofSweepFailed(user.ID, proof, "revoke_refresh_tokens", err)
-		}
-		if s.cfg.RevocationMode == config.RevocationModeSession {
-			if err := repo.RevokeSessionsForUser(ctx, user.ID, nowMs); err != nil {
-				return s.externalProofSweepFailed(user.ID, proof, "revoke_sessions", err)
-			}
+		if err := s.revokeSessionsForProof(ctx, user.ID, proof, nowMs); err != nil {
+			return err
 		}
 	}
 	if passkeysCleared {
@@ -1218,21 +1222,8 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 			return s.externalProofSweepFailed(user.ID, proof, "delete_passkeys", err)
 		}
 	}
-	for _, link := range plantedLinks {
-		if err := repo.DeleteOAuthIdentity(ctx, user.ID, link.Provider, link.ProviderUserID); err != nil {
-			return s.externalProofSweepFailed(user.ID, proof, "delete_provider_link", err)
-		}
-		s.audit.Log(
-			ctx, audit.EventIdentityUnlinked,
-			audit.WithActor(user.ID),
-			audit.WithSuccess(true),
-			audit.WithDetails(map[string]any{
-				"provider":         link.Provider,
-				"provider_user_id": link.ProviderUserID,
-				"reason":           "planted_link_cleared_on_external_email_verification",
-				"method":           proof.method,
-			}),
-		)
+	if err := s.voidProviderLinks(ctx, user.ID, proof, plantedLinks); err != nil {
+		return err
 	}
 
 	patch := map[string]any{
@@ -1252,6 +1243,25 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	if passwordCleared {
 		user.PasswordHash = ""
 		user.PasswordChangeRequired = false
+	}
+
+	// A link a signed-in caller added after the listing above escaped it.
+	// LinkIdentity re-reads the account after its insert and withdraws a link
+	// added while the address was being proven; listing again now that the
+	// address is marked verified means one of the two sees the other.
+	links, err = repo.ListOAuthIdentitiesForUser(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "relist_provider_links", err)
+	}
+	if lateLinks := proof.voidedAmong(links, user.Email); len(lateLinks) > 0 {
+		if err := s.revokeSessionsForProof(ctx, user.ID, proof, nowMs); err != nil {
+			return err
+		}
+		if err := s.voidProviderLinks(ctx, user.ID, proof, lateLinks); err != nil {
+			return err
+		}
+		plantedLinks = append(plantedLinks, lateLinks...)
+		anyCleared = true
 	}
 
 	if anyCleared {
@@ -1276,16 +1286,63 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	return nil
 }
 
+// voidedAmong returns the links among links that the proof voids.
+func (p externalProof) voidedAmong(links []*OAuthIdentity, accountEmail string) []*OAuthIdentity {
+	var voided []*OAuthIdentity
+	for _, link := range links {
+		if p.voids(link, accountEmail) {
+			voided = append(voided, link)
+		}
+	}
+	return voided
+}
+
+// revokeSessionsForProof ends every session of the account the proof is
+// voiding credentials on.
+func (s *AuthService) revokeSessionsForProof(ctx context.Context, userID string, proof externalProof, nowMs int64) error {
+	repo := s.repo(ctx)
+	if err := repo.DeleteRefreshTokensForUser(ctx, userID); err != nil {
+		return s.externalProofSweepFailed(userID, proof, "revoke_refresh_tokens", err)
+	}
+	if s.cfg.RevocationMode == config.RevocationModeSession {
+		if err := repo.RevokeSessionsForUser(ctx, userID, nowMs); err != nil {
+			return s.externalProofSweepFailed(userID, proof, "revoke_sessions", err)
+		}
+	}
+	return nil
+}
+
+// voidProviderLinks deletes the links a proof voids, auditing each.
+func (s *AuthService) voidProviderLinks(ctx context.Context, userID string, proof externalProof, links []*OAuthIdentity) error {
+	for _, link := range links {
+		if err := s.repo(ctx).DeleteOAuthIdentity(ctx, userID, link.Provider, link.ProviderUserID); err != nil {
+			return s.externalProofSweepFailed(userID, proof, "delete_provider_link", err)
+		}
+		s.audit.Log(
+			ctx, audit.EventIdentityUnlinked,
+			audit.WithActor(userID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{
+				"provider":         link.Provider,
+				"provider_user_id": link.ProviderUserID,
+				"reason":           "planted_link_cleared_on_external_email_verification",
+				"method":           proof.method,
+			}),
+		)
+	}
+	return nil
+}
+
 // externalProofSweepFailed logs why the sweep stopped and returns the error
-// the sign-in fails with. The store's error stays in the log: these sign-ins
-// are unauthenticated, so the caller learns only to try again.
+// the proof fails with. The store's error stays in the log: these calls are
+// unauthenticated, so the caller learns only to try again.
 func (s *AuthService) externalProofSweepFailed(userID string, proof externalProof, step string, err error) error {
 	s.logger.Error("email_verified_external_sweep_failed",
 		zap.String("user_id", userID),
 		zap.String("method", proof.method),
 		zap.String("step", step),
 		zap.Error(err))
-	return fmt.Errorf("%w: the sign-in could not be completed", ErrUnavailable)
+	return fmt.Errorf("%w: the address could not be proven", ErrUnavailable)
 }
 
 // applyOAuthProfileUpdates patches the local user record with any new
@@ -1345,10 +1402,11 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 // fail the login since the user has already been authenticated. On a
 // duplicate-link race the duplicate is treated as success — the next
 // login will simply hit the fast path.
-func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, identity *oauth.Identity, email string, nowMs int64) {
+func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, identity *oauth.Identity, nowMs int64) {
 	if identity.ProviderUserID == "" || identity.Provider == "" {
 		return
 	}
+	email := assertedAddress(identity)
 	oi := &OAuthIdentity{
 		UserID:          userID,
 		Provider:        identity.Provider,

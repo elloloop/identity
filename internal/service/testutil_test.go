@@ -170,6 +170,13 @@ type fakeRepo struct {
 	// uniqueness check exactly as a racing winner would.
 	createUserHook func()
 
+	// listOAuthIdentitiesHook, when set, runs after ListOAuthIdentitiesForUser
+	// has read its result, and createOAuthIdentityHook at the start of
+	// CreateOAuthIdentity. Tests use them to land a concurrent write between a
+	// read and the write that follows it.
+	listOAuthIdentitiesHook func()
+	createOAuthIdentityHook func()
+
 	// The following, when non-nil, make the corresponding read/write return
 	// that error so a test can exercise the caller's repo-error-propagation
 	// path. Default nil (success).
@@ -1645,6 +1652,9 @@ func (r *fakeRepo) FindUserByProviderID(_ context.Context, provider, providerUse
 }
 
 func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *OAuthIdentity) error {
+	if r.createOAuthIdentityHook != nil {
+		r.createOAuthIdentityHook()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Application-enforced uniqueness: (provider, provider_user_id).
@@ -1662,8 +1672,8 @@ func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *OAuthIdentity) err
 
 func (r *fakeRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*OAuthIdentity, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.listOAuthIdentitiesErr != nil {
+		r.mu.Unlock()
 		return nil, r.listOAuthIdentitiesErr
 	}
 	var out []*OAuthIdentity
@@ -1672,6 +1682,11 @@ func (r *fakeRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) 
 			cp := *oi
 			out = append(out, &cp)
 		}
+	}
+	hook := r.listOAuthIdentitiesHook
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
 	}
 	return out, nil
 }

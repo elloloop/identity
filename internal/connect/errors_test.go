@@ -228,7 +228,7 @@ func TestToConnectErrorPasswordChangeRequired(t *testing.T) {
 // A transient store failure on a step a request cannot skip is retryable, so
 // it maps to Unavailable rather than Internal.
 func TestToConnectErrorUnavailable(t *testing.T) {
-	err := toConnectError(fmt.Errorf("%w: the sign-in could not be completed", service.ErrUnavailable))
+	err := toConnectError(fmt.Errorf("%w: the address could not be proven", service.ErrUnavailable))
 	if got := connect.CodeOf(err); got != connect.CodeUnavailable {
 		t.Fatalf("code = %v, want Unavailable", got)
 	}

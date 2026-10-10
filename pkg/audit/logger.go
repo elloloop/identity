@@ -159,10 +159,12 @@ const (
 
 	// EventUnprovenCredentialsVoided records the credentials added to an
 	// account while its address was unproven being voided by the first proof
-	// of that address (a passwordless email code or magic link, or a provider
-	// asserting it). Actor and target are the account; the details carry the
-	// proof's `method` (passwordless | oauth) and what was voided
-	// (`password_cleared`, `passkeys_cleared`, `provider_links_cleared`).
+	// of that address (a passwordless email code or magic link, a provider
+	// asserting it, or a verification link for an account a provider claimed
+	// with a tagged address). Actor and target are the account; the details
+	// carry the proof's `method` (passwordless | oauth | verification_link)
+	// and what was voided (`password_cleared`, `passkeys_cleared`,
+	// `provider_links_cleared`).
 	// Each voided provider link is also recorded as identity_unlinked.
 	EventUnprovenCredentialsVoided EventType = "unproven_credentials_voided"
 
