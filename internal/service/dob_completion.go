@@ -230,7 +230,6 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	// Completing the step continues the session it interrupted: the same
 	// sign-in, not a new one. A ticket from a refresh carries none, and the
 	// session it yields has none either.
-	s.updateLastLogin(ctx, user.ID)
 	anchor := claims.AuthTime * 1000
 	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, anchor, anchor)
 	if err != nil {

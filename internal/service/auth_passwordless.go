@@ -436,17 +436,15 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
 	}
 
-	s.updateLastLogin(ctx, user.ID)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	if err != nil {
+		return nil, err
+	}
 	s.logger.Info("passwordless_login_success",
 		zap.String("email", redactEmail(emailStr)),
 		zap.String("user_id", user.ID),
 		zap.String("method", method),
 		zap.Bool("new_user", isNew))
-
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
-	if err != nil {
-		return nil, err
-	}
 
 	s.audit.Log(ctx, audit.EventLoginSuccess,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),

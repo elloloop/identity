@@ -1824,7 +1824,9 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // fresh credential proof (issueTokens), an earlier sign-in's time for a step
 // that continues one, 0 for a flow that proves no credential. It is the one
 // place to auto-cancel a pending self-service deletion: an owner who signs
-// back in during the grace window has reclaimed the account.
+// back in during the grace window has reclaimed the account. It is also the
+// one place a sign-in is recorded as the account's last login, once the
+// session is issued: a sign-in refused on the way is not a login.
 func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
 	// The verified-email gate for every sign-in, and every step that
 	// continues one, refusing with a verification email so the user has a
@@ -1833,7 +1835,12 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 		return "", "", err
 	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionStartedAtMs, authTimeMs)
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionStartedAtMs, authTimeMs)
+	if err != nil {
+		return "", "", err
+	}
+	s.updateLastLogin(ctx, user.ID)
+	return accessToken, refreshToken, nil
 }
 
 // needsEmailVerification reports whether GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL

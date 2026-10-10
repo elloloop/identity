@@ -405,3 +405,17 @@ func TestRequiredPasswordChange_GatesRecheckedAtCompletion(t *testing.T) {
 		})
 	}
 }
+
+// A completion refused when its session is issued (the account has no date
+// of birth on a deployment that requires one) records no login.
+func TestRequiredPasswordChange_RefusedIssuanceRecordsNoLastLogin(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	issuedPasswordUser(t, repo, "issued@example.com")
+	ticket := passwordChangeTicket(t, svc, "issued@example.com")
+	enableAgeGate(t, svc, true)
+
+	_, err := svc.CompleteRequiredPasswordChange(context.Background(), ticket, strongPW, "", "203.0.113.10", "agent")
+	require.ErrorIs(t, err, ErrDOBRequired)
+	requireNoLastLogin(t, repo, "issued@example.com")
+}
