@@ -122,6 +122,10 @@ func (StubRepository) DeletePasskeyCredentialsForUser(context.Context, string) e
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) DeletePasskeyCredential(context.Context, string, string) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) GetPasskeyChallenge(context.Context, string) (*PasskeyChallengeRecord, error) {
 	return nil, ErrServiceUnavailable
 }

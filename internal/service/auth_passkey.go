@@ -162,7 +162,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		return nil, nil, fmt.Errorf("%w: attestation verification failed", ErrInvalidArgument)
 	}
 
-	// Read before the insert: see withdrawPasskeysIfAddressProven.
+	// Read before the insert: see withdrawPasskeyIfAddressProven.
 	holder, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, nil, err
@@ -192,7 +192,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 	// Single-use challenge -- delete it.
 	_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
 	if !holder.EmailVerified {
-		if err := s.withdrawPasskeysIfAddressProven(ctx, userID, result.CredentialID); err != nil {
+		if err := s.withdrawPasskeyIfAddressProven(ctx, userID, result.CredentialID); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -457,18 +457,18 @@ func coalesce(vals ...string) string {
 	return ""
 }
 
-// withdrawPasskeysIfAddressProven deletes the account's passkeys when its
-// address, unproven when the registration began, is proven now: see
-// withdrawIfAddressProven. The store deletes passkeys only per account, so
-// the passkeys registered before this one go with it, even when the proof
-// was a verification link that voids none.
-func (s *AuthService) withdrawPasskeysIfAddressProven(ctx context.Context, userID, credentialID string) error {
+// withdrawPasskeyIfAddressProven deletes the passkey this registration just
+// stored when the account's address, unproven when the registration began,
+// is proven now: see withdrawIfAddressProven. Only that credential goes; the
+// passkeys registered before it are the proof's to void or keep, and a
+// verification link keeps them.
+func (s *AuthService) withdrawPasskeyIfAddressProven(ctx context.Context, userID, credentialID string) error {
 	withdrawn, err := s.withdrawIfAddressProven(ctx, userID, attachedCredential{
 		kind:    "passkey",
 		refusal: "the passkey could not be registered",
 		fields:  []zap.Field{zap.String("credential_id", credentialID)},
 		withdraw: func(ctx context.Context) error {
-			return s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, userID)
+			return s.repo(ctx).DeletePasskeyCredential(ctx, userID, credentialID)
 		},
 	})
 	if err != nil || !withdrawn {

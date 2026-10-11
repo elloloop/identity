@@ -167,6 +167,21 @@ func (r *pgRepository) DeletePasskeyCredentialsForUser(ctx context.Context, user
 	return nil
 }
 
+func (r *pgRepository) DeletePasskeyCredential(ctx context.Context, userID, credentialID string) error {
+	if userID == "" || credentialID == "" {
+		return service.ErrNotFound
+	}
+	const q = `DELETE FROM passkeys WHERE project_id = $1 AND user_id = $2 AND credential_id = $3`
+	tag, err := r.pool.Exec(ctx, q, r.projectID, userID, credentialID)
+	if err != nil {
+		return wrapPgErr("DeletePasskeyCredential", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ErrNotFound
+	}
+	return nil
+}
+
 // ── Passkey challenges ────────────────────────────────────────────
 
 func (r *pgRepository) GetPasskeyChallenge(ctx context.Context, nodeID string) (*service.PasskeyChallengeRecord, error) {

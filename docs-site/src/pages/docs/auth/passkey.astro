@@ -106,11 +106,10 @@ await fetch("/identity.v1.IdentityService/CompletePasskeyRegistration", {
     since whoever added them may not own the address. A registration that
     began while the address was unproven and finds it proven when it
     completes therefore fails with <code>UNAUTHENTICATED</code>: sign in again
-    and register it once more. It cannot tell which proof landed, so it
-    deletes the account's passkeys, not only the one it registered: a passkey
-    registered earlier goes too even when the proof was a verification link,
-    which deletes none, and must be registered again. A registration that
-    cannot re-read the account deletes them the same way and fails with
+    and register it once more. It withdraws only the passkey it registered:
+    the account's earlier passkeys are left to the proof, so a verification
+    link, which deletes none, keeps them. A registration that cannot re-read
+    the account withdraws its passkey the same way and fails with
     <code>UNAVAILABLE</code>; one whose account was deleted meanwhile fails
     with <code>NOT_FOUND</code>.
   </p>

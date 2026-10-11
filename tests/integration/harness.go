@@ -1492,6 +1492,18 @@ func (r *MemRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID stri
 	return nil
 }
 
+func (r *MemRepo) DeletePasskeyCredential(_ context.Context, userID, credentialID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID && c.CredentialID == credentialID {
+			delete(r.passkeyCreds, id)
+			return nil
+		}
+	}
+	return service.ErrNotFound
+}
+
 // ── Passkey Challenges ────────────────────────────────────────────
 
 func (r *MemRepo) GetPasskeyChallenge(_ context.Context, nodeID string) (*service.PasskeyChallengeRecord, error) {

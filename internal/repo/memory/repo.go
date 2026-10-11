@@ -854,6 +854,18 @@ func (r *Repo) DeletePasskeyCredentialsForUser(_ context.Context, userID string)
 	return nil
 }
 
+func (r *Repo) DeletePasskeyCredential(_ context.Context, userID, credentialID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if userID != "" && c.UserID == userID && c.CredentialID == credentialID {
+			delete(r.passkeyCreds, id)
+			return nil
+		}
+	}
+	return service.ErrNotFound
+}
+
 // ── Passkey Challenges ────────────────────────────────────────────
 
 func (r *Repo) GetPasskeyChallenge(_ context.Context, nodeID string) (*service.PasskeyChallengeRecord, error) {

@@ -394,6 +394,12 @@ type Repository interface {
 	// external proof of email control voids it. Idempotent: a user with no
 	// passkeys is a no-op returning nil.
 	DeletePasskeyCredentialsForUser(ctx context.Context, userID string) error
+	// DeletePasskeyCredential removes the one passkey credential whose
+	// WebAuthn credential id is credentialID, only when userID owns it. It
+	// backs withdrawing a passkey registered while the account's address was
+	// unproven, which must leave the account's earlier passkeys alone.
+	// Returns ErrNotFound when the user owns no such credential.
+	DeletePasskeyCredential(ctx context.Context, userID, credentialID string) error
 
 	// Passkey challenges
 	GetPasskeyChallenge(ctx context.Context, nodeID string) (*PasskeyChallengeRecord, error)

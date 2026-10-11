@@ -401,13 +401,60 @@ func TestCompletePasskeyRegistration_WithdrawsAPasskeyWhenTheAddressIsProvenMean
 	assert.Empty(t, creds, "the passkey is withdrawn")
 }
 
+// A verification link that lands while a passkey registration runs proves
+// the address without voiding anything, so the registration withdraws only
+// the passkey it stored and the account keeps the passkeys it already had.
+func TestCompletePasskeyRegistration_VerificationLinkMidRegistrationKeepsEarlierPasskeys(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+	user := seedUser(repo, "owner@example.com", "", StatusActive)
+	earlier := seedPasskey(t, repo, user.ID, "earlier-cred")
+	challengeID := registrationChallenge(t, repo, user.ID)
+	repo.createPasskeyCredentialHook = func() {
+		repo.createPasskeyCredentialHook = nil
+		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
+	}
+
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	require.ErrorIs(t, err, ErrUnauthenticated)
+	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
+	require.NoError(t, err)
+	require.Len(t, creds, 1, "only the passkey this registration stored is withdrawn")
+	assert.Equal(t, earlier, creds[0].CredentialID)
+}
+
+// A proof that lands mid-registration and voids the passkey itself leaves
+// nothing for the registration to withdraw: the missing credential is not a
+// failure, and the call still reports the address proven.
+func TestCompletePasskeyRegistration_PasskeyAlreadyVoidedIsNotAFailure(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+	user := seedUser(repo, "victim@example.com", "", StatusActive)
+	challengeID := registrationChallenge(t, repo, user.ID)
+	repo.createPasskeyCredentialHook = func() {
+		repo.createPasskeyCredentialHook = nil
+		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
+		// The proof voids the passkey after its insert, before the
+		// registration re-reads the account. The hook runs under the lock.
+		repo.afterGetUserHook = func(*User) {
+			repo.afterGetUserHook = nil
+			clear(repo.passkeyCreds)
+		}
+	}
+
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
+	require.ErrorIs(t, err, ErrUnauthenticated)
+	assert.NotErrorIs(t, err, ErrUnavailable)
+}
+
 // A passkey registration whose re-read of the account fails cannot tell
-// whether the address was proven meanwhile, so it withdraws the passkey and
-// fails as unavailable.
+// whether the address was proven meanwhile, so it withdraws the passkey it
+// stored, keeps the earlier ones, and fails as unavailable.
 func TestCompletePasskeyRegistration_FailedRecheckWithdrawsThePasskey(t *testing.T) {
 	svc, repo, _ := newPasskeyVectorSvc(t)
 	ctx := context.Background()
 	user := seedUser(repo, "someone@example.com", "", StatusActive)
+	earlier := seedPasskey(t, repo, user.ID, "earlier-cred")
 	challengeID := registrationChallenge(t, repo, user.ID)
 	repo.createPasskeyCredentialHook = func() {
 		repo.createPasskeyCredentialHook = nil
@@ -419,7 +466,19 @@ func TestCompletePasskeyRegistration_FailedRecheckWithdrawsThePasskey(t *testing
 	repo.getUserErr = nil
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
 	require.NoError(t, err)
-	assert.Empty(t, creds, "the passkey is withdrawn")
+	require.Len(t, creds, 1, "only the passkey this registration stored is withdrawn")
+	assert.Equal(t, earlier, creds[0].CredentialID)
+}
+
+// seedPasskey stores a passkey credential for userID, as if registered
+// earlier, and returns its credential id.
+func seedPasskey(t *testing.T, repo *fakeRepo, userID, credentialID string) string {
+	t.Helper()
+	_, err := repo.CreatePasskeyCredential(context.Background(), &PasskeyCredRecord{
+		CredentialID: credentialID, UserID: userID, PublicKey: "pk",
+	})
+	require.NoError(t, err)
+	return credentialID
 }
 
 // A passkey registration that must withdraw its passkey and cannot fails as
@@ -432,7 +491,7 @@ func TestCompletePasskeyRegistration_FailedWithdrawIsUnavailable(t *testing.T) {
 	repo.createPasskeyCredentialHook = func() {
 		repo.createPasskeyCredentialHook = nil
 		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
-		repo.deletePasskeyCredsErr = errors.New("connection reset")
+		repo.deletePasskeyCredErr = errors.New("connection reset")
 	}
 
 	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")

@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.15.0 → v4.16.0 — sign-in hardening follow-ups (behaviour changes); `GATEWAY_RATE_LIMIT_QR_POLL_PER_IP` and `gate` on `login_locked` audit rows (additive)
+## v4.15.0 → v4.16.0 — sign-in hardening follow-ups (behaviour changes); `GATEWAY_RATE_LIMIT_QR_POLL_PER_IP` and `gate` on `login_locked` audit rows (additive); `Repository.DeletePasskeyCredential` (custom repositories must add it)
 
 No schema change and no migration.
 
@@ -66,17 +66,21 @@ No schema change and no migration.
   ending the account's sessions.
 - `CompletePasskeyRegistration` on an account whose address was unverified
   when the call began now re-reads the account after storing the passkey. If
-  the address was proven in the meantime, the account's passkeys are deleted
-  and the call fails with `unauthenticated` ("the account's address was
-  proven while registering; sign in again"), audited as `passkey_added` with
-  `success=false` and `reason=address_proven_while_registering`. Clients
+  the address was proven in the meantime, the passkey it just stored is
+  deleted and the call fails with `unauthenticated` ("the account's address
+  was proven while registering; sign in again"), audited as `passkey_added`
+  with `success=false` and `reason=address_proven_while_registering`. Clients
   should prompt the user to sign in again and register the passkey once
   more. This mirrors what `LinkIdentity` already does for provider links.
-  The store deletes passkeys only per account, so passkeys the account
-  registered earlier go too, even when the proof was a verification link that
-  voids none; they must be registered again. If the re-read fails, the
-  passkeys are deleted the same way and the call fails with `unavailable`; if
-  the account was deleted meanwhile, it fails with `not_found`.
+  Only that one passkey is withdrawn: passkeys the account registered earlier
+  are left to the proof, so a verification link, which voids none, keeps
+  them. If the re-read fails, the new passkey is deleted the same way and the
+  call fails with `unavailable`; if the account was deleted meanwhile, it
+  fails with `not_found`.
+- Custom `Repository` implementations must add
+  `DeletePasskeyCredential(ctx, userID, credentialID)`: delete the one
+  passkey with that WebAuthn credential id, only when `userID` owns it, and
+  return `ErrNotFound` when no row matches. No migration is needed.
 - The `unproven_credentials_voided` audit event's `password_cleared` field
   now reports whether the verified write actually cleared a password. A
   proof racing another proof of the same address no longer reports a

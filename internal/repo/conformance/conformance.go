@@ -784,6 +784,65 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("DeletePasskeyCredential", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			owner := createTestUser(t, r, "pk-one-owner@example.com")
+			other := createTestUser(t, r, "pk-one-other@example.com")
+			for _, c := range []struct{ cid, uid string }{
+				{"oc-1", owner}, {"oc-2", owner}, {"xc-1", other},
+			} {
+				if _, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{
+					CredentialID: c.cid, UserID: c.uid, PublicKey: "pk",
+				}); err != nil {
+					t.Fatalf("Create cred %s: %v", c.cid, err)
+				}
+			}
+			credIDs := func(userID string) []string {
+				t.Helper()
+				list, err := r.ListPasskeyCredentials(ctx, userID)
+				if err != nil {
+					t.Fatalf("List %s: %v", userID, err)
+				}
+				out := make([]string, 0, len(list))
+				for _, c := range list {
+					out = append(out, c.CredentialID)
+				}
+				sort.Strings(out)
+				return out
+			}
+
+			// Deletes only that credential and leaves the user's others.
+			if err := r.DeletePasskeyCredential(ctx, owner, "oc-1"); err != nil {
+				t.Fatalf("DeletePasskeyCredential: %v", err)
+			}
+			if got := credIDs(owner); len(got) != 1 || got[0] != "oc-2" {
+				t.Fatalf("owner creds after delete = %v, want [oc-2]", got)
+			}
+			if got, _ := r.GetPasskeyCredentialByCredID(ctx, "oc-1"); got != nil {
+				t.Fatalf("deleted credential still resolves: %#v", got)
+			}
+
+			// Scoped to the user: another user's credential id is not found
+			// and survives.
+			if err := r.DeletePasskeyCredential(ctx, owner, "xc-1"); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("delete another user's credential: err = %v, want ErrNotFound", err)
+			}
+			if got := credIDs(other); len(got) != 1 || got[0] != "xc-1" {
+				t.Fatalf("other user's creds = %v, want [xc-1]", got)
+			}
+
+			// Missing: an id no row has, and one already deleted.
+			for _, cid := range []string{"no-such-cred", "oc-1"} {
+				if err := r.DeletePasskeyCredential(ctx, owner, cid); !errors.Is(err, service.ErrNotFound) {
+					t.Fatalf("delete missing %s: err = %v, want ErrNotFound", cid, err)
+				}
+			}
+			if got := credIDs(owner); len(got) != 1 || got[0] != "oc-2" {
+				t.Fatalf("owner creds after missing deletes = %v, want [oc-2]", got)
+			}
+		})
+
 		t.Run("CreateUser_HonoursProvidedID", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
