@@ -181,6 +181,9 @@ type fakeRepo struct {
 	// read and the write that follows it.
 	listOAuthIdentitiesHook func()
 	createOAuthIdentityHook func()
+	// createPasskeyCredentialHook, when set, runs at the start of
+	// CreatePasskeyCredential, before the insert, for the same purpose.
+	createPasskeyCredentialHook func()
 
 	// The following, when non-nil, make the corresponding read/write return
 	// that error so a test can exercise the caller's repo-error-propagation
@@ -196,6 +199,8 @@ type fakeRepo struct {
 	// setEmailVerifiedErr, when set, fails every SetUserEmailVerified.
 	setEmailVerifiedErr  error
 	createPasskeyCredErr error
+	// deletePasskeyCredErr, when set, fails every DeletePasskeyCredential.
+	deletePasskeyCredErr error
 	getUserErr           error
 	getTotpCredentialErr error
 
@@ -809,6 +814,9 @@ func (r *fakeRepo) GetPasskeyCredentialByCredID(_ context.Context, credentialID 
 }
 
 func (r *fakeRepo) CreatePasskeyCredential(_ context.Context, rec *PasskeyCredRecord) (string, error) {
+	if r.createPasskeyCredentialHook != nil {
+		r.createPasskeyCredentialHook()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.createPasskeyCredErr != nil {
@@ -846,6 +854,21 @@ func (r *fakeRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID str
 		}
 	}
 	return nil
+}
+
+func (r *fakeRepo) DeletePasskeyCredential(_ context.Context, userID, credentialID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.deletePasskeyCredErr != nil {
+		return r.deletePasskeyCredErr
+	}
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID && c.CredentialID == credentialID {
+			delete(r.passkeyCreds, id)
+			return nil
+		}
+	}
+	return ErrNotFound
 }
 
 // ── Passkey Challenges ─────────────────────────────────────────────────
@@ -1565,27 +1588,28 @@ func (r *fakeRepo) MarkEmailVerificationTokenConsumed(_ context.Context, id stri
 	return nil
 }
 
-func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID, email string, atMs int64, clearPassword bool) (verified, passwordCleared bool, err error) {
 	if userID == "" || email == "" {
-		return false, errors.New("SetUserEmailVerified: missing user id or email")
+		return false, false, errors.New("SetUserEmailVerified: missing user id or email")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.setEmailVerifiedErr != nil {
-		return false, r.setEmailVerifiedErr
+		return false, false, r.setEmailVerifiedErr
 	}
 	u, ok := r.users[userID]
 	if !ok || u.Email != email {
-		return false, nil
+		return false, false, nil
 	}
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
 	u.UpdatedAt = time.UnixMilli(atMs)
+	passwordCleared = clearPassword && u.PasswordHash != ""
 	if clearPassword {
 		u.PasswordHash = ""
 		u.PasswordChangeRequired = false
 	}
-	return true, nil
+	return true, passwordCleared, nil
 }
 
 func (r *fakeRepo) SetUserIDVVerified(_ context.Context, userID string, atMs int64) error {

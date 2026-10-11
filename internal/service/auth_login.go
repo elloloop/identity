@@ -60,6 +60,21 @@ func getDummyPasswordHash() string {
 	return dummyPasswordHash
 }
 
+// errInvalidCredentials is the one answer a password sign-in gives whenever
+// the caller has not proven the password: the response must not tell an
+// unknown identifier from a wrong password.
+var errInvalidCredentials = fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+
+// refuseAsUnknownIdentifier answers a sign-in that must look exactly like one
+// naming no account: the same error, after the same bcrypt cost a wrong
+// password pays. Without the dummy check the refusal returns in microseconds
+// while a wrong password takes ~250ms, which tells the caller the account
+// exists.
+func refuseAsUnknownIdentifier(password string) error {
+	_ = passwords.Verify(password, getDummyPasswordHash())
+	return errInvalidCredentials
+}
+
 func finishPasswordSignupFloor(start time.Time) {
 	if wait := time.Until(start.Add(passwordSignupMinDuration)); wait > 0 {
 		time.Sleep(wait)
@@ -532,12 +547,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 	}
 
 	if user == nil {
-		// Run a dummy bcrypt verification so the response time for an
-		// unknown identifier is comparable to the wrong-password path. This
-		// closes the enumeration timing oracle (the bcrypt cost dominates
-		// wall time; without this, the no-user path returns in microseconds
-		// while the wrong-password path takes ~250ms).
-		_ = passwords.Verify(password, getDummyPasswordHash())
+		refusal := refuseAsUnknownIdentifier(password)
 		s.logger.Info("local_login_failed", zap.String("reason", "user_not_found"))
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
@@ -545,7 +555,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "user_not_found", identifierKey: identifier}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		return nil, loginPolicyDecision{}, refusal
 	}
 
 	// While locked, the account is refused whatever the password, and as an
@@ -556,17 +566,18 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 	// `login_locked` audit event tells operators "tried during lockout" from
 	// "threshold tripped".
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
-		_ = passwords.Verify(password, getDummyPasswordHash())
+		refusal := refuseAsUnknownIdentifier(password)
 		s.audit.Log(
 			ctx, audit.EventLoginLocked,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{
 				"reason":       "account_locked",
+				"gate":         string(sessionGateSignIn),
 				"locked_until": user.LockedUntil,
 			}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		return nil, loginPolicyDecision{}, refusal
 	}
 
 	// Lockout window has passed. Reset count + LockedUntil before
@@ -584,14 +595,14 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 	// none, so it is refused as an unknown identifier is, at the same cost:
 	// saying so would tell a caller with no credential that it exists.
 	if user.PasswordHash == "" {
-		_ = passwords.Verify(password, getDummyPasswordHash())
+		refusal := refuseAsUnknownIdentifier(password)
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "no_password_set"}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		return nil, loginPolicyDecision{}, refusal
 	}
 
 	if !passwords.Verify(password, user.PasswordHash) {
@@ -600,7 +611,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 		// lockout (fail-closed).
 		_, lockedNow, recErr := s.recordFailedLogin(ctx, user)
 		if recErr != nil {
-			return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+			return nil, loginPolicyDecision{}, errInvalidCredentials
 		}
 		if lockedNow {
 			s.audit.Log(
@@ -619,7 +630,7 @@ func (s *AuthService) verifyPasswordCredential(ctx context.Context, email, passw
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "password_mismatch"}),
 		)
-		return nil, loginPolicyDecision{}, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		return nil, loginPolicyDecision{}, errInvalidCredentials
 	}
 
 	// A username sign-in skipped the email-keyed access gate above; it gets
@@ -1226,10 +1237,10 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		return s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
 	}
 	plantedLinks := proof.voidedAmong(links, user.Email)
-	passwordCleared := user.PasswordHash != ""
+	hadPassword := user.PasswordHash != ""
 	passkeysCleared := len(passkeys) > 0
 
-	if passwordCleared || passkeysCleared || len(plantedLinks) > 0 {
+	if hadPassword || passkeysCleared || len(plantedLinks) > 0 {
 		// Sessions go first, as ConfirmPasswordReset ends them for a replaced
 		// password: one opened with a voided credential must not outlive it.
 		// Doing it before the deletions means a failure further on leaves the
@@ -1248,9 +1259,10 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		return err
 	}
 
-	// The password predates the proof of email control, so it cannot be
-	// trusted to belong to the verified owner. It is cleared with the flag.
-	verified, err := repo.SetUserEmailVerified(ctx, user.ID, user.Email, nowMs, passwordCleared)
+	// Any password the account holds at this write predates the proof of
+	// email control, including one set since the read above, so it cannot
+	// be trusted to belong to the verified owner. It is cleared with the flag.
+	verified, passwordCleared, err := repo.SetUserEmailVerified(ctx, user.ID, user.Email, nowMs, true)
 	if err != nil {
 		return s.externalProofSweepFailed(user.ID, proof, "mark_verified", err)
 	}
@@ -1262,15 +1274,24 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	}
 	user.EmailVerified = true
 	user.EmailVerifiedAt = nowMs
-	if passwordCleared {
-		user.PasswordHash = ""
-		user.PasswordChangeRequired = false
-	}
+	user.PasswordHash = ""
+	user.PasswordChangeRequired = false
 
-	// A link a signed-in caller added after the listing above escaped it.
-	// LinkIdentity re-reads the account after its insert and withdraws a link
-	// added while the address was being proven; listing again now that the
-	// address is marked verified means one of the two sees the other.
+	// A passkey or link a signed-in caller added after the listings above
+	// escaped them. CompletePasskeyRegistration and LinkIdentity re-read the
+	// account after their insert and withdraw what was added while the
+	// address was being proven; listing again now that the address is marked
+	// verified means one of the two sees the other.
+	passkeys, err = repo.ListPasskeyCredentials(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "relist_passkeys", err)
+	}
+	if len(passkeys) > 0 {
+		if err := repo.DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
+			return s.externalProofSweepFailed(user.ID, proof, "delete_passkeys", err)
+		}
+		passkeysCleared = true
+	}
 	links, err = repo.ListOAuthIdentitiesForUser(ctx, user.ID)
 	if err != nil {
 		return s.externalProofSweepFailed(user.ID, proof, "relist_provider_links", err)
@@ -1474,7 +1495,8 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 // in lockout cannot bypass the limit by switching authentication method.
 // When cfg.IDVRequired is set, unverified users are blocked with
 // ErrIDVRequired so the client can route them to BeginIdentityVerification.
-// A refused lockout is audited as login_locked when refusalAuditDue.
+// A refused lockout is audited as login_locked, with the gate that refused,
+// when refusalAuditDue.
 func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate) error {
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
 		if s.refusalAuditDue(user, gate, "account_locked") {
@@ -1484,6 +1506,7 @@ func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr
 				audit.WithSuccess(false),
 				audit.WithDetails(map[string]any{
 					"reason":       "account_locked",
+					"gate":         string(gate),
 					"locked_until": user.LockedUntil,
 				}),
 			)

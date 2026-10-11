@@ -208,7 +208,7 @@ func TestSecurity_QRLoginSession_SingleUse(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
 	require.NoError(t, err)
 
 	// First poll: returns tokens.

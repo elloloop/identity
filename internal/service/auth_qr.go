@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -97,7 +98,7 @@ func (s *AuthService) GetQrLoginSession(ctx context.Context, sessionID string) (
 // ── ApproveQrLogin ─────────────────────────────────────────────────────
 
 // ApproveQrLogin approves or rejects a QR login session. Returns the new status.
-func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, approve bool, userID, userAgent string) (string, error) {
+func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, approve bool, userID, ipAddr, userAgent string) (string, error) {
 	if sessionID == "" {
 		return "", fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
 	}
@@ -126,6 +127,9 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 
 	var newStatus string
 	if approve {
+		if err := s.checkQrApprover(ctx, userID, ipAddr, userAgent); err != nil {
+			return "", err
+		}
 		newStatus = "approved"
 		err = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 			"status":               "approved",
@@ -160,6 +164,37 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 		zap.Bool("approved", approve),
 	)
 	return newStatus, nil
+}
+
+// checkQrApprover refuses an approval from an account that could not sign in
+// itself: a still-valid access token outlives a deactivation or a lockout, and
+// the approval is a sign-in for another device. The poll re-checks at
+// collection, since the account can change after approving.
+func (s *AuthService) checkQrApprover(ctx context.Context, userID, ipAddr, userAgent string) error {
+	user, err := s.GetCurrentUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateQrApprove)
+}
+
+// qrApprovalCollectionGrace is how long past its window an approved hand-off
+// can still be collected. An approval may land just before the window closes,
+// and the device only sees it at its next poll; the grace covers a client's
+// poll interval with room to spare while keeping a refused hand-off from
+// outliving its window by much.
+const qrApprovalCollectionGrace = 30 * time.Second
+
+// qrCollectionClosed reports whether an open (pending or approved) session is
+// past the point a poll may collect it.
+func qrCollectionClosed(session *QrLoginSessionRecord, nowMs int64) bool {
+	switch session.Status {
+	case "pending":
+		return session.ExpiresAt < nowMs
+	case "approved":
+		return session.ExpiresAt+qrApprovalCollectionGrace.Milliseconds() < nowMs
+	}
+	return false
 }
 
 // ── PollQrLogin ────────────────────────────────────────────────────────
@@ -201,9 +236,9 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	status := session.Status
 
 	// An approved session expires too: a sign-in refused below leaves it
-	// approved, and the hand-off must not outlive its window waiting for the
-	// account to become eligible.
-	if (status == "pending" || status == "approved") && session.ExpiresAt < now {
+	// approved, and the hand-off must not outlive its window (and its
+	// collection grace) waiting for the account to become eligible.
+	if qrCollectionClosed(session, now) {
 		_ = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 			"status": "expired", "updated_at": now,
 		})
@@ -243,7 +278,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	// receiving sessions through QR. They run before the consume so a refusal
 	// leaves the hand-off approved: once the account is eligible (its address
 	// verified, say) the device's next poll within the window completes.
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateQrPoll); err != nil {
 		return nil, err
 	}
 	if !user.IsAnonymous {
@@ -251,7 +286,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 			return nil, err
 		}
 	}
-	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateQrPoll); err != nil {
 		return nil, err
 	}
 

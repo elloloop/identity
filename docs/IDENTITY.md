@@ -645,13 +645,24 @@ outlives the request that created it, and a project that tightens its policy in
 between would otherwise have every outstanding token as a hole in the new
 policy.
 
-**QR login** is gated at completion rather than at approval: polling mints an
+**QR login** is gated at completion as well as at approval: polling mints an
 independent session for the scanning device, which outlives the approval that
-authorized it, so the approval alone cannot stand in for the check. The poll
+authorized it, so the approval alone cannot stand in for the check. An approval
+is refused, with the codes a sign-in uses, from an account that could not sign
+in itself (deactivated, invited, locked, or unverified while identity
+verification is required); rejecting a hand-off is always allowed. The poll
 runs the checks every sign-in runs (account status and lockout, project access,
 the verified-email gate) before it consumes the hand-off, so a refused poll
 leaves the session approved and a later poll completes once the account is
-eligible. An approved session expires with its window like a pending one.
+eligible. Because a refused poll can be replayed at will, its audit row
+(`gate: qr_poll`) is written at most once per account and reason per 10
+minutes, and so is a locked approver's (`gate: qr_approve`), which can repeat
+the approval with the access token it still holds. An approved session expires with its window like a pending one, plus
+a 30-second grace so an approval landing just before the window closes can
+still be collected by the device's next poll. `InitiateQrLogin` counts against the per-IP
+login limit, and `PollQrLogin` against its own per-IP limit,
+`GATEWAY_RATE_LIMIT_QR_POLL_PER_IP` (default 120 per window), sized for a
+device that polls by design.
 
 **SCIM provisioning** is deliberately outside the gate. It writes user records
 on an operator's instruction rather than an end user's, so an IdP can create or

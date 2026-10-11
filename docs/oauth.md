@@ -185,9 +185,19 @@ Browser                 identity                       Provider
 
 ### Callback errors
 
-A callback whose signed state token (or its CSRF cookie) does not verify has
-no trusted `return_to`, so it answers `400` on the identity origin. Once the
-state token verifies, every refused sign-in is 302-redirected to
+A callback without a trusted `return_to` answers `400` on the identity origin,
+since there is nowhere safe to redirect. That is the case when:
+
+- the provider itself redirected back with an `error` (for example the user
+  declined consent), since the callback does not trust `return_to` before the
+  state token is checked;
+- the signed state token or its CSRF cookie does not verify;
+- the state token was minted for a different provider than the callback path
+  names; or
+- the state token was minted for a different project than the callback
+  request resolves to.
+
+Once all of these pass, every refused sign-in is 302-redirected to
 `return_to?error=<code>`, with no `code` parameter:
 
 | `error` | Meaning |

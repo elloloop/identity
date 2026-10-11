@@ -98,4 +98,31 @@ curl -sX POST http://localhost/identity.v1.IdentityService/SignOutEverywhere \\
     account is locked out after failed sign-ins does not, and keeps its
     refresh token, which rotates normally once the lockout ends.
   </p>
+
+  <h2 id="refused-refresh-audit">Auditing a refused refresh</h2>
+  <p>
+    A refresh refused because the account's address is unverified, because it
+    has no date of birth on file (<code>GATEWAY_AGEGATE_REQUIRE_DOB</code>), or
+    because the account is locked out keeps its refresh token, so a client can
+    replay it without limit. Each replay is refused, but its audit row
+    (<code>login_failure</code> with <code>gate: refresh</code> and reason
+    <code>email_not_verified</code> or <code>dob_required</code>, or
+    <code>login_locked</code> with <code>gate: refresh</code>) is written at most once per account and reason
+    every <strong>10 minutes</strong> on each replica. The window is fixed: no
+    setting changes it. A refused sign-in is audited every time. Alerting that
+    counts refused refreshes therefore counts accounts per window, not
+    attempts.
+  </p>
+  <p>
+    QR sign-in is paced the same way, on the same window. A poll refused
+    because the account's address is unverified or the account is locked out
+    leaves the hand-off approved, so the device replays the refusal on every
+    poll; its row (<code>login_failure</code> with <code>gate: qr_poll</code>
+    and reason <code>email_not_verified</code>, or <code>login_locked</code>
+    with <code>gate: qr_poll</code>) is written at most once per account and
+    reason every 10 minutes on each replica. An approval refused because the
+    approving account is locked out can be repeated with the access token the
+    approver still holds; its <code>login_locked</code> row, with
+    <code>gate: qr_approve</code>, is paced the same way.
+  </p>
 </DocsLayout>

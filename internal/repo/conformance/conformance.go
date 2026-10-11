@@ -263,7 +263,7 @@ func RunConformance(t *testing.T, driver Driver) {
 
 			// Verified and unverified accounts are both returned, each with
 			// its stored email-verified state: the directory discloses it.
-			if ok, err := r.SetUserEmailVerified(ctx, a, "batch-a@example.com", 1_700_000_000_000, false); err != nil || !ok {
+			if ok, _, err := r.SetUserEmailVerified(ctx, a, "batch-a@example.com", 1_700_000_000_000, false); err != nil || !ok {
 				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
 			}
 			got, err = r.FindUsersByEmails(ctx, []string{"batch-a@example.com", "batch-b@example.com"})
@@ -781,6 +781,65 @@ func RunConformance(t *testing.T, driver Driver) {
 			// Idempotent: deleting again (now zero creds) is a no-op.
 			if err := r.DeletePasskeyCredentialsForUser(ctx, victim); err != nil {
 				t.Fatalf("DeletePasskeyCredentialsForUser idempotent: %v", err)
+			}
+		})
+
+		t.Run("DeletePasskeyCredential", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			owner := createTestUser(t, r, "pk-one-owner@example.com")
+			other := createTestUser(t, r, "pk-one-other@example.com")
+			for _, c := range []struct{ cid, uid string }{
+				{"oc-1", owner}, {"oc-2", owner}, {"xc-1", other},
+			} {
+				if _, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{
+					CredentialID: c.cid, UserID: c.uid, PublicKey: "pk",
+				}); err != nil {
+					t.Fatalf("Create cred %s: %v", c.cid, err)
+				}
+			}
+			credIDs := func(userID string) []string {
+				t.Helper()
+				list, err := r.ListPasskeyCredentials(ctx, userID)
+				if err != nil {
+					t.Fatalf("List %s: %v", userID, err)
+				}
+				out := make([]string, 0, len(list))
+				for _, c := range list {
+					out = append(out, c.CredentialID)
+				}
+				sort.Strings(out)
+				return out
+			}
+
+			// Deletes only that credential and leaves the user's others.
+			if err := r.DeletePasskeyCredential(ctx, owner, "oc-1"); err != nil {
+				t.Fatalf("DeletePasskeyCredential: %v", err)
+			}
+			if got := credIDs(owner); len(got) != 1 || got[0] != "oc-2" {
+				t.Fatalf("owner creds after delete = %v, want [oc-2]", got)
+			}
+			if got, _ := r.GetPasskeyCredentialByCredID(ctx, "oc-1"); got != nil {
+				t.Fatalf("deleted credential still resolves: %#v", got)
+			}
+
+			// Scoped to the user: another user's credential id is not found
+			// and survives.
+			if err := r.DeletePasskeyCredential(ctx, owner, "xc-1"); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("delete another user's credential: err = %v, want ErrNotFound", err)
+			}
+			if got := credIDs(other); len(got) != 1 || got[0] != "xc-1" {
+				t.Fatalf("other user's creds = %v, want [xc-1]", got)
+			}
+
+			// Missing: an id no row has, and one already deleted.
+			for _, cid := range []string{"no-such-cred", "oc-1"} {
+				if err := r.DeletePasskeyCredential(ctx, owner, cid); !errors.Is(err, service.ErrNotFound) {
+					t.Fatalf("delete missing %s: err = %v, want ErrNotFound", cid, err)
+				}
+			}
+			if got := credIDs(owner); len(got) != 1 || got[0] != "oc-2" {
+				t.Fatalf("owner creds after missing deletes = %v, want [oc-2]", got)
 			}
 		})
 
@@ -1786,8 +1845,8 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
-			if ok, err := r.SetUserEmailVerified(ctx, id, "ev@example.com", 555, false); err != nil || !ok {
-				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
+			if ok, cleared, err := r.SetUserEmailVerified(ctx, id, "ev@example.com", 555, false); err != nil || !ok || cleared {
+				t.Fatalf("SetUserEmailVerified = %v %v %v, want true false nil", ok, cleared, err)
 			}
 			got, _ := r.GetUser(ctx, id)
 			if got == nil || !got.EmailVerified || got.EmailVerifiedAt != 555 || got.UpdatedAt.UnixMilli() != 555 ||
@@ -1805,11 +1864,32 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
-			if ok, err := r.SetUserEmailVerified(ctx, id, "evp@example.com", 555, true); err != nil || !ok {
-				t.Fatalf("SetUserEmailVerified: %v %v", ok, err)
+			if ok, cleared, err := r.SetUserEmailVerified(ctx, id, "evp@example.com", 555, true); err != nil || !ok || !cleared {
+				t.Fatalf("SetUserEmailVerified = %v %v %v, want true true nil", ok, cleared, err)
 			}
 			got, _ := r.GetUser(ctx, id)
 			if got == nil || !got.EmailVerified || got.PasswordHash != "" || got.PasswordChangeRequired {
+				t.Fatalf("after Set: %+v", got)
+			}
+			// The report is of what the write found, so a second write has no
+			// password left to clear.
+			if ok, cleared, err := r.SetUserEmailVerified(ctx, id, "evp@example.com", 556, true); err != nil || !ok || cleared {
+				t.Fatalf("second SetUserEmailVerified = %v %v %v, want true false nil", ok, cleared, err)
+			}
+		})
+
+		t.Run("SetUserEmailVerified_ClearsNoPasswordOnAPasswordlessAccount", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{Email: "evn@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			if ok, cleared, err := r.SetUserEmailVerified(ctx, id, "evn@example.com", 555, true); err != nil || !ok || cleared {
+				t.Fatalf("SetUserEmailVerified = %v %v %v, want true false nil", ok, cleared, err)
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || !got.EmailVerified || got.PasswordHash != "" {
 				t.Fatalf("after Set: %+v", got)
 			}
 		})
@@ -1825,19 +1905,19 @@ func RunConformance(t *testing.T, driver Driver) {
 				t.Fatalf("CreateUser: %v", err)
 			}
 			for _, proven := range []string{"before@example.com", "Moved@example.com"} {
-				ok, err := r.SetUserEmailVerified(ctx, id, proven, 555, true)
-				if err != nil || ok {
-					t.Fatalf("SetUserEmailVerified(%q) = %v %v, want false nil", proven, ok, err)
+				ok, cleared, err := r.SetUserEmailVerified(ctx, id, proven, 555, true)
+				if err != nil || ok || cleared {
+					t.Fatalf("SetUserEmailVerified(%q) = %v %v %v, want false false nil", proven, ok, cleared, err)
 				}
 			}
 			got, _ := r.GetUser(ctx, id)
 			if got == nil || got.EmailVerified || got.EmailVerifiedAt != 0 || got.PasswordHash != "hash" {
 				t.Fatalf("after a refused Set: %+v", got)
 			}
-			if ok, err := r.SetUserEmailVerified(ctx, "no-such-user", "moved@example.com", 555, false); err != nil || ok {
+			if ok, _, err := r.SetUserEmailVerified(ctx, "no-such-user", "moved@example.com", 555, false); err != nil || ok {
 				t.Fatalf("missing user = %v %v, want false nil", ok, err)
 			}
-			if _, err := r.SetUserEmailVerified(ctx, id, "", 555, false); err == nil {
+			if _, _, err := r.SetUserEmailVerified(ctx, id, "", 555, false); err == nil {
 				t.Fatal("empty email: want an error")
 			}
 		})
@@ -2683,7 +2763,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runPaginationConformance(t, driver)
 	runFreshTenantConformance(t, driver)
 	runRoundTripConformance(t, driver)
-	runConcurrencyConformance(t, driver)
+	RunConcurrencyConformance(t, driver)
 	runMutationConformance(t, driver)
 	runKeyFidelityConformance(t, driver)
 	runSweeperBoundaryConformance(t, driver)

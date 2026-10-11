@@ -196,11 +196,10 @@ type Deps struct {
 	MetricsRegistry prometheus.Registerer
 
 	// SynchronousEmailSend forces request-phase credential-email sends to run
-	// inline instead of on a detached goroutine. Production leaves it false, so
-	// New enables asynchronous dispatch (decoupling SMTP latency from RPC
-	// response time — the send timing oracle). Full-stack tests that read the
-	// recording mailer right after a request set it true for deterministic
-	// observation without polling.
+	// inline instead of on a detached goroutine, for full-stack tests that read
+	// the recording mailer right after a request. Production leaves it false:
+	// inline, the response time follows the account lookup and the SMTP send,
+	// and so tells a caller whether the address has an account.
 	SynchronousEmailSend bool
 }
 
@@ -444,6 +443,18 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// used to mass-create accounts or pump verification mail.
 			PathPrefix: "/identity.v1.IdentityService/BeginPasskeySignup", Tag: "passkey_signup",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
+			// QR sign-in is unauthenticated at both ends the new device
+			// calls: initiating writes a session row, so it is held to the
+			// login budget like the other sign-in starts; polling is
+			// frequent by design and has its own, larger budget.
+			PathPrefix: identityconnectgen.IdentityServiceInitiateQrLoginProcedure, Tag: "qr_initiate",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			PathPrefix: identityconnectgen.IdentityServicePollQrLoginProcedure, Tag: "qr_poll",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitQrPollPerIP, 0),
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/VerifyTotp", Tag: "totp_verify",
@@ -714,7 +725,9 @@ func New(deps Deps) (*Built, error) {
 	// latency cannot time the gated send/no-send decision. Tests that read the
 	// mailer synchronously opt out via Deps.SynchronousEmailSend.
 	if !deps.SynchronousEmailSend {
-		authSvc = authSvc.WithAsyncEmailDispatch()
+		if authSvc, err = authSvc.WithAsyncEmailDispatch(deps.MetricsRegistry); err != nil {
+			return nil, err
+		}
 	}
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)

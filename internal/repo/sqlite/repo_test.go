@@ -56,6 +56,31 @@ func TestConformance(t *testing.T) {
 	})
 }
 
+// TestConcurrencyConformance_FileWAL runs the concurrency conformance cases,
+// the provider-link race among them, against a file-backed store opened as a
+// deployment opens it: WAL journal and a pool of DefaultMaxConns connections.
+// TestConformance's in-memory store is pinned to one connection, which
+// serialises every writer before SQLite's write lock is ever contended.
+func TestConcurrencyConformance_FileWAL(t *testing.T) {
+	t.Parallel()
+	conformance.RunConcurrencyConformance(t, conformance.Driver{
+		Name: "sqlite-file",
+		NewRepo: func(t *testing.T) service.Repository {
+			t.Helper()
+			ctx := context.Background()
+			repo, err := New(ctx, Config{Path: t.TempDir() + "/identity.db", ProjectID: "sqlite-conformance"})
+			if err != nil {
+				t.Fatalf("open file-backed sqlite: %v", err)
+			}
+			t.Cleanup(repo.Close)
+			if err := repo.EnsureDefaultProject(ctx, "sqlite-conformance", "sqlite-conformance"); err != nil {
+				t.Fatalf("seed default project: %v", err)
+			}
+			return repo
+		},
+	})
+}
+
 // TestSQLite_CaseInsensitiveEmail verifies the lower(email) unique index
 // gives case-insensitive lookup + uniqueness, the SQLite analogue of the
 // postgres smoke test (the conformance suite only asserts exact-match).

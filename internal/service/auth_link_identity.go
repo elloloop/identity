@@ -122,31 +122,59 @@ func (s *AuthService) LinkIdentity(
 	return oi, nil
 }
 
-// withdrawLinkIfAddressProven deletes a link just added to an account whose
-// address was unproven when the call began, if it is proven now. The first
-// proof of an address voids the links added before it, listing them once
-// before marking the address verified and once after; a link inserted
-// between the two escapes the first listing. Reading the account after the
-// insert means either the second listing sees the link or this read sees the
-// proof. A read that fails withdraws the link too, so the call fails closed.
-func (s *AuthService) withdrawLinkIfAddressProven(ctx context.Context, oi *OAuthIdentity) error {
-	account, err := s.repo(ctx).GetUser(ctx, oi.UserID)
+// attachedCredential is a credential a call has just attached to an account
+// whose address was unproven when the call began: what withdraws it, and how
+// a failure to withdraw it is logged (kind_withdraw_failed,
+// kind_recheck_failed) and refused.
+type attachedCredential struct {
+	kind     string
+	refusal  string
+	fields   []zap.Field
+	withdraw func(context.Context) error
+}
+
+// withdrawIfAddressProven withdraws c if the account's address is proven now,
+// and reports whether it did. The first proof of an address voids the
+// credentials attached before it, listing them once before marking the
+// address verified and once after; one attached between the two escapes both
+// listings. Reading the account after the attach means either the second
+// listing sees the credential or this read sees the proof. A read that fails
+// withdraws the credential too, so the call fails closed. An account deleted
+// meanwhile takes the credential with it and is ErrNotFound.
+func (s *AuthService) withdrawIfAddressProven(ctx context.Context, userID string, c attachedCredential) (bool, error) {
+	account, err := s.repo(ctx).GetUser(ctx, userID)
 	if err == nil && account != nil && !account.EmailVerified {
-		return nil
+		return false, nil
 	}
-	if delErr := s.repo(ctx).DeleteOAuthIdentity(ctx, oi.UserID, oi.Provider, oi.ProviderUserID); delErr != nil {
-		s.logger.Error("identity_link_withdraw_failed",
-			zap.String("user_id", oi.UserID),
-			zap.String("provider", oi.Provider),
-			zap.Error(delErr))
-		return fmt.Errorf("%w: the provider could not be linked", ErrUnavailable)
+	fields := append([]zap.Field{zap.String("user_id", userID)}, c.fields...)
+	if delErr := c.withdraw(ctx); delErr != nil && !errors.Is(delErr, ErrNotFound) {
+		s.logger.Error(c.kind+"_withdraw_failed", append(fields, zap.Error(delErr))...)
+		return false, fmt.Errorf("%w: %s", ErrUnavailable, c.refusal)
 	}
 	if err != nil {
-		s.logger.Error("identity_link_recheck_failed",
-			zap.String("user_id", oi.UserID),
-			zap.String("provider", oi.Provider),
-			zap.Error(err))
-		return fmt.Errorf("%w: the provider could not be linked", ErrUnavailable)
+		s.logger.Error(c.kind+"_recheck_failed", append(fields, zap.Error(err))...)
+		return false, fmt.Errorf("%w: %s", ErrUnavailable, c.refusal)
+	}
+	if account == nil {
+		return false, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	return true, nil
+}
+
+// withdrawLinkIfAddressProven deletes a link just added to an account whose
+// address was unproven when the call began, if it is proven now: see
+// withdrawIfAddressProven.
+func (s *AuthService) withdrawLinkIfAddressProven(ctx context.Context, oi *OAuthIdentity) error {
+	withdrawn, err := s.withdrawIfAddressProven(ctx, oi.UserID, attachedCredential{
+		kind:    "identity_link",
+		refusal: "the provider could not be linked",
+		fields:  []zap.Field{zap.String("provider", oi.Provider)},
+		withdraw: func(ctx context.Context) error {
+			return s.repo(ctx).DeleteOAuthIdentity(ctx, oi.UserID, oi.Provider, oi.ProviderUserID)
+		},
+	})
+	if err != nil || !withdrawn {
+		return err
 	}
 	s.audit.Log(
 		ctx, audit.EventIdentityLinked,

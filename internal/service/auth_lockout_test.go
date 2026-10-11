@@ -248,6 +248,7 @@ func TestLockout_AuditEventsEmitted(t *testing.T) {
 	_, err := svc.PasswordLogin(context.Background(), "audit-lock@example.com", strongPW, "", "")
 	require.True(t, errors.Is(err, ErrUnauthenticated))
 	assert.Equal(t, 1, rec.countByEventType("login_locked"), "exactly one login_locked event")
+	assert.Equal(t, 1, rec.countByEventTypeAndDetail("login_locked", "gate", "sign_in"), "the row names the sign-in gate")
 	assert.Equal(t, svc.cfg.LoginMaxFailedAttempts, rec.countByEventType("login_failure"),
 		"login_failure count should not increase during lockout")
 

@@ -1476,6 +1476,15 @@
     "anchor": "rate-limiting"
   },
   {
+    "name": "GATEWAY_RATE_LIMIT_QR_POLL_PER_IP",
+    "type": "integer",
+    "default": "120",
+    "required": false,
+    "description": "is the per-IP cap per window on PollQrLogin.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
     "name": "GATEWAY_RATE_LIMIT_RESET_PER_IP",
     "type": "integer",
     "default": "5",

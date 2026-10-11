@@ -515,9 +515,10 @@ func (h *IdentityHandler) ApproveQrLogin(
 	req *connect.Request[identitypb.ApproveQrLoginRequest],
 ) (*connect.Response[identitypb.ApproveQrLoginResponse], error) {
 	userID := authenticatedUserID(req.Header())
+	ipAddr := clientIP(req.Header())
 	userAgent := clientUserAgent(req.Header())
 
-	status, err := h.auth.ApproveQrLogin(ctx, req.Msg.SessionId, req.Msg.Approve, userID, userAgent)
+	status, err := h.auth.ApproveQrLogin(ctx, req.Msg.SessionId, req.Msg.Approve, userID, ipAddr, userAgent)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

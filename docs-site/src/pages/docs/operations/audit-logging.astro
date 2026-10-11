@@ -39,6 +39,20 @@ const eventTypes = auditEvents as string[];
     <li>Admin help requests: requested, resolved.</li>
     <li>Control-plane changes: login-policy upsert/delete, project-config update, platform-admin bootstrap blocked.</li>
   </ul>
+  <p>
+    A refused refresh that keeps its refresh token (an unverified address, a
+    missing date of birth, a lockout), a refused QR poll that leaves the
+    hand-off approved (an unverified address, a lockout), and a QR approval
+    refused because the approver is locked out are each audited at most once
+    per account, step and reason every 10 minutes on each replica, a fixed
+    window with no setting; see
+    <a href="/identity/docs/concepts/sessions#refused-refresh-audit">auditing
+    a refused refresh</a>. A refused sign-in is audited every time. A
+    <code>login_locked</code> row, like a refused session's
+    <code>login_failure</code> row, names the step that refused in its
+    <code>gate</code> detail: <code>sign_in</code>, <code>refresh</code>,
+    <code>qr_approve</code> or <code>qr_poll</code>.
+  </p>
 
   <h2>Event types</h2>
   <p>

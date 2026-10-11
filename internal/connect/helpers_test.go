@@ -614,6 +614,18 @@ func (r *fakeRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID str
 	return nil
 }
 
+func (r *fakeRepo) DeletePasskeyCredential(_ context.Context, userID, credentialID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID && c.CredentialID == credentialID {
+			delete(r.passkeyCreds, id)
+			return nil
+		}
+	}
+	return service.ErrNotFound
+}
+
 func (r *fakeRepo) GetPasskeyChallenge(_ context.Context, nodeID string) (*service.PasskeyChallengeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1118,24 +1130,25 @@ func (r *fakeRepo) MarkEmailVerificationTokenConsumed(_ context.Context, id stri
 	return nil
 }
 
-func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID, email string, atMs int64, clearPassword bool) (verified, passwordCleared bool, err error) {
 	if userID == "" || email == "" {
-		return false, errors.New("SetUserEmailVerified: missing user id or email")
+		return false, false, errors.New("SetUserEmailVerified: missing user id or email")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u, ok := r.users[userID]
 	if !ok || u.Email != email {
-		return false, nil
+		return false, false, nil
 	}
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
 	u.UpdatedAt = time.UnixMilli(atMs)
+	passwordCleared = clearPassword && u.PasswordHash != ""
 	if clearPassword {
 		u.PasswordHash = ""
 		u.PasswordChangeRequired = false
 	}
-	return true, nil
+	return true, passwordCleared, nil
 }
 
 func (r *fakeRepo) SetUserIDVVerified(_ context.Context, userID string, atMs int64) error {

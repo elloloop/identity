@@ -72,12 +72,12 @@ func formatExpiresIn(d time.Duration) string {
 // Per OWASP guidance and the proto contract, every account-dependent
 // outcome returns nil — an unknown email included — and the account is
 // looked up and mailed through dispatchEmailSend, so neither the answer nor
-// (with async dispatch) its timing is an email-enumeration oracle. Errors
-// during token persistence or email dispatch are logged internally; the
-// caller is told nothing. The one
-// error it returns is ErrInvalidArgument for refused link params, which
-// are checked first and from the request alone, so that answer is the
-// same for every email.
+// (with async dispatch, which app.New turns on unless SynchronousEmailSend
+// is set) its timing is an email-enumeration oracle. Errors during token
+// persistence or email dispatch are logged internally; the caller is told
+// nothing. The one error it returns is ErrInvalidArgument for refused link
+// params, which are checked first and from the request alone, so that
+// answer is the same for every email.
 func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string, params EmailLinkParams) error {
 	link, err := s.checkEmailLinkParams(params)
 	if err != nil {
@@ -332,7 +332,12 @@ func (s *AuthService) sendEmailVerification(ctx context.Context, userID string, 
 		s.logger.Info("email_verification_throttled", zap.String("user_id", user.ID))
 		return nil
 	}
+	return s.mailEmailVerification(ctx, user, link)
+}
 
+// mailEmailVerification mints a verification token for user and mails its
+// link; the caller has already charged the address's send throttle.
+func (s *AuthService) mailEmailVerification(ctx context.Context, user *User, link emailLink) error {
 	rawToken := randomToken(32)
 	tokenHash := sha256Hex(rawToken)
 	now := s.nowMs()
@@ -375,12 +380,12 @@ func (s *AuthService) sendEmailVerification(ctx context.Context, userID string, 
 
 // ── VerifyEmail ────────────────────────────────────────────────────────
 
-// VerifyEmail consumes a verification token and marks the user's
-// email as verified, voiding what was added before it on an account a
-// provider claimed (addressClaimedByProvider). Idempotent — re-verifying an already-verified
-// user still consumes the supplied token but does not change state.
-// The token proves only the address it was mailed to: once the account
-// holds another address it is refused (and consumed). Returns the
+// VerifyEmail consumes a verification token and marks the user's email as
+// verified, voiding what was added before it on an account a provider
+// claimed (addressClaimedByProvider). Idempotent — re-verifying an
+// already-verified user still consumes the supplied token but does not
+// change state. The token proves only the address it was mailed to: once the
+// account holds another address it is refused (and consumed). Returns the
 // updated user.
 func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, error) {
 	if token == "" {
@@ -411,40 +416,52 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 	}
 
 	now := s.nowMs()
-	proven := ProofCarriesTo(rec.Email, user.Email)
-	if proven && !user.EmailVerified {
-		proof := externalProof{address: rec.Email, method: "verification_link", keepsAssertingLinks: true}
-		claimed, err := s.addressClaimedByProvider(ctx, user)
-		if err != nil {
-			return nil, s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
-		}
-		if claimed {
-			if err := s.markEmailVerifiedViaExternalProof(ctx, user, proof, now); err != nil {
-				return nil, err
-			}
-			proven = user.EmailVerified
-		} else if proven, err = s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, now, false); err != nil {
-			return nil, fmt.Errorf("setting email verified: %w", err)
-		}
+	proven, err := s.verifyAddressByLink(ctx, user, rec.Email, now)
+	if err != nil {
+		return nil, err
 	}
-	if !proven {
-		if err := s.repo(ctx).MarkEmailVerificationTokenConsumed(ctx, rec.NodeID, now); err != nil {
-			s.logger.Warn("email_verification_consume_failed",
-				zap.String("user_id", user.ID), zap.Error(err))
-		}
-		s.logger.Info("email_verification_address_changed", zap.String("user_id", user.ID))
-		return nil, fmt.Errorf("%w: verification token was sent to another address", ErrUnauthenticated)
-	}
-	if !user.EmailVerified {
-		user.EmailVerified = true
-		user.EmailVerifiedAt = now
-	}
-
 	if err := s.repo(ctx).MarkEmailVerificationTokenConsumed(ctx, rec.NodeID, now); err != nil {
 		s.logger.Warn("email_verification_consume_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
+	if !proven {
+		s.logger.Info("email_verification_address_changed", zap.String("user_id", user.ID))
+		return nil, fmt.Errorf("%w: verification token was sent to another address", ErrUnauthenticated)
+	}
 	return user, nil
+}
+
+// verifyAddressByLink reports whether a verification link mailed to mailedTo
+// proves the account's address, marking it verified on user and in the store
+// when it was not yet. It is false once the account holds another address, or
+// when a concurrent change of address wins the compare-and-set.
+func (s *AuthService) verifyAddressByLink(ctx context.Context, user *User, mailedTo string, now int64) (bool, error) {
+	if !ProofCarriesTo(mailedTo, user.Email) {
+		return false, nil
+	}
+	if user.EmailVerified {
+		return true, nil
+	}
+	proof := externalProof{address: mailedTo, method: "verification_link", keepsAssertingLinks: true}
+	claimed, err := s.addressClaimedByProvider(ctx, user)
+	if err != nil {
+		return false, s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
+	}
+	if claimed {
+		if err := s.markEmailVerifiedViaExternalProof(ctx, user, proof, now); err != nil {
+			return false, err
+		}
+		return user.EmailVerified, nil
+	}
+	set, _, err := s.repo(ctx).SetUserEmailVerified(ctx, user.ID, user.Email, now, false)
+	if err != nil {
+		return false, fmt.Errorf("setting email verified: %w", err)
+	}
+	if set {
+		user.EmailVerified = true
+		user.EmailVerifiedAt = now
+	}
+	return set, nil
 }
 
 // addressClaimedByProvider reports whether a provider link on the account

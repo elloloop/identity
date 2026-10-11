@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
@@ -393,6 +394,12 @@ type Repository interface {
 	// external proof of email control voids it. Idempotent: a user with no
 	// passkeys is a no-op returning nil.
 	DeletePasskeyCredentialsForUser(ctx context.Context, userID string) error
+	// DeletePasskeyCredential removes the one passkey credential whose
+	// WebAuthn credential id is credentialID, only when userID owns it. It
+	// backs withdrawing a passkey registered while the account's address was
+	// unproven, which must leave the account's earlier passkeys alone.
+	// Returns ErrNotFound when the user owns no such credential.
+	DeletePasskeyCredential(ctx context.Context, userID, credentialID string) error
 
 	// Passkey challenges
 	GetPasskeyChallenge(ctx context.Context, nodeID string) (*PasskeyChallengeRecord, error)
@@ -583,10 +590,15 @@ type Repository interface {
 	// while its stored email is exactly email, in one write, and reports
 	// whether it did. A proof checked against an earlier read therefore
 	// cannot verify an address that replaced the proven one in between.
-	// clearPassword clears password_hash and password_change_required in the
-	// same write. A missing account, or one holding another email, is
-	// (false, nil); an empty userID or email is an error.
-	SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error)
+	// With clearPassword the same write also empties password_hash and
+	// clears password_change_required, acting on whatever password the
+	// account holds at that write rather than at the caller's read;
+	// passwordCleared reports whether it found a non-empty password to
+	// clear. Without clearPassword both columns are left as they are and
+	// passwordCleared is false. A missing account, or one holding another
+	// email, is (false, false, nil) and nothing is written; an empty userID
+	// or email is an error.
+	SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (verified, passwordCleared bool, err error)
 
 	// User idv-verified update; called by IdentityVerificationService
 	// when a verification reaches APPROVED.
@@ -1360,9 +1372,9 @@ type AuthService struct {
 	webAssurance      assurance.Verifier
 	emailThrottle     *keyCooldown
 	signupThrottle    *keyCooldown
-	// refusedRefreshAudits paces the audit rows of refused refreshes
-	// (refusedRefreshAuditWindow).
-	refusedRefreshAudits *keyCooldown
+	// replayedRefusalAudits paces the audit rows of refusals a caller can
+	// replay at will (replayedRefusalAuditWindow).
+	replayedRefusalAudits *keyCooldown
 	// usernameProbes caps "username taken" answers per client IP
 	// (config.RateLimitUsernameTakenPerIP).
 	usernameProbes *probeBudget
@@ -1388,13 +1400,17 @@ type AuthService struct {
 	// here (with a WARN); app.New refuses to boot on it.
 	defaultProjectAccounts ProjectAccountsConfig
 
-	// runEmailSend runs a request-phase credential-email send. It defaults to
-	// SYNCHRONOUS (run inline); app.New swaps in an asynchronous dispatcher via
-	// WithAsyncEmailDispatch so the RPC response time cannot depend on — and thus
-	// leak — the gated send/no-send decision (a timing oracle that, in invite
-	// mode, would reveal account existence). Kept injectable so tests observe
-	// sends deterministically without polling.
-	runEmailSend func(func())
+	// emailSendSlots, when non-nil, runs request-phase credential-email sends
+	// on detached goroutines, at most cap(emailSendSlots) at once, so the RPC
+	// response time cannot depend on — and thus leak — the gated send/no-send
+	// decision (a timing oracle that reveals account existence). nil runs them
+	// inline, so a directly-constructed service (tests, embedders) observes
+	// sends deterministically; app.New sets it via WithAsyncEmailDispatch.
+	emailSendSlots chan struct{}
+	// emailSendsDropped counts the sends dropped with every slot taken, by
+	// op; emailDropReports paces the log line that reports them.
+	emailSendsDropped *prometheus.CounterVec
+	emailDropReports  droppedSendReports
 
 	// autoFormer, when set (postgres driver only), auto-forms a tenant from
 	// a new user's company email domain at signup. nil disables the
@@ -1605,27 +1621,34 @@ func NewAuthServiceWithOAuth(
 		logger:                 logger,
 		oauthResolver:          newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
 		emailThrottle:          newKeyCooldown(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
-		refusedRefreshAudits:   newKeyCooldown(refusedRefreshAuditWindow.Milliseconds(), 0),
+		replayedRefusalAudits:  newKeyCooldown(replayedRefusalAuditWindow.Milliseconds(), 0),
 		signupThrottle:         newKeyCooldown(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		usernameProbes:         newProbeBudget(rateLimitWindowMs(cfg), cfg.RateLimitUsernameTakenPerIP),
 		phoneThrottle:          newKeyCooldown(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
 		nowFunc:                time.Now,
-		// Default to synchronous sends; app.New opts into async via
-		// WithAsyncEmailDispatch. A synchronous default keeps every
-		// directly-constructed service (tests, embedders) deterministic.
-		runEmailSend: func(fn func()) { fn() },
 	}
 }
 
 // WithAsyncEmailDispatch switches request-phase credential-email sends to run
-// on a detached background goroutine, so the RPC response time is independent
+// on detached background goroutines, so the RPC response time is independent
 // of the gated send/no-send decision (closing the timing oracle). app.New
-// enables this for the served deployment; it is a set-once option that returns
-// the receiver for chaining. One goroutine per permitted send is acceptable
-// because the per-IP rate limiter and captcha upstream already bound this path.
-func (s *AuthService) WithAsyncEmailDispatch() *AuthService {
-	s.runEmailSend = func(fn func()) { go fn() }
-	return s
+// enables this for the served deployment; it is a set-once option. The sends
+// it drops at capacity are counted as identity_email_send_dropped_total{op},
+// registered with reg (nil registers with a fresh registry, for tests).
+func (s *AuthService) WithAsyncEmailDispatch(reg prometheus.Registerer) (*AuthService, error) {
+	if reg == nil {
+		reg = prometheus.NewRegistry()
+	}
+	dropped := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "identity_email_send_dropped_total",
+		Help: "Credential emails dropped because every background send slot was taken, labelled by op.",
+	}, []string{"op"})
+	if err := reg.Register(dropped); err != nil {
+		return nil, fmt.Errorf("email send metrics: %w", err)
+	}
+	s.emailSendSlots = make(chan struct{}, maxInFlightEmailSends)
+	s.emailSendsDropped = dropped
+	return s, nil
 }
 
 // WithReturnAllowlist sets the return_to allowlist the magic-link flow checks.
@@ -1642,16 +1665,27 @@ func (s *AuthService) WithReturnAllowlist(a ReturnAllowlist) *AuthService {
 // cannot leak a goroutine indefinitely.
 const asyncEmailSendTimeout = 30 * time.Second
 
-// dispatchEmailSend runs send via runEmailSend (sync or async per construction).
-// It hands send a DETACHED context — context.WithoutCancel(ctx) with a bounded
-// timeout — NOT the request ctx, which is cancelled when the RPC returns and
-// would abort an async send mid-flight; the detached copy still carries
-// request-scoped values (the resolved project scope, etc.). Panics in the
-// background goroutine are recovered and logged, since the send is now
-// fire-and-forget.
+// maxInFlightEmailSends bounds the detached sends running at once. The per-IP
+// limiter bounds one caller, not a distributed flood, and every detached send
+// holds a goroutine and possibly an SMTP connection for up to
+// asyncEmailSendTimeout. At that worst case the cap still admits about four
+// sends a second; at a normal sub-second send it admits far more than any
+// single instance's legitimate credential-mail rate.
+const maxInFlightEmailSends = 128
+
+// dispatchEmailSend runs send inline, or on a detached goroutine when async
+// dispatch is on. It hands send a DETACHED context — context.WithoutCancel(ctx)
+// with a bounded timeout — NOT the request ctx, which is cancelled when the RPC
+// returns and would abort an async send mid-flight; the detached copy still
+// carries request-scoped values (the resolved project scope, etc.). Panics are
+// recovered and logged, since the send is fire-and-forget.
+//
+// With every slot taken the send is dropped rather than waited for: waiting
+// would put the send back on the request path, and the answer must not depend
+// on whether mail goes out.
 func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send func(context.Context)) {
 	detached := context.WithoutCancel(ctx)
-	s.runEmailSend(func() {
+	run := func() {
 		defer func() {
 			if r := recover(); r != nil {
 				s.logger.Error("email_send_panic", zap.String("op", op), zap.Any("panic", r))
@@ -1660,7 +1694,57 @@ func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send fun
 		sendCtx, cancel := context.WithTimeout(detached, asyncEmailSendTimeout)
 		defer cancel()
 		send(sendCtx)
-	})
+	}
+	if s.emailSendSlots == nil {
+		run()
+		return
+	}
+	select {
+	case s.emailSendSlots <- struct{}{}:
+		go func() {
+			defer func() { <-s.emailSendSlots }()
+			run()
+		}()
+	default:
+		s.emailSendsDropped.WithLabelValues(op).Inc()
+		if n := s.emailDropReports.add(op, s.nowMs()); n > 0 {
+			s.logger.Warn("email_send_dropped_at_capacity",
+				zap.String("op", op), zap.Int("dropped", n), zap.Int("in_flight", maxInFlightEmailSends))
+		}
+	}
+}
+
+// emailDropReportInterval is how often each op's dropped sends are logged. A
+// flood that fills every slot drops mail at its own rate, and one line per
+// drop would let it drive the log volume too; the counter has every drop.
+const emailDropReportInterval = time.Minute
+
+// droppedSendReports paces the log line for sends dropped at capacity: at
+// most one per op per emailDropReportInterval, carrying the drops since the
+// op's previous line. The ops are a fixed set, so the maps stay small.
+type droppedSendReports struct {
+	mu         sync.Mutex
+	reportedAt map[string]int64
+	unreported map[string]int
+}
+
+// add records one dropped send of op and returns how many to report now: 0
+// while op's previous line is under emailDropReportInterval old.
+func (r *droppedSendReports) add(op string, nowMs int64) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.reportedAt == nil {
+		r.reportedAt = map[string]int64{}
+		r.unreported = map[string]int{}
+	}
+	r.unreported[op]++
+	if last, ok := r.reportedAt[op]; ok && nowMs-last < emailDropReportInterval.Milliseconds() {
+		return 0
+	}
+	n := r.unreported[op]
+	r.unreported[op] = 0
+	r.reportedAt[op] = nowMs
+	return n
 }
 
 // buildDefaultProjectAccess parses the env-configured default project's access
@@ -1869,25 +1953,31 @@ func (s *AuthService) needsEmailVerification(user *User) bool {
 }
 
 // sessionGate is the step a gate on issuing a session refuses at: a sign-in,
-// or the refresh of a session already issued.
+// the refresh of a session already issued, the approval of a QR hand-off by
+// a signed-in account, or the poll that collects an approved hand-off.
 type sessionGate string
 
 const (
-	sessionGateSignIn  sessionGate = "sign_in"
-	sessionGateRefresh sessionGate = "refresh"
+	sessionGateSignIn    sessionGate = "sign_in"
+	sessionGateRefresh   sessionGate = "refresh"
+	sessionGateQrApprove sessionGate = "qr_approve"
+	sessionGateQrPoll    sessionGate = "qr_poll"
 )
 
-// refusedRefreshAuditWindow is how often one account's refresh refused for
-// one reason is audited. A refusal that keeps the refresh token (an unproven
-// address, a missing date of birth, a lockout) can be replayed at will, and
-// every replay would otherwise write a row.
-const refusedRefreshAuditWindow = 10 * time.Minute
+// replayedRefusalAuditWindow is how often one account's refusal for one
+// reason at a replayable step (a refresh, a QR approval or poll) is audited.
+// A refusal that keeps the refresh token, the approver's access token or the
+// approved hand-off (an unproven address, a missing date of birth, a
+// lockout) can be replayed at will, and every replay would otherwise write a
+// row.
+const replayedRefusalAuditWindow = 10 * time.Minute
 
 // refusalAuditDue reports whether a gate's refusal is to be audited: a
-// sign-in's always is; a refused refresh's at most once per account and
-// reason per refusedRefreshAuditWindow on each replica.
+// sign-in's always is; a replayable step's at most once per account, step
+// and reason per replayedRefusalAuditWindow on each replica.
 func (s *AuthService) refusalAuditDue(user *User, gate sessionGate, reason string) bool {
-	return gate == sessionGateSignIn || s.refusedRefreshAudits.allow(user.ID+"\x00"+reason, s.nowMs())
+	return gate == sessionGateSignIn ||
+		s.replayedRefusalAudits.allow(user.ID+"\x00"+string(gate)+"\x00"+reason, s.nowMs())
 }
 
 // auditSessionRefusal records a gate's refusal to issue a session as
@@ -1907,18 +1997,24 @@ func (s *AuthService) auditSessionRefusal(ctx context.Context, user *User, ipAdd
 
 // enforceVerifiedEmail refuses a session to an account whose address is
 // unproven while GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on, audited with
-// reason email_not_verified. A refused sign-in also sends a verification email, best-effort and throttled:
-// a failure to send never changes the refusal.
+// reason email_not_verified. A refused sign-in or QR poll also sends a
+// verification email, best-effort and throttled: a failure to send never
+// changes the refusal. The throttle is charged before anything else, since a
+// QR poll replays the refusal at will, and the mail goes out like the other
+// credential mail, off the request path when async dispatch is on.
 func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate) error {
 	if !s.needsEmailVerification(user) {
 		return nil
 	}
 	s.auditSessionRefusal(ctx, user, ipAddr, userAgent, gate, "email_not_verified")
-	if gate == sessionGateSignIn {
-		if err := s.sendEmailVerification(ctx, user.ID, emailLink{}); err != nil {
-			s.logger.Warn("login_verification_resend_failed",
-				zap.String("user_id", user.ID), zap.Error(err))
-		}
+	if gate != sessionGateRefresh && s.emailThrottle.allow(strings.ToLower(user.Email), s.nowMs()) {
+		recipient := *user
+		s.dispatchEmailSend(ctx, "email_verification", func(ctx context.Context) {
+			if err := s.mailEmailVerification(ctx, &recipient, emailLink{}); err != nil {
+				s.logger.Warn("login_verification_resend_failed",
+					zap.String("user_id", user.ID), zap.Error(err))
+			}
+		})
 	}
 	return ErrEmailVerificationRequired
 }

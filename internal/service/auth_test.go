@@ -286,6 +286,32 @@ func TestPasswordLogin_NoPasswordSetIsRefusedLikeAnUnknownAddress(t *testing.T) 
 	assert.Equal(t, unknownErr.Error(), noPasswordErr.Error())
 }
 
+// Every refusal that must not reveal the account answers exactly as an unknown
+// identifier does.
+func TestPasswordLogin_RefusalsThatHideTheAccountMatchAnUnknownIdentifier(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	locked := seedUser(repo, "locked@example.com", hashPW(t, strongPW), "active")
+	require.NoError(t, repo.SetUserLockedUntil(context.Background(), locked.ID, time.Now().Add(time.Hour).UnixMilli()))
+	seedUser(repo, "provider-only@example.com", "", "active")
+	seedUser(repo, "wrong@example.com", hashPW(t, strongPW), "active")
+
+	_, unknownErr := svc.PasswordLogin(context.Background(), "nobody@example.com", strongPW, "", "")
+	require.ErrorIs(t, unknownErr, ErrUnauthenticated)
+	for _, tc := range []struct{ name, email, password string }{
+		{"locked with the right password", "locked@example.com", strongPW},
+		{"no password set", "provider-only@example.com", strongPW},
+		{"wrong password", "wrong@example.com", "WrongP@ss1!"},
+		{"unknown username", "nobody", strongPW},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.PasswordLogin(context.Background(), tc.email, tc.password, "", "")
+			require.ErrorIs(t, err, ErrUnauthenticated)
+			assert.Equal(t, unknownErr.Error(), err.Error())
+		})
+	}
+}
+
 func TestPasswordLogin_DeactivatedAccountFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -517,7 +543,7 @@ func TestQrLogin_InitiateApproveAndPoll(t *testing.T) {
 	assert.Equal(t, "Pixel 8", info.NewDeviceInfo)
 
 	// Step 3: Approve.
-	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "ApproverAgent")
+	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "ApproverAgent")
 	require.NoError(t, err)
 	assert.Equal(t, "approved", status)
 
@@ -544,7 +570,7 @@ func TestQrLogin_PollWithoutSecret_AppearsExpired(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Pixel", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
 	require.NoError(t, err)
 
 	// Missing secret.
@@ -574,7 +600,7 @@ func TestQrLogin_RejectFlow(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, false, user.ID, "")
+	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, false, user.ID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "rejected", status)
 
@@ -623,7 +649,7 @@ func TestQrLogin_ConcurrentPollOfApprovedSession_SingleWinner(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
 	require.NoError(t, err)
 
 	const N = 16

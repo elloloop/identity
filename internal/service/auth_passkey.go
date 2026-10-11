@@ -162,6 +162,15 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		return nil, nil, fmt.Errorf("%w: attestation verification failed", ErrInvalidArgument)
 	}
 
+	// Read before the insert: see withdrawPasskeyIfAddressProven.
+	holder, err := s.repo(ctx).GetUser(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if holder == nil {
+		return nil, nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+
 	now := s.nowMs()
 	_, err = s.repo(ctx).CreatePasskeyCredential(ctx, &PasskeyCredRecord{
 		CredentialID:   result.CredentialID,
@@ -182,6 +191,11 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 
 	// Single-use challenge -- delete it.
 	_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
+	if !holder.EmailVerified {
+		if err := s.withdrawPasskeyIfAddressProven(ctx, userID, result.CredentialID); err != nil {
+			return nil, nil, err
+		}
+	}
 
 	s.logger.Info(
 		"passkey_registered",
@@ -441,6 +455,35 @@ func coalesce(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// withdrawPasskeyIfAddressProven deletes the passkey this registration just
+// stored when the account's address, unproven when the registration began,
+// is proven now: see withdrawIfAddressProven. Only that credential goes; the
+// passkeys registered before it are the proof's to void or keep, and a
+// verification link keeps them.
+func (s *AuthService) withdrawPasskeyIfAddressProven(ctx context.Context, userID, credentialID string) error {
+	withdrawn, err := s.withdrawIfAddressProven(ctx, userID, attachedCredential{
+		kind:    "passkey",
+		refusal: "the passkey could not be registered",
+		fields:  []zap.Field{zap.String("credential_id", credentialID)},
+		withdraw: func(ctx context.Context) error {
+			return s.repo(ctx).DeletePasskeyCredential(ctx, userID, credentialID)
+		},
+	})
+	if err != nil || !withdrawn {
+		return err
+	}
+	s.audit.Log(
+		ctx, audit.EventPasskeyAdded,
+		audit.WithActor(userID),
+		audit.WithSuccess(false),
+		audit.WithDetails(map[string]any{
+			"credential_id": credentialID,
+			"reason":        "address_proven_while_registering",
+		}),
+	)
+	return fmt.Errorf("%w: the account's address was proven while registering; sign in again", ErrUnauthenticated)
 }
 
 // passkeysFor returns the WebAuthn relying-party instance to use for the

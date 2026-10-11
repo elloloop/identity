@@ -686,23 +686,36 @@ func (r *pgRepository) SetUserLockedUntil(ctx context.Context, userID string, lo
 	return nil
 }
 
-func (r *pgRepository) SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (bool, error) {
+func (r *pgRepository) SetUserEmailVerified(ctx context.Context, userID, email string, atMs int64, clearPassword bool) (verified, passwordCleared bool, err error) {
 	if userID == "" || email == "" {
-		return false, errors.New("postgres: SetUserEmailVerified: missing user id or email")
+		return false, false, errors.New("postgres: SetUserEmailVerified: missing user id or email")
 	}
+	// RETURNING sees the updated row; prev locks the row first and keeps the
+	// password the write replaces. It locks only a row whose address matches,
+	// so a write the address check refuses waits on no one.
 	const q = `
+		WITH prev AS (
+		    SELECT id, password_hash FROM users
+		     WHERE project_id = $1 AND id = $2 AND email = $3
+		       FOR UPDATE
+		)
 		UPDATE users
 		   SET email_verified = TRUE,
 		       email_verified_at_ms = $4,
 		       updated_at_ms = $4,
-		       password_hash = CASE WHEN $5::boolean THEN '' ELSE password_hash END,
-		       password_change_required = CASE WHEN $5::boolean THEN FALSE ELSE password_change_required END
-		 WHERE project_id = $1 AND id = $2 AND email = $3`
-	tag, err := r.pool.Exec(ctx, q, r.projectID, userID, email, atMs, clearPassword)
-	if err != nil {
-		return false, wrapPgErr("SetUserEmailVerified", err)
+		       password_hash = CASE WHEN $5::boolean THEN '' ELSE users.password_hash END,
+		       password_change_required = CASE WHEN $5::boolean THEN FALSE ELSE users.password_change_required END
+		  FROM prev
+		 WHERE users.project_id = $1 AND users.id = $2 AND users.email = $3 AND prev.id = users.id
+		RETURNING $5::boolean AND prev.password_hash <> ''`
+	err = r.pool.QueryRow(ctx, q, r.projectID, userID, email, atMs, clearPassword).Scan(&passwordCleared)
+	if noRows(err) {
+		return false, false, nil
 	}
-	return tag.RowsAffected() == 1, nil
+	if err != nil {
+		return false, false, wrapPgErr("SetUserEmailVerified", err)
+	}
+	return true, passwordCleared, nil
 }
 
 func (r *pgRepository) SetUserIDVVerified(ctx context.Context, userID string, atMs int64) error {

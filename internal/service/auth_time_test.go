@@ -32,7 +32,7 @@ func TestAuthTime_QrHandoffIsNotASignIn(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(ctx, "Pixel 8", "agent", "203.0.113.10")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "ApproverAgent")
+	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "", "ApproverAgent")
 	require.NoError(t, err)
 	res, err := svc.PollQrLogin(ctx, init.SessionID, init.PollSecret, "203.0.113.10", "agent")
 	require.NoError(t, err)

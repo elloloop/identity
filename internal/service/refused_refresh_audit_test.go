@@ -43,7 +43,7 @@ func TestRefusedRefreshAudit_OncePerAccountPerWindow(t *testing.T) {
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Equal(t, 2, refused(), "another account's refusal is its own")
 
-	now = now.Add(refusedRefreshAuditWindow)
+	now = now.Add(replayedRefusalAuditWindow)
 	_, _, _, err = svc.RefreshToken(ctx, refreshes[0], "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Equal(t, 3, refused(), "the next window records the refusal again")
@@ -77,7 +77,7 @@ func TestRefusedRefreshAudit_DOBStepPacedOnRefreshOnly(t *testing.T) {
 
 // A refresh refused over a lockout keeps its token too, so its login_locked
 // row is paced the same way; a refused sign-in is a fresh act and is audited
-// every time.
+// every time. Each row names the gate that refused.
 func TestRefusedRefreshAudit_LockoutPacedOnRefreshOnly(t *testing.T) {
 	repo := newFakeRepo()
 	writer := newRecordingAuditWriter()
@@ -96,6 +96,7 @@ func TestRefusedRefreshAudit_LockoutPacedOnRefreshOnly(t *testing.T) {
 	}
 	locked := func() int { return writer.countByEventType("login_locked") }
 	assert.Equal(t, 1, locked())
+	assert.Equal(t, 1, writer.countByEventTypeAndDetail("login_locked", "gate", "refresh"))
 
 	stored, err := repo.GetUser(ctx, user.ID)
 	require.NoError(t, err)
@@ -103,8 +104,9 @@ func TestRefusedRefreshAudit_LockoutPacedOnRefreshOnly(t *testing.T) {
 		require.ErrorIs(t, svc.checkAccountStatus(ctx, stored, "", "", sessionGateSignIn), ErrAccountLocked)
 	}
 	assert.Equal(t, 3, locked())
+	assert.Equal(t, 2, writer.countByEventTypeAndDetail("login_locked", "gate", "sign_in"))
 
-	now = now.Add(refusedRefreshAuditWindow)
+	now = now.Add(replayedRefusalAuditWindow)
 	_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
 	require.ErrorIs(t, err, ErrAccountLocked)
 	assert.Equal(t, 4, locked(), "the next window records the refusal again")

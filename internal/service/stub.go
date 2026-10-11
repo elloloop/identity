@@ -122,6 +122,10 @@ func (StubRepository) DeletePasskeyCredentialsForUser(context.Context, string) e
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) DeletePasskeyCredential(context.Context, string, string) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) GetPasskeyChallenge(context.Context, string) (*PasskeyChallengeRecord, error) {
 	return nil, ErrServiceUnavailable
 }
@@ -286,8 +290,8 @@ func (StubRepository) MarkEmailVerificationTokenConsumed(context.Context, string
 	return ErrServiceUnavailable
 }
 
-func (StubRepository) SetUserEmailVerified(context.Context, string, string, int64, bool) (bool, error) {
-	return false, ErrServiceUnavailable
+func (StubRepository) SetUserEmailVerified(context.Context, string, string, int64, bool) (bool, bool, error) {
+	return false, false, ErrServiceUnavailable
 }
 
 func (StubRepository) SetUserIDVVerified(context.Context, string, int64) error {

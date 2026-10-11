@@ -354,7 +354,7 @@ func productAgeIssuingPaths() []productAgePath {
 			u := seedUserAged(t, repo, "user@example.com", dobMs)
 			init, err := svc.InitiateQrLogin(ctx, "New Phone", "agent", "1.2.3.4")
 			require.NoError(t, err)
-			_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, u.ID, "ApproverAgent")
+			_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, u.ID, "", "ApproverAgent")
 			require.NoError(t, err)
 			_, err = svc.PollQrLogin(ctx, init.SessionID, init.PollSecret, "1.2.3.4", "agent")
 			return err

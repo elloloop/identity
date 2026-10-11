@@ -115,10 +115,12 @@ type Options struct {
 	DNSResolver service.DNSResolver
 
 	// SynchronousEmailSend forces request-phase credential emails to send
-	// inline rather than on a detached goroutine. Production leaves it false
-	// (async, so SMTP latency cannot time the gated send decision); full-stack
-	// tests that read the recording mailer immediately after a request set it
-	// true for deterministic observation.
+	// inline rather than on a detached goroutine, for full-stack tests that
+	// read the recording mailer immediately after a request. Never set it in a
+	// deployment: inline, a password-reset, email-code or magic-link request
+	// takes as long as the account lookup, token write and SMTP send it
+	// triggers, so its response time tells a caller whether the address has an
+	// account (or, for a code, whether the project would mail it).
 	SynchronousEmailSend bool
 }
 

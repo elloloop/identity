@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
@@ -961,7 +963,7 @@ func TestPasswordSignup_RefusedLinkParamsCreateNoAccount(t *testing.T) {
 // unknown address does: the response time says nothing about the account.
 func TestRequestPasswordReset_AsyncDoesNotBlockOnTheAccount(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
-	svc.WithAsyncEmailDispatch()
+	enableAsyncEmailDispatch(t, svc)
 	mailer := &blockingTransport{release: make(chan struct{}), sent: make(chan struct{})}
 	svc.mailer = mailer
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
@@ -984,5 +986,114 @@ func TestRequestPasswordReset_AsyncDoesNotBlockOnTheAccount(t *testing.T) {
 	case <-mailer.sent:
 	case <-time.After(2 * time.Second):
 		t.Fatal("the reset mail was not sent after the request returned")
+	}
+}
+
+// Async dispatch runs at most maxInFlightEmailSends sends at once: one more is
+// dropped, not queued and not waited for, and a freed slot admits the next.
+func TestDispatchEmailSend_CapsSendsInFlight(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	enableAsyncEmailDispatch(t, svc)
+	release := make(chan struct{})
+	var started, finished sync.WaitGroup
+	started.Add(maxInFlightEmailSends)
+	finished.Add(maxInFlightEmailSends)
+	for range maxInFlightEmailSends {
+		svc.dispatchEmailSend(context.Background(), "test", func(context.Context) {
+			defer finished.Done()
+			started.Done()
+			<-release
+		})
+	}
+	started.Wait()
+
+	overflow := make(chan struct{}, 1)
+	svc.dispatchEmailSend(context.Background(), "test", func(context.Context) { overflow <- struct{}{} })
+	close(release)
+	finished.Wait()
+	select {
+	case <-overflow:
+		t.Fatal("a send beyond the cap ran")
+	default:
+	}
+
+	// A slot is released just after its send returns.
+	deadline := time.Now().Add(2 * time.Second)
+	for len(svc.emailSendSlots) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("finished sends did not release their slots")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	ran := make(chan struct{})
+	svc.dispatchEmailSend(context.Background(), "test", func(context.Context) { close(ran) })
+	select {
+	case <-ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a send after the in-flight ones finished did not run")
+	}
+}
+
+func enableAsyncEmailDispatch(t *testing.T, svc *AuthService) {
+	t.Helper()
+	if _, err := svc.WithAsyncEmailDispatch(nil); err != nil {
+		t.Fatalf("WithAsyncEmailDispatch: %v", err)
+	}
+}
+
+// Every send dropped at capacity is counted, by op, but logged at most once
+// per op per interval, with the drops since the op's previous line, so a
+// flood that sheds mail does not flood the log as well.
+func TestDispatchEmailSend_CountsDropsAndPacesTheirLog(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	enableAsyncEmailDispatch(t, svc)
+	core, logs := observer.New(zap.WarnLevel)
+	svc.logger = zap.New(core)
+	now := time.Now()
+	svc.nowFunc = func() time.Time { return now }
+	release := make(chan struct{})
+	defer close(release)
+	var started sync.WaitGroup
+	started.Add(maxInFlightEmailSends)
+	for range maxInFlightEmailSends {
+		svc.dispatchEmailSend(context.Background(), "password_reset", func(context.Context) {
+			started.Done()
+			<-release
+		})
+	}
+	started.Wait()
+	drop := func(op string) {
+		svc.dispatchEmailSend(context.Background(), op, func(context.Context) { t.Error("a send beyond the cap ran") })
+	}
+	droppedLines := func() []observer.LoggedEntry {
+		return logs.FilterMessage("email_send_dropped_at_capacity").AllUntimed()
+	}
+
+	for range 3 {
+		drop("password_reset")
+	}
+	drop("magic_link")
+	lines := droppedLines()
+	if len(lines) != 2 {
+		t.Fatalf("logged %d drop lines, want one per op", len(lines))
+	}
+	if got := lines[0].ContextMap()["dropped"]; got != int64(1) {
+		t.Fatalf("first line reports %v drops, want 1", got)
+	}
+
+	now = now.Add(emailDropReportInterval)
+	drop("password_reset")
+	lines = droppedLines()
+	if len(lines) != 3 {
+		t.Fatalf("logged %d drop lines after the interval, want 3", len(lines))
+	}
+	if got := lines[2].ContextMap()["dropped"]; got != int64(3) {
+		t.Fatalf("the next line reports %v drops, want the 3 since the previous one", got)
+	}
+	if got := testutil.ToFloat64(svc.emailSendsDropped.WithLabelValues("password_reset")); got != 4 {
+		t.Fatalf("counted %v password_reset drops, want 4", got)
+	}
+	if got := testutil.ToFloat64(svc.emailSendsDropped.WithLabelValues("magic_link")); got != 1 {
+		t.Fatalf("counted %v magic_link drops, want 1", got)
 	}
 }
