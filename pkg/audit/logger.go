@@ -276,6 +276,9 @@ const (
 	EventGuardianChildReactivated     EventType = "guardian_child_reactivated"
 	EventGuardianChildDeleted         EventType = "guardian_child_deleted"
 
+	EventOAuthClientCreated EventType = "oauth_client_created"
+	EventOAuthClientUpdated EventType = "oauth_client_updated"
+
 	// Agent accounts (non-human accounts owned by a person): one event type
 	// per management operation, actor the caller (the owner or a project
 	// admin) and target the agent. A refused attempt is logged with
@@ -365,6 +368,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventGuardianChildDeactivated:      {},
 	EventGuardianChildReactivated:      {},
 	EventGuardianChildDeleted:          {},
+	EventOAuthClientCreated:            {},
+	EventOAuthClientUpdated:            {},
 	EventAgentCreated:                  {},
 	EventAgentUpdated:                  {},
 	EventAgentTransferred:              {},

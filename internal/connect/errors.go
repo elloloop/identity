@@ -20,6 +20,9 @@ func toConnectError(err error) *connect.Error {
 	}
 
 	switch {
+	case errors.Is(err, service.ErrOAuthClientRevision):
+		return connect.NewError(connect.CodeAborted, err)
+
 	case errors.Is(err, service.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
 

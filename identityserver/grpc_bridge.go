@@ -781,3 +781,19 @@ func (b *grpcBridge) MergeAccounts(ctx context.Context, in *identitypb.MergeAcco
 func (b *grpcBridge) MergeUsers(ctx context.Context, in *identitypb.MergeUsersRequest) (*identitypb.MergeUsersResponse, error) {
 	return invoke(ctx, b, in, b.h.MergeUsers)
 }
+
+func (b *grpcBridge) CreateOAuthClient(ctx context.Context, in *identitypb.CreateOAuthClientRequest) (*identitypb.CreateOAuthClientResponse, error) {
+	return invoke(ctx, b, in, b.h.CreateOAuthClient)
+}
+
+func (b *grpcBridge) GetOAuthClient(ctx context.Context, in *identitypb.GetOAuthClientRequest) (*identitypb.GetOAuthClientResponse, error) {
+	return invoke(ctx, b, in, b.h.GetOAuthClient)
+}
+
+func (b *grpcBridge) UpdateOAuthClient(ctx context.Context, in *identitypb.UpdateOAuthClientRequest) (*identitypb.UpdateOAuthClientResponse, error) {
+	return invoke(ctx, b, in, b.h.UpdateOAuthClient)
+}
+
+func (b *grpcBridge) ListOAuthClients(ctx context.Context, in *identitypb.ListOAuthClientsRequest) (*identitypb.ListOAuthClientsResponse, error) {
+	return invoke(ctx, b, in, b.h.ListOAuthClients)
+}

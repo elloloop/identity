@@ -289,6 +289,17 @@ type Repository interface {
 	// embedded one's promoted WithProject returns the undecorated inner.
 	WithProject(projectID string) Repository
 
+	// OAuth client registrations contain no secrets or delegated grants. Get
+	// returns nil when absent. Create returns ErrAlreadyExists on a duplicate
+	// id. Update changes exactly the expected revision and returns nil when
+	// absent/stale, preserving id, kind and created_at. List orders by id ASC
+	// after the exclusive cursor, with a required limit of 1..100. All methods
+	// are project-scoped; each driver validates writes and copies input/output.
+	CreateOAuthClient(context.Context, *OAuthClient) error
+	GetOAuthClient(context.Context, string) (*OAuthClient, error)
+	UpdateOAuthClient(context.Context, string, int64, *OAuthClientRegistration, int64) (*OAuthClient, error)
+	ListOAuthClients(context.Context, string, int) ([]*OAuthClient, error)
+
 	// Users
 
 	// FindUserByEmail returns the account whose email equals email under

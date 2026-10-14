@@ -44,6 +44,7 @@ type Repo struct {
 	mu sync.Mutex
 
 	seq                 int64
+	oauthClients        map[string]*service.OAuthClient
 	users               map[string]*service.User
 	agentCreations      map[[2]string]service.AgentCreationReceipt
 	refreshTokens       map[string]*service.RefreshTokenRecord
@@ -101,6 +102,7 @@ func New() *Repo {
 // carries no project binding or registry; New / WithProject set those.
 func newStore() *Repo {
 	return &Repo{
+		oauthClients:        make(map[string]*service.OAuthClient),
 		users:               make(map[string]*service.User),
 		agentCreations:      make(map[[2]string]service.AgentCreationReceipt),
 		refreshTokens:       make(map[string]*service.RefreshTokenRecord),

@@ -561,3 +561,19 @@ func (StubRepository) DeleteStaleAttestedDevices(context.Context, int64, int) er
 func (StubRepository) DeleteStaleAnonymousUsers(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
+
+func (StubRepository) CreateOAuthClient(context.Context, *OAuthClient) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) GetOAuthClient(context.Context, string) (*OAuthClient, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) UpdateOAuthClient(context.Context, string, int64, *OAuthClientRegistration, int64) (*OAuthClient, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) ListOAuthClients(context.Context, string, int) ([]*OAuthClient, error) {
+	return nil, ErrServiceUnavailable
+}

@@ -2648,3 +2648,17 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m AccountMerge) error {
 	}
 	return nil
 }
+
+func (*fakeRepo) CreateOAuthClient(context.Context, *OAuthClient) error { return ErrServiceUnavailable }
+
+func (*fakeRepo) GetOAuthClient(context.Context, string) (*OAuthClient, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (*fakeRepo) UpdateOAuthClient(context.Context, string, int64, *OAuthClientRegistration, int64) (*OAuthClient, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (*fakeRepo) ListOAuthClients(context.Context, string, int) ([]*OAuthClient, error) {
+	return nil, ErrServiceUnavailable
+}
