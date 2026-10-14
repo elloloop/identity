@@ -149,6 +149,9 @@ func (s *AuthService) checkAgentStanding(ctx context.Context, agent *User) error
 	if err != nil {
 		return err
 	}
+	if s.needsEmailVerification(owner) {
+		return ErrEmailVerificationRequired
+	}
 	if err := s.enforceAccountAccessLogin(ctx, owner); err != nil {
 		return err
 	}

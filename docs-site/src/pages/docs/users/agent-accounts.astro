@@ -176,7 +176,11 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     unverified owner is refused with <code>identity verification
     required</code>. This is checked every time a token is issued for the
     agent, refresh included, so a change to the owner's access takes effect
-    at the agent's next refresh.
+    at the agent's next refresh. With
+    <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code>, the owner must also have
+    a proven address. If that check refuses a refresh, its refresh token
+    survives, but its access session ends in session-revocation mode. Once
+    the owner proves the address, rotation creates a fresh session.
   </p>
 
   <h2>Tokens</h2>

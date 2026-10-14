@@ -80,7 +80,10 @@ its owner instead: in an `allowlist` or `closed` project, or under a deny
 rule that blocks the owner's address, the agent is refused whenever the
 owner would be. Where the deployment requires identity verification, the
 owner's verification is the one that counts; an agent cannot verify anyone.
-Both checks run with the standing check at every token issue, so the
+Required email verification also judges the owner. A refused refresh
+keeps its refresh token but ends its access session in session-revocation
+mode; after the owner proves the address, rotation creates a fresh session.
+These checks run with the standing check at every token issue, so the
 token-issuing path for agents inherits them rather than having to remember
 them. (Before this rule an agent was judged as the empty address, which
 refused it under every allowlist whatever its owner's standing.)

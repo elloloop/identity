@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.13.0 → next — agent accounts
+## v4.16.0 → next — agent accounts
 
 **Migration 0038** (SQLite 0021) adds `users.kind` (`'person'` or
 `'agent'`), `users.owner_user_id` and `users.pending_owner_user_id`, all with
@@ -34,6 +34,9 @@ becomes a person.
 - **An agent is admitted as its owner is.** In an `allowlist` or `closed`
   project, under a deny rule, or with `GATEWAY_IDV_REQUIRED`, an agent's
   refresh is judged by its owner's address and verification.
+  With `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL`, the owner must also have a
+  proven address. A refused agent refresh preserves its refresh token and,
+  under session revocation, ends its access session until a fresh rotation.
 - **`User` gains `kind`, `owner_user_id` and `pending_owner_user_id`.** Every existing account
   reports `USER_KIND_PERSON`. A client that treats every user as a person
   should check `kind` before showing an account as one.

@@ -850,7 +850,7 @@ func TestDeleteAgent_DelegatesToThePurger(t *testing.T) {
 // chokepoint, the way the delegation flow will: no sign-in.
 func issueAgentTokens(t *testing.T, f *agentFixture, agent *User) (string, string) {
 	t.Helper()
-	access, refresh, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", 0, 0)
+	access, refresh, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0)
 	require.NoError(t, err)
 	return access, refresh
 }
@@ -918,7 +918,7 @@ func TestAgentStanding_FollowsTheOwner(t *testing.T) {
 
 			stored, _ := f.repo.GetUser(context.Background(), agent.ID)
 			if stored != nil {
-				_, _, err = f.svc.issueTokensWithSessionStart(context.Background(), stored, "", "", 0, 0)
+				_, _, err = f.svc.issueTokensWithSessionStart(context.Background(), stored, "", "", sessionGateRefresh, 0, 0)
 				require.ErrorIs(t, err, ErrAccountNotActive)
 			}
 		})
@@ -931,7 +931,7 @@ func TestAgentStanding_RestoredWithTheOwner(t *testing.T) {
 	f := newAgentFixture(t)
 	agent := seedAgent(f.repo, f.owner.ID)
 	f.setStatus(f.owner.ID, StatusDeactivated)
-	_, _, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", 0, 0)
+	_, _, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0)
 	require.ErrorIs(t, err, ErrAccountNotActive)
 
 	f.setStatus(f.owner.ID, StatusActive)
@@ -976,7 +976,7 @@ func TestAgentAdmission_FollowsTheOwner(t *testing.T) {
 				return
 			}
 			require.ErrorIs(t, err, ErrAccessNotAllowed)
-			_, _, err = f.svc.issueTokensWithSessionStart(ctx, agent, "", "", 0, 0)
+			_, _, err = f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0)
 			require.ErrorIs(t, err, ErrAccessNotAllowed, "the token chokepoint refuses too")
 		})
 	}
@@ -1211,7 +1211,7 @@ func TestAgentSignIn_QR(t *testing.T) {
 
 	init, err := f.svc.InitiateQrLogin(ctx, "Pixel 8", "ua", "10.0.0.1")
 	require.NoError(t, err)
-	_, err = f.svc.ApproveQrLogin(ctx, init.SessionID, true, agent.ID, "ua")
+	_, err = f.svc.ApproveQrLogin(ctx, init.SessionID, true, agent.ID, "10.0.0.1", "ua")
 	require.NoError(t, err)
 	_, err = f.svc.PollQrLogin(ctx, init.SessionID, init.PollSecret, "10.0.0.1", "ua")
 	requireAgentSignInRefusal(t, f.repo, err, agent.ID)

@@ -2567,6 +2567,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	switch {
 	case timeoutUser.IsAgent():
 		if err := s.checkAgentStanding(ctx, timeoutUser); err != nil {
+			if errors.Is(err, ErrEmailVerificationRequired) {
+				s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "email_not_verified")
+			}
 			return nil, "", "", err
 		}
 	case !timeoutUser.IsAnonymous:
