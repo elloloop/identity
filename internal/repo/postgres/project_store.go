@@ -688,9 +688,8 @@ func (s *ProjectStore) SetProjectAuthDomainVerified(ctx context.Context, project
 // SetPrimaryProjectAuthDomain promotes a project's VERIFIED auth-domain to its
 // primary serving host, atomically demoting the current primary in the SAME
 // transaction so the per-project partial-unique primary index is never violated
-// — even under concurrent promotions (both lock the same project's rows, so
-// they serialize rather than colliding on the index). Only a verified
-// (verified_at_ms > 0) domain may be promoted: an unverified target is
+// — even under concurrent promotions, which serialize on the project row.
+// Only a verified (verified_at_ms > 0) domain may be promoted: an unverified target is
 // ErrAuthDomainNotVerified. A hostname the project does not own is ErrNotFound.
 // Promoting the already-primary host is a no-op that returns its record.
 func (s *ProjectStore) SetPrimaryProjectAuthDomain(ctx context.Context, projectID, hostname string) (*ProjectAuthDomain, error) {
@@ -707,8 +706,17 @@ func (s *ProjectStore) SetPrimaryProjectAuthDomain(ctx context.Context, projectI
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Lock the target row so a concurrent promotion of the same project
-	// serializes here rather than racing the partial-unique primary index.
+	// Different target domains do not share a row lock. Serialize on their
+	// project before reading either the target or the current primary, so a
+	// waiting promotion sees the preceding promotion's committed primary.
+	var lockedProjectID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM projects WHERE id = $1 FOR NO KEY UPDATE`, projectID).Scan(&lockedProjectID); err != nil {
+		if noRows(err) {
+			return nil, fmt.Errorf("%w: project", service.ErrNotFound)
+		}
+		return nil, wrapPgErr("SetPrimaryProjectAuthDomain lock project", err)
+	}
+
 	const selectQ = `SELECT ` + projectAuthDomainColumns + `
 		FROM project_auth_domains
 		WHERE project_id = $1 AND lower(hostname) = lower($2)
