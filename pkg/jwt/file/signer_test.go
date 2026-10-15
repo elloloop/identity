@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 )
 
 func TestSigner_LoadsKeysAndSigns(t *testing.T) {
@@ -622,4 +623,14 @@ func pemForKey(priv *rsa.PrivateKey) string {
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(priv),
 	}))
+}
+
+func TestDelegatedFileProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys.json")
+	writeKeys(t, path, []keysEntryFixture{{kid: "delegated", priv: mustGenKey(t), notBeforeOff: -time.Minute, expiresAtOff: time.Hour}})
+	signer, err := New(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwttest.AssertDelegatedProfile(t, signer)
 }

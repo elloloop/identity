@@ -1,0 +1,40 @@
+---
+import controller from '../consent.js?raw';
+import { Button } from '@refraction-ui/astro';
+import '../styles.css';
+---
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><meta name="color-scheme" content="light dark"/><title>Authorize your agent</title></head>
+<body>
+<main>
+  <header class="page-header"><div class="mark" aria-hidden="true">↗</div><p class="eyebrow">AGENT ACCESS</p><h1>Let your agent help.</h1><p class="intro">Choose who can act, see the exact access, and stay in control.</p></header>
+  <div class="consent-card">
+    <p id="status" role="status" aria-live="polite">Sign in to review this request.</p>
+    <div id="error" role="alert" hidden></div>
+    <section id="login-panel" aria-labelledby="login-title">
+      <h2 id="login-title">First, confirm it’s you</h2><p class="muted">Your sign-in stays on this page. It is never shared with the requesting app.</p>
+      <form id="login-form">
+        <label for="identifier" id="identifier-label">Email</label><input id="identifier" name="identifier" type="email" autocomplete="username" required/>
+        <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required/>
+        <div id="captcha" hidden></div>
+        <Button id="sign-in" type="submit" class="wide">Sign in to review</Button>
+      </form>
+      <form id="totp-form" hidden><label for="totp-code">Authenticator or recovery code</label><input id="totp-code" autocomplete="one-time-code" required/><Button type="submit" class="wide">Verify and review</Button></form>
+      <p id="no-login" hidden class="muted">Password sign-in is unavailable here. Open this request through your organization’s supported sign-in experience. No access has been granted.</p>
+    </section>
+    <section id="review-panel" aria-labelledby="review-title" hidden>
+      <div class="section-heading"><p class="eyebrow">REVIEW REQUEST</p><h2 id="review-title"></h2><p class="muted">This app is asking an agent you own to act on your behalf.</p></div>
+      <dl class="facts"><div><dt>App</dt><dd id="client-name"></dd></div><div><dt>Resource</dt><dd id="resource"></dd></div><div><dt>Access ends</dt><dd id="grant-expiry"></dd></div></dl>
+      <h3>What it can do</h3><ul id="scopes" class="scope-list"></ul>
+      <fieldset><legend>Choose your agent</legend><div id="agents" class="agents"></div><p id="empty" hidden class="muted">You have no eligible active agents for this request. No access can be granted.</p><Button id="more-agents" variant="outline" hidden>Show more agents</Button></fieldset>
+      <p class="notice">You can revoke this access later. It ends if the agent or your authority changes.</p>
+      <p id="request-expiry" class="muted"></p>
+      <div class="actions"><Button id="deny" variant="outline">Don’t allow</Button><Button id="approve" disabled>Allow selected agent</Button></div>
+    </section>
+  </div>
+  <p class="footer">Only approve a request you started. Your agent receives its own limited access.</p>
+</main>
+<!--IDENTITY_AGENT_CONFIG-->
+<script is:inline set:html={controller}></script>
+</body></html>

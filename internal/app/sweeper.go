@@ -104,12 +104,13 @@ const auditRetentionDay = 24 * time.Hour
 // One instance per app.New; started immediately and stopped via the
 // returned cancel func.
 type sweeper struct {
-	repo     service.Repository
-	purger   accountPurger
-	logger   *zap.Logger
-	interval time.Duration
-	batch    int
-	grace    time.Duration
+	repo            service.Repository
+	agentOAuthSweep func(context.Context, int64, int) error
+	purger          accountPurger
+	logger          *zap.Logger
+	interval        time.Duration
+	batch           int
+	grace           time.Duration
 
 	// auditRetentionDays bounds how long audit events are kept; each tick
 	// deletes events older than now - auditRetentionDays. 0 (or negative)
@@ -345,7 +346,7 @@ func (s *sweeper) purgeExpiredAccountDeletions(ctx context.Context, cutoffMs int
 // Defined as a method rather than a package-level var because the
 // function values close over s.repo.
 func (s *sweeper) targets() []nodeTypeSweeper {
-	return []nodeTypeSweeper{
+	targets := []nodeTypeSweeper{
 		{"webauthn_challenges", s.repo.DeleteExpiredWebAuthnChallenges},
 		{"email_verification_tokens", s.repo.DeleteExpiredEmailVerificationTokens},
 		{"password_reset_tokens", s.repo.DeleteExpiredPasswordResetTokens},
@@ -360,6 +361,10 @@ func (s *sweeper) targets() []nodeTypeSweeper {
 		{"user_invitations", s.repo.DeleteExpiredInvitations},
 		{"assurance_challenges", s.repo.DeleteExpiredAssuranceChallenges},
 	}
+	if s.agentOAuthSweep != nil {
+		targets = append(targets, nodeTypeSweeper{"agent_authorizations", s.agentOAuthSweep})
+	}
+	return targets
 }
 
 func (s *sweeper) sweepType(ctx context.Context, t nodeTypeSweeper, beforeMs int64) {

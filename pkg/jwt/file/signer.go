@@ -17,6 +17,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jws"
 	jwtoken "github.com/lestrrat-go/jwx/v2/jwt"
 
 	"github.com/elloloop/identity/pkg/jwt"
@@ -197,7 +198,19 @@ func (s *Signer) SignAccessToken(ctx context.Context, claims jwt.Claims, expiry 
 }
 
 // SignClaims is the generic JWT-signing primitive.
-func (s *Signer) SignClaims(_ context.Context, claims map[string]any) (string, error) {
+func (s *Signer) SignClaims(ctx context.Context, claims map[string]any) (string, error) {
+	return s.signClaims(ctx, claims, "JWT")
+}
+
+func (s *Signer) SignDelegatedAccessToken(ctx context.Context, claims jwt.DelegatedAccessClaims) (string, error) {
+	m, err := claims.ClaimsMap()
+	if err != nil {
+		return "", err
+	}
+	return s.signClaims(ctx, m, jwt.DelegatedAccessTokenType)
+}
+
+func (s *Signer) signClaims(_ context.Context, claims map[string]any, profile string) (string, error) {
 	snap := s.snap.Load()
 	if snap == nil {
 		return "", errors.New("file signer not initialized")
@@ -216,7 +229,11 @@ func (s *Signer) SignClaims(_ context.Context, claims map[string]any) (string, e
 		return "", fmt.Errorf("building token: %w", err)
 	}
 
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, active.signKey))
+	headers := jws.NewHeaders()
+	if err := headers.Set(jws.TypeKey, profile); err != nil {
+		return "", err
+	}
+	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, active.signKey, jws.WithProtectedHeaders(headers)))
 	if err != nil {
 		return "", fmt.Errorf("signing token: %w", err)
 	}

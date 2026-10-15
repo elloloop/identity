@@ -90,6 +90,69 @@
     "anchor": "agent-accounts"
   },
   {
+    "name": "GATEWAY_AGENT_OAUTH_ACCESS_SECONDS",
+    "type": "integer",
+    "default": "",
+    "required": false,
+    "description": "bounds delegated access JWTs to 1–900 seconds.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_AGENT_OAUTH_CONSENT_SECONDS",
+    "type": "integer",
+    "default": "",
+    "required": false,
+    "description": "bounds an explicit grant's lifetime, also capped by its original human session.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_AGENT_OAUTH_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": true,
+    "description": "enables native OAuth-only delegated agent access.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP",
+    "type": "integer",
+    "default": "",
+    "required": false,
+    "description": "sets the authenticated resource budget.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP",
+    "type": "integer",
+    "default": "",
+    "required": false,
+    "description": "sets the protocol budget per configured rate-limit window.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_AGENT_OAUTH_REFRESH_IDLE_SECONDS",
+    "type": "integer",
+    "default": "",
+    "required": false,
+    "description": "bounds a refresh credential's idle lifetime.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_AGENT_OAUTH_RESOURCE_CREDENTIALS_JSON",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is a bounded JSON array of project, resource audience, credential ID and SHA-256 secret digest bindings.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_ALLOWED_ORIGINS",
     "type": "string",
     "default": "http://localhost:9002,http://localhost:3000",
@@ -750,7 +813,7 @@
     "name": "GATEWAY_JWT_ISSUER",
     "type": "string",
     "default": "",
-    "required": false,
+    "required": true,
     "description": "when non-empty, is stamped on every minted token as the \"iss\" claim, so a verifier can pin the issuer.",
     "category": "JWT \u0026 tokens",
     "anchor": "jwt-and-tokens"

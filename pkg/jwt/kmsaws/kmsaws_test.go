@@ -17,6 +17,7 @@ import (
 	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
 
 	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 )
 
 // fakeKMS is an in-process stand-in for the AWS KMS client. It serves
@@ -424,4 +425,14 @@ func (b *badKMS) GetPublicKey(_ context.Context, _ *kms.GetPublicKeyInput, _ ...
 
 func (b *badKMS) Sign(_ context.Context, _ *kms.SignInput, _ ...func(*kms.Options)) (*kms.SignOutput, error) {
 	return nil, errors.New("not used in this test")
+}
+
+func TestDelegatedKMSProfile(t *testing.T) {
+	fake := newFakeKMS()
+	fake.addKey(t, "arn:delegated")
+	signer, err := New(context.Background(), Config{API: fake, Keys: []KeyRef{{KID: "delegated", KeyARN: "arn:delegated", NotBefore: time.Now().Add(-time.Minute), ExpiresAt: time.Now().Add(time.Hour)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwttest.AssertDelegatedProfile(t, signer)
 }

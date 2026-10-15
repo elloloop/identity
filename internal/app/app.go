@@ -497,6 +497,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSCIMPerIP, 0),
 		},
 	}
+	if cfg.AgentOAuthEnabled {
+		protocol := middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthProtocolPerIP, 0)
+		for _, path := range []string{agentOAuthAuthorizePath, agentOAuthTokenPath, agentOAuthRevokePath, identityconnectgen.IdentityServiceGetAgentAuthorizationProcedure, identityconnectgen.IdentityServiceDecideAgentAuthorizationProcedure, identityconnectgen.IdentityServiceListAgentDelegationsProcedure, identityconnectgen.IdentityServiceRevokeAgentDelegationProcedure} {
+			limits = append(limits, middleware.PathLimit{PathPrefix: path, Tag: "agent_oauth_protocol", Limiter: protocol})
+		}
+		limits = append(limits, middleware.PathLimit{PathPrefix: agentOAuthIntrospectPath, Tag: "agent_oauth_introspection", Limiter: middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthIntrospectionPerIP, 0)})
+	}
 	for _, path := range guardianManagementPaths {
 		limits = append(limits, middleware.PathLimit{
 			PathPrefix: path, Tag: "guardian_manage", Limiter: guardianLimiter,
@@ -757,6 +764,13 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.AnonymousRetentionDays,
 		logger,
 	)
+	if sweep != nil {
+		if _, ok := deps.Repo.(service.AgentOAuthRepository); ok {
+			sweep.agentOAuthSweep = func(ctx context.Context, beforeMs int64, limit int) error {
+				return sweepAgentOAuth(ctx, deps.Repo, deps.Projects, deps.Config.DefaultProjectID, beforeMs, limit)
+			}
+		}
+	}
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	// COPPA data-minimization: one minimizer derived from the age gate +
@@ -797,7 +811,19 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf("otelconnect interceptor: %w", err)
 	}
 
+	var agentOAuth *service.AgentOAuthService
+	if deps.Config.AgentOAuthEnabled {
+		agentOAuth, err = service.NewAgentOAuthService(authSvc, deps.Repo)
+		if err != nil {
+			return nil, fmt.Errorf("agent OAuth: %w", err)
+		}
+	}
+	handler.WithAgentOAuth(agentOAuth)
 	mux := http.NewServeMux()
+	if agentOAuth != nil {
+		(&agentOAuthProtocol{service: agentOAuth, auth: authSvc, issuer: deps.Config.JWTIssuer}).register(mux)
+		mux.Handle(agentOAuthConsentPath, ui.AgentConsentHandler(deps.Config, authSvc))
+	}
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)
 
@@ -926,6 +952,9 @@ func New(deps Deps) (*Built, error) {
 		),
 		logger,
 	)(chain)
+	if agentOAuth != nil {
+		chain = agentOAuthRequestBounds(chain)
+	}
 	chain = middleware.HealthMiddleware(newDBReadinessProbe(deps.DB), chain)
 	chain = middleware.RecoverMiddleware(logger)(chain)
 	chain = middleware.LoggingMiddleware(logger)(chain)

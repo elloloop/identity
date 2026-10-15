@@ -20,9 +20,13 @@ func toConnectError(err error) *connect.Error {
 	}
 
 	switch {
-	case errors.Is(err, service.ErrOAuthClientRevision):
+	case errors.Is(err, service.ErrAgentOAuthRevision), errors.Is(err, service.ErrOAuthClientRevision):
 		return connect.NewError(connect.CodeAborted, err)
 
+	case errors.Is(err, service.ErrAgentOAuthReauthenticationRequired):
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	case errors.Is(err, service.ErrAgentOAuthGrant):
+		return connect.NewError(connect.CodePermissionDenied, err)
 	case errors.Is(err, service.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
 
@@ -111,6 +115,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrMergeRefused),
 		errors.Is(err, service.ErrAccountMergeDisabled),
 		errors.Is(err, service.ErrAgentsDisabled),
+		errors.Is(err, service.ErrAgentOAuthDisabled),
 		errors.Is(err, service.ErrReauthenticationRequired),
 		errors.Is(err, service.ErrAccountKindOff),
 		errors.Is(err, service.ErrPasskeySignupDisabled),

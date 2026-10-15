@@ -15,7 +15,7 @@ func oauthRegistrationFromProto(in *identitypb.OAuthClientRegistration) *service
 	}
 	out := &service.OAuthClientRegistration{Name: in.GetName(), RedirectURIs: in.GetRedirectUris(), GrantTypes: in.GetGrantTypes(), Disabled: in.GetDisabled()}
 	for _, resource := range in.GetResources() {
-		out.Resources = append(out.Resources, service.OAuthResourceBounds{Resource: resource.GetResource(), Scopes: resource.GetScopes()})
+		out.Resources = append(out.Resources, service.OAuthResourceBounds{Resource: resource.GetResource(), Scopes: resource.GetScopes(), Product: resource.GetProduct()})
 	}
 	return out
 }
@@ -23,7 +23,7 @@ func oauthRegistrationFromProto(in *identitypb.OAuthClientRegistration) *service
 func oauthClientToProto(in *service.OAuthClient) *identitypb.OAuthClient {
 	registration := &identitypb.OAuthClientRegistration{Name: in.Registration.Name, RedirectUris: in.Registration.RedirectURIs, GrantTypes: in.Registration.GrantTypes, Disabled: in.Registration.Disabled}
 	for _, resource := range in.Registration.Resources {
-		registration.Resources = append(registration.Resources, &identitypb.OAuthResourceBounds{Resource: resource.Resource, Scopes: resource.Scopes})
+		registration.Resources = append(registration.Resources, &identitypb.OAuthResourceBounds{Resource: resource.Resource, Scopes: resource.Scopes, Product: resource.Product})
 	}
 	return &identitypb.OAuthClient{ClientId: in.ID, Kind: identitypb.OAuthClientKind_O_AUTH_CLIENT_KIND_NATIVE_PUBLIC, Registration: registration, Revision: in.Revision, CreatedAtMs: in.CreatedAt, UpdatedAtMs: in.UpdatedAt}
 }

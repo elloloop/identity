@@ -2718,6 +2718,8 @@ enum OAuthClientKind {
 message OAuthResourceBounds {
   string resource = 1; // Exact approved HTTPS audience URI or URN; no fragment.
   repeated string scopes = 2; // Protocol scope tokens, not application permissions.
+  // Product whose current age/admission policy applies. Required for delegation.
+  string product = 3;
 }
 
 message OAuthClientRegistration {
@@ -2771,7 +2773,69 @@ message ListOAuthClientsResponse {
   // Pass the last returned client_id as after_client_id; an empty page ends listing.
 }
 
+enum AgentAuthorizationDecision {
+  AGENT_AUTHORIZATION_DECISION_UNSPECIFIED = 0;
+  AGENT_AUTHORIZATION_DECISION_APPROVE = 1;
+  AGENT_AUTHORIZATION_DECISION_DENY = 2;
+}
+message GetAgentAuthorizationRequest {
+  string request_id = 1;
+  int32 agent_offset = 2; // Bounded owner-choice pages; zero starts listing.
+}
+message GetAgentAuthorizationResponse {
+  string request_id = 1;
+  int64 revision = 2;
+  string client_id = 3;
+  string client_name = 4;
+  string resource = 5;
+  repeated string scopes = 6;
+  string product = 7;
+  int64 request_expires_at_ms = 8;
+  int64 grant_expires_at_ms = 9;
+  repeated User agents = 10;
+  int32 next_agent_offset = 11; // -1 ends the choices.
+}
+message DecideAgentAuthorizationRequest {
+  string request_id = 1;
+  int64 expected_revision = 2;
+  AgentAuthorizationDecision decision = 3;
+  string agent_user_id = 4; // Only a currently owned active agent may be selected.
+}
+message DecideAgentAuthorizationResponse {
+  string redirect_uri = 1; // Server-validated registered redirect with original state.
+}
+message AgentDelegation {
+  string delegation_id = 1;
+  string agent_user_id = 2;
+  string client_id = 3;
+  string resource = 4;
+  repeated string scopes = 5;
+  string product = 6;
+  int64 consented_at_ms = 7;
+  int64 expires_at_ms = 8;
+  int64 revoked_at_ms = 9; // Terminal; reactivation requires fresh consent.
+}
+message ListAgentDelegationsRequest {
+  string after_delegation_id = 1;
+  int32 limit = 2; // 1..100; zero selects 50.
+}
+message ListAgentDelegationsResponse {
+  repeated AgentDelegation delegations = 1;
+  string next_cursor = 2; // Empty ends listing.
+}
+message RevokeAgentDelegationRequest {
+  string delegation_id = 1;
+}
+message RevokeAgentDelegationResponse {}
+
 service IdentityService {
+  // OAuth-only human consent requires a live durable human SID and recent sign-in.
+  // Callers cannot supply actor, client, resource, scopes or an arbitrary proof.
+  rpc GetAgentAuthorization(GetAgentAuthorizationRequest) returns (GetAgentAuthorizationResponse);
+  rpc DecideAgentAuthorization(DecideAgentAuthorizationRequest) returns (DecideAgentAuthorizationResponse);
+  rpc ListAgentDelegations(ListAgentDelegationsRequest) returns (ListAgentDelegationsResponse);
+  rpc RevokeAgentDelegation(RevokeAgentDelegationRequest) returns (RevokeAgentDelegationResponse);
+
   // Same-project active human administrator required. No dynamic registration.
   rpc CreateOAuthClient(CreateOAuthClientRequest) returns (CreateOAuthClientResponse);
   rpc GetOAuthClient(GetOAuthClientRequest) returns (GetOAuthClientResponse);

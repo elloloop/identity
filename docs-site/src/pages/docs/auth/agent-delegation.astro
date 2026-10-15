@@ -1,0 +1,62 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Delegated agent access">
+<h1>Delegated agent access</h1>
+<p>This optional OAuth-only flow lets a native public client act as an owned
+agent after explicit human consent. It is off by default. It issues no ID token
+and never turns an agent into a human sign-in account.</p>
+<h2>Enable deliberately</h2>
+<p>Enable agent accounts and session revocation, set the issuer to an HTTPS origin
+without a path, query, fragment or trailing slash, and configure
+<code>GATEWAY_AGENT_OAUTH_RESOURCE_CREDENTIALS_JSON</code> as a bounded JSON array of
+<code>id</code>, <code>project_id</code>, <code>resource</code> and
+<code>secret_sha256</code>. Generate a high-entropy resource secret outside source
+control; Identity stores its SHA-256 digest while the resource keeps the secret.
+No public client ID or directory credential substitutes for that secret.</p>
+<p>Register a native client with exact redirects, one or more resource/scope
+bounds and a <code>product</code> policy slug. A registration grants no permission.
+Then enable <code>GATEWAY_AGENT_OAUTH_ENABLED</code> only after completing the
+runnable <code>examples/agent-delegation</code> journey.</p>
+<h2>Complete the journey</h2>
+<ol>
+<li>The native client creates an unpredictable state and verifier, then opens
+<code>/oauth/authorize</code> with response_type=code, its client ID, exact
+redirect, one resource, requested scopes and the S256 challenge.</li>
+<li>The hosted <code>/auth/agent-consent</code> page uses normal human sign-in.
+Consent requires a live human SID and a sign-in within five minutes. Review
+client, resource, scopes and expiry, then explicitly select an owned active
+agent and approve or deny. Signing in does not itself approve access.</li>
+<li>The client verifies the callback state and issuer, then redeems the code at
+<code>/oauth/token</code> using the original verifier and exact original bounds.
+A code is single-use and expires after one minute. It receives an agent access
+JWT and, if registered, an opaque rotating refresh credential.</li>
+<li>The resource verifies the distinct <code>at+jwt</code> profile and authenticates
+to <code>/oauth/introspect</code> using HTTP Basic on every request. It checks
+active, issuer, project, single audience, scopes and actor/agent bindings. On
+an inactive token or an unavailable authority service it refuses access.</li>
+<li>The human can list and revoke their grants through the session RPCs.
+The native client can revoke its refresh credential at <code>/oauth/revoke</code>.
+A used refresh token replay terminally revokes the whole grant.</li>
+</ol>
+<h2>Bounds and loss of authority</h2>
+<p>Access lasts 300 seconds by default (maximum 900); consent defaults to 86400
+seconds (maximum thirty days); refresh idle defaults to 3600 seconds. Original
+human session lifetime and tenant idle/absolute policy can shorten these bounds.
+Delegation does not keep a human session active. Ownership changes, signout,
+status or credential changes, guardian loss, client edits and project changes
+invalidate old grants. Restoring a previous owner or enabling a client again
+never restores the old grant. Product and age policy derives from the current
+human owner and the registered product, never a caller-supplied age claim.</p>
+<p>Only GET authorization and form-encoded POST token/introspection/revocation
+are exposed. Requests are limited to 64 KiB and compact access JWTs to 32 KiB;
+the configured issuer is at most 2048 bytes. The <code>openid</code> scope is
+explicitly refused. Duplicate parameters, body/query mixing, client secrets on public
+clients, non-S256 proof, multiple resources and scope widening are refused.
+Discovery is <code>/.well-known/oauth-authorization-server</code>; there is no
+OIDC discovery, userinfo, implicit flow, dynamic registration or generic mint API.</p>
+<p>Native-gRPC hosts that call consent RPCs must explicitly opt into
+<code>GRPCTrustSessionID</code> and <code>GRPCTrustAuthTime</code> only after their
+verified interceptor owns those metadata values. Otherwise the bridge strips
+them. Ordinary existing gRPC auth behavior is unchanged.</p>
+</DocsLayout>

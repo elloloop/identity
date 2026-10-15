@@ -47,10 +47,11 @@ type grpcBridge struct {
 	logger         *zap.Logger
 	// trustAuthTime: the host's interceptor owns x-authenticated-auth-time
 	// (Options.GRPCTrustAuthTime). Otherwise the bridge drops it.
-	trustAuthTime bool
+	trustAuthTime  bool
+	trustSessionID bool
 }
 
-func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime bool) *grpcBridge {
+func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSessionID bool) *grpcBridge {
 	directoryLimit, ok := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceLookupUsersProcedure)
 	if !ok {
 		// app.Build always configures this limit; reaching here means the
@@ -64,6 +65,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime bool) *gr
 		trustedProxies: built.TrustedProxies,
 		logger:         logger,
 		trustAuthTime:  trustAuthTime,
+		trustSessionID: trustSessionID,
 	}
 }
 
@@ -142,6 +144,9 @@ func invoke[Req, Resp any](
 	}
 	// The sign-in time vouches for a recent sign-in; only a host that said
 	// its interceptor sets it from the verified token may pass it on.
+	if !b.trustSessionID {
+		creq.Header().Del(middleware.AuthenticatedSessionIDHeader)
+	}
 	if !b.trustAuthTime {
 		creq.Header().Del(middleware.AuthenticatedAuthTimeHeader)
 	}
@@ -796,4 +801,20 @@ func (b *grpcBridge) UpdateOAuthClient(ctx context.Context, in *identitypb.Updat
 
 func (b *grpcBridge) ListOAuthClients(ctx context.Context, in *identitypb.ListOAuthClientsRequest) (*identitypb.ListOAuthClientsResponse, error) {
 	return invoke(ctx, b, in, b.h.ListOAuthClients)
+}
+
+func (b *grpcBridge) GetAgentAuthorization(ctx context.Context, in *identitypb.GetAgentAuthorizationRequest) (*identitypb.GetAgentAuthorizationResponse, error) {
+	return invoke(ctx, b, in, b.h.GetAgentAuthorization)
+}
+
+func (b *grpcBridge) DecideAgentAuthorization(ctx context.Context, in *identitypb.DecideAgentAuthorizationRequest) (*identitypb.DecideAgentAuthorizationResponse, error) {
+	return invoke(ctx, b, in, b.h.DecideAgentAuthorization)
+}
+
+func (b *grpcBridge) ListAgentDelegations(ctx context.Context, in *identitypb.ListAgentDelegationsRequest) (*identitypb.ListAgentDelegationsResponse, error) {
+	return invoke(ctx, b, in, b.h.ListAgentDelegations)
+}
+
+func (b *grpcBridge) RevokeAgentDelegation(ctx context.Context, in *identitypb.RevokeAgentDelegationRequest) (*identitypb.RevokeAgentDelegationResponse, error) {
+	return invoke(ctx, b, in, b.h.RevokeAgentDelegation)
 }

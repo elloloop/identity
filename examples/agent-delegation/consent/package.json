@@ -1,0 +1,20 @@
+{
+  "name": "identity-agent-consent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "astro build && node scripts/embed.mjs",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@refraction-ui/astro": "0.22.1",
+    "@refraction-ui/tailwind-config": "0.1.7",
+    "@tailwindcss/vite": "4.3.2",
+    "astro": "7.3.8",
+    "tailwindcss": "4.3.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  },
+  "packageManager": "pnpm@9.15.4"
+}

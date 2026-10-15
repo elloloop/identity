@@ -1,5 +1,29 @@
 # Upgrade guide
 
+## Next — native delegated agent OAuth
+
+The new feature remains off unless `GATEWAY_AGENT_OAUTH_ENABLED=true`. It requires
+agent accounts, `GATEWAY_REVOCATION_MODE=session`, an HTTPS origin for
+`GATEWAY_JWT_ISSUER` without a path, query, fragment or trailing slash, and
+dedicated resource credentials. PostgreSQL migration 0041 / SQLite 0024
+add consent, code and refresh-family state plus terminal security fences. Down
+migrations erase that state and revoke its usefulness; retain needed audit
+evidence before rollback. Ordinary sign-in and legacy human JWT compatibility
+are unchanged. A human without a durable SID must sign in normally again only
+when beginning this new consent flow.
+
+Native resource registrations can now supply `product` alongside `resource`
+and `scopes`; delegated authorization requires it. Existing registrations
+without a product remain valid registry metadata but cannot issue grants.
+An update advances the registration revision and requires fresh consent.
+
+The four new session RPCs GetAgentAuthorization, DecideAgentAuthorization,
+ListAgentDelegations and RevokeAgentDelegation implement explicit human consent
+and access management. HTTP publishes only OAuth code+S256 and rotating refresh,
+not OIDC. Resources must use authenticated current introspection on every call;
+verifying the JWT signature alone is insufficient. See ADR-0016 and the runnable
+`examples/agent-delegation` journey before enabling the feature.
+
 ## Next — native public OAuth client registrations
 
 PostgreSQL migration 0040 (SQLite 0023) adds the project-scoped `oauth_clients`

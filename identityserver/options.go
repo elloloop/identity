@@ -57,6 +57,9 @@ type Options struct {
 	// written before the key existed cannot let a client vouch for its own
 	// sign-in.
 	GRPCTrustAuthTime bool
+	// GRPCTrustSessionID requires the host interceptor to strip caller metadata
+	// and supply X-Authenticated-Session-Id from a verified human token.
+	GRPCTrustSessionID bool
 
 	// MetricsRegistry is where identity records its Prometheus RED
 	// metrics. nil uses prometheus.DefaultRegisterer (what the container

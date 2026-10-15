@@ -10,6 +10,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jws"
 	jwtoken "github.com/lestrrat-go/jwx/v2/jwt"
 )
 
@@ -113,7 +114,19 @@ func (m *memSigner) SignAccessToken(ctx context.Context, c Claims, expiry time.D
 	return m.SignClaims(ctx, c.ClaimsMap(time.Now().UTC(), expiry))
 }
 
-func (m *memSigner) SignClaims(_ context.Context, claims map[string]any) (string, error) {
+func (m *memSigner) SignClaims(ctx context.Context, claims map[string]any) (string, error) {
+	return m.signClaims(ctx, claims, "JWT")
+}
+
+func (m *memSigner) SignDelegatedAccessToken(ctx context.Context, claims DelegatedAccessClaims) (string, error) {
+	claimMap, err := claims.ClaimsMap()
+	if err != nil {
+		return "", err
+	}
+	return m.signClaims(ctx, claimMap, DelegatedAccessTokenType)
+}
+
+func (m *memSigner) signClaims(_ context.Context, claims map[string]any, profile string) (string, error) {
 	k, ok := m.byKID[m.activeKID]
 	if !ok {
 		return "", fmt.Errorf("memSigner: active kid %q not present", m.activeKID)
@@ -126,7 +139,11 @@ func (m *memSigner) SignClaims(_ context.Context, claims map[string]any) (string
 	if err != nil {
 		return "", err
 	}
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, k.jwk))
+	headers := jws.NewHeaders()
+	if err := headers.Set(jws.TypeKey, profile); err != nil {
+		return "", err
+	}
+	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, k.jwk, jws.WithProtectedHeaders(headers)))
 	if err != nil {
 		return "", err
 	}

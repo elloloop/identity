@@ -14,6 +14,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jws"
 	jwtoken "github.com/lestrrat-go/jwx/v2/jwt"
 
 	"github.com/elloloop/identity/pkg/jwt"
@@ -131,7 +132,19 @@ func (s *Signer) SignAccessToken(ctx context.Context, claims jwt.Claims, expiry 
 }
 
 // SignClaims signs a generic claim map.
-func (s *Signer) SignClaims(_ context.Context, claims map[string]any) (string, error) {
+func (s *Signer) SignClaims(ctx context.Context, claims map[string]any) (string, error) {
+	return s.signClaims(ctx, claims, "JWT")
+}
+
+func (s *Signer) SignDelegatedAccessToken(ctx context.Context, claims jwt.DelegatedAccessClaims) (string, error) {
+	m, err := claims.ClaimsMap()
+	if err != nil {
+		return "", err
+	}
+	return s.signClaims(ctx, m, jwt.DelegatedAccessTokenType)
+}
+
+func (s *Signer) signClaims(_ context.Context, claims map[string]any, profile string) (string, error) {
 	s.mu.RLock()
 	k, ok := s.byKID[s.activeKID]
 	s.mu.RUnlock()
@@ -146,7 +159,11 @@ func (s *Signer) SignClaims(_ context.Context, claims map[string]any) (string, e
 	if err != nil {
 		return "", err
 	}
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, k.jwk))
+	headers := jws.NewHeaders()
+	if err := headers.Set(jws.TypeKey, profile); err != nil {
+		return "", err
+	}
+	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, k.jwk, jws.WithProtectedHeaders(headers)))
 	if err != nil {
 		return "", err
 	}

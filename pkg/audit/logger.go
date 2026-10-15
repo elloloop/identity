@@ -276,6 +276,9 @@ const (
 	EventGuardianChildReactivated     EventType = "guardian_child_reactivated"
 	EventGuardianChildDeleted         EventType = "guardian_child_deleted"
 
+	EventAgentOAuthConsent  EventType = "agent_oauth_consent"
+	EventAgentOAuthIssued   EventType = "agent_oauth_issued"
+	EventAgentOAuthRevoked  EventType = "agent_oauth_revoked"
 	EventOAuthClientCreated EventType = "oauth_client_created"
 	EventOAuthClientUpdated EventType = "oauth_client_updated"
 
@@ -368,6 +371,9 @@ var validEventTypes = map[EventType]struct{}{
 	EventGuardianChildDeactivated:      {},
 	EventGuardianChildReactivated:      {},
 	EventGuardianChildDeleted:          {},
+	EventAgentOAuthConsent:             {},
+	EventAgentOAuthIssued:              {},
+	EventAgentOAuthRevoked:             {},
 	EventOAuthClientCreated:            {},
 	EventOAuthClientUpdated:            {},
 	EventAgentCreated:                  {},

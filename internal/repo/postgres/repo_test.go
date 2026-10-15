@@ -69,7 +69,7 @@ func TestConformance(t *testing.T) {
 		return ctx
 	}
 
-	conformance.RunConformance(t, conformance.Driver{
+	driver := conformance.Driver{
 		Name: "postgres",
 		NewRepo: func(t *testing.T) service.Repository {
 			t.Helper()
@@ -100,7 +100,9 @@ func TestConformance(t *testing.T) {
 			seedProject(constructCtx(t), t, pg, projectID)
 			return pg.WithProject(projectID)
 		},
-	})
+	}
+	conformance.RunConformance(t, driver)
+	conformance.RunAgentOAuthConformance(t, driver)
 }
 
 // seedProject inserts the projects(id) row a project-scoped data-plane write

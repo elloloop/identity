@@ -104,3 +104,5 @@ func TestSigner_SignClaimsPropagates(t *testing.T) {
 		t.Fatalf("Verify: %v", err)
 	}
 }
+
+func TestDelegatedTestProfile(t *testing.T) { AssertDelegatedProfile(t, NewSigner(t, "delegated")) }

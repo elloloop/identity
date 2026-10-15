@@ -21,10 +21,19 @@ func validRegistration() *service.OAuthClientRegistration {
 
 func TestOAuthClientRegistrationValidation(t *testing.T) {
 	require.NoError(t, validRegistration().Validate())
+	for _, name := range []string{"ఆకృతి Desktop", "Acme café", "Acme العربية"} {
+		r := validRegistration()
+		r.Name = name
+		require.NoError(t, r.Validate())
+	}
 	require.ErrorIs(t, (*service.OAuthClientRegistration)(nil).Validate(), service.ErrInvalidArgument)
 	cases := map[string]func(*service.OAuthClientRegistration){
 		"empty name":         func(r *service.OAuthClientRegistration) { r.Name = " " },
 		"control name":       func(r *service.OAuthClientRegistration) { r.Name = "test\n" },
+		"bidi override name": func(r *service.OAuthClientRegistration) { r.Name = "Acme\u202edesktop" },
+		"bidi isolate name":  func(r *service.OAuthClientRegistration) { r.Name = "Acme\u2066desktop" },
+		"zero width name":    func(r *service.OAuthClientRegistration) { r.Name = "Acme\u200bdesktop" },
+		"invalid UTF8 name":  func(r *service.OAuthClientRegistration) { r.Name = "Acme\xffdesktop" },
 		"large name":         func(r *service.OAuthClientRegistration) { r.Name = strings.Repeat("a", 201) },
 		"no redirect":        func(r *service.OAuthClientRegistration) { r.RedirectURIs = nil },
 		"duplicate redirect": func(r *service.OAuthClientRegistration) { r.RedirectURIs = append(r.RedirectURIs, r.RedirectURIs[0]) },
