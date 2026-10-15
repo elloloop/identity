@@ -20,6 +20,9 @@ func toConnectError(err error) *connect.Error {
 	}
 
 	switch {
+	case errors.Is(err, service.ErrOAuthClientRevision):
+		return connect.NewError(connect.CodeAborted, err)
+
 	case errors.Is(err, service.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
 
@@ -144,31 +147,12 @@ func toConnectError(err error) *connect.Error {
 		// something else first (submit a date of birth via SubmitDateOfBirth).
 		// The completion ticket rides along as an error detail so the client
 		// can complete the step without a session.
-		cerr := connect.NewError(connect.CodeFailedPrecondition, err)
-		var dobErr *service.DOBRequiredError
-		if errors.As(err, &dobErr) && dobErr.Ticket != "" {
-			if detail, detErr := connect.NewErrorDetail(&identitypb.DOBRequiredDetails{
-				CompletionToken: dobErr.Ticket,
-			}); detErr == nil {
-				cerr.AddDetail(detail)
-			}
-		}
-		return cerr
+		return dobRequiredConnectError(err)
 
 	case errors.Is(err, service.ErrPasswordChangeRequired):
 		// FailedPrecondition, like dob_required: the client completes a step
 		// (CompleteRequiredPasswordChange) with the ticket in the detail.
-		cerr := connect.NewError(connect.CodeFailedPrecondition, err)
-		var pcErr *service.PasswordChangeRequiredError
-		if errors.As(err, &pcErr) && pcErr.Ticket != "" {
-			if detail, detErr := connect.NewErrorDetail(&identitypb.PasswordChangeRequiredDetails{
-				CompletionToken:      pcErr.Ticket,
-				SecondFactorRequired: pcErr.SecondFactorRequired,
-			}); detErr == nil {
-				cerr.AddDetail(detail)
-			}
-		}
-		return cerr
+		return passwordChangeRequiredConnectError(err)
 
 	case errors.Is(err, service.ErrMergeConflict):
 		// One of the two accounts changed between the merge's checks and its
@@ -206,6 +190,33 @@ func toConnectError(err error) *connect.Error {
 	}
 
 	return connect.NewError(connect.CodeInternal, err)
+}
+
+func dobRequiredConnectError(err error) *connect.Error {
+	cerr := connect.NewError(connect.CodeFailedPrecondition, err)
+	var dobErr *service.DOBRequiredError
+	if errors.As(err, &dobErr) && dobErr.Ticket != "" {
+		if detail, detErr := connect.NewErrorDetail(&identitypb.DOBRequiredDetails{
+			CompletionToken: dobErr.Ticket,
+		}); detErr == nil {
+			cerr.AddDetail(detail)
+		}
+	}
+	return cerr
+}
+
+func passwordChangeRequiredConnectError(err error) *connect.Error {
+	cerr := connect.NewError(connect.CodeFailedPrecondition, err)
+	var pcErr *service.PasswordChangeRequiredError
+	if errors.As(err, &pcErr) && pcErr.Ticket != "" {
+		if detail, detErr := connect.NewErrorDetail(&identitypb.PasswordChangeRequiredDetails{
+			CompletionToken:      pcErr.Ticket,
+			SecondFactorRequired: pcErr.SecondFactorRequired,
+		}); detErr == nil {
+			cerr.AddDetail(detail)
+		}
+	}
+	return cerr
 }
 
 // containsAny returns true if s contains any of the given substrings.

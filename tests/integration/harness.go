@@ -734,6 +734,7 @@ func newTestConfig() *config.Config {
 // flows. All operations are mutex-protected so tests using
 // t.Parallel() are race-free.
 type MemRepo struct {
+	oauthClients        map[string]*service.OAuthClient
 	attestedDevices     map[string]*service.AttestedDeviceRecord
 	assuranceChallenges map[string]*service.AssuranceChallengeRecord
 	mu                  sync.Mutex
@@ -772,6 +773,7 @@ func (r *MemRepo) WithProject(string) service.Repository { return r }
 // NewMemRepo returns an empty MemRepo.
 func NewMemRepo() *MemRepo {
 	return &MemRepo{
+		oauthClients:       make(map[string]*service.OAuthClient),
 		users:              make(map[string]*service.User),
 		agentCreations:     make(map[[2]string]service.AgentCreationReceipt),
 		refreshTokens:      make(map[string]*service.RefreshTokenRecord),
@@ -3132,4 +3134,64 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 		}
 	}
 	return nil
+}
+
+func (r *MemRepo) CreateOAuthClient(_ context.Context, client *service.OAuthClient) error {
+	if err := service.ValidateNewOAuthClient(client); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.oauthClients[client.ID] != nil {
+		return service.ErrAlreadyExists
+	}
+	r.oauthClients[client.ID] = client.Clone()
+	return nil
+}
+
+func (r *MemRepo) GetOAuthClient(_ context.Context, id string) (*service.OAuthClient, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.oauthClients[id].Clone(), nil
+}
+
+func (r *MemRepo) UpdateOAuthClient(_ context.Context, id string, expected int64, registration *service.OAuthClientRegistration, atMs int64) (*service.OAuthClient, error) {
+	if err := service.ValidateOAuthClientUpdate(id, expected, registration, atMs); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	client := r.oauthClients[id]
+	if client == nil || client.Revision != expected {
+		return nil, nil
+	}
+	next := *client
+	next.Registration = *registration
+	next.Revision++
+	next.UpdatedAt = atMs
+	r.oauthClients[id] = next.Clone()
+	return next.Clone(), nil
+}
+
+func (r *MemRepo) ListOAuthClients(_ context.Context, afterID string, limit int) ([]*service.OAuthClient, error) {
+	if err := service.ValidateOAuthClientPage(afterID, limit); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ids := make([]string, 0, len(r.oauthClients))
+	for id := range r.oauthClients {
+		if id > afterID {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	clients := make([]*service.OAuthClient, 0, len(ids))
+	for _, id := range ids {
+		clients = append(clients, r.oauthClients[id].Clone())
+	}
+	return clients, nil
 }

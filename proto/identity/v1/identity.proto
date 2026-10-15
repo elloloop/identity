@@ -2708,7 +2708,76 @@ message UnlinkIdentityRequest {
 
 message UnlinkIdentityResponse {}
 
+// Explicit registration only: a public client id is never a credential.
+// This registry does not expose an OAuth authorization/token endpoint.
+enum OAuthClientKind {
+  O_AUTH_CLIENT_KIND_UNSPECIFIED = 0;
+  O_AUTH_CLIENT_KIND_NATIVE_PUBLIC = 1;
+}
+
+message OAuthResourceBounds {
+  string resource = 1; // Exact approved HTTPS audience URI or URN; no fragment.
+  repeated string scopes = 2; // Protocol scope tokens, not application permissions.
+}
+
+message OAuthClientRegistration {
+  string name = 1;
+  // HTTPS, or literal 127.0.0.1 / [::1] HTTP. Only a loopback port may vary.
+  repeated string redirect_uris = 2;
+  repeated OAuthResourceBounds resources = 3;
+  // authorization_code is required; refresh_token is optional. These bounds
+  // do not advertise or enable either protocol flow.
+  repeated string grant_types = 4;
+  bool disabled = 5;
+}
+
+message OAuthClient {
+  string client_id = 1;
+  OAuthClientKind kind = 2;
+  OAuthClientRegistration registration = 3;
+  // Advances on every update, even disable/re-enable. Delegations must keep
+  // their approved bounds separately, and never expand them from this record.
+  int64 revision = 4;
+  int64 created_at_ms = 5;
+  int64 updated_at_ms = 6;
+}
+
+message CreateOAuthClientRequest {
+  OAuthClientRegistration registration = 1;
+}
+message CreateOAuthClientResponse {
+  OAuthClient client = 1;
+}
+message GetOAuthClientRequest {
+  string client_id = 1;
+}
+message GetOAuthClientResponse {
+  OAuthClient client = 1;
+}
+message UpdateOAuthClientRequest {
+  string client_id = 1;
+  int64 expected_revision = 2;
+  OAuthClientRegistration registration = 3; // Complete replacement, including disabled.
+}
+message UpdateOAuthClientResponse {
+  OAuthClient client = 1;
+}
+message ListOAuthClientsRequest {
+  string after_client_id = 1; // Exclusive lexicographic cursor.
+  int32 limit = 2; // 1..100; zero uses 50.
+}
+message ListOAuthClientsResponse {
+  repeated OAuthClient clients = 1;
+  // Pass the last returned client_id as after_client_id; an empty page ends listing.
+}
+
 service IdentityService {
+  // Same-project active human administrator required. No dynamic registration.
+  rpc CreateOAuthClient(CreateOAuthClientRequest) returns (CreateOAuthClientResponse);
+  rpc GetOAuthClient(GetOAuthClientRequest) returns (GetOAuthClientResponse);
+  rpc UpdateOAuthClient(UpdateOAuthClientRequest) returns (UpdateOAuthClientResponse);
+  rpc ListOAuthClients(ListOAuthClientsRequest) returns (ListOAuthClientsResponse);
+
   // Authentication
   rpc BeginOAuthLogin(BeginOAuthLoginRequest) returns (BeginOAuthLoginResponse);
   rpc OAuthLogin(OAuthLoginRequest) returns (OAuthLoginResponse);

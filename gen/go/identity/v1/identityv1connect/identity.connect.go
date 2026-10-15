@@ -33,6 +33,18 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// IdentityServiceCreateOAuthClientProcedure is the fully-qualified name of the IdentityService's
+	// CreateOAuthClient RPC.
+	IdentityServiceCreateOAuthClientProcedure = "/identity.v1.IdentityService/CreateOAuthClient"
+	// IdentityServiceGetOAuthClientProcedure is the fully-qualified name of the IdentityService's
+	// GetOAuthClient RPC.
+	IdentityServiceGetOAuthClientProcedure = "/identity.v1.IdentityService/GetOAuthClient"
+	// IdentityServiceUpdateOAuthClientProcedure is the fully-qualified name of the IdentityService's
+	// UpdateOAuthClient RPC.
+	IdentityServiceUpdateOAuthClientProcedure = "/identity.v1.IdentityService/UpdateOAuthClient"
+	// IdentityServiceListOAuthClientsProcedure is the fully-qualified name of the IdentityService's
+	// ListOAuthClients RPC.
+	IdentityServiceListOAuthClientsProcedure = "/identity.v1.IdentityService/ListOAuthClients"
 	// IdentityServiceBeginOAuthLoginProcedure is the fully-qualified name of the IdentityService's
 	// BeginOAuthLogin RPC.
 	IdentityServiceBeginOAuthLoginProcedure = "/identity.v1.IdentityService/BeginOAuthLogin"
@@ -449,6 +461,11 @@ const (
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
 type IdentityServiceClient interface {
+	// Same-project active human administrator required. No dynamic registration.
+	CreateOAuthClient(context.Context, *connect.Request[v1.CreateOAuthClientRequest]) (*connect.Response[v1.CreateOAuthClientResponse], error)
+	GetOAuthClient(context.Context, *connect.Request[v1.GetOAuthClientRequest]) (*connect.Response[v1.GetOAuthClientResponse], error)
+	UpdateOAuthClient(context.Context, *connect.Request[v1.UpdateOAuthClientRequest]) (*connect.Response[v1.UpdateOAuthClientResponse], error)
+	ListOAuthClients(context.Context, *connect.Request[v1.ListOAuthClientsRequest]) (*connect.Response[v1.ListOAuthClientsResponse], error)
 	// Authentication
 	BeginOAuthLogin(context.Context, *connect.Request[v1.BeginOAuthLoginRequest]) (*connect.Response[v1.BeginOAuthLoginResponse], error)
 	OAuthLogin(context.Context, *connect.Request[v1.OAuthLoginRequest]) (*connect.Response[v1.OAuthLoginResponse], error)
@@ -775,6 +792,30 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 	baseURL = strings.TrimRight(baseURL, "/")
 	identityServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("IdentityService").Methods()
 	return &identityServiceClient{
+		createOAuthClient: connect.NewClient[v1.CreateOAuthClientRequest, v1.CreateOAuthClientResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateOAuthClientProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateOAuthClient")),
+			connect.WithClientOptions(opts...),
+		),
+		getOAuthClient: connect.NewClient[v1.GetOAuthClientRequest, v1.GetOAuthClientResponse](
+			httpClient,
+			baseURL+IdentityServiceGetOAuthClientProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetOAuthClient")),
+			connect.WithClientOptions(opts...),
+		),
+		updateOAuthClient: connect.NewClient[v1.UpdateOAuthClientRequest, v1.UpdateOAuthClientResponse](
+			httpClient,
+			baseURL+IdentityServiceUpdateOAuthClientProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UpdateOAuthClient")),
+			connect.WithClientOptions(opts...),
+		),
+		listOAuthClients: connect.NewClient[v1.ListOAuthClientsRequest, v1.ListOAuthClientsResponse](
+			httpClient,
+			baseURL+IdentityServiceListOAuthClientsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListOAuthClients")),
+			connect.WithClientOptions(opts...),
+		),
 		beginOAuthLogin: connect.NewClient[v1.BeginOAuthLoginRequest, v1.BeginOAuthLoginResponse](
 			httpClient,
 			baseURL+IdentityServiceBeginOAuthLoginProcedure,
@@ -1608,6 +1649,10 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 
 // identityServiceClient implements IdentityServiceClient.
 type identityServiceClient struct {
+	createOAuthClient               *connect.Client[v1.CreateOAuthClientRequest, v1.CreateOAuthClientResponse]
+	getOAuthClient                  *connect.Client[v1.GetOAuthClientRequest, v1.GetOAuthClientResponse]
+	updateOAuthClient               *connect.Client[v1.UpdateOAuthClientRequest, v1.UpdateOAuthClientResponse]
+	listOAuthClients                *connect.Client[v1.ListOAuthClientsRequest, v1.ListOAuthClientsResponse]
 	beginOAuthLogin                 *connect.Client[v1.BeginOAuthLoginRequest, v1.BeginOAuthLoginResponse]
 	oAuthLogin                      *connect.Client[v1.OAuthLoginRequest, v1.OAuthLoginResponse]
 	nativeOAuthLogin                *connect.Client[v1.NativeOAuthLoginRequest, v1.NativeOAuthLoginResponse]
@@ -1746,6 +1791,26 @@ type identityServiceClient struct {
 	adminDeleteProjectOAuthProvider *connect.Client[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse]
 	adminListProjectOAuthProviders  *connect.Client[v1.AdminListProjectOAuthProvidersRequest, v1.AdminListProjectOAuthProvidersResponse]
 	lookupUsers                     *connect.Client[v1.LookupUsersRequest, v1.LookupUsersResponse]
+}
+
+// CreateOAuthClient calls identity.v1.IdentityService.CreateOAuthClient.
+func (c *identityServiceClient) CreateOAuthClient(ctx context.Context, req *connect.Request[v1.CreateOAuthClientRequest]) (*connect.Response[v1.CreateOAuthClientResponse], error) {
+	return c.createOAuthClient.CallUnary(ctx, req)
+}
+
+// GetOAuthClient calls identity.v1.IdentityService.GetOAuthClient.
+func (c *identityServiceClient) GetOAuthClient(ctx context.Context, req *connect.Request[v1.GetOAuthClientRequest]) (*connect.Response[v1.GetOAuthClientResponse], error) {
+	return c.getOAuthClient.CallUnary(ctx, req)
+}
+
+// UpdateOAuthClient calls identity.v1.IdentityService.UpdateOAuthClient.
+func (c *identityServiceClient) UpdateOAuthClient(ctx context.Context, req *connect.Request[v1.UpdateOAuthClientRequest]) (*connect.Response[v1.UpdateOAuthClientResponse], error) {
+	return c.updateOAuthClient.CallUnary(ctx, req)
+}
+
+// ListOAuthClients calls identity.v1.IdentityService.ListOAuthClients.
+func (c *identityServiceClient) ListOAuthClients(ctx context.Context, req *connect.Request[v1.ListOAuthClientsRequest]) (*connect.Response[v1.ListOAuthClientsResponse], error) {
+	return c.listOAuthClients.CallUnary(ctx, req)
 }
 
 // BeginOAuthLogin calls identity.v1.IdentityService.BeginOAuthLogin.
@@ -2441,6 +2506,11 @@ func (c *identityServiceClient) LookupUsers(ctx context.Context, req *connect.Re
 
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
 type IdentityServiceHandler interface {
+	// Same-project active human administrator required. No dynamic registration.
+	CreateOAuthClient(context.Context, *connect.Request[v1.CreateOAuthClientRequest]) (*connect.Response[v1.CreateOAuthClientResponse], error)
+	GetOAuthClient(context.Context, *connect.Request[v1.GetOAuthClientRequest]) (*connect.Response[v1.GetOAuthClientResponse], error)
+	UpdateOAuthClient(context.Context, *connect.Request[v1.UpdateOAuthClientRequest]) (*connect.Response[v1.UpdateOAuthClientResponse], error)
+	ListOAuthClients(context.Context, *connect.Request[v1.ListOAuthClientsRequest]) (*connect.Response[v1.ListOAuthClientsResponse], error)
 	// Authentication
 	BeginOAuthLogin(context.Context, *connect.Request[v1.BeginOAuthLoginRequest]) (*connect.Response[v1.BeginOAuthLoginResponse], error)
 	OAuthLogin(context.Context, *connect.Request[v1.OAuthLoginRequest]) (*connect.Response[v1.OAuthLoginResponse], error)
@@ -2763,6 +2833,30 @@ type IdentityServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	identityServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("IdentityService").Methods()
+	identityServiceCreateOAuthClientHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateOAuthClientProcedure,
+		svc.CreateOAuthClient,
+		connect.WithSchema(identityServiceMethods.ByName("CreateOAuthClient")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetOAuthClientHandler := connect.NewUnaryHandler(
+		IdentityServiceGetOAuthClientProcedure,
+		svc.GetOAuthClient,
+		connect.WithSchema(identityServiceMethods.ByName("GetOAuthClient")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUpdateOAuthClientHandler := connect.NewUnaryHandler(
+		IdentityServiceUpdateOAuthClientProcedure,
+		svc.UpdateOAuthClient,
+		connect.WithSchema(identityServiceMethods.ByName("UpdateOAuthClient")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListOAuthClientsHandler := connect.NewUnaryHandler(
+		IdentityServiceListOAuthClientsProcedure,
+		svc.ListOAuthClients,
+		connect.WithSchema(identityServiceMethods.ByName("ListOAuthClients")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceBeginOAuthLoginHandler := connect.NewUnaryHandler(
 		IdentityServiceBeginOAuthLoginProcedure,
 		svc.BeginOAuthLogin,
@@ -3593,6 +3687,14 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case IdentityServiceCreateOAuthClientProcedure:
+			identityServiceCreateOAuthClientHandler.ServeHTTP(w, r)
+		case IdentityServiceGetOAuthClientProcedure:
+			identityServiceGetOAuthClientHandler.ServeHTTP(w, r)
+		case IdentityServiceUpdateOAuthClientProcedure:
+			identityServiceUpdateOAuthClientHandler.ServeHTTP(w, r)
+		case IdentityServiceListOAuthClientsProcedure:
+			identityServiceListOAuthClientsHandler.ServeHTTP(w, r)
 		case IdentityServiceBeginOAuthLoginProcedure:
 			identityServiceBeginOAuthLoginHandler.ServeHTTP(w, r)
 		case IdentityServiceOAuthLoginProcedure:
@@ -3877,6 +3979,22 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 
 // UnimplementedIdentityServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedIdentityServiceHandler struct{}
+
+func (UnimplementedIdentityServiceHandler) CreateOAuthClient(context.Context, *connect.Request[v1.CreateOAuthClientRequest]) (*connect.Response[v1.CreateOAuthClientResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateOAuthClient is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetOAuthClient(context.Context, *connect.Request[v1.GetOAuthClientRequest]) (*connect.Response[v1.GetOAuthClientResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetOAuthClient is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UpdateOAuthClient(context.Context, *connect.Request[v1.UpdateOAuthClientRequest]) (*connect.Response[v1.UpdateOAuthClientResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpdateOAuthClient is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListOAuthClients(context.Context, *connect.Request[v1.ListOAuthClientsRequest]) (*connect.Response[v1.ListOAuthClientsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListOAuthClients is not implemented"))
+}
 
 func (UnimplementedIdentityServiceHandler) BeginOAuthLogin(context.Context, *connect.Request[v1.BeginOAuthLoginRequest]) (*connect.Response[v1.BeginOAuthLoginResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.BeginOAuthLogin is not implemented"))

@@ -74,6 +74,9 @@ linters:
       - path: internal/repo/memory/repo\.go
         linters:
           - nilnil
+      - path: internal/repo/memory/oauth_clients\.go
+        linters:
+          - nilnil
       - path: internal/repo/memory/assurance\.go
         linters:
           - nilnil

@@ -1,0 +1,56 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Native client registry">
+  <h1>Native client registry</h1>
+  <p>Register a native public client explicitly from an active human administrator's
+  session in the same project. A client ID is public metadata, never a credential.
+  This registry is separate from the social-login providers used to sign in.</p>
+  <p><strong>Registration does not enable authorization or token issuance.</strong>
+  Authorization, S256 PKCE, consent, refresh, introspection and delegation are
+  not implemented by these management RPCs.</p>
+  <h2>Register a client</h2>
+  <p>Call <code>identity.v1.IdentityService/CreateOAuthClient</code> with the
+  administrator's normal bearer and this JSON body:</p>
+  <pre><code>{JSON.stringify({registration:{name:"Acme desktop",redirectUris:["http://127.0.0.1/callback","http://[::1]/callback"],resources:[{resource:"https://api.example.test/",scopes:["records:read"]}],grantTypes:["authorization_code","refresh_token"]}},null,2)}</code></pre>
+  <p>The result contains a generated <code>clientId</code>, kind
+  <code>O_AUTH_CLIENT_KIND_NATIVE_PUBLIC</code>, registration, revision 1 and
+  creation/update times. No secret is returned.</p>
+  <h2>Bounds</h2>
+  <ul>
+    <li>A name is 1–200 bytes without control characters.</li>
+    <li>Register 1–16 distinct redirects, each at most 2048 bytes. HTTPS matches
+    exactly. HTTP is allowed only on literal <code>127.0.0.1</code> or
+    <code>[::1]</code>; only its port may vary. Host, encoded path and query
+    must still match. Fragments, userinfo, wildcards, localhost DNS and private
+    schemes are refused.</li>
+    <li>Register 1–16 distinct resource audiences as absolute HTTPS URIs or URNs,
+    without fragments. Each has 1–64 distinct protocol scope tokens, each at most
+    128 ASCII bytes. A scope token cannot contain spaces, quotes or backslashes.
+    These bounds grant no application permission.</li>
+    <li><code>authorization_code</code> is required and <code>refresh_token</code>
+    is optional. Other grant types are refused. Recording a grant type does not
+    advertise or enable its protocol endpoint.</li>
+  </ul>
+  <h2>Read, update and disable</h2>
+  <p><code>GetOAuthClient</code> accepts <code>clientId</code>.
+  <code>ListOAuthClients</code> accepts a limit of 1–100 (zero uses 50) and an
+  exclusive <code>afterClientId</code>. Results are ordered by ID; pass the last
+  returned ID to fetch the next page, stopping on an empty page.</p>
+  <p><code>UpdateOAuthClient</code> accepts <code>clientId</code>,
+  <code>expectedRevision</code> and a complete replacement registration. Set
+  <code>registration.disabled</code> to disable the client. Every update advances
+  its revision, even a name-only edit or disable/re-enable. A stale revision or
+  unknown client returns <code>ABORTED</code>; reread and review before trying
+  again. Missing or invalid expected revisions are <code>INVALID_ARGUMENT</code>.</p>
+  <p>Future grants must preserve their approved bounds and client revision.
+  Changing this record cannot expand consent. Disabled or revision-mismatched
+  clients must fail future issuance and introspection; re-enabling must never
+  revive a previous grant. A new revision requires fresh consent.</p>
+  <h2>Storage and audit</h2>
+  <p>Memory, SQLite and PostgreSQL share the same registry semantics. PostgreSQL
+  migration 0040 and SQLite migration 0023 create <code>oauth_clients</code>.
+  Creation and successful updates record <code>oauth_client_created</code> and
+  <code>oauth_client_updated</code> with the administrator and client ID, without
+  recording callback URLs, scope lists, codes or credentials.</p>
+</DocsLayout>

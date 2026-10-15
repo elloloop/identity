@@ -1,5 +1,21 @@
 # Upgrade guide
 
+## Next — native public OAuth client registrations
+
+PostgreSQL migration 0040 (SQLite 0023) adds the project-scoped `oauth_clients`
+table. It contains public registration metadata only: no client secrets, codes,
+tokens or consent. Rolling back drops these registrations; export them before
+using the down migration. Existing sign-in and token behavior is unchanged.
+
+Four admin-session RPCs create, read, list and replace native public clients.
+Updates require the exact revision and advance it, including disable/re-enable.
+Custom `service.Repository` implementations must implement the four OAuth-client
+methods with the documented atomic and project-isolation semantics.
+
+This does not enable an OAuth authorization server or agent delegation. No
+provider endpoints or discovery claims are added. See the native-client registry
+documentation for validation limits and the remaining protocol work.
+
 ## v4.16.0 → next — agent accounts; custom repositories must implement ownership and transfer semantics
 
 **Migration 0038** (SQLite 0021) adds `users.kind` (`'person'` or

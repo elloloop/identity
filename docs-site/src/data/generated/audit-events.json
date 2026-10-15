@@ -42,6 +42,8 @@
   "login_success",
   "logout",
   "managed_child_account_created",
+  "oauth_client_created",
+  "oauth_client_updated",
   "oauth_login",
   "parental_consent_granted",
   "parental_consent_revoked",

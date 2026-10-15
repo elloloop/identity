@@ -19,6 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	IdentityService_CreateOAuthClient_FullMethodName               = "/identity.v1.IdentityService/CreateOAuthClient"
+	IdentityService_GetOAuthClient_FullMethodName                  = "/identity.v1.IdentityService/GetOAuthClient"
+	IdentityService_UpdateOAuthClient_FullMethodName               = "/identity.v1.IdentityService/UpdateOAuthClient"
+	IdentityService_ListOAuthClients_FullMethodName                = "/identity.v1.IdentityService/ListOAuthClients"
 	IdentityService_BeginOAuthLogin_FullMethodName                 = "/identity.v1.IdentityService/BeginOAuthLogin"
 	IdentityService_OAuthLogin_FullMethodName                      = "/identity.v1.IdentityService/OAuthLogin"
 	IdentityService_NativeOAuthLogin_FullMethodName                = "/identity.v1.IdentityService/NativeOAuthLogin"
@@ -163,6 +167,11 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type IdentityServiceClient interface {
+	// Same-project active human administrator required. No dynamic registration.
+	CreateOAuthClient(ctx context.Context, in *CreateOAuthClientRequest, opts ...grpc.CallOption) (*CreateOAuthClientResponse, error)
+	GetOAuthClient(ctx context.Context, in *GetOAuthClientRequest, opts ...grpc.CallOption) (*GetOAuthClientResponse, error)
+	UpdateOAuthClient(ctx context.Context, in *UpdateOAuthClientRequest, opts ...grpc.CallOption) (*UpdateOAuthClientResponse, error)
+	ListOAuthClients(ctx context.Context, in *ListOAuthClientsRequest, opts ...grpc.CallOption) (*ListOAuthClientsResponse, error)
 	// Authentication
 	BeginOAuthLogin(ctx context.Context, in *BeginOAuthLoginRequest, opts ...grpc.CallOption) (*BeginOAuthLoginResponse, error)
 	OAuthLogin(ctx context.Context, in *OAuthLoginRequest, opts ...grpc.CallOption) (*OAuthLoginResponse, error)
@@ -484,6 +493,46 @@ type identityServiceClient struct {
 
 func NewIdentityServiceClient(cc grpc.ClientConnInterface) IdentityServiceClient {
 	return &identityServiceClient{cc}
+}
+
+func (c *identityServiceClient) CreateOAuthClient(ctx context.Context, in *CreateOAuthClientRequest, opts ...grpc.CallOption) (*CreateOAuthClientResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateOAuthClientResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateOAuthClient_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) GetOAuthClient(ctx context.Context, in *GetOAuthClientRequest, opts ...grpc.CallOption) (*GetOAuthClientResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOAuthClientResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetOAuthClient_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) UpdateOAuthClient(ctx context.Context, in *UpdateOAuthClientRequest, opts ...grpc.CallOption) (*UpdateOAuthClientResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateOAuthClientResponse)
+	err := c.cc.Invoke(ctx, IdentityService_UpdateOAuthClient_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListOAuthClients(ctx context.Context, in *ListOAuthClientsRequest, opts ...grpc.CallOption) (*ListOAuthClientsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListOAuthClientsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListOAuthClients_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *identityServiceClient) BeginOAuthLogin(ctx context.Context, in *BeginOAuthLoginRequest, opts ...grpc.CallOption) (*BeginOAuthLoginResponse, error) {
@@ -1870,6 +1919,11 @@ func (c *identityServiceClient) LookupUsers(ctx context.Context, in *LookupUsers
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
 type IdentityServiceServer interface {
+	// Same-project active human administrator required. No dynamic registration.
+	CreateOAuthClient(context.Context, *CreateOAuthClientRequest) (*CreateOAuthClientResponse, error)
+	GetOAuthClient(context.Context, *GetOAuthClientRequest) (*GetOAuthClientResponse, error)
+	UpdateOAuthClient(context.Context, *UpdateOAuthClientRequest) (*UpdateOAuthClientResponse, error)
+	ListOAuthClients(context.Context, *ListOAuthClientsRequest) (*ListOAuthClientsResponse, error)
 	// Authentication
 	BeginOAuthLogin(context.Context, *BeginOAuthLoginRequest) (*BeginOAuthLoginResponse, error)
 	OAuthLogin(context.Context, *OAuthLoginRequest) (*OAuthLoginResponse, error)
@@ -2193,6 +2247,18 @@ type IdentityServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedIdentityServiceServer struct{}
 
+func (UnimplementedIdentityServiceServer) CreateOAuthClient(context.Context, *CreateOAuthClientRequest) (*CreateOAuthClientResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateOAuthClient not implemented")
+}
+func (UnimplementedIdentityServiceServer) GetOAuthClient(context.Context, *GetOAuthClientRequest) (*GetOAuthClientResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetOAuthClient not implemented")
+}
+func (UnimplementedIdentityServiceServer) UpdateOAuthClient(context.Context, *UpdateOAuthClientRequest) (*UpdateOAuthClientResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateOAuthClient not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListOAuthClients(context.Context, *ListOAuthClientsRequest) (*ListOAuthClientsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListOAuthClients not implemented")
+}
 func (UnimplementedIdentityServiceServer) BeginOAuthLogin(context.Context, *BeginOAuthLoginRequest) (*BeginOAuthLoginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BeginOAuthLogin not implemented")
 }
@@ -2626,6 +2692,78 @@ func RegisterIdentityServiceServer(s grpc.ServiceRegistrar, srv IdentityServiceS
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&IdentityService_ServiceDesc, srv)
+}
+
+func _IdentityService_CreateOAuthClient_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateOAuthClientRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateOAuthClient(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateOAuthClient_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateOAuthClient(ctx, req.(*CreateOAuthClientRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_GetOAuthClient_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOAuthClientRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetOAuthClient(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetOAuthClient_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetOAuthClient(ctx, req.(*GetOAuthClientRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_UpdateOAuthClient_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateOAuthClientRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).UpdateOAuthClient(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_UpdateOAuthClient_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).UpdateOAuthClient(ctx, req.(*UpdateOAuthClientRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListOAuthClients_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListOAuthClientsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListOAuthClients(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListOAuthClients_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListOAuthClients(ctx, req.(*ListOAuthClientsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _IdentityService_BeginOAuthLogin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -5119,6 +5257,22 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "identity.v1.IdentityService",
 	HandlerType: (*IdentityServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateOAuthClient",
+			Handler:    _IdentityService_CreateOAuthClient_Handler,
+		},
+		{
+			MethodName: "GetOAuthClient",
+			Handler:    _IdentityService_GetOAuthClient_Handler,
+		},
+		{
+			MethodName: "UpdateOAuthClient",
+			Handler:    _IdentityService_UpdateOAuthClient_Handler,
+		},
+		{
+			MethodName: "ListOAuthClients",
+			Handler:    _IdentityService_ListOAuthClients_Handler,
+		},
 		{
 			MethodName: "BeginOAuthLogin",
 			Handler:    _IdentityService_BeginOAuthLogin_Handler,

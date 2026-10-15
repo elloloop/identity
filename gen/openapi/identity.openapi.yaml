@@ -1411,6 +1411,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.CreateManagedChildAccountResponse'
+  /identity.v1.IdentityService/CreateOAuthClient:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CreateOAuthClient
+      description: Same-project active human administrator required. No dynamic registration.
+      operationId: identity.v1.IdentityService.CreateOAuthClient
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CreateOAuthClientRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CreateOAuthClientResponse'
   /identity.v1.IdentityService/CreateTenantInvitation:
     post:
       tags:
@@ -2139,6 +2175,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.GetManagedChildProfileResponse'
+  /identity.v1.IdentityService/GetOAuthClient:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetOAuthClient
+      operationId: identity.v1.IdentityService.GetOAuthClient
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetOAuthClientRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetOAuthClientResponse'
   /identity.v1.IdentityService/GetProjectConfig:
     post:
       tags:
@@ -2756,6 +2827,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ListMySessionsResponse'
+  /identity.v1.IdentityService/ListOAuthClients:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListOAuthClients
+      operationId: identity.v1.IdentityService.ListOAuthClients
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListOAuthClientsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListOAuthClientsResponse'
   /identity.v1.IdentityService/ListPasskeys:
     post:
       tags:
@@ -4560,6 +4666,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.UpdateGroupResponse'
+  /identity.v1.IdentityService/UpdateOAuthClient:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UpdateOAuthClient
+      operationId: identity.v1.IdentityService.UpdateOAuthClient
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UpdateOAuthClientRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UpdateOAuthClientResponse'
   /identity.v1.IdentityService/UpdateProfile:
     post:
       tags:
@@ -6467,6 +6608,22 @@ components:
              BeginPasskeyRegistration / CompletePasskeyRegistration.
       title: CreateManagedChildAccountResponse
       additionalProperties: false
+    identity.v1.CreateOAuthClientRequest:
+      type: object
+      properties:
+        registration:
+          title: registration
+          $ref: '#/components/schemas/identity.v1.OAuthClientRegistration'
+      title: CreateOAuthClientRequest
+      additionalProperties: false
+    identity.v1.CreateOAuthClientResponse:
+      type: object
+      properties:
+        client:
+          title: client
+          $ref: '#/components/schemas/identity.v1.OAuthClient'
+      title: CreateOAuthClientResponse
+      additionalProperties: false
     identity.v1.CreateTenantInvitationRequest:
       type: object
       properties:
@@ -7028,6 +7185,22 @@ components:
              holds very little, and this RPC adds nothing to it.
           $ref: '#/components/schemas/identity.v1.User'
       title: GetManagedChildProfileResponse
+      additionalProperties: false
+    identity.v1.GetOAuthClientRequest:
+      type: object
+      properties:
+        clientId:
+          type: string
+          title: client_id
+      title: GetOAuthClientRequest
+      additionalProperties: false
+    identity.v1.GetOAuthClientResponse:
+      type: object
+      properties:
+        client:
+          title: client
+          $ref: '#/components/schemas/identity.v1.OAuthClient'
+      title: GetOAuthClientResponse
       additionalProperties: false
     identity.v1.GetProjectConfigRequest:
       type: object
@@ -7664,6 +7837,31 @@ components:
           title: sessions
       title: ListMySessionsResponse
       additionalProperties: false
+    identity.v1.ListOAuthClientsRequest:
+      type: object
+      properties:
+        afterClientId:
+          type: string
+          title: after_client_id
+          description: Exclusive lexicographic cursor.
+        limit:
+          type: integer
+          title: limit
+          format: int32
+          description: 1..100; zero uses 50.
+      title: ListOAuthClientsRequest
+      additionalProperties: false
+    identity.v1.ListOAuthClientsResponse:
+      type: object
+      properties:
+        clients:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.OAuthClient'
+          title: clients
+          description: Pass the last returned client_id as after_client_id; an empty page ends listing.
+      title: ListOAuthClientsResponse
+      additionalProperties: false
     identity.v1.ListPasskeysRequest:
       type: object
       title: ListPasskeysRequest
@@ -8067,6 +8265,80 @@ components:
       description: |-
         NativeOAuthLoginResponse mirrors OAuthLoginResponse: the backend-issued
          token pair plus the resolved user.
+    identity.v1.OAuthClient:
+      type: object
+      properties:
+        clientId:
+          type: string
+          title: client_id
+        kind:
+          title: kind
+          $ref: '#/components/schemas/identity.v1.OAuthClientKind'
+        registration:
+          title: registration
+          $ref: '#/components/schemas/identity.v1.OAuthClientRegistration'
+        revision:
+          type:
+            - integer
+            - string
+          title: revision
+          format: int64
+          description: |-
+            Advances on every update, even disable/re-enable. Delegations must keep
+             their approved bounds separately, and never expand them from this record.
+        createdAtMs:
+          type:
+            - integer
+            - string
+          title: created_at_ms
+          format: int64
+        updatedAtMs:
+          type:
+            - integer
+            - string
+          title: updated_at_ms
+          format: int64
+      title: OAuthClient
+      additionalProperties: false
+    identity.v1.OAuthClientKind:
+      type: string
+      title: OAuthClientKind
+      enum:
+        - O_AUTH_CLIENT_KIND_UNSPECIFIED
+        - O_AUTH_CLIENT_KIND_NATIVE_PUBLIC
+      description: |-
+        Explicit registration only: a public client id is never a credential.
+         This registry does not expose an OAuth authorization/token endpoint.
+    identity.v1.OAuthClientRegistration:
+      type: object
+      properties:
+        name:
+          type: string
+          title: name
+        redirectUris:
+          type: array
+          items:
+            type: string
+          title: redirect_uris
+          description: HTTPS, or literal 127.0.0.1 / [::1] HTTP. Only a loopback port may vary.
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.OAuthResourceBounds'
+          title: resources
+        grantTypes:
+          type: array
+          items:
+            type: string
+          title: grant_types
+          description: |-
+            authorization_code is required; refresh_token is optional. These bounds
+             do not advertise or enable either protocol flow.
+        disabled:
+          type: boolean
+          title: disabled
+      title: OAuthClientRegistration
+      additionalProperties: false
     identity.v1.OAuthCredential:
       type: object
       properties:
@@ -8150,6 +8422,21 @@ components:
           format: int32
           description: Access token lifetime in seconds
       title: OAuthLoginResponse
+      additionalProperties: false
+    identity.v1.OAuthResourceBounds:
+      type: object
+      properties:
+        resource:
+          type: string
+          title: resource
+          description: Exact approved HTTPS audience URI or URN; no fragment.
+        scopes:
+          type: array
+          items:
+            type: string
+          title: scopes
+          description: Protocol scope tokens, not application permissions.
+      title: OAuthResourceBounds
       additionalProperties: false
     identity.v1.ParentalConsentVerificationFactor:
       type: string
@@ -9530,6 +9817,32 @@ components:
           title: group
           $ref: '#/components/schemas/identity.v1.Group'
       title: UpdateGroupResponse
+      additionalProperties: false
+    identity.v1.UpdateOAuthClientRequest:
+      type: object
+      properties:
+        clientId:
+          type: string
+          title: client_id
+        expectedRevision:
+          type:
+            - integer
+            - string
+          title: expected_revision
+          format: int64
+        registration:
+          title: registration
+          description: Complete replacement, including disabled.
+          $ref: '#/components/schemas/identity.v1.OAuthClientRegistration'
+      title: UpdateOAuthClientRequest
+      additionalProperties: false
+    identity.v1.UpdateOAuthClientResponse:
+      type: object
+      properties:
+        client:
+          title: client
+          $ref: '#/components/schemas/identity.v1.OAuthClient'
+      title: UpdateOAuthClientResponse
       additionalProperties: false
     identity.v1.UpdateProfileRequest:
       type: object
