@@ -149,6 +149,11 @@ realpostgres: ## Integration tests against a real postgres (expects GATEWAY_POST
 	GATEWAY_TEST_POSTGRES_DSN=$$GATEWAY_POSTGRES_DSN \
 		$(GO) test -race -timeout=300s -skip='^TestConformance$$' ./internal/repo/postgres/...
 
+# PostgreSQL tests create and drop a UUID-named database per test process.
+# GATEWAY_TEST_POSTGRES_DSN must name a role with CREATEDB; its provided
+# database is never truncated by the postgres package. Other packages and
+# parallel coverage shards keep their own fixtures.
+
 # ---------------------------------------------------------------------------
 # Conformance — runs internal/repo/conformance against each driver. Maps
 # 1:1 to .github/workflows/conformance.yml. Skips a driver if its
