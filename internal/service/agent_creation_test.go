@@ -10,40 +10,9 @@ import (
 )
 
 func (r *fakeRepo) CreateAgent(_ context.Context, request AgentCreation) (*User, bool, error) {
-	if err := ValidateAgentCreation(request); err != nil {
-		return nil, false, err
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := CheckAgentCreationAuthority(r.users[request.CallerID], r.users[request.Agent.OwnerUserID]); err != nil {
-		return nil, false, err
-	}
-	key := [2]string{request.CallerID, request.RequestID}
-	if receipt, ok := r.agentCreations[key]; request.RequestID != "" && ok {
-		agent := r.users[receipt.AgentID]
-		if err := CheckAgentCreationReplay(receipt, request, agent); err != nil {
-			return nil, false, err
-		}
-		copy := *agent
-		return &copy, false, nil
-	}
-	count := 0
-	for _, user := range r.users {
-		if user.IsAgent() && user.OwnerUserID == request.Agent.OwnerUserID {
-			count++
-		}
-	}
-	if count >= request.OwnerLimit {
-		return nil, false, ErrAgentLimitReached
-	}
-	copy := *request.Agent
-	copy.ID = nextNodeID()
-	r.users[copy.ID] = &copy
-	if request.RequestID != "" {
-		r.agentCreations[key] = AgentCreationReceipt{CallerID: request.CallerID, RequestID: request.RequestID, Fingerprint: request.Fingerprint, AgentID: copy.ID, OwnerID: copy.OwnerUserID}
-	}
-	result := copy
-	return &result, true, nil
+	return request.ApplyToUsers(r.users, r.agentCreations, nextNodeID)
 }
 
 func TestCreateAgentRetryNormalizesAndEmitsOnce(t *testing.T) {
@@ -89,4 +58,27 @@ func TestAgentCreationAuthorityLoss(t *testing.T) {
 	copy.PendingOwnerUserID = "recipient"
 	require.False(t, AgentCreationAuthorityLost(original, &copy))
 	require.True(t, AgentCreationAuthorityLost(original, nil))
+}
+
+func TestAgentCreationSharedMemoryOperation(t *testing.T) {
+	owner := &User{ID: "owner", Kind: UserKindPerson, Role: RoleMember, Status: StatusActive}
+	users := map[string]*User{owner.ID: owner}
+	receipts := make(map[[2]string]AgentCreationReceipt)
+	request := AgentCreation{CallerID: owner.ID, RequestID: "retry", Fingerprint: strings.Repeat("a", 64), OwnerLimit: 1, Agent: &User{Kind: UserKindAgent, OwnerUserID: owner.ID, Name: "Helper", Role: RoleMember, Status: StatusActive}}
+	allocated := 0
+	allocate := func() string { allocated++; return "agent" }
+	first, created, err := request.ApplyToUsers(users, receipts, allocate)
+	require.NoError(t, err)
+	require.True(t, created)
+	first.Name = "caller mutation"
+	replay, created, err := request.ApplyToUsers(users, receipts, allocate)
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Equal(t, "Helper", replay.Name)
+	require.Equal(t, 1, allocated)
+	require.Empty(t, request.Agent.ID)
+	InvalidateAgentCreationReceipts(receipts, owner.ID)
+	_, _, err = request.ApplyToUsers(users, receipts, allocate)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	require.Equal(t, 1, allocated)
 }

@@ -95,3 +95,54 @@ func ValidateAgentCreation(request AgentCreation) error {
 	}
 	return validateAgentCreationKey(request.RequestID)
 }
+
+// ApplyToUsers changes the in-memory records under the caller's storage lock.
+// Test stores use the same decision so they cannot bless weaker semantics.
+func (request AgentCreation) ApplyToUsers(users map[string]*User, receipts map[[2]string]AgentCreationReceipt, allocateID func() string) (*User, bool, error) {
+	if err := ValidateAgentCreation(request); err != nil {
+		return nil, false, err
+	}
+	if err := CheckAgentCreationAuthority(users[request.CallerID], users[request.Agent.OwnerUserID]); err != nil {
+		return nil, false, err
+	}
+	key := [2]string{request.CallerID, request.RequestID}
+	if receipt, ok := receipts[key]; request.RequestID != "" && ok {
+		agent := users[receipt.AgentID]
+		if err := CheckAgentCreationReplay(receipt, request, agent); err != nil {
+			return nil, false, err
+		}
+		copy := *agent
+		return &copy, false, nil
+	}
+	count := 0
+	for _, user := range users {
+		if user.IsAgent() && user.OwnerUserID == request.Agent.OwnerUserID {
+			count++
+		}
+	}
+	if count >= request.OwnerLimit {
+		return nil, false, ErrAgentLimitReached
+	}
+	agent := *request.Agent
+	agent.ID = allocateID()
+	if agent.ID == "" || users[agent.ID] != nil {
+		return nil, false, fmt.Errorf("%w: new subject id unavailable", ErrAlreadyExists)
+	}
+	users[agent.ID] = &agent
+	if request.RequestID != "" {
+		receipts[key] = AgentCreationReceipt{CallerID: request.CallerID, RequestID: request.RequestID, Fingerprint: request.Fingerprint, AgentID: agent.ID, OwnerID: agent.OwnerUserID}
+	}
+	result := agent
+	return &result, true, nil
+}
+
+// InvalidateAgentCreationReceipts shares the lifecycle fence among memory
+// stores; the caller holds its lock across this and the lifecycle write.
+func InvalidateAgentCreationReceipts(receipts map[[2]string]AgentCreationReceipt, userID string) {
+	for key, receipt := range receipts {
+		if receipt.AgentID == userID || receipt.OwnerID == userID || receipt.CallerID == userID {
+			receipt.Invalidated = true
+			receipts[key] = receipt
+		}
+	}
+}
