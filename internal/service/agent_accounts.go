@@ -294,7 +294,7 @@ func (s *AuthService) emitAgentEvent(ctx context.Context, t events.EventType, ag
 // to the caller. Naming another owner requires a project admin, and that
 // owner must be an active person in this project.
 func (s *AuthService) CreateAgent(
-	ctx context.Context, callerID, name, avatarURL, ownerUserID, ip, userAgent string,
+	ctx context.Context, callerID, name, avatarURL, ownerUserID, ip, userAgent, clientRequestID string,
 ) (*User, error) {
 	caller, isAdmin, err := s.agentCaller(ctx, agentOpCreate, callerID, "", ip, userAgent)
 	if err != nil {
@@ -321,12 +321,9 @@ func (s *AuthService) CreateAgent(
 			return nil, errAgentOwnerNotEligible
 		}
 	}
-	if err := s.checkAgentCapacity(ctx, owner.ID); err != nil {
-		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
-			map[string]any{"step": "limit_reached", "owner_user_id": owner.ID})
+	if err := validateAgentCreationKey(clientRequestID); err != nil {
 		return nil, err
 	}
-
 	now := time.UnixMilli(s.nowMs())
 	agent := &User{
 		Kind:        UserKindAgent,
@@ -338,14 +335,25 @@ func (s *AuthService) CreateAgent(
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	id, err := repo.CreateUser(ctx, agent)
+
+	agent, created, err := repo.CreateAgent(ctx, AgentCreation{
+		CallerID: caller.ID, RequestID: clientRequestID,
+		Fingerprint: agentCreationFingerprint(name, avatarURL, owner.ID),
+		Agent:       agent, OwnerLimit: s.cfg.AgentsPerOwnerLimit(),
+	})
 	if err != nil {
+		if errors.Is(err, ErrAgentLimitReached) {
+			s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
+				map[string]any{"step": "limit_reached", "owner_user_id": owner.ID})
+		}
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
-	agent.ID = id
-	s.auditAgentAction(ctx, agentOpCreate, callerID, id, true, ip, userAgent,
-		map[string]any{"owner_user_id": owner.ID})
-	s.emitAgentEvent(ctx, events.EventUserCreated, agent)
+
+	s.auditAgentAction(ctx, agentOpCreate, callerID, agent.ID, true, ip, userAgent,
+		map[string]any{"owner_user_id": owner.ID, "replayed": !created})
+	if created {
+		s.emitAgentEvent(ctx, events.EventUserCreated, agent)
+	}
 	return agent, nil
 }
 

@@ -276,6 +276,10 @@ type PollQrResult struct {
 
 // Repository abstracts all persistence operations for the auth service.
 type Repository interface {
+	// CreateAgent atomically creates an agent and its scoped retry receipt, or
+	// returns the existing subject after rechecking current caller/owner authority.
+	CreateAgent(ctx context.Context, request AgentCreation) (*User, bool, error)
+
 	// WithProject returns a Repository bound to projectID (its storage
 	// shard): every read and write through it carries that project's
 	// `WHERE project_id = $1` boundary. It is part of the interface, not an

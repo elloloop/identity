@@ -34,6 +34,53 @@ concurrent build fails, drop its invalid index before retrying. The earlier
 anonymous-excluding directory index stays available for callers opting into
 agents.
 
+**Migration 0039** (SQLite 0022) adds `agent_creation_receipts` and lifecycle
+invalidation triggers. Apply it before running this service version. The table
+is scoped by project; PostgreSQL enables and forces row-level security using
+`app.current_project_id`, matching the other data-plane tables. Its primary key
+is `(project_id, caller_id, request_id)`, with additional owner and subject
+indexes. The project FK removes receipts on project deletion; there are no user
+FKs because an erased subject must not be recreated by an old request.
+
+**Custom repositories must implement the new atomic
+`CreateAgent(context.Context, AgentCreation) (*User, bool, error)` operation.**
+The boolean is true only for a newly committed subject. In one transaction or
+critical section, recheck current caller/owner eligibility and caller authority,
+look up an optional scoped receipt, enforce the owner limit for a new subject,
+and commit the subject and receipt together. Do not implement this as a
+separate receipt write around `CreateUser`. All calls, including those without
+a key, use this operation and share its atomic capacity check.
+
+`CreateAgentRequest.client_request_id` is optional. An empty key preserves
+independent creation on every successful call. A nonempty, case-sensitive key
+is at most 128 UTF-8 bytes without controls. It is bound to the trimmed name,
+avatar URL and resolved owner (an omitted owner is the caller). Matching retries
+return the existing subject's current profile without consuming quota or
+emitting another creation event; a different normalized payload is
+`ALREADY_EXISTS`. Current authority is checked even on a matching retry.
+
+Receipts are permanently invalidated by actual ownership changes, account
+revocation/deactivation, merging, erasure, or removal of the caller's admin
+role. Reassignment back or reactivation does not restore replay access. Pending
+transfer offers and profile edits do not invalidate receipts. Custom stores
+must fence these changes atomically across every lifecycle writer. The SQL
+triggers cover all user writers; memory applies the equivalent rule under its
+mutex. PostgreSQL creation locks caller/owner person rows in ID order before
+an existing agent, matching merge's person-before-agent lock order. SQLite
+acquires its writer before reading so concurrent connections cannot upgrade a
+stale read transaction. The PostgreSQL migration bounds schema lock waits at
+10 seconds; creation lock waits remain bounded by the request context.
+
+**Destructive rollback loses retry history.** The down migrations remove the
+triggers and receipt table, including invalidation tombstones. They leave agent
+accounts intact. After such a rollback, do not replay previously used creation
+keys: without their receipts they could create another subject. A normal
+application rollback must retain this additive schema and its durable receipts.
+Send keyed retries only to a service version implementing this field; retaining
+the schema cannot make an older application version retry-safe.
+Receipts contain opaque identifiers and a request digest and remain until
+project deletion, including after individual account erasure.
+
 - **Custom `Repository` implementations must persist the three new `User`
   fields**, default `Kind` to person, and honor `IncludeAgents` (false by
   default), `OwnerUserID` and `PendingOwnerUserID` identically in `ListUsers`

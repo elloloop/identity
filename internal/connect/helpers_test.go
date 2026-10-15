@@ -83,7 +83,8 @@ var nodeIDSeq atomic.Int64
 func nextID() string { return fmt.Sprintf("n-%d", nodeIDSeq.Add(1)) }
 
 type fakeRepo struct {
-	mu sync.Mutex
+	agentCreations map[[2]string]service.AgentCreationReceipt
+	mu             sync.Mutex
 
 	users               map[string]*service.User
 	refreshTokens       map[string]*service.RefreshTokenRecord
@@ -124,6 +125,7 @@ func (r *fakeRepo) WithProject(string) service.Repository { return r }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
+		agentCreations:     make(map[[2]string]service.AgentCreationReceipt),
 		users:              make(map[string]*service.User),
 		refreshTokens:      make(map[string]*service.RefreshTokenRecord),
 		passkeyCreds:       make(map[string]*service.PasskeyCredRecord),

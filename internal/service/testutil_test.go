@@ -155,7 +155,8 @@ func nextNodeID() string {
 }
 
 type fakeRepo struct {
-	mu sync.Mutex
+	agentCreations map[[2]string]AgentCreationReceipt
+	mu             sync.Mutex
 
 	// incrementErrCount, when > 0, causes the next N
 	// IncrementFailedLoginCount calls to return an error. Set this
@@ -262,6 +263,7 @@ func (r *fakeRepo) WithProject(string) Repository { return r }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
+		agentCreations:     make(map[[2]string]AgentCreationReceipt),
 		users:              make(map[string]*User),
 		refreshTokens:      make(map[string]*RefreshTokenRecord),
 		passkeyCreds:       make(map[string]*PasskeyCredRecord),

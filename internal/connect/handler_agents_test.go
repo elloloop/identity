@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"github.com/stretchr/testify/require"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/config"
@@ -188,4 +189,25 @@ func TestUserToProto_PersonKind(t *testing.T) {
 	if pb.GetKind() != identitypb.UserKind_USER_KIND_PERSON || pb.GetOwnerUserId() != "" {
 		t.Fatalf("person kind/owner = %v/%q", pb.GetKind(), pb.GetOwnerUserId())
 	}
+}
+
+func TestHandler_CreateAgentRetryKey(t *testing.T) {
+	ctx := context.Background()
+	h := newAgentHarness(t)
+	owner := seedConsentAdult(ctx, t, h, "retry-owner@example.com", false)
+	create := func(name, key string) (*connect.Response[identitypb.CreateAgentResponse], error) {
+		return h.client.CreateAgent(ctx, authedReq(connect.NewRequest(&identitypb.CreateAgentRequest{Name: name, ClientRequestId: key}), owner))
+	}
+	first, err := create("Helper", "lost-response")
+	require.NoError(t, err)
+	replay, err := create(" Helper ", "lost-response")
+	require.NoError(t, err)
+	require.Equal(t, first.Msg.Agent.Id, replay.Msg.Agent.Id)
+	_, err = create("Different", "lost-response")
+	require.Equal(t, connect.CodeAlreadyExists, connect.CodeOf(err))
+	_, err = create("Helper", "line\nbreak")
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+	unkeyed, err := create("Helper", "")
+	require.NoError(t, err)
+	require.NotEqual(t, first.Msg.Agent.Id, unkeyed.Msg.Agent.Id)
 }

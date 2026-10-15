@@ -31,7 +31,7 @@ func (h *IdentityHandler) CreateAgent(
 	agent, err := h.auth.CreateAgent(
 		ctx, callerID,
 		req.Msg.GetName(), req.Msg.GetAvatarUrl(), req.Msg.GetOwnerUserId(),
-		clientIP(req.Header()), clientUserAgent(req.Header()),
+		clientIP(req.Header()), clientUserAgent(req.Header()), req.Msg.GetClientRequestId(),
 	)
 	if err != nil {
 		return nil, toConnectError(err)

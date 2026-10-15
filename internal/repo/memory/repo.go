@@ -45,6 +45,7 @@ type Repo struct {
 
 	seq                 int64
 	users               map[string]*service.User
+	agentCreations      map[[2]string]service.AgentCreationReceipt
 	refreshTokens       map[string]*service.RefreshTokenRecord
 	passkeyCreds        map[string]*service.PasskeyCredRecord
 	attestedDevices     map[string]*service.AttestedDeviceRecord
@@ -101,6 +102,7 @@ func New() *Repo {
 func newStore() *Repo {
 	return &Repo{
 		users:               make(map[string]*service.User),
+		agentCreations:      make(map[[2]string]service.AgentCreationReceipt),
 		refreshTokens:       make(map[string]*service.RefreshTokenRecord),
 		passkeyCreds:        make(map[string]*service.PasskeyCredRecord),
 		attestedDevices:     make(map[string]*service.AttestedDeviceRecord),
@@ -442,7 +444,11 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 			}
 		}
 	}
+	before := *u
 	applyUserFields(u, fields)
+	if service.AgentCreationAuthorityLost(&before, u) {
+		r.invalidateAgentCreations(userID)
+	}
 	return nil
 }
 
@@ -514,11 +520,15 @@ func (r *Repo) SetDateOfBirthOnce(
 	if !ok || u.DateOfBirthMs != 0 {
 		return false, nil
 	}
+	before := *u
 	u.DateOfBirthMs = dobMs
 	if status != "" {
 		u.Status = status
 	}
 	u.UpdatedAt = time.UnixMilli(nowMs)
+	if service.AgentCreationAuthorityLost(&before, u) {
+		r.invalidateAgentCreations(userID)
+	}
 	return true, nil
 }
 
@@ -536,6 +546,7 @@ func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 // hold r.mu — it exists so a sweep can select and delete under ONE lock
 // rather than snapshotting ids and deleting after releasing it.
 func (r *Repo) deleteUserLocked(userID string) {
+	r.invalidateAgentCreations(userID)
 	deleteByUser(r.refreshTokens, userID, func(t *service.RefreshTokenRecord) string { return t.UserID })
 	deleteByUser(r.sessions, userID, func(s *service.SessionRecord) string { return s.UserID })
 	deleteByUser(r.passkeyCreds, userID, func(c *service.PasskeyCredRecord) string { return c.UserID })
@@ -636,6 +647,7 @@ func fieldInt64(v any) (int64, bool) {
 var (
 	userStringFields = map[string]func(*service.User) *string{
 		"name":                func(u *service.User) *string { return &u.Name },
+		"role":                func(u *service.User) *string { return &u.Role },
 		"email":               func(u *service.User) *string { return &u.Email },
 		"avatar_url":          func(u *service.User) *string { return &u.AvatarURL },
 		"password_hash":       func(u *service.User) *string { return &u.PasswordHash },
@@ -2353,7 +2365,16 @@ func (r *Repo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID st
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.users[agentID].SettleAgentTransfer(pendingOwnerID, accept, atMs), nil
+	u := r.users[agentID]
+	if u == nil {
+		return false, nil
+	}
+	before := *u
+	changed := u.SettleAgentTransfer(pendingOwnerID, accept, atMs)
+	if changed && service.AgentCreationAuthorityLost(&before, u) {
+		r.invalidateAgentCreations(agentID)
+	}
+	return changed, nil
 }
 
 // SetAgentOwnership writes the agent's owners under the store's lock, only
@@ -2364,7 +2385,16 @@ func (r *Repo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ow
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.users[agentID].SetAgentOwnership(expectedOwnerID, ownerID, pendingOwnerID, atMs), nil
+	u := r.users[agentID]
+	if u == nil {
+		return false, nil
+	}
+	before := *u
+	changed := u.SetAgentOwnership(expectedOwnerID, ownerID, pendingOwnerID, atMs)
+	if changed && service.AgentCreationAuthorityLost(&before, u) {
+		r.invalidateAgentCreations(agentID)
+	}
+	return changed, nil
 }
 
 // ApplyAccountMerge is the merge under the store's lock: the records change
@@ -2376,8 +2406,13 @@ func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) erro
 	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
 	}
+	r.invalidateAgentCreations(m.OtherID)
 	for _, u := range r.users {
+		before := *u
 		m.ApplyToAgent(u)
+		if service.AgentCreationAuthorityLost(&before, u) {
+			r.invalidateAgentCreations(u.ID)
+		}
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {

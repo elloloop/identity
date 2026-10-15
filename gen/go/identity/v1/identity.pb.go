@@ -6592,9 +6592,14 @@ type CreateAgentRequest struct {
 	// owner_user_id names the person who will own the agent. Empty means the
 	// caller. Naming anyone else requires the admin role. The owner must be an
 	// active person, not an anonymous account.
-	OwnerUserId   string `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	OwnerUserId string `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
+	// Retries a lost creation response without provisioning another subject.
+	// Optional opaque key, scoped to this project and authenticated caller.
+	// Reusing it with a different normalized name, avatar or owner is rejected.
+	// Revocation, deletion or an ownership change permanently ends replay access.
+	ClientRequestId string `protobuf:"bytes,4,opt,name=client_request_id,json=clientRequestId,proto3" json:"client_request_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CreateAgentRequest) Reset() {
@@ -6644,6 +6649,13 @@ func (x *CreateAgentRequest) GetAvatarUrl() string {
 func (x *CreateAgentRequest) GetOwnerUserId() string {
 	if x != nil {
 		return x.OwnerUserId
+	}
+	return ""
+}
+
+func (x *CreateAgentRequest) GetClientRequestId() string {
+	if x != nil {
+		return x.ClientRequestId
 	}
 	return ""
 }
@@ -18079,12 +18091,13 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x8f\x01\n" +
 	"\x1dRevokeParentalConsentResponse\x122\n" +
 	"\x06record\x18\x01 \x01(\v2\x1a.identity.v1.ConsentRecordR\x06record\x12:\n" +
-	"\fchild_status\x18\x02 \x01(\x0e2\x17.identity.v1.UserStatusR\vchildStatus\"k\n" +
+	"\fchild_status\x18\x02 \x01(\x0e2\x17.identity.v1.UserStatusR\vchildStatus\"\x97\x01\n" +
 	"\x12CreateAgentRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"avatar_url\x18\x02 \x01(\tR\tavatarUrl\x12\"\n" +
-	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\">\n" +
+	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\x12*\n" +
+	"\x11client_request_id\x18\x04 \x01(\tR\x0fclientRequestId\">\n" +
 	"\x13CreateAgentResponse\x12'\n" +
 	"\x05agent\x18\x01 \x01(\v2\x11.identity.v1.UserR\x05agent\"7\n" +
 	"\x11ListAgentsRequest\x12\"\n" +

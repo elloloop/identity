@@ -42,6 +42,10 @@ func (StubRepository) GetUser(context.Context, string) (*User, error) {
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) CreateAgent(context.Context, AgentCreation) (*User, bool, error) {
+	return nil, false, ErrServiceUnavailable
+}
+
 func (StubRepository) CreateUser(context.Context, *User) (string, error) {
 	return "", ErrServiceUnavailable
 }
