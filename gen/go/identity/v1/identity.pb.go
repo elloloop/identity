@@ -6594,8 +6594,11 @@ type CreateAgentRequest struct {
 	// active person, not an anonymous account.
 	OwnerUserId string `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
 	// Retries a lost creation response without provisioning another subject.
-	// Optional opaque key, scoped to this project and authenticated caller.
-	// Reusing it with a different normalized name, avatar or owner is rejected.
+	// Optional case-sensitive opaque key, at most 128 UTF-8 bytes without control
+	// characters, scoped to this project and authenticated caller. Malformed keys
+	// are INVALID_ARGUMENT; a different normalized name/avatar/owner for a used
+	// key is ALREADY_EXISTS. An invalidated receipt is PERMISSION_DENIED forever.
+	// Keep the same key after an unknown outcome; never replace it to evade refusal.
 	// Revocation, deletion or an ownership change permanently ends replay access.
 	ClientRequestId string `protobuf:"bytes,4,opt,name=client_request_id,json=clientRequestId,proto3" json:"client_request_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields

@@ -63,7 +63,7 @@ func (r *pgRepository) CreateAgent(ctx context.Context, request service.AgentCre
 		}
 	}
 	var count int
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM users WHERE project_id=$1 AND kind='agent' AND owner_user_id=$2`, r.projectID, request.Agent.OwnerUserID).Scan(&count); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM users WHERE project_id=$1 AND kind='agent' AND owner_user_id<>'' AND owner_user_id=$2`, r.projectID, request.Agent.OwnerUserID).Scan(&count); err != nil {
 		return nil, false, err
 	}
 	if count >= request.OwnerLimit {
@@ -72,11 +72,11 @@ func (r *pgRepository) CreateAgent(ctx context.Context, request service.AgentCre
 	agent := *request.Agent
 	id, role, status := defaultNewUserFields(&agent)
 	if _, err = tx.Exec(ctx, insertUserQuery, insertUserArgs(r.projectID, id, role, status, &agent)...); err != nil {
-		return nil, false, err
+		return nil, false, wrapPgErr("create agent subject", err)
 	}
 	if request.RequestID != "" {
 		if _, err = tx.Exec(ctx, `INSERT INTO agent_creation_receipts(project_id,caller_id,request_id,fingerprint,agent_id,owner_id,invalidated) VALUES($1,$2,$3,$4,$5,$6,false)`, r.projectID, request.CallerID, request.RequestID, request.Fingerprint, id, agent.OwnerUserID); err != nil {
-			return nil, false, err
+			return nil, false, wrapPgErr("create agent receipt", err)
 		}
 	}
 	if err = tx.Commit(ctx); err != nil {

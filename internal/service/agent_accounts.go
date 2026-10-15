@@ -50,7 +50,9 @@ const (
 	// agentNameMaxRunes bounds an agent's display name.
 	agentNameMaxRunes = 200
 	// agentAvatarURLMaxBytes bounds an agent's avatar URL.
-	agentAvatarURLMaxBytes = 2048
+	agentAvatarURLMaxBytes         = 2048
+	agentCreationKeyMaxBytes       = 128
+	agentCreationFingerprintDomain = "agent-create-v1"
 )
 
 var (
@@ -342,10 +344,17 @@ func (s *AuthService) CreateAgent(
 		Agent:       agent, OwnerLimit: s.cfg.AgentsPerOwnerLimit(),
 	})
 	if err != nil {
-		if errors.Is(err, ErrAgentLimitReached) {
-			s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
-				map[string]any{"step": "limit_reached", "owner_user_id": owner.ID})
+		step := "storage_failed"
+		switch {
+		case errors.Is(err, ErrAgentLimitReached):
+			step = "limit_reached"
+		case errors.Is(err, ErrPermissionDenied):
+			step = "authority_revoked"
+		case errors.Is(err, ErrAlreadyExists):
+			step = "request_id_conflict"
 		}
+		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
+			map[string]any{"step": step, "owner_user_id": owner.ID, "has_request_id": clientRequestID != ""})
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
 

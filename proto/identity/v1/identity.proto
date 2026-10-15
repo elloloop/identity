@@ -1080,8 +1080,11 @@ message CreateAgentRequest {
   // active person, not an anonymous account.
   string owner_user_id = 3;
   // Retries a lost creation response without provisioning another subject.
-  // Optional opaque key, scoped to this project and authenticated caller.
-  // Reusing it with a different normalized name, avatar or owner is rejected.
+  // Optional case-sensitive opaque key, at most 128 UTF-8 bytes without control
+  // characters, scoped to this project and authenticated caller. Malformed keys
+  // are INVALID_ARGUMENT; a different normalized name/avatar/owner for a used
+  // key is ALREADY_EXISTS. An invalidated receipt is PERMISSION_DENIED forever.
+  // Keep the same key after an unknown outcome; never replace it to evade refusal.
   // Revocation, deletion or an ownership change permanently ends replay access.
   string client_request_id = 4;
 }

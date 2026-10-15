@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/events"
 	"github.com/stretchr/testify/require"
 )
@@ -81,4 +82,18 @@ func TestAgentCreationSharedMemoryOperation(t *testing.T) {
 	_, _, err = request.ApplyToUsers(users, receipts, allocate)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	require.Equal(t, 1, allocated)
+}
+
+func TestCreateAgentAuditsStoreRefusals(t *testing.T) {
+	f := newAgentFixture(t)
+	ctx := context.Background()
+	_, err := f.svc.CreateAgent(ctx, f.owner.ID, "Helper", "", "", "", "", "same-key")
+	require.NoError(t, err)
+	_, err = f.svc.CreateAgent(ctx, f.owner.ID, "Other", "", "", "", "", "same-key")
+	require.ErrorIs(t, err, ErrAlreadyExists)
+	require.Equal(t, 1, f.writer.countByEventTypeAndDetail(string(audit.EventAgentCreated), "step", "request_id_conflict"))
+	f.repo.afterGetUserHook = func(stored *User) { f.repo.afterGetUserHook = nil; stored.Status = StatusDeactivated }
+	_, err = f.svc.CreateAgent(ctx, f.owner.ID, "Helper", "", "", "", "", "same-key")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	require.Equal(t, 1, f.writer.countByEventTypeAndDetail(string(audit.EventAgentCreated), "step", "authority_revoked"))
 }

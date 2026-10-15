@@ -107,10 +107,15 @@ validation and the audit for no difference in behaviour.
 
 A per-owner cap (`GATEWAY_AGENTS_MAX_PER_OWNER`, default 25, at most 500)
 and a per-IP rate limit on creation bound how many accounts a single person
-can mint. The cap is checked before the write and is not transactional; the
-rate limit bounds the overshoot. A merge can carry an owner past the cap, so
-listing and the revocation cascade page through every agent rather than
-assuming one page.
+can mint. Creation now checks the cap and inserts the subject atomically for
+both ordinary and keyed requests. An optional caller/project-scoped request
+key recovers the same subject after a lost response; lifecycle tombstones
+permanently end replay after authority loss, including transfer-back or
+reactivation. Receipts survive account erasure until project deletion.
+Transfer acceptance/reassignment still checks recipient capacity before its
+write, so a concurrent transfer and creation can exceed the limit; atomic
+creation does not close that separate transfer race. A merge can also carry
+an owner past the cap, so listing and revocation page through every agent.
 
 An agent's role is always `member`. Its role in an application is the
 application's to decide.

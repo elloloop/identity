@@ -32,15 +32,15 @@ type AgentCreationReceipt struct {
 }
 
 func validateAgentCreationKey(key string) error {
-	if len(key) > 128 || !utf8.ValidString(key) || strings.IndexFunc(key, unicode.IsControl) >= 0 {
-		return fmt.Errorf("%w: client_request_id must be at most 128 UTF-8 bytes without controls", ErrInvalidArgument)
+	if len(key) > agentCreationKeyMaxBytes || !utf8.ValidString(key) || strings.IndexFunc(key, unicode.IsControl) >= 0 {
+		return fmt.Errorf("%w: client_request_id must be at most %d UTF-8 bytes without controls", ErrInvalidArgument, agentCreationKeyMaxBytes)
 	}
 	return nil
 }
 
 func agentCreationFingerprint(values ...string) string {
 	h := sha256.New()
-	_, _ = h.Write([]byte("agent-create-v1"))
+	_, _ = h.Write([]byte(agentCreationFingerprintDomain))
 	for _, value := range values {
 		var size [8]byte
 		binary.BigEndian.PutUint64(size[:], uint64(len(value)))
@@ -90,7 +90,7 @@ func AgentCreationAuthorityLost(before, after *User) bool {
 // ValidateAgentCreation guards the atomic storage operation's invariants.
 func ValidateAgentCreation(request AgentCreation) error {
 	if request.Agent == nil || request.Agent.ID != "" || !request.Agent.IsAgent() || request.Agent.OwnerUserID == "" ||
-		request.CallerID == "" || len(request.Fingerprint) != 64 || request.OwnerLimit <= 0 {
+		request.CallerID == "" || len(request.Fingerprint) != hex.EncodedLen(sha256.Size) || request.OwnerLimit <= 0 {
 		return fmt.Errorf("%w: invalid agent creation receipt", ErrInvalidArgument)
 	}
 	return validateAgentCreationKey(request.RequestID)
