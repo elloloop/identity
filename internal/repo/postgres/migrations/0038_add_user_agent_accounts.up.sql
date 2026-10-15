@@ -13,13 +13,14 @@
 -- scan of existing rows: every one of them takes the defaults ('person', '',
 -- ''), which satisfy all three, and every later write is checked. The ALTERs
 -- take an ACCESS EXCLUSIVE lock that the transaction holds to commit, so
--- reads as well as writes wait for the rest of the file, including the two
--- owner indexes' builds: one scan of `users` each that indexes nothing, the
--- indexes being partial. lock_timeout bounds the wait to acquire the lock,
+-- reads as well as writes wait for the rest of the file, including the
+-- directory and owner index builds. lock_timeout bounds the wait to acquire
+-- the lock,
 -- as in 0034-0037: on timeout the file rolls back and version 38 is left
 -- dirty — confirm kind is absent, then `identity migrate force 37` and
 -- `identity migrate` again. The IF [NOT] EXISTS guards let an operator
--- pre-build the indexes with CREATE INDEX CONCURRENTLY.
+-- add the columns first, then pre-build the indexes with
+-- CREATE INDEX CONCURRENTLY.
 SET LOCAL lock_timeout = '10s';
 
 ALTER TABLE users
@@ -49,3 +50,9 @@ CREATE INDEX IF NOT EXISTS users_project_owner_idx
 CREATE INDEX IF NOT EXISTS users_project_pending_owner_idx
     ON users (project_id, pending_owner_user_id)
     WHERE pending_owner_user_id <> '';
+
+-- The default person-only directory count must remain index-only: kind is
+-- otherwise a heap filter on the anonymous-excluding directory index.
+CREATE INDEX IF NOT EXISTS users_project_created_id_person_idx
+    ON users (project_id, created_at_ms, id)
+    WHERE NOT is_anonymous AND kind <> 'agent';

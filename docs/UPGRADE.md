@@ -1,16 +1,50 @@
 # Upgrade guide
 
-## v4.16.0 → next — agent accounts
+## v4.16.0 → next — agent accounts; custom repositories must implement ownership and transfer semantics
 
 **Migration 0038** (SQLite 0021) adds `users.kind` (`'person'` or
 `'agent'`), `users.owner_user_id` and `users.pending_owner_user_id`, all with
 constant defaults (catalog-only), three `NOT VALID` CHECK constraints, and
 partial indexes on `(project_id, owner_user_id)` and
-`(project_id, pending_owner_user_id)` that index no existing row
+`(project_id, pending_owner_user_id)` that index no existing row, plus a
+person-only `(project_id, created_at_ms, id)` directory index
 (`lock_timeout = 10s`; on timeout confirm `kind` is absent, then
 `identity migrate force 37` and `identity migrate`). Every existing account
 becomes a person.
 
+For large PostgreSQL deployments, migration 0038 holds `ACCESS EXCLUSIVE`
+while building its indexes. To keep those builds outside that lock, first
+add the columns, then build the indexes concurrently, outside a transaction:
+
+```sql
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'person',
+  ADD COLUMN IF NOT EXISTS owner_user_id TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS pending_owner_user_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_owner_idx
+  ON users (project_id, owner_user_id) WHERE owner_user_id <> '';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_pending_owner_idx
+  ON users (project_id, pending_owner_user_id) WHERE pending_owner_user_id <> '';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_created_id_person_idx
+  ON users (project_id, created_at_ms, id) WHERE NOT is_anonymous AND kind <> 'agent';
+```
+
+Then run `identity migrate`; it reuses those columns and indexes. If a
+concurrent build fails, drop its invalid index before retrying. The earlier
+anonymous-excluding directory index stays available for callers opting into
+agents.
+
+- **Custom `Repository` implementations must persist the three new `User`
+  fields**, default `Kind` to person, and honor `IncludeAgents` (false by
+  default), `OwnerUserID` and `PendingOwnerUserID` identically in `ListUsers`
+  and `CountUsers`. Implement `SetAgentOwnership` and `SettleAgentTransfer`
+  as conditional, atomic writes that return false on a stale owner or offer,
+  and extend `ApplyAccountMerge` to re-point owned agents and pending offers,
+  clearing offers that become self-transfers. The service's pure in-memory
+  row helpers express those rules; SQL drivers must preserve them within
+  their transactions.
+- **`CreateAgent` has its own per-IP rate-limit bucket, `agent_create`,**
+  using `GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`. Include that bucket in monitoring.
 - **Agent accounts (new, off by default).** A non-human account a person
   owns, with no way to sign in. `CreateAgent`, `ListAgents`, `UpdateAgent`,
   `TransferAgent`, `CancelAgentTransfer`, `DeactivateAgent`,

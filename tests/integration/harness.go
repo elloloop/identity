@@ -867,29 +867,10 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 		offset = 0
 	}
 
-	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	matched := make([]*service.User, 0, len(r.users))
 	for _, u := range r.users {
-		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
-			continue
-		}
-		if !filter.IncludeAgents && u.IsAgent() {
-			continue
-		}
-		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
-			continue
-		}
-		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
+		if !filter.Matches(u) {
 			continue
 		}
 		cp := *u
@@ -917,30 +898,11 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 }
 
 func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
-	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
-			continue
-		}
-		if !filter.IncludeAgents && u.IsAgent() {
-			continue
-		}
-		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
-			continue
-		}
-		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
+		if !filter.Matches(u) {
 			continue
 		}
 		n++
@@ -3092,16 +3054,7 @@ func (r *MemRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	u, ok := r.users[agentID]
-	if !ok || !u.IsAgent() || u.PendingOwnerUserID == "" || u.PendingOwnerUserID != pendingOwnerID {
-		return false, nil
-	}
-	if accept {
-		u.OwnerUserID = u.PendingOwnerUserID
-	}
-	u.PendingOwnerUserID = ""
-	u.UpdatedAt = time.UnixMilli(atMs)
-	return true, nil
+	return r.users[agentID].SettleAgentTransfer(pendingOwnerID, accept, atMs), nil
 }
 
 // SetAgentOwnership writes the agent's owners under the store's lock, only
@@ -3112,13 +3065,7 @@ func (r *MemRepo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID,
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	u, ok := r.users[agentID]
-	if !ok || !u.IsAgent() || u.OwnerUserID != expectedOwnerID {
-		return false, nil
-	}
-	u.OwnerUserID, u.PendingOwnerUserID = ownerID, pendingOwnerID
-	u.UpdatedAt = time.UnixMilli(atMs)
-	return true, nil
+	return r.users[agentID].SetAgentOwnership(expectedOwnerID, ownerID, pendingOwnerID, atMs), nil
 }
 
 // ApplyAccountMerge is the merge under the store's lock: the records change
@@ -3131,17 +3078,7 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 		return err
 	}
 	for _, u := range r.users {
-		if u.OwnerUserID == m.OtherID {
-			u.OwnerUserID = m.SurvivorID
-		}
-	}
-	for _, u := range r.users {
-		if u.PendingOwnerUserID == m.OtherID || u.PendingOwnerUserID == m.SurvivorID {
-			u.PendingOwnerUserID = m.SurvivorID
-			if u.OwnerUserID == m.SurvivorID {
-				u.PendingOwnerUserID = ""
-			}
-		}
+		m.ApplyToAgent(u)
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {

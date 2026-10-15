@@ -3,6 +3,7 @@
 -- Dropping the columns turns every agent into an ordinary account with no
 -- sign-in method: delete agents first (DeleteAgent) if they must not remain.
 
+DROP INDEX IF EXISTS users_project_created_id_person_idx;
 DROP INDEX IF EXISTS users_project_pending_owner_idx;
 DROP INDEX IF EXISTS users_project_owner_idx;
 ALTER TABLE users

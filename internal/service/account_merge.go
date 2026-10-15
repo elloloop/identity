@@ -37,7 +37,7 @@ type AccountMerge struct {
 // changes nothing and returns ErrMergeConflict when either account is no
 // longer active, unmerged people, or a move would overwrite a field the
 // survivor has filled. The caller re-points the other account's linked
-// providers, agents and pending agent transfers, and ends its sessions,
+// providers, applies ApplyToAgent to its users, and ends its sessions,
 // under the same lock.
 func (m AccountMerge) ApplyToUsers(survivor, other *User) error {
 	mergeable := func(u *User) bool { return u.Status == StatusActive && u.MergedIntoUserID == "" && !u.IsAgent() }
@@ -64,6 +64,21 @@ func (m AccountMerge) ApplyToUsers(survivor, other *User) error {
 	other.Status, other.MergedIntoUserID = StatusDeactivated, m.SurvivorID
 	other.UpdatedAt, survivor.UpdatedAt = time.UnixMilli(m.AtMs), time.UnixMilli(m.AtMs)
 	return nil
+}
+
+func (m AccountMerge) ApplyToAgent(u *User) {
+	if u == nil {
+		return
+	}
+	if u.OwnerUserID == m.OtherID {
+		u.OwnerUserID = m.SurvivorID
+	}
+	if u.PendingOwnerUserID == m.OtherID || u.PendingOwnerUserID == m.SurvivorID {
+		u.PendingOwnerUserID = m.SurvivorID
+		if u.OwnerUserID == m.SurvivorID {
+			u.PendingOwnerUserID = ""
+		}
+	}
 }
 
 // ErrMergeConflict is returned by ApplyAccountMerge when either account is no

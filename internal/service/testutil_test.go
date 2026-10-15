@@ -355,25 +355,7 @@ func (r *fakeRepo) ListUsers(_ context.Context, filter UserListFilter) ([]*User,
 	defer r.mu.Unlock()
 	var out []*User
 	for _, u := range r.users {
-		if filter.Email != "" && FoldEmail(u.Email) != FoldEmail(filter.Email) {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
-			continue
-		}
-		if !filter.IncludeAgents && u.IsAgent() {
-			continue
-		}
-		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
-			continue
-		}
-		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
+		if !filter.Matches(u) {
 			continue
 		}
 		cp := *u
@@ -428,25 +410,7 @@ func (r *fakeRepo) CountUsers(_ context.Context, filter UserListFilter) (int, er
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && FoldEmail(u.Email) != FoldEmail(filter.Email) {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
-			continue
-		}
-		if !filter.IncludeAgents && u.IsAgent() {
-			continue
-		}
-		if filter.OwnerUserID != "" && u.OwnerUserID != filter.OwnerUserID {
-			continue
-		}
-		if filter.PendingOwnerUserID != "" && u.PendingOwnerUserID != filter.PendingOwnerUserID {
+		if !filter.Matches(u) {
 			continue
 		}
 		n++
@@ -2605,16 +2569,7 @@ func (r *fakeRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerI
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	u, ok := r.users[agentID]
-	if !ok || !u.IsAgent() || u.PendingOwnerUserID == "" || u.PendingOwnerUserID != pendingOwnerID {
-		return false, nil
-	}
-	if accept {
-		u.OwnerUserID = u.PendingOwnerUserID
-	}
-	u.PendingOwnerUserID = ""
-	u.UpdatedAt = time.UnixMilli(atMs)
-	return true, nil
+	return r.users[agentID].SettleAgentTransfer(pendingOwnerID, accept, atMs), nil
 }
 
 // SetAgentOwnership writes the agent's owners under the store's lock, only
@@ -2625,13 +2580,7 @@ func (r *fakeRepo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	u, ok := r.users[agentID]
-	if !ok || !u.IsAgent() || u.OwnerUserID != expectedOwnerID {
-		return false, nil
-	}
-	u.OwnerUserID, u.PendingOwnerUserID = ownerID, pendingOwnerID
-	u.UpdatedAt = time.UnixMilli(atMs)
-	return true, nil
+	return r.users[agentID].SetAgentOwnership(expectedOwnerID, ownerID, pendingOwnerID, atMs), nil
 }
 
 // ApplyAccountMerge is the merge under the store's lock: the records change
@@ -2644,17 +2593,7 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m AccountMerge) error {
 		return err
 	}
 	for _, u := range r.users {
-		if u.OwnerUserID == m.OtherID {
-			u.OwnerUserID = m.SurvivorID
-		}
-	}
-	for _, u := range r.users {
-		if u.PendingOwnerUserID == m.OtherID || u.PendingOwnerUserID == m.SurvivorID {
-			u.PendingOwnerUserID = m.SurvivorID
-			if u.OwnerUserID == m.SurvivorID {
-				u.PendingOwnerUserID = ""
-			}
-		}
+		m.ApplyToAgent(u)
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {
