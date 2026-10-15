@@ -6206,6 +6206,17 @@ components:
             owner_user_id names the person who will own the agent. Empty means the
              caller. Naming anyone else requires the admin role. The owner must be an
              active person, not an anonymous account.
+        clientRequestId:
+          type: string
+          title: client_request_id
+          description: |-
+            Retries a lost creation response without provisioning another subject.
+             Optional case-sensitive opaque key, at most 128 UTF-8 bytes without control
+             characters, scoped to this project and authenticated caller. Malformed keys
+             are INVALID_ARGUMENT; a different normalized name/avatar/owner for a used
+             key is ALREADY_EXISTS. An invalidated receipt is PERMISSION_DENIED forever.
+             Keep the same key after an unknown outcome; never replace it to evade refusal.
+             Revocation, deletion or an ownership change permanently ends replay access.
       title: CreateAgentRequest
       additionalProperties: false
     identity.v1.CreateAgentResponse:

@@ -48,6 +48,32 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     </li>
   </ul>
 
+  <h2>Retrying creation safely</h2>
+  <p>
+    Set an opaque <code>client_request_id</code> when a lost response must not
+    create a second subject. Keep the same key and request when retrying.
+    The key is case-sensitive, at most 128 UTF-8 bytes, without control
+    characters, and scoped to the project and authenticated caller. Malformed
+    keys answer <code>INVALID_ARGUMENT</code>.
+    Name and avatar are trimmed and an omitted owner means the caller, so
+    equivalent requests return the same subject's current profile. A changed
+    normalized request answers <code>ALREADY_EXISTS</code>. Omitting the key
+    creates a new subject on each successful call.
+  </p>
+  <p>
+    A retry always checks current caller and owner authority. Changing the
+    actual owner, deactivating or erasing a subject or its owner/caller, merging
+    an account, or removing the caller's admin role permanently invalidates
+    affected receipts. Transferring back or reactivating does not restore them;
+    a pending transfer offer alone does not invalidate a receipt. A refused key
+    never recreates a missing account and answers <code>PERMISSION_DENIED</code>
+    permanently. Review current ownership and account standing; do not replace
+    the key to hide an unknown creation or bypass the refusal. Keyed retries at the owner limit still
+    return the existing subject and emit no duplicate creation event.
+    Receipts retain only opaque identifiers and a request digest until project
+    erasure, including after account erasure, to prevent accidental recreation.
+  </p>
+
   <h2>Managing agents</h2>
   <p>
     The owner manages their agents from their own session. A project

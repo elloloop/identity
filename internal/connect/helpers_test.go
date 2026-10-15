@@ -83,7 +83,8 @@ var nodeIDSeq atomic.Int64
 func nextID() string { return fmt.Sprintf("n-%d", nodeIDSeq.Add(1)) }
 
 type fakeRepo struct {
-	mu sync.Mutex
+	agentCreations map[[2]string]service.AgentCreationReceipt
+	mu             sync.Mutex
 
 	users               map[string]*service.User
 	refreshTokens       map[string]*service.RefreshTokenRecord
@@ -124,6 +125,7 @@ func (r *fakeRepo) WithProject(string) service.Repository { return r }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
+		agentCreations:     make(map[[2]string]service.AgentCreationReceipt),
 		users:              make(map[string]*service.User),
 		refreshTokens:      make(map[string]*service.RefreshTokenRecord),
 		passkeyCreds:       make(map[string]*service.PasskeyCredRecord),
@@ -252,10 +254,13 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
 	}
+	before := *u
 	for k, v := range fields {
 		switch k {
 		case "name":
 			u.Name = v.(string)
+		case "role":
+			u.Role = v.(string)
 		case "email":
 			u.Email = v.(string)
 		case "avatar_url":
@@ -314,6 +319,9 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 				u.DeletionScheduledAtMs = int64(x)
 			}
 		}
+	}
+	if service.AgentCreationAuthorityLost(&before, u) {
+		service.InvalidateAgentCreationReceipts(r.agentCreations, userID)
 	}
 	return nil
 }
@@ -435,6 +443,7 @@ func (r *fakeRepo) DeleteUser(_ context.Context, userID string) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	service.InvalidateAgentCreationReceipts(r.agentCreations, userID)
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
 			delete(r.refreshTokens, id)
@@ -1447,11 +1456,15 @@ func (r *fakeRepo) SetDateOfBirthOnce(_ context.Context, userID string, dobMs in
 	if !ok || u.DateOfBirthMs != 0 {
 		return false, nil
 	}
+	before := *u
 	u.DateOfBirthMs = dobMs
 	if status != "" {
 		u.Status = status
 	}
 	u.UpdatedAt = time.UnixMilli(nowMs)
+	if service.AgentCreationAuthorityLost(&before, u) {
+		service.InvalidateAgentCreationReceipts(r.agentCreations, userID)
+	}
 	return true, nil
 }
 
@@ -2502,7 +2515,16 @@ func (r *fakeRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerI
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.users[agentID].SettleAgentTransfer(pendingOwnerID, accept, atMs), nil
+	u := r.users[agentID]
+	if u == nil {
+		return false, nil
+	}
+	before := *u
+	changed := u.SettleAgentTransfer(pendingOwnerID, accept, atMs)
+	if changed && service.AgentCreationAuthorityLost(&before, u) {
+		service.InvalidateAgentCreationReceipts(r.agentCreations, agentID)
+	}
+	return changed, nil
 }
 
 // SetAgentOwnership writes the agent's owners under the store's lock, only
@@ -2513,7 +2535,16 @@ func (r *fakeRepo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.users[agentID].SetAgentOwnership(expectedOwnerID, ownerID, pendingOwnerID, atMs), nil
+	u := r.users[agentID]
+	if u == nil {
+		return false, nil
+	}
+	before := *u
+	changed := u.SetAgentOwnership(expectedOwnerID, ownerID, pendingOwnerID, atMs)
+	if changed && service.AgentCreationAuthorityLost(&before, u) {
+		service.InvalidateAgentCreationReceipts(r.agentCreations, agentID)
+	}
+	return changed, nil
 }
 
 // ApplyAccountMerge is the merge under the store's lock: the records change
@@ -2525,8 +2556,13 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) 
 	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
 	}
+	service.InvalidateAgentCreationReceipts(r.agentCreations, m.OtherID)
 	for _, u := range r.users {
+		before := *u
 		m.ApplyToAgent(u)
+		if service.AgentCreationAuthorityLost(&before, u) {
+			service.InvalidateAgentCreationReceipts(r.agentCreations, u.ID)
+		}
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {

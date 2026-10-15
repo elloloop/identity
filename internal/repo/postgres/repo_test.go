@@ -198,6 +198,7 @@ func truncateAll(ctx context.Context, dsn string) error {
 
 	const stmt = `
 		TRUNCATE TABLE
+			agent_creation_receipts,
 			admin_help_requests,
 			login_challenges,
 			recovery_codes,

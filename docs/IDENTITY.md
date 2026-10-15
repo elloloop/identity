@@ -1211,3 +1211,26 @@ before you ship.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.
+
+
+## Retry-safe agent creation
+
+An owner activating an agent may lose the `CreateAgent` response. Optional
+`client_request_id` on that RPC recovers the same subject instead of creating
+another. The request key is scoped by project and authenticated caller, and
+bound to the normalized name, avatar and resolved owner. Storage atomically
+creates the subject and durable receipt; concurrent retries have one winner.
+Replays recheck current authority, preserve subsequent profile edits, do not
+consume capacity, and do not emit another user-created event. Conflicting
+payloads are rejected. Empty keys retain independent-create behavior.
+
+Receipts are not grants. Account revocation, actual ownership changes, merges
+and erasure permanently invalidate affected receipts. A return transfer or
+reactivation cannot restore them; pending offers alone do not invalidate them.
+SQL lifecycle triggers fence every writer in the same transaction, while the
+memory driver applies the same rule under its mutex. Tombstones survive account
+erasure and contain opaque IDs and a digest, not the original profile. They
+remain until project deletion so an old retry can never recreate an erased
+subject. PostgreSQL migration 0039 and SQLite migration 0022 add the receipt
+store and lifecycle triggers; rollback drops both and therefore discards retry
+history, so clients must not replay old keys after a schema rollback.

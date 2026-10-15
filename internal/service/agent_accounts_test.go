@@ -121,7 +121,7 @@ func TestCreateAgent_OwnedByCaller(t *testing.T) {
 	f := newAgentFixture(t)
 	ctx := context.Background()
 
-	agent, err := f.svc.CreateAgent(ctx, f.owner.ID, "  Research helper ", "https://cdn.example.com/a.png", "", "203.0.113.1", "ua")
+	agent, err := f.svc.CreateAgent(ctx, f.owner.ID, "  Research helper ", "https://cdn.example.com/a.png", "", "203.0.113.1", "ua", "")
 	require.NoError(t, err)
 	assert.True(t, agent.IsAgent())
 	assert.Equal(t, f.owner.ID, agent.OwnerUserID)
@@ -158,7 +158,7 @@ func TestCreateAgent_Validation(t *testing.T) {
 		{"long_avatar", "A", "https://example.com/" + strings.Repeat("a", agentAvatarURLMaxBytes)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := f.svc.CreateAgent(ctx, f.owner.ID, tc.agentName, tc.avatar, "", "", "")
+			_, err := f.svc.CreateAgent(ctx, f.owner.ID, tc.agentName, tc.avatar, "", "", "", "")
 			require.ErrorIs(t, err, ErrInvalidArgument)
 		})
 	}
@@ -171,17 +171,17 @@ func TestCreateAgent_ForAnotherOwner(t *testing.T) {
 	f := newAgentFixture(t)
 	ctx := context.Background()
 
-	_, err := f.svc.CreateAgent(ctx, f.stranger.ID, "A", "", f.owner.ID, "", "")
+	_, err := f.svc.CreateAgent(ctx, f.stranger.ID, "A", "", f.owner.ID, "", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "only an admin names another owner")
 
-	agent, err := f.svc.CreateAgent(ctx, f.admin.ID, "A", "", f.owner.ID, "", "")
+	agent, err := f.svc.CreateAgent(ctx, f.admin.ID, "A", "", f.owner.ID, "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, f.owner.ID, agent.OwnerUserID)
 
 	// The named owner must be an active person.
 	f.setStatus(f.stranger.ID, StatusDeactivated)
 	for _, owner := range []string{agent.ID, f.stranger.ID, "no-such-user"} {
-		_, err := f.svc.CreateAgent(ctx, f.admin.ID, "A", "", owner, "", "")
+		_, err := f.svc.CreateAgent(ctx, f.admin.ID, "A", "", owner, "", "", "")
 		require.ErrorIs(t, err, ErrInvalidArgument, owner)
 	}
 }
@@ -193,14 +193,14 @@ func TestCreateAgent_RefusedCallers(t *testing.T) {
 	anon := seedUser(f.repo, "", "", StatusActive)
 	anon.IsAnonymous = true
 
-	_, err := f.svc.CreateAgent(ctx, "", "A", "", "", "", "")
+	_, err := f.svc.CreateAgent(ctx, "", "A", "", "", "", "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	for _, caller := range []string{agent.ID, anon.ID, "no-such-user"} {
-		_, err := f.svc.CreateAgent(ctx, caller, "A", "", "", "", "")
+		_, err := f.svc.CreateAgent(ctx, caller, "A", "", "", "", "", "")
 		require.ErrorIs(t, err, ErrPermissionDenied, caller)
 	}
 	f.setStatus(f.stranger.ID, StatusDeactivated)
-	_, err = f.svc.CreateAgent(ctx, f.stranger.ID, "A", "", "", "", "")
+	_, err = f.svc.CreateAgent(ctx, f.stranger.ID, "A", "", "", "", "", "")
 	require.ErrorIs(t, err, ErrAccountNotActive)
 }
 
@@ -210,15 +210,15 @@ func TestCreateAgent_PerOwnerCap(t *testing.T) {
 	f.svc.cfg.AgentsMaxPerOwner = 2
 
 	for range 2 {
-		_, err := f.svc.CreateAgent(ctx, f.owner.ID, "A", "", "", "", "")
+		_, err := f.svc.CreateAgent(ctx, f.owner.ID, "A", "", "", "", "", "")
 		require.NoError(t, err)
 	}
-	_, err := f.svc.CreateAgent(ctx, f.owner.ID, "A", "", "", "", "")
+	_, err := f.svc.CreateAgent(ctx, f.owner.ID, "A", "", "", "", "", "")
 	require.ErrorIs(t, err, ErrAgentLimitReached)
 	assert.Equal(t, 1, f.writer.countByEventTypeAndDetail(string(audit.EventAgentCreated), "step", "limit_reached"))
 
 	// Another owner's capacity is their own.
-	_, err = f.svc.CreateAgent(ctx, f.stranger.ID, "A", "", "", "", "")
+	_, err = f.svc.CreateAgent(ctx, f.stranger.ID, "A", "", "", "", "", "")
 	require.NoError(t, err)
 }
 
@@ -230,7 +230,7 @@ func TestAgentOps_DisabledByDefault(t *testing.T) {
 	ctx := context.Background()
 	agent := seedAgent(f.repo, f.owner.ID)
 
-	_, err := f.svc.CreateAgent(ctx, f.owner.ID, "A", "", "", "", "")
+	_, err := f.svc.CreateAgent(ctx, f.owner.ID, "A", "", "", "", "", "")
 	require.ErrorIs(t, err, ErrAgentsDisabled)
 	_, err = f.svc.ListAgents(ctx, f.admin.ID, f.owner.ID)
 	require.ErrorIs(t, err, ErrAgentsDisabled)
