@@ -25,6 +25,9 @@ func (s *AuthService) BeginTotpSetup(ctx context.Context, userID string) (string
 	if user == nil {
 		return "", "", nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
+	if user.IsAgent() {
+		return "", "", nil, ErrAgentCredential
+	}
 
 	// Clean up any previously-started (unverified) enrollment.
 	existing, err := s.repo(ctx).GetTotpCredential(ctx, userID)

@@ -37,7 +37,7 @@ func toEventUser(u *User) events.User {
 	if u == nil {
 		return events.User{}
 	}
-	return events.User{
+	e := events.User{
 		ID:            u.ID,
 		Email:         u.Email,
 		Name:          u.Name,
@@ -46,6 +46,10 @@ func toEventUser(u *User) events.User {
 
 		MergedIntoUserID: u.MergedIntoUserID,
 	}
+	if u.IsAgent() {
+		e.Kind, e.OwnerUserID, e.PendingOwnerUserID = UserKindAgent, u.OwnerUserID, u.PendingOwnerUserID
+	}
+	return e
 }
 
 // EmitUserEvent publishes a single user-lifecycle event through pub. A nil

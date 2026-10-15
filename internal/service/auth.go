@@ -146,6 +146,17 @@ type User struct {
 	// stored password is one an admin issued; every write of a password the
 	// user chose, or of no password, clears it.
 	PasswordChangeRequired bool
+	// Kind is UserKindAgent on an agent account and UserKindPerson on every
+	// other account. Fixed at creation.
+	Kind string
+	// OwnerUserID is set on an agent: the person in the same project who owns
+	// it. Empty on a person. It keeps naming a deleted owner, which leaves the
+	// agent unusable until it is transferred.
+	OwnerUserID string
+	// PendingOwnerUserID is set on an agent while a transfer waits for the
+	// recipient it names to accept or decline it; the agent stays with
+	// OwnerUserID until then. Empty otherwise, and always on a person.
+	PendingOwnerUserID string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
 	// deletion. Set when the owner requests deletion; cleared on cancel or a
@@ -202,6 +213,16 @@ type UserListFilter struct {
 	// an empty userName. Excluded in the DRIVER, not the caller, so a
 	// paginated count matches the rows returned.
 	IncludeAnonymous bool
+	// IncludeAgents admits agent accounts, which are excluded by default for
+	// the same reason: no email, and no IdP that provisions them.
+	IncludeAgents bool
+	// OwnerUserID, when non-empty, matches only the agents that account owns.
+	// It needs IncludeAgents to match anything.
+	OwnerUserID string
+	// PendingOwnerUserID, when non-empty, matches only the agents whose
+	// pending transfer waits on that account. It needs IncludeAgents to match
+	// anything.
+	PendingOwnerUserID string
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -720,8 +741,29 @@ type Repository interface {
 	// its own (else ErrMergeConflict); the other account's linked provider
 	// identities move to the survivor (passkeys stay: they are bound to the
 	// account they were registered for); its refresh tokens are deleted and
-	// its sessions revoked. Any failure rolls all of it back.
+	// its sessions revoked. The agents the other account owns move to the
+	// survivor, and a transfer waiting on the other account waits on the
+	// survivor instead, and one that would leave an agent offered to its own
+	// owner is dropped. Any failure rolls all of it back.
 	ApplyAccountMerge(ctx context.Context, m AccountMerge) error
+
+	// SettleAgentTransfer ends the pending transfer of agentID if, and only
+	// if, it still waits on pendingOwnerID: accept makes that account the
+	// owner, otherwise the transfer is dropped. Either way the pending owner
+	// is cleared and updated_at set to atMs, in one conditional statement, so
+	// an acceptance cannot land on a transfer that was cancelled or replaced
+	// after it was read. It reports whether a transfer was settled. An empty
+	// agentID or pendingOwnerID is an error.
+	SettleAgentTransfer(ctx context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error)
+
+	// SetAgentOwnership writes an agent's owner and pending owner if, and
+	// only if, the agent is still owned by expectedOwnerID, and sets
+	// updated_at to atMs, in one conditional statement: an offer or a
+	// reassignment authorized on a read cannot land on an agent whose owner
+	// changed since (an offer accepted in between). It reports whether the
+	// agent was written. An empty agentID, expectedOwnerID or ownerID is an
+	// error; an empty pendingOwnerID clears the pending owner.
+	SetAgentOwnership(ctx context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error)
 
 	// OAuth identities — links a (provider, provider_user_id) pair to a
 	// local User so OAuth login can survive provider-side email changes.
@@ -1928,6 +1970,11 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // one place a sign-in is recorded as the account's last login, once the
 // session is issued: a sign-in refused on the way is not a login.
 func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+	// An agent account has no sign-in method. Refused here, before anything
+	// is written, so no credential a corrupt row might hold opens one.
+	if err := s.refuseAgentSignIn(ctx, user, ipAddr, userAgent); err != nil {
+		return "", "", err
+	}
 	// The verified-email gate for every sign-in, and every step that
 	// continues one, refusing with a verification email so the user has a
 	// way forward. The refresh path runs it before consuming its token.
@@ -2040,6 +2087,16 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	sessionStart := sessionStartedAtMs
 	if sessionStart <= 0 {
 		sessionStart = now
+	}
+
+	// An agent's standing and admission are derived from its owner's,
+	// re-checked on every issue (refresh included) so an owner's suspension,
+	// deletion or loss of access ends the agent's sessions at their next
+	// rotation. Before any state is written.
+	if user.IsAgent() {
+		if err := s.checkAgentStanding(ctx, user); err != nil {
+			return "", "", err
+		}
 	}
 
 	// Stamp the derived minor flag from the stored DOB so the token carries
@@ -2504,7 +2561,18 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// authoritative check still runs after rotation below; this one exists only
 	// so a denial does not destroy the credential on its way out. Anonymous
 	// accounts carry no email to judge, and their own refusals run above.
-	if !timeoutUser.IsAnonymous {
+	// An agent's whole admission (its owner's standing, access and identity
+	// verification) is checked here too: an agent cannot sign in again to
+	// recover a burnt token.
+	switch {
+	case timeoutUser.IsAgent():
+		if err := s.checkAgentStanding(ctx, timeoutUser); err != nil {
+			if errors.Is(err, ErrEmailVerificationRequired) {
+				s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "email_not_verified")
+			}
+			return nil, "", "", err
+		}
+	case !timeoutUser.IsAnonymous:
 		if err := s.enforceAccountAccessLogin(ctx, timeoutUser); err != nil {
 			return nil, "", "", err
 		}
@@ -2628,6 +2696,9 @@ func (s *AuthService) accessTokenClaims(ctx context.Context, user *User, authTim
 		IsMinor:       user.IsMinor,
 		Anonymous:     user.IsAnonymous,
 		AuthTime:      authTimeMs / 1000,
+	}
+	if user.IsAgent() {
+		claims.Kind = UserKindAgent
 	}
 	s.stampTokenScope(&claims)
 	return claims

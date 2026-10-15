@@ -72,6 +72,24 @@
     "anchor": "age-gating-coppa"
   },
   {
+    "name": "GATEWAY_AGENTS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "turns on agent accounts: non-human accounts a person owns, managed by their owner or a project admin through CreateAgent and the other agent RPCs.",
+    "category": "Agent accounts",
+    "anchor": "agent-accounts"
+  },
+  {
+    "name": "GATEWAY_AGENTS_MAX_PER_OWNER",
+    "type": "integer",
+    "default": "25",
+    "required": false,
+    "description": "caps how many agent accounts one person may own, from 0 to 500 (0 selects the default, 25); creating or transferring an agent past it is refused.",
+    "category": "Agent accounts",
+    "anchor": "agent-accounts"
+  },
+  {
     "name": "GATEWAY_ALLOWED_ORIGINS",
     "type": "string",
     "default": "http://localhost:9002,http://localhost:3000",

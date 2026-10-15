@@ -66,6 +66,7 @@ func (h *IdentityHandler) ListUsers(
 		req.Msg.Search,
 		req.Msg.Cursor,
 		int(req.Msg.Limit),
+		req.Msg.IncludeAgents,
 	)
 	if err != nil {
 		return nil, toConnectError(err)

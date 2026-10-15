@@ -268,20 +268,10 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 		offset = 0
 	}
 
-	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	matched := make([]*service.User, 0, len(r.users))
 	for _, u := range r.users {
-		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Anonymous accounts have no email, so consumers that present users
-		// by address would render them blank. Mirrors the SQL drivers'
-		// NOT is_anonymous predicate.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
+		if !filter.Matches(u) {
 			continue
 		}
 		cp := *u
@@ -348,18 +338,11 @@ func (r *Repo) ListUsersPendingDeletionBefore(_ context.Context, cutoffMs int64,
 // /Users totalResults so a page reports the true match count rather than the
 // page size. Mirrors the SQL drivers.
 func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
-	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		if !filter.IncludeAnonymous && u.IsAnonymous {
+		if !filter.Matches(u) {
 			continue
 		}
 		n++
@@ -403,6 +386,9 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 		return "", fmt.Errorf("user id %q: %w", id, service.ErrAlreadyExists)
 	}
 	u.ID = id
+	if u.Kind == "" {
+		u.Kind = service.UserKindPerson
+	}
 	cp := *u
 	r.users[id] = &cp
 	return id, nil
@@ -1857,6 +1843,9 @@ func (r *Repo) CreateManagedChildAccount(_ context.Context, u *service.User, edg
 		return fmt.Errorf("user id %q: %w", id, service.ErrAlreadyExists)
 	}
 	u.ID = id
+	if u.Kind == "" {
+		u.Kind = service.UserKindPerson
+	}
 	cp := *u
 	r.users[id] = &cp
 
@@ -2356,6 +2345,28 @@ func (r *Repo) AssignAccountAddress(_ context.Context, userID, address string) (
 	return address, nil
 }
 
+// SettleAgentTransfer settles the transfer under the store's lock, only while
+// it still waits on pendingOwnerID.
+func (r *Repo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error) {
+	if agentID == "" || pendingOwnerID == "" {
+		return false, errors.New("memory: SettleAgentTransfer: missing agent or pending owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.users[agentID].SettleAgentTransfer(pendingOwnerID, accept, atMs), nil
+}
+
+// SetAgentOwnership writes the agent's owners under the store's lock, only
+// while expectedOwnerID still owns it.
+func (r *Repo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error) {
+	if agentID == "" || expectedOwnerID == "" || ownerID == "" {
+		return false, errors.New("memory: SetAgentOwnership: missing agent or owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.users[agentID].SetAgentOwnership(expectedOwnerID, ownerID, pendingOwnerID, atMs), nil
+}
+
 // ApplyAccountMerge is the merge under the store's lock: the records change
 // through AccountMerge.ApplyToUsers, then the side tables follow.
 func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
@@ -2364,6 +2375,9 @@ func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) erro
 	// A missing account is nil, which ApplyToUsers refuses.
 	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
+	}
+	for _, u := range r.users {
+		m.ApplyToAgent(u)
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {

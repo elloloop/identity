@@ -1,5 +1,101 @@
 # Upgrade guide
 
+## v4.16.0 → next — agent accounts; custom repositories must implement ownership and transfer semantics
+
+**Migration 0038** (SQLite 0021) adds `users.kind` (`'person'` or
+`'agent'`), `users.owner_user_id` and `users.pending_owner_user_id`, all with
+constant defaults (catalog-only), three `NOT VALID` CHECK constraints, and
+partial indexes on `(project_id, owner_user_id)` and
+`(project_id, pending_owner_user_id)` that index no existing row, plus a
+person-only `(project_id, created_at_ms, id)` directory index
+(`lock_timeout = 10s`; on timeout confirm `kind` is absent, then
+`identity migrate force 37` and `identity migrate`). Every existing account
+becomes a person.
+
+For large PostgreSQL deployments, migration 0038 holds `ACCESS EXCLUSIVE`
+while building its indexes. To keep those builds outside that lock, first
+add the columns, then build the indexes concurrently, outside a transaction:
+
+```sql
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'person',
+  ADD COLUMN IF NOT EXISTS owner_user_id TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS pending_owner_user_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_owner_idx
+  ON users (project_id, owner_user_id) WHERE owner_user_id <> '';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_pending_owner_idx
+  ON users (project_id, pending_owner_user_id) WHERE pending_owner_user_id <> '';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_created_id_person_idx
+  ON users (project_id, created_at_ms, id) WHERE NOT is_anonymous AND kind <> 'agent';
+```
+
+Then run `identity migrate`; it reuses those columns and indexes. If a
+concurrent build fails, drop its invalid index before retrying. The earlier
+anonymous-excluding directory index stays available for callers opting into
+agents.
+
+- **Custom `Repository` implementations must persist the three new `User`
+  fields**, default `Kind` to person, and honor `IncludeAgents` (false by
+  default), `OwnerUserID` and `PendingOwnerUserID` identically in `ListUsers`
+  and `CountUsers`. Implement `SetAgentOwnership` and `SettleAgentTransfer`
+  as conditional, atomic writes that return false on a stale owner or offer,
+  and extend `ApplyAccountMerge` to re-point owned agents and pending offers,
+  clearing offers that become self-transfers. The service's pure in-memory
+  row helpers express those rules; SQL drivers must preserve them within
+  their transactions.
+- **`CreateAgent` has its own per-IP rate-limit bucket, `agent_create`,**
+  using `GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`. Include that bucket in monitoring.
+- **Agent accounts (new, off by default).** A non-human account a person
+  owns, with no way to sign in. `CreateAgent`, `ListAgents`, `UpdateAgent`,
+  `TransferAgent`, `CancelAgentTransfer`, `DeactivateAgent`,
+  `ReactivateAgent` and `DeleteAgent` serve the owner and a project admin,
+  and `AcceptAgentTransfer`, `DeclineAgentTransfer` and
+  `ListIncomingAgentTransfers` serve a transfer's recipient, once
+  `GATEWAY_AGENTS_ENABLED=true`
+  (new, default `false`); until then each answers `FAILED_PRECONDITION`.
+  At most `GATEWAY_AGENTS_MAX_PER_OWNER` (new, default 25, 1 to 500; 0
+  selects the default and anything else outside the range is refused at
+  boot) per owner. See *Agent accounts* in the docs and
+  [ADR-0014](./adr/0014-agent-accounts.md).
+- **A transfer is an offer the recipient accepts.** `TransferAgent` sets the
+  agent's `pending_owner_user_id`; ownership moves only on
+  `AcceptAgentTransfer`, which checks the recipient's limit then. The agent
+  stays with its owner meanwhile. An offer or an answer that raced a change
+  (the agent changed hands, or the offer was cancelled or replaced) is
+  refused with `PERMISSION_DENIED`; re-read and retry. A project admin's transfer of an orphan
+  (an agent whose owner was deleted) takes effect at once, with no
+  acceptance, because nobody is left to hand it over.
+- **An agent is admitted as its owner is.** In an `allowlist` or `closed`
+  project, under a deny rule, or with `GATEWAY_IDV_REQUIRED`, an agent's
+  refresh is judged by its owner's address and verification.
+  With `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL`, the owner must also have a
+  proven address. A refused agent refresh preserves its refresh token and,
+  under session revocation, ends its access session until a fresh rotation.
+- **`User` gains `kind`, `owner_user_id` and `pending_owner_user_id`.** Every existing account
+  reports `USER_KIND_PERSON`. A client that treats every user as a person
+  should check `kind` before showing an account as one.
+- **An access token issued to an agent carries `"kind": "agent"`.** No path
+  issues one from outside the service yet (delegation is follow-up work). A
+  person's token carries no `kind`, so verifiers see no change.
+- **The admin `ListUsers` leaves agents out** unless the new
+  `include_agents` is set. The directory lookup and SCIM never return them.
+- **Webhook payloads for an agent carry `kind` and `owner_user_id`**, and
+  `pending_owner_user_id` while a transfer is pending. A person's payload
+  is unchanged.
+- **Deactivating or deleting a person also revokes their agents' sessions**,
+  and an agent's token is refused at refresh while its owner is not active.
+  Deleting a person does not delete their agents: an admin transfers (at
+  once) or deletes them (`ListAgents` with the deleted owner's id finds them).
+- **Merging moves the retired account's agents to the survivor**, and
+  transfers offered to it now wait on the survivor. An agent
+  account cannot itself be merged.
+- **The admin `UpdateUser` refuses an agent**; edit one with `UpdateAgent`.
+- **Eleven new audit event types:** `agent_created`, `agent_updated`,
+  `agent_transfer_requested`, `agent_transferred`,
+  `agent_transfer_declined`, `agent_transfer_cancelled`,
+  `agent_deactivated`, `agent_reactivated`, `agent_deleted`,
+  `agents_listed`, `agent_sign_in_refused`.
+
 ## v4.15.0 → v4.16.0 — sign-in hardening follow-ups (behaviour changes); `GATEWAY_RATE_LIMIT_QR_POLL_PER_IP` and `gate` on `login_locked` audit rows (additive); `Repository.DeletePasskeyCredential` (custom repositories must add it)
 
 No schema change and no migration.

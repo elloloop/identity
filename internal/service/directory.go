@@ -266,8 +266,8 @@ func (s *DirectoryService) directoryUsersInOrder(wanted []directoryAddress, foun
 	return out
 }
 
-// isActiveDirectoryAccount reports whether u is a live, credentialed member of
-// the project.
+// isActiveDirectoryAccount reports whether u is a live, credentialed person in
+// the project. An agent account is never one: it holds no address to look up.
 func isActiveDirectoryAccount(u *User) bool {
-	return u != nil && !u.IsAnonymous && u.Email != "" && isActiveStatus(u.Status)
+	return u != nil && !u.IsAnonymous && !u.IsAgent() && u.Email != "" && isActiveStatus(u.Status)
 }

@@ -867,20 +867,10 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 		offset = 0
 	}
 
-	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	matched := make([]*service.User, 0, len(r.users))
 	for _, u := range r.users {
-		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
+		if !filter.Matches(u) {
 			continue
 		}
 		cp := *u
@@ -908,21 +898,11 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 }
 
 func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
-	wantEmail := service.FoldEmail(filter.Email)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for _, u := range r.users {
-		if filter.Email != "" && service.FoldEmail(u.Email) != wantEmail {
-			continue
-		}
-		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
-			continue
-		}
-		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
-		// accounts have no email, so a surface presenting users by address
-		// must not receive them unless it opts in.
-		if !filter.IncludeAnonymous && u.IsAnonymous {
+		if !filter.Matches(u) {
 			continue
 		}
 		n++
@@ -1001,6 +981,9 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 		id = r.nextID()
 	}
 	u.ID = id
+	if u.Kind == "" {
+		u.Kind = service.UserKindPerson
+	}
 	cp := *u
 	r.users[id] = &cp
 	return id, nil
@@ -3063,6 +3046,28 @@ func (r *MemRepo) AssignAccountAddress(_ context.Context, userID, address string
 	return address, nil
 }
 
+// SettleAgentTransfer settles the transfer under the store's lock, only
+// while it still waits on pendingOwnerID.
+func (r *MemRepo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID string, accept bool, atMs int64) (bool, error) {
+	if agentID == "" || pendingOwnerID == "" {
+		return false, errors.New("SettleAgentTransfer: missing agent or pending owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.users[agentID].SettleAgentTransfer(pendingOwnerID, accept, atMs), nil
+}
+
+// SetAgentOwnership writes the agent's owners under the store's lock, only
+// while expectedOwnerID still owns it.
+func (r *MemRepo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ownerID, pendingOwnerID string, atMs int64) (bool, error) {
+	if agentID == "" || expectedOwnerID == "" || ownerID == "" {
+		return false, errors.New("SetAgentOwnership: missing agent or owner id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.users[agentID].SetAgentOwnership(expectedOwnerID, ownerID, pendingOwnerID, atMs), nil
+}
+
 // ApplyAccountMerge is the merge under the store's lock: the records change
 // through AccountMerge.ApplyToUsers, then the side tables follow.
 func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
@@ -3071,6 +3076,9 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 	// A missing account is nil, which ApplyToUsers refuses.
 	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err
+	}
+	for _, u := range r.users {
+		m.ApplyToAgent(u)
 	}
 	for _, oi := range r.oauthIdentities {
 		if oi.UserID == m.OtherID {
