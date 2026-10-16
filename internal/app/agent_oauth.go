@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/zitadel/oidc/v3/pkg/oidc"
 	"github.com/zitadel/oidc/v3/pkg/op"
@@ -251,7 +252,10 @@ func strictOAuthForm(next http.Handler) http.Handler {
 
 // Run before project resolution, whose hosted OAuth parser otherwise reads the
 // form first and would prevent a later body reader from enforcing this bound.
-func agentOAuthRequestBounds(next http.Handler) http.Handler {
+func agentOAuthRequestBounds(cfg *config.Config, next http.Handler) http.Handler {
+	if !cfg.AgentOAuthEnabled {
+		return next
+	}
 	bounded := strictOAuthForm(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
