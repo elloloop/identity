@@ -109,3 +109,10 @@ type Signer interface {
 	// "exp", custom names).
 	SignClaims(ctx context.Context, claims map[string]any) (string, error)
 }
+
+// DelegatedSigner supports the distinct OAuth access-token signing profile.
+// Ordinary session signers need this capability only when delegation is enabled.
+type DelegatedSigner interface {
+	Signer
+	SignDelegatedAccessToken(context.Context, DelegatedAccessClaims) (string, error)
+}

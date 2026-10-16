@@ -49,8 +49,9 @@ type IdentityHandler struct {
 	// project credential rather than a user JWT. nil when the build has no
 	// control plane (memory, sqlite), which disables the RPC
 	// (CodeUnimplemented).
-	directory *service.DirectoryService
-	cfg       *config.Config
+	agentOAuth *service.AgentOAuthService
+	directory  *service.DirectoryService
+	cfg        *config.Config
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service
@@ -179,4 +180,9 @@ func clientIP(headers headerReader) string {
 // clientUserAgent extracts the User-Agent header.
 func clientUserAgent(headers headerReader) string {
 	return headers.Get("User-Agent")
+}
+
+func (h *IdentityHandler) WithAgentOAuth(oauth *service.AgentOAuthService) *IdentityHandler {
+	h.agentOAuth = oauth
+	return h
 }

@@ -1219,6 +1219,30 @@ type Config struct {
 	// agents created while it was on stay as they are and still cannot sign
 	// in. Driven by GATEWAY_AGENTS_ENABLED (default false).
 	AgentsEnabled bool
+	// AgentOAuthEnabled enables native OAuth-only delegated agent access.
+	// Requires agents, session revocation, HTTPS issuer and authenticated
+	// resource credentials. GATEWAY_AGENT_OAUTH_ENABLED defaults to false.
+	AgentOAuthEnabled bool
+	// AgentOAuthAccessSeconds bounds delegated access JWTs to 1–900 seconds.
+	// GATEWAY_AGENT_OAUTH_ACCESS_SECONDS defaults to 300.
+	AgentOAuthAccessSeconds int
+	// AgentOAuthConsentSeconds bounds an explicit grant's lifetime, also
+	// capped by its original human session. GATEWAY_AGENT_OAUTH_CONSENT_SECONDS
+	// defaults to 86400 and cannot exceed thirty days.
+	AgentOAuthConsentSeconds int
+	// AgentOAuthRefreshIdleSeconds bounds a refresh credential's idle lifetime.
+	// GATEWAY_AGENT_OAUTH_REFRESH_IDLE_SECONDS defaults to 3600.
+	AgentOAuthRefreshIdleSeconds int
+	// AgentOAuthResourceCredentialsJSON is a bounded JSON array of project,
+	// resource audience, credential ID and SHA-256 secret digest bindings.
+	// GATEWAY_AGENT_OAUTH_RESOURCE_CREDENTIALS_JSON contains no plaintext secret.
+	AgentOAuthResourceCredentialsJSON string
+	// AgentOAuthProtocolPerIP sets the protocol budget per configured rate-limit window.
+	// GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP defaults to 30; zero selects default.
+	AgentOAuthProtocolPerIP int
+	// AgentOAuthIntrospectionPerIP sets the authenticated resource
+	// budget. GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP defaults to 1200.
+	AgentOAuthIntrospectionPerIP int
 	// AgentsMaxPerOwner caps how many agent accounts one person may own, from
 	// 0 to 500 (0 selects the default, 25); creating or transferring an
 	// agent past it is refused. Driven by GATEWAY_AGENTS_MAX_PER_OWNER.
@@ -1590,11 +1614,18 @@ func loadFromEnv() *Config {
 		SweeperBatchSize:       envInt("GATEWAY_SWEEPER_BATCH_SIZE", 500),
 		SweeperGraceSeconds:    envInt("GATEWAY_SWEEPER_GRACE_SECONDS", 60),
 
-		AccountDeletionGraceDays: envInt("GATEWAY_ACCOUNT_DELETION_GRACE_DAYS", 30),
-		ExportMaxAuditEvents:     envInt("GATEWAY_EXPORT_MAX_AUDIT_EVENTS", DefaultExportMaxAuditEvents),
-		AgentsEnabled:            envBool("GATEWAY_AGENTS_ENABLED", false),
-		AgentsMaxPerOwner:        envInt("GATEWAY_AGENTS_MAX_PER_OWNER", DefaultAgentsMaxPerOwner),
-		AuditRetentionDays:       envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
+		AccountDeletionGraceDays:          envInt("GATEWAY_ACCOUNT_DELETION_GRACE_DAYS", 30),
+		ExportMaxAuditEvents:              envInt("GATEWAY_EXPORT_MAX_AUDIT_EVENTS", DefaultExportMaxAuditEvents),
+		AgentsEnabled:                     envBool("GATEWAY_AGENTS_ENABLED", false),
+		AgentOAuthProtocolPerIP:           envInt("GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP", DefaultAgentOAuthProtocolPerIP),
+		AgentOAuthIntrospectionPerIP:      envInt("GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP", DefaultAgentOAuthIntrospectionPerIP),
+		AgentOAuthEnabled:                 envBool("GATEWAY_AGENT_OAUTH_ENABLED", false),
+		AgentOAuthAccessSeconds:           envInt("GATEWAY_AGENT_OAUTH_ACCESS_SECONDS", DefaultAgentOAuthAccessSeconds),
+		AgentOAuthConsentSeconds:          envInt("GATEWAY_AGENT_OAUTH_CONSENT_SECONDS", DefaultAgentOAuthConsentSeconds),
+		AgentOAuthRefreshIdleSeconds:      envInt("GATEWAY_AGENT_OAUTH_REFRESH_IDLE_SECONDS", DefaultAgentOAuthRefreshIdleSeconds),
+		AgentOAuthResourceCredentialsJSON: envStr("GATEWAY_AGENT_OAUTH_RESOURCE_CREDENTIALS_JSON", ""),
+		AgentsMaxPerOwner:                 envInt("GATEWAY_AGENTS_MAX_PER_OWNER", DefaultAgentsMaxPerOwner),
+		AuditRetentionDays:                envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
 
 		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
 		WebhooksMaxAttempts:           envInt("GATEWAY_WEBHOOKS_MAX_ATTEMPTS", 6),
@@ -2017,6 +2048,9 @@ func detectRemovedEnvVars() error {
 }
 
 func (c *Config) Validate() error {
+	if err := c.ValidateAgentOAuth(); err != nil {
+		return err
+	}
 	if c.removedEnvVarErr != nil {
 		return c.removedEnvVarErr
 	}

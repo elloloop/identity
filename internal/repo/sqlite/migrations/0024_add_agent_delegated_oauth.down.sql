@@ -1,0 +1,10 @@
+DROP TRIGGER agent_oauth_user_update;
+DROP TRIGGER agent_oauth_user_delete;
+DROP TRIGGER agent_oauth_session_update;
+DROP TRIGGER agent_oauth_session_delete;
+DROP TRIGGER agent_oauth_refresh_delete;
+DROP TRIGGER agent_oauth_client_update;
+DROP TRIGGER agent_oauth_guardian_delete;
+DROP TRIGGER agent_oauth_project_policy;
+DROP TABLE agent_oauth_refresh_tokens;
+DROP TABLE agent_authorizations;

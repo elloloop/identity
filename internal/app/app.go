@@ -497,6 +497,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSCIMPerIP, 0),
 		},
 	}
+	if cfg.AgentOAuthEnabled {
+		protocol := middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthProtocolPerIP, 0)
+		for _, path := range []string{agentOAuthAuthorizePath, agentOAuthTokenPath, agentOAuthRevokePath, identityconnectgen.IdentityServiceGetAgentAuthorizationProcedure, identityconnectgen.IdentityServiceDecideAgentAuthorizationProcedure, identityconnectgen.IdentityServiceListAgentDelegationsProcedure, identityconnectgen.IdentityServiceRevokeAgentDelegationProcedure} {
+			limits = append(limits, middleware.PathLimit{PathPrefix: path, Tag: "agent_oauth_protocol", Limiter: protocol})
+		}
+		limits = append(limits, middleware.PathLimit{PathPrefix: agentOAuthIntrospectPath, Tag: "agent_oauth_introspection", Limiter: middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthIntrospectionPerIP, 0)})
+	}
 	for _, path := range guardianManagementPaths {
 		limits = append(limits, middleware.PathLimit{
 			PathPrefix: path, Tag: "guardian_manage", Limiter: guardianLimiter,
@@ -757,6 +764,7 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.AnonymousRetentionDays,
 		logger,
 	)
+	configureAgentOAuthSweep(sweep, deps)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	// COPPA data-minimization: one minimizer derived from the age gate +
@@ -792,14 +800,10 @@ func New(deps Deps) (*Built, error) {
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
 
-	connectOpts, err := buildConnectHandlerOptions(deps.Config)
-	if err != nil {
-		return nil, fmt.Errorf("otelconnect interceptor: %w", err)
-	}
-
 	mux := http.NewServeMux()
-	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
-	mux.Handle(path, svcHandler)
+	if err := mountIdentityService(mux, deps, authSvc, handler); err != nil {
+		return nil, err
+	}
 
 	// Default auth UI (login/signup). Rendered per request so it offers
 	// exactly the sign-in options the resolved project enables server-side.
@@ -926,6 +930,7 @@ func New(deps Deps) (*Built, error) {
 		),
 		logger,
 	)(chain)
+	chain = agentOAuthRequestBounds(deps.Config, chain)
 	chain = middleware.HealthMiddleware(newDBReadinessProbe(deps.DB), chain)
 	chain = middleware.RecoverMiddleware(logger)(chain)
 	chain = middleware.LoggingMiddleware(logger)(chain)

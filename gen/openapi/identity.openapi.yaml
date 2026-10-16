@@ -1633,6 +1633,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.DeactivateUserResponse'
+  /identity.v1.IdentityService/DecideAgentAuthorization:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: DecideAgentAuthorization
+      operationId: identity.v1.IdentityService.DecideAgentAuthorization
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.DecideAgentAuthorizationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.DecideAgentAuthorizationResponse'
   /identity.v1.IdentityService/DeclineAgentTransfer:
     post:
       tags:
@@ -1991,6 +2026,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ExportMyDataResponse'
+  /identity.v1.IdentityService/GetAgentAuthorization:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetAgentAuthorization
+      description: |-
+        OAuth-only human consent requires a live durable human SID and recent sign-in.
+         Callers cannot supply actor, client, resource, scopes or an arbitrary proof.
+      operationId: identity.v1.IdentityService.GetAgentAuthorization
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetAgentAuthorizationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetAgentAuthorizationResponse'
   /identity.v1.IdentityService/GetCurrentUser:
     post:
       tags:
@@ -2501,6 +2574,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.LinkIdentityResponse'
+  /identity.v1.IdentityService/ListAgentDelegations:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListAgentDelegations
+      operationId: identity.v1.IdentityService.ListAgentDelegations
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListAgentDelegationsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListAgentDelegationsResponse'
   /identity.v1.IdentityService/ListAgents:
     post:
       tags:
@@ -4052,6 +4160,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ResolveHelpRequestResponse'
+  /identity.v1.IdentityService/RevokeAgentDelegation:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RevokeAgentDelegation
+      operationId: identity.v1.IdentityService.RevokeAgentDelegation
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RevokeAgentDelegationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RevokeAgentDelegationResponse'
   /identity.v1.IdentityService/RevokeAllSessions:
     post:
       tags:
@@ -5791,6 +5934,57 @@ components:
         AgeBand is the coarse age classification derived from a user's date of
          birth and the deployment's configured age thresholds. Zero-value
          (UNSPECIFIED) means age is unknown or age-gating is off.
+    identity.v1.AgentAuthorizationDecision:
+      type: string
+      title: AgentAuthorizationDecision
+      enum:
+        - AGENT_AUTHORIZATION_DECISION_UNSPECIFIED
+        - AGENT_AUTHORIZATION_DECISION_APPROVE
+        - AGENT_AUTHORIZATION_DECISION_DENY
+    identity.v1.AgentDelegation:
+      type: object
+      properties:
+        delegationId:
+          type: string
+          title: delegation_id
+        agentUserId:
+          type: string
+          title: agent_user_id
+        clientId:
+          type: string
+          title: client_id
+        resource:
+          type: string
+          title: resource
+        scopes:
+          type: array
+          items:
+            type: string
+          title: scopes
+        product:
+          type: string
+          title: product
+        consentedAtMs:
+          type:
+            - integer
+            - string
+          title: consented_at_ms
+          format: int64
+        expiresAtMs:
+          type:
+            - integer
+            - string
+          title: expires_at_ms
+          format: int64
+        revokedAtMs:
+          type:
+            - integer
+            - string
+          title: revoked_at_ms
+          format: int64
+          description: Terminal; reactivation requires fresh consent.
+      title: AgentDelegation
+      additionalProperties: false
     identity.v1.ApproveQrLoginRequest:
       type: object
       properties:
@@ -6775,6 +6969,36 @@ components:
       type: object
       title: DeactivateUserResponse
       additionalProperties: false
+    identity.v1.DecideAgentAuthorizationRequest:
+      type: object
+      properties:
+        requestId:
+          type: string
+          title: request_id
+        expectedRevision:
+          type:
+            - integer
+            - string
+          title: expected_revision
+          format: int64
+        decision:
+          title: decision
+          $ref: '#/components/schemas/identity.v1.AgentAuthorizationDecision'
+        agentUserId:
+          type: string
+          title: agent_user_id
+          description: Only a currently owned active agent may be selected.
+      title: DecideAgentAuthorizationRequest
+      additionalProperties: false
+    identity.v1.DecideAgentAuthorizationResponse:
+      type: object
+      properties:
+        redirectUri:
+          type: string
+          title: redirect_uri
+          description: Server-validated registered redirect with original state.
+      title: DecideAgentAuthorizationResponse
+      additionalProperties: false
     identity.v1.DeclineAgentTransferRequest:
       type: object
       properties:
@@ -7066,6 +7290,72 @@ components:
             audit_events are the security/audit events where the caller is the actor
              OR the target, newest first, capped by GATEWAY_EXPORT_MAX_AUDIT_EVENTS.
       title: ExportMyDataResponse
+      additionalProperties: false
+    identity.v1.GetAgentAuthorizationRequest:
+      type: object
+      properties:
+        requestId:
+          type: string
+          title: request_id
+        agentOffset:
+          type: integer
+          title: agent_offset
+          format: int32
+          description: Bounded owner-choice pages; zero starts listing.
+      title: GetAgentAuthorizationRequest
+      additionalProperties: false
+    identity.v1.GetAgentAuthorizationResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          title: request_id
+        revision:
+          type:
+            - integer
+            - string
+          title: revision
+          format: int64
+        clientId:
+          type: string
+          title: client_id
+        clientName:
+          type: string
+          title: client_name
+        resource:
+          type: string
+          title: resource
+        scopes:
+          type: array
+          items:
+            type: string
+          title: scopes
+        product:
+          type: string
+          title: product
+        requestExpiresAtMs:
+          type:
+            - integer
+            - string
+          title: request_expires_at_ms
+          format: int64
+        grantExpiresAtMs:
+          type:
+            - integer
+            - string
+          title: grant_expires_at_ms
+          format: int64
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.User'
+          title: agents
+        nextAgentOffset:
+          type: integer
+          title: next_agent_offset
+          format: int32
+          description: -1 ends the choices.
+      title: GetAgentAuthorizationResponse
       additionalProperties: false
     identity.v1.GetCurrentUserRequest:
       type: object
@@ -7586,6 +7876,33 @@ components:
       title: LinkedIdentity
       additionalProperties: false
       description: LinkedIdentity is one connected provider identity for the authenticated user.
+    identity.v1.ListAgentDelegationsRequest:
+      type: object
+      properties:
+        afterDelegationId:
+          type: string
+          title: after_delegation_id
+        limit:
+          type: integer
+          title: limit
+          format: int32
+          description: 1..100; zero selects 50.
+      title: ListAgentDelegationsRequest
+      additionalProperties: false
+    identity.v1.ListAgentDelegationsResponse:
+      type: object
+      properties:
+        delegations:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.AgentDelegation'
+          title: delegations
+        nextCursor:
+          type: string
+          title: next_cursor
+          description: Empty ends listing.
+      title: ListAgentDelegationsResponse
+      additionalProperties: false
     identity.v1.ListAgentsRequest:
       type: object
       properties:
@@ -8436,6 +8753,10 @@ components:
             type: string
           title: scopes
           description: Protocol scope tokens, not application permissions.
+        product:
+          type: string
+          title: product
+          description: Product whose current age/admission policy applies. Required for delegation.
       title: OAuthResourceBounds
       additionalProperties: false
     identity.v1.ParentalConsentVerificationFactor:
@@ -9282,6 +9603,18 @@ components:
           title: request
           $ref: '#/components/schemas/identity.v1.AdminHelpRequest'
       title: ResolveHelpRequestResponse
+      additionalProperties: false
+    identity.v1.RevokeAgentDelegationRequest:
+      type: object
+      properties:
+        delegationId:
+          type: string
+          title: delegation_id
+      title: RevokeAgentDelegationRequest
+      additionalProperties: false
+    identity.v1.RevokeAgentDelegationResponse:
+      type: object
+      title: RevokeAgentDelegationResponse
       additionalProperties: false
     identity.v1.RevokeAllSessionsRequest:
       type: object

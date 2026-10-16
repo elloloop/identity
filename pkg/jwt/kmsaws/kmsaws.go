@@ -269,6 +269,18 @@ func (s *Signer) SignAccessToken(ctx context.Context, claims jwt.Claims, expiry 
 // JWS signing input, send the SHA-256 digest to KMS, assemble the
 // compact JWS.
 func (s *Signer) SignClaims(ctx context.Context, claims map[string]any) (string, error) {
+	return s.signClaims(ctx, claims, "JWT")
+}
+
+func (s *Signer) SignDelegatedAccessToken(ctx context.Context, claims jwt.DelegatedAccessClaims) (string, error) {
+	m, err := claims.ClaimsMap()
+	if err != nil {
+		return "", err
+	}
+	return s.signClaims(ctx, m, jwt.DelegatedAccessTokenType)
+}
+
+func (s *Signer) signClaims(ctx context.Context, claims map[string]any, profile string) (string, error) {
 	s.mu.RLock()
 	active, ok := s.byKID[s.activeKID]
 	s.mu.RUnlock()
@@ -278,7 +290,7 @@ func (s *Signer) SignClaims(ctx context.Context, claims map[string]any) (string,
 
 	header := map[string]string{
 		"alg": "RS256",
-		"typ": "JWT",
+		"typ": profile,
 		"kid": active.ref.KID,
 	}
 	headerJSON, err := json.Marshal(header)

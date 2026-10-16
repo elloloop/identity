@@ -185,63 +185,59 @@ func (s *AuthService) enforceLoginPolicy(ctx context.Context, email, method stri
 // resolveLoginPolicy binds the request's project scope to the shared
 // governance lookup for the claimed tenant that owns email's domain.
 func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Tenant, *LoginPolicy) {
-	return s.governance.resolvePolicy(ctx, s.projectID(ctx), s.logger, email)
+	tenant, policy, _ := s.governance.resolvePolicy(ctx, s.projectID(ctx), s.logger, email)
+	return tenant, policy
 }
 
 // resolvePolicy walks the governance plane (domain → tenant → policy) for the
 // claimed tenant that owns email's domain and returns its LoginPolicy, or
 // (nil, nil) when there is no governed policy to apply.
 //
-// It is the single fail-safe lookup the method, password-strength, and
-// session-timeout enforcement all share — across both the auth and profile
-// services. It fails SAFE at every step: a nil bundle (a driver with no
-// governance plane), an empty project, an unverified or unknown domain, an
-// unclaimed tenant, an absent policy, or any lookup error all return
-// (nil, nil) so a caller imposes NO restriction. The tenant is returned
-// alongside the policy so callers that audit or log can name the org without
-// a second lookup.
-func (g *LoginGovernance) resolvePolicy(ctx context.Context, projectID string, logger *zap.Logger, email string) (*Tenant, *LoginPolicy) {
+// Lookup errors remain distinguishable from an absent policy. Ordinary human
+// login retains its documented project-default behavior; delegated admission
+// fails closed when current governance cannot be read.
+func (g *LoginGovernance) resolvePolicy(ctx context.Context, projectID string, logger *zap.Logger, email string) (*Tenant, *LoginPolicy, error) {
 	if g == nil || projectID == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	// Split on the LAST '@' (via emailDomain) so the tenant lookup key matches
 	// emailaddr.Canonicalize's domain — a quoted local part containing '@' must not
 	// resolve to a bogus domain and thereby skip the tenant's SSO/2FA policy.
 	domainName := emailDomain(email)
 	if domainName == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	domain, err := g.Domains.GetDomainByName(ctx, projectID, domainName)
 	if err != nil {
 		logger.Warn("login_policy_domain_lookup_failed",
 			zap.String("project_id", projectID), zap.Error(err))
-		return nil, nil
+		return nil, nil, err
 	}
 	if domain == nil || domain.Status != DomainStatusVerified {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	tenant, err := g.Tenants.GetTenant(ctx, projectID, domain.TenantID)
 	if err != nil {
 		logger.Warn("login_policy_tenant_lookup_failed",
 			zap.String("project_id", projectID), zap.String("tenant_id", domain.TenantID), zap.Error(err))
-		return nil, nil
+		return nil, nil, err
 	}
 	if tenant == nil || tenant.Status != TenantStatusClaimed {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	policy, err := g.Policies.GetLoginPolicy(ctx, projectID, tenant.ID)
 	if err != nil {
 		logger.Warn("login_policy_lookup_failed",
 			zap.String("project_id", projectID), zap.String("tenant_id", tenant.ID), zap.Error(err))
-		return nil, nil
+		return nil, nil, err
 	}
 	if policy == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return tenant, policy
+	return tenant, policy, nil
 }
 
 // passwordStrengthPolicy returns the per-tenant password StrengthPolicy for the
@@ -250,7 +246,7 @@ func (g *LoginGovernance) resolvePolicy(ctx context.Context, projectID string, l
 // validate without a nil check and a tenant only ever tightens the global
 // baseline.
 func (g *LoginGovernance) passwordStrengthPolicy(ctx context.Context, projectID string, logger *zap.Logger, email string) passwords.StrengthPolicy {
-	_, policy := g.resolvePolicy(ctx, projectID, logger, email)
+	_, policy, _ := g.resolvePolicy(ctx, projectID, logger, email)
 	if policy == nil {
 		return passwords.StrengthPolicy{}
 	}

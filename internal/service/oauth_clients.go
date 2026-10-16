@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/elloloop/identity/pkg/audit"
 )
@@ -24,6 +25,7 @@ const (
 	maxOAuthScopes              = 64
 	maxOAuthURIBytes            = 2048
 	maxOAuthScopeBytes          = 128
+	maxOAuthProductBytes        = 128
 	maxOAuthClientNameBytes     = 200
 	maxOAuthClientPage          = 100
 	defaultOAuthClientPage      = 50
@@ -34,6 +36,7 @@ var ErrOAuthClientRevision = errors.New("OAuth client revision changed")
 // OAuthResourceBounds are protocol bounds, not application permissions.
 type OAuthResourceBounds struct {
 	Resource string   `json:"resource"`
+	Product  string   `json:"product,omitempty"`
 	Scopes   []string `json:"scopes"`
 }
 
@@ -140,8 +143,8 @@ func (r *OAuthClientRegistration) Validate() error {
 	if r == nil {
 		return invalidOAuthClient("registration is required")
 	}
-	if strings.TrimSpace(r.Name) == "" || len(r.Name) > maxOAuthClientNameBytes || strings.ContainsFunc(r.Name, unicode.IsControl) {
-		return invalidOAuthClient("client name is required and must be at most 200 bytes without control characters")
+	if !validOAuthClientName(r.Name) {
+		return invalidOAuthClient("client name is required and must be at most 200 bytes without control or format characters")
 	}
 	if !boundedOAuthStrings(r.RedirectURIs, maxOAuthRedirects) {
 		return invalidOAuthClient("register 1 to 16 distinct redirects")
@@ -164,6 +167,9 @@ func (r *OAuthClientRegistration) Validate() error {
 			return invalidOAuthClient("resource registrations must be distinct")
 		}
 		seenResources[resource.Resource] = true
+		if resource.Product != "" && (resource.Product != normalizeProductSlug(resource.Product) || len(resource.Product) > maxOAuthProductBytes || strings.ContainsAny(resource.Product, " /?#\\") || strings.ContainsFunc(resource.Product, unicode.IsControl)) {
+			return invalidOAuthClient("invalid resource product")
+		}
 		if !boundedOAuthStrings(resource.Scopes, maxOAuthScopes) {
 			return invalidOAuthClient("register 1 to 64 distinct scopes per resource")
 		}
@@ -182,6 +188,11 @@ func (r *OAuthClientRegistration) Validate() error {
 		}
 	}
 	return nil
+}
+
+func validOAuthClientName(name string) bool {
+	return utf8.ValidString(name) && strings.TrimSpace(name) != "" && len(name) <= maxOAuthClientNameBytes &&
+		!strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) })
 }
 
 // ValidateOAuthRequest checks registration bounds only. It does not authenticate

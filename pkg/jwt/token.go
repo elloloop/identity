@@ -211,30 +211,14 @@ func VerifyPurposeToken(
 // run. It is deliberately unexported: everything outside this file goes
 // through one of the two, so no caller can skip the purpose decision.
 func verifyToken(tokenStr string, kp KeyProvider, expectedTenant, expectedAudience string, requireAudience bool) (*Claims, error) {
+	return verifyTokenProfile(tokenStr, kp, expectedTenant, expectedAudience, requireAudience, "JWT")
+}
+
+func verifyTokenProfile(tokenStr string, kp KeyProvider, expectedTenant, expectedAudience string, requireAudience bool, profile string) (*Claims, error) {
 	tokenBytes := []byte(tokenStr)
-
-	kid, err := extractKID(tokenBytes)
+	key, err := verificationKey(tokenBytes, kp, profile)
 	if err != nil {
-		return nil, fmt.Errorf("parsing token headers: %w", err)
-	}
-	if kid == "" {
-		return nil, errors.New("token missing kid header")
-	}
-
-	pub, ok := kp.Get(kid)
-	if !ok {
-		return nil, fmt.Errorf("unknown signing key kid=%s", kid)
-	}
-
-	key, err := jwk.FromRaw(pub)
-	if err != nil {
-		return nil, fmt.Errorf("converting public key: %w", err)
-	}
-	if err := key.Set(jwk.KeyIDKey, kid); err != nil {
-		return nil, fmt.Errorf("setting kid: %w", err)
-	}
-	if err := key.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return nil, fmt.Errorf("setting alg: %w", err)
+		return nil, err
 	}
 
 	tok, err := jwtoken.Parse(
@@ -445,4 +429,40 @@ func numericClaim(v any) int64 {
 	default:
 		return 0
 	}
+}
+
+func verificationKey(tokenBytes []byte, kp KeyProvider, profile string) (jwk.Key, error) {
+	typ, err := tokenType(tokenBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing token headers: %w", err)
+	}
+	if (profile == DelegatedAccessTokenType && typ != DelegatedAccessTokenType) || (profile == "JWT" && typ != "" && typ != "JWT") {
+		return nil, errors.New("token profile mismatch")
+	}
+
+	kid, err := extractKID(tokenBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing token headers: %w", err)
+	}
+	if kid == "" {
+		return nil, errors.New("token missing kid header")
+	}
+
+	pub, ok := kp.Get(kid)
+	if !ok {
+		return nil, fmt.Errorf("unknown signing key kid=%s", kid)
+	}
+
+	key, err := jwk.FromRaw(pub)
+	if err != nil {
+		return nil, fmt.Errorf("converting public key: %w", err)
+	}
+	if err := key.Set(jwk.KeyIDKey, kid); err != nil {
+		return nil, fmt.Errorf("setting kid: %w", err)
+	}
+	if err := key.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
+		return nil, fmt.Errorf("setting alg: %w", err)
+	}
+
+	return key, nil
 }

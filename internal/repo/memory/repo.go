@@ -45,6 +45,9 @@ type Repo struct {
 
 	seq                 int64
 	oauthClients        map[string]*service.OAuthClient
+	agentAuthorizations map[string]*service.AgentAuthorization
+	agentOAuthCodes     map[string]string
+	agentOAuthRefresh   map[string]*service.AgentOAuthRefresh
 	users               map[string]*service.User
 	agentCreations      map[[2]string]service.AgentCreationReceipt
 	refreshTokens       map[string]*service.RefreshTokenRecord
@@ -451,6 +454,7 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 	if service.AgentCreationAuthorityLost(&before, u) {
 		r.invalidateAgentCreations(userID)
 	}
+	r.revokeAgentOAuthUserLocked(&before, u, time.Now().UnixMilli())
 	return nil
 }
 
@@ -531,6 +535,7 @@ func (r *Repo) SetDateOfBirthOnce(
 	if service.AgentCreationAuthorityLost(&before, u) {
 		r.invalidateAgentCreations(userID)
 	}
+	r.revokeAgentOAuthUserLocked(&before, u, nowMs)
 	return true, nil
 }
 
@@ -549,6 +554,7 @@ func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 // rather than snapshotting ids and deleting after releasing it.
 func (r *Repo) deleteUserLocked(userID string) {
 	r.invalidateAgentCreations(userID)
+	r.revokeAgentOAuthUserLocked(r.users[userID], nil, time.Now().UnixMilli())
 	deleteByUser(r.refreshTokens, userID, func(t *service.RefreshTokenRecord) string { return t.UserID })
 	deleteByUser(r.sessions, userID, func(s *service.SessionRecord) string { return s.UserID })
 	deleteByUser(r.passkeyCreds, userID, func(c *service.PasskeyCredRecord) string { return c.UserID })
@@ -570,6 +576,7 @@ func (r *Repo) deleteUserLocked(userID string) {
 	// the user is deleted as guardian OR as child.
 	for key, e := range r.guardianEdges {
 		if e.GuardianUserID == userID || e.ChildUserID == userID {
+			r.revokeAgentOAuthOwnerLocked(e.ChildUserID, time.Now().UnixMilli())
 			delete(r.guardianEdges, key)
 		}
 	}
@@ -758,6 +765,9 @@ func (r *Repo) CreateRefreshToken(_ context.Context, rec *service.RefreshTokenRe
 func (r *Repo) DeleteRefreshToken(_ context.Context, nodeID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if token := r.refreshTokens[nodeID]; token != nil {
+		r.revokeAgentOAuthSIDLocked(token.SID, time.Now().UnixMilli())
+	}
 	delete(r.refreshTokens, nodeID)
 	return nil
 }
@@ -767,6 +777,7 @@ func (r *Repo) DeleteRefreshTokensForUser(_ context.Context, userID string) erro
 	defer r.mu.Unlock()
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
+			r.revokeAgentOAuthSIDLocked(t.SID, time.Now().UnixMilli())
 			delete(r.refreshTokens, id)
 		}
 	}
@@ -1450,6 +1461,7 @@ func (r *Repo) SetUserEmailVerified(_ context.Context, userID, email string, atM
 	if !ok || u.Email != email {
 		return false, false, nil
 	}
+	before := *u
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
 	u.UpdatedAt = time.UnixMilli(atMs)
@@ -1458,6 +1470,7 @@ func (r *Repo) SetUserEmailVerified(_ context.Context, userID, email string, atM
 		u.PasswordHash = ""
 		u.PasswordChangeRequired = false
 	}
+	r.revokeAgentOAuthUserLocked(&before, u, atMs)
 	return true, passwordCleared, nil
 }
 
@@ -1468,8 +1481,10 @@ func (r *Repo) SetUserIDVVerified(_ context.Context, userID string, atMs int64) 
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
 	}
+	before := *u
 	u.IDVVerified = true
 	u.IDVVerifiedAt = atMs
+	r.revokeAgentOAuthUserLocked(&before, u, atMs)
 	return nil
 }
 
@@ -1537,10 +1552,12 @@ func (r *Repo) UpdateUserEmail(_ context.Context, userID, newEmail string, atMs 
 			return fmt.Errorf("email %q: %w", newEmail, service.ErrAlreadyExists)
 		}
 	}
+	before := *u
 	u.Email = newEmail
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
 	u.UpdatedAt = time.UnixMilli(atMs)
+	r.revokeAgentOAuthUserLocked(&before, u, atMs)
 	return nil
 }
 
@@ -1901,7 +1918,11 @@ func (r *Repo) UpsertGuardianEdge(_ context.Context, e *service.GuardianEdge) er
 func (r *Repo) DeleteGuardianEdge(_ context.Context, guardianUserID, childUserID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.guardianEdges, guardianEdgeKey(guardianUserID, childUserID))
+	key := guardianEdgeKey(guardianUserID, childUserID)
+	if _, exists := r.guardianEdges[key]; exists {
+		r.revokeAgentOAuthOwnerLocked(childUserID, time.Now().UnixMilli())
+		delete(r.guardianEdges, key)
+	}
 	return nil
 }
 
@@ -2267,6 +2288,7 @@ func (r *Repo) RevokeSession(_ context.Context, sid string, atMs int64) error {
 		if s.SID == sid {
 			if s.RevokedAtMs == 0 {
 				s.RevokedAtMs = atMs
+				r.revokeAgentOAuthSIDLocked(s.SID, atMs)
 			}
 			return nil
 		}
@@ -2286,6 +2308,7 @@ func (r *Repo) RevokeSessionsForUser(_ context.Context, userID string, atMs int6
 	for _, s := range r.sessions {
 		if s.UserID == userID && s.RevokedAtMs == 0 {
 			s.RevokedAtMs = atMs
+			r.revokeAgentOAuthSIDLocked(s.SID, atMs)
 		}
 	}
 	return nil
@@ -2376,6 +2399,9 @@ func (r *Repo) SettleAgentTransfer(_ context.Context, agentID, pendingOwnerID st
 	if changed && service.AgentCreationAuthorityLost(&before, u) {
 		r.invalidateAgentCreations(agentID)
 	}
+	if changed {
+		r.revokeAgentOAuthUserLocked(&before, u, atMs)
+	}
 	return changed, nil
 }
 
@@ -2396,6 +2422,9 @@ func (r *Repo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ow
 	if changed && service.AgentCreationAuthorityLost(&before, u) {
 		r.invalidateAgentCreations(agentID)
 	}
+	if changed {
+		r.revokeAgentOAuthUserLocked(&before, u, atMs)
+	}
 	return changed, nil
 }
 
@@ -2404,6 +2433,15 @@ func (r *Repo) SetAgentOwnership(_ context.Context, agentID, expectedOwnerID, ow
 func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	before := make(map[string]service.User, len(r.users))
+	for id, u := range r.users {
+		before[id] = *u
+	}
+	defer func() {
+		for id, u := range before {
+			r.revokeAgentOAuthUserLocked(&u, r.users[id], m.AtMs)
+		}
+	}()
 	// A missing account is nil, which ApplyToUsers refuses.
 	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
 		return err

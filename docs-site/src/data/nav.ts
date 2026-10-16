@@ -52,6 +52,7 @@ export const sidebarSections: NavSection[] = [
       { label: "Invitations", href: `${BASE}/docs/auth/invitations` },
       { label: "OAuth", href: `${BASE}/docs/auth/oauth` },
       { label: "Native Client Registry", href: `${BASE}/docs/auth/oauth-clients` },
+      { label: "Delegated Agent Access", href: `${BASE}/docs/auth/agent-delegation` },
       { label: "Passkey", href: `${BASE}/docs/auth/passkey` },
       { label: "TOTP (2FA)", href: `${BASE}/docs/auth/totp` },
       { label: "Identity Verification (KYC)", href: `${BASE}/docs/auth/identity-verification` },

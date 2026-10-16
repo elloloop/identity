@@ -35,7 +35,7 @@ func newTestRepo(t *testing.T, projectID string) *sqliteRepository {
 // the postgres leg it always runs in CI.
 func TestConformance(t *testing.T) {
 	t.Parallel()
-	conformance.RunConformance(t, conformance.Driver{
+	driver := conformance.Driver{
 		Name: "sqlite",
 		NewRepo: func(t *testing.T) service.Repository {
 			t.Helper()
@@ -53,7 +53,9 @@ func TestConformance(t *testing.T) {
 			}
 			return repo.WithProject(projectID)
 		},
-	})
+	}
+	conformance.RunConformance(t, driver)
+	conformance.RunAgentOAuthConformance(t, driver)
 }
 
 // TestConcurrencyConformance_FileWAL runs the concurrency conformance cases,
@@ -63,7 +65,7 @@ func TestConformance(t *testing.T) {
 // serialises every writer before SQLite's write lock is ever contended.
 func TestConcurrencyConformance_FileWAL(t *testing.T) {
 	t.Parallel()
-	conformance.RunConcurrencyConformance(t, conformance.Driver{
+	driver := conformance.Driver{
 		Name: "sqlite-file",
 		NewRepo: func(t *testing.T) service.Repository {
 			t.Helper()
@@ -78,7 +80,17 @@ func TestConcurrencyConformance_FileWAL(t *testing.T) {
 			}
 			return repo
 		},
-	})
+		BindProject: func(t *testing.T, base service.Repository, projectID string) service.Repository {
+			t.Helper()
+			repo := base.(*sqliteRepository)
+			if err := repo.EnsureDefaultProject(context.Background(), projectID, projectID); err != nil {
+				t.Fatal(err)
+			}
+			return repo.WithProject(projectID)
+		},
+	}
+	conformance.RunConcurrencyConformance(t, driver)
+	conformance.RunAgentOAuthConformance(t, driver)
 }
 
 // TestSQLite_CaseInsensitiveEmail verifies the lower(email) unique index

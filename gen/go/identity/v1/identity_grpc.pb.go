@@ -19,6 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	IdentityService_GetAgentAuthorization_FullMethodName           = "/identity.v1.IdentityService/GetAgentAuthorization"
+	IdentityService_DecideAgentAuthorization_FullMethodName        = "/identity.v1.IdentityService/DecideAgentAuthorization"
+	IdentityService_ListAgentDelegations_FullMethodName            = "/identity.v1.IdentityService/ListAgentDelegations"
+	IdentityService_RevokeAgentDelegation_FullMethodName           = "/identity.v1.IdentityService/RevokeAgentDelegation"
 	IdentityService_CreateOAuthClient_FullMethodName               = "/identity.v1.IdentityService/CreateOAuthClient"
 	IdentityService_GetOAuthClient_FullMethodName                  = "/identity.v1.IdentityService/GetOAuthClient"
 	IdentityService_UpdateOAuthClient_FullMethodName               = "/identity.v1.IdentityService/UpdateOAuthClient"
@@ -167,6 +171,12 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type IdentityServiceClient interface {
+	// OAuth-only human consent requires a live durable human SID and recent sign-in.
+	// Callers cannot supply actor, client, resource, scopes or an arbitrary proof.
+	GetAgentAuthorization(ctx context.Context, in *GetAgentAuthorizationRequest, opts ...grpc.CallOption) (*GetAgentAuthorizationResponse, error)
+	DecideAgentAuthorization(ctx context.Context, in *DecideAgentAuthorizationRequest, opts ...grpc.CallOption) (*DecideAgentAuthorizationResponse, error)
+	ListAgentDelegations(ctx context.Context, in *ListAgentDelegationsRequest, opts ...grpc.CallOption) (*ListAgentDelegationsResponse, error)
+	RevokeAgentDelegation(ctx context.Context, in *RevokeAgentDelegationRequest, opts ...grpc.CallOption) (*RevokeAgentDelegationResponse, error)
 	// Same-project active human administrator required. No dynamic registration.
 	CreateOAuthClient(ctx context.Context, in *CreateOAuthClientRequest, opts ...grpc.CallOption) (*CreateOAuthClientResponse, error)
 	GetOAuthClient(ctx context.Context, in *GetOAuthClientRequest, opts ...grpc.CallOption) (*GetOAuthClientResponse, error)
@@ -493,6 +503,46 @@ type identityServiceClient struct {
 
 func NewIdentityServiceClient(cc grpc.ClientConnInterface) IdentityServiceClient {
 	return &identityServiceClient{cc}
+}
+
+func (c *identityServiceClient) GetAgentAuthorization(ctx context.Context, in *GetAgentAuthorizationRequest, opts ...grpc.CallOption) (*GetAgentAuthorizationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAgentAuthorizationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetAgentAuthorization_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) DecideAgentAuthorization(ctx context.Context, in *DecideAgentAuthorizationRequest, opts ...grpc.CallOption) (*DecideAgentAuthorizationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DecideAgentAuthorizationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_DecideAgentAuthorization_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListAgentDelegations(ctx context.Context, in *ListAgentDelegationsRequest, opts ...grpc.CallOption) (*ListAgentDelegationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentDelegationsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListAgentDelegations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RevokeAgentDelegation(ctx context.Context, in *RevokeAgentDelegationRequest, opts ...grpc.CallOption) (*RevokeAgentDelegationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeAgentDelegationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RevokeAgentDelegation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *identityServiceClient) CreateOAuthClient(ctx context.Context, in *CreateOAuthClientRequest, opts ...grpc.CallOption) (*CreateOAuthClientResponse, error) {
@@ -1919,6 +1969,12 @@ func (c *identityServiceClient) LookupUsers(ctx context.Context, in *LookupUsers
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
 type IdentityServiceServer interface {
+	// OAuth-only human consent requires a live durable human SID and recent sign-in.
+	// Callers cannot supply actor, client, resource, scopes or an arbitrary proof.
+	GetAgentAuthorization(context.Context, *GetAgentAuthorizationRequest) (*GetAgentAuthorizationResponse, error)
+	DecideAgentAuthorization(context.Context, *DecideAgentAuthorizationRequest) (*DecideAgentAuthorizationResponse, error)
+	ListAgentDelegations(context.Context, *ListAgentDelegationsRequest) (*ListAgentDelegationsResponse, error)
+	RevokeAgentDelegation(context.Context, *RevokeAgentDelegationRequest) (*RevokeAgentDelegationResponse, error)
 	// Same-project active human administrator required. No dynamic registration.
 	CreateOAuthClient(context.Context, *CreateOAuthClientRequest) (*CreateOAuthClientResponse, error)
 	GetOAuthClient(context.Context, *GetOAuthClientRequest) (*GetOAuthClientResponse, error)
@@ -2247,6 +2303,18 @@ type IdentityServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedIdentityServiceServer struct{}
 
+func (UnimplementedIdentityServiceServer) GetAgentAuthorization(context.Context, *GetAgentAuthorizationRequest) (*GetAgentAuthorizationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAgentAuthorization not implemented")
+}
+func (UnimplementedIdentityServiceServer) DecideAgentAuthorization(context.Context, *DecideAgentAuthorizationRequest) (*DecideAgentAuthorizationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DecideAgentAuthorization not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListAgentDelegations(context.Context, *ListAgentDelegationsRequest) (*ListAgentDelegationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAgentDelegations not implemented")
+}
+func (UnimplementedIdentityServiceServer) RevokeAgentDelegation(context.Context, *RevokeAgentDelegationRequest) (*RevokeAgentDelegationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeAgentDelegation not implemented")
+}
 func (UnimplementedIdentityServiceServer) CreateOAuthClient(context.Context, *CreateOAuthClientRequest) (*CreateOAuthClientResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateOAuthClient not implemented")
 }
@@ -2692,6 +2760,78 @@ func RegisterIdentityServiceServer(s grpc.ServiceRegistrar, srv IdentityServiceS
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&IdentityService_ServiceDesc, srv)
+}
+
+func _IdentityService_GetAgentAuthorization_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAgentAuthorizationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetAgentAuthorization(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetAgentAuthorization_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetAgentAuthorization(ctx, req.(*GetAgentAuthorizationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_DecideAgentAuthorization_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DecideAgentAuthorizationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).DecideAgentAuthorization(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_DecideAgentAuthorization_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).DecideAgentAuthorization(ctx, req.(*DecideAgentAuthorizationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListAgentDelegations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentDelegationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListAgentDelegations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListAgentDelegations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListAgentDelegations(ctx, req.(*ListAgentDelegationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RevokeAgentDelegation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeAgentDelegationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RevokeAgentDelegation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RevokeAgentDelegation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RevokeAgentDelegation(ctx, req.(*RevokeAgentDelegationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _IdentityService_CreateOAuthClient_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -5257,6 +5397,22 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "identity.v1.IdentityService",
 	HandlerType: (*IdentityServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetAgentAuthorization",
+			Handler:    _IdentityService_GetAgentAuthorization_Handler,
+		},
+		{
+			MethodName: "DecideAgentAuthorization",
+			Handler:    _IdentityService_DecideAgentAuthorization_Handler,
+		},
+		{
+			MethodName: "ListAgentDelegations",
+			Handler:    _IdentityService_ListAgentDelegations_Handler,
+		},
+		{
+			MethodName: "RevokeAgentDelegation",
+			Handler:    _IdentityService_RevokeAgentDelegation_Handler,
+		},
 		{
 			MethodName: "CreateOAuthClient",
 			Handler:    _IdentityService_CreateOAuthClient_Handler,

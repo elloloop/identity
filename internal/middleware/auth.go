@@ -156,7 +156,7 @@ const authUIPrefix = "/auth/"
 // exact-match entry in AuthExemptPaths or any path under the hosted
 // OAuth, auth UI or SCIM prefix.
 func isAuthExempt(path string) bool {
-	return AuthExemptPaths[path] ||
+	return path == "/.well-known/oauth-authorization-server" || AuthExemptPaths[path] ||
 		strings.HasPrefix(path, hostedOAuthPrefix) ||
 		strings.HasPrefix(path, authUIPrefix) ||
 		path == scimMountPath ||
@@ -248,10 +248,15 @@ const AuthenticatedProjectHeader = "X-Authenticated-Project"
 // a recent sign-in. Absent when the token has none.
 const AuthenticatedAuthTimeHeader = "X-Authenticated-Auth-Time"
 
+const AuthenticatedSessionIDHeader = "X-Authenticated-Session-Id"
+
 // setAuthHeaders writes the verified identity headers from claims. Only
 // called after VerifyAccessToken succeeds, so the values are trusted.
 func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
 	r.Header.Set(AuthenticatedUserIDHeader, claims.Sub)
+	if claims.SID != "" {
+		r.Header.Set(AuthenticatedSessionIDHeader, claims.SID)
+	}
 	if claims.Tenant != "" {
 		r.Header.Set(AuthenticatedTenantHeader, claims.Tenant)
 	}
@@ -271,6 +276,7 @@ func clearAuthHeaders(r *http.Request) {
 	r.Header.Del(AuthenticatedTenantHeader)
 	r.Header.Del(AuthenticatedProjectHeader)
 	r.Header.Del(AuthenticatedAuthTimeHeader)
+	r.Header.Del(AuthenticatedSessionIDHeader)
 }
 
 // extractBearerToken returns the token portion of an "Authorization: Bearer <token>"

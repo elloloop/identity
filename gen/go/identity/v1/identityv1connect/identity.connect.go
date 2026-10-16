@@ -33,6 +33,18 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// IdentityServiceGetAgentAuthorizationProcedure is the fully-qualified name of the
+	// IdentityService's GetAgentAuthorization RPC.
+	IdentityServiceGetAgentAuthorizationProcedure = "/identity.v1.IdentityService/GetAgentAuthorization"
+	// IdentityServiceDecideAgentAuthorizationProcedure is the fully-qualified name of the
+	// IdentityService's DecideAgentAuthorization RPC.
+	IdentityServiceDecideAgentAuthorizationProcedure = "/identity.v1.IdentityService/DecideAgentAuthorization"
+	// IdentityServiceListAgentDelegationsProcedure is the fully-qualified name of the IdentityService's
+	// ListAgentDelegations RPC.
+	IdentityServiceListAgentDelegationsProcedure = "/identity.v1.IdentityService/ListAgentDelegations"
+	// IdentityServiceRevokeAgentDelegationProcedure is the fully-qualified name of the
+	// IdentityService's RevokeAgentDelegation RPC.
+	IdentityServiceRevokeAgentDelegationProcedure = "/identity.v1.IdentityService/RevokeAgentDelegation"
 	// IdentityServiceCreateOAuthClientProcedure is the fully-qualified name of the IdentityService's
 	// CreateOAuthClient RPC.
 	IdentityServiceCreateOAuthClientProcedure = "/identity.v1.IdentityService/CreateOAuthClient"
@@ -461,6 +473,12 @@ const (
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
 type IdentityServiceClient interface {
+	// OAuth-only human consent requires a live durable human SID and recent sign-in.
+	// Callers cannot supply actor, client, resource, scopes or an arbitrary proof.
+	GetAgentAuthorization(context.Context, *connect.Request[v1.GetAgentAuthorizationRequest]) (*connect.Response[v1.GetAgentAuthorizationResponse], error)
+	DecideAgentAuthorization(context.Context, *connect.Request[v1.DecideAgentAuthorizationRequest]) (*connect.Response[v1.DecideAgentAuthorizationResponse], error)
+	ListAgentDelegations(context.Context, *connect.Request[v1.ListAgentDelegationsRequest]) (*connect.Response[v1.ListAgentDelegationsResponse], error)
+	RevokeAgentDelegation(context.Context, *connect.Request[v1.RevokeAgentDelegationRequest]) (*connect.Response[v1.RevokeAgentDelegationResponse], error)
 	// Same-project active human administrator required. No dynamic registration.
 	CreateOAuthClient(context.Context, *connect.Request[v1.CreateOAuthClientRequest]) (*connect.Response[v1.CreateOAuthClientResponse], error)
 	GetOAuthClient(context.Context, *connect.Request[v1.GetOAuthClientRequest]) (*connect.Response[v1.GetOAuthClientResponse], error)
@@ -792,6 +810,30 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 	baseURL = strings.TrimRight(baseURL, "/")
 	identityServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("IdentityService").Methods()
 	return &identityServiceClient{
+		getAgentAuthorization: connect.NewClient[v1.GetAgentAuthorizationRequest, v1.GetAgentAuthorizationResponse](
+			httpClient,
+			baseURL+IdentityServiceGetAgentAuthorizationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetAgentAuthorization")),
+			connect.WithClientOptions(opts...),
+		),
+		decideAgentAuthorization: connect.NewClient[v1.DecideAgentAuthorizationRequest, v1.DecideAgentAuthorizationResponse](
+			httpClient,
+			baseURL+IdentityServiceDecideAgentAuthorizationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DecideAgentAuthorization")),
+			connect.WithClientOptions(opts...),
+		),
+		listAgentDelegations: connect.NewClient[v1.ListAgentDelegationsRequest, v1.ListAgentDelegationsResponse](
+			httpClient,
+			baseURL+IdentityServiceListAgentDelegationsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListAgentDelegations")),
+			connect.WithClientOptions(opts...),
+		),
+		revokeAgentDelegation: connect.NewClient[v1.RevokeAgentDelegationRequest, v1.RevokeAgentDelegationResponse](
+			httpClient,
+			baseURL+IdentityServiceRevokeAgentDelegationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RevokeAgentDelegation")),
+			connect.WithClientOptions(opts...),
+		),
 		createOAuthClient: connect.NewClient[v1.CreateOAuthClientRequest, v1.CreateOAuthClientResponse](
 			httpClient,
 			baseURL+IdentityServiceCreateOAuthClientProcedure,
@@ -1649,6 +1691,10 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 
 // identityServiceClient implements IdentityServiceClient.
 type identityServiceClient struct {
+	getAgentAuthorization           *connect.Client[v1.GetAgentAuthorizationRequest, v1.GetAgentAuthorizationResponse]
+	decideAgentAuthorization        *connect.Client[v1.DecideAgentAuthorizationRequest, v1.DecideAgentAuthorizationResponse]
+	listAgentDelegations            *connect.Client[v1.ListAgentDelegationsRequest, v1.ListAgentDelegationsResponse]
+	revokeAgentDelegation           *connect.Client[v1.RevokeAgentDelegationRequest, v1.RevokeAgentDelegationResponse]
 	createOAuthClient               *connect.Client[v1.CreateOAuthClientRequest, v1.CreateOAuthClientResponse]
 	getOAuthClient                  *connect.Client[v1.GetOAuthClientRequest, v1.GetOAuthClientResponse]
 	updateOAuthClient               *connect.Client[v1.UpdateOAuthClientRequest, v1.UpdateOAuthClientResponse]
@@ -1791,6 +1837,26 @@ type identityServiceClient struct {
 	adminDeleteProjectOAuthProvider *connect.Client[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse]
 	adminListProjectOAuthProviders  *connect.Client[v1.AdminListProjectOAuthProvidersRequest, v1.AdminListProjectOAuthProvidersResponse]
 	lookupUsers                     *connect.Client[v1.LookupUsersRequest, v1.LookupUsersResponse]
+}
+
+// GetAgentAuthorization calls identity.v1.IdentityService.GetAgentAuthorization.
+func (c *identityServiceClient) GetAgentAuthorization(ctx context.Context, req *connect.Request[v1.GetAgentAuthorizationRequest]) (*connect.Response[v1.GetAgentAuthorizationResponse], error) {
+	return c.getAgentAuthorization.CallUnary(ctx, req)
+}
+
+// DecideAgentAuthorization calls identity.v1.IdentityService.DecideAgentAuthorization.
+func (c *identityServiceClient) DecideAgentAuthorization(ctx context.Context, req *connect.Request[v1.DecideAgentAuthorizationRequest]) (*connect.Response[v1.DecideAgentAuthorizationResponse], error) {
+	return c.decideAgentAuthorization.CallUnary(ctx, req)
+}
+
+// ListAgentDelegations calls identity.v1.IdentityService.ListAgentDelegations.
+func (c *identityServiceClient) ListAgentDelegations(ctx context.Context, req *connect.Request[v1.ListAgentDelegationsRequest]) (*connect.Response[v1.ListAgentDelegationsResponse], error) {
+	return c.listAgentDelegations.CallUnary(ctx, req)
+}
+
+// RevokeAgentDelegation calls identity.v1.IdentityService.RevokeAgentDelegation.
+func (c *identityServiceClient) RevokeAgentDelegation(ctx context.Context, req *connect.Request[v1.RevokeAgentDelegationRequest]) (*connect.Response[v1.RevokeAgentDelegationResponse], error) {
+	return c.revokeAgentDelegation.CallUnary(ctx, req)
 }
 
 // CreateOAuthClient calls identity.v1.IdentityService.CreateOAuthClient.
@@ -2506,6 +2572,12 @@ func (c *identityServiceClient) LookupUsers(ctx context.Context, req *connect.Re
 
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
 type IdentityServiceHandler interface {
+	// OAuth-only human consent requires a live durable human SID and recent sign-in.
+	// Callers cannot supply actor, client, resource, scopes or an arbitrary proof.
+	GetAgentAuthorization(context.Context, *connect.Request[v1.GetAgentAuthorizationRequest]) (*connect.Response[v1.GetAgentAuthorizationResponse], error)
+	DecideAgentAuthorization(context.Context, *connect.Request[v1.DecideAgentAuthorizationRequest]) (*connect.Response[v1.DecideAgentAuthorizationResponse], error)
+	ListAgentDelegations(context.Context, *connect.Request[v1.ListAgentDelegationsRequest]) (*connect.Response[v1.ListAgentDelegationsResponse], error)
+	RevokeAgentDelegation(context.Context, *connect.Request[v1.RevokeAgentDelegationRequest]) (*connect.Response[v1.RevokeAgentDelegationResponse], error)
 	// Same-project active human administrator required. No dynamic registration.
 	CreateOAuthClient(context.Context, *connect.Request[v1.CreateOAuthClientRequest]) (*connect.Response[v1.CreateOAuthClientResponse], error)
 	GetOAuthClient(context.Context, *connect.Request[v1.GetOAuthClientRequest]) (*connect.Response[v1.GetOAuthClientResponse], error)
@@ -2833,6 +2905,30 @@ type IdentityServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	identityServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("IdentityService").Methods()
+	identityServiceGetAgentAuthorizationHandler := connect.NewUnaryHandler(
+		IdentityServiceGetAgentAuthorizationProcedure,
+		svc.GetAgentAuthorization,
+		connect.WithSchema(identityServiceMethods.ByName("GetAgentAuthorization")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDecideAgentAuthorizationHandler := connect.NewUnaryHandler(
+		IdentityServiceDecideAgentAuthorizationProcedure,
+		svc.DecideAgentAuthorization,
+		connect.WithSchema(identityServiceMethods.ByName("DecideAgentAuthorization")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListAgentDelegationsHandler := connect.NewUnaryHandler(
+		IdentityServiceListAgentDelegationsProcedure,
+		svc.ListAgentDelegations,
+		connect.WithSchema(identityServiceMethods.ByName("ListAgentDelegations")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRevokeAgentDelegationHandler := connect.NewUnaryHandler(
+		IdentityServiceRevokeAgentDelegationProcedure,
+		svc.RevokeAgentDelegation,
+		connect.WithSchema(identityServiceMethods.ByName("RevokeAgentDelegation")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceCreateOAuthClientHandler := connect.NewUnaryHandler(
 		IdentityServiceCreateOAuthClientProcedure,
 		svc.CreateOAuthClient,
@@ -3687,6 +3783,14 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case IdentityServiceGetAgentAuthorizationProcedure:
+			identityServiceGetAgentAuthorizationHandler.ServeHTTP(w, r)
+		case IdentityServiceDecideAgentAuthorizationProcedure:
+			identityServiceDecideAgentAuthorizationHandler.ServeHTTP(w, r)
+		case IdentityServiceListAgentDelegationsProcedure:
+			identityServiceListAgentDelegationsHandler.ServeHTTP(w, r)
+		case IdentityServiceRevokeAgentDelegationProcedure:
+			identityServiceRevokeAgentDelegationHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateOAuthClientProcedure:
 			identityServiceCreateOAuthClientHandler.ServeHTTP(w, r)
 		case IdentityServiceGetOAuthClientProcedure:
@@ -3979,6 +4083,22 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 
 // UnimplementedIdentityServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedIdentityServiceHandler struct{}
+
+func (UnimplementedIdentityServiceHandler) GetAgentAuthorization(context.Context, *connect.Request[v1.GetAgentAuthorizationRequest]) (*connect.Response[v1.GetAgentAuthorizationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetAgentAuthorization is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DecideAgentAuthorization(context.Context, *connect.Request[v1.DecideAgentAuthorizationRequest]) (*connect.Response[v1.DecideAgentAuthorizationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DecideAgentAuthorization is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListAgentDelegations(context.Context, *connect.Request[v1.ListAgentDelegationsRequest]) (*connect.Response[v1.ListAgentDelegationsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListAgentDelegations is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RevokeAgentDelegation(context.Context, *connect.Request[v1.RevokeAgentDelegationRequest]) (*connect.Response[v1.RevokeAgentDelegationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RevokeAgentDelegation is not implemented"))
+}
 
 func (UnimplementedIdentityServiceHandler) CreateOAuthClient(context.Context, *connect.Request[v1.CreateOAuthClientRequest]) (*connect.Response[v1.CreateOAuthClientResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateOAuthClient is not implemented"))

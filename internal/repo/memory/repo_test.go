@@ -15,7 +15,7 @@ import (
 // matrix entry invokes this test.
 func TestConformance(t *testing.T) {
 	t.Parallel()
-	conformance.RunConformance(t, conformance.Driver{
+	driver := conformance.Driver{
 		Name: "memory",
 		NewRepo: func(_ *testing.T) service.Repository {
 			return memory.New()
@@ -27,7 +27,9 @@ func TestConformance(t *testing.T) {
 				WithProject(string) service.Repository
 			}).WithProject(projectID)
 		},
-	})
+	}
+	conformance.RunConformance(t, driver)
+	conformance.RunAgentOAuthConformance(t, driver)
 }
 
 func TestRefreshTokenDeleteAndCount(t *testing.T) {
