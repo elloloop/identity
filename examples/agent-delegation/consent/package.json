@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "astro build && node scripts/embed.mjs",
-    "test": "playwright test"
+    "test": "node --test scripts/browser-fixture.test.mjs && playwright test"
   },
   "dependencies": {
     "@refraction-ui/astro": "0.22.1",

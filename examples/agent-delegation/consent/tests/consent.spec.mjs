@@ -1,19 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { spawn, execFileSync } from 'node:child_process';
-import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-let fixture, origin;
-const root = fileURLToPath(new URL('../../../..', import.meta.url));
-const events = [];
-test.beforeAll(async () => {
-  const binary=join(tmpdir(),'identity-agent-consent-browser-'+process.pid+'.test');
-  execFileSync('go',['test','-c','-o',binary,'./examples/agent-delegation'],{cwd:root,env:process.env});
-  fixture=spawn(binary,['-test.run=^TestBrowserFixture$','-test.timeout=190s'],{cwd:root,env:{...process.env,IDENTITY_BROWSER_FIXTURE:'1'}});
-  origin=await new Promise((resolve,reject)=>{let output='';const timer=setTimeout(()=>reject(new Error('fixture did not become ready')),20000);fixture.stdout.on('data',data=>{output+=data;const match=output.match(/BROWSER_FIXTURE_URL=(http:\/\/127\.0\.0\.1:\d+)/);if(match){clearTimeout(timer);resolve(match[1]);}});fixture.on('exit',code=>reject(new Error('fixture exited '+code+' '+output)));fixture.stderr.on('data',data=>events.push(String(data)));});
+let origin;
+test.beforeAll(() => {
+ origin = process.env.IDENTITY_BROWSER_FIXTURE_ORIGIN;
+ if (!origin) throw new Error('global setup did not provide the owned browser fixture');
 });
-test.afterAll(async()=>{if(origin)await fetch(origin+'/fixture/stop',{method:'POST'});if(fixture&&fixture.exitCode===null)await once(fixture,'exit');});
 test.beforeEach(async({page})=>{
  await page.route('https://challenges.cloudflare.com/turnstile/v0/api.js?*',route=>route.fulfill({contentType:'application/javascript',body:`let proofCallback;window.turnstile={render(element,options){proofCallback=options.callback;element.dataset.ready='true';queueMicrotask(()=>proofCallback('offline-browser-captcha-proof'));return 1;},reset(){queueMicrotask(()=>proofCallback('offline-browser-captcha-proof'));}};`}));
 });
