@@ -17,6 +17,7 @@ const (
 	// wildcard is both the character that marks an entry as a pattern and
 	// the whole leftmost label a valid pattern consists of.
 	wildcard         = "*"
+	httpScheme       = "http"
 	httpsScheme      = "https"
 	httpsDefaultPort = "443"
 	httpDefaultPort  = "80"

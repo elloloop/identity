@@ -29,8 +29,9 @@ func ParseAllowedOrigins(raw string, allowCredentials bool) (Allowlist, error) {
 }
 
 // ValidateAllowedOrigins validates a list of origins: each entry is a bare
-// lower-case-scheme http(s) origin, or a one-label wildcard pattern (see
-// ParsePattern). When allowCredentials is true it also refuses the bare
+// lower-case-scheme http(s) origin, a one-label wildcard pattern (see
+// ParsePattern), or an exact origin on an application's own scheme (see
+// parseBareOrigin). When allowCredentials is true it also refuses the bare
 // wildcard "*", the literal "null" and empty entries: the CORS middleware
 // always sets Access-Control-Allow-Credentials, so any of those would expose
 // authenticated state to arbitrary origins. Exact entries keep their input
@@ -74,12 +75,23 @@ func ValidateAllowedOrigins(origins []string, allowCredentials bool) (Allowlist,
 	return a, nil
 }
 
+// parseBareOrigin parses an entry that must be a serialized origin,
+// scheme://host, with a lower-case scheme and nothing after the host. An http
+// or https entry takes any host and port url.Parse accepts. Any other scheme
+// is an application's own: a desktop or mobile shell that registers it as a
+// standard scheme for the pages it serves, so its browser engine sends their
+// origin as scheme://host. Such an entry takes only the form that engine
+// sends: a host of lower-case DNS labels, with no port.
 func parseBareOrigin(s string) (*url.URL, error) {
 	if strings.ContainsAny(s, " \t\r\n") {
 		return nil, errors.New("contains whitespace")
 	}
-	if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
-		return nil, errors.New("scheme must be lower-case http:// or https://")
+	scheme, host, ok := strings.Cut(s, "://")
+	if !ok || !validScheme(scheme) {
+		return nil, errors.New("must be scheme://host with a lower-case scheme, such as https://app.example.com")
+	}
+	if slices.Contains(refusedSchemes, scheme) {
+		return nil, fmt.Errorf("scheme %s: never names the origin of a page that makes requests", scheme)
 	}
 	u, err := url.Parse(s)
 	if err != nil {
@@ -100,7 +112,46 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	if u.User != nil {
 		return nil, errors.New("userinfo not allowed")
 	}
+	if scheme != httpScheme && scheme != httpsScheme && !validAppHost(host) {
+		return nil, errAppOriginHost
+	}
 	return u, nil
+}
+
+// refusedSchemes are the schemes besides http and https that the URL, Fetch
+// and HTML standards give a meaning of their own, so none is an application's
+// own: about:, data: and javascript: pages have an opaque origin (sent as
+// "null"), blob: and filesystem: URLs take the origin of the URL inside them,
+// file: is shared by every local file, ws: and wss: name sockets, not pages,
+// and browsers no longer load ftp: pages.
+var refusedSchemes = []string{"about", "blob", "data", "file", "filesystem", "ftp", "javascript", "ws", "wss"}
+
+var errAppOriginHost = errors.New("an origin on an application's own scheme is exact: its host is lower-case DNS labels (letters, digits, hyphens, dots), with no port or wildcard")
+
+// validScheme reports whether s is an RFC 3986 scheme in lower case, the form
+// a browser serializes: a letter, then letters, digits, "+", "-" or ".".
+func validScheme(s string) bool {
+	if s == "" || s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '+' && c != '-' && c != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+// validAppHost reports whether host is one or more dot-separated lower-case
+// DNS labels, the host an application-scheme origin is serialized with.
+func validAppHost(host string) bool {
+	for _, l := range strings.Split(host, ".") {
+		if !validLabel(l) {
+			return false
+		}
+	}
+	return true
 }
 
 // errInvalidURL replaces url.Parse's error, which quotes the whole input and so

@@ -28,11 +28,11 @@ func TestParseProjectConfig_CORSOrigins(t *testing.T) {
 func TestProjectCORSConfig_Allowlist(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := ParseProjectConfig(`{"cors":{"allowed_origins":["https://app.example.app","https://*.myproj.pages.dev"]}}`)
+	cfg, err := ParseProjectConfig(`{"cors":{"allowed_origins":["https://app.example.app","https://*.myproj.pages.dev","app://example-desktop"]}}`)
 	require.NoError(t, err)
 	a, err := cfg.CORS.Allowlist()
 	require.NoError(t, err)
-	assert.Equal(t, []string{"https://app.example.app"}, a.Exact())
+	assert.Equal(t, []string{"https://app.example.app", "app://example-desktop"}, a.Exact())
 	assert.Equal(t, []string{"https://*.myproj.pages.dev"}, a.Patterns())
 
 	empty, err := ProjectCORSConfig{}.Allowlist()
@@ -47,7 +47,7 @@ func TestProjectCORSConfig_Allowlist(t *testing.T) {
 func TestParseProjectConfig_InvalidCORSDoesNotFailParse(t *testing.T) {
 	t.Parallel()
 
-	for _, entry := range []string{"*", "null", "", "app.example.app", "https://*.app", "https://*.vercel.app", "http://*.previews.example.app"} {
+	for _, entry := range []string{"*", "null", "", "app.example.app", "https://*.app", "https://*.vercel.app", "http://*.previews.example.app", "file://", "app://example-desktop/", "app://*.example-desktop"} {
 		cfg, err := ParseProjectConfig(`{"cors":{"allowed_origins":["` + entry + `"]}}`)
 		require.NoError(t, err, entry)
 		_, err = cfg.CORS.Allowlist()

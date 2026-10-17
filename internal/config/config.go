@@ -963,8 +963,12 @@ type Config struct {
 	// exact origins, or one-label wildcard patterns such as
 	// https://*.previews.example.app. A pattern matches exactly one DNS
 	// label under a fixed parent, https only, on a fixed port; the response
-	// echoes the concrete request Origin. A bare "*", "null", a malformed
-	// pattern or one whose parent is a public suffix fails startup, since
+	// echoes the concrete request Origin. An exact origin may also be on an
+	// application's own scheme, such as app://example-desktop for a desktop
+	// shell's pages: scheme://host with a lower-case DNS-label host and no
+	// port. A bare "*", "null", a malformed pattern or one whose parent is a
+	// public suffix, and an origin on file:, data:, blob:, javascript: or
+	// another scheme with no origin of its own fail startup, since
 	// credentials are always allowed.
 	AllowedOrigins string
 

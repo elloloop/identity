@@ -21,15 +21,47 @@ func TestCORS_WildcardOriginPreflight(t *testing.T) {
 		c.AllowedOrigins = "http://localhost:9002,https://*.previews.example.app"
 	}))
 
-	cases := []struct {
-		origin  string
-		allowed bool
-	}{
+	assertPreflights(t, h, []preflightCase{
 		{"https://feature-1.previews.example.app", true},
 		{"https://feature-1.previews.example.net", false},
 		{"https://a.feature-1.previews.example.app", false},
 		{"https://previews.example.app", false},
-	}
+	})
+}
+
+// TestCORS_AppSchemeOriginPreflight verifies an exact origin on an
+// application's own scheme end to end: a preflight from exactly that origin is
+// answered with it and credentials, and every look-alike gets no CORS grant.
+func TestCORS_AppSchemeOriginPreflight(t *testing.T) {
+	t.Parallel()
+
+	h := StartServer(t, WithConfig(func(c *config.Config) {
+		c.AllowedOrigins = "http://localhost:9002,app://example-desktop"
+	}))
+
+	assertPreflights(t, h, []preflightCase{
+		{"app://example-desktop", true},
+		{"http://localhost:9002", true},
+		{"app://other-desktop", false},
+		{"web://example-desktop", false},
+		{"APP://example-desktop", false},
+		{"app://Example-Desktop", false},
+		{"app://example-desktop/", false},
+		{"app://example-desktop/index.html", false},
+		{"null", false},
+		{"file://", false},
+	})
+}
+
+type preflightCase struct {
+	origin  string
+	allowed bool
+}
+
+// assertPreflights sends a CORS preflight from each case's Origin and checks
+// that an allowed one is echoed with credentials and the rest get no grant.
+func assertPreflights(t *testing.T, h *Harness, cases []preflightCase) {
+	t.Helper()
 	for _, tc := range cases {
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodOptions,
 			h.BaseURL+"/identity.v1.IdentityService/RedeemOAuthCode", nil)

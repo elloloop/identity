@@ -52,6 +52,104 @@ func TestAllowlist_Allows(t *testing.T) {
 	}
 }
 
+// TestAllowlist_AppSchemeOrigin pins that an exact origin on an application's
+// own scheme admits that serialized origin, byte for byte, and no look-alike.
+func TestAllowlist_AppSchemeOrigin(t *testing.T) {
+	t.Parallel()
+
+	a := mustAllowlist(t, "https://app.example.app", "app://example-desktop")
+	tests := []struct {
+		name   string
+		origin string
+		want   bool
+	}{
+		{"exact", "app://example-desktop", true},
+		{"http_entry_unchanged", "https://app.example.app", true},
+		{"other_host", "app://other-desktop", false},
+		{"host_suffix", "app://example-desktop.example.app", false},
+		{"other_scheme", "web://example-desktop", false},
+		{"https_same_host", "https://example-desktop", false},
+		{"upper_scheme", "APP://example-desktop", false},
+		{"upper_host", "app://Example-Desktop", false},
+		{"trailing_slash", "app://example-desktop/", false},
+		{"path", "app://example-desktop/index.html", false},
+		{"port", "app://example-desktop:443", false},
+		{"userinfo", "app://u@example-desktop", false},
+		{"null", "null", false},
+		{"file", "file://", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, a.Allows(tt.origin), tt.origin)
+		})
+	}
+}
+
+func TestValidateAllowedOrigins_AppSchemeOrigins(t *testing.T) {
+	t.Parallel()
+
+	entries := []string{"app://example-desktop", "example+shell://ui.example.test", "x-example.app://localhost", "app2://127.0.0.1"}
+	out, err := ValidateAllowedOrigins(entries, true)
+	require.NoError(t, err)
+	assert.Equal(t, entries, out.Exact())
+	assert.Empty(t, out.Patterns())
+}
+
+func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"app://":                          "host is empty",
+		"app://example-desktop/":          "path not allowed",
+		"app://example-desktop/index":     "path not allowed",
+		"app://example-desktop?":          "query not allowed",
+		"app://example-desktop?x=1":       "query not allowed",
+		"app://example-desktop#f":         "fragment not allowed",
+		"app://u@example-desktop":         "userinfo not allowed",
+		"app://example-desktop:8080":      "no port or wildcard",
+		"app://example-desktop:":          "no port or wildcard",
+		"app://Example-Desktop":           "no port or wildcard",
+		"app://*.example-desktop":         "no port or wildcard",
+		"app://*":                         "no port or wildcard",
+		"app://example-desktop.":          "no port or wildcard",
+		"app://example_desktop":           "no port or wildcard",
+		"app://-example-desktop":          "no port or wildcard",
+		"app://%65xample-desktop":         "not a valid URL",
+		"app://[::1]":                     "no port or wildcard",
+		"APP://example-desktop":           "lower-case scheme",
+		"App://example-desktop":           "lower-case scheme",
+		"1app://example-desktop":          "lower-case scheme",
+		"ap_p://example-desktop":          "lower-case scheme",
+		"://example-desktop":              "lower-case scheme",
+		"app:example-desktop":             "lower-case scheme",
+		"app:/example-desktop":            "lower-case scheme",
+		"blob:https://app.example.app":    "lower-case scheme",
+		"file://":                         "scheme file:",
+		"file:///":                        "scheme file:",
+		"file://localhost":                "scheme file:",
+		"data://example-desktop":          "scheme data:",
+		"blob://example-desktop":          "scheme blob:",
+		"javascript://example-desktop":    "scheme javascript:",
+		"about://blank":                   "scheme about:",
+		"filesystem://example-desktop":    "scheme filesystem:",
+		"ws://example-desktop":            "scheme ws:",
+		"wss://example-desktop":           "scheme wss:",
+		"ftp://example-desktop":           "scheme ftp:",
+		"app://example-desktop,":          "empty origin entry",
+		"app://example-desktop,null":      "null",
+		"app://example-desktop,*":         "wildcard",
+		"app://example-desktop,app://x y": "whitespace",
+	}
+	for raw, wantMsg := range cases {
+		t.Run(raw, func(t *testing.T) {
+			_, err := ParseAllowedOrigins(raw, true)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), wantMsg)
+		})
+	}
+}
+
 func TestAllowlist_ZeroValueAllowsNothing(t *testing.T) {
 	t.Parallel()
 
@@ -221,6 +319,8 @@ func TestValidateAllowedOrigins_ErrorsNeverCarryCredentials(t *testing.T) {
 		"https://user:" + secret + "@*.previews.example.app",
 		"https://user:" + secret + "@app.example.app/%zz",
 		"https://user:" + secret + "@app.example.app/path",
+		"app://user:" + secret + "@example-desktop",
+		"app://user:" + secret + "@example-desktop:8080",
 	} {
 		_, err := ValidateAllowedOrigins([]string{entry}, true)
 		require.Error(t, err, entry)

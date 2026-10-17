@@ -341,3 +341,53 @@ func TestCORS_PatternOrigin(t *testing.T) {
 		}
 	}
 }
+
+func TestCORS_AppSchemeOrigin(t *testing.T) {
+	const appOrigin = "app://example-desktop"
+	cases := []struct {
+		name, origin string
+		want         bool
+	}{
+		{"exact", appOrigin, true},
+		{"other_host", "app://other-desktop", false},
+		{"other_scheme", "web://example-desktop", false},
+		{"https_same_host", "https://example-desktop", false},
+		{"upper_scheme", "APP://example-desktop", false},
+		{"upper_host", "app://EXAMPLE-DESKTOP", false},
+		{"trailing_slash", appOrigin + "/", false},
+		{"path", appOrigin + "/index.html", false},
+		{"null", "null", false},
+		{"file", "file://", false},
+	}
+	scopes := map[string]func(*testing.T, *http.Request) (*http.Request, http.Handler){
+		"global": func(t *testing.T, r *http.Request) (*http.Request, http.Handler) {
+			t.Helper()
+			return r, CORSMiddleware(mustParse(t, "http://localhost:9002,"+appOrigin))(nopHandler())
+		},
+		"project": func(t *testing.T, r *http.Request) (*http.Request, http.Handler) {
+			t.Helper()
+			return withProjectOrigins(t, r, appOrigin), CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+		},
+	}
+	for scopeName, build := range scopes {
+		for _, method := range []string{http.MethodOptions, http.MethodPost} {
+			for _, tc := range cases {
+				t.Run(scopeName+"/"+method+"/"+tc.name, func(t *testing.T) {
+					req := httptest.NewRequest(method, "/identity.v1.IdentityService/RefreshToken", nil)
+					req.Header.Set("Origin", tc.origin)
+					req, handler := build(t, req)
+					rec := httptest.NewRecorder()
+					handler.ServeHTTP(rec, req)
+					if !tc.want {
+						assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+						assert.Empty(t, rec.Header().Get("Access-Control-Allow-Credentials"))
+						return
+					}
+					assert.Equal(t, tc.origin, rec.Header().Get("Access-Control-Allow-Origin"))
+					assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
+					assert.Equal(t, []string{"Origin"}, rec.Header().Values("Vary"))
+				})
+			}
+		}
+	}
+}

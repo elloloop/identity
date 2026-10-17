@@ -1,6 +1,43 @@
 # Upgrade guide
 
-## Next — native delegated agent OAuth
+## v4.19.0 → v4.20.0 — CORS allow-lists accept an exact origin on an application's own scheme (additive)
+
+No schema change and no migration.
+
+- **`GATEWAY_ALLOWED_ORIGINS` and a project's `cors.allowed_origins` accept
+  an exact origin on an application's own scheme**, such as
+  `app://example-desktop`. A desktop or mobile shell that serves its web
+  client from a scheme it registers as standard (an Electron app, or a native
+  web view with a custom scheme handler) runs those pages at that origin, and
+  its browser engine sends it as their `Origin`. The entry is
+  `scheme://host` with a lower-case scheme and a host of lower-case DNS
+  labels, and no port, path, trailing slash, query, fragment or userinfo. It
+  matches byte for byte, like any exact entry, and the response echoes it with
+  credentials.
+- **Still refused:** `*`, `null` and empty entries; a wildcard on any scheme
+  but `https`; any other form of entry on an application scheme; and the
+  schemes the URL standards give a meaning of their own (`file:`, `data:`,
+  `blob:`, `javascript:`, `about:`, `filesystem:`, `ws:`, `wss:`, `ftp:`),
+  whose pages send `null`, the origin of a URL inside them, or an origin every
+  local file shares. Such an entry fails startup in `GATEWAY_ALLOWED_ORIGINS`,
+  and the admin API refuses it in a project's list.
+- **http(s) entries and patterns are unchanged.** Every list that starts
+  today starts unchanged and admits the same origins. The startup error for a
+  non-http(s) entry now names the rule it breaks instead of saying the scheme
+  must be http or https.
+- **Why this admits no website.** A browser sets `Origin` itself; page script
+  cannot change it. A page loaded over http or https presents that origin,
+  and a sandboxed, `data:` or `file:` page presents `null`, so no web page can
+  present `app://example-desktop`. Only an application that registered the
+  scheme, and loads its own pages from it, does. A non-browser client can
+  send any `Origin` whether or not the entry exists.
+- **Rolling back:** a release before v4.20.0 refuses an application-scheme
+  entry. Remove it from `GATEWAY_ALLOWED_ORIGINS` first, or the older release
+  fails startup. A project whose stored `cors.allowed_origins` holds one keeps
+  serving on the older release, but its whole per-project list is dropped and
+  each resolution logs `project_cors_config_invalid_failing_closed`.
+
+## v4.18.0 → v4.19.0 — native delegated agent OAuth
 
 The new feature remains off unless `GATEWAY_AGENT_OAUTH_ENABLED=true`. It requires
 agent accounts, `GATEWAY_REVOCATION_MODE=session`, an HTTPS origin for
@@ -24,7 +61,7 @@ not OIDC. Resources must use authenticated current introspection on every call;
 verifying the JWT signature alone is insufficient. See ADR-0016 and the runnable
 `examples/agent-delegation` journey before enabling the feature.
 
-## Next — native public OAuth client registrations
+## v4.17.0 → v4.18.0 — native public OAuth client registrations
 
 PostgreSQL migration 0040 (SQLite 0023) adds the project-scoped `oauth_clients`
 table. It contains public registration metadata only: no client secrets, codes,
@@ -40,7 +77,7 @@ This does not enable an OAuth authorization server or agent delegation. No
 provider endpoints or discovery claims are added. See the native-client registry
 documentation for validation limits and the remaining protocol work.
 
-## v4.16.0 → next — agent accounts; custom repositories must implement ownership and transfer semantics
+## v4.16.0 → v4.17.0 — agent accounts; custom repositories must implement ownership and transfer semantics
 
 **Migration 0038** (SQLite 0021) adds `users.kind` (`'person'` or
 `'agent'`), `users.owner_user_id` and `users.pending_owner_user_id`, all with
