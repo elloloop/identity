@@ -260,6 +260,14 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       <code>https</code>-only, as above.
     </li>
     <li>
+      <strong>A named host.</strong> The shell must serve its pages from a
+      DNS-style host name. A placeholder host such as <code>app://-</code> or
+      <code>app://.</code>, a host with an underscore, and an IP address are
+      refused: an engine reads a host whose last label is a number
+      (<code>app://127.0.0.1</code>, <code>app://1</code>) as an IPv4 address
+      and sends it rewritten, so such an entry could never match.
+    </li>
+    <li>
       <strong>Refused</strong> at startup, and by the admin API in a
       project's list: any other form of entry on such a scheme (<code>app://example-desktop:8080</code>,
       <code>app://Example-Desktop</code>, <code>app://*.example</code>), and
@@ -269,7 +277,20 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       <code>filesystem:</code>, <code>ws:</code>, <code>wss:</code> and
       <code>ftp:</code>. Their pages send <code>null</code> (which is refused
       too), the origin of a URL inside them, or an origin every local file
-      shares.
+      shares; <code>ws:</code> and <code>wss:</code> name sockets, not pages,
+      and browsers no longer load <code>ftp:</code> pages.
+    </li>
+    <li>
+      <strong>Logged apart.</strong> The startup line
+      <code>cors_allowed_origins</code> lists these entries again under
+      <code>app_scheme_origins</code>. A mistyped <code>https</code> scheme,
+      such as <code>htps://app.example.app</code>, is a valid application
+      scheme: it loads, admits nothing, and shows up there. Check that field
+      after changing the list.
+    </li>
+    <li>
+      <strong>CORS only.</strong> <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>
+      still takes <code>http</code> and <code>https</code> URLs only.
     </li>
   </ul>
   <aside class="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
@@ -281,6 +302,12 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     and loads its own pages from it presents the origin. A non-browser client
     can send any <code>Origin</code> it likes, with or without this entry: CORS
     governs what browsers let pages read, not who can call the server.
+    The origin is not an application's identity, though: another application
+    on the same machine can register the same scheme, and a framework's
+    default origin (such as <code>capacitor://localhost</code> or
+    <code>tauri://localhost</code>) is shared by every app built on it. Give
+    your shell a distinctive host, and list only an origin your own
+    application serves.
   </aside>
 
   <h2>Password reset &amp; signup toggles</h2>

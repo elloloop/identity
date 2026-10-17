@@ -296,11 +296,7 @@ func TestCORS_VaryOrigin_OnEveryResponse(t *testing.T) {
 }
 
 func TestCORS_PatternOrigin(t *testing.T) {
-	const pattern = "https://*.previews.example.app"
-	cases := []struct {
-		name, origin string
-		want         bool
-	}{
+	assertCORSGrants(t, "https://*.previews.example.app", "/identity.v1.IdentityService/RedeemOAuthCode", []corsGrantCase{
 		{"one_label", "https://feature-1.previews.example.app", true},
 		{"two_labels", "https://a.b.previews.example.app", false},
 		{"bare_parent", "https://previews.example.app", false},
@@ -308,46 +304,12 @@ func TestCORS_PatternOrigin(t *testing.T) {
 		{"port_mismatch", "https://feature-1.previews.example.app:8443", false},
 		{"sibling_domain", "https://feature-1.previews.example.net", false},
 		{"mixed_case_host", "https://Feature-1.Previews.example.app", true},
-	}
-	scopes := map[string]func(*testing.T, *http.Request) (*http.Request, http.Handler){
-		"global": func(t *testing.T, r *http.Request) (*http.Request, http.Handler) {
-			t.Helper()
-			return r, CORSMiddleware(mustParse(t, "http://localhost:9002,"+pattern))(nopHandler())
-		},
-		"project": func(t *testing.T, r *http.Request) (*http.Request, http.Handler) {
-			t.Helper()
-			return withProjectOrigins(t, r, pattern), CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
-		},
-	}
-	for scopeName, build := range scopes {
-		for _, method := range []string{http.MethodOptions, http.MethodPost} {
-			for _, tc := range cases {
-				t.Run(scopeName+"/"+method+"/"+tc.name, func(t *testing.T) {
-					req := httptest.NewRequest(method, "/identity.v1.IdentityService/RedeemOAuthCode", nil)
-					req.Header.Set("Origin", tc.origin)
-					req, handler := build(t, req)
-					rec := httptest.NewRecorder()
-					handler.ServeHTTP(rec, req)
-					if !tc.want {
-						assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
-						assert.Empty(t, rec.Header().Get("Access-Control-Allow-Credentials"))
-						return
-					}
-					assert.Equal(t, tc.origin, rec.Header().Get("Access-Control-Allow-Origin"), "echoes the concrete origin, never the pattern")
-					assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
-					assert.Equal(t, []string{"Origin"}, rec.Header().Values("Vary"))
-				})
-			}
-		}
-	}
+	})
 }
 
 func TestCORS_AppSchemeOrigin(t *testing.T) {
 	const appOrigin = "app://example-desktop"
-	cases := []struct {
-		name, origin string
-		want         bool
-	}{
+	assertCORSGrants(t, appOrigin, "/identity.v1.IdentityService/RefreshToken", []corsGrantCase{
 		{"exact", appOrigin, true},
 		{"other_host", "app://other-desktop", false},
 		{"other_scheme", "web://example-desktop", false},
@@ -358,22 +320,36 @@ func TestCORS_AppSchemeOrigin(t *testing.T) {
 		{"path", appOrigin + "/index.html", false},
 		{"null", "null", false},
 		{"file", "file://", false},
-	}
+	})
+}
+
+type corsGrantCase struct {
+	name, origin string
+	want         bool
+}
+
+// assertCORSGrants lists entry beside an http origin, once in the global
+// allow-list and once in a project's, and checks for each case, on a preflight
+// and on an actual request to path, that the middleware grants exactly the
+// origins marked want: it echoes the request's own Origin with credentials
+// and sets no CORS header for any other.
+func assertCORSGrants(t *testing.T, entry, path string, cases []corsGrantCase) {
+	t.Helper()
 	scopes := map[string]func(*testing.T, *http.Request) (*http.Request, http.Handler){
 		"global": func(t *testing.T, r *http.Request) (*http.Request, http.Handler) {
 			t.Helper()
-			return r, CORSMiddleware(mustParse(t, "http://localhost:9002,"+appOrigin))(nopHandler())
+			return r, CORSMiddleware(mustParse(t, "http://localhost:9002,"+entry))(nopHandler())
 		},
 		"project": func(t *testing.T, r *http.Request) (*http.Request, http.Handler) {
 			t.Helper()
-			return withProjectOrigins(t, r, appOrigin), CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+			return withProjectOrigins(t, r, entry), CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 		},
 	}
 	for scopeName, build := range scopes {
 		for _, method := range []string{http.MethodOptions, http.MethodPost} {
 			for _, tc := range cases {
 				t.Run(scopeName+"/"+method+"/"+tc.name, func(t *testing.T) {
-					req := httptest.NewRequest(method, "/identity.v1.IdentityService/RefreshToken", nil)
+					req := httptest.NewRequest(method, path, nil)
 					req.Header.Set("Origin", tc.origin)
 					req, handler := build(t, req)
 					rec := httptest.NewRecorder()
@@ -383,7 +359,7 @@ func TestCORS_AppSchemeOrigin(t *testing.T) {
 						assert.Empty(t, rec.Header().Get("Access-Control-Allow-Credentials"))
 						return
 					}
-					assert.Equal(t, tc.origin, rec.Header().Get("Access-Control-Allow-Origin"))
+					assert.Equal(t, tc.origin, rec.Header().Get("Access-Control-Allow-Origin"), "echoes the concrete request origin, never the entry")
 					assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
 					assert.Equal(t, []string{"Origin"}, rec.Header().Values("Vary"))
 				})

@@ -89,11 +89,56 @@ func TestAllowlist_AppSchemeOrigin(t *testing.T) {
 func TestValidateAllowedOrigins_AppSchemeOrigins(t *testing.T) {
 	t.Parallel()
 
-	entries := []string{"app://example-desktop", "example+shell://ui.example.test", "x-example.app://localhost", "app2://127.0.0.1"}
+	entries := []string{"app://example-desktop", "example+shell://ui.example.test", "x-example.app://localhost", "app2://123.example-desktop"}
 	out, err := ValidateAllowedOrigins(entries, true)
 	require.NoError(t, err)
 	assert.Equal(t, entries, out.Exact())
+	assert.Equal(t, entries, out.AppSchemeOrigins())
 	assert.Empty(t, out.Patterns())
+}
+
+// TestAllowlist_AppSchemeOrigins pins that the app-scheme entries are listed
+// apart from the http(s) ones, a mistyped http(s) scheme among them: such an
+// entry loads, admits nothing, and is visible only there.
+func TestAllowlist_AppSchemeOrigins(t *testing.T) {
+	t.Parallel()
+
+	a := mustAllowlist(t, "https://app.example.app", "app://example-desktop", "http://localhost:3000", "htps://admin.example.app", "https://*.previews.example.app")
+	assert.Equal(t, []string{"app://example-desktop", "htps://admin.example.app"}, a.AppSchemeOrigins())
+	assert.False(t, a.Allows("https://admin.example.app"), "a mistyped entry admits not the origin it meant")
+	assert.Nil(t, mustAllowlist(t, "https://app.example.app").AppSchemeOrigins())
+}
+
+// TestValidateAllowedOrigins_AppSchemeHostRejections pins the host rule's two
+// sentinels: a host that is not a lower-case DNS name with no port, and one a
+// browser engine would read as an IPv4 address and send rewritten.
+func TestValidateAllowedOrigins_AppSchemeHostRejections(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]error{
+		"app://example-desktop:8080": errAppOriginHost,
+		"app://example-desktop:":     errAppOriginHost,
+		"app://Example-Desktop":      errAppOriginHost,
+		"app://*.example-desktop":    errAppOriginHost,
+		"app://*":                    errAppOriginHost,
+		"app://example-desktop.":     errAppOriginHost,
+		"app://example_desktop":      errAppOriginHost,
+		"app://-example-desktop":     errAppOriginHost,
+		"app://-":                    errAppOriginHost,
+		"app://.":                    errAppOriginHost,
+		"app://[::1]":                errAppOriginHost,
+		"app://1":                    errAppOriginNumericHost,
+		"app://0x7f":                 errAppOriginNumericHost,
+		"app://0x":                   errAppOriginNumericHost,
+		"app://example.123":          errAppOriginNumericHost,
+		"app2://127.0.0.1":           errAppOriginNumericHost,
+	}
+	for raw, want := range cases {
+		t.Run(raw, func(t *testing.T) {
+			_, err := ParseAllowedOrigins(raw, true)
+			require.ErrorIs(t, err, want)
+		})
+	}
 }
 
 func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
@@ -106,17 +151,9 @@ func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
 		"app://example-desktop?":          "query not allowed",
 		"app://example-desktop?x=1":       "query not allowed",
 		"app://example-desktop#f":         "fragment not allowed",
+		"app://example-desktop#":          "fragment not allowed",
 		"app://u@example-desktop":         "userinfo not allowed",
-		"app://example-desktop:8080":      "no port or wildcard",
-		"app://example-desktop:":          "no port or wildcard",
-		"app://Example-Desktop":           "no port or wildcard",
-		"app://*.example-desktop":         "no port or wildcard",
-		"app://*":                         "no port or wildcard",
-		"app://example-desktop.":          "no port or wildcard",
-		"app://example_desktop":           "no port or wildcard",
-		"app://-example-desktop":          "no port or wildcard",
 		"app://%65xample-desktop":         "not a valid URL",
-		"app://[::1]":                     "no port or wildcard",
 		"APP://example-desktop":           "lower-case scheme",
 		"App://example-desktop":           "lower-case scheme",
 		"1app://example-desktop":          "lower-case scheme",

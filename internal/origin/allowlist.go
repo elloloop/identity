@@ -81,12 +81,12 @@ func ValidateAllowedOrigins(origins []string, allowCredentials bool) (Allowlist,
 // is an application's own: a desktop or mobile shell that registers it as a
 // standard scheme for the pages it serves, so its browser engine sends their
 // origin as scheme://host. Such an entry takes only the form that engine
-// sends: a host of lower-case DNS labels, with no port.
+// sends unchanged: a DNS name of lower-case labels, with no port.
 func parseBareOrigin(s string) (*url.URL, error) {
 	if strings.ContainsAny(s, " \t\r\n") {
 		return nil, errors.New("contains whitespace")
 	}
-	scheme, host, ok := strings.Cut(s, "://")
+	scheme, rest, ok := strings.Cut(s, "://")
 	if !ok || !validScheme(scheme) {
 		return nil, errors.New("must be scheme://host with a lower-case scheme, such as https://app.example.com")
 	}
@@ -107,15 +107,31 @@ func parseBareOrigin(s string) (*url.URL, error) {
 		return nil, errors.New("query not allowed")
 	}
 	if u.Fragment != "" {
-		return nil, errors.New("fragment not allowed")
+		return nil, errFragment
 	}
 	if u.User != nil {
 		return nil, errors.New("userinfo not allowed")
 	}
-	if scheme != httpScheme && scheme != httpsScheme && !validAppHost(host) {
-		return nil, errAppOriginHost
+	if !isWebScheme(scheme) {
+		// The rules below read the entry's own text after "://", not u.Host
+		// or u.Fragment: url.Parse keeps no trace of an empty fragment, and
+		// an entry carrying any "#" or port is not the origin an engine sends.
+		if strings.Contains(rest, "#") {
+			return nil, errFragment
+		}
+		if err := checkAppHost(rest); err != nil {
+			return nil, err
+		}
 	}
 	return u, nil
+}
+
+var errFragment = errors.New("fragment not allowed")
+
+// isWebScheme reports whether scheme is http or https, the schemes whose
+// entries keep the rules they had before application schemes were accepted.
+func isWebScheme(scheme string) bool {
+	return scheme == httpScheme || scheme == httpsScheme
 }
 
 // refusedSchemes are the schemes besides http and https that the URL, Fetch
@@ -126,7 +142,13 @@ func parseBareOrigin(s string) (*url.URL, error) {
 // and browsers no longer load ftp: pages.
 var refusedSchemes = []string{"about", "blob", "data", "file", "filesystem", "ftp", "javascript", "ws", "wss"}
 
-var errAppOriginHost = errors.New("an origin on an application's own scheme is exact: its host is lower-case DNS labels (letters, digits, hyphens, dots), with no port or wildcard")
+var (
+	errAppOriginHost = errors.New("an origin on an application's own scheme is exact: its host is a DNS name of lower-case labels (letters, digits, hyphens, dots), with no port or wildcard")
+	// A browser engine parses a host that ends in a number as an IPv4
+	// address and sends it rewritten (app://1 as app://0.0.0.1), so an entry
+	// spelled that way would never match.
+	errAppOriginNumericHost = errors.New("an origin on an application's own scheme takes a DNS name, not an IP address: its last label is not a number")
+)
 
 // validScheme reports whether s is an RFC 3986 scheme in lower case, the form
 // a browser serializes: a letter, then letters, digits, "+", "-" or ".".
@@ -143,15 +165,27 @@ func validScheme(s string) bool {
 	return true
 }
 
-// validAppHost reports whether host is one or more dot-separated lower-case
-// DNS labels, the host an application-scheme origin is serialized with.
-func validAppHost(host string) bool {
-	for _, l := range strings.Split(host, ".") {
+// checkAppHost accepts host when it is one or more dot-separated lower-case
+// DNS labels whose last label does not end in a number in the URL standard's
+// sense (decimal digits, or 0x and hex digits).
+func checkAppHost(host string) error {
+	labels := strings.Split(host, ".")
+	for _, l := range labels {
 		if !validLabel(l) {
-			return false
+			return errAppOriginHost
 		}
 	}
-	return true
+	if last := labels[len(labels)-1]; isNumeric(last) || isHexNumber(last) {
+		return errAppOriginNumericHost
+	}
+	return nil
+}
+
+// isHexNumber reports whether l is "0x" followed by zero or more hex digits,
+// which the URL standard's host parser reads as a number.
+func isHexNumber(l string) bool {
+	digits, ok := strings.CutPrefix(l, "0x")
+	return ok && strings.Trim(digits, "0123456789abcdef") == ""
 }
 
 // errInvalidURL replaces url.Parse's error, which quotes the whole input and so
@@ -182,6 +216,19 @@ const (
 
 // Exact returns a copy of the exact origins in configured order.
 func (a Allowlist) Exact() []string { return slices.Clone(a.exact) }
+
+// AppSchemeOrigins returns the exact origins on an application's own scheme,
+// in configured order. A mistyped http(s) scheme is one of them, so listing
+// them apart is what lets an operator see one.
+func (a Allowlist) AppSchemeOrigins() []string {
+	var out []string
+	for _, e := range a.exact {
+		if scheme, _, _ := strings.Cut(e, "://"); !isWebScheme(scheme) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
 
 // Patterns returns the wildcard patterns, in canonical form, in configured order.
 func (a Allowlist) Patterns() []string {
