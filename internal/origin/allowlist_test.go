@@ -1,6 +1,11 @@
 package origin
 
 import (
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,6 +55,216 @@ func TestAllowlist_Allows(t *testing.T) {
 			assert.Equal(t, tt.want, a.Allows(tt.origin), tt.origin)
 		})
 	}
+}
+
+// TestAllowlist_Allows_AppSchemeOrigin pins that an exact origin on an application's
+// own scheme admits that serialized origin, byte for byte, and no look-alike.
+func TestAllowlist_Allows_AppSchemeOrigin(t *testing.T) {
+	t.Parallel()
+
+	a := mustAllowlist(t, "https://app.example.app", "app://example-desktop")
+	tests := []struct {
+		name   string
+		origin string
+		want   bool
+	}{
+		{"exact", "app://example-desktop", true},
+		{"http_entry_unchanged", "https://app.example.app", true},
+		{"other_host", "app://other-desktop", false},
+		{"host_suffix", "app://example-desktop.example.app", false},
+		{"other_scheme", "web://example-desktop", false},
+		{"https_same_host", "https://example-desktop", false},
+		{"upper_scheme", "APP://example-desktop", false},
+		{"upper_host", "app://Example-Desktop", false},
+		{"trailing_slash", "app://example-desktop/", false},
+		{"path", "app://example-desktop/index.html", false},
+		{"port", "app://example-desktop:443", false},
+		{"userinfo", "app://u@example-desktop", false},
+		{"null", "null", false},
+		{"file", "file://", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, a.Allows(tt.origin), tt.origin)
+		})
+	}
+}
+
+func TestValidateAllowedOrigins_AppSchemeOrigins(t *testing.T) {
+	t.Parallel()
+
+	entries := []string{
+		"app://example-desktop",
+		"example+shell://ui.example.test",
+		"x-example.app://localhost",
+		"app2://123.example-desktop",
+		"app://example.0xg",
+		// An extension page's origin: Chromium's ID is 32 letters a to p,
+		// Firefox's host a lower-case UUID per installation.
+		"chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+		"moz-extension://0d5e1f3a-7b2c-4d6e-9f80-1a2b3c4d5e6f",
+	}
+	out, err := ValidateAllowedOrigins(entries, true)
+	require.NoError(t, err)
+	assert.Equal(t, entries, out.Exact())
+	assert.Equal(t, entries, out.AppSchemeOrigins())
+	assert.Empty(t, out.Patterns())
+}
+
+// TestAllowlist_AppSchemeOrigins pins that the app-scheme entries are listed
+// apart from the http(s) entries and the patterns.
+func TestAllowlist_AppSchemeOrigins(t *testing.T) {
+	t.Parallel()
+
+	a := mustAllowlist(t, "https://app.example.app", "app://example-desktop", "http://localhost:3000", "example+shell://ui.example.test", "https://*.previews.example.app")
+	assert.Equal(t, []string{"app://example-desktop", "example+shell://ui.example.test"}, a.AppSchemeOrigins())
+	assert.Nil(t, mustAllowlist(t, "https://app.example.app").AppSchemeOrigins())
+}
+
+func TestOneEditApart(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"https", "htps", true},     // deletion
+		{"https", "hhttps", true},   // insertion
+		{"https", "https2", true},   // insertion at the end
+		{"http", "shttp", true},     // insertion at the start
+		{"http", "htpp", true},      // substitution
+		{"https", "httsp", true},    // adjacent swap
+		{"http", "thtp", true},      // adjacent swap at the start
+		{"http", "http", false},     // equal
+		{"http", "hxxp", false},     // two substitutions
+		{"http", "ptth", false},     // reversed
+		{"https", "htp", false},     // two deletions
+		{"https", "hptts", false},   // a swap that is not adjacent
+		{"http", "app", false},      // unrelated
+		{"https", "example", false}, // unrelated, longer
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, oneEditApart(tt.a, tt.b), "%s / %s", tt.a, tt.b)
+		assert.Equal(t, tt.want, oneEditApart(tt.b, tt.a), "%s / %s", tt.b, tt.a)
+	}
+}
+
+// TestValidateAllowedOrigins_AppSchemeHostRejections pins the host rule's two
+// sentinels: a host that is not a lower-case DNS name with no port, and one a
+// browser engine would read as an IPv4 address and send rewritten.
+func TestValidateAllowedOrigins_AppSchemeHostRejections(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]error{
+		"app://example-desktop:8080": errAppOriginHost,
+		"app://example-desktop:":     errAppOriginHost,
+		"app://Example-Desktop":      errAppOriginHost,
+		"app://*.example-desktop":    errAppOriginHost,
+		"app://*":                    errAppOriginHost,
+		"app://example-desktop.":     errAppOriginHost,
+		"app://example_desktop":      errAppOriginHost,
+		"app://-example-desktop":     errAppOriginHost,
+		"app://-":                    errAppOriginHost,
+		"app://.":                    errAppOriginHost,
+		"app://[::1]":                errAppOriginHost,
+		"app://1":                    errAppOriginNumericHost,
+		"app://0x7f":                 errAppOriginNumericHost,
+		"app://0x":                   errAppOriginNumericHost,
+		"app://example.123":          errAppOriginNumericHost,
+		"app2://127.0.0.1":           errAppOriginNumericHost,
+	}
+	for raw, want := range cases {
+		t.Run(raw, func(t *testing.T) {
+			_, err := ParseAllowedOrigins(raw, true)
+			require.ErrorIs(t, err, want)
+		})
+	}
+}
+
+func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"app://":                           "host is empty",
+		"app://example-desktop/":           "path not allowed",
+		"app://example-desktop/index":      "path not allowed",
+		"app://example-desktop?":           "query not allowed",
+		"app://example-desktop?x=1":        "query not allowed",
+		"app://example-desktop#f":          "fragment not allowed",
+		"app://example-desktop#":           "fragment not allowed",
+		"app://u@example-desktop":          "userinfo not allowed",
+		"app://%65xample-desktop":          "not a valid URL",
+		"APP://example-desktop":            "lower-case scheme",
+		"App://example-desktop":            "lower-case scheme",
+		"1app://example-desktop":           "lower-case scheme",
+		"ap_p://example-desktop":           "lower-case scheme",
+		"://example-desktop":               "lower-case scheme",
+		"app:example-desktop":              "lower-case scheme",
+		"app:/example-desktop":             "lower-case scheme",
+		"blob:https://app.example.app":     "scheme blob: its URLs take the origin of the URL inside them",
+		"filesystem:https://a.example.app": "scheme filesystem:",
+		"data:text/plain,x":                "scheme data: its pages have an opaque origin",
+		"javascript:void(0)":               "scheme javascript:",
+		"view-source:https://example.app":  "scheme view-source: names a browser's",
+		"file://":                          "scheme file: every local file shares one origin",
+		"file:///":                         "scheme file:",
+		"file://localhost":                 "scheme file:",
+		"data://example-desktop":           "scheme data:",
+		"blob://example-desktop":           "scheme blob:",
+		"javascript://example-desktop":     "scheme javascript:",
+		"about://blank":                    "scheme about:",
+		"filesystem://example-desktop":     "scheme filesystem:",
+		"ws://example-desktop":             "scheme ws:",
+		"wss://example-desktop":            "scheme wss:",
+		"ftp://example-desktop":            "scheme ftp:",
+		"chrome://settings":                "scheme chrome: names a browser's",
+		"chrome-untrusted://terminal":      "scheme chrome-untrusted: names a browser's",
+		"chrome-search://local-ntp":        "scheme chrome-search: names a browser's",
+		"devtools://devtools":              "scheme devtools: names a browser's",
+		"edge://settings":                  "scheme edge: names a browser's",
+		"view-source://example-desktop":    "scheme view-source: names a browser's",
+		"resource://gre":                   "scheme resource: names a browser's",
+		"content://media":                  "scheme content: names a browser's",
+		"file":                             "must be scheme://host",
+		"content":                          "must be scheme://host",
+		"htps://app.example.app":           "misspelling",
+		"htp://app.example.app":            "misspelling",
+		"hhttps://app.example.app":         "misspelling",
+		"httsp://app.example.app":          "misspelling",
+		"htttps://app.example.app":         "misspelling",
+		"https2://app.example.app":         "misspelling",
+		"httpx://app.example.app":          "misspelling",
+		"app://example-desktop,":           "empty origin entry",
+		"app://example-desktop,null":       "null",
+		"app://example-desktop,*":          "wildcard",
+		"app://example-desktop,app://x y":  "whitespace",
+	}
+	for raw, wantMsg := range cases {
+		t.Run(raw, func(t *testing.T) {
+			_, err := ParseAllowedOrigins(raw, true)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), wantMsg)
+		})
+	}
+}
+
+// TestRefusedSchemesDocumented keeps the configuration page in step with the
+// code: every scheme parseBareOrigin refuses by name is listed there, so adding
+// one to refusedSchemes without documenting it fails. It lives here, not in
+// tests/docs, because it reads that unexported table.
+func TestRefusedSchemesDocumented(t *testing.T) {
+	t.Parallel()
+
+	page, err := os.ReadFile(filepath.Join("..", "..", "docs-site", "src", "pages", "docs", "installation", "configuration.astro"))
+	require.NoError(t, err)
+	var missing []string
+	for _, scheme := range slices.Sorted(maps.Keys(refusedSchemes)) {
+		if !strings.Contains(string(page), "<code>"+scheme+":</code>") {
+			missing = append(missing, scheme)
+		}
+	}
+	assert.Empty(t, missing, "schemes refused but not listed on the configuration page")
 }
 
 func TestAllowlist_ZeroValueAllowsNothing(t *testing.T) {
@@ -126,7 +341,7 @@ func TestParseAllowedOrigins_MalformedOrigin_Rejected(t *testing.T) {
 
 	for _, raw := range []string{
 		"localhost:9002",            // missing scheme
-		"ftp://localhost:9002",      // wrong scheme
+		"ftp://localhost:9002",      // a scheme with a standard meaning (refusedSchemes)
 		"http://localhost:9002/",    // trailing slash
 		"http://localhost:9002/x",   // path
 		"http://localhost:9002?q=1", // query
@@ -221,6 +436,13 @@ func TestValidateAllowedOrigins_ErrorsNeverCarryCredentials(t *testing.T) {
 		"https://user:" + secret + "@*.previews.example.app",
 		"https://user:" + secret + "@app.example.app/%zz",
 		"https://user:" + secret + "@app.example.app/path",
+		"app://user:" + secret + "@example-desktop",
+		"app://user:" + secret + "@example-desktop:8080",
+		"App://user:" + secret + "@example-desktop",
+		"ap_p://user:" + secret + "@example-desktop",
+		"ftp://user:" + secret + "@example-desktop",
+		"chrome://user:" + secret + "@settings",
+		"htps://user:" + secret + "@app.example.app",
 	} {
 		_, err := ValidateAllowedOrigins([]string{entry}, true)
 		require.Error(t, err, entry)

@@ -960,12 +960,18 @@ type Config struct {
 	PublicEmailDomains string
 
 	// AllowedOrigins is the comma-separated list of CORS allowed origins:
-	// exact origins, or one-label wildcard patterns such as
+	// exact http(s) origins, exact origins on an application's own scheme
+	// such as app://example-desktop, or one-label wildcard patterns such as
 	// https://*.previews.example.app. A pattern matches exactly one DNS
 	// label under a fixed parent, https only, on a fixed port; the response
-	// echoes the concrete request Origin. A bare "*", "null", a malformed
-	// pattern or one whose parent is a public suffix fails startup, since
-	// credentials are always allowed.
+	// echoes the concrete request Origin. An application-scheme origin, the
+	// origin of a desktop shell's pages, is scheme://host with a lower-case
+	// DNS name and no port. A bare "*", "null", a malformed pattern or one
+	// whose parent is a public suffix, an origin on file:, data:, blob:,
+	// javascript: or another scheme the URL standards give a meaning of
+	// their own, one a browser keeps for its own pages, and a scheme one
+	// edit from http or https fail startup, since credentials are always
+	// allowed.
 	AllowedOrigins string
 
 	// Cookie settings.

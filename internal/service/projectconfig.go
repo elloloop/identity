@@ -1220,9 +1220,11 @@ func (j ProjectJurisdictionsConfig) canonicalized() ProjectJurisdictionsConfig {
 // on top of the global GATEWAY_ALLOWED_ORIGINS floor: a browser origin is
 // accepted when either set admits it. Each entry must be a bare
 // scheme+host(+port) origin (no path/query/fragment, lower-case http:// or
-// https:// scheme) or a one-label wildcard pattern (https://*.parent.example);
-// ProjectCORSConfig.Allowlist validates them, refusing a bad entry on the admin
-// write path and failing the project's own allow-list closed at resolution.
+// https:// scheme), an exact origin on an application's own scheme
+// (app://example-desktop) or a one-label wildcard pattern
+// (https://*.parent.example); ProjectCORSConfig.Allowlist validates them,
+// refusing a bad entry on the admin write path and failing the project's own
+// allow-list closed at resolution.
 type ProjectCORSConfig struct {
 	AllowedOrigins []string `json:"allowed_origins"`
 }

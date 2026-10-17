@@ -468,6 +468,40 @@ func TestConfigSetupMatrix(t *testing.T) {
 		})
 	})
 
+	// Case 7b — NEGATIVE: a scheme that never names one application's pages,
+	// a scheme one edit from https, and an application-scheme origin carrying
+	// a path, fail startup.
+	t.Run("non_origin_scheme_cors_entry_fails", func(t *testing.T) {
+		t.Parallel()
+		env, _ := cfgEnv(t, map[string]string{
+			"GATEWAY_ALLOWED_ORIGINS": "http://localhost:9002,file://",
+		})
+		cfgExpectBootFailure(t, env, []string{
+			"cors config invalid",
+			"scheme file: every local file shares one origin",
+		})
+	})
+	t.Run("misspelled_https_cors_entry_fails", func(t *testing.T) {
+		t.Parallel()
+		env, _ := cfgEnv(t, map[string]string{
+			"GATEWAY_ALLOWED_ORIGINS": "http://localhost:9002,htps://admin.example.app",
+		})
+		cfgExpectBootFailure(t, env, []string{
+			"cors config invalid",
+			"scheme htps: one edit from http or https, so refused as a misspelling of one",
+		})
+	})
+	t.Run("app_scheme_cors_origin_with_path_fails", func(t *testing.T) {
+		t.Parallel()
+		env, _ := cfgEnv(t, map[string]string{
+			"GATEWAY_ALLOWED_ORIGINS": "http://localhost:9002,app://example-desktop/",
+		})
+		cfgExpectBootFailure(t, env, []string{
+			"cors config invalid",
+			"path not allowed",
+		})
+	})
+
 	// Case 8 — POSITIVE: valid wildcard patterns boot clean and are logged
 	// next to the exact entries, so an operator can see what is admitted; a
 	// malformed exact return-URL entry stays non-fatal but is warned about.
@@ -482,6 +516,18 @@ func TestConfigSetupMatrix(t *testing.T) {
 				"origin_patterns", "https://*.previews.example.app", "allowed_return_url_patterns",
 				"oauth_allowed_return_url_ignored", "app.example.app/no-scheme",
 			},
+			nil)
+	})
+
+	// Case 8b — POSITIVE: an exact origin on an application's own scheme
+	// boots clean and is logged apart from the http(s) entries.
+	t.Run("app_scheme_cors_origin_boots_and_is_logged", func(t *testing.T) {
+		t.Parallel()
+		env, port := cfgEnv(t, map[string]string{
+			"GATEWAY_ALLOWED_ORIGINS": "http://localhost:9002,app://example-desktop",
+		})
+		cfgExpectBootClean(t, env, port,
+			[]string{"cors_allowed_origins", `"app_scheme_origins":["app://example-desktop"]`},
 			nil)
 	})
 

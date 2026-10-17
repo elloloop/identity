@@ -236,6 +236,124 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     list is your responsibility.
   </aside>
 
+  <h2 id="application-scheme-origins">Application-scheme origins</h2>
+  <p>
+    A desktop or mobile shell that serves its web client from its own scheme
+    (an Electron app registering <code>app</code> as a standard, secure scheme,
+    or a native web view with a custom scheme handler) runs those pages at an
+    origin such as <code>app://example-desktop</code>, and its browser engine
+    sends exactly that as the <code>Origin</code> of their requests. To let such
+    a client call identity directly, list the origin in
+    <code>GATEWAY_ALLOWED_ORIGINS</code> or a project's
+    <code>cors.allowed_origins</code>:
+  </p>
+  <pre><code>{`GATEWAY_ALLOWED_ORIGINS=https://app.example.app,app://example-desktop`}</code></pre>
+  <ul>
+    <li>
+      <strong>Exact, the way the engine sends it.</strong> The entry is
+      <code>scheme://host</code>: a lower-case scheme, a host of lower-case DNS
+      labels, and nothing else — no port, path, trailing slash, query,
+      fragment or userinfo. It matches that origin byte for byte, so a
+      request from <code>app://other-desktop</code>,
+      <code>web://example-desktop</code>, <code>APP://example-desktop</code>
+      or <code>app://example-desktop/</code> is not admitted. A wildcard is
+      <code>https</code>-only, as above.
+    </li>
+    <li>
+      <strong>A named host.</strong> The shell must serve its pages from a
+      DNS-style host name, each label starting and ending with a letter or
+      digit. A placeholder host such as <code>app://-</code> or
+      <code>app://.</code> is refused, since it is not a DNS host name. Where
+      the helper that serves the shell's pages defaults to one, set its host
+      name option to a distinctive name and list that. An IP address
+      (<code>app://127.0.0.1</code>) and a host with an underscore are refused
+      too: the entry names the application by a DNS host. So is a host whose
+      last label is a number (<code>app://1</code>,
+      <code>app://example.123</code>, <code>app://0x7f</code>), since an
+      engine may read it as an IPv4 address and rewrite it, as Chromium sends
+      <code>app://1</code> as <code>app://0.0.0.1</code>.
+    </li>
+    <li>
+      <strong>Refused</strong> at startup, and by the admin API in a
+      project's list: any other form of entry on such a scheme (<code>app://example-desktop:8080</code>,
+      <code>app://Example-Desktop</code>, <code>app://*.example</code>), and
+      every scheme the URL standards give a meaning of their own —
+      <code>file:</code>, <code>data:</code>, <code>blob:</code>,
+      <code>javascript:</code>, <code>about:</code>,
+      <code>filesystem:</code>, <code>ws:</code>, <code>wss:</code> and
+      <code>ftp:</code>. Their pages send <code>null</code> (which is refused
+      too), the origin of a URL inside them, or an origin every local file
+      shares; <code>ws:</code> and <code>wss:</code> name sockets, not pages,
+      and browsers no longer load <code>ftp:</code> pages. So are the schemes
+      a browser or a platform keeps for its own pages:
+      <code>chrome:</code>, <code>chrome-untrusted:</code>,
+      <code>chrome-search:</code>, <code>devtools:</code>,
+      <code>edge:</code>, <code>view-source:</code>, Firefox's
+      <code>resource:</code> and Android's <code>content:</code>. Some of a
+      browser's own pages show content it loads from elsewhere, and every
+      document a content provider serves shares its origin. That list holds
+      the schemes likeliest to be listed by mistake, not every engine's
+      internal scheme: list only an origin your own application serves.
+    </li>
+    <li>
+      <strong>No near-miss of <code>http</code> or <code>https</code>.</strong>
+      A scheme one edit away from either, such as <code>htps:</code>,
+      <code>hhttps:</code> or <code>httsp:</code>, is refused as a
+      misspelling rather than read as an application's own.
+    </li>
+    <li>
+      <strong>Logged apart.</strong> The startup line
+      <code>cors_allowed_origins</code> lists the
+      <code>GATEWAY_ALLOWED_ORIGINS</code> entries on these schemes again
+      under <code>app_scheme_origins</code>. A project's list is not logged;
+      read it back with the admin API's <code>GetProjectConfig</code>.
+    </li>
+    <li>
+      <strong>Browser extensions.</strong> An extension page's origin, such
+      as <code>chrome-extension://</code> followed by the extension's ID,
+      follows the same rule and loads as an exact entry. An entry's host is
+      lower case, so an origin whose host an engine sends with upper-case
+      letters cannot be listed. Firefox gives each
+      installation of an extension its own <code>moz-extension://</code>
+      host, so an entry for one admits a single browser profile. An ID is
+      not proof of which extension is running: an unpacked extension can
+      declare any published extension's key and take its ID.
+    </li>
+    <li>
+      <strong>CORS only.</strong> <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>
+      still takes <code>http</code> and <code>https</code> URLs only, and
+      passkey ceremonies still verify against
+      <code>GATEWAY_PASSKEY_ORIGIN</code> or a project's
+      <code>passkey.origin</code>. So hosted OAuth and a magic link cannot
+      return to a page on an application scheme, and a passkey cannot sign
+      it in; it signs in with a call that returns the tokens itself, such as
+      <code>PasswordLogin</code>, <code>VerifyEmailLoginCode</code> or
+      <code>NativeOAuthLogin</code>. Identity sets no session cookie: the sign-in
+      calls return the access and refresh tokens, and the client keeps them
+      and sends them itself, the access token as a bearer token and the
+      refresh token to <code>RefreshToken</code>.
+    </li>
+  </ul>
+  <aside class="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
+    <strong>Security:</strong> an entry for an origin your own application
+    serves admits no website. A browser
+    sets <code>Origin</code> itself and page script cannot change it; a page
+    loaded over <code>http</code> or <code>https</code> always presents that
+    origin, a sandboxed or <code>data:</code> page presents <code>null</code>,
+    and a <code>file:</code> page presents <code>null</code> or, in some
+    shells, <code>file://</code>; both are refused. Only an application that
+    registered the scheme
+    and loads its own pages from it presents the origin. A non-browser client
+    can send any <code>Origin</code> it likes, with or without this entry: CORS
+    governs what browsers let pages read, not who can call the server.
+    The origin is not an application's identity, though: another application
+    on the same machine can register the same scheme, and a framework's
+    default origin (such as <code>capacitor://localhost</code> or
+    <code>tauri://localhost</code>) is shared by every app built on it. Give
+    your shell a distinctive host, and list only an origin your own
+    application serves.
+  </aside>
+
   <h2>Password reset &amp; signup toggles</h2>
   <p>
     When <code>GATEWAY_PASSWORD_RESET_ENABLED=false</code>,
