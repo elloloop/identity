@@ -39,6 +39,20 @@ an inactive token or an unavailable authority service it refuses access.</li>
 The native client can revoke its refresh credential at <code>/oauth/revoke</code>.
 A used refresh token replay terminally revokes the whole grant.</li>
 </ol>
+<h2>Hosted sign-in choices</h2>
+<p>The review page offers only providers enabled for the current project. Provider
+sign-in also requires <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code> to admit the
+actual consent page, such as <code>https://auth.example.com/auth/agent-consent</code>.
+An unlisted page explains that hosted sign-in is unavailable; it does not offer
+broken provider links. Hub-shared providers start on their configured origin and
+need the original project routing key.</p>
+<p>The browser binds each return to its original tab, request and project using a
+short-lived nonsecret intent. It removes that intent before redeeming a one-time
+code and keeps tokens only in page memory. A canceled provider sign-in returns
+safely only after server state and browser CSRF checks. Signing in never selects
+an agent or approves access. Password and its TOTP challenge remain available
+only when enabled; hosted redemption that requires a TOTP challenge currently
+fails closed because that response has no challenge fields.</p>
 <h2>Bounds and loss of authority</h2>
 <p>Access lasts 300 seconds by default (maximum 900); consent defaults to 86400
 seconds (maximum thirty days); refresh idle defaults to 3600 seconds. Original

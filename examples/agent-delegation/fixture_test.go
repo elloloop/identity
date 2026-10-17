@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,6 +26,7 @@ import (
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
+	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/require"
@@ -36,10 +39,14 @@ func TestBrowserFixture(t *testing.T) {
 		t.Skip("browser harness only")
 	}
 	const resource = "https://files.example.test"
+	// One owned fixture serves every browser case; retain a finite limiter budget
+	// for its authorize, review, decision and token requests.
+	const browserProtocolBudget = 100
 	mux := http.NewServeMux()
 	server := httptest.NewUnstartedServer(mux)
 	defer server.Close()
 	cfg := &config.Config{DefaultTenantID: "tenant", DefaultProjectID: config.DefaultProjectIDFallback, DefaultProjectAccessMode: service.AccessModeOpen, AuthAllowLocal: true, PasswordSignupEnabled: true, PasswordResetEnabled: true, JWTExpirySeconds: 900, RefreshExpirySeconds: 604800, LoginMaxFailedAttempts: 100, LoginLockoutSeconds: 900, LoginChallengeExpirySeconds: 300, PasskeyRPID: "localhost", PasskeyRPName: "Identity test", PasskeyOrigin: "http://localhost:9002", PasskeyChallengeExpirySeconds: 300, TOTPIssuer: "Identity test", JWTIssuer: "https://auth.example.test", AgentsEnabled: true, AgentOAuthEnabled: true, RevocationMode: config.RevocationModeSession, AgentOAuthAccessSeconds: 300, AgentOAuthConsentSeconds: 86400, AgentOAuthRefreshIdleSeconds: 3600}
+	cfg.AgentOAuthProtocolPerIP = browserProtocolBudget
 	cfg.AssuranceEnabled = true
 	cfg.AssuranceChallengeTTLSeconds = 300
 	cfg.AssuranceTurnstileSecret = "offline-provider-fixture-secret"
@@ -49,15 +56,19 @@ func TestBrowserFixture(t *testing.T) {
 	cfg.AssuranceWebTokenTTLSeconds = 300
 	cfg.AssuranceTokenTTLSeconds = 300
 	cfg.AllowedOrigins = "http://" + server.Listener.Addr().String()
+	cfg.OAuthAllowedReturnURLs = cfg.AllowedOrigins + "/auth/agent-consent"
+	registry := oauth.NewRegistry()
+	registry.Register("google", &browserOAuthProvider{origin: cfg.AllowedOrigins})
 	sum := sha256.Sum256([]byte("offline-resource-test-secret"))
 	cfg.AgentOAuthResourceCredentialsJSON = fmt.Sprintf(`[{"id":"files-resource","project_id":"%s","resource":"%s","secret_sha256":"%s"}]`, cfg.DefaultProjectID, resource, hex.EncodeToString(sum[:]))
 	repo := memory.New()
 	signer := jwttest.NewSigner(t, "browser-test-key")
 	pk, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: "localhost", RPName: "Identity test", Origin: "http://localhost:9002"})
 	require.NoError(t, err)
-	built, err := app.New(app.Deps{AssuranceWebVerifier: browserAssuranceVerifier{}, Config: cfg, Logger: zap.NewNop(), Signer: signer, Repo: repo, DB: repo, Passkeys: pk, TOTPKey: []byte("01234567890123456789012345678901"), TOTPRecoveryPepper: []byte("offline-recovery-pepper-0123456789012345")})
+	built, err := app.New(app.Deps{OAuthRegistry: registry, AssuranceWebVerifier: browserAssuranceVerifier{}, Config: cfg, Logger: zap.NewNop(), Signer: signer, Repo: repo, DB: repo, Passkeys: pk, TOTPKey: []byte("01234567890123456789012345678901"), TOTPRecoveryPepper: []byte("offline-recovery-pepper-0123456789012345")})
 	require.NoError(t, err)
 	mux.Handle("/", built.Handler)
+	mux.HandleFunc("GET /fixture/provider", browserOAuthAuthorize)
 	server.Start()
 	client := identityconnect.NewIdentityServiceClient(server.Client(), server.URL)
 	signed, err := client.PasswordSignup(context.Background(), connect.NewRequest(&identitypb.PasswordSignupRequest{Email: "browser-owner@example.com", Password: "Offline-Browser-Password123!"}))
@@ -127,4 +138,35 @@ func (browserAssuranceVerifier) Verify(_ context.Context, token, _ string) error
 		return assurance.ErrVerificationFailed
 	}
 	return nil
+}
+
+type browserOAuthProvider struct{ origin string }
+
+func (p *browserOAuthProvider) AuthorizationURL(_ context.Context, redirectURI, state, challenge string) (string, error) {
+	return p.origin + "/fixture/provider?" + url.Values{"redirect_uri": {redirectURI}, "state": {state}, "challenge": {challenge}}.Encode(), nil
+}
+
+func (*browserOAuthProvider) Exchange(_ context.Context, params oauth.ExchangeParams) (*oauth.Identity, error) {
+	if params.Code != "offline-browser-provider-code" || params.CodeVerifier == "" {
+		return nil, errors.New("synthetic provider refused invalid code or verifier")
+	}
+	return &oauth.Identity{Provider: "google", ProviderUserID: "offline-browser-owner", Email: "browser-owner@example.com", EmailVerified: true, Name: "Example owner"}, nil
+}
+
+func browserOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
+	target, err := url.Parse(r.URL.Query().Get("redirect_uri"))
+	if err != nil || target.Host != r.Host || target.Path != "/oauth/callback/google" || r.URL.Query().Get("challenge") == "" {
+		http.Error(w, "invalid fixture provider request", http.StatusBadRequest)
+		return
+	}
+	q := url.Values{"state": {r.URL.Query().Get("state")}, "code": {"offline-browser-provider-code"}}
+	target.RawQuery = q.Encode()
+	approved := target.String()
+	q.Del("code")
+	q.Set("error", "access_denied")
+	target.RawQuery = q.Encode()
+	page := template.Must(template.New("provider").Parse(`<h1>Synthetic provider</h1><a href="{{.Approve}}">Use example account</a><a href="{{.Cancel}}">Cancel sign-in</a>`))
+	if err := page.Execute(w, struct{ Approve, Cancel string }{approved, target.String()}); err != nil {
+		return
+	}
 }

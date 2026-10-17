@@ -802,7 +802,7 @@ func New(deps Deps) (*Built, error) {
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
 
 	mux := http.NewServeMux()
-	if err := mountIdentityService(mux, deps, authSvc, handler); err != nil {
+	if err := mountIdentityService(mux, deps, authSvc, handler, returnAllow); err != nil {
 		return nil, err
 	}
 

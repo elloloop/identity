@@ -132,20 +132,21 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 
 	state := r.FormValue("state")
 
-	// Provider-side error (user denied consent, etc). We cannot recover
-	// return_to without a valid state token, so there is nowhere safe to
-	// redirect — surface a generic 400 and log server-side.
-	if provErr := r.FormValue("error"); provErr != "" {
-		h.logger.Info("hosted_oauth_provider_error",
-			zap.String("provider", provider), zap.String("error", provErr))
-		http.Error(w, "oauth failed", http.StatusBadRequest)
-		return
-	}
-
 	csrfTokens, ok := hostedOAuthCSRFTokens(r, provider)
 	if !ok {
 		h.logger.Info("hosted_oauth_csrf_cookie_invalid", zap.String("provider", provider))
 		http.Error(w, "oauth failed", http.StatusBadRequest)
+		return
+	}
+
+	if r.FormValue("error") != "" {
+		refusal, err := h.auth.CancelHostedOAuth(r.Context(), provider, state, csrfTokens)
+		if err != nil {
+			http.Error(w, "oauth failed", http.StatusBadRequest)
+			return
+		}
+		h.finishCallback(w, r, provider, csrfTokens, refusal.CSRFToken,
+			appendQueryParam(refusal.ReturnTo, "error", refusal.Code))
 		return
 	}
 

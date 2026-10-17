@@ -14,6 +14,9 @@ import '../styles.css';
     <div id="error" role="alert" hidden></div>
     <section id="login-panel" aria-labelledby="login-title">
       <h2 id="login-title">First, confirm it’s you</h2><p class="muted">Your sign-in stays on this page. It is never shared with the requesting app.</p>
+      <div id="oauth-buttons" class="oauth-buttons" hidden></div>
+      <template id="oauth-button-template"><Button type="button" variant="outline" class="oauth-provider"><span></span></Button></template>
+      <p id="oauth-divider" class="muted oauth-divider" hidden>Or sign in with your password</p>
       <form id="login-form">
         <label for="identifier" id="identifier-label">Email</label><input id="identifier" name="identifier" type="email" autocomplete="username" required/>
         <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required/>
@@ -21,7 +24,7 @@ import '../styles.css';
         <Button id="sign-in" type="submit" class="wide">Sign in to review</Button>
       </form>
       <form id="totp-form" hidden><label for="totp-code">Authenticator or recovery code</label><input id="totp-code" autocomplete="one-time-code" required/><Button type="submit" class="wide">Verify and review</Button></form>
-      <p id="no-login" hidden class="muted">Password sign-in is unavailable here. Open this request through your organization’s supported sign-in experience. No access has been granted.</p>
+      <p id="no-login" hidden class="muted">No supported sign-in method is available for this request. Contact your administrator. No access has been granted.</p>
     </section>
     <section id="review-panel" aria-labelledby="review-title" hidden>
       <div class="section-heading"><p class="eyebrow">REVIEW REQUEST</p><h2 id="review-title"></h2><p class="muted">This app is asking an agent you own to act on your behalf.</p></div>

@@ -22,7 +22,7 @@ func configureAgentOAuthSweep(sweep *sweeper, deps Deps) {
 }
 
 func mountIdentityService(
-	mux *http.ServeMux, deps Deps, authSvc *service.AuthService, handler *identityconnect.IdentityHandler,
+	mux *http.ServeMux, deps Deps, authSvc *service.AuthService, handler *identityconnect.IdentityHandler, returnAllow service.ReturnAllowlist,
 ) error {
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
@@ -39,7 +39,7 @@ func mountIdentityService(
 	handler.WithAgentOAuth(agentOAuth)
 	if agentOAuth != nil {
 		(&agentOAuthProtocol{service: agentOAuth, auth: authSvc, issuer: deps.Config.JWTIssuer}).register(mux)
-		mux.Handle(agentOAuthConsentPath, ui.AgentConsentHandler(deps.Config, authSvc))
+		mux.Handle(agentOAuthConsentPath, ui.AgentConsentHandler(deps.Config, authSvc, returnAllow))
 	}
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)

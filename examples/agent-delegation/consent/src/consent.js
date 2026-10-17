@@ -7,8 +7,90 @@
   const byId = (value) => document.getElementById(value);
   let token = '', challenge = '', view = null, busy = false, selected = '', captchaToken = '', captchaWidget = null;
   const seen = new Set();
+  const loginIntentKey = 'identity.agent-consent.login.v1';
+  const loginIntentLifetime = 15 * 60 * 1000;
+  const providerButtons = [];
+  const providerKeys = new Set();
+  const providerLabels = { google: 'Google', microsoft: 'Microsoft', github: 'GitHub', apple: 'Apple', oidc: 'OIDC' };
+  function consentReturnURL() {
+    const target = new URL(location.pathname, location.origin);
+    target.searchParams.set('request_id', requestID);
+    if (projectKey) target.searchParams.set('project_key', projectKey);
+    return target;
+  }
+  async function loginContext() {
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(consentReturnURL().href));
+    return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+  function providerOrigin(provider) {
+    const origin = provider.startOrigin || location.origin;
+    try {
+      const parsed = new URL(origin);
+      const local = ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname);
+      if (parsed.origin !== origin || !(parsed.protocol === 'https:' || (local && parsed.protocol === 'http:'))) return null;
+      return origin;
+    } catch { return null; }
+  }
+  function renderProviders() {
+    const providers = Array.isArray(config.oauthProviders) ? config.oauthProviders : [];
+    if (config.hostedOAuthEnabled) {
+      for (const provider of providers) {
+        if (!/^[a-z][a-z0-9_-]{0,63}$/.test(provider.key) || (provider.needsProjectKey && !projectKey)) continue;
+        const origin = providerOrigin(provider);
+        if (!origin || providerKeys.has(provider.key)) continue;
+        const button = byId('oauth-button-template').content.firstElementChild.cloneNode(true);
+        button.querySelector('span').textContent = 'Continue with ' + (providerLabels[provider.key] || provider.key);
+        button.addEventListener('click', () => action(async () => {
+          const state = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join('');
+          const intent = { state, context: await loginContext(), provider: provider.key, expires: Date.now() + loginIntentLifetime };
+          try { sessionStorage.setItem(loginIntentKey, JSON.stringify(intent)); }
+          catch { throw new Error('This browser cannot retain the sign-in request. Allow session storage or use another browser.'); }
+          const target = consentReturnURL(); target.searchParams.set('login_state', state);
+          const start = new URL('/oauth/start/' + encodeURIComponent(provider.key), origin);
+          start.searchParams.set('return_to', target.href);
+          if (projectKey) start.searchParams.set('project_key', projectKey);
+          location.assign(start.href);
+        }));
+        providerKeys.add(provider.key); providerButtons.push(button); byId('oauth-buttons').append(button);
+      }
+    }
+    byId('oauth-buttons').hidden = providerButtons.length === 0;
+    byId('oauth-divider').hidden = !config.passwordLoginEnabled || providerButtons.length === 0;
+    if (!config.passwordLoginEnabled && providerButtons.length === 0) {
+      byId('no-login').hidden = false;
+      if (providers.some(provider => provider.needsProjectKey) && !projectKey) byId('no-login').textContent = 'Your organization’s sign-in needs the original project-scoped request link. Start again from the requesting app.';
+    }
+    if (providers.length && !config.hostedOAuthEnabled) {
+      byId('no-login').hidden = false;
+      byId('no-login').textContent = 'Hosted sign-in cannot return to this consent page under the server’s allowed return policy. Contact your administrator. No access has been granted.';
+    }
+  }
+  async function resumeHostedLogin() {
+    const codes = query.getAll('code'), errors = query.getAll('error'), states = query.getAll('login_state');
+    if (!codes.length && !errors.length && !states.length) return;
+    let intent;
+    try {
+      const saved = sessionStorage.getItem(loginIntentKey);
+      sessionStorage.removeItem(loginIntentKey);
+      if (saved && saved.length <= 1024) intent = JSON.parse(saved);
+    } catch { throw new Error('This browser could not verify the sign-in return. Start sign-in again.'); }
+    if (states.length !== 1 || !/^[a-f0-9]{64}$/.test(states[0]) || !intent || intent.state !== states[0] ||
+        intent.context !== await loginContext() || !Number.isFinite(intent.expires) || intent.expires <= Date.now() ||
+        intent.expires > Date.now() + loginIntentLifetime || !providerButtons.length ||
+        !providerKeys.has(intent.provider) ||
+        codes.length + errors.length !== 1 || (codes.length && (!codes[0] || codes[0].length > 1024))) {
+      throw new Error('This sign-in return does not match this browser and authorization request. Start sign-in again.');
+    }
+    if (errors.length) throw new Error('Sign-in was canceled or refused. No access has been granted. You can try signing in again.');
+    await signedIn(await rpc('RedeemOAuthCode', { code: codes[0] }));
+  }
+
   const requestID = id.length === 1 && id[0].length <= 128 ? id[0] : '';
   const projectKey = project.length === 1 && project[0].length <= 256 ? project[0] : '';
+  // The one-time code must leave the address bar before any await or external script.
+  if (['code', 'error', 'login_state'].some(key => query.has(key))) {
+    history.replaceState(null, '', consentReturnURL().pathname + consentReturnURL().search);
+  }
   const errorText = {
     unauthenticated: 'Please sign in again to review this request.',
     permission_denied: 'You can’t authorize this request. No access has been granted.',
@@ -28,6 +110,7 @@
     disabled('deny', busy || expired);
     disabled('sign-in', busy);
     disabled('more-agents', busy || expired);
+    for (const button of providerButtons) button.disabled = busy;
   }
   async function rpc(method, body, extra = {}) {
     const headers = { 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1', ...extra };
@@ -53,7 +136,7 @@
         byId('review-panel').hidden = true; byId('login-panel').hidden = false; byId('totp-form').hidden = true;
         byId('login-form').hidden = !config.passwordLoginEnabled; byId('password').value = '';
         byId('status').textContent = 'Your sign-in needs to be confirmed again. No access is approved automatically.';
-        byId('identifier').focus();
+        (providerButtons[0] || byId('identifier')).focus();
       }
       showError(error.message || 'Connection failed. Check the requesting app before retrying.');
     }
@@ -150,10 +233,13 @@
   byId('deny').addEventListener('click', () => decide(false));
   window.addEventListener('pagehide', () => { token = ''; challenge = ''; captchaToken = ''; });
   if (!requestID || id[0] === '' || project.length > 1 || (project.length === 1 && !projectKey)) {
+    try { sessionStorage.removeItem(loginIntentKey); } catch {}
     byId('login-panel').hidden = true; showError('This authorization link is incomplete. Start again from the requesting app.');
     return;
   }
-  if (!config.passwordLoginEnabled) { byId('login-form').hidden = true; byId('no-login').hidden = false; }
+  if (!config.passwordLoginEnabled) byId('login-form').hidden = true;
+  renderProviders();
+  action(resumeHostedLogin);
   if (config.usernameLoginEnabled) { byId('identifier').type = 'text'; byId('identifier-label').textContent = 'Email or username'; }
   if (config.captchaEnforceLogin && config.passwordLoginEnabled) {
     byId('captcha').hidden = false;

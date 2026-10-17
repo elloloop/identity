@@ -12,7 +12,7 @@ import (
 )
 
 func TestAgentConsentHandlerUsesPrivatePerRequestConfiguration(t *testing.T) {
-	h := AgentConsentHandler(&config.Config{}, scopeOptions{})
+	h := AgentConsentHandler(&config.Config{}, scopeOptions{}, service.ReturnAllowlist{})
 	for _, project := range []string{"proj-google", "default"} {
 		req := httptest.NewRequest(http.MethodGet, "/auth/agent-consent?request_id=private-request", nil)
 		req = req.WithContext(service.WithProjectScope(req.Context(), &service.ProjectScope{ProjectID: project}))
@@ -41,7 +41,7 @@ func TestAgentConsentHandlerUsesPrivatePerRequestConfiguration(t *testing.T) {
 
 func TestAgentConsentConfigurationEscapesOperatorText(t *testing.T) {
 	cfg := &config.Config{AssuranceEnabled: true, AssuranceWebProvider: config.AssuranceWebProviderTurnstile, AssuranceTurnstileSiteKey: `</script><script>alert(1)</script>`, AssuranceEnforcePasswordLogin: true}
-	h := AgentConsentHandler(cfg, allEnabled())
+	h := AgentConsentHandler(cfg, allEnabled(), service.ReturnAllowlist{})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/agent-consent", nil))
 	if strings.Contains(rec.Body.String(), `</script><script>alert(1)</script>`) || !strings.Contains(rec.Body.String(), `\u003c/script\u003e`) {
@@ -54,8 +54,45 @@ func TestAgentConsentConfigurationEscapesOperatorText(t *testing.T) {
 
 func TestAgentConsentHandlerRejectsMutation(t *testing.T) {
 	rec := httptest.NewRecorder()
-	AgentConsentHandler(&config.Config{}, allEnabled()).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth/agent-consent", nil))
+	AgentConsentHandler(&config.Config{}, allEnabled(), service.ReturnAllowlist{}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth/agent-consent", nil))
 	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != http.MethodGet {
 		t.Fatal("consent HTML must never accept a mutation")
+	}
+}
+
+func TestAgentConsentOAuthReturnPolicyAndScopedProviders(t *testing.T) {
+	allow, err := service.ParseReturnAllowlist("https://auth.example.test/auth/agent-consent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, address, forwardedHost, forwardedProto string
+		enabled                                      bool
+	}{
+		{name: "direct TLS", address: "https://auth.example.test/auth/agent-consent", enabled: true},
+		{name: "Azure forwarded", address: "http://internal.example.test/auth/agent-consent", forwardedHost: "auth.example.test", forwardedProto: "https", enabled: true},
+		{name: "other project host", address: "https://other.example.test/auth/agent-consent"},
+		{name: "HTTP not allowed", address: "http://auth.example.test/auth/agent-consent"},
+		{name: "ambiguous scheme", address: "http://auth.example.test/auth/agent-consent", forwardedProto: "https,http"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := stubOptions{opts: service.HostedUIOptions{OAuthProviders: []service.HostedUIProvider{{Key: "google", StartOrigin: "https://hub.example.test", NeedsProjectKey: true}}}}
+			r := httptest.NewRequest(http.MethodGet, tc.address, nil)
+			if tc.forwardedHost != "" {
+				r.Header.Set("X-Forwarded-Host", tc.forwardedHost)
+			}
+			if tc.forwardedProto != "" {
+				r.Header.Set("X-Forwarded-Proto", tc.forwardedProto)
+			}
+			w := httptest.NewRecorder()
+			AgentConsentHandler(&config.Config{}, opts, allow).ServeHTTP(w, r)
+			want := `"hostedOAuthEnabled":false`
+			if tc.enabled {
+				want = `"hostedOAuthEnabled":true`
+			}
+			if !strings.Contains(w.Body.String(), want) || !strings.Contains(w.Body.String(), `"startOrigin":"https://hub.example.test","needsProjectKey":true`) {
+				t.Fatal("wrong return policy or scoped provider projection")
+			}
+		})
 	}
 }
