@@ -312,7 +312,7 @@ func TestParseAllowedOrigins_MalformedOrigin_Rejected(t *testing.T) {
 
 	for _, raw := range []string{
 		"localhost:9002",            // missing scheme
-		"ftp://localhost:9002",      // a scheme with a standard meaning (refusedSchemes)
+		"ftp://localhost:9002",      // a scheme with a standard meaning (standardSchemes)
 		"http://localhost:9002/",    // trailing slash
 		"http://localhost:9002/x",   // path
 		"http://localhost:9002?q=1", // query

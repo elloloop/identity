@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.19.0 → v4.20.0 — CORS allow-lists accept an exact origin on an application's own scheme (additive)
+## v4.19.0 → v4.20.0 — CORS allow-lists accept an exact origin on an application's own scheme (additive); a stored project CORS list that fails closed today can come back (behaviour change)
 
 No schema change and no migration.
 

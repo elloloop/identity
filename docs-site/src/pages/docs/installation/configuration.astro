@@ -253,10 +253,10 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       <strong>Exact, the way the engine sends it.</strong> The entry is
       <code>scheme://host</code>: a lower-case scheme, a host of lower-case DNS
       labels, and nothing else — no port, path, trailing slash, query,
-      fragment or userinfo. It matches that origin byte for byte, so
-      <code>app://other-desktop</code>, <code>web://example-desktop</code>,
-      <code>APP://example-desktop</code> and
-      <code>app://example-desktop/</code> are refused. A wildcard is
+      fragment or userinfo. It matches that origin byte for byte, so a
+      request from <code>app://other-desktop</code>,
+      <code>web://example-desktop</code>, <code>APP://example-desktop</code>
+      or <code>app://example-desktop/</code> is not admitted. A wildcard is
       <code>https</code>-only, as above.
     </li>
     <li>
@@ -289,7 +289,9 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       <code>edge:</code>, <code>view-source:</code>, Firefox's
       <code>resource:</code> and Android's <code>content:</code>. Some of a
       browser's own pages show content it loads from elsewhere, and every
-      document a content provider serves shares its origin.
+      document a content provider serves shares its origin. That list holds
+      the schemes likeliest to be listed by mistake, not every engine's
+      internal scheme: list only an origin your own application serves.
     </li>
     <li>
       <strong>No near-miss of <code>http</code> or <code>https</code>.</strong>
@@ -309,7 +311,9 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       as <code>chrome-extension://</code> followed by the extension's ID,
       follows the same rule and loads as an exact entry. Firefox gives each
       installation of an extension its own <code>moz-extension://</code>
-      host, so an entry for one admits a single browser profile.
+      host, so an entry for one admits a single browser profile. An ID is
+      not proof of which extension is running: an unpacked extension can
+      declare any published extension's key and take its ID.
     </li>
     <li>
       <strong>CORS only.</strong> <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>
@@ -317,12 +321,10 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       passkey ceremonies still verify against
       <code>GATEWAY_PASSKEY_ORIGIN</code> or a project's
       <code>passkey.origin</code>, so a page on an application scheme signs
-      in by other methods. Such a page is cross-site
-      to this server, so its requests carry no auth cookie set with
-      <code>SameSite</code> <code>Lax</code> (the
-      <code>GATEWAY_COOKIE_SAMESITE</code> default) or <code>Strict</code>:
-      the client keeps the access and refresh tokens the sign-in calls return
-      and sends them itself.
+      in by other methods. Identity sets no session cookie: the sign-in
+      calls return the access and refresh tokens, and the client keeps them
+      and sends them itself, the access token as a bearer token and the
+      refresh token to <code>RefreshToken</code>.
     </li>
   </ul>
   <aside class="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">

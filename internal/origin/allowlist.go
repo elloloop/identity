@@ -91,7 +91,7 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	if !ok || !validScheme(scheme) {
 		return nil, errors.New("must be scheme://host with a lower-case scheme, such as https://app.example.com")
 	}
-	if slices.Contains(refusedSchemes, scheme) {
+	if slices.Contains(standardSchemes, scheme) {
 		return nil, fmt.Errorf("scheme %s: never names the origin of a page that makes requests", scheme)
 	}
 	if slices.Contains(browserSchemes, scheme) {
@@ -120,12 +120,11 @@ func parseBareOrigin(s string) (*url.URL, error) {
 		return nil, errors.New("userinfo not allowed")
 	}
 	if !isWebScheme(scheme) {
-		// The rules below read the entry's own text after "://", not u.Host
-		// or u.Fragment: url.Parse keeps no trace of an empty fragment, and
-		// an entry carrying any "#" or port is not the origin an engine sends.
-		// http(s) entries keep the rules they had, so one ending in a bare
-		// "#" still loads and, like any origin no browser sends, matches
-		// nothing.
+		// These rules hold an application scheme to the exact text an
+		// engine sends, so they read the entry after "://", not u.Host or
+		// u.Fragment: url.Parse keeps no trace of an empty fragment, and an
+		// entry carrying any "#" or port is not such an origin. An http(s)
+		// entry is held only to the url.Parse checks above.
 		if strings.Contains(rest, "#") {
 			return nil, errFragment
 		}
@@ -143,22 +142,24 @@ func isWebScheme(scheme string) bool {
 	return scheme == httpScheme || scheme == httpsScheme
 }
 
-// refusedSchemes are the schemes besides http and https that the URL, Fetch
+// standardSchemes are the schemes besides http and https that the URL, Fetch
 // and HTML standards give a meaning of their own, so none is an application's
-// own: about:, data: and javascript: pages have an opaque origin (sent as
-// "null"), blob: and filesystem: URLs take the origin of the URL inside them,
-// file: is shared by every local file, ws: and wss: name sockets, not pages,
-// and browsers no longer load ftp: pages.
-var refusedSchemes = []string{"about", "blob", "data", "file", "filesystem", "ftp", "javascript", "ws", "wss"}
+// own and each is refused: about:, data: and javascript: pages have an opaque
+// origin (sent as "null"), blob: and filesystem: URLs take the origin of the
+// URL inside them, file: is shared by every local file, ws: and wss: name
+// sockets, not pages, and browsers no longer load ftp: pages.
+var standardSchemes = []string{"about", "blob", "data", "file", "filesystem", "ftp", "javascript", "ws", "wss"}
 
 // browserSchemes are the schemes a browser or a platform keeps for its own
-// pages, so none is an application's: chrome:, chrome-untrusted:,
-// chrome-search:, devtools:, edge: and view-source: are Chromium's and Edge's,
-// some of whose pages show content the browser loads from elsewhere;
-// resource: is Firefox's; and content: is Android's content providers, whose
-// origin every document a provider serves shares, as every local file shares
-// file:. An extension's own scheme (chrome-extension:, moz-extension:) names
-// that extension and is accepted.
+// pages, so none is an application's and each is refused: chrome:,
+// chrome-untrusted:, chrome-search:, devtools:, edge: and view-source: are
+// Chromium's and Edge's, some of whose pages show content the browser loads
+// from elsewhere; resource: is Firefox's; and content: is Android's content
+// providers, whose origin every document a provider serves shares, as every
+// local file shares file:. An extension's own scheme (chrome-extension:,
+// moz-extension:) names that extension and is accepted. The list holds the
+// schemes an operator is likeliest to list by mistake, not every engine's
+// internal scheme, so it guards against a mistake and is not a boundary.
 var browserSchemes = []string{"chrome", "chrome-search", "chrome-untrusted", "content", "devtools", "edge", "resource", "view-source"}
 
 var (
@@ -266,9 +267,8 @@ const (
 // Exact returns a copy of the exact origins in configured order.
 func (a Allowlist) Exact() []string { return slices.Clone(a.exact) }
 
-// AppSchemeOrigins returns the exact origins on an application's own scheme,
-// in configured order, so the startup log can list apart each scheme the
-// allow-list trusts besides http and https.
+// AppSchemeOrigins returns the exact origins whose scheme is neither http nor
+// https, in configured order.
 func (a Allowlist) AppSchemeOrigins() []string {
 	var out []string
 	for _, e := range a.exact {
