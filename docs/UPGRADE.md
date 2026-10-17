@@ -14,10 +14,10 @@ No schema change and no migration.
   labels, and no port, path, trailing slash, query, fragment or userinfo. It
   matches byte for byte, like any exact entry, and the response echoes it with
   credentials. The host must be a DNS name: a placeholder such as `app://-`,
-  which names no application, a host with an underscore, and one whose last
-  label is a number (`app://127.0.0.1`, which an engine sends rewritten) are
-  refused. Configure a shell that serves from a placeholder to use a
-  distinctive host name instead.
+  which names no application, a host with an underscore, and an IP address
+  (`app://127.0.0.1`, or `app://1`, which Chromium sends rewritten as
+  `app://0.0.0.1`) are refused. Configure a shell that serves from a
+  placeholder to use a distinctive host name instead.
 - **Still refused:** `*`, `null` and empty entries; a wildcard on any scheme
   but `https`; any other form of entry on an application scheme; and the
   schemes the URL standards give a meaning of their own (`file:`, `data:`,
@@ -44,7 +44,7 @@ No schema change and no migration.
   `project_cors_config_invalid_failing_closed`. If every such entry is one
   this release accepts, the upgrade turns the whole list back on, its http(s)
   entries included. Review stored entries that are not http(s) before
-  upgrading (Postgres):
+  upgrading. Only the Postgres driver serves per-project CORS lists:
 
   ```sql
   SELECT p.id, o.entry

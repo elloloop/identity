@@ -265,10 +265,11 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       digit. A placeholder host such as <code>app://-</code> or
       <code>app://.</code> is refused because it names no application:
       configure the shell, or the helper that serves its pages, to use a
-      distinctive host name and list that. A host with an underscore and an IP
-      address are refused too: an engine reads a host whose last label is a
-      number (<code>app://127.0.0.1</code>, <code>app://1</code>) as an IPv4
-      address and sends it rewritten, so such an entry could never match.
+      distinctive host name and list that. An IP address
+      (<code>app://127.0.0.1</code>) and a host with an underscore are refused
+      too: the entry names the application by a DNS host. An engine may also
+      rewrite a host whose last label is a number, as Chromium sends
+      <code>app://1</code> as <code>app://0.0.0.1</code>.
     </li>
     <li>
       <strong>Refused</strong> at startup, and by the admin API in a
@@ -291,24 +292,32 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     </li>
     <li>
       <strong>Logged apart.</strong> The startup line
-      <code>cors_allowed_origins</code> lists these entries again under
-      <code>app_scheme_origins</code>, so the schemes the list trusts besides
-      <code>http</code> and <code>https</code> are in one place.
+      <code>cors_allowed_origins</code> lists the
+      <code>GATEWAY_ALLOWED_ORIGINS</code> entries on these schemes again
+      under <code>app_scheme_origins</code>. A project's list is not logged;
+      read it back with the admin API's <code>GetProjectConfig</code>.
     </li>
     <li>
       <strong>Browser extensions.</strong> An extension page's origin, such
       as <code>chrome-extension://</code> followed by the extension's ID,
       follows the same rule and loads as an exact entry. Firefox gives each
       installation of an extension its own <code>moz-extension://</code>
-      host, so an entry for one admits a single browser profile.
+      host, so an entry for one admits a single browser profile. A browser's
+      own internal schemes, such as <code>chrome:</code> or
+      <code>chrome-untrusted:</code>, are not an application's: some of their
+      pages show content the browser loads from elsewhere, so do not list one.
     </li>
     <li>
       <strong>CORS only.</strong> <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>
-      still takes <code>http</code> and <code>https</code> URLs only.
+      still takes <code>http</code> and <code>https</code> URLs only, and
+      passkey ceremonies still verify against
+      <code>GATEWAY_PASSKEY_ORIGIN</code>, so a page on an application scheme
+      signs in by other methods.
     </li>
   </ul>
   <aside class="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
-    <strong>Security:</strong> an entry like this admits no website. A browser
+    <strong>Security:</strong> an entry for an origin your own application
+    serves admits no website. A browser
     sets <code>Origin</code> itself and page script cannot change it; a page
     loaded over <code>http</code> or <code>https</code> always presents that
     origin, a sandboxed or <code>data:</code> page presents <code>null</code>,

@@ -148,9 +148,10 @@ var refusedSchemes = []string{"about", "blob", "data", "file", "filesystem", "ft
 
 var (
 	errAppOriginHost = errors.New("an origin on an application's own scheme is exact: its host is a DNS name of dot-separated lower-case labels of letters, digits and hyphens, each starting and ending with a letter or digit, with no port or wildcard")
-	// A browser engine parses a host that ends in a number as an IPv4
-	// address and sends it rewritten (app://1 as app://0.0.0.1), so an entry
-	// spelled that way would never match.
+	// The entry names the application by a DNS host, so an IP address is
+	// refused. An engine may also read a host that ends in a number as an
+	// IPv4 address and send it rewritten (Chromium sends app://1 as
+	// app://0.0.0.1), so such an entry might never match.
 	errAppOriginNumericHost = errors.New("an origin on an application's own scheme takes a DNS name, not an IP address: its last label is not a number")
 )
 

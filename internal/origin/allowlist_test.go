@@ -52,9 +52,9 @@ func TestAllowlist_Allows(t *testing.T) {
 	}
 }
 
-// TestAllowlist_AppSchemeOrigin pins that an exact origin on an application's
+// TestAllowlist_Allows_AppSchemeOrigin pins that an exact origin on an application's
 // own scheme admits that serialized origin, byte for byte, and no look-alike.
-func TestAllowlist_AppSchemeOrigin(t *testing.T) {
+func TestAllowlist_Allows_AppSchemeOrigin(t *testing.T) {
 	t.Parallel()
 
 	a := mustAllowlist(t, "https://app.example.app", "app://example-desktop")
