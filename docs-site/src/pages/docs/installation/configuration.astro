@@ -261,11 +261,14 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     </li>
     <li>
       <strong>A named host.</strong> The shell must serve its pages from a
-      DNS-style host name. A placeholder host such as <code>app://-</code> or
-      <code>app://.</code>, a host with an underscore, and an IP address are
-      refused: an engine reads a host whose last label is a number
-      (<code>app://127.0.0.1</code>, <code>app://1</code>) as an IPv4 address
-      and sends it rewritten, so such an entry could never match.
+      DNS-style host name, each label starting and ending with a letter or
+      digit. A placeholder host such as <code>app://-</code> or
+      <code>app://.</code> is refused because it names no application:
+      configure the shell, or the helper that serves its pages, to use a
+      distinctive host name and list that. A host with an underscore and an IP
+      address are refused too: an engine reads a host whose last label is a
+      number (<code>app://127.0.0.1</code>, <code>app://1</code>) as an IPv4
+      address and sends it rewritten, so such an entry could never match.
     </li>
     <li>
       <strong>Refused</strong> at startup, and by the admin API in a
@@ -281,12 +284,23 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       and browsers no longer load <code>ftp:</code> pages.
     </li>
     <li>
+      <strong>No near-miss of <code>http</code> or <code>https</code>.</strong>
+      A scheme one edit away from either, such as <code>htps:</code>,
+      <code>hhttps:</code> or <code>httsp:</code>, is refused as a
+      misspelling rather than read as an application's own.
+    </li>
+    <li>
       <strong>Logged apart.</strong> The startup line
       <code>cors_allowed_origins</code> lists these entries again under
-      <code>app_scheme_origins</code>. A mistyped <code>https</code> scheme,
-      such as <code>htps://app.example.app</code>, is a valid application
-      scheme: it loads, admits nothing, and shows up there. Check that field
-      after changing the list.
+      <code>app_scheme_origins</code>, so the schemes the list trusts besides
+      <code>http</code> and <code>https</code> are in one place.
+    </li>
+    <li>
+      <strong>Browser extensions.</strong> An extension page's origin, such
+      as <code>chrome-extension://</code> followed by the extension's ID,
+      follows the same rule and loads as an exact entry. Firefox gives each
+      installation of an extension its own <code>moz-extension://</code>
+      host, so an entry for one admits a single browser profile.
     </li>
     <li>
       <strong>CORS only.</strong> <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>
@@ -297,8 +311,10 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     <strong>Security:</strong> an entry like this admits no website. A browser
     sets <code>Origin</code> itself and page script cannot change it; a page
     loaded over <code>http</code> or <code>https</code> always presents that
-    origin, and a sandboxed, <code>data:</code> or <code>file:</code> page
-    presents <code>null</code>. Only an application that registered the scheme
+    origin, a sandboxed or <code>data:</code> page presents <code>null</code>,
+    and a <code>file:</code> page presents <code>null</code> or, in some
+    shells, <code>file://</code>; both are refused. Only an application that
+    registered the scheme
     and loads its own pages from it presents the origin. A non-browser client
     can send any <code>Origin</code> it likes, with or without this entry: CORS
     governs what browsers let pages read, not who can call the server.

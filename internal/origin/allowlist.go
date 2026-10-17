@@ -93,6 +93,9 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	if slices.Contains(refusedSchemes, scheme) {
 		return nil, fmt.Errorf("scheme %s: never names the origin of a page that makes requests", scheme)
 	}
+	if !isWebScheme(scheme) && (oneEditApart(scheme, httpScheme) || oneEditApart(scheme, httpsScheme)) {
+		return nil, fmt.Errorf("scheme %s: one edit from http or https, so refused as a misspelling of one", scheme)
+	}
 	u, err := url.Parse(s)
 	if err != nil {
 		return nil, errInvalidURL
@@ -128,8 +131,9 @@ func parseBareOrigin(s string) (*url.URL, error) {
 
 var errFragment = errors.New("fragment not allowed")
 
-// isWebScheme reports whether scheme is http or https, the schemes whose
-// entries keep the rules they had before application schemes were accepted.
+// isWebScheme reports whether scheme is http or https, whose entries take
+// any host and port url.Parse accepts; every other scheme takes only the exact
+// form a browser engine serializes (see parseBareOrigin).
 func isWebScheme(scheme string) bool {
 	return scheme == httpScheme || scheme == httpsScheme
 }
@@ -143,7 +147,7 @@ func isWebScheme(scheme string) bool {
 var refusedSchemes = []string{"about", "blob", "data", "file", "filesystem", "ftp", "javascript", "ws", "wss"}
 
 var (
-	errAppOriginHost = errors.New("an origin on an application's own scheme is exact: its host is a DNS name of lower-case labels (letters, digits, hyphens, dots), with no port or wildcard")
+	errAppOriginHost = errors.New("an origin on an application's own scheme is exact: its host is a DNS name of dot-separated lower-case labels of letters, digits and hyphens, each starting and ending with a letter or digit, with no port or wildcard")
 	// A browser engine parses a host that ends in a number as an IPv4
 	// address and sends it rewritten (app://1 as app://0.0.0.1), so an entry
 	// spelled that way would never match.
@@ -167,7 +171,9 @@ func validScheme(s string) bool {
 
 // checkAppHost accepts host when it is one or more dot-separated lower-case
 // DNS labels whose last label does not end in a number in the URL standard's
-// sense (decimal digits, or 0x and hex digits).
+// sense (decimal digits, or 0x and hex digits). ParsePattern checks decimal
+// only: an https host whose last label is 0x and hex is not a valid URL, so a
+// pattern with such a parent matches nothing and fails closed.
 func checkAppHost(host string) error {
 	labels := strings.Split(host, ".")
 	for _, l := range labels {
@@ -179,6 +185,32 @@ func checkAppHost(host string) error {
 		return errAppOriginNumericHost
 	}
 	return nil
+}
+
+// oneEditApart reports whether a becomes b by exactly one insertion,
+// deletion, substitution or swap of two adjacent characters. An entry whose
+// scheme is that close to http or https is far likelier a typo than a scheme
+// an application registered, and loading it would admit nothing while the
+// origin it meant stays refused.
+func oneEditApart(a, b string) bool {
+	if len(a) < len(b) {
+		a, b = b, a
+	}
+	i := 0
+	for i < len(b) && a[i] == b[i] {
+		i++
+	}
+	switch len(a) - len(b) {
+	case 0:
+		if i == len(a) {
+			return false
+		}
+		return a[i+1:] == b[i+1:] || (a[i] == b[i+1] && a[i+1] == b[i] && a[i+2:] == b[i+2:])
+	case 1:
+		return a[i+1:] == b[i:]
+	default:
+		return false
+	}
 }
 
 // isHexNumber reports whether l is "0x" followed by zero or more hex digits,
@@ -218,8 +250,8 @@ const (
 func (a Allowlist) Exact() []string { return slices.Clone(a.exact) }
 
 // AppSchemeOrigins returns the exact origins on an application's own scheme,
-// in configured order. A mistyped http(s) scheme is one of them, so listing
-// them apart is what lets an operator see one.
+// in configured order, so the startup log can list apart each scheme the
+// allow-list trusts besides http and https.
 func (a Allowlist) AppSchemeOrigins() []string {
 	var out []string
 	for _, e := range a.exact {

@@ -967,8 +967,9 @@ type Config struct {
 	// echoes the concrete request Origin. An application-scheme origin, the
 	// origin of a desktop shell's pages, is scheme://host with a lower-case
 	// DNS name and no port. A bare "*", "null", a malformed pattern or one
-	// whose parent is a public suffix, and an origin on file:, data:, blob:,
-	// javascript: or another scheme with no origin of its own fail startup,
+	// whose parent is a public suffix, an origin on file:, data:, blob:,
+	// javascript: or another scheme the URL standards give a meaning of
+	// their own, and a scheme one edit from http or https fail startup,
 	// since credentials are always allowed.
 	AllowedOrigins string
 

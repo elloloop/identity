@@ -469,7 +469,8 @@ func TestConfigSetupMatrix(t *testing.T) {
 	})
 
 	// Case 7b — NEGATIVE: a scheme that never names one application's pages,
-	// and an application-scheme origin carrying a path, fail startup.
+	// a scheme one edit from https, and an application-scheme origin carrying
+	// a path, fail startup.
 	t.Run("non_origin_scheme_cors_entry_fails", func(t *testing.T) {
 		t.Parallel()
 		env, _ := cfgEnv(t, map[string]string{
@@ -478,6 +479,16 @@ func TestConfigSetupMatrix(t *testing.T) {
 		cfgExpectBootFailure(t, env, []string{
 			"cors config invalid",
 			"scheme file: never names the origin of a page that makes requests",
+		})
+	})
+	t.Run("misspelled_https_cors_entry_fails", func(t *testing.T) {
+		t.Parallel()
+		env, _ := cfgEnv(t, map[string]string{
+			"GATEWAY_ALLOWED_ORIGINS": "http://localhost:9002,htps://admin.example.app",
+		})
+		cfgExpectBootFailure(t, env, []string{
+			"cors config invalid",
+			"scheme htps: one edit from http or https, so refused as a misspelling of one",
 		})
 	})
 	t.Run("app_scheme_cors_origin_with_path_fails", func(t *testing.T) {
@@ -509,16 +520,14 @@ func TestConfigSetupMatrix(t *testing.T) {
 	})
 
 	// Case 8b — POSITIVE: an exact origin on an application's own scheme
-	// boots clean and is logged apart from the http(s) entries. So is a
-	// mistyped http(s) scheme, which loads as one: that field is where an
-	// operator sees it.
+	// boots clean and is logged apart from the http(s) entries.
 	t.Run("app_scheme_cors_origin_boots_and_is_logged", func(t *testing.T) {
 		t.Parallel()
 		env, port := cfgEnv(t, map[string]string{
-			"GATEWAY_ALLOWED_ORIGINS": "http://localhost:9002,app://example-desktop,htps://admin.example.app",
+			"GATEWAY_ALLOWED_ORIGINS": "http://localhost:9002,app://example-desktop",
 		})
 		cfgExpectBootClean(t, env, port,
-			[]string{"cors_allowed_origins", `"app_scheme_origins":["app://example-desktop","htps://admin.example.app"]`},
+			[]string{"cors_allowed_origins", `"app_scheme_origins":["app://example-desktop"]`},
 			nil)
 	})
 

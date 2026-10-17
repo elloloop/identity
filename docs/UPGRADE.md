@@ -14,8 +14,10 @@ No schema change and no migration.
   labels, and no port, path, trailing slash, query, fragment or userinfo. It
   matches byte for byte, like any exact entry, and the response echoes it with
   credentials. The host must be a DNS name: a placeholder such as `app://-`,
-  a host with an underscore, and one whose last label is a number
-  (`app://127.0.0.1`, which an engine sends rewritten) are refused.
+  which names no application, a host with an underscore, and one whose last
+  label is a number (`app://127.0.0.1`, which an engine sends rewritten) are
+  refused. Configure a shell that serves from a placeholder to use a
+  distinctive host name instead.
 - **Still refused:** `*`, `null` and empty entries; a wildcard on any scheme
   but `https`; any other form of entry on an application scheme; and the
   schemes the URL standards give a meaning of their own (`file:`, `data:`,
@@ -24,21 +26,39 @@ No schema change and no migration.
   local file shares, or which name sockets or pages browsers no longer load.
   Such an entry fails startup in `GATEWAY_ALLOWED_ORIGINS`, and the admin API
   refuses it in a project's list.
-- **A mistyped http(s) scheme now loads.** `htps://app.example.app` used to
-  fail startup; it is now a valid application-scheme entry, and it admits
-  nothing. The startup line `cors_allowed_origins` lists application-scheme
-  entries apart, under `app_scheme_origins`, so check that field after
-  changing the list.
-- **http(s) entries and patterns are unchanged.** Every list that starts
-  today starts unchanged and admits the same origins. A non-http(s) entry
-  that is still refused gets an error naming the rule it breaks instead of
-  saying the scheme must be http or https, at startup and in the admin API's
-  `InvalidArgument` message for a project's list. The error code is
-  unchanged. `GATEWAY_OAUTH_ALLOWED_RETURN_URLS` still takes http(s) URLs
-  only.
+- **A misspelled http(s) scheme is still refused.** A scheme one edit away
+  from `http` or `https` (`htps://`, `hhttps://`, `httsp://`) is refused as a
+  misspelling, not loaded as an application scheme. The startup line
+  `cors_allowed_origins` lists the application-scheme entries that loaded
+  under a new field, `app_scheme_origins`.
+- **http(s) entries and patterns are unchanged.** Every
+  `GATEWAY_ALLOWED_ORIGINS` that starts today starts unchanged and admits the
+  same origins. An entry refused for its scheme (a non-http(s) scheme, an
+  upper-case scheme, or none) gets a new message naming the rule it breaks,
+  at startup and in the admin API's `InvalidArgument` for a project's list.
+  The error code is unchanged. `GATEWAY_OAUTH_ALLOWED_RETURN_URLS` still
+  takes http(s) URLs only.
+- **A project list that fails closed today can come back.** A stored
+  `cors.allowed_origins` holding an entry an older release refused is
+  dropped whole, and each resolution logs
+  `project_cors_config_invalid_failing_closed`. If every such entry is one
+  this release accepts, the upgrade turns the whole list back on, its http(s)
+  entries included. Review stored entries that are not http(s) before
+  upgrading (Postgres):
+
+  ```sql
+  SELECT p.id, o.entry
+  FROM projects p,
+       jsonb_array_elements_text(
+         CASE WHEN jsonb_typeof(p.config_json -> 'cors' -> 'allowed_origins') = 'array'
+              THEN p.config_json -> 'cors' -> 'allowed_origins' ELSE '[]'::jsonb END
+       ) AS o(entry)
+  WHERE o.entry !~ '^https?://';
+  ```
 - **Why this admits no website.** A browser sets `Origin` itself; page script
   cannot change it. A page loaded over http or https presents that origin,
-  and a sandboxed, `data:` or `file:` page presents `null`, so no web page can
+  a sandboxed or `data:` page presents `null`, and a `file:` page presents
+  `null` or, in some shells, `file://` (both refused), so no web page can
   present `app://example-desktop`. Only an application that registered the
   scheme, and loads its own pages from it, does. A non-browser client can
   send any `Origin` whether or not the entry exists. The origin is not an
@@ -50,8 +70,9 @@ No schema change and no migration.
   fails startup. A project whose stored `cors.allowed_origins` holds one keeps
   serving on the older release, but its whole per-project list is dropped and
   each resolution logs `project_cors_config_invalid_failing_closed`, and that
-  release's admin API refuses to write the project's config until the entry
-  is gone. Remove such entries before rolling back.
+  release's `UpsertProjectConfig` refuses the project's whole config until the
+  entry is gone (targeted writes, such as OAuth providers and assurance, are
+  unaffected). Remove such entries before rolling back.
 
 ## v4.18.0 → v4.19.0 — native delegated agent OAuth
 

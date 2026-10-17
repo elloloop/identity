@@ -89,7 +89,7 @@ func TestAllowlist_AppSchemeOrigin(t *testing.T) {
 func TestValidateAllowedOrigins_AppSchemeOrigins(t *testing.T) {
 	t.Parallel()
 
-	entries := []string{"app://example-desktop", "example+shell://ui.example.test", "x-example.app://localhost", "app2://123.example-desktop"}
+	entries := []string{"app://example-desktop", "example+shell://ui.example.test", "x-example.app://localhost", "app2://123.example-desktop", "app://example.0xg"}
 	out, err := ValidateAllowedOrigins(entries, true)
 	require.NoError(t, err)
 	assert.Equal(t, entries, out.Exact())
@@ -98,15 +98,41 @@ func TestValidateAllowedOrigins_AppSchemeOrigins(t *testing.T) {
 }
 
 // TestAllowlist_AppSchemeOrigins pins that the app-scheme entries are listed
-// apart from the http(s) ones, a mistyped http(s) scheme among them: such an
-// entry loads, admits nothing, and is visible only there.
+// apart from the http(s) entries and the patterns.
 func TestAllowlist_AppSchemeOrigins(t *testing.T) {
 	t.Parallel()
 
-	a := mustAllowlist(t, "https://app.example.app", "app://example-desktop", "http://localhost:3000", "htps://admin.example.app", "https://*.previews.example.app")
-	assert.Equal(t, []string{"app://example-desktop", "htps://admin.example.app"}, a.AppSchemeOrigins())
-	assert.False(t, a.Allows("https://admin.example.app"), "a mistyped entry admits not the origin it meant")
+	a := mustAllowlist(t, "https://app.example.app", "app://example-desktop", "http://localhost:3000", "example+shell://ui.example.test", "https://*.previews.example.app")
+	assert.Equal(t, []string{"app://example-desktop", "example+shell://ui.example.test"}, a.AppSchemeOrigins())
 	assert.Nil(t, mustAllowlist(t, "https://app.example.app").AppSchemeOrigins())
+}
+
+func TestOneEditApart(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"https", "htps", true},     // deletion
+		{"https", "hhttps", true},   // insertion
+		{"https", "https2", true},   // insertion at the end
+		{"http", "shttp", true},     // insertion at the start
+		{"http", "htpp", true},      // substitution
+		{"https", "httsp", true},    // adjacent swap
+		{"http", "thtp", true},      // adjacent swap at the start
+		{"http", "http", false},     // equal
+		{"http", "hxxp", false},     // two substitutions
+		{"http", "ptth", false},     // reversed
+		{"https", "htp", false},     // two deletions
+		{"https", "hptts", false},   // a swap that is not adjacent
+		{"http", "app", false},      // unrelated
+		{"https", "example", false}, // unrelated, longer
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, oneEditApart(tt.a, tt.b), "%s / %s", tt.a, tt.b)
+		assert.Equal(t, tt.want, oneEditApart(tt.b, tt.a), "%s / %s", tt.b, tt.a)
+	}
 }
 
 // TestValidateAllowedOrigins_AppSchemeHostRejections pins the host rule's two
@@ -173,6 +199,13 @@ func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
 		"ws://example-desktop":            "scheme ws:",
 		"wss://example-desktop":           "scheme wss:",
 		"ftp://example-desktop":           "scheme ftp:",
+		"htps://app.example.app":          "misspelling",
+		"htp://app.example.app":           "misspelling",
+		"hhttps://app.example.app":        "misspelling",
+		"httsp://app.example.app":         "misspelling",
+		"htttps://app.example.app":        "misspelling",
+		"https2://app.example.app":        "misspelling",
+		"httpx://app.example.app":         "misspelling",
 		"app://example-desktop,":          "empty origin entry",
 		"app://example-desktop,null":      "null",
 		"app://example-desktop,*":         "wildcard",
@@ -261,7 +294,7 @@ func TestParseAllowedOrigins_MalformedOrigin_Rejected(t *testing.T) {
 
 	for _, raw := range []string{
 		"localhost:9002",            // missing scheme
-		"ftp://localhost:9002",      // wrong scheme
+		"ftp://localhost:9002",      // a scheme with a standard meaning (refusedSchemes)
 		"http://localhost:9002/",    // trailing slash
 		"http://localhost:9002/x",   // path
 		"http://localhost:9002?q=1", // query
