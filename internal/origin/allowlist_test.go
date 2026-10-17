@@ -1,6 +1,11 @@
 package origin
 
 import (
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -181,53 +186,57 @@ func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"app://":                          "host is empty",
-		"app://example-desktop/":          "path not allowed",
-		"app://example-desktop/index":     "path not allowed",
-		"app://example-desktop?":          "query not allowed",
-		"app://example-desktop?x=1":       "query not allowed",
-		"app://example-desktop#f":         "fragment not allowed",
-		"app://example-desktop#":          "fragment not allowed",
-		"app://u@example-desktop":         "userinfo not allowed",
-		"app://%65xample-desktop":         "not a valid URL",
-		"APP://example-desktop":           "lower-case scheme",
-		"App://example-desktop":           "lower-case scheme",
-		"1app://example-desktop":          "lower-case scheme",
-		"ap_p://example-desktop":          "lower-case scheme",
-		"://example-desktop":              "lower-case scheme",
-		"app:example-desktop":             "lower-case scheme",
-		"app:/example-desktop":            "lower-case scheme",
-		"blob:https://app.example.app":    "lower-case scheme",
-		"file://":                         "scheme file:",
-		"file:///":                        "scheme file:",
-		"file://localhost":                "scheme file:",
-		"data://example-desktop":          "scheme data:",
-		"blob://example-desktop":          "scheme blob:",
-		"javascript://example-desktop":    "scheme javascript:",
-		"about://blank":                   "scheme about:",
-		"filesystem://example-desktop":    "scheme filesystem:",
-		"ws://example-desktop":            "scheme ws:",
-		"wss://example-desktop":           "scheme wss:",
-		"ftp://example-desktop":           "scheme ftp:",
-		"chrome://settings":               "scheme chrome: names a browser's",
-		"chrome-untrusted://terminal":     "scheme chrome-untrusted: names a browser's",
-		"chrome-search://local-ntp":       "scheme chrome-search: names a browser's",
-		"devtools://devtools":             "scheme devtools: names a browser's",
-		"edge://settings":                 "scheme edge: names a browser's",
-		"view-source://example-desktop":   "scheme view-source: names a browser's",
-		"resource://gre":                  "scheme resource: names a browser's",
-		"content://media":                 "scheme content: names a browser's",
-		"htps://app.example.app":          "misspelling",
-		"htp://app.example.app":           "misspelling",
-		"hhttps://app.example.app":        "misspelling",
-		"httsp://app.example.app":         "misspelling",
-		"htttps://app.example.app":        "misspelling",
-		"https2://app.example.app":        "misspelling",
-		"httpx://app.example.app":         "misspelling",
-		"app://example-desktop,":          "empty origin entry",
-		"app://example-desktop,null":      "null",
-		"app://example-desktop,*":         "wildcard",
-		"app://example-desktop,app://x y": "whitespace",
+		"app://":                           "host is empty",
+		"app://example-desktop/":           "path not allowed",
+		"app://example-desktop/index":      "path not allowed",
+		"app://example-desktop?":           "query not allowed",
+		"app://example-desktop?x=1":        "query not allowed",
+		"app://example-desktop#f":          "fragment not allowed",
+		"app://example-desktop#":           "fragment not allowed",
+		"app://u@example-desktop":          "userinfo not allowed",
+		"app://%65xample-desktop":          "not a valid URL",
+		"APP://example-desktop":            "lower-case scheme",
+		"App://example-desktop":            "lower-case scheme",
+		"1app://example-desktop":           "lower-case scheme",
+		"ap_p://example-desktop":           "lower-case scheme",
+		"://example-desktop":               "lower-case scheme",
+		"app:example-desktop":              "lower-case scheme",
+		"app:/example-desktop":             "lower-case scheme",
+		"blob:https://app.example.app":     "scheme blob: its URLs take the origin of the URL inside them",
+		"filesystem:https://a.example.app": "scheme filesystem:",
+		"data:text/plain,x":                "scheme data: its pages have an opaque origin",
+		"javascript:void(0)":               "scheme javascript:",
+		"view-source:https://example.app":  "scheme view-source: names a browser's",
+		"file://":                          "scheme file: every local file shares one origin",
+		"file:///":                         "scheme file:",
+		"file://localhost":                 "scheme file:",
+		"data://example-desktop":           "scheme data:",
+		"blob://example-desktop":           "scheme blob:",
+		"javascript://example-desktop":     "scheme javascript:",
+		"about://blank":                    "scheme about:",
+		"filesystem://example-desktop":     "scheme filesystem:",
+		"ws://example-desktop":             "scheme ws:",
+		"wss://example-desktop":            "scheme wss:",
+		"ftp://example-desktop":            "scheme ftp:",
+		"chrome://settings":                "scheme chrome: names a browser's",
+		"chrome-untrusted://terminal":      "scheme chrome-untrusted: names a browser's",
+		"chrome-search://local-ntp":        "scheme chrome-search: names a browser's",
+		"devtools://devtools":              "scheme devtools: names a browser's",
+		"edge://settings":                  "scheme edge: names a browser's",
+		"view-source://example-desktop":    "scheme view-source: names a browser's",
+		"resource://gre":                   "scheme resource: names a browser's",
+		"content://media":                  "scheme content: names a browser's",
+		"htps://app.example.app":           "misspelling",
+		"htp://app.example.app":            "misspelling",
+		"hhttps://app.example.app":         "misspelling",
+		"httsp://app.example.app":          "misspelling",
+		"htttps://app.example.app":         "misspelling",
+		"https2://app.example.app":         "misspelling",
+		"httpx://app.example.app":          "misspelling",
+		"app://example-desktop,":           "empty origin entry",
+		"app://example-desktop,null":       "null",
+		"app://example-desktop,*":          "wildcard",
+		"app://example-desktop,app://x y":  "whitespace",
 	}
 	for raw, wantMsg := range cases {
 		t.Run(raw, func(t *testing.T) {
@@ -236,6 +245,23 @@ func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
 			assert.Contains(t, err.Error(), wantMsg)
 		})
 	}
+}
+
+// TestRefusedSchemesDocumented keeps the configuration page in step with the
+// code: every scheme parseBareOrigin refuses by name is listed there, so adding
+// one to standardSchemes or browserSchemes without documenting it fails.
+func TestRefusedSchemesDocumented(t *testing.T) {
+	t.Parallel()
+
+	page, err := os.ReadFile(filepath.Join("..", "..", "docs-site", "src", "pages", "docs", "installation", "configuration.astro"))
+	require.NoError(t, err)
+	var missing []string
+	for _, scheme := range append(slices.Sorted(maps.Keys(standardSchemes)), browserSchemes...) {
+		if !strings.Contains(string(page), "<code>"+scheme+":</code>") {
+			missing = append(missing, scheme)
+		}
+	}
+	assert.Empty(t, missing, "schemes refused but not listed on the configuration page")
 }
 
 func TestAllowlist_ZeroValueAllowsNothing(t *testing.T) {

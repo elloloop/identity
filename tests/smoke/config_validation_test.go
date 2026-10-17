@@ -478,7 +478,7 @@ func TestConfigSetupMatrix(t *testing.T) {
 		})
 		cfgExpectBootFailure(t, env, []string{
 			"cors config invalid",
-			"scheme file: never names the origin of a page that makes requests",
+			"scheme file: every local file shares one origin",
 		})
 	})
 	t.Run("misspelled_https_cors_entry_fails", func(t *testing.T) {

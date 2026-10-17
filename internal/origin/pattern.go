@@ -86,6 +86,9 @@ func ParsePattern(u *url.URL) (Pattern, error) {
 			return Pattern{}, ErrPatternParentLabel
 		}
 	}
+	// Decimal only, unlike checkAppHost: an https host whose last label is 0x
+	// and hex is not a valid URL, so no browser sends a request from under
+	// such a parent and the pattern fails closed.
 	if isNumeric(parentLabels[len(parentLabels)-1]) {
 		return Pattern{}, ErrPatternParentNumeric
 	}

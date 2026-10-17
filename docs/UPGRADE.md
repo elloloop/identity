@@ -14,8 +14,9 @@ No schema change and no migration.
   labels, and no port, path, trailing slash, query, fragment or userinfo. It
   matches byte for byte, like any exact entry, and the response echoes it with
   credentials. The host must be a DNS name: a placeholder such as `app://-`,
-  a host with an underscore, and an IP address (`app://127.0.0.1`, or
-  `app://1`, which Chromium sends rewritten as `app://0.0.0.1`) are refused.
+  a host with an underscore, an IP address (`app://127.0.0.1`) and a host
+  whose last label is a number (`app://1`, which Chromium sends rewritten as
+  `app://0.0.0.1`, or `app://0x7f`) are refused.
   Where the helper that serves a shell's pages defaults to a placeholder, set
   its host name option to a distinctive name instead.
 - **Still refused:** `*`, `null` and empty entries; a wildcard on any scheme
@@ -34,8 +35,10 @@ No schema change and no migration.
   from `http` or `https` (`htps://`, `hhttps://`, `httsp://`) is refused as a
   misspelling, not loaded as an application scheme.
 - **Logged apart.** The startup line `cors_allowed_origins` lists the
-  application-scheme entries of `GATEWAY_ALLOWED_ORIGINS` under a new field,
-  `app_scheme_origins`.
+  application-scheme entries of `GATEWAY_ALLOWED_ORIGINS` again under a new
+  field, `app_scheme_origins`. Its `origins` field still lists every exact
+  entry, these included, so a log reader that expects only http(s) values
+  there sees the new schemes too.
 - **http(s) entries and patterns are unchanged.** Every
   `GATEWAY_ALLOWED_ORIGINS` that starts today starts unchanged and admits the
   same origins. An entry refused for its scheme (a non-http(s) scheme, an

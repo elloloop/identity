@@ -87,17 +87,20 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	if strings.ContainsAny(s, " \t\r\n") {
 		return nil, errors.New("contains whitespace")
 	}
+	// A refused scheme is named whatever follows it, so blob:https://… and
+	// data:text/plain,… get the scheme's own reason, not a form error.
+	lead, _, _ := strings.Cut(s, ":")
+	if reason, refused := standardSchemes[lead]; refused {
+		return nil, fmt.Errorf("scheme %s: %s", lead, reason)
+	}
+	if slices.Contains(browserSchemes, lead) {
+		return nil, fmt.Errorf("scheme %s: names a browser's or a platform's own pages, never an application's", lead)
+	}
 	scheme, rest, ok := strings.Cut(s, "://")
 	if !ok || !validScheme(scheme) {
 		return nil, errors.New("must be scheme://host with a lower-case scheme, such as https://app.example.com")
 	}
-	if slices.Contains(standardSchemes, scheme) {
-		return nil, fmt.Errorf("scheme %s: never names the origin of a page that makes requests", scheme)
-	}
-	if slices.Contains(browserSchemes, scheme) {
-		return nil, fmt.Errorf("scheme %s: names a browser's or a platform's own pages, never an application's", scheme)
-	}
-	if !isWebScheme(scheme) && (oneEditApart(scheme, httpScheme) || oneEditApart(scheme, httpsScheme)) {
+	if !isHTTPScheme(scheme) && (oneEditApart(scheme, httpScheme) || oneEditApart(scheme, httpsScheme)) {
 		return nil, fmt.Errorf("scheme %s: one edit from http or https, so refused as a misspelling of one", scheme)
 	}
 	u, err := url.Parse(s)
@@ -119,7 +122,7 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	if u.User != nil {
 		return nil, errors.New("userinfo not allowed")
 	}
-	if !isWebScheme(scheme) {
+	if !isHTTPScheme(scheme) {
 		// These rules hold an application scheme to the exact text an
 		// engine sends, so they read the entry after "://", not u.Host or
 		// u.Fragment: url.Parse keeps no trace of an empty fragment, and an
@@ -135,20 +138,34 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	return u, nil
 }
 
-// isWebScheme reports whether scheme is http or https, whose entries take
-// any host and port url.Parse accepts; every other scheme takes only the exact
-// form a browser engine serializes (see parseBareOrigin).
-func isWebScheme(scheme string) bool {
+// isHTTPScheme reports whether scheme is http or https, the Fetch standard's
+// HTTP(S) schemes, whose entries take any host and port url.Parse accepts;
+// every other scheme takes only the exact form a browser engine serializes
+// (see parseBareOrigin).
+func isHTTPScheme(scheme string) bool {
 	return scheme == httpScheme || scheme == httpsScheme
 }
 
 // standardSchemes are the schemes besides http and https that the URL, Fetch
 // and HTML standards give a meaning of their own, so none is an application's
-// own and each is refused: about:, data: and javascript: pages have an opaque
-// origin (sent as "null"), blob: and filesystem: URLs take the origin of the
-// URL inside them, file: is shared by every local file, ws: and wss: name
-// sockets, not pages, and browsers no longer load ftp: pages.
-var standardSchemes = []string{"about", "blob", "data", "file", "filesystem", "ftp", "javascript", "ws", "wss"}
+// own and each is refused, with the reason the operator is told.
+var standardSchemes = map[string]string{
+	"about":      reasonOpaqueOrigin,
+	"data":       reasonOpaqueOrigin,
+	"javascript": reasonOpaqueOrigin,
+	"blob":       reasonInnerOrigin,
+	"filesystem": reasonInnerOrigin,
+	"file":       "every local file shares one origin, which a browser sends as null or file://; serve the pages from an application scheme with a named host, such as app://example-desktop",
+	"ws":         reasonSocket,
+	"wss":        reasonSocket,
+	"ftp":        "browsers no longer load its pages",
+}
+
+const (
+	reasonOpaqueOrigin = "its pages have an opaque origin, which a browser sends as null"
+	reasonInnerOrigin  = "its URLs take the origin of the URL inside them; list that origin instead"
+	reasonSocket       = "names a socket, not a page; list the origin of the page that opens the socket"
+)
 
 // browserSchemes are the schemes a browser or a platform keeps for its own
 // pages, so none is an application's and each is refused: chrome:,
@@ -189,9 +206,7 @@ func validScheme(s string) bool {
 
 // checkAppHost accepts host when it is one or more dot-separated lower-case
 // DNS labels whose last label does not end in a number in the URL standard's
-// sense (decimal digits, or 0x and hex digits). ParsePattern checks decimal
-// only: an https host whose last label is 0x and hex is not a valid URL, so a
-// pattern with such a parent matches nothing and fails closed.
+// sense (decimal digits, or 0x and hex digits).
 func checkAppHost(host string) error {
 	labels := strings.Split(host, ".")
 	for _, l := range labels {
@@ -272,7 +287,7 @@ func (a Allowlist) Exact() []string { return slices.Clone(a.exact) }
 func (a Allowlist) AppSchemeOrigins() []string {
 	var out []string
 	for _, e := range a.exact {
-		if scheme, _, _ := strings.Cut(e, "://"); !isWebScheme(scheme) {
+		if scheme, _, _ := strings.Cut(e, "://"); !isHTTPScheme(scheme) {
 			out = append(out, e)
 		}
 	}
