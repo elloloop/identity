@@ -56,7 +56,7 @@ test('signed-in provider user can explicitly deny without agent selection', asyn
  await page.getByRole('button', { name: 'Don’t allow' }).click(); await expect(page.getByText('Native denial', { exact: true })).toBeVisible();
  expect(callback.searchParams.get('error')).toBe('access_denied'); expect(callback.searchParams.has('code')).toBe(false);
 });
-for (const kind of ['unsolicited', 'state', 'request', 'duplicate-request', 'duplicate-project', 'duplicate-code', 'expired']) {
+for (const kind of ['unsolicited', 'state', 'request', 'duplicate-request', 'duplicate-project', 'duplicate-code', 'context', 'expired']) {
  test('refuses unbound hosted return: ' + kind, async ({ page }) => {
   const info = await start(page); let destination, redeems = 0;
   await page.route('**/oauth/start/google?*', route => { destination = new URL(route.request().url()).searchParams.get('return_to'); return route.fulfill({ status: 200, body: 'Held synthetic provider start' }); });
@@ -68,7 +68,7 @@ for (const kind of ['unsolicited', 'state', 'request', 'duplicate-request', 'dup
   if (kind === 'duplicate-request') target.searchParams.append('request_id', new URL(info.url).searchParams.get('request_id'));
   if (kind === 'duplicate-project') { target.searchParams.append('project_key', ''); target.searchParams.append('project_key', ''); }
   if (kind === 'duplicate-code') target.searchParams.append('code', 'other-code');
-  if (kind === 'expired') await page.evaluate(() => { const key = 'identity.agent-consent.login.v1'; const state = JSON.parse(sessionStorage.getItem(key)); state.expires = Date.now() - 1; sessionStorage.setItem(key, JSON.stringify(state)); });
+  if (kind === 'expired' || kind === 'context') await page.evaluate(kind => { const key = 'identity.agent-consent.login.v1'; const state = JSON.parse(sessionStorage.getItem(key)); sessionStorage.setItem(key, JSON.stringify({ state: state.state, context: kind === 'context' ? '0'.repeat(64) : state.context, expires: kind === 'expired' ? Date.now() - 1 : state.expires })); }, kind);
   page.on('request', request => { if (request.url().includes('/RedeemOAuthCode')) redeems++; });
   await page.goto(target.href); await expect(page.getByRole('alert')).toContainText(kind.startsWith('duplicate-') && kind !== 'duplicate-code' ? 'incomplete' : 'does not match');
   expect(redeems).toBe(0); expect(new URL(page.url()).searchParams.has('code')).toBe(false);
@@ -151,4 +151,33 @@ test('returning provider must remain renderable even if another provider is avai
  page.on('request', request => { if (request.url().includes('/RedeemOAuthCode')) redeems++; });
  await page.goto(target.href); await expect(page.getByRole('alert')).toContainText('does not match'); expect(redeems).toBe(0);
  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+});
+
+test('hosted intent retains only nonce, provider-bound digest and expiry', async ({ page }) => {
+ const info = await start(page);
+ await provider(page);
+ const saved = await page.evaluate(() => sessionStorage.getItem('identity.agent-consent.login.v1'));
+ const intent = JSON.parse(saved);
+ expect(Object.keys(intent).sort()).toEqual(['context', 'expires', 'state']);
+ expect(intent.state).toMatch(/^[a-f0-9]{64}$/);
+ expect(intent.context).toMatch(/^[a-f0-9]{64}$/);
+ expect(intent.expires).toBeGreaterThan(Date.now());
+ expect(saved).not.toContain('google');
+ expect(saved).not.toContain(new URL(info.url).searchParams.get('request_id'));
+ let returnedCode, issuedToken;
+ page.on('request', request => {
+  const url = new URL(request.url());
+  if (url.pathname === '/auth/agent-consent') returnedCode = url.searchParams.get('code');
+ });
+ await page.route('**/identity.v1.IdentityService/RedeemOAuthCode', async route => {
+  const response = await route.fetch();
+  issuedToken = (await response.json()).accessToken;
+  await route.fulfill({ response });
+ });
+ await page.getByRole('link', { name: 'Use example account' }).click();
+ await expect(page.getByRole('heading', { name: 'Authorize access to files' })).toBeVisible();
+ expect(returnedCode).toBeTruthy(); expect(issuedToken).toBeTruthy();
+ expect(saved).not.toContain(returnedCode); expect(saved).not.toContain(issuedToken);
+ expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+ await expect(page.getByRole('button', { name: 'Allow selected agent' })).toBeDisabled();
 });

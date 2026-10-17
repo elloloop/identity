@@ -18,8 +18,9 @@
     if (projectKey) target.searchParams.set('project_key', projectKey);
     return target;
   }
-  async function loginContext() {
-    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(consentReturnURL().href));
+  async function loginContext(providerKey) {
+    const context = JSON.stringify([consentReturnURL().href, providerKey]);
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(context));
     return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
   }
   function providerOrigin(provider) {
@@ -42,7 +43,7 @@
         button.querySelector('span').textContent = 'Continue with ' + (providerLabels[provider.key] || provider.key);
         button.addEventListener('click', () => action(async () => {
           const state = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join('');
-          const intent = { state, context: await loginContext(), provider: provider.key, expires: Date.now() + loginIntentLifetime };
+          const intent = { state, context: await loginContext(provider.key), expires: Date.now() + loginIntentLifetime };
           try { sessionStorage.setItem(loginIntentKey, JSON.stringify(intent)); }
           catch { throw new Error('This browser cannot retain the sign-in request. Allow session storage or use another browser.'); }
           const target = consentReturnURL(); target.searchParams.set('login_state', state);
@@ -65,6 +66,12 @@
       byId('no-login').textContent = 'Hosted sign-in cannot return to this consent page under the server’s allowed return policy. Contact your administrator. No access has been granted.';
     }
   }
+  async function matchesLoginContext(context) {
+    for (const providerKey of providerKeys) {
+      if (context === await loginContext(providerKey)) return true;
+    }
+    return false;
+  }
   async function resumeHostedLogin() {
     const codes = query.getAll('code'), errors = query.getAll('error'), states = query.getAll('login_state');
     if (!codes.length && !errors.length && !states.length) return;
@@ -75,9 +82,8 @@
       if (saved && saved.length <= 1024) intent = JSON.parse(saved);
     } catch { throw new Error('This browser could not verify the sign-in return. Start sign-in again.'); }
     if (states.length !== 1 || !/^[a-f0-9]{64}$/.test(states[0]) || !intent || intent.state !== states[0] ||
-        intent.context !== await loginContext() || !Number.isFinite(intent.expires) || intent.expires <= Date.now() ||
+        !await matchesLoginContext(intent.context) || !Number.isFinite(intent.expires) || intent.expires <= Date.now() ||
         intent.expires > Date.now() + loginIntentLifetime || !providerButtons.length ||
-        !providerKeys.has(intent.provider) ||
         codes.length + errors.length !== 1 || (codes.length && (!codes[0] || codes[0].length > 1024))) {
       throw new Error('This sign-in return does not match this browser and authorization request. Start sign-in again.');
     }

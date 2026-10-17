@@ -358,8 +358,7 @@ func (s *AuthService) verifyHostedOAuthReturn(ctx context.Context, providerFromP
 		return nil, fmt.Errorf("%w: csrf mismatch", ErrUnauthenticated)
 	}
 	if want := strings.ToLower(strings.TrimSpace(providerFromPath)); want != "" && claims.Provider != want {
-		s.logger.Info("hosted_oauth_provider_mismatch",
-			zap.String("path_provider", want), zap.String("token_provider", claims.Provider))
+		s.logger.Info("hosted_oauth_provider_mismatch")
 		return nil, fmt.Errorf("%w: provider mismatch", ErrUnauthenticated)
 	}
 
