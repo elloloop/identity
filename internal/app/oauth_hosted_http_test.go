@@ -580,3 +580,47 @@ func TestClientIPFromRequest(t *testing.T) {
 		t.Errorf("XFF IP = %q", got)
 	}
 }
+
+func TestHostedHTTP_CancellationReturnsOnlyWithSignedBrowserBoundState(t *testing.T) {
+	for _, kind := range []string{"valid", "no-cookie", "tampered", "wrong-provider"} {
+		t.Run(kind, func(t *testing.T) {
+			h := newHostedTestHandler(t, "https://app.test/auth/agent-consent", hostedTestRegistry(&appTestStubProvider{}))
+			start := httptest.NewRecorder()
+			h.ServeHTTP(start, httptest.NewRequest(http.MethodGet, "/oauth/start/google?return_to="+url.QueryEscape("https://app.test/auth/agent-consent?request_id=original&login_state=browser-bound"), nil))
+			location, err := url.Parse(start.Header().Get("Location"))
+			if err != nil || start.Code != 302 {
+				t.Fatal("start failed")
+			}
+			state := location.Query().Get("state")
+			provider := "google"
+			if kind == "tampered" {
+				state = "invalid"
+			}
+			if kind == "wrong-provider" {
+				provider = "github"
+			}
+			request := httptest.NewRequest(http.MethodGet, "/oauth/callback/"+provider+"?"+url.Values{"state": {state}, "error": {"private-provider-message"}}.Encode(), nil)
+			if kind != "no-cookie" {
+				request.AddCookie(start.Result().Cookies()[0])
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, request)
+			if kind != "valid" {
+				if w.Code != 400 || w.Header().Get("Location") != "" {
+					t.Fatal("untrusted cancellation redirected")
+				}
+				return
+			}
+			destination, err := url.Parse(w.Header().Get("Location"))
+			if err != nil || w.Code != 302 {
+				t.Fatal("valid cancellation failed")
+			}
+			if destination.Host != "app.test" || destination.Path != "/auth/agent-consent" || destination.Query().Get("request_id") != "original" || destination.Query().Get("error") != "access_denied" || destination.Query().Has("code") || strings.Contains(w.Header().Get("Location"), "private-provider-message") {
+				t.Fatal("cancellation changed request, exposed provider data or granted code")
+			}
+			if len(w.Result().Cookies()) != 1 || w.Result().Cookies()[0].MaxAge >= 0 {
+				t.Fatal("cancellation did not spend browser state")
+			}
+		})
+	}
+}

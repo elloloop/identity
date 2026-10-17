@@ -6,7 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
+
+	"github.com/elloloop/identity/internal/service"
 
 	"github.com/elloloop/identity/internal/config"
 )
@@ -17,7 +20,7 @@ var agentConsentFS embed.FS
 
 // AgentConsentHandler serves the human review screen. Authentication is kept
 // in page memory; project-scoped RPCs independently enforce the live session.
-func AgentConsentHandler(cfg *config.Config, options OptionsSource) http.Handler {
+func AgentConsentHandler(cfg *config.Config, options OptionsSource, returnAllow service.ReturnAllowlist) http.Handler {
 	page, err := agentConsentFS.ReadFile("agent_assets/consent.html")
 	if err != nil {
 		panic(err)
@@ -31,6 +34,8 @@ func AgentConsentHandler(cfg *config.Config, options OptionsSource) http.Handler
 		opts := options.HostedUIOptions(r.Context())
 		settings := configData{
 			PasswordLoginEnabled: opts.PasswordLoginEnabled,
+			OAuthProviders:       opts.OAuthProviders,
+			HostedOAuthEnabled:   returnAllow.Allows(agentConsentReturnURL(r)),
 			UsernameLoginEnabled: opts.UsernameLoginEnabled,
 			CaptchaProvider:      captchaUIProvider(cfg),
 			CaptchaSiteKey:       captchaUISiteKey(cfg),
@@ -61,4 +66,19 @@ func AgentConsentHandler(cfg *config.Config, options OptionsSource) http.Handler
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(body))
 	})
+}
+
+func agentConsentReturnURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded != "" {
+		scheme = forwarded
+	}
+	host := r.Host
+	if forwarded := r.Header.Get("X-Forwarded-Host"); forwarded != "" {
+		host = forwarded
+	}
+	return (&url.URL{Scheme: scheme, Host: host, Path: "/auth/agent-consent"}).String()
 }

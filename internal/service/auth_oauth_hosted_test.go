@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
@@ -387,4 +388,20 @@ func TestHostedOAuthErrorCode_UnexpectedFailureIsServerError(t *testing.T) {
 	assert.Equal(t, HostedOAuthErrorUnavailable, hostedOAuthErrorCode(ErrOAuthDisabled))
 	assert.Equal(t, HostedOAuthErrorUnavailable, hostedOAuthErrorCode(fmt.Errorf("%w: sweep", ErrUnavailable)))
 	assert.Equal(t, HostedOAuthErrorUnavailable, hostedOAuthErrorCode(ErrAssuranceUnavailable))
+}
+
+func TestHostedOAuth_ProviderMismatchLogOmitsProviderInput(t *testing.T) {
+	svc := newTestAuthService(t, newFakeRepo())
+	ctx := withProject("proj-1")
+	begin, err := svc.BeginHostedOAuth(ctx, "google",
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+	require.NoError(t, err)
+	core, logs := observer.New(zap.InfoLevel)
+	svc.logger = zap.New(core)
+	_, err = svc.CancelHostedOAuth(ctx, "other\nforged_log_entry", stateTokenFromAuthURL(t, begin.AuthorizationURL), []string{"csrf-123"})
+	require.ErrorIs(t, err, ErrUnauthenticated)
+	entries := logs.All()
+	require.Len(t, entries, 1)
+	assert.Equal(t, "hosted_oauth_provider_mismatch", entries[0].Message)
+	assert.Empty(t, entries[0].ContextMap())
 }

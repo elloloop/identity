@@ -146,34 +146,9 @@ func (s *AuthService) CompleteHostedOAuth(
 	providerFromPath, code, stateToken, appleUserPayload, ipAddr, userAgent string,
 	csrfTokens []string,
 ) (*HostedOAuthCallbackResult, error) {
-	_, stateToken = oauth.SplitProjectKeyState(stateToken)
-
-	claims, err := oauth.VerifyHostedStateToken(stateToken, s.signer, s.nowFunc().UTC())
+	claims, err := s.verifyHostedOAuthReturn(ctx, providerFromPath, stateToken, csrfTokens)
 	if err != nil {
-		s.logger.Info("hosted_oauth_state_validation_failed", zap.Error(err))
-		return nil, fmt.Errorf("%w: invalid oauth state", ErrUnauthenticated)
-	}
-	matchedCSRFToken := 0
-	for _, token := range csrfTokens {
-		matchedCSRFToken |= subtle.ConstantTimeCompare([]byte(claims.CSRFToken), []byte(token))
-	}
-	if matchedCSRFToken != 1 {
-		s.logger.Info("hosted_oauth_csrf_mismatch")
-		return nil, fmt.Errorf("%w: csrf mismatch", ErrUnauthenticated)
-	}
-	if want := strings.ToLower(strings.TrimSpace(providerFromPath)); want != "" && claims.Provider != want {
-		s.logger.Info("hosted_oauth_provider_mismatch",
-			zap.String("path_provider", want), zap.String("token_provider", claims.Provider))
-		return nil, fmt.Errorf("%w: provider mismatch", ErrUnauthenticated)
-	}
-
-	// The token's project_id claim must name the project the request
-	// resolved to: a state minted for project A cannot complete a login in
-	// project B, whatever prefix or host the callback arrived with.
-	scope := ProjectScopeFromContext(ctx)
-	if scope == nil || claims.ProjectID != scope.ProjectID {
-		s.logger.Info("hosted_oauth_project_mismatch", zap.String("expected", claims.ProjectID))
-		return nil, fmt.Errorf("%w: project mismatch", ErrUnauthenticated)
+		return nil, err
 	}
 
 	// From here the state token has proven ReturnTo, so a refusal goes back to
@@ -354,4 +329,47 @@ func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAge
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
+}
+
+// CancelHostedOAuth recovers only the signed, browser-bound return destination;
+// a provider refusal never exchanges a code or authenticates the browser.
+func (s *AuthService) CancelHostedOAuth(ctx context.Context, provider, state string, csrfTokens []string) (*HostedOAuthRefusalError, error) {
+	claims, err := s.verifyHostedOAuthReturn(ctx, provider, state, csrfTokens)
+	if err != nil {
+		return nil, err
+	}
+	return &HostedOAuthRefusalError{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: HostedOAuthErrorAccessDenied, Err: ErrUnauthenticated}, nil
+}
+
+func (s *AuthService) verifyHostedOAuthReturn(ctx context.Context, providerFromPath, stateToken string, csrfTokens []string) (*oauth.HostedStateClaims, error) {
+	_, stateToken = oauth.SplitProjectKeyState(stateToken)
+
+	claims, err := oauth.VerifyHostedStateToken(stateToken, s.signer, s.nowFunc().UTC())
+	if err != nil {
+		s.logger.Info("hosted_oauth_state_validation_failed", zap.Error(err))
+		return nil, fmt.Errorf("%w: invalid oauth state", ErrUnauthenticated)
+	}
+	matchedCSRFToken := 0
+	for _, token := range csrfTokens {
+		matchedCSRFToken |= subtle.ConstantTimeCompare([]byte(claims.CSRFToken), []byte(token))
+	}
+	if matchedCSRFToken != 1 {
+		s.logger.Info("hosted_oauth_csrf_mismatch")
+		return nil, fmt.Errorf("%w: csrf mismatch", ErrUnauthenticated)
+	}
+	if want := strings.ToLower(strings.TrimSpace(providerFromPath)); want != "" && claims.Provider != want {
+		s.logger.Info("hosted_oauth_provider_mismatch")
+		return nil, fmt.Errorf("%w: provider mismatch", ErrUnauthenticated)
+	}
+
+	// The token's project_id claim must name the project the request
+	// resolved to: a state minted for project A cannot complete a login in
+	// project B, whatever prefix or host the callback arrived with.
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil || claims.ProjectID != scope.ProjectID {
+		s.logger.Info("hosted_oauth_project_mismatch", zap.String("expected", claims.ProjectID))
+		return nil, fmt.Errorf("%w: project mismatch", ErrUnauthenticated)
+	}
+
+	return claims, nil
 }

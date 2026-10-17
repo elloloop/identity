@@ -1,5 +1,26 @@
 # Upgrade guide
 
+## Next — hosted provider sign-in for agent consent
+
+The agent review page now offers only the current project's enabled hosted
+OAuth providers, alongside any enabled password sign-in. Add the exact public
+consent page, for example `https://auth.example.com/auth/agent-consent`, to
+`GATEWAY_OAUTH_ALLOWED_RETURN_URLS` if provider sign-in should return there.
+An existing nonempty allowlist is insufficient unless it actually admits that
+page. No allowlist, provider, project or authentication policy is widened.
+Hub-shared providers still require the original `project_key` and start on the
+configured hub origin.
+
+The browser keeps a short-lived nonsecret login intent in tab session storage;
+no access or refresh token is persisted. The one-time code leaves the address
+bar before redemption, and the intent is consumed before redemption or refusal.
+Provider cancellation returns `access_denied` only after the signed state,
+project/provider and browser CSRF binding validate. Invalid state still fails
+without redirecting. Sign-in never approves an agent: selection and Allow remain
+explicit. Existing password/TOTP behavior is unchanged; the current hosted
+redemption response cannot carry a required TOTP challenge, and such sign-ins
+fail closed rather than issuing access. There is no schema or proto change.
+
 ## v4.19.0 → v4.20.0 — CORS allow-lists accept an exact origin on an application's own scheme (additive); a stored project CORS list that fails closed today can come back (behaviour change)
 
 No schema change and no migration.
