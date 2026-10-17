@@ -30,8 +30,9 @@ func ParseAllowedOrigins(raw string, allowCredentials bool) (Allowlist, error) {
 
 // ValidateAllowedOrigins validates a list of origins: each entry is a bare
 // lower-case-scheme http(s) origin, a one-label wildcard pattern (see
-// ParsePattern), or an exact origin on an application's own scheme (see
-// parseBareOrigin). When allowCredentials is true it also refuses the bare
+// ParsePattern), or an exact origin on an application's own scheme,
+// scheme://host with a lower-case scheme, a host of lower-case DNS labels and
+// no port. When allowCredentials is true it also refuses the bare
 // wildcard "*", the literal "null" and empty entries: the CORS middleware
 // always sets Access-Control-Allow-Credentials, so any of those would expose
 // authenticated state to arbitrary origins. Exact entries keep their input
@@ -93,6 +94,9 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	if slices.Contains(refusedSchemes, scheme) {
 		return nil, fmt.Errorf("scheme %s: never names the origin of a page that makes requests", scheme)
 	}
+	if slices.Contains(browserSchemes, scheme) {
+		return nil, fmt.Errorf("scheme %s: names a browser's or a platform's own pages, never an application's", scheme)
+	}
 	if !isWebScheme(scheme) && (oneEditApart(scheme, httpScheme) || oneEditApart(scheme, httpsScheme)) {
 		return nil, fmt.Errorf("scheme %s: one edit from http or https, so refused as a misspelling of one", scheme)
 	}
@@ -119,6 +123,9 @@ func parseBareOrigin(s string) (*url.URL, error) {
 		// The rules below read the entry's own text after "://", not u.Host
 		// or u.Fragment: url.Parse keeps no trace of an empty fragment, and
 		// an entry carrying any "#" or port is not the origin an engine sends.
+		// http(s) entries keep the rules they had, so one ending in a bare
+		// "#" still loads and, like any origin no browser sends, matches
+		// nothing.
 		if strings.Contains(rest, "#") {
 			return nil, errFragment
 		}
@@ -128,8 +135,6 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	}
 	return u, nil
 }
-
-var errFragment = errors.New("fragment not allowed")
 
 // isWebScheme reports whether scheme is http or https, whose entries take
 // any host and port url.Parse accepts; every other scheme takes only the exact
@@ -146,7 +151,18 @@ func isWebScheme(scheme string) bool {
 // and browsers no longer load ftp: pages.
 var refusedSchemes = []string{"about", "blob", "data", "file", "filesystem", "ftp", "javascript", "ws", "wss"}
 
+// browserSchemes are the schemes a browser or a platform keeps for its own
+// pages, so none is an application's: chrome:, chrome-untrusted:,
+// chrome-search:, devtools:, edge: and view-source: are Chromium's and Edge's,
+// some of whose pages show content the browser loads from elsewhere;
+// resource: is Firefox's; and content: is Android's content providers, whose
+// origin every document a provider serves shares, as every local file shares
+// file:. An extension's own scheme (chrome-extension:, moz-extension:) names
+// that extension and is accepted.
+var browserSchemes = []string{"chrome", "chrome-search", "chrome-untrusted", "content", "devtools", "edge", "resource", "view-source"}
+
 var (
+	errFragment      = errors.New("fragment not allowed")
 	errAppOriginHost = errors.New("an origin on an application's own scheme is exact: its host is a DNS name of dot-separated lower-case labels of letters, digits and hyphens, each starting and ending with a letter or digit, with no port or wildcard")
 	// The entry names the application by a DNS host, so an IP address is
 	// refused. An engine may also read a host that ends in a number as an

@@ -89,7 +89,17 @@ func TestAllowlist_Allows_AppSchemeOrigin(t *testing.T) {
 func TestValidateAllowedOrigins_AppSchemeOrigins(t *testing.T) {
 	t.Parallel()
 
-	entries := []string{"app://example-desktop", "example+shell://ui.example.test", "x-example.app://localhost", "app2://123.example-desktop", "app://example.0xg"}
+	entries := []string{
+		"app://example-desktop",
+		"example+shell://ui.example.test",
+		"x-example.app://localhost",
+		"app2://123.example-desktop",
+		"app://example.0xg",
+		// An extension page's origin: Chromium's ID is 32 letters a to p,
+		// Firefox's host a lower-case UUID per installation.
+		"chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+		"moz-extension://0d5e1f3a-7b2c-4d6e-9f80-1a2b3c4d5e6f",
+	}
 	out, err := ValidateAllowedOrigins(entries, true)
 	require.NoError(t, err)
 	assert.Equal(t, entries, out.Exact())
@@ -199,6 +209,14 @@ func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
 		"ws://example-desktop":            "scheme ws:",
 		"wss://example-desktop":           "scheme wss:",
 		"ftp://example-desktop":           "scheme ftp:",
+		"chrome://settings":               "scheme chrome: names a browser's",
+		"chrome-untrusted://terminal":     "scheme chrome-untrusted: names a browser's",
+		"chrome-search://local-ntp":       "scheme chrome-search: names a browser's",
+		"devtools://devtools":             "scheme devtools: names a browser's",
+		"edge://settings":                 "scheme edge: names a browser's",
+		"view-source://example-desktop":   "scheme view-source: names a browser's",
+		"resource://gre":                  "scheme resource: names a browser's",
+		"content://media":                 "scheme content: names a browser's",
 		"htps://app.example.app":          "misspelling",
 		"htp://app.example.app":           "misspelling",
 		"hhttps://app.example.app":        "misspelling",
@@ -391,6 +409,11 @@ func TestValidateAllowedOrigins_ErrorsNeverCarryCredentials(t *testing.T) {
 		"https://user:" + secret + "@app.example.app/path",
 		"app://user:" + secret + "@example-desktop",
 		"app://user:" + secret + "@example-desktop:8080",
+		"App://user:" + secret + "@example-desktop",
+		"ap_p://user:" + secret + "@example-desktop",
+		"ftp://user:" + secret + "@example-desktop",
+		"chrome://user:" + secret + "@settings",
+		"htps://user:" + secret + "@app.example.app",
 	} {
 		_, err := ValidateAllowedOrigins([]string{entry}, true)
 		require.Error(t, err, entry)

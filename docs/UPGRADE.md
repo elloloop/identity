@@ -14,23 +14,28 @@ No schema change and no migration.
   labels, and no port, path, trailing slash, query, fragment or userinfo. It
   matches byte for byte, like any exact entry, and the response echoes it with
   credentials. The host must be a DNS name: a placeholder such as `app://-`,
-  which names no application, a host with an underscore, and an IP address
-  (`app://127.0.0.1`, or `app://1`, which Chromium sends rewritten as
-  `app://0.0.0.1`) are refused. Configure a shell that serves from a
-  placeholder to use a distinctive host name instead.
+  a host with an underscore, and an IP address (`app://127.0.0.1`, or
+  `app://1`, which Chromium sends rewritten as `app://0.0.0.1`) are refused.
+  Where the helper that serves a shell's pages defaults to a placeholder, set
+  its host name option to a distinctive name instead.
 - **Still refused:** `*`, `null` and empty entries; a wildcard on any scheme
   but `https`; any other form of entry on an application scheme; and the
   schemes the URL standards give a meaning of their own (`file:`, `data:`,
   `blob:`, `javascript:`, `about:`, `filesystem:`, `ws:`, `wss:`, `ftp:`),
   whose pages send `null`, the origin of a URL inside them, or an origin every
-  local file shares, or which name sockets or pages browsers no longer load.
-  Such an entry fails startup in `GATEWAY_ALLOWED_ORIGINS`, and the admin API
+  local file shares, or which name sockets or pages browsers no longer load;
+  and the schemes a browser or a platform keeps for its own pages (`chrome:`,
+  `chrome-untrusted:`, `chrome-search:`, `devtools:`, `edge:`,
+  `view-source:`, `resource:`, `content:`). An extension's scheme
+  (`chrome-extension:`, `moz-extension:`) is accepted. Such an entry fails
+  startup in `GATEWAY_ALLOWED_ORIGINS`, and the admin API
   refuses it in a project's list.
 - **A misspelled http(s) scheme is still refused.** A scheme one edit away
   from `http` or `https` (`htps://`, `hhttps://`, `httsp://`) is refused as a
-  misspelling, not loaded as an application scheme. The startup line
-  `cors_allowed_origins` lists the application-scheme entries that loaded
-  under a new field, `app_scheme_origins`.
+  misspelling, not loaded as an application scheme.
+- **Logged apart.** The startup line `cors_allowed_origins` lists the
+  application-scheme entries of `GATEWAY_ALLOWED_ORIGINS` under a new field,
+  `app_scheme_origins`.
 - **http(s) entries and patterns are unchanged.** Every
   `GATEWAY_ALLOWED_ORIGINS` that starts today starts unchanged and admits the
   same origins. An entry refused for its scheme (a non-http(s) scheme, an

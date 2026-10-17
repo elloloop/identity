@@ -263,9 +263,9 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       <strong>A named host.</strong> The shell must serve its pages from a
       DNS-style host name, each label starting and ending with a letter or
       digit. A placeholder host such as <code>app://-</code> or
-      <code>app://.</code> is refused because it names no application:
-      configure the shell, or the helper that serves its pages, to use a
-      distinctive host name and list that. An IP address
+      <code>app://.</code> is refused, since it is not a DNS host name. Where
+      the helper that serves the shell's pages defaults to one, set its host
+      name option to a distinctive name and list that. An IP address
       (<code>app://127.0.0.1</code>) and a host with an underscore are refused
       too: the entry names the application by a DNS host. An engine may also
       rewrite a host whose last label is a number, as Chromium sends
@@ -282,7 +282,14 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       <code>ftp:</code>. Their pages send <code>null</code> (which is refused
       too), the origin of a URL inside them, or an origin every local file
       shares; <code>ws:</code> and <code>wss:</code> name sockets, not pages,
-      and browsers no longer load <code>ftp:</code> pages.
+      and browsers no longer load <code>ftp:</code> pages. So are the schemes
+      a browser or a platform keeps for its own pages:
+      <code>chrome:</code>, <code>chrome-untrusted:</code>,
+      <code>chrome-search:</code>, <code>devtools:</code>,
+      <code>edge:</code>, <code>view-source:</code>, Firefox's
+      <code>resource:</code> and Android's <code>content:</code>. Some of a
+      browser's own pages show content it loads from elsewhere, and every
+      document a content provider serves shares its origin.
     </li>
     <li>
       <strong>No near-miss of <code>http</code> or <code>https</code>.</strong>
@@ -302,17 +309,20 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       as <code>chrome-extension://</code> followed by the extension's ID,
       follows the same rule and loads as an exact entry. Firefox gives each
       installation of an extension its own <code>moz-extension://</code>
-      host, so an entry for one admits a single browser profile. A browser's
-      own internal schemes, such as <code>chrome:</code> or
-      <code>chrome-untrusted:</code>, are not an application's: some of their
-      pages show content the browser loads from elsewhere, so do not list one.
+      host, so an entry for one admits a single browser profile.
     </li>
     <li>
       <strong>CORS only.</strong> <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>
       still takes <code>http</code> and <code>https</code> URLs only, and
       passkey ceremonies still verify against
-      <code>GATEWAY_PASSKEY_ORIGIN</code>, so a page on an application scheme
-      signs in by other methods.
+      <code>GATEWAY_PASSKEY_ORIGIN</code> or a project's
+      <code>passkey.origin</code>, so a page on an application scheme signs
+      in by other methods. Such a page is cross-site
+      to this server, so its requests carry no auth cookie set with
+      <code>SameSite</code> <code>Lax</code> (the
+      <code>GATEWAY_COOKIE_SAMESITE</code> default) or <code>Strict</code>:
+      the client keeps the access and refresh tokens the sign-in calls return
+      and sends them itself.
     </li>
   </ul>
   <aside class="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">

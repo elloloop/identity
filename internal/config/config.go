@@ -969,8 +969,9 @@ type Config struct {
 	// DNS name and no port. A bare "*", "null", a malformed pattern or one
 	// whose parent is a public suffix, an origin on file:, data:, blob:,
 	// javascript: or another scheme the URL standards give a meaning of
-	// their own, and a scheme one edit from http or https fail startup,
-	// since credentials are always allowed.
+	// their own, one a browser keeps for its own pages, and a scheme one
+	// edit from http or https fail startup, since credentials are always
+	// allowed.
 	AllowedOrigins string
 
 	// Cookie settings.
