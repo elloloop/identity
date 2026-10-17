@@ -226,6 +226,8 @@ func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
 		"view-source://example-desktop":    "scheme view-source: names a browser's",
 		"resource://gre":                   "scheme resource: names a browser's",
 		"content://media":                  "scheme content: names a browser's",
+		"file":                             "must be scheme://host",
+		"content":                          "must be scheme://host",
 		"htps://app.example.app":           "misspelling",
 		"htp://app.example.app":            "misspelling",
 		"hhttps://app.example.app":         "misspelling",
@@ -249,14 +251,15 @@ func TestValidateAllowedOrigins_AppSchemeRejections(t *testing.T) {
 
 // TestRefusedSchemesDocumented keeps the configuration page in step with the
 // code: every scheme parseBareOrigin refuses by name is listed there, so adding
-// one to standardSchemes or browserSchemes without documenting it fails.
+// one to refusedSchemes without documenting it fails. It lives here, not in
+// tests/docs, because it reads that unexported table.
 func TestRefusedSchemesDocumented(t *testing.T) {
 	t.Parallel()
 
 	page, err := os.ReadFile(filepath.Join("..", "..", "docs-site", "src", "pages", "docs", "installation", "configuration.astro"))
 	require.NoError(t, err)
 	var missing []string
-	for _, scheme := range append(slices.Sorted(maps.Keys(standardSchemes)), browserSchemes...) {
+	for _, scheme := range slices.Sorted(maps.Keys(refusedSchemes)) {
 		if !strings.Contains(string(page), "<code>"+scheme+":</code>") {
 			missing = append(missing, scheme)
 		}
@@ -338,7 +341,7 @@ func TestParseAllowedOrigins_MalformedOrigin_Rejected(t *testing.T) {
 
 	for _, raw := range []string{
 		"localhost:9002",            // missing scheme
-		"ftp://localhost:9002",      // a scheme with a standard meaning (standardSchemes)
+		"ftp://localhost:9002",      // a scheme with a standard meaning (refusedSchemes)
 		"http://localhost:9002/",    // trailing slash
 		"http://localhost:9002/x",   // path
 		"http://localhost:9002?q=1", // query

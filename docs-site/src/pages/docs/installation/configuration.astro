@@ -311,7 +311,9 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     <li>
       <strong>Browser extensions.</strong> An extension page's origin, such
       as <code>chrome-extension://</code> followed by the extension's ID,
-      follows the same rule and loads as an exact entry. Firefox gives each
+      follows the same rule and loads as an exact entry. An entry's host is
+      lower case, so an origin whose host an engine sends with upper-case
+      letters cannot be listed. Firefox gives each
       installation of an extension its own <code>moz-extension://</code>
       host, so an entry for one admits a single browser profile. An ID is
       not proof of which extension is running: an unpacked extension can
@@ -322,8 +324,11 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       still takes <code>http</code> and <code>https</code> URLs only, and
       passkey ceremonies still verify against
       <code>GATEWAY_PASSKEY_ORIGIN</code> or a project's
-      <code>passkey.origin</code>, so a page on an application scheme signs
-      in by other methods. Identity sets no session cookie: the sign-in
+      <code>passkey.origin</code>. So hosted OAuth and a magic link cannot
+      return to a page on an application scheme, and a passkey cannot sign
+      it in; it signs in with a call that returns the tokens itself, such as
+      <code>PasswordLogin</code>, <code>VerifyEmailLoginCode</code> or
+      <code>NativeOAuthLogin</code>. Identity sets no session cookie: the sign-in
       calls return the access and refresh tokens, and the client keeps them
       and sends them itself, the access token as a bearer token and the
       refresh token to <code>RefreshToken</code>.

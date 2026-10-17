@@ -87,14 +87,12 @@ func parseBareOrigin(s string) (*url.URL, error) {
 	if strings.ContainsAny(s, " \t\r\n") {
 		return nil, errors.New("contains whitespace")
 	}
-	// A refused scheme is named whatever follows it, so blob:https://… and
-	// data:text/plain,… get the scheme's own reason, not a form error.
-	lead, _, _ := strings.Cut(s, ":")
-	if reason, refused := standardSchemes[lead]; refused {
-		return nil, fmt.Errorf("scheme %s: %s", lead, reason)
-	}
-	if slices.Contains(browserSchemes, lead) {
-		return nil, fmt.Errorf("scheme %s: names a browser's or a platform's own pages, never an application's", lead)
+	// A refused scheme is named whatever follows its ":", so blob:https://…
+	// and data:text/plain,… get the scheme's own reason, not a form error.
+	if lead, _, hasColon := strings.Cut(s, ":"); hasColon {
+		if reason, refused := refusedSchemes[lead]; refused {
+			return nil, fmt.Errorf("scheme %s: %s", lead, reason)
+		}
 	}
 	scheme, rest, ok := strings.Cut(s, "://")
 	if !ok || !validScheme(scheme) {
@@ -146,10 +144,19 @@ func isHTTPScheme(scheme string) bool {
 	return scheme == httpScheme || scheme == httpsScheme
 }
 
-// standardSchemes are the schemes besides http and https that the URL, Fetch
-// and HTML standards give a meaning of their own, so none is an application's
-// own and each is refused, with the reason the operator is told.
-var standardSchemes = map[string]string{
+// refusedSchemes are the schemes no application owns, each with the reason the
+// operator is told. Every scheme besides http and https that the URL, Fetch
+// and HTML standards give a meaning of their own is here. So are the schemes a
+// browser or a platform keeps for its own pages: chrome:, chrome-untrusted:,
+// chrome-search:, devtools:, edge: and view-source: are Chromium's and Edge's,
+// some of whose pages show content the browser loads from elsewhere;
+// resource: is Firefox's; and content: is Android's content providers, whose
+// origin every document a provider serves shares, as every local file shares
+// file:. Those are the ones an operator is likeliest to list by mistake, not
+// every engine's internal scheme, so the table guards against a mistake and
+// is not a boundary. An extension's own scheme (chrome-extension:,
+// moz-extension:) names that extension and is accepted.
+var refusedSchemes = map[string]string{
 	"about":      reasonOpaqueOrigin,
 	"data":       reasonOpaqueOrigin,
 	"javascript": reasonOpaqueOrigin,
@@ -159,25 +166,23 @@ var standardSchemes = map[string]string{
 	"ws":         reasonSocket,
 	"wss":        reasonSocket,
 	"ftp":        "browsers no longer load its pages",
+
+	"chrome":           reasonBrowserOwn,
+	"chrome-search":    reasonBrowserOwn,
+	"chrome-untrusted": reasonBrowserOwn,
+	"content":          reasonBrowserOwn,
+	"devtools":         reasonBrowserOwn,
+	"edge":             reasonBrowserOwn,
+	"resource":         reasonBrowserOwn,
+	"view-source":      reasonBrowserOwn,
 }
 
 const (
 	reasonOpaqueOrigin = "its pages have an opaque origin, which a browser sends as null"
 	reasonInnerOrigin  = "its URLs take the origin of the URL inside them; list that origin instead"
 	reasonSocket       = "names a socket, not a page; list the origin of the page that opens the socket"
+	reasonBrowserOwn   = "names a browser's or a platform's own pages, never an application's"
 )
-
-// browserSchemes are the schemes a browser or a platform keeps for its own
-// pages, so none is an application's and each is refused: chrome:,
-// chrome-untrusted:, chrome-search:, devtools:, edge: and view-source: are
-// Chromium's and Edge's, some of whose pages show content the browser loads
-// from elsewhere; resource: is Firefox's; and content: is Android's content
-// providers, whose origin every document a provider serves shares, as every
-// local file shares file:. An extension's own scheme (chrome-extension:,
-// moz-extension:) names that extension and is accepted. The list holds the
-// schemes an operator is likeliest to list by mistake, not every engine's
-// internal scheme, so it guards against a mistake and is not a boundary.
-var browserSchemes = []string{"chrome", "chrome-search", "chrome-untrusted", "content", "devtools", "edge", "resource", "view-source"}
 
 var (
 	errFragment      = errors.New("fragment not allowed")
@@ -186,7 +191,7 @@ var (
 	// refused. An engine may also read a host that ends in a number as an
 	// IPv4 address and send it rewritten (Chromium sends app://1 as
 	// app://0.0.0.1), so such an entry might never match.
-	errAppOriginNumericHost = errors.New("an origin on an application's own scheme takes a DNS name, not an IP address: its last label is not a number")
+	errAppOriginNumericHost = errors.New("an origin on an application's own scheme takes a DNS name, not an IP address: its last label must not be a number")
 )
 
 // validScheme reports whether s is an RFC 3986 scheme in lower case, the form
