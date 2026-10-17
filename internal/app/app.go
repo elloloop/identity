@@ -521,6 +521,7 @@ func loadAllowedOrigins(cfg *config.Config, logger *zap.Logger) (origin.Allowlis
 	}
 	logger.Info("cors_allowed_origins",
 		zap.Strings("origins", allowed.Exact()),
+		zap.Strings("app_scheme_origins", allowed.AppSchemeOrigins()),
 		zap.Strings("origin_patterns", allowed.Patterns()))
 	return allowed, nil
 }

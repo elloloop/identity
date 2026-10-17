@@ -302,15 +302,15 @@ func TestUpsertProjectConfig_RejectsInvalidCORSOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AdminCreateProject: %v", err)
 	}
-	for _, entry := range []string{"*", "https://*.app", "https://*.pages.dev", "https://pr-*.example.app", "https://app.example.app/x"} {
+	for _, entry := range []string{"*", "https://*.app", "https://*.pages.dev", "https://pr-*.example.app", "https://app.example.app/x", "file://", "app://example-desktop/", "app://*.example-desktop"} {
 		cfg := `{"cors":{"allowed_origins":["https://app.example.app","` + entry + `"]}}`
 		if _, err := f.svc.UpsertProjectConfig(ctx, policyAdminSecret, projectID, cfg); !errors.Is(err, ErrInvalidArgument) {
 			t.Errorf("entry %q: err = %v, want ErrInvalidArgument", entry, err)
 		}
 	}
-	valid := `{"cors":{"allowed_origins":["https://app.example.app","https://*.previews.example.app"]}}`
+	valid := `{"cors":{"allowed_origins":["https://app.example.app","https://*.previews.example.app","app://example-desktop"]}}`
 	if _, err := f.svc.UpsertProjectConfig(ctx, policyAdminSecret, projectID, valid); err != nil {
-		t.Fatalf("valid pattern rejected: %v", err)
+		t.Fatalf("valid pattern and app-scheme origin rejected: %v", err)
 	}
 }
 
