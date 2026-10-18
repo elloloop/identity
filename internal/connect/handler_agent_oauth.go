@@ -57,7 +57,7 @@ func (h *IdentityHandler) ListAgentDelegations(ctx context.Context, req *connect
 		if grant.Decision != service.AgentAuthorizationApproved {
 			continue
 		}
-		out.Delegations = append(out.Delegations, &identitypb.AgentDelegation{DelegationId: grant.ID, AgentUserId: grant.AgentID, ClientId: grant.ClientID, Resource: grant.Resource, Scopes: grant.Scopes, Product: grant.Product, ConsentedAtMs: grant.ConsentAtMs, ExpiresAtMs: grant.GrantExpiresAtMs, RevokedAtMs: grant.RevokedAtMs})
+		out.Delegations = append(out.Delegations, &identitypb.AgentDelegation{DelegationId: grant.ID, AgentUserId: grant.AgentID, ClientId: grant.ClientID, Resource: grant.Resource, Scopes: grant.Scopes, Product: grant.Product, ConsentedAtMs: grant.ConsentAtMs, ExpiresAtMs: grant.GrantExpiresAtMs, RevokedAtMs: grant.RevokedAtMs, MachineId: grant.MachineID})
 	}
 	if len(grants) == 0 {
 		out.NextCursor = ""

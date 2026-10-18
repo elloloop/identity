@@ -64,6 +64,12 @@ import (
 // Driver names the backend implementation under test and provides a
 // factory the suite calls at the top of every subtest.
 type Driver struct {
+	// ChangeProjectPolicy changes and restores source policy without restoring grants.
+	ChangeProjectPolicy func(*testing.T, service.Repository)
+
+	// Reopen closes and reopens the same durable backing store when supported.
+	Reopen func(*testing.T, service.Repository) service.Repository
+
 	// Name appears in every subtest path emitted by the suite, e.g.
 	// `TestConformance/postgres/UserCRUD`. Use the same names CI
 	// surfaces as check names — `memory`, `postgres`.

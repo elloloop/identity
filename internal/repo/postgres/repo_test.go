@@ -71,6 +71,24 @@ func TestConformance(t *testing.T) {
 
 	driver := conformance.Driver{
 		Name: "postgres",
+		ChangeProjectPolicy: func(t *testing.T, base service.Repository) {
+			t.Helper()
+			scoped := base.(*pgRepository)
+			for _, status := range []string{"suspended", "active"} {
+				if _, err := scoped.pool.Exec(context.Background(), "UPDATE projects SET status=$2 WHERE id=$1", scoped.projectID, status); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		Reopen: func(t *testing.T, base service.Repository) service.Repository {
+			t.Helper()
+			old := base.(*pgRepository)
+			old.Close()
+			next, err := New(constructCtx(t), Config{DSN: dsn, MaxConns: 5, ConnTimeout: 5 * time.Second, ProjectID: old.projectID})
+			require.NoError(t, err)
+			t.Cleanup(next.Close)
+			return next
+		},
 		NewRepo: func(t *testing.T) service.Repository {
 			t.Helper()
 			ctx := constructCtx(t)
@@ -103,6 +121,7 @@ func TestConformance(t *testing.T) {
 	}
 	conformance.RunConformance(t, driver)
 	conformance.RunAgentOAuthConformance(t, driver)
+	conformance.RunAgentMachineConformance(t, driver)
 }
 
 // seedProject inserts the projects(id) row a project-scoped data-plane write

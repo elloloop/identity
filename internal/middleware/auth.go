@@ -11,8 +11,14 @@ import (
 // AuthExemptPaths lists URL paths that do not require a valid JWT.
 // Connect-Go uses the proto service/method as the URL path.
 var AuthExemptPaths = map[string]bool{
-	"/identity.v1.IdentityService/BeginOAuthLogin": true,
-	"/identity.v1.IdentityService/OAuthLogin":      true,
+	// These verify the durable machine credential themselves; human and agent
+	// JWTs are never substitutes for that proof.
+	"/identity.v1.IdentityService/ExchangeAgentMachineCredential": true,
+	// Dedicated configured resource authentication, verified in the handler.
+	"/identity.v1.IdentityService/IntrospectAgentMachine": true,
+	"/identity.v1.IdentityService/ListAgentMachineAgents": true,
+	"/identity.v1.IdentityService/BeginOAuthLogin":        true,
+	"/identity.v1.IdentityService/OAuthLogin":             true,
 	// NativeOAuthLogin verifies a native mobile-SDK ID token; the caller is
 	// anonymous until the token is verified, so no Bearer is required.
 	"/identity.v1.IdentityService/NativeOAuthLogin": true,

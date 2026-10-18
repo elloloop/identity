@@ -96,7 +96,9 @@ func (r *Repo) MutateAgentAuthorization(_ context.Context, id string, m service.
 	if m.Operation == service.AgentOAuthApprove || m.Operation == service.AgentOAuthDeny {
 		owner, agent, sid = m.OwnerID, m.AgentID, m.HumanSID
 	}
-	next, err := service.ApplyAgentOAuthMutation(current, r.oauthAuthorityLocked(owner, agent, sid, current.ClientID), r.agentOAuthRefresh[m.RefreshHash], m)
+	authority := r.oauthAuthorityLocked(owner, agent, sid, current.ClientID)
+	authority.Machine = r.agentMachines[current.MachineID].Clone()
+	next, err := service.ApplyAgentOAuthMutation(current, authority, r.agentOAuthRefresh[m.RefreshHash], m)
 	if next == nil {
 		return nil, err
 	}
@@ -150,6 +152,11 @@ func (r *Repo) revokeAgentOAuthUserLocked(before, after *service.User, atMs int6
 	if !service.AgentOAuthAuthorityLost(before, after) {
 		return
 	}
+	for _, machine := range r.agentMachines {
+		if machine.OwnerID == before.ID {
+			r.revokeAgentMachineLocked(machine, atMs)
+		}
+	}
 	for _, g := range r.agentAuthorizations {
 		if (g.OwnerID == before.ID || g.AgentID == before.ID) && g.RevokedAtMs == 0 {
 			g.RevokedAtMs = atMs
@@ -160,7 +167,7 @@ func (r *Repo) revokeAgentOAuthUserLocked(before, after *service.User, atMs int6
 
 func (r *Repo) revokeAgentOAuthSIDLocked(sid string, atMs int64) {
 	for _, g := range r.agentAuthorizations {
-		if g.HumanSID == sid && g.RevokedAtMs == 0 {
+		if g.MachineID == "" && g.HumanSID == sid && g.RevokedAtMs == 0 {
 			g.RevokedAtMs = atMs
 			g.Revision++
 		}
@@ -175,7 +182,7 @@ func (r *Repo) DeleteExpiredAgentAuthorizations(_ context.Context, beforeMs int6
 	defer r.mu.Unlock()
 	expired := make([]string, 0)
 	for id, g := range r.agentAuthorizations {
-		if max(g.ExpiresAtMs, g.GrantExpiresAtMs) < beforeMs {
+		if g.MachineID == "" && max(g.ExpiresAtMs, g.GrantExpiresAtMs) > 0 && max(g.ExpiresAtMs, g.GrantExpiresAtMs) < beforeMs {
 			expired = append(expired, id)
 		}
 	}
@@ -199,6 +206,11 @@ func (r *Repo) DeleteExpiredAgentAuthorizations(_ context.Context, beforeMs int6
 }
 
 func (r *Repo) revokeAgentOAuthOwnerLocked(owner string, atMs int64) {
+	for _, machine := range r.agentMachines {
+		if machine.OwnerID == owner {
+			r.revokeAgentMachineLocked(machine, atMs)
+		}
+	}
 	for _, grant := range r.agentAuthorizations {
 		if grant.OwnerID == owner && grant.RevokedAtMs == 0 {
 			grant.RevokedAtMs = atMs

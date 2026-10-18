@@ -95,6 +95,11 @@ func NewAgentOAuthService(auth *AuthService, repo Repository) (*AgentOAuthServic
 	if _, ok := repo.(AgentOAuthRepository); !ok {
 		return nil, errors.New("delegated OAuth requires a supported durable repository")
 	}
+	if auth.cfg.AgentMachineEnabled {
+		if _, ok := repo.(AgentMachineRepository); !ok {
+			return nil, errors.New("durable machine access requires a supported repository")
+		}
+	}
 	signer, ok := auth.signer.(jwtpkg.DelegatedSigner)
 	if !ok {
 		return nil, errors.New("delegated OAuth requires a signer with the at+jwt profile")
@@ -389,21 +394,40 @@ func (s *AgentOAuthService) admittedAuthority(ctx context.Context, request *Agen
 	if request == nil {
 		return AgentOAuthAuthority{}, 0, ErrAgentOAuthGrant
 	}
-	a, err := s.repo(ctx).AgentOAuthAuthority(ctx, request.OwnerID, request.AgentID, request.HumanSID, request.ClientID)
+	var a AgentOAuthAuthority
+	var err error
+	if request.MachineID != "" {
+		repo, repoErr := s.machineRepo(ctx)
+		if repoErr != nil {
+			return a, 0, repoErr
+		}
+		a, err = repo.AgentMachineAuthority(ctx, request.MachineID, request.AgentID)
+	} else {
+		a, err = s.repo(ctx).AgentOAuthAuthority(ctx, request.OwnerID, request.AgentID, request.HumanSID, request.ClientID)
+	}
 	if err != nil {
 		return a, 0, err
 	}
 	if request.RevokedAtMs != 0 {
 		return a, 0, ErrAgentOAuthGrant
 	}
-	if !a.Valid(request) || request.GrantExpiresAtMs <= s.auth.nowMs() {
+	if !a.Valid(request) || (request.MachineID == "" && request.GrantExpiresAtMs <= s.auth.nowMs()) {
 		return a, 0, s.invalidate(ctx, request)
 	}
 	if err = s.admitOwner(ctx, a.Owner, request.Product); err != nil {
 		if isAgentOAuthAdmissionRefusal(err) {
+			if request.MachineID != "" {
+				return a, 0, s.invalidateMachine(ctx, a.Machine)
+			}
 			return a, 0, s.invalidate(ctx, request)
 		}
 		return a, 0, err
+	}
+	if request.MachineID != "" {
+		if !s.resourceConfigured(ctx, request.Resource) {
+			return a, 0, s.invalidateMachine(ctx, a.Machine)
+		}
+		return a, s.auth.nowMs() + int64(s.auth.cfg.AgentOAuthAccessSeconds)*1000, nil
 	}
 	currentExpiry, err := s.grantExpiry(ctx, a.Owner, a.HumanSession)
 	if err != nil {
@@ -507,7 +531,7 @@ func (s *AgentOAuthService) Introspect(ctx context.Context, resource, raw string
 	if err != nil {
 		return nil, err
 	}
-	if request == nil || request.AgentID != claims.Sub || request.OwnerID != claims.Actor.Sub || request.ClientID != claims.ClientID || request.Resource != resource || request.SessionID != claims.SID || strings.Join(request.Scopes, " ") != claims.Scope || request.GrantExpiresAtMs/time.Second.Milliseconds() < claims.ExpiresAt {
+	if request == nil || request.AgentID != claims.Sub || request.OwnerID != claims.Actor.Sub || request.ClientID != claims.ClientID || request.Resource != resource || request.SessionID != claims.SID || strings.Join(request.Scopes, " ") != claims.Scope || (request.MachineID == "" && request.GrantExpiresAtMs/time.Second.Milliseconds() < claims.ExpiresAt) {
 		return inactive, nil
 	}
 	authority, _, err := s.admittedAuthority(ctx, request)

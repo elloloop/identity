@@ -43,37 +43,39 @@ type Repo struct {
 
 	mu sync.Mutex
 
-	seq                 int64
-	oauthClients        map[string]*service.OAuthClient
-	agentAuthorizations map[string]*service.AgentAuthorization
-	agentOAuthCodes     map[string]string
-	agentOAuthRefresh   map[string]*service.AgentOAuthRefresh
-	users               map[string]*service.User
-	agentCreations      map[[2]string]service.AgentCreationReceipt
-	refreshTokens       map[string]*service.RefreshTokenRecord
-	passkeyCreds        map[string]*service.PasskeyCredRecord
-	attestedDevices     map[string]*service.AttestedDeviceRecord
-	assuranceChallenges map[string]*service.AssuranceChallengeRecord
-	passkeyChallenges   map[string]*service.PasskeyChallengeRecord
-	qrSessions          map[string]*service.QrLoginSessionRecord
-	oauthOneTimeCodes   map[string]*service.OAuthOneTimeCodeRecord
-	nativeRedemptions   map[string]*service.NativeTokenRedemptionRecord
-	emailLoginCodes     map[string]*service.EmailLoginCodeRecord
-	magicLinkTokens     map[string]*service.MagicLinkTokenRecord
-	phoneVerifyCodes    map[string]*service.PhoneVerificationCodeRecord
-	totpCreds           map[string]*service.TotpCredRecord
-	recoveryCodes       map[string]*service.RecoveryCodeRecord
-	loginChallenges     map[string]*service.LoginChallengeRecord
-	invitations         map[string]*service.InvitationRecord
-	passwordResets      map[string]*service.PasswordResetToken
-	emailVerifications  map[string]*service.EmailVerificationToken
-	emailChanges        map[string]*service.EmailChangeToken
-	oauthIdentities     map[string]*service.OAuthIdentity
-	idvRecords          map[string]*service.IdentityVerificationRecord
-	parentalConsents    map[string]*service.ParentalConsentRecord
-	guardianEdges       map[string]*service.GuardianEdge
-	sessions            map[string]*service.SessionRecord
-	auditEvents         map[string]*service.AuditEvent
+	seq                       int64
+	oauthClients              map[string]*service.OAuthClient
+	agentAuthorizations       map[string]*service.AgentAuthorization
+	agentOAuthCodes           map[string]string
+	agentOAuthRefresh         map[string]*service.AgentOAuthRefresh
+	agentMachines             map[string]*service.AgentMachine
+	agentMachineRegistrations map[string]*service.AgentMachine
+	users                     map[string]*service.User
+	agentCreations            map[[2]string]service.AgentCreationReceipt
+	refreshTokens             map[string]*service.RefreshTokenRecord
+	passkeyCreds              map[string]*service.PasskeyCredRecord
+	attestedDevices           map[string]*service.AttestedDeviceRecord
+	assuranceChallenges       map[string]*service.AssuranceChallengeRecord
+	passkeyChallenges         map[string]*service.PasskeyChallengeRecord
+	qrSessions                map[string]*service.QrLoginSessionRecord
+	oauthOneTimeCodes         map[string]*service.OAuthOneTimeCodeRecord
+	nativeRedemptions         map[string]*service.NativeTokenRedemptionRecord
+	emailLoginCodes           map[string]*service.EmailLoginCodeRecord
+	magicLinkTokens           map[string]*service.MagicLinkTokenRecord
+	phoneVerifyCodes          map[string]*service.PhoneVerificationCodeRecord
+	totpCreds                 map[string]*service.TotpCredRecord
+	recoveryCodes             map[string]*service.RecoveryCodeRecord
+	loginChallenges           map[string]*service.LoginChallengeRecord
+	invitations               map[string]*service.InvitationRecord
+	passwordResets            map[string]*service.PasswordResetToken
+	emailVerifications        map[string]*service.EmailVerificationToken
+	emailChanges              map[string]*service.EmailChangeToken
+	oauthIdentities           map[string]*service.OAuthIdentity
+	idvRecords                map[string]*service.IdentityVerificationRecord
+	parentalConsents          map[string]*service.ParentalConsentRecord
+	guardianEdges             map[string]*service.GuardianEdge
+	sessions                  map[string]*service.SessionRecord
+	auditEvents               map[string]*service.AuditEvent
 }
 
 // projectRegistry memoises the per-project Repo siblings produced by
@@ -105,33 +107,35 @@ func New() *Repo {
 // carries no project binding or registry; New / WithProject set those.
 func newStore() *Repo {
 	return &Repo{
-		oauthClients:        make(map[string]*service.OAuthClient),
-		users:               make(map[string]*service.User),
-		agentCreations:      make(map[[2]string]service.AgentCreationReceipt),
-		refreshTokens:       make(map[string]*service.RefreshTokenRecord),
-		passkeyCreds:        make(map[string]*service.PasskeyCredRecord),
-		attestedDevices:     make(map[string]*service.AttestedDeviceRecord),
-		assuranceChallenges: make(map[string]*service.AssuranceChallengeRecord),
-		passkeyChallenges:   make(map[string]*service.PasskeyChallengeRecord),
-		qrSessions:          make(map[string]*service.QrLoginSessionRecord),
-		oauthOneTimeCodes:   make(map[string]*service.OAuthOneTimeCodeRecord),
-		nativeRedemptions:   make(map[string]*service.NativeTokenRedemptionRecord),
-		emailLoginCodes:     make(map[string]*service.EmailLoginCodeRecord),
-		magicLinkTokens:     make(map[string]*service.MagicLinkTokenRecord),
-		phoneVerifyCodes:    make(map[string]*service.PhoneVerificationCodeRecord),
-		totpCreds:           make(map[string]*service.TotpCredRecord),
-		recoveryCodes:       make(map[string]*service.RecoveryCodeRecord),
-		loginChallenges:     make(map[string]*service.LoginChallengeRecord),
-		invitations:         make(map[string]*service.InvitationRecord),
-		passwordResets:      make(map[string]*service.PasswordResetToken),
-		emailVerifications:  make(map[string]*service.EmailVerificationToken),
-		emailChanges:        make(map[string]*service.EmailChangeToken),
-		oauthIdentities:     make(map[string]*service.OAuthIdentity),
-		idvRecords:          make(map[string]*service.IdentityVerificationRecord),
-		parentalConsents:    make(map[string]*service.ParentalConsentRecord),
-		guardianEdges:       make(map[string]*service.GuardianEdge),
-		sessions:            make(map[string]*service.SessionRecord),
-		auditEvents:         make(map[string]*service.AuditEvent),
+		oauthClients:              make(map[string]*service.OAuthClient),
+		agentMachines:             make(map[string]*service.AgentMachine),
+		agentMachineRegistrations: make(map[string]*service.AgentMachine),
+		users:                     make(map[string]*service.User),
+		agentCreations:            make(map[[2]string]service.AgentCreationReceipt),
+		refreshTokens:             make(map[string]*service.RefreshTokenRecord),
+		passkeyCreds:              make(map[string]*service.PasskeyCredRecord),
+		attestedDevices:           make(map[string]*service.AttestedDeviceRecord),
+		assuranceChallenges:       make(map[string]*service.AssuranceChallengeRecord),
+		passkeyChallenges:         make(map[string]*service.PasskeyChallengeRecord),
+		qrSessions:                make(map[string]*service.QrLoginSessionRecord),
+		oauthOneTimeCodes:         make(map[string]*service.OAuthOneTimeCodeRecord),
+		nativeRedemptions:         make(map[string]*service.NativeTokenRedemptionRecord),
+		emailLoginCodes:           make(map[string]*service.EmailLoginCodeRecord),
+		magicLinkTokens:           make(map[string]*service.MagicLinkTokenRecord),
+		phoneVerifyCodes:          make(map[string]*service.PhoneVerificationCodeRecord),
+		totpCreds:                 make(map[string]*service.TotpCredRecord),
+		recoveryCodes:             make(map[string]*service.RecoveryCodeRecord),
+		loginChallenges:           make(map[string]*service.LoginChallengeRecord),
+		invitations:               make(map[string]*service.InvitationRecord),
+		passwordResets:            make(map[string]*service.PasswordResetToken),
+		emailVerifications:        make(map[string]*service.EmailVerificationToken),
+		emailChanges:              make(map[string]*service.EmailChangeToken),
+		oauthIdentities:           make(map[string]*service.OAuthIdentity),
+		idvRecords:                make(map[string]*service.IdentityVerificationRecord),
+		parentalConsents:          make(map[string]*service.ParentalConsentRecord),
+		guardianEdges:             make(map[string]*service.GuardianEdge),
+		sessions:                  make(map[string]*service.SessionRecord),
+		auditEvents:               make(map[string]*service.AuditEvent),
 	}
 }
 

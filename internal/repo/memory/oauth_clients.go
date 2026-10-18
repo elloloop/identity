@@ -41,6 +41,11 @@ func (r *Repo) UpdateOAuthClient(_ context.Context, id string, expected int64, r
 	next.Revision++
 	next.UpdatedAt = atMs
 	r.oauthClients[id] = next.Clone()
+	for _, machine := range r.agentMachines {
+		if machine.ClientID == id {
+			r.revokeAgentMachineLocked(machine, atMs)
+		}
+	}
 	for _, grant := range r.agentAuthorizations {
 		if grant.ClientID == id && grant.RevokedAtMs == 0 {
 			grant.RevokedAtMs = atMs

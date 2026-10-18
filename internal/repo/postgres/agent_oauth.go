@@ -188,6 +188,21 @@ func (r *pgRepository) MutateAgentAuthorization(ctx context.Context, id string, 
 	if m.Operation == service.AgentOAuthValidate {
 		lock = " FOR SHARE"
 	}
+	if initial.MachineID != "" {
+		machineLock := ""
+		if m.Operation == service.AgentOAuthValidate {
+			machineLock = " FOR SHARE"
+		} else {
+			machineLock = " FOR UPDATE"
+		}
+		authority.Machine, err = scanAgentMachine(tx.QueryRow(ctx, `SELECT `+agentMachineColumns+` FROM agent_machines WHERE project_id=$1 AND id=$2`+machineLock, r.projectID, initial.MachineID))
+		if noRows(err) {
+			return nil, service.ErrAgentOAuthGrant
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 	current, err := scanAgentAuthorization(tx.QueryRow(ctx, `SELECT `+agentAuthorizationColumns+` FROM agent_authorizations WHERE project_id=$1 AND id=$2`+lock, r.projectID, id))
 	if noRows(err) {
 		return nil, service.ErrAgentOAuthGrant
@@ -262,6 +277,6 @@ func (r *pgRepository) DeleteExpiredAgentAuthorizations(ctx context.Context, bef
 	if limit < 1 || limit > service.MaxUserListLimit {
 		return service.ErrInvalidArgument
 	}
-	_, err := r.pool.Exec(ctx, `DELETE FROM agent_authorizations WHERE project_id=$1 AND id IN(SELECT id FROM agent_authorizations WHERE project_id=$1 AND expires_at_ms<$2 ORDER BY expires_at_ms,id LIMIT $3)`, r.projectID, beforeMs, limit)
+	_, err := r.pool.Exec(ctx, `DELETE FROM agent_authorizations WHERE project_id=$1 AND id IN(SELECT id FROM agent_authorizations WHERE project_id=$1 AND machine_id IS NULL AND expires_at_ms>0 AND expires_at_ms<$2 ORDER BY expires_at_ms,id LIMIT $3)`, r.projectID, beforeMs, limit)
 	return err
 }

@@ -18,6 +18,7 @@ const (
 	DefaultAgentOAuthAccessSeconds      = 300
 	DefaultAgentOAuthConsentSeconds     = 86400
 	DefaultAgentOAuthRefreshIdleSeconds = 3600
+	AgentMachineRequestMaxBytes         = 64 << 10
 	AgentOAuthRequestLifetime           = 5 * time.Minute
 	AgentOAuthCodeLifetime              = time.Minute
 	AgentOAuthRecentSignIn              = 5 * time.Minute
@@ -68,6 +69,9 @@ func (c *Config) AgentOAuthCredentials() ([]AgentOAuthResourceCredential, error)
 
 func (c *Config) ValidateAgentOAuth() error {
 	if !c.AgentOAuthEnabled {
+		if c.AgentMachineEnabled {
+			return errors.New("config: durable machine access requires GATEWAY_AGENT_OAUTH_ENABLED")
+		}
 		return nil
 	}
 	if c.AgentOAuthProtocolPerIP == 0 {

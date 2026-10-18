@@ -177,13 +177,23 @@ func (r *sqliteRepository) MutateAgentAuthorization(ctx context.Context, id stri
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if m.Operation != service.AgentOAuthValidate {
-		if _, err = tx.Exec(ctx, "UPDATE agent_authorizations SET id=id WHERE project_id=$1 AND id=$2", r.projectID, id); err != nil {
+		if _, err = tx.Exec(ctx, "UPDATE users SET id=id WHERE project_id=$1 AND id=$2", r.projectID, owner); err != nil {
 			return nil, err
 		}
 	}
 	authority, err := r.agentOAuthLockedAuthority(ctx, tx, owner, agent, sid, initial.ClientID)
 	if err != nil {
 		return nil, err
+	}
+	if initial.MachineID != "" {
+		machineLock := ""
+		authority.Machine, err = scanAgentMachine(tx.QueryRow(ctx, `SELECT `+agentMachineColumns+` FROM agent_machines WHERE project_id=$1 AND id=$2`+machineLock, r.projectID, initial.MachineID))
+		if noRows(err) {
+			return nil, service.ErrAgentOAuthGrant
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	current, err := scanAgentAuthorization(tx.QueryRow(ctx, `SELECT `+agentAuthorizationColumns+` FROM agent_authorizations WHERE project_id=$1 AND id=$2`, r.projectID, id))
 	if noRows(err) {
@@ -259,6 +269,6 @@ func (r *sqliteRepository) DeleteExpiredAgentAuthorizations(ctx context.Context,
 	if limit < 1 || limit > service.MaxUserListLimit {
 		return service.ErrInvalidArgument
 	}
-	_, err := r.db.Exec(ctx, `DELETE FROM agent_authorizations WHERE project_id=$1 AND id IN(SELECT id FROM agent_authorizations WHERE project_id=$1 AND expires_at_ms<$2 ORDER BY expires_at_ms,id LIMIT $3)`, r.projectID, beforeMs, limit)
+	_, err := r.db.Exec(ctx, `DELETE FROM agent_authorizations WHERE project_id=$1 AND id IN(SELECT id FROM agent_authorizations WHERE project_id=$1 AND machine_id IS NULL AND expires_at_ms>0 AND expires_at_ms<$2 ORDER BY expires_at_ms,id LIMIT $3)`, r.projectID, beforeMs, limit)
 	return err
 }

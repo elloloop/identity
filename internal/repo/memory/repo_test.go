@@ -30,6 +30,7 @@ func TestConformance(t *testing.T) {
 	}
 	conformance.RunConformance(t, driver)
 	conformance.RunAgentOAuthConformance(t, driver)
+	conformance.RunAgentMachineConformance(t, driver)
 }
 
 func TestRefreshTokenDeleteAndCount(t *testing.T) {

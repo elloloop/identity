@@ -179,11 +179,11 @@ func (r *OAuthClientRegistration) Validate() error {
 			}
 		}
 	}
-	if !boundedOAuthStrings(r.GrantTypes, 2) || !slices.Contains(r.GrantTypes, OAuthGrantAuthorizationCode) {
-		return invalidOAuthClient("authorization_code is required; refresh_token is optional")
+	if !boundedOAuthStrings(r.GrantTypes, 3) || !slices.Contains(r.GrantTypes, OAuthGrantAuthorizationCode) {
+		return invalidOAuthClient("authorization_code is required; refresh_token and agent_machine are optional")
 	}
 	for _, grant := range r.GrantTypes {
-		if grant != OAuthGrantAuthorizationCode && grant != OAuthGrantRefreshToken {
+		if grant != OAuthGrantAuthorizationCode && grant != OAuthGrantRefreshToken && grant != OAuthGrantAgentMachine {
 			return invalidOAuthClient("unsupported grant type")
 		}
 	}
@@ -355,4 +355,24 @@ func ValidateOAuthClientPage(afterID string, limit int) error {
 		return invalidOAuthClient("invalid client page")
 	}
 	return nil
+}
+
+// ValidateMachineRequest requires explicit registry opt-in to durable access.
+// There is no redirect or browser authorization code in this grant.
+func (c *OAuthClient) ValidateMachineRequest(resource string, scopes []string) error {
+	if c == nil || c.Kind != OAuthClientNativePublic || c.Revision <= 0 || c.Registration.Disabled || c.Registration.Validate() != nil || !slices.Contains(c.Registration.GrantTypes, OAuthGrantAgentMachine) || !boundedOAuthStrings(scopes, maxOAuthScopes) || slices.Contains(scopes, "openid") {
+		return ErrPermissionDenied
+	}
+	for _, bound := range c.Registration.Resources {
+		if bound.Resource != resource || bound.Product == "" {
+			continue
+		}
+		for _, scope := range scopes {
+			if !slices.Contains(bound.Scopes, scope) {
+				return ErrPermissionDenied
+			}
+		}
+		return nil
+	}
+	return ErrPermissionDenied
 }

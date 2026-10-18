@@ -1229,6 +1229,9 @@ type Config struct {
 	// Requires agents, session revocation, HTTPS issuer and authenticated
 	// resource credentials. GATEWAY_AGENT_OAUTH_ENABLED defaults to false.
 	AgentOAuthEnabled bool
+	// AgentMachineEnabled enables durable owner-managed machine credentials.
+	// GATEWAY_AGENT_MACHINE_ENABLED; disabled by default, requires delegated OAuth.
+	AgentMachineEnabled bool
 	// AgentOAuthAccessSeconds bounds delegated access JWTs to 1–900 seconds.
 	// GATEWAY_AGENT_OAUTH_ACCESS_SECONDS defaults to 300.
 	AgentOAuthAccessSeconds int
@@ -1626,6 +1629,7 @@ func loadFromEnv() *Config {
 		AgentOAuthProtocolPerIP:           envInt("GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP", DefaultAgentOAuthProtocolPerIP),
 		AgentOAuthIntrospectionPerIP:      envInt("GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP", DefaultAgentOAuthIntrospectionPerIP),
 		AgentOAuthEnabled:                 envBool("GATEWAY_AGENT_OAUTH_ENABLED", false),
+		AgentMachineEnabled:               envBool("GATEWAY_AGENT_MACHINE_ENABLED", false),
 		AgentOAuthAccessSeconds:           envInt("GATEWAY_AGENT_OAUTH_ACCESS_SECONDS", DefaultAgentOAuthAccessSeconds),
 		AgentOAuthConsentSeconds:          envInt("GATEWAY_AGENT_OAUTH_CONSENT_SECONDS", DefaultAgentOAuthConsentSeconds),
 		AgentOAuthRefreshIdleSeconds:      envInt("GATEWAY_AGENT_OAUTH_REFRESH_IDLE_SECONDS", DefaultAgentOAuthRefreshIdleSeconds),
