@@ -37,7 +37,7 @@ func (r *machineAdmissionRepo) ListUsers(context.Context, UserListFilter) ([]*Us
 
 func machineAdmissionFixture(t *testing.T) (*AgentOAuthService, *machineAdmissionRepo, string) {
 	t.Helper()
-	machine, authority, _ := machineStateFixture()
+	machine, authority, _ := machineGrantFixture()
 	raw := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	machine.CredentialHash = oauthHash(raw)
 	repo := &machineAdmissionRepo{Repository: newFakeRepo(), authority: authority, stale: machine.Clone()}

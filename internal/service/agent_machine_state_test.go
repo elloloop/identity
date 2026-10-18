@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func machineStateFixture() (*AgentMachine, AgentOAuthAuthority, *AgentAuthorization) {
+func machineGrantFixture() (*AgentMachine, AgentOAuthAuthority, *AgentAuthorization) {
 	_, authority, _ := agentOAuthFixture()
 	authority.Client.Registration.GrantTypes = append(authority.Client.Registration.GrantTypes, OAuthGrantAgentMachine)
 	authority.Client.Registration.Resources[0].Product = "files"
@@ -19,7 +19,7 @@ func machineStateFixture() (*AgentMachine, AgentOAuthAuthority, *AgentAuthorizat
 }
 
 func TestMachineAuthoritySurvivesHumanSessionLossButNeverOwnerOrAgentLoss(t *testing.T) {
-	machine, authority, grant := machineStateFixture()
+	machine, authority, grant := machineGrantFixture()
 	require.NoError(t, ValidateAgentMachine(machine))
 	require.True(t, authority.ValidMachineRegistration(machine))
 	authority.HumanSession = nil
@@ -40,12 +40,12 @@ func TestMachineAuthoritySurvivesHumanSessionLossButNeverOwnerOrAgentLoss(t *tes
 		"agent excluded":          func(a *AgentOAuthAuthority) { a.Machine.ExcludedAgentIDs = []string{grant.AgentID} },
 		"scope widened":           func(a *AgentOAuthAuthority) { a.Machine.Scopes = append(a.Machine.Scopes, "files:write") },
 	} {
-		t.Run(name, func(t *testing.T) { _, a, g := machineStateFixture(); change(&a); require.False(t, a.Valid(g)) })
+		t.Run(name, func(t *testing.T) { _, a, g := machineGrantFixture(); change(&a); require.False(t, a.Valid(g)) })
 	}
 }
 
 func TestMachineSelectionRevisionAndRevocation(t *testing.T) {
-	machine, _, _ := machineStateFixture()
+	machine, _, _ := machineGrantFixture()
 	require.True(t, machine.Allows("future-agent"))
 	selected, err := ApplyAgentMachineMutation(machine, AgentMachineMutation{Operation: AgentMachineSelect, OwnerID: machine.OwnerID, AtMs: 2000, ExpectedRevision: 1, AllAgents: false, AgentIDs: []string{"agent"}})
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestMachineInputAndCredentialBounds(t *testing.T) {
 	for _, bad := range []string{"", raw + "=", raw[:42], strings.Repeat("x", 100000), strings.Repeat("/", 43), strings.Repeat("A", 42) + "B"} {
 		require.False(t, validAgentMachineCredential(bad))
 	}
-	machine, _, _ := machineStateFixture()
+	machine, _, _ := machineGrantFixture()
 	clone := machine.Clone()
 	clone.Scopes[0] = "changed"
 	require.Equal(t, "files:read", machine.Scopes[0])
@@ -97,7 +97,7 @@ func TestMachineInputAndCredentialBounds(t *testing.T) {
 }
 
 func TestMachineExchangeCannotUseBrowserCodeOrRefreshPaths(t *testing.T) {
-	_, authority, grant := machineStateFixture()
+	_, authority, grant := machineGrantFixture()
 	for _, operation := range []string{AgentOAuthRedeem, AgentOAuthRotate} {
 		_, err := ApplyAgentOAuthMutation(grant, authority, nil, AgentOAuthMutation{Operation: operation, AtMs: 3000, AuthorityFingerprint: authority.Fingerprint()})
 		require.ErrorIs(t, err, ErrAgentOAuthGrant)
