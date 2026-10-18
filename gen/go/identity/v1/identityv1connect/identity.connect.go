@@ -505,7 +505,8 @@ type IdentityServiceClient interface {
 	IntrospectAgentMachine(context.Context, *connect.Request[v1.IntrospectAgentMachineRequest]) (*connect.Response[v1.IntrospectAgentMachineResponse], error)
 	// Creation and selection changes require a recently signed-in owning human.
 	// List/revoke require the owning human; agent tokens cannot manage machines.
-	// Exchange/list-agents authenticate the opaque machine credential, never a
+	// Exchange uses the agent key and list-agents uses the engine key, each
+	// proving possession through a single-use signed challenge. Neither uses a
 	// human bearer. Revocation and excluded/revoked children cannot auto-revive.
 	RegisterAgentMachine(context.Context, *connect.Request[v1.RegisterAgentMachineRequest]) (*connect.Response[v1.RegisterAgentMachineResponse], error)
 	ListAgentMachines(context.Context, *connect.Request[v1.ListAgentMachinesRequest]) (*connect.Response[v1.ListAgentMachinesResponse], error)
@@ -2725,7 +2726,8 @@ type IdentityServiceHandler interface {
 	IntrospectAgentMachine(context.Context, *connect.Request[v1.IntrospectAgentMachineRequest]) (*connect.Response[v1.IntrospectAgentMachineResponse], error)
 	// Creation and selection changes require a recently signed-in owning human.
 	// List/revoke require the owning human; agent tokens cannot manage machines.
-	// Exchange/list-agents authenticate the opaque machine credential, never a
+	// Exchange uses the agent key and list-agents uses the engine key, each
+	// proving possession through a single-use signed challenge. Neither uses a
 	// human bearer. Revocation and excluded/revoked children cannot auto-revive.
 	RegisterAgentMachine(context.Context, *connect.Request[v1.RegisterAgentMachineRequest]) (*connect.Response[v1.RegisterAgentMachineResponse], error)
 	ListAgentMachines(context.Context, *connect.Request[v1.ListAgentMachinesRequest]) (*connect.Response[v1.ListAgentMachinesResponse], error)
