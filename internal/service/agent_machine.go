@@ -143,12 +143,12 @@ func (s *AgentOAuthService) invalidateMachine(ctx context.Context, machine *Agen
 }
 
 func (s *AgentOAuthService) ExchangeMachine(ctx context.Context, id, agent string, proof AgentMachineProof) (*AgentOAuthTokens, error) {
-	_, authority, grant, err := s.machineAccess(ctx, AgentMachineChallengeRequest{MachineID: id, AgentID: agent, Operation: AgentMachineExchange}, proof)
+	_, _, grant, err := s.machineAccess(ctx, AgentMachineChallengeRequest{MachineID: id, AgentID: agent, Operation: AgentMachineExchange}, proof)
 	if err != nil {
 		return nil, err
 	}
 	now := s.auth.nowMs()
-	authority, _, err = s.admittedAuthority(ctx, grant)
+	authority, _, err := s.admittedAuthority(ctx, grant)
 	if err != nil {
 		return nil, err
 	}
