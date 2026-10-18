@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"net/http"
 
+	"connectrpc.com/connect"
+
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/app/ui"
+	"github.com/elloloop/identity/internal/config"
 	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/service"
 )
@@ -41,6 +44,14 @@ func mountIdentityService(
 		(&agentOAuthProtocol{service: agentOAuth, auth: authSvc, issuer: deps.Config.JWTIssuer}).register(mux)
 		mux.Handle(agentOAuthConsentPath, ui.AgentConsentHandler(deps.Config, authSvc, returnAllow))
 	}
+	connectOpts = append(connectOpts, connect.WithConditionalHandlerOptions(func(spec connect.Spec) []connect.HandlerOption {
+		switch spec.Procedure {
+		case identityconnectgen.IdentityServiceIntrospectAgentMachineProcedure, identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, identityconnectgen.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityconnectgen.IdentityServiceRegisterAgentMachineProcedure, identityconnectgen.IdentityServiceListAgentMachinesProcedure, identityconnectgen.IdentityServiceSelectAgentMachineAgentsProcedure, identityconnectgen.IdentityServiceRevokeAgentMachineProcedure, identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure, identityconnectgen.IdentityServiceListAgentMachineAgentsProcedure:
+			return []connect.HandlerOption{connect.WithReadMaxBytes(config.AgentMachineRequestMaxBytes)}
+		default:
+			return nil
+		}
+	}))
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)
 

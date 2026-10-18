@@ -69,6 +69,12 @@ Database triggers fence security state even if a later session-cache invalidatio
 fails. Observed external product-policy refusal terminally revokes the grant.
 Retention deletes expired aggregate and refresh data in bounded sweeper batches.
 
+## Durable unattended machines
+
+ADR-0017 defines a separately enabled owner-managed machine capability using
+short-lived tokens with durable, revocable machine authority. It does not change
+this browser flow's human-session bounds or its refresh rotation semantics.
+
 ## Consequences
 
 Operators must enable session revocation, choose an HTTPS issuer origin without

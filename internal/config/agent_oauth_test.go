@@ -65,3 +65,11 @@ func TestAgentOAuthIssuerIsOriginOnly(t *testing.T) {
 		require.NoError(t, c.ValidateAgentOAuth())
 	})
 }
+
+func TestMachineAccessRequiresExplicitDelegatedFeature(t *testing.T) {
+	c := oauthConfig()
+	c.AgentMachineEnabled = true
+	require.NoError(t, c.ValidateAgentOAuth())
+	c.AgentOAuthEnabled = false
+	require.Error(t, c.ValidateAgentOAuth())
+}

@@ -56,6 +56,7 @@ func TestConformance(t *testing.T) {
 	}
 	conformance.RunConformance(t, driver)
 	conformance.RunAgentOAuthConformance(t, driver)
+	conformance.RunAgentMachineConformance(t, driver)
 }
 
 // TestConcurrencyConformance_FileWAL runs the concurrency conformance cases,
@@ -67,6 +68,31 @@ func TestConcurrencyConformance_FileWAL(t *testing.T) {
 	t.Parallel()
 	driver := conformance.Driver{
 		Name: "sqlite-file",
+		ChangeProjectPolicy: func(t *testing.T, base service.Repository) {
+			t.Helper()
+			scoped := base.(*sqliteRepository)
+			for _, status := range []string{"suspended", "active"} {
+				if _, err := scoped.db.Exec(context.Background(), "UPDATE projects SET status=$2 WHERE id=$1", scoped.projectID, status); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		Reopen: func(t *testing.T, base service.Repository) service.Repository {
+			t.Helper()
+			old := base.(*sqliteRepository)
+			var seq int
+			var name, path string
+			if err := old.db.QueryRow(context.Background(), "PRAGMA database_list").Scan(&seq, &name, &path); err != nil {
+				t.Fatal(err)
+			}
+			old.Close()
+			next, err := New(context.Background(), Config{Path: path, ProjectID: old.projectID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(next.Close)
+			return next
+		},
 		NewRepo: func(t *testing.T) service.Repository {
 			t.Helper()
 			ctx := context.Background()
@@ -91,6 +117,7 @@ func TestConcurrencyConformance_FileWAL(t *testing.T) {
 	}
 	conformance.RunConcurrencyConformance(t, driver)
 	conformance.RunAgentOAuthConformance(t, driver)
+	conformance.RunAgentMachineConformance(t, driver)
 }
 
 // TestSQLite_CaseInsensitiveEmail verifies the lower(email) unique index

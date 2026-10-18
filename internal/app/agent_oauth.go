@@ -313,6 +313,11 @@ func sweepAgentOAuth(ctx context.Context, base service.Repository, projects serv
 		if err := store.DeleteExpiredAgentAuthorizations(ctx, beforeMs, limit); err != nil {
 			return err
 		}
+		if machines, ok := base.WithProject(id).(service.AgentMachineRepository); ok {
+			if err := machines.DeleteExpiredAgentMachineChallenges(ctx, beforeMs, limit); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

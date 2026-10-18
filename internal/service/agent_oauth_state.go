@@ -31,6 +31,8 @@ var (
 // hashes of codes and refresh credentials are persisted. Revocation is terminal.
 type AgentAuthorization struct {
 	ID               string
+	MachineID        string
+	MachinePublicKey string
 	ClientID         string
 	ClientRevision   int64
 	RedirectURI      string
@@ -70,6 +72,7 @@ type AgentOAuthAuthority struct {
 	HumanSession *SessionRecord
 	Client       *OAuthClient
 	HasGuardian  bool
+	Machine      *AgentMachine
 }
 
 type agentOAuthUserAuthority struct {
@@ -92,13 +95,17 @@ func (a AgentOAuthAuthority) Fingerprint() string {
 		Session      *SessionRecord
 		Client       *OAuthClient
 		HasGuardian  bool
-	}{agentOAuthUserSnapshot(a.Owner), agentOAuthUserSnapshot(a.Agent), a.HumanSession, a.Client, a.HasGuardian}
+		Machine      *AgentMachine
+	}{agentOAuthUserSnapshot(a.Owner), agentOAuthUserSnapshot(a.Agent), a.HumanSession, a.Client, a.HasGuardian, a.Machine}
 	data, _ := json.Marshal(snapshot)
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
 
 func (a AgentOAuthAuthority) Valid(r *AgentAuthorization) bool {
+	if r != nil && r.MachineID != "" {
+		return a.ValidMachine(a.Machine) && a.Machine.ID == r.MachineID && validMachinePublicKey(r.MachinePublicKey) && r.MachinePublicKey != a.Machine.PublicKey && a.Machine.Allows(r.AgentID) && a.Agent != nil && a.Agent.IsAgent() && isActiveStatus(a.Agent.Status) && a.Agent.OwnerUserID == r.OwnerID && a.Agent.ID == r.AgentID && a.Machine.OwnerID == r.OwnerID && r.ClientID == a.Machine.ClientID && r.ClientRevision == a.Machine.ClientRevision && r.Resource == a.Machine.Resource && r.Product == a.Machine.Product && slices.Equal(r.Scopes, a.Machine.Scopes) && r.HumanSID == "" && r.GrantExpiresAtMs == 0
+	}
 	return r != nil && isEligibleAgentOwner(a.Owner) && a.Agent != nil && a.Agent.IsAgent() &&
 		isActiveStatus(a.Agent.Status) && a.Agent.OwnerUserID == a.Owner.ID && a.Owner.ID == r.OwnerID &&
 		a.Agent.ID == r.AgentID && a.HumanSession != nil && a.HumanSession.SID == r.HumanSID &&
@@ -148,7 +155,7 @@ type AgentOAuthRepository interface {
 func ValidateAgentAuthorization(r *AgentAuthorization) error {
 	if r == nil || !validOAuthClientID(r.ID) || !validOAuthClientID(r.ClientID) || r.ClientRevision <= 0 ||
 		r.Revision != 1 || r.Decision != AgentAuthorizationPending || r.CreatedAtMs <= 0 || r.ExpiresAtMs <= r.CreatedAtMs ||
-		r.OwnerID != "" || r.AgentID != "" || r.HumanSID != "" || r.CodeHash != "" || r.SessionID != "" ||
+		r.MachineID != "" || r.MachinePublicKey != "" || r.OwnerID != "" || r.AgentID != "" || r.HumanSID != "" || r.CodeHash != "" || r.SessionID != "" ||
 		r.GrantExpiresAtMs != 0 || r.RevokedAtMs != 0 || !boundedOAuthStrings(r.Scopes, maxOAuthScopes) || !ValidS256Challenge(r.Challenge) {
 		return ErrInvalidArgument
 	}
@@ -197,7 +204,10 @@ func ApplyAgentOAuthMutation(current *AgentAuthorization, authority AgentOAuthAu
 	if m.Operation == AgentOAuthApprove || m.Operation == AgentOAuthDeny {
 		return applyAgentOAuthConsent(next, authority, m)
 	}
-	if next.Decision != AgentAuthorizationApproved || next.GrantExpiresAtMs <= m.AtMs || !authority.Valid(next) || authority.Fingerprint() != m.AuthorityFingerprint {
+	if next.Decision != AgentAuthorizationApproved || (next.MachineID == "" && next.GrantExpiresAtMs <= m.AtMs) || !authority.Valid(next) || authority.Fingerprint() != m.AuthorityFingerprint {
+		return nil, ErrAgentOAuthGrant
+	}
+	if next.MachineID != "" && m.Operation != AgentOAuthValidate {
 		return nil, ErrAgentOAuthGrant
 	}
 	switch m.Operation {

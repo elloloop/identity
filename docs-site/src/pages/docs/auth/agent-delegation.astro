@@ -73,4 +73,38 @@ OIDC discovery, userinfo, implicit flow, dynamic registration or generic mint AP
 <code>GRPCTrustSessionID</code> and <code>GRPCTrustAuthTime</code> only after their
 verified interceptor owns those metadata values. Otherwise the bridge strips
 them. Ordinary existing gRPC auth behavior is unchanged.</p>
+<h2>Durable unattended machines</h2>
+<p>For an orchestrator that must survive human signout, enable the separate
+<code>GATEWAY_AGENT_MACHINE_ENABLED</code> feature and explicitly register
+<code>agent_machine</code> in the native client's grant types. This is a typed
+RPC capability, separate from the browser OAuth flow above.</p>
+<p>The signed-in owner calls <code>RegisterAgentMachine</code> with exact bounds
+and the engine's Ed25519 public key (64 lowercase hex characters). The engine
+creates and protects the private key locally; Identity never receives it. Persist
+the request ID and key pair before sending. Identical retries recover the result.
+Omitted selection includes all current and future owned agents; Team and
+application permissions still apply.</p>
+<p>The engine key can discover eligible agents and register their separate public
+keys through <code>RegisterAgentMachineAgentKey</code>. Only each agent's key may
+use <code>ExchangeAgentMachineCredential</code> to obtain its own short-lived token.
+Each operation first obtains a <code>CreateAgentMachineChallenge</code> and signs
+its exact message. Challenges bind issuer, project, machine, agent, operation and
+request, expire after 60 seconds and can be consumed once across issuer restarts.
+After response loss, obtain a fresh challenge; do not replay a consumed proof.</p>
+<p><code>ListAgentMachineAgents</code> pages the selected owned agents. Continue
+until <code>next_offset</code> is -1, even when a filtered page is empty. Its proof
+is bound to that page offset. Keep all private keys outside agent workspaces;
+pass each agent only its own access token. New eligible agents can enroll after
+the owner's human session ends. Existing agent keys cannot be silently replaced.</p>
+<p>Owners list, select and revoke connections with <code>ListAgentMachines</code>,
+<code>SelectAgentMachineAgents</code> and <code>RevokeAgentMachine</code>.
+Selection changes require recent human sign-in and an expected revision.
+Excluded or revoked child grants never reconnect through default-all. Machine
+revocation stops all children. Replacement requires a newly authorized connection.
+Human signout alone does not revoke this kind; ownership, status, security,
+client and policy loss still do. Resources keep introspecting on every request.
+Resources authenticate with their dedicated project/resource HTTP Basic
+credential to <code>IntrospectAgentMachine</code> on every machine-control request;
+a public client ID or human bearer cannot substitute for verification.
+No application machine policy or existing expiring approval is silently extended.</p>
 </DocsLayout>

@@ -19,6 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	IdentityService_CreateAgentMachineChallenge_FullMethodName     = "/identity.v1.IdentityService/CreateAgentMachineChallenge"
+	IdentityService_RegisterAgentMachineAgentKey_FullMethodName    = "/identity.v1.IdentityService/RegisterAgentMachineAgentKey"
+	IdentityService_IntrospectAgentMachine_FullMethodName          = "/identity.v1.IdentityService/IntrospectAgentMachine"
+	IdentityService_RegisterAgentMachine_FullMethodName            = "/identity.v1.IdentityService/RegisterAgentMachine"
+	IdentityService_ListAgentMachines_FullMethodName               = "/identity.v1.IdentityService/ListAgentMachines"
+	IdentityService_SelectAgentMachineAgents_FullMethodName        = "/identity.v1.IdentityService/SelectAgentMachineAgents"
+	IdentityService_RevokeAgentMachine_FullMethodName              = "/identity.v1.IdentityService/RevokeAgentMachine"
+	IdentityService_ExchangeAgentMachineCredential_FullMethodName  = "/identity.v1.IdentityService/ExchangeAgentMachineCredential"
+	IdentityService_ListAgentMachineAgents_FullMethodName          = "/identity.v1.IdentityService/ListAgentMachineAgents"
 	IdentityService_GetAgentAuthorization_FullMethodName           = "/identity.v1.IdentityService/GetAgentAuthorization"
 	IdentityService_DecideAgentAuthorization_FullMethodName        = "/identity.v1.IdentityService/DecideAgentAuthorization"
 	IdentityService_ListAgentDelegations_FullMethodName            = "/identity.v1.IdentityService/ListAgentDelegations"
@@ -171,6 +180,20 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type IdentityServiceClient interface {
+	CreateAgentMachineChallenge(ctx context.Context, in *CreateAgentMachineChallengeRequest, opts ...grpc.CallOption) (*CreateAgentMachineChallengeResponse, error)
+	RegisterAgentMachineAgentKey(ctx context.Context, in *RegisterAgentMachineAgentKeyRequest, opts ...grpc.CallOption) (*RegisterAgentMachineAgentKeyResponse, error)
+	IntrospectAgentMachine(ctx context.Context, in *IntrospectAgentMachineRequest, opts ...grpc.CallOption) (*IntrospectAgentMachineResponse, error)
+	// Creation and selection changes require a recently signed-in owning human.
+	// List/revoke require the owning human; agent tokens cannot manage machines.
+	// Exchange uses the agent key and list-agents uses the engine key, each
+	// proving possession through a single-use signed challenge. Neither uses a
+	// human bearer. Revocation and excluded/revoked children cannot auto-revive.
+	RegisterAgentMachine(ctx context.Context, in *RegisterAgentMachineRequest, opts ...grpc.CallOption) (*RegisterAgentMachineResponse, error)
+	ListAgentMachines(ctx context.Context, in *ListAgentMachinesRequest, opts ...grpc.CallOption) (*ListAgentMachinesResponse, error)
+	SelectAgentMachineAgents(ctx context.Context, in *SelectAgentMachineAgentsRequest, opts ...grpc.CallOption) (*SelectAgentMachineAgentsResponse, error)
+	RevokeAgentMachine(ctx context.Context, in *RevokeAgentMachineRequest, opts ...grpc.CallOption) (*RevokeAgentMachineResponse, error)
+	ExchangeAgentMachineCredential(ctx context.Context, in *ExchangeAgentMachineCredentialRequest, opts ...grpc.CallOption) (*ExchangeAgentMachineCredentialResponse, error)
+	ListAgentMachineAgents(ctx context.Context, in *ListAgentMachineAgentsRequest, opts ...grpc.CallOption) (*ListAgentMachineAgentsResponse, error)
 	// OAuth-only human consent requires a live durable human SID and recent sign-in.
 	// Callers cannot supply actor, client, resource, scopes or an arbitrary proof.
 	GetAgentAuthorization(ctx context.Context, in *GetAgentAuthorizationRequest, opts ...grpc.CallOption) (*GetAgentAuthorizationResponse, error)
@@ -503,6 +526,96 @@ type identityServiceClient struct {
 
 func NewIdentityServiceClient(cc grpc.ClientConnInterface) IdentityServiceClient {
 	return &identityServiceClient{cc}
+}
+
+func (c *identityServiceClient) CreateAgentMachineChallenge(ctx context.Context, in *CreateAgentMachineChallengeRequest, opts ...grpc.CallOption) (*CreateAgentMachineChallengeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateAgentMachineChallengeResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateAgentMachineChallenge_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RegisterAgentMachineAgentKey(ctx context.Context, in *RegisterAgentMachineAgentKeyRequest, opts ...grpc.CallOption) (*RegisterAgentMachineAgentKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterAgentMachineAgentKeyResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RegisterAgentMachineAgentKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) IntrospectAgentMachine(ctx context.Context, in *IntrospectAgentMachineRequest, opts ...grpc.CallOption) (*IntrospectAgentMachineResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IntrospectAgentMachineResponse)
+	err := c.cc.Invoke(ctx, IdentityService_IntrospectAgentMachine_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RegisterAgentMachine(ctx context.Context, in *RegisterAgentMachineRequest, opts ...grpc.CallOption) (*RegisterAgentMachineResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterAgentMachineResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RegisterAgentMachine_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListAgentMachines(ctx context.Context, in *ListAgentMachinesRequest, opts ...grpc.CallOption) (*ListAgentMachinesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentMachinesResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListAgentMachines_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) SelectAgentMachineAgents(ctx context.Context, in *SelectAgentMachineAgentsRequest, opts ...grpc.CallOption) (*SelectAgentMachineAgentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SelectAgentMachineAgentsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_SelectAgentMachineAgents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RevokeAgentMachine(ctx context.Context, in *RevokeAgentMachineRequest, opts ...grpc.CallOption) (*RevokeAgentMachineResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeAgentMachineResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RevokeAgentMachine_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ExchangeAgentMachineCredential(ctx context.Context, in *ExchangeAgentMachineCredentialRequest, opts ...grpc.CallOption) (*ExchangeAgentMachineCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExchangeAgentMachineCredentialResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ExchangeAgentMachineCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListAgentMachineAgents(ctx context.Context, in *ListAgentMachineAgentsRequest, opts ...grpc.CallOption) (*ListAgentMachineAgentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentMachineAgentsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListAgentMachineAgents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *identityServiceClient) GetAgentAuthorization(ctx context.Context, in *GetAgentAuthorizationRequest, opts ...grpc.CallOption) (*GetAgentAuthorizationResponse, error) {
@@ -1969,6 +2082,20 @@ func (c *identityServiceClient) LookupUsers(ctx context.Context, in *LookupUsers
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
 type IdentityServiceServer interface {
+	CreateAgentMachineChallenge(context.Context, *CreateAgentMachineChallengeRequest) (*CreateAgentMachineChallengeResponse, error)
+	RegisterAgentMachineAgentKey(context.Context, *RegisterAgentMachineAgentKeyRequest) (*RegisterAgentMachineAgentKeyResponse, error)
+	IntrospectAgentMachine(context.Context, *IntrospectAgentMachineRequest) (*IntrospectAgentMachineResponse, error)
+	// Creation and selection changes require a recently signed-in owning human.
+	// List/revoke require the owning human; agent tokens cannot manage machines.
+	// Exchange uses the agent key and list-agents uses the engine key, each
+	// proving possession through a single-use signed challenge. Neither uses a
+	// human bearer. Revocation and excluded/revoked children cannot auto-revive.
+	RegisterAgentMachine(context.Context, *RegisterAgentMachineRequest) (*RegisterAgentMachineResponse, error)
+	ListAgentMachines(context.Context, *ListAgentMachinesRequest) (*ListAgentMachinesResponse, error)
+	SelectAgentMachineAgents(context.Context, *SelectAgentMachineAgentsRequest) (*SelectAgentMachineAgentsResponse, error)
+	RevokeAgentMachine(context.Context, *RevokeAgentMachineRequest) (*RevokeAgentMachineResponse, error)
+	ExchangeAgentMachineCredential(context.Context, *ExchangeAgentMachineCredentialRequest) (*ExchangeAgentMachineCredentialResponse, error)
+	ListAgentMachineAgents(context.Context, *ListAgentMachineAgentsRequest) (*ListAgentMachineAgentsResponse, error)
 	// OAuth-only human consent requires a live durable human SID and recent sign-in.
 	// Callers cannot supply actor, client, resource, scopes or an arbitrary proof.
 	GetAgentAuthorization(context.Context, *GetAgentAuthorizationRequest) (*GetAgentAuthorizationResponse, error)
@@ -2303,6 +2430,33 @@ type IdentityServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedIdentityServiceServer struct{}
 
+func (UnimplementedIdentityServiceServer) CreateAgentMachineChallenge(context.Context, *CreateAgentMachineChallengeRequest) (*CreateAgentMachineChallengeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateAgentMachineChallenge not implemented")
+}
+func (UnimplementedIdentityServiceServer) RegisterAgentMachineAgentKey(context.Context, *RegisterAgentMachineAgentKeyRequest) (*RegisterAgentMachineAgentKeyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterAgentMachineAgentKey not implemented")
+}
+func (UnimplementedIdentityServiceServer) IntrospectAgentMachine(context.Context, *IntrospectAgentMachineRequest) (*IntrospectAgentMachineResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IntrospectAgentMachine not implemented")
+}
+func (UnimplementedIdentityServiceServer) RegisterAgentMachine(context.Context, *RegisterAgentMachineRequest) (*RegisterAgentMachineResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterAgentMachine not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListAgentMachines(context.Context, *ListAgentMachinesRequest) (*ListAgentMachinesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAgentMachines not implemented")
+}
+func (UnimplementedIdentityServiceServer) SelectAgentMachineAgents(context.Context, *SelectAgentMachineAgentsRequest) (*SelectAgentMachineAgentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SelectAgentMachineAgents not implemented")
+}
+func (UnimplementedIdentityServiceServer) RevokeAgentMachine(context.Context, *RevokeAgentMachineRequest) (*RevokeAgentMachineResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeAgentMachine not implemented")
+}
+func (UnimplementedIdentityServiceServer) ExchangeAgentMachineCredential(context.Context, *ExchangeAgentMachineCredentialRequest) (*ExchangeAgentMachineCredentialResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ExchangeAgentMachineCredential not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListAgentMachineAgents(context.Context, *ListAgentMachineAgentsRequest) (*ListAgentMachineAgentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAgentMachineAgents not implemented")
+}
 func (UnimplementedIdentityServiceServer) GetAgentAuthorization(context.Context, *GetAgentAuthorizationRequest) (*GetAgentAuthorizationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAgentAuthorization not implemented")
 }
@@ -2760,6 +2914,168 @@ func RegisterIdentityServiceServer(s grpc.ServiceRegistrar, srv IdentityServiceS
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&IdentityService_ServiceDesc, srv)
+}
+
+func _IdentityService_CreateAgentMachineChallenge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateAgentMachineChallengeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateAgentMachineChallenge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateAgentMachineChallenge_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateAgentMachineChallenge(ctx, req.(*CreateAgentMachineChallengeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RegisterAgentMachineAgentKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterAgentMachineAgentKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RegisterAgentMachineAgentKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RegisterAgentMachineAgentKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RegisterAgentMachineAgentKey(ctx, req.(*RegisterAgentMachineAgentKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_IntrospectAgentMachine_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IntrospectAgentMachineRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).IntrospectAgentMachine(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_IntrospectAgentMachine_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).IntrospectAgentMachine(ctx, req.(*IntrospectAgentMachineRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RegisterAgentMachine_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterAgentMachineRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RegisterAgentMachine(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RegisterAgentMachine_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RegisterAgentMachine(ctx, req.(*RegisterAgentMachineRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListAgentMachines_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentMachinesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListAgentMachines(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListAgentMachines_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListAgentMachines(ctx, req.(*ListAgentMachinesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_SelectAgentMachineAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SelectAgentMachineAgentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).SelectAgentMachineAgents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_SelectAgentMachineAgents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).SelectAgentMachineAgents(ctx, req.(*SelectAgentMachineAgentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RevokeAgentMachine_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeAgentMachineRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RevokeAgentMachine(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RevokeAgentMachine_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RevokeAgentMachine(ctx, req.(*RevokeAgentMachineRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ExchangeAgentMachineCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExchangeAgentMachineCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ExchangeAgentMachineCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ExchangeAgentMachineCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ExchangeAgentMachineCredential(ctx, req.(*ExchangeAgentMachineCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListAgentMachineAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentMachineAgentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListAgentMachineAgents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListAgentMachineAgents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListAgentMachineAgents(ctx, req.(*ListAgentMachineAgentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _IdentityService_GetAgentAuthorization_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -5397,6 +5713,42 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "identity.v1.IdentityService",
 	HandlerType: (*IdentityServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateAgentMachineChallenge",
+			Handler:    _IdentityService_CreateAgentMachineChallenge_Handler,
+		},
+		{
+			MethodName: "RegisterAgentMachineAgentKey",
+			Handler:    _IdentityService_RegisterAgentMachineAgentKey_Handler,
+		},
+		{
+			MethodName: "IntrospectAgentMachine",
+			Handler:    _IdentityService_IntrospectAgentMachine_Handler,
+		},
+		{
+			MethodName: "RegisterAgentMachine",
+			Handler:    _IdentityService_RegisterAgentMachine_Handler,
+		},
+		{
+			MethodName: "ListAgentMachines",
+			Handler:    _IdentityService_ListAgentMachines_Handler,
+		},
+		{
+			MethodName: "SelectAgentMachineAgents",
+			Handler:    _IdentityService_SelectAgentMachineAgents_Handler,
+		},
+		{
+			MethodName: "RevokeAgentMachine",
+			Handler:    _IdentityService_RevokeAgentMachine_Handler,
+		},
+		{
+			MethodName: "ExchangeAgentMachineCredential",
+			Handler:    _IdentityService_ExchangeAgentMachineCredential_Handler,
+		},
+		{
+			MethodName: "ListAgentMachineAgents",
+			Handler:    _IdentityService_ListAgentMachineAgents_Handler,
+		},
 		{
 			MethodName: "GetAgentAuthorization",
 			Handler:    _IdentityService_GetAgentAuthorization_Handler,

@@ -2727,7 +2727,7 @@ message OAuthClientRegistration {
   // HTTPS, or literal 127.0.0.1 / [::1] HTTP. Only a loopback port may vary.
   repeated string redirect_uris = 2;
   repeated OAuthResourceBounds resources = 3;
-  // authorization_code is required; refresh_token is optional. These bounds
+  // authorization_code is required; refresh_token and agent_machine are optional. These bounds
   // do not advertise or enable either protocol flow.
   repeated string grant_types = 4;
   bool disabled = 5;
@@ -2814,6 +2814,7 @@ message AgentDelegation {
   int64 consented_at_ms = 7;
   int64 expires_at_ms = 8;
   int64 revoked_at_ms = 9; // Terminal; reactivation requires fresh consent.
+  string machine_id = 10; // Empty for browser OAuth grants; durable grants expire only on revocation.
 }
 message ListAgentDelegationsRequest {
   string after_delegation_id = 1;
@@ -2828,7 +2829,146 @@ message RevokeAgentDelegationRequest {
 }
 message RevokeAgentDelegationResponse {}
 
+// Durable machine authority is separate from a human browser session. Omission
+// of selection on registration selects all current and future owned agents;
+// resources still enforce their own current activation and service permissions.
+message AgentMachineSelection {
+  bool all_agents = 1;
+  repeated string agent_user_ids = 2;
+  repeated string excluded_agent_user_ids = 3;
+}
+message AgentMachine {
+  string machine_id = 1;
+  string owner_user_id = 2;
+  string client_id = 3;
+  string resource = 4;
+  repeated string scopes = 5;
+  string product = 6;
+  string display_name = 7;
+  AgentMachineSelection selection = 8;
+  int64 created_at_ms = 9;
+  int64 revision = 10;
+  int64 revoked_at_ms = 11;
+  string engine_public_key = 12;
+}
+message RegisterAgentMachineRequest {
+  // Persist this id and the engine's locally generated Ed25519 key pair before
+  // sending. Identical retries recover the same result. Private keys never leave
+  // the machine; only the canonical lowercase hex public key is registered.
+  string machine_id = 1;
+  string client_id = 2;
+  string resource = 3;
+  repeated string scopes = 4;
+  string display_name = 5;
+  string engine_public_key = 6; // Ed25519 public key, 64 lowercase hex characters.
+  AgentMachineSelection selection = 7;
+}
+message RegisterAgentMachineResponse {
+  AgentMachine machine = 1;
+}
+message ListAgentMachinesRequest {
+  string after_machine_id = 1;
+  int32 limit = 2;
+}
+message ListAgentMachinesResponse {
+  repeated AgentMachine machines = 1;
+  string next_cursor = 2;
+}
+message SelectAgentMachineAgentsRequest {
+  string machine_id = 1;
+  int64 expected_revision = 2;
+  AgentMachineSelection selection = 3;
+}
+message SelectAgentMachineAgentsResponse {
+  AgentMachine machine = 1;
+}
+message RevokeAgentMachineRequest {
+  string machine_id = 1;
+}
+message RevokeAgentMachineResponse {}
+message ExchangeAgentMachineCredentialRequest {
+  string machine_id = 1;
+  // Signed by this agent's registered key, never the engine key.
+  AgentMachineProof proof = 2;
+  string agent_user_id = 3;
+}
+message ExchangeAgentMachineCredentialResponse {
+  string access_token = 1;
+  uint64 expires_in = 2;
+  string scope = 3;
+  string token_type = 4;
+}
+message ListAgentMachineAgentsRequest {
+  string machine_id = 1;
+  AgentMachineProof proof = 2;
+  int32 offset = 3;
+}
+message ListAgentMachineAgentsResponse {
+  repeated User agents = 1;
+  int32 next_offset = 2; // -1 ends listing, including filtered empty pages.
+}
+
+// A configured resource authenticates with its dedicated HTTP Basic credential
+// before any machine proof is examined. Introspect on every control request;
+// neither a public client ID, directory key nor human JWT substitutes for it.
+message IntrospectAgentMachineRequest {
+  string machine_id = 1;
+  AgentMachineProof proof = 2;
+}
+message IntrospectAgentMachineResponse {
+  bool active = 1;
+  AgentMachine machine = 2; // Present only for this resource's active connection.
+}
+
+enum AgentMachineOperation {
+  AGENT_MACHINE_OPERATION_UNSPECIFIED = 0;
+  AGENT_MACHINE_OPERATION_ENROLL_AGENT = 1;
+  AGENT_MACHINE_OPERATION_EXCHANGE_AGENT = 2;
+  AGENT_MACHINE_OPERATION_LIST_AGENTS = 3;
+  AGENT_MACHINE_OPERATION_INSPECT_MACHINE = 4;
+}
+message AgentMachineProof {
+  string challenge_id = 1;
+  bytes signature = 2; // Ed25519 signature over the exact challenge message.
+}
+message CreateAgentMachineChallengeRequest {
+  string machine_id = 1;
+  string agent_user_id = 2;
+  AgentMachineOperation operation = 3;
+  string agent_public_key = 4; // Enrollment only: 64 lowercase hex characters.
+  int32 offset = 5; // Roster only: binds the proof to this page.
+}
+message CreateAgentMachineChallengeResponse {
+  string challenge_id = 1;
+  bytes message = 2; // Exact UTF-8 document to sign; includes issuer and project.
+  int64 expires_at_ms = 3;
+}
+message RegisterAgentMachineAgentKeyRequest {
+  string machine_id = 1;
+  string agent_user_id = 2;
+  string agent_public_key = 3;
+  AgentMachineProof proof = 4; // Signed by the registered engine key.
+}
+message RegisterAgentMachineAgentKeyResponse {
+  string delegation_id = 1;
+}
+
 service IdentityService {
+  rpc CreateAgentMachineChallenge(CreateAgentMachineChallengeRequest) returns (CreateAgentMachineChallengeResponse);
+  rpc RegisterAgentMachineAgentKey(RegisterAgentMachineAgentKeyRequest) returns (RegisterAgentMachineAgentKeyResponse);
+  rpc IntrospectAgentMachine(IntrospectAgentMachineRequest) returns (IntrospectAgentMachineResponse);
+  // Creation and selection changes require a recently signed-in owning human.
+  // List/revoke require the owning human; agent tokens cannot manage machines.
+  // Exchange uses the agent key and list-agents uses the engine key, each
+  // proving possession through a single-use signed challenge. Neither uses a
+  // human bearer. Revocation and excluded/revoked children cannot auto-revive.
+  rpc RegisterAgentMachine(RegisterAgentMachineRequest) returns (RegisterAgentMachineResponse);
+  rpc ListAgentMachines(ListAgentMachinesRequest) returns (ListAgentMachinesResponse);
+  rpc SelectAgentMachineAgents(SelectAgentMachineAgentsRequest) returns (SelectAgentMachineAgentsResponse);
+  rpc RevokeAgentMachine(RevokeAgentMachineRequest) returns (RevokeAgentMachineResponse);
+  rpc ExchangeAgentMachineCredential(ExchangeAgentMachineCredentialRequest) returns (ExchangeAgentMachineCredentialResponse);
+  rpc ListAgentMachineAgents(ListAgentMachineAgentsRequest) returns (ListAgentMachineAgentsResponse);
+
   // OAuth-only human consent requires a live durable human SID and recent sign-in.
   // Callers cannot supply actor, client, resource, scopes or an arbitrary proof.
   rpc GetAgentAuthorization(GetAgentAuthorizationRequest) returns (GetAgentAuthorizationResponse);

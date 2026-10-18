@@ -90,6 +90,15 @@
     "anchor": "agent-accounts"
   },
   {
+    "name": "GATEWAY_AGENT_MACHINE_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "enables durable owner-managed machine public-key authentication.",
+    "category": "Agent accounts",
+    "anchor": "agent-accounts"
+  },
+  {
     "name": "GATEWAY_AGENT_OAUTH_ACCESS_SECONDS",
     "type": "integer",
     "default": "",

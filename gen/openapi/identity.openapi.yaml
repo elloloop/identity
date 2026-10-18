@@ -1207,6 +1207,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.CreateAgentResponse'
+  /identity.v1.IdentityService/CreateAgentMachineChallenge:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CreateAgentMachineChallenge
+      operationId: identity.v1.IdentityService.CreateAgentMachineChallenge
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CreateAgentMachineChallengeRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CreateAgentMachineChallengeResponse'
   /identity.v1.IdentityService/CreateAssuranceChallenge:
     post:
       tags:
@@ -1987,6 +2022,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.DisableTotpResponse'
+  /identity.v1.IdentityService/ExchangeAgentMachineCredential:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ExchangeAgentMachineCredential
+      operationId: identity.v1.IdentityService.ExchangeAgentMachineCredential
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ExchangeAgentMachineCredentialRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ExchangeAgentMachineCredentialResponse'
   /identity.v1.IdentityService/ExportMyData:
     post:
       tags:
@@ -2466,6 +2536,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.InitiateQrLoginResponse'
+  /identity.v1.IdentityService/IntrospectAgentMachine:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: IntrospectAgentMachine
+      operationId: identity.v1.IdentityService.IntrospectAgentMachine
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.IntrospectAgentMachineRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.IntrospectAgentMachineResponse'
   /identity.v1.IdentityService/InviteUser:
     post:
       tags:
@@ -2609,6 +2714,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ListAgentDelegationsResponse'
+  /identity.v1.IdentityService/ListAgentMachineAgents:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListAgentMachineAgents
+      operationId: identity.v1.IdentityService.ListAgentMachineAgents
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListAgentMachineAgentsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListAgentMachineAgentsResponse'
+  /identity.v1.IdentityService/ListAgentMachines:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListAgentMachines
+      operationId: identity.v1.IdentityService.ListAgentMachines
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListAgentMachinesRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListAgentMachinesResponse'
   /identity.v1.IdentityService/ListAgents:
     post:
       tags:
@@ -3802,6 +3977,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RegenerateRecoveryCodesResponse'
+  /identity.v1.IdentityService/RegisterAgentMachine:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RegisterAgentMachine
+      description: |-
+        Creation and selection changes require a recently signed-in owning human.
+         List/revoke require the owning human; agent tokens cannot manage machines.
+         Exchange uses the agent key and list-agents uses the engine key, each
+         proving possession through a single-use signed challenge. Neither uses a
+         human bearer. Revocation and excluded/revoked children cannot auto-revive.
+      operationId: identity.v1.IdentityService.RegisterAgentMachine
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RegisterAgentMachineRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RegisterAgentMachineResponse'
+  /identity.v1.IdentityService/RegisterAgentMachineAgentKey:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RegisterAgentMachineAgentKey
+      operationId: identity.v1.IdentityService.RegisterAgentMachineAgentKey
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RegisterAgentMachineAgentKeyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RegisterAgentMachineAgentKeyResponse'
   /identity.v1.IdentityService/RemoveGroupMember:
     post:
       tags:
@@ -4195,6 +4446,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RevokeAgentDelegationResponse'
+  /identity.v1.IdentityService/RevokeAgentMachine:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RevokeAgentMachine
+      operationId: identity.v1.IdentityService.RevokeAgentMachine
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RevokeAgentMachineRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RevokeAgentMachineResponse'
   /identity.v1.IdentityService/RevokeAllSessions:
     post:
       tags:
@@ -4335,6 +4621,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RevokeSessionResponse'
+  /identity.v1.IdentityService/SelectAgentMachineAgents:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: SelectAgentMachineAgents
+      operationId: identity.v1.IdentityService.SelectAgentMachineAgents
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.SelectAgentMachineAgentsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.SelectAgentMachineAgentsResponse'
   /identity.v1.IdentityService/SendEmailVerification:
     post:
       tags:
@@ -5983,8 +6304,108 @@ components:
           title: revoked_at_ms
           format: int64
           description: Terminal; reactivation requires fresh consent.
+        machineId:
+          type: string
+          title: machine_id
+          description: Empty for browser OAuth grants; durable grants expire only on revocation.
       title: AgentDelegation
       additionalProperties: false
+    identity.v1.AgentMachine:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+        ownerUserId:
+          type: string
+          title: owner_user_id
+        clientId:
+          type: string
+          title: client_id
+        resource:
+          type: string
+          title: resource
+        scopes:
+          type: array
+          items:
+            type: string
+          title: scopes
+        product:
+          type: string
+          title: product
+        displayName:
+          type: string
+          title: display_name
+        selection:
+          title: selection
+          $ref: '#/components/schemas/identity.v1.AgentMachineSelection'
+        createdAtMs:
+          type:
+            - integer
+            - string
+          title: created_at_ms
+          format: int64
+        revision:
+          type:
+            - integer
+            - string
+          title: revision
+          format: int64
+        revokedAtMs:
+          type:
+            - integer
+            - string
+          title: revoked_at_ms
+          format: int64
+        enginePublicKey:
+          type: string
+          title: engine_public_key
+      title: AgentMachine
+      additionalProperties: false
+    identity.v1.AgentMachineOperation:
+      type: string
+      title: AgentMachineOperation
+      enum:
+        - AGENT_MACHINE_OPERATION_UNSPECIFIED
+        - AGENT_MACHINE_OPERATION_ENROLL_AGENT
+        - AGENT_MACHINE_OPERATION_EXCHANGE_AGENT
+        - AGENT_MACHINE_OPERATION_LIST_AGENTS
+        - AGENT_MACHINE_OPERATION_INSPECT_MACHINE
+    identity.v1.AgentMachineProof:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        signature:
+          type: string
+          title: signature
+          format: byte
+          description: Ed25519 signature over the exact challenge message.
+      title: AgentMachineProof
+      additionalProperties: false
+    identity.v1.AgentMachineSelection:
+      type: object
+      properties:
+        allAgents:
+          type: boolean
+          title: all_agents
+        agentUserIds:
+          type: array
+          items:
+            type: string
+          title: agent_user_ids
+        excludedAgentUserIds:
+          type: array
+          items:
+            type: string
+          title: excluded_agent_user_ids
+      title: AgentMachineSelection
+      additionalProperties: false
+      description: |-
+        Durable machine authority is separate from a human browser session. Omission
+         of selection on registration selects all current and future owned agents;
+         resources still enforce their own current activation and service permissions.
     identity.v1.ApproveQrLoginRequest:
       type: object
       properties:
@@ -6524,6 +6945,48 @@ components:
          granted parental consent for a specific child account. It is retained as a
          compliance/audit record and survives deletion of either referenced user,
          matching the audit-trail retention posture.
+    identity.v1.CreateAgentMachineChallengeRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+        agentUserId:
+          type: string
+          title: agent_user_id
+        operation:
+          title: operation
+          $ref: '#/components/schemas/identity.v1.AgentMachineOperation'
+        agentPublicKey:
+          type: string
+          title: agent_public_key
+          description: 'Enrollment only: 64 lowercase hex characters.'
+        offset:
+          type: integer
+          title: offset
+          format: int32
+          description: 'Roster only: binds the proof to this page.'
+      title: CreateAgentMachineChallengeRequest
+      additionalProperties: false
+    identity.v1.CreateAgentMachineChallengeResponse:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        message:
+          type: string
+          title: message
+          format: byte
+          description: Exact UTF-8 document to sign; includes issuer and project.
+        expiresAtMs:
+          type:
+            - integer
+            - string
+          title: expires_at_ms
+          format: int64
+      title: CreateAgentMachineChallengeResponse
+      additionalProperties: false
     identity.v1.CreateAgentRequest:
       type: object
       properties:
@@ -7222,6 +7685,41 @@ components:
         Domain is an email domain bound to a Tenant within the caller's
          Project. Verifying it (DNS TXT or email) flips its status to verified
          and claims the owning tenant.
+    identity.v1.ExchangeAgentMachineCredentialRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+        proof:
+          title: proof
+          description: Signed by this agent's registered key, never the engine key.
+          $ref: '#/components/schemas/identity.v1.AgentMachineProof'
+        agentUserId:
+          type: string
+          title: agent_user_id
+      title: ExchangeAgentMachineCredentialRequest
+      additionalProperties: false
+    identity.v1.ExchangeAgentMachineCredentialResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          title: access_token
+        expiresIn:
+          type:
+            - integer
+            - string
+          title: expires_in
+          format: int64
+        scope:
+          type: string
+          title: scope
+        tokenType:
+          type: string
+          title: token_type
+      title: ExchangeAgentMachineCredentialResponse
+      additionalProperties: false
     identity.v1.ExportMyDataRequest:
       type: object
       title: ExportMyDataRequest
@@ -7707,6 +8205,33 @@ components:
              sees the scanned QR code cannot poll for the issued tokens.
       title: InitiateQrLoginResponse
       additionalProperties: false
+    identity.v1.IntrospectAgentMachineRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+        proof:
+          title: proof
+          $ref: '#/components/schemas/identity.v1.AgentMachineProof'
+      title: IntrospectAgentMachineRequest
+      additionalProperties: false
+      description: |-
+        A configured resource authenticates with its dedicated HTTP Basic credential
+         before any machine proof is examined. Introspect on every control request;
+         neither a public client ID, directory key nor human JWT substitutes for it.
+    identity.v1.IntrospectAgentMachineResponse:
+      type: object
+      properties:
+        active:
+          type: boolean
+          title: active
+        machine:
+          title: machine
+          description: Present only for this resource's active connection.
+          $ref: '#/components/schemas/identity.v1.AgentMachine'
+      title: IntrospectAgentMachineResponse
+      additionalProperties: false
     identity.v1.InviteUserRequest:
       type: object
       properties:
@@ -7902,6 +8427,61 @@ components:
           title: next_cursor
           description: Empty ends listing.
       title: ListAgentDelegationsResponse
+      additionalProperties: false
+    identity.v1.ListAgentMachineAgentsRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+        proof:
+          title: proof
+          $ref: '#/components/schemas/identity.v1.AgentMachineProof'
+        offset:
+          type: integer
+          title: offset
+          format: int32
+      title: ListAgentMachineAgentsRequest
+      additionalProperties: false
+    identity.v1.ListAgentMachineAgentsResponse:
+      type: object
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.User'
+          title: agents
+        nextOffset:
+          type: integer
+          title: next_offset
+          format: int32
+          description: -1 ends listing, including filtered empty pages.
+      title: ListAgentMachineAgentsResponse
+      additionalProperties: false
+    identity.v1.ListAgentMachinesRequest:
+      type: object
+      properties:
+        afterMachineId:
+          type: string
+          title: after_machine_id
+        limit:
+          type: integer
+          title: limit
+          format: int32
+      title: ListAgentMachinesRequest
+      additionalProperties: false
+    identity.v1.ListAgentMachinesResponse:
+      type: object
+      properties:
+        machines:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.AgentMachine'
+          title: machines
+        nextCursor:
+          type: string
+          title: next_cursor
+      title: ListAgentMachinesResponse
       additionalProperties: false
     identity.v1.ListAgentsRequest:
       type: object
@@ -8649,7 +9229,7 @@ components:
             type: string
           title: grant_types
           description: |-
-            authorization_code is required; refresh_token is optional. These bounds
+            authorization_code is required; refresh_token and agent_machine are optional. These bounds
              do not advertise or enable either protocol flow.
         disabled:
           type: boolean
@@ -9392,6 +9972,73 @@ components:
           title: recovery_codes
       title: RegenerateRecoveryCodesResponse
       additionalProperties: false
+    identity.v1.RegisterAgentMachineAgentKeyRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+        agentUserId:
+          type: string
+          title: agent_user_id
+        agentPublicKey:
+          type: string
+          title: agent_public_key
+        proof:
+          title: proof
+          description: Signed by the registered engine key.
+          $ref: '#/components/schemas/identity.v1.AgentMachineProof'
+      title: RegisterAgentMachineAgentKeyRequest
+      additionalProperties: false
+    identity.v1.RegisterAgentMachineAgentKeyResponse:
+      type: object
+      properties:
+        delegationId:
+          type: string
+          title: delegation_id
+      title: RegisterAgentMachineAgentKeyResponse
+      additionalProperties: false
+    identity.v1.RegisterAgentMachineRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+          description: |-
+            Persist this id and the engine's locally generated Ed25519 key pair before
+             sending. Identical retries recover the same result. Private keys never leave
+             the machine; only the canonical lowercase hex public key is registered.
+        clientId:
+          type: string
+          title: client_id
+        resource:
+          type: string
+          title: resource
+        scopes:
+          type: array
+          items:
+            type: string
+          title: scopes
+        displayName:
+          type: string
+          title: display_name
+        enginePublicKey:
+          type: string
+          title: engine_public_key
+          description: Ed25519 public key, 64 lowercase hex characters.
+        selection:
+          title: selection
+          $ref: '#/components/schemas/identity.v1.AgentMachineSelection'
+      title: RegisterAgentMachineRequest
+      additionalProperties: false
+    identity.v1.RegisterAgentMachineResponse:
+      type: object
+      properties:
+        machine:
+          title: machine
+          $ref: '#/components/schemas/identity.v1.AgentMachine'
+      title: RegisterAgentMachineResponse
+      additionalProperties: false
     identity.v1.RemoveGroupMemberRequest:
       type: object
       properties:
@@ -9616,6 +10263,18 @@ components:
       type: object
       title: RevokeAgentDelegationResponse
       additionalProperties: false
+    identity.v1.RevokeAgentMachineRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+      title: RevokeAgentMachineRequest
+      additionalProperties: false
+    identity.v1.RevokeAgentMachineResponse:
+      type: object
+      title: RevokeAgentMachineResponse
+      additionalProperties: false
     identity.v1.RevokeAllSessionsRequest:
       type: object
       properties:
@@ -9691,6 +10350,31 @@ components:
     identity.v1.RevokeSessionResponse:
       type: object
       title: RevokeSessionResponse
+      additionalProperties: false
+    identity.v1.SelectAgentMachineAgentsRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+        expectedRevision:
+          type:
+            - integer
+            - string
+          title: expected_revision
+          format: int64
+        selection:
+          title: selection
+          $ref: '#/components/schemas/identity.v1.AgentMachineSelection'
+      title: SelectAgentMachineAgentsRequest
+      additionalProperties: false
+    identity.v1.SelectAgentMachineAgentsResponse:
+      type: object
+      properties:
+        machine:
+          title: machine
+          $ref: '#/components/schemas/identity.v1.AgentMachine'
+      title: SelectAgentMachineAgentsResponse
       additionalProperties: false
     identity.v1.SendEmailVerificationRequest:
       type: object

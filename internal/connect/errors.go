@@ -86,7 +86,8 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrAccountLocked),
 		errors.Is(err, service.ErrSignupThrottled),
-		errors.Is(err, service.ErrAgentLimitReached):
+		errors.Is(err, service.ErrAgentLimitReached),
+		errors.Is(err, service.ErrAgentMachineChallengeLimit):
 		// CodeResourceExhausted: lockout is a per-account quota of failed
 		// attempts. ResourceExhausted matches gRPC's documented semantics
 		// for "the resource is exhausted" / rate-limit-style failures and
