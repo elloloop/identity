@@ -28,26 +28,42 @@ permissions and execution leases remain separate, narrower requirements. A
 machine connection grants no repository or application role by itself.
 
 Before registration the native application atomically persists a fresh request
-ID and 32 cryptographically random bytes in its protected credential store,
-outside every agent workspace. The wire credential is canonical unpadded
-base64url. Only SHA-256 of the canonical 43-character base64url credential string is
-registered and stored by Identity. The
-caller retains the credential; the issuer never returns or recovers it. An
-identical registration retry returns the original/current record; changed input
-with the same ID conflicts. Source SID and time are audit provenance and may
-change between identical authenticated retries. Revoked registrations stay
-revoked. A lost response never justifies silently registering a new ID.
+ID and a locally generated Ed25519 engine key pair outside every agent workspace.
+The signed-in owner registers only its public key, encoded as 64 lowercase hex
+characters. Identity never receives a private key. Identical registration retries
+recover the original/current record; changed input with the same ID conflicts.
+Source SID and time are audit provenance and may change between authenticated
+retries. Revoked registrations stay revoked. A lost response never justifies
+silently registering a new machine ID or replacing its key.
 
-The machine credential authenticates unattended exchange and paginated listing
-of selected active owned agent accounts. It is not a human session or an agent
-access token. Exchange creates one durable child delegation per machine/agent
-and returns the existing distinct, short-lived `at+jwt` profile: agent `sub`,
-responsible owner `act.sub`, project, one resource, exact scopes, client,
-delegation and session. There is no rotating refresh family. Repeating exchange
-is safe after a lost response; the parent credential does not change. The
-orchestrator alone holds it and passes only the relevant agent's short-lived
-access token into that agent's service boundary. It must not appear in coding
-prompts, agent files, URLs, logs or source control.
+The engine key authenticates orchestration only: paginated discovery of selected
+active owned agents, public-key enrollment for those agents, and resource-bound
+machine introspection. Each agent on each machine has a separate locally generated
+Ed25519 pair. `RegisterAgentMachineAgentKey` creates one durable delegation binding
+the agent's public key; exact repeats recover that delegation, changed keys
+conflict, and a revoked child is never replaced automatically. Keys cannot be
+shared between agents on a machine or with its engine key.
+
+`CreateAgentMachineChallenge` returns the exact UTF-8 message to sign. It includes
+a versioned domain, configured issuer, project, machine, agent, operation, request
+binding, random nonce and expiry. A challenge lasts 60 seconds, binds enrollment
+to its public key and roster proofs to their offset, and is consumed atomically
+only after valid signature verification. All three stores persist at most 128
+pending challenges per machine, reclaim expired entries and enforce project
+isolation. Consumption survives issuer restart and permits one winner across
+replicas. Invalid signatures do not consume a valid challenge. HTTP and native
+gRPC share request limits and rate budgets.
+
+Only the registered agent key can authenticate `ExchangeAgentMachineCredential`.
+It returns the existing separately attributed short-lived `at+jwt` profile: agent
+`sub`, responsible owner `act.sub`, project, one resource, exact scopes, client,
+delegation and session. The engine key cannot exchange for an agent token. There
+is no rotating refresh family. After response loss the caller requests a fresh
+challenge and recovers the same delegation; it never replays a consumed proof or
+changes a key. All private keys stay outside coding sessions, prompts, task files,
+URLs, logs and source control. Only the relevant agent's short-lived access token
+enters its service boundary. This is a typed application authentication protocol,
+not a claim of OAuth client-assertion or DPoP wire compatibility.
 
 The source human signing out, expiring or having refresh data cleaned up does
 not revoke this new kind. Machine and child grants have no scheduled expiry.
@@ -65,8 +81,7 @@ binding. This lets an application enforce machine policy and resolve the
 reporting roster without a human bearer. Inactive proofs and unavailable
 verification both refuse control access; resources must not cache admission.
 
-Owner management RPCs list, select and revoke machines without exposing hashes
-or credentials. Selection is revision-fenced and requires recent human sign-in.
+Owner management RPCs list, select and revoke machines without exposing private material. Selection is revision-fenced and requires recent human sign-in.
 Removing an already connected agent revokes that child permanently. Returning
 to default-all cannot recreate it. Explicit replacement uses a newly authorized
 machine connection; it never changes a terminal grant back to active. Machine
@@ -85,7 +100,8 @@ Service tests cover authority separation, selection CAS, input bounds and
 refusal of browser-code/refresh operations on durable children. Shared memory,
 SQLite and PostgreSQL conformance covers concurrency, registration recovery,
 restart, project isolation, human logout, terminal invalidation and retention.
-Real HTTP tests exercise registration, unattributed credential exchange,
+Real HTTP tests exercise registration, engine-versus-agent key separation,
+concurrent challenge replay, future agent enrollment after human signout,
 agent-versus-human JWT separation, introspection after human logout, management
 ownership, selection/revocation, safe retries, feature opt-in and transport size
 bounds. Native gRPC forwards the same handlers and retains its existing verified

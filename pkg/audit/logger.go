@@ -276,14 +276,15 @@ const (
 	EventGuardianChildReactivated     EventType = "guardian_child_reactivated"
 	EventGuardianChildDeleted         EventType = "guardian_child_deleted"
 
-	EventAgentMachineRegistered EventType = "agent_machine_registered"
-	EventAgentMachineSelection  EventType = "agent_machine_selection"
-	EventAgentMachineRevoked    EventType = "agent_machine_revoked"
-	EventAgentOAuthConsent      EventType = "agent_oauth_consent"
-	EventAgentOAuthIssued       EventType = "agent_oauth_issued"
-	EventAgentOAuthRevoked      EventType = "agent_oauth_revoked"
-	EventOAuthClientCreated     EventType = "oauth_client_created"
-	EventOAuthClientUpdated     EventType = "oauth_client_updated"
+	EventAgentMachineRegistered    EventType = "agent_machine_registered"
+	EventAgentMachineAgentEnrolled EventType = "agent_machine_agent_enrolled"
+	EventAgentMachineSelection     EventType = "agent_machine_selection"
+	EventAgentMachineRevoked       EventType = "agent_machine_revoked"
+	EventAgentOAuthConsent         EventType = "agent_oauth_consent"
+	EventAgentOAuthIssued          EventType = "agent_oauth_issued"
+	EventAgentOAuthRevoked         EventType = "agent_oauth_revoked"
+	EventOAuthClientCreated        EventType = "oauth_client_created"
+	EventOAuthClientUpdated        EventType = "oauth_client_updated"
 
 	// Agent accounts (non-human accounts owned by a person): one event type
 	// per management operation, actor the caller (the owner or a project
@@ -375,6 +376,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventGuardianChildReactivated:      {},
 	EventGuardianChildDeleted:          {},
 	EventAgentMachineRegistered:        {},
+	EventAgentMachineAgentEnrolled:     {},
 	EventAgentMachineSelection:         {},
 	EventAgentMachineRevoked:           {},
 	EventAgentOAuthConsent:             {},

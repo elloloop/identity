@@ -220,7 +220,7 @@ func (r *sqliteRepository) EnsureAgentMachineDelegation(ctx context.Context, id 
 		return nil, err
 	}
 	if existing != nil {
-		if !a.Valid(existing) {
+		if !a.Valid(existing) || existing.MachinePublicKey != candidate.MachinePublicKey {
 			return nil, service.ErrAgentOAuthGrant
 		}
 		return existing, tx.Commit(ctx)

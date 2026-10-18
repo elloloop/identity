@@ -50,6 +50,7 @@ type Repo struct {
 	agentOAuthRefresh         map[string]*service.AgentOAuthRefresh
 	agentMachines             map[string]*service.AgentMachine
 	agentMachineRegistrations map[string]*service.AgentMachine
+	agentMachineChallenges    map[string]*service.AgentMachineChallenge
 	users                     map[string]*service.User
 	agentCreations            map[[2]string]service.AgentCreationReceipt
 	refreshTokens             map[string]*service.RefreshTokenRecord

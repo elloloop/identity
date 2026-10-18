@@ -16,6 +16,8 @@ CREATE TRIGGER agent_oauth_guardian_delete AFTER DELETE ON guardian_edges BEGIN 
 DROP TRIGGER agent_oauth_project_policy;
 CREATE TRIGGER agent_oauth_project_policy AFTER UPDATE OF config_json,status ON projects WHEN OLD.config_json IS NOT NEW.config_json OR OLD.status IS NOT NEW.status BEGIN UPDATE agent_authorizations SET revoked_at_ms=MAX(1,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)),revision=revision+1 WHERE project_id=OLD.id AND revoked_at_ms=0; END;
 DROP TRIGGER agent_machine_revoke;
+DROP INDEX agent_authorizations_machine_key_idx;
 DROP INDEX agent_authorizations_machine_agent_idx;
 ALTER TABLE agent_authorizations DROP COLUMN machine_id;
+DROP TABLE agent_machine_challenges;
 DROP TABLE agent_machines;

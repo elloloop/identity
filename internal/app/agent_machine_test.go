@@ -2,10 +2,7 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"net/http"
 	"net/url"
 	"strings"
@@ -31,33 +28,6 @@ func newAgentMachineFixture(t *testing.T) *agentOAuthHTTPFixture {
 	return f
 }
 
-func registerTestMachine(t *testing.T, f *agentOAuthHTTPFixture) (*identitypb.RegisterAgentMachineRequest, *identitypb.AgentMachine, string) {
-	t.Helper()
-	secret := make([]byte, 32)
-	_, err := rand.Read(secret)
-	require.NoError(t, err)
-	raw := base64.RawURLEncoding.EncodeToString(secret)
-	digest := sha256.Sum256([]byte(raw))
-	input := &identitypb.RegisterAgentMachineRequest{MachineId: "test-desktop", ClientId: f.clientID, Resource: testAgentResource, Scopes: []string{"files:read"}, DisplayName: "Example desktop", CredentialSha256: hex.EncodeToString(digest[:])}
-	req := connect.NewRequest(input)
-	req.Header().Set("Authorization", "Bearer "+f.token)
-	result, err := f.client.RegisterAgentMachine(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, "no-store", result.Header().Get("Cache-Control"))
-	require.True(t, result.Msg.Machine.Selection.AllAgents)
-	return input, result.Msg.Machine, raw
-}
-
-func exchangeTestMachine(t *testing.T, f *agentOAuthHTTPFixture, id, raw, agent string) *identitypb.ExchangeAgentMachineCredentialResponse {
-	t.Helper()
-	result, err := f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: id, MachineCredential: raw, AgentUserId: agent}))
-	require.NoError(t, err)
-	require.Equal(t, "no-store", result.Header().Get("Cache-Control"))
-	require.Equal(t, "Bearer", result.Msg.TokenType)
-	require.EqualValues(t, f.cfg.AgentOAuthAccessSeconds, result.Msg.ExpiresIn)
-	return result.Msg
-}
-
 func TestMachineHTTPUnattendedExchangeAfterHumanSessionEnds(t *testing.T) {
 	f := newAgentMachineFixture(t)
 	_, machine, raw := registerTestMachine(t, f)
@@ -81,7 +51,7 @@ func TestMachineHTTPUnattendedExchangeAfterHumanSessionEnds(t *testing.T) {
 	status, active := f.post(t, agentOAuthIntrospectPath, url.Values{"token": {second.AccessToken}}, true)
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, true, active["active"])
-	page, err := f.client.ListAgentMachineAgents(t.Context(), connect.NewRequest(&identitypb.ListAgentMachineAgentsRequest{MachineId: machine.MachineId, MachineCredential: raw}))
+	page, err := f.client.ListAgentMachineAgents(t.Context(), connect.NewRequest(&identitypb.ListAgentMachineAgentsRequest{MachineId: machine.MachineId, Proof: machineControlProof(t, f, machine.MachineId, raw, identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_LIST_AGENTS)}))
 	require.NoError(t, err)
 	require.Len(t, page.Msg.Agents, 1)
 	require.Equal(t, f.agent, page.Msg.Agents[0].Id)
@@ -103,13 +73,13 @@ func TestMachineHTTPSelectionRevokeAndNoAutomaticResurrection(t *testing.T) {
 	req.Msg.Selection = &identitypb.AgentMachineSelection{AllAgents: true}
 	_, err = f.client.SelectAgentMachineAgents(t.Context(), req)
 	require.NoError(t, err)
-	_, err = f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: machine.MachineId, MachineCredential: raw, AgentUserId: f.agent}))
+	_, err = f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: machine.MachineId, AgentUserId: f.agent}))
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
 	revoke := connect.NewRequest(&identitypb.RevokeAgentMachineRequest{MachineId: machine.MachineId})
 	revoke.Header().Set("Authorization", "Bearer "+f.token)
 	_, err = f.client.RevokeAgentMachine(t.Context(), revoke)
 	require.NoError(t, err)
-	_, err = f.client.ListAgentMachineAgents(t.Context(), connect.NewRequest(&identitypb.ListAgentMachineAgentsRequest{MachineId: machine.MachineId, MachineCredential: raw}))
+	_, err = f.client.ListAgentMachineAgents(t.Context(), connect.NewRequest(&identitypb.ListAgentMachineAgentsRequest{MachineId: machine.MachineId}))
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
 }
 
@@ -121,17 +91,18 @@ func TestMachineHTTPRegistrationRecoveryAndBounds(t *testing.T) {
 	repeated, err := f.client.RegisterAgentMachine(t.Context(), req)
 	require.NoError(t, err)
 	require.Equal(t, machine.CreatedAtMs, repeated.Msg.Machine.CreatedAtMs)
-	input.CredentialSha256 = strings.Repeat("a", 64)
+	input.EnginePublicKey = strings.Repeat("a", 64)
 	_, err = f.client.RegisterAgentMachine(t.Context(), req)
 	require.Equal(t, connect.CodeAlreadyExists, connect.CodeOf(err))
-	for _, proof := range []string{"", raw + "=", base64.RawURLEncoding.EncodeToString(make([]byte, 32))} {
-		_, err = f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: machine.MachineId, MachineCredential: proof, AgentUserId: f.agent}))
+	enrollTestAgent(t, f, machine.MachineId, f.agent, raw)
+	for _, proof := range [][]byte{nil, []byte("invalid"), make([]byte, 63), make([]byte, 64), make([]byte, 65)} {
+		_, err = f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: machine.MachineId, Proof: &identitypb.AgentMachineProof{ChallengeId: "unknown-challenge", Signature: proof}, AgentUserId: f.agent}))
 		require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
 	}
-	_, err = f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: machine.MachineId, MachineCredential: raw, AgentUserId: f.owner}))
+	_, err = f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: machine.MachineId, AgentUserId: f.owner}))
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
 	for _, offset := range []int32{-1, 2147483647} {
-		_, err = f.client.ListAgentMachineAgents(t.Context(), connect.NewRequest(&identitypb.ListAgentMachineAgentsRequest{MachineId: machine.MachineId, MachineCredential: raw, Offset: offset}))
+		_, err = f.client.ListAgentMachineAgents(t.Context(), connect.NewRequest(&identitypb.ListAgentMachineAgentsRequest{MachineId: machine.MachineId, Offset: offset}))
 		require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
 	}
 }
@@ -163,7 +134,7 @@ func TestMachineHTTPManagementNeverUsesAgentTokensOrForeignOwners(t *testing.T) 
 func TestMachineHTTPFeatureRequiresBothOperatorAndClientOptIn(t *testing.T) {
 	f := newAgentOAuthHTTPFixture(t)
 	f.cfg.AgentMachineEnabled = true
-	req := connect.NewRequest(&identitypb.RegisterAgentMachineRequest{MachineId: "test-desktop", ClientId: f.clientID, Resource: testAgentResource, Scopes: []string{"files:read"}, DisplayName: "Example desktop", CredentialSha256: strings.Repeat("a", 64)})
+	req := connect.NewRequest(&identitypb.RegisterAgentMachineRequest{MachineId: "test-desktop", ClientId: f.clientID, Resource: testAgentResource, Scopes: []string{"files:read"}, DisplayName: "Example desktop", EnginePublicKey: strings.Repeat("a", 64)})
 	req.Header().Set("Authorization", "Bearer "+f.token)
 	_, err := f.client.RegisterAgentMachine(t.Context(), req)
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
@@ -174,7 +145,7 @@ func TestMachineHTTPFeatureRequiresBothOperatorAndClientOptIn(t *testing.T) {
 
 func TestMachineHTTPRejectsOversizedCredentialBeforeService(t *testing.T) {
 	f := newAgentMachineFixture(t)
-	_, err := f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: "test-desktop", MachineCredential: strings.Repeat("x", maxAgentOAuthFormBytes+1), AgentUserId: f.agent}))
+	_, err := f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: "test-desktop", Proof: &identitypb.AgentMachineProof{Signature: make([]byte, maxAgentOAuthFormBytes+1)}, AgentUserId: f.agent}))
 	require.Equal(t, connect.CodeResourceExhausted, connect.CodeOf(err))
 }
 
@@ -193,14 +164,14 @@ func TestMachineHTTPObservedOwnerPolicyLossRevokesWholeMachine(t *testing.T) {
 	require.NoError(t, err)
 	require.Positive(t, stored.RevokedAtMs)
 	f.cfg.IDVRequired = false
-	_, err = f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: machine.MachineId, MachineCredential: raw, AgentUserId: second.Msg.Agent.Id}))
+	_, err = f.client.ExchangeAgentMachineCredential(t.Context(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{MachineId: machine.MachineId, AgentUserId: second.Msg.Agent.Id}))
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
 }
 
 func TestMachineHTTPResourceVerificationRequiresDedicatedCredential(t *testing.T) {
 	f := newAgentMachineFixture(t)
 	_, machine, raw := registerTestMachine(t, f)
-	input := &identitypb.IntrospectAgentMachineRequest{MachineId: machine.MachineId, MachineCredential: raw}
+	input := &identitypb.IntrospectAgentMachineRequest{MachineId: machine.MachineId, Proof: machineControlProof(t, f, machine.MachineId, raw, identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_INSPECT_MACHINE)}
 	for _, authorization := range []string{"", "Bearer " + f.token, "Basic " + base64.StdEncoding.EncodeToString([]byte("files-resource:wrong"))} {
 		req := connect.NewRequest(input)
 		req.Header().Set("Authorization", authorization)
@@ -214,12 +185,12 @@ func TestMachineHTTPResourceVerificationRequiresDedicatedCredential(t *testing.T
 	require.True(t, response.Msg.Active)
 	require.Equal(t, f.owner, response.Msg.Machine.OwnerUserId)
 	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
-	req.Msg.MachineCredential = "invalid"
+	req.Msg.Proof = &identitypb.AgentMachineProof{ChallengeId: "invalid"}
 	response, err = f.client.IntrospectAgentMachine(t.Context(), req)
 	require.NoError(t, err)
 	require.False(t, response.Msg.Active)
 	require.Nil(t, response.Msg.Machine)
-	req.Msg.MachineCredential = raw
+	req.Msg.Proof = machineControlProof(t, f, machine.MachineId, raw, identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_INSPECT_MACHINE)
 	revoke := connect.NewRequest(&identitypb.RevokeAgentMachineRequest{MachineId: machine.MachineId})
 	revoke.Header().Set("Authorization", "Bearer "+f.token)
 	_, err = f.client.RevokeAgentMachine(t.Context(), revoke)

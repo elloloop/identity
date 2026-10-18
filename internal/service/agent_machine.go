@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"math"
 	"slices"
@@ -15,10 +14,10 @@ import (
 )
 
 type AgentMachineRegistration struct {
-	ID, ClientID, Resource, DisplayName, CredentialHash string
-	Scopes                                              []string
-	AllAgents                                           bool
-	AgentIDs, ExcludedAgentIDs                          []string
+	ID, ClientID, Resource, DisplayName, PublicKey string
+	Scopes                                         []string
+	AllAgents                                      bool
+	AgentIDs, ExcludedAgentIDs                     []string
 }
 
 type AgentMachineAgents struct {
@@ -66,7 +65,7 @@ func (s *AgentOAuthService) RegisterMachine(ctx context.Context, human AgentOAut
 	if err = s.admitOwner(ctx, authority.Owner, product); err != nil {
 		return nil, err
 	}
-	machine := &AgentMachine{ID: input.ID, OwnerID: human.UserID, ClientID: input.ClientID, ClientRevision: client.Revision, Resource: input.Resource, Product: product, Scopes: slices.Clone(input.Scopes), DisplayName: input.DisplayName, CredentialHash: input.CredentialHash, RegistrationSID: human.SID, AllAgents: input.AllAgents, AgentIDs: slices.Clone(input.AgentIDs), ExcludedAgentIDs: slices.Clone(input.ExcludedAgentIDs), CreatedAtMs: s.auth.nowMs(), Revision: 1}
+	machine := &AgentMachine{ID: input.ID, OwnerID: human.UserID, ClientID: input.ClientID, ClientRevision: client.Revision, Resource: input.Resource, Product: product, Scopes: slices.Clone(input.Scopes), DisplayName: input.DisplayName, PublicKey: input.PublicKey, RegistrationSID: human.SID, AllAgents: input.AllAgents, AgentIDs: slices.Clone(input.AgentIDs), ExcludedAgentIDs: slices.Clone(input.ExcludedAgentIDs), CreatedAtMs: s.auth.nowMs(), Revision: 1}
 	if err = ValidateAgentMachine(machine); err != nil {
 		return nil, err
 	}
@@ -130,45 +129,6 @@ func (s *AgentOAuthService) RevokeMachine(ctx context.Context, human AgentOAuthH
 	return err
 }
 
-func validAgentMachineCredential(raw string) bool {
-	if len(raw) != 43 {
-		return false
-	}
-	data, err := base64.RawURLEncoding.DecodeString(raw)
-	return err == nil && len(data) == 32 && base64.RawURLEncoding.EncodeToString(data) == raw
-}
-
-func (s *AgentOAuthService) machineAccess(ctx context.Context, id, credential, agent string) (*AgentMachine, AgentOAuthAuthority, error) {
-	repo, err := s.machineRepo(ctx)
-	if err != nil {
-		return nil, AgentOAuthAuthority{}, err
-	}
-	if !validOAuthClientID(id) || !validAgentMachineCredential(credential) {
-		return nil, AgentOAuthAuthority{}, ErrUnauthenticated
-	}
-	authority, err := repo.AgentMachineAuthority(ctx, id, agent)
-	if err != nil {
-		return nil, authority, err
-	}
-	machine := authority.Machine
-	if machine == nil || !hashEqual(machine.CredentialHash, agentOAuthHash(credential)) {
-		return nil, authority, ErrUnauthenticated
-	}
-	if !authority.ValidMachine(machine) {
-		return nil, authority, ErrAgentOAuthGrant
-	}
-	if !s.resourceConfigured(ctx, machine.Resource) {
-		return nil, authority, s.invalidateMachine(ctx, machine)
-	}
-	if err = s.admitOwner(ctx, authority.Owner, machine.Product); err != nil {
-		if isAgentOAuthAdmissionRefusal(err) {
-			return nil, authority, s.invalidateMachine(ctx, machine)
-		}
-		return nil, authority, err
-	}
-	return machine, authority, nil
-}
-
 func (s *AgentOAuthService) invalidateMachine(ctx context.Context, machine *AgentMachine) error {
 	repo, err := s.machineRepo(ctx)
 	if err != nil {
@@ -182,27 +142,12 @@ func (s *AgentOAuthService) invalidateMachine(ctx context.Context, machine *Agen
 	return ErrAgentOAuthGrant
 }
 
-func (s *AgentOAuthService) ExchangeMachine(ctx context.Context, id, credential, agent string) (*AgentOAuthTokens, error) {
-	if !validOAuthClientID(agent) {
-		return nil, ErrInvalidArgument
-	}
-	machine, authority, err := s.machineAccess(ctx, id, credential, agent)
+func (s *AgentOAuthService) ExchangeMachine(ctx context.Context, id, agent string, proof AgentMachineProof) (*AgentOAuthTokens, error) {
+	_, authority, grant, err := s.machineAccess(ctx, AgentMachineChallengeRequest{MachineID: id, AgentID: agent, Operation: AgentMachineExchange}, proof)
 	if err != nil {
 		return nil, err
 	}
 	now := s.auth.nowMs()
-	proposal := &AgentAuthorization{ID: rand.Text(), MachineID: machine.ID, ClientID: machine.ClientID, ClientRevision: machine.ClientRevision, Resource: machine.Resource, Product: machine.Product, Scopes: slices.Clone(machine.Scopes), CreatedAtMs: now, ConsentAtMs: now, Revision: 1, Decision: AgentAuthorizationApproved, OwnerID: machine.OwnerID, AgentID: agent, SessionID: rand.Text()}
-	repo, err := s.machineRepo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	grant, err := repo.EnsureAgentMachineDelegation(ctx, id, proposal, agentOAuthHash(credential), authority.Fingerprint())
-	if err != nil {
-		return nil, err
-	}
-	if grant.RevokedAtMs != 0 {
-		return nil, ErrAgentOAuthGrant
-	}
 	authority, _, err = s.admittedAuthority(ctx, grant)
 	if err != nil {
 		return nil, err
@@ -229,11 +174,11 @@ func (s *AgentOAuthService) ExchangeMachine(ctx context.Context, id, credential,
 	return &AgentOAuthTokens{AccessToken: token, ExpiresIn: uint64(lifetime), Scope: claims.Scope}, nil
 }
 
-func (s *AgentOAuthService) MachineAgents(ctx context.Context, id, credential string, offset int) (*AgentMachineAgents, error) {
+func (s *AgentOAuthService) MachineAgents(ctx context.Context, id string, proof AgentMachineProof, offset int) (*AgentMachineAgents, error) {
 	if offset < 0 || offset > math.MaxInt32-agentOAuthChoicePage {
 		return nil, ErrInvalidArgument
 	}
-	machine, authority, err := s.machineAccess(ctx, id, credential, "")
+	machine, authority, _, err := s.machineAccess(ctx, AgentMachineChallengeRequest{MachineID: id, Operation: AgentMachineRoster, Offset: offset}, proof)
 	if err != nil {
 		return nil, err
 	}
@@ -275,9 +220,9 @@ type AgentMachineIntrospection struct {
 }
 
 // IntrospectMachine is called only after the handler authenticates the resource.
-func (s *AgentOAuthService) IntrospectMachine(ctx context.Context, resource, id, credential string) (*AgentMachineIntrospection, error) {
+func (s *AgentOAuthService) IntrospectMachine(ctx context.Context, resource, id string, proof AgentMachineProof) (*AgentMachineIntrospection, error) {
 	inactive := &AgentMachineIntrospection{}
-	machine, authority, err := s.machineAccess(ctx, id, credential, "")
+	machine, authority, _, err := s.machineAccess(ctx, AgentMachineChallengeRequest{MachineID: id, Operation: AgentMachineInspect}, proof)
 	if errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrAgentOAuthGrant) {
 		return inactive, nil
 	}

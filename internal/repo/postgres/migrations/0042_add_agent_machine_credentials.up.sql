@@ -58,3 +58,21 @@ BEGIN
  UPDATE agent_authorizations SET revoked_at_ms=GREATEST(1,(EXTRACT(EPOCH FROM clock_timestamp())*1000)::BIGINT),revision=revision+1 WHERE project_id=affected_project AND revoked_at_ms=0;
  PERFORM set_config('app.current_project_id',COALESCE(prior_project,''),true);
 END; $$;
+
+CREATE TABLE agent_machine_challenges (
+ project_id TEXT NOT NULL,
+ id TEXT NOT NULL,
+ machine_id TEXT NOT NULL,
+ data_json JSONB NOT NULL,
+ created_at_ms BIGINT NOT NULL,
+ expires_at_ms BIGINT NOT NULL,
+ PRIMARY KEY(project_id,id),
+ FOREIGN KEY(project_id,machine_id) REFERENCES agent_machines(project_id,id) ON DELETE CASCADE
+);
+CREATE INDEX agent_machine_challenges_expiry_idx ON agent_machine_challenges(project_id,machine_id,expires_at_ms);
+ALTER TABLE agent_machine_challenges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_machine_challenges FORCE ROW LEVEL SECURITY;
+CREATE POLICY agent_machine_challenges_project_isolation ON agent_machine_challenges USING(project_id=current_setting('app.current_project_id',true));
+
+CREATE UNIQUE INDEX agent_authorizations_machine_key_idx ON agent_authorizations(project_id,machine_id,(data_json->>'MachinePublicKey')) WHERE machine_id IS NOT NULL;
+CREATE INDEX agent_machine_challenges_sweep_idx ON agent_machine_challenges(project_id,expires_at_ms,id);

@@ -10,6 +10,7 @@
   "agent_created",
   "agent_deactivated",
   "agent_deleted",
+  "agent_machine_agent_enrolled",
   "agent_machine_registered",
   "agent_machine_revoked",
   "agent_machine_selection",

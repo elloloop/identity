@@ -33,6 +33,12 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// IdentityServiceCreateAgentMachineChallengeProcedure is the fully-qualified name of the
+	// IdentityService's CreateAgentMachineChallenge RPC.
+	IdentityServiceCreateAgentMachineChallengeProcedure = "/identity.v1.IdentityService/CreateAgentMachineChallenge"
+	// IdentityServiceRegisterAgentMachineAgentKeyProcedure is the fully-qualified name of the
+	// IdentityService's RegisterAgentMachineAgentKey RPC.
+	IdentityServiceRegisterAgentMachineAgentKeyProcedure = "/identity.v1.IdentityService/RegisterAgentMachineAgentKey"
 	// IdentityServiceIntrospectAgentMachineProcedure is the fully-qualified name of the
 	// IdentityService's IntrospectAgentMachine RPC.
 	IdentityServiceIntrospectAgentMachineProcedure = "/identity.v1.IdentityService/IntrospectAgentMachine"
@@ -494,6 +500,8 @@ const (
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
 type IdentityServiceClient interface {
+	CreateAgentMachineChallenge(context.Context, *connect.Request[v1.CreateAgentMachineChallengeRequest]) (*connect.Response[v1.CreateAgentMachineChallengeResponse], error)
+	RegisterAgentMachineAgentKey(context.Context, *connect.Request[v1.RegisterAgentMachineAgentKeyRequest]) (*connect.Response[v1.RegisterAgentMachineAgentKeyResponse], error)
 	IntrospectAgentMachine(context.Context, *connect.Request[v1.IntrospectAgentMachineRequest]) (*connect.Response[v1.IntrospectAgentMachineResponse], error)
 	// Creation and selection changes require a recently signed-in owning human.
 	// List/revoke require the owning human; agent tokens cannot manage machines.
@@ -842,6 +850,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 	baseURL = strings.TrimRight(baseURL, "/")
 	identityServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("IdentityService").Methods()
 	return &identityServiceClient{
+		createAgentMachineChallenge: connect.NewClient[v1.CreateAgentMachineChallengeRequest, v1.CreateAgentMachineChallengeResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateAgentMachineChallengeProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateAgentMachineChallenge")),
+			connect.WithClientOptions(opts...),
+		),
+		registerAgentMachineAgentKey: connect.NewClient[v1.RegisterAgentMachineAgentKeyRequest, v1.RegisterAgentMachineAgentKeyResponse](
+			httpClient,
+			baseURL+IdentityServiceRegisterAgentMachineAgentKeyProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RegisterAgentMachineAgentKey")),
+			connect.WithClientOptions(opts...),
+		),
 		introspectAgentMachine: connect.NewClient[v1.IntrospectAgentMachineRequest, v1.IntrospectAgentMachineResponse](
 			httpClient,
 			baseURL+IdentityServiceIntrospectAgentMachineProcedure,
@@ -1765,6 +1785,8 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 
 // identityServiceClient implements IdentityServiceClient.
 type identityServiceClient struct {
+	createAgentMachineChallenge     *connect.Client[v1.CreateAgentMachineChallengeRequest, v1.CreateAgentMachineChallengeResponse]
+	registerAgentMachineAgentKey    *connect.Client[v1.RegisterAgentMachineAgentKeyRequest, v1.RegisterAgentMachineAgentKeyResponse]
 	introspectAgentMachine          *connect.Client[v1.IntrospectAgentMachineRequest, v1.IntrospectAgentMachineResponse]
 	registerAgentMachine            *connect.Client[v1.RegisterAgentMachineRequest, v1.RegisterAgentMachineResponse]
 	listAgentMachines               *connect.Client[v1.ListAgentMachinesRequest, v1.ListAgentMachinesResponse]
@@ -1918,6 +1940,16 @@ type identityServiceClient struct {
 	adminDeleteProjectOAuthProvider *connect.Client[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse]
 	adminListProjectOAuthProviders  *connect.Client[v1.AdminListProjectOAuthProvidersRequest, v1.AdminListProjectOAuthProvidersResponse]
 	lookupUsers                     *connect.Client[v1.LookupUsersRequest, v1.LookupUsersResponse]
+}
+
+// CreateAgentMachineChallenge calls identity.v1.IdentityService.CreateAgentMachineChallenge.
+func (c *identityServiceClient) CreateAgentMachineChallenge(ctx context.Context, req *connect.Request[v1.CreateAgentMachineChallengeRequest]) (*connect.Response[v1.CreateAgentMachineChallengeResponse], error) {
+	return c.createAgentMachineChallenge.CallUnary(ctx, req)
+}
+
+// RegisterAgentMachineAgentKey calls identity.v1.IdentityService.RegisterAgentMachineAgentKey.
+func (c *identityServiceClient) RegisterAgentMachineAgentKey(ctx context.Context, req *connect.Request[v1.RegisterAgentMachineAgentKeyRequest]) (*connect.Response[v1.RegisterAgentMachineAgentKeyResponse], error) {
+	return c.registerAgentMachineAgentKey.CallUnary(ctx, req)
 }
 
 // IntrospectAgentMachine calls identity.v1.IdentityService.IntrospectAgentMachine.
@@ -2688,6 +2720,8 @@ func (c *identityServiceClient) LookupUsers(ctx context.Context, req *connect.Re
 
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
 type IdentityServiceHandler interface {
+	CreateAgentMachineChallenge(context.Context, *connect.Request[v1.CreateAgentMachineChallengeRequest]) (*connect.Response[v1.CreateAgentMachineChallengeResponse], error)
+	RegisterAgentMachineAgentKey(context.Context, *connect.Request[v1.RegisterAgentMachineAgentKeyRequest]) (*connect.Response[v1.RegisterAgentMachineAgentKeyResponse], error)
 	IntrospectAgentMachine(context.Context, *connect.Request[v1.IntrospectAgentMachineRequest]) (*connect.Response[v1.IntrospectAgentMachineResponse], error)
 	// Creation and selection changes require a recently signed-in owning human.
 	// List/revoke require the owning human; agent tokens cannot manage machines.
@@ -3032,6 +3066,18 @@ type IdentityServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	identityServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("IdentityService").Methods()
+	identityServiceCreateAgentMachineChallengeHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateAgentMachineChallengeProcedure,
+		svc.CreateAgentMachineChallenge,
+		connect.WithSchema(identityServiceMethods.ByName("CreateAgentMachineChallenge")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRegisterAgentMachineAgentKeyHandler := connect.NewUnaryHandler(
+		IdentityServiceRegisterAgentMachineAgentKeyProcedure,
+		svc.RegisterAgentMachineAgentKey,
+		connect.WithSchema(identityServiceMethods.ByName("RegisterAgentMachineAgentKey")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceIntrospectAgentMachineHandler := connect.NewUnaryHandler(
 		IdentityServiceIntrospectAgentMachineProcedure,
 		svc.IntrospectAgentMachine,
@@ -3952,6 +3998,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case IdentityServiceCreateAgentMachineChallengeProcedure:
+			identityServiceCreateAgentMachineChallengeHandler.ServeHTTP(w, r)
+		case IdentityServiceRegisterAgentMachineAgentKeyProcedure:
+			identityServiceRegisterAgentMachineAgentKeyHandler.ServeHTTP(w, r)
 		case IdentityServiceIntrospectAgentMachineProcedure:
 			identityServiceIntrospectAgentMachineHandler.ServeHTTP(w, r)
 		case IdentityServiceRegisterAgentMachineProcedure:
@@ -4266,6 +4316,14 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 
 // UnimplementedIdentityServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedIdentityServiceHandler struct{}
+
+func (UnimplementedIdentityServiceHandler) CreateAgentMachineChallenge(context.Context, *connect.Request[v1.CreateAgentMachineChallengeRequest]) (*connect.Response[v1.CreateAgentMachineChallengeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateAgentMachineChallenge is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RegisterAgentMachineAgentKey(context.Context, *connect.Request[v1.RegisterAgentMachineAgentKeyRequest]) (*connect.Response[v1.RegisterAgentMachineAgentKeyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RegisterAgentMachineAgentKey is not implemented"))
+}
 
 func (UnimplementedIdentityServiceHandler) IntrospectAgentMachine(context.Context, *connect.Request[v1.IntrospectAgentMachineRequest]) (*connect.Response[v1.IntrospectAgentMachineResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.IntrospectAgentMachine is not implemented"))

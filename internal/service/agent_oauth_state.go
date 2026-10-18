@@ -32,6 +32,7 @@ var (
 type AgentAuthorization struct {
 	ID               string
 	MachineID        string
+	MachinePublicKey string
 	ClientID         string
 	ClientRevision   int64
 	RedirectURI      string
@@ -103,7 +104,7 @@ func (a AgentOAuthAuthority) Fingerprint() string {
 
 func (a AgentOAuthAuthority) Valid(r *AgentAuthorization) bool {
 	if r != nil && r.MachineID != "" {
-		return a.ValidMachine(a.Machine) && a.Machine.ID == r.MachineID && a.Machine.Allows(r.AgentID) && a.Agent != nil && a.Agent.IsAgent() && isActiveStatus(a.Agent.Status) && a.Agent.OwnerUserID == r.OwnerID && a.Agent.ID == r.AgentID && a.Machine.OwnerID == r.OwnerID && r.ClientID == a.Machine.ClientID && r.ClientRevision == a.Machine.ClientRevision && r.Resource == a.Machine.Resource && r.Product == a.Machine.Product && slices.Equal(r.Scopes, a.Machine.Scopes) && r.HumanSID == "" && r.GrantExpiresAtMs == 0
+		return a.ValidMachine(a.Machine) && a.Machine.ID == r.MachineID && validMachinePublicKey(r.MachinePublicKey) && r.MachinePublicKey != a.Machine.PublicKey && a.Machine.Allows(r.AgentID) && a.Agent != nil && a.Agent.IsAgent() && isActiveStatus(a.Agent.Status) && a.Agent.OwnerUserID == r.OwnerID && a.Agent.ID == r.AgentID && a.Machine.OwnerID == r.OwnerID && r.ClientID == a.Machine.ClientID && r.ClientRevision == a.Machine.ClientRevision && r.Resource == a.Machine.Resource && r.Product == a.Machine.Product && slices.Equal(r.Scopes, a.Machine.Scopes) && r.HumanSID == "" && r.GrantExpiresAtMs == 0
 	}
 	return r != nil && isEligibleAgentOwner(a.Owner) && a.Agent != nil && a.Agent.IsAgent() &&
 		isActiveStatus(a.Agent.Status) && a.Agent.OwnerUserID == a.Owner.ID && a.Owner.ID == r.OwnerID &&
@@ -154,7 +155,7 @@ type AgentOAuthRepository interface {
 func ValidateAgentAuthorization(r *AgentAuthorization) error {
 	if r == nil || !validOAuthClientID(r.ID) || !validOAuthClientID(r.ClientID) || r.ClientRevision <= 0 ||
 		r.Revision != 1 || r.Decision != AgentAuthorizationPending || r.CreatedAtMs <= 0 || r.ExpiresAtMs <= r.CreatedAtMs ||
-		r.MachineID != "" || r.OwnerID != "" || r.AgentID != "" || r.HumanSID != "" || r.CodeHash != "" || r.SessionID != "" ||
+		r.MachineID != "" || r.MachinePublicKey != "" || r.OwnerID != "" || r.AgentID != "" || r.HumanSID != "" || r.CodeHash != "" || r.SessionID != "" ||
 		r.GrantExpiresAtMs != 0 || r.RevokedAtMs != 0 || !boundedOAuthStrings(r.Scopes, maxOAuthScopes) || !ValidS256Challenge(r.Challenge) {
 		return ErrInvalidArgument
 	}

@@ -30,7 +30,7 @@ func TestAgentMachineMigrationRoundTrip(t *testing.T) {
 	defer func() { _ = raw.Close(ctx) }()
 	for _, version := range []uint{42, previous, 42} {
 		migrateToVersion(t, scratch, version)
-		for _, table := range []string{"agent_machines"} {
+		for _, table := range []string{"agent_machines", "agent_machine_challenges"} {
 			var exists bool
 			require.NoError(t, raw.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists))
 			require.Equal(t, version == 42, exists)

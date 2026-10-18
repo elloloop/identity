@@ -1207,6 +1207,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.CreateAgentResponse'
+  /identity.v1.IdentityService/CreateAgentMachineChallenge:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CreateAgentMachineChallenge
+      operationId: identity.v1.IdentityService.CreateAgentMachineChallenge
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CreateAgentMachineChallengeRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CreateAgentMachineChallengeResponse'
   /identity.v1.IdentityService/CreateAssuranceChallenge:
     post:
       tags:
@@ -3982,6 +4017,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RegisterAgentMachineResponse'
+  /identity.v1.IdentityService/RegisterAgentMachineAgentKey:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RegisterAgentMachineAgentKey
+      operationId: identity.v1.IdentityService.RegisterAgentMachineAgentKey
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RegisterAgentMachineAgentKeyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RegisterAgentMachineAgentKeyResponse'
   /identity.v1.IdentityService/RemoveGroupMember:
     post:
       tags:
@@ -6286,7 +6356,32 @@ components:
             - string
           title: revoked_at_ms
           format: int64
+        enginePublicKey:
+          type: string
+          title: engine_public_key
       title: AgentMachine
+      additionalProperties: false
+    identity.v1.AgentMachineOperation:
+      type: string
+      title: AgentMachineOperation
+      enum:
+        - AGENT_MACHINE_OPERATION_UNSPECIFIED
+        - AGENT_MACHINE_OPERATION_ENROLL_AGENT
+        - AGENT_MACHINE_OPERATION_EXCHANGE_AGENT
+        - AGENT_MACHINE_OPERATION_LIST_AGENTS
+        - AGENT_MACHINE_OPERATION_INSPECT_MACHINE
+    identity.v1.AgentMachineProof:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        signature:
+          type: string
+          title: signature
+          format: byte
+          description: Ed25519 signature over the exact challenge message.
+      title: AgentMachineProof
       additionalProperties: false
     identity.v1.AgentMachineSelection:
       type: object
@@ -6849,6 +6944,48 @@ components:
          granted parental consent for a specific child account. It is retained as a
          compliance/audit record and survives deletion of either referenced user,
          matching the audit-trail retention posture.
+    identity.v1.CreateAgentMachineChallengeRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+        agentUserId:
+          type: string
+          title: agent_user_id
+        operation:
+          title: operation
+          $ref: '#/components/schemas/identity.v1.AgentMachineOperation'
+        agentPublicKey:
+          type: string
+          title: agent_public_key
+          description: 'Enrollment only: 64 lowercase hex characters.'
+        offset:
+          type: integer
+          title: offset
+          format: int32
+          description: 'Roster only: binds the proof to this page.'
+      title: CreateAgentMachineChallengeRequest
+      additionalProperties: false
+    identity.v1.CreateAgentMachineChallengeResponse:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        message:
+          type: string
+          title: message
+          format: byte
+          description: Exact UTF-8 document to sign; includes issuer and project.
+        expiresAtMs:
+          type:
+            - integer
+            - string
+          title: expires_at_ms
+          format: int64
+      title: CreateAgentMachineChallengeResponse
+      additionalProperties: false
     identity.v1.CreateAgentRequest:
       type: object
       properties:
@@ -7553,12 +7690,10 @@ components:
         machineId:
           type: string
           title: machine_id
-        machineCredential:
-          type: string
-          title: machine_credential
-          description: |-
-            Base64url without padding, exactly 32 random bytes. Never log or forward
-             this credential into a coding session. The returned token is agent-only.
+        proof:
+          title: proof
+          description: Signed by this agent's registered key, never the engine key.
+          $ref: '#/components/schemas/identity.v1.AgentMachineProof'
         agentUserId:
           type: string
           title: agent_user_id
@@ -8075,9 +8210,9 @@ components:
         machineId:
           type: string
           title: machine_id
-        machineCredential:
-          type: string
-          title: machine_credential
+        proof:
+          title: proof
+          $ref: '#/components/schemas/identity.v1.AgentMachineProof'
       title: IntrospectAgentMachineRequest
       additionalProperties: false
       description: |-
@@ -8298,9 +8433,9 @@ components:
         machineId:
           type: string
           title: machine_id
-        machineCredential:
-          type: string
-          title: machine_credential
+        proof:
+          title: proof
+          $ref: '#/components/schemas/identity.v1.AgentMachineProof'
         offset:
           type: integer
           title: offset
@@ -9836,6 +9971,32 @@ components:
           title: recovery_codes
       title: RegenerateRecoveryCodesResponse
       additionalProperties: false
+    identity.v1.RegisterAgentMachineAgentKeyRequest:
+      type: object
+      properties:
+        machineId:
+          type: string
+          title: machine_id
+        agentUserId:
+          type: string
+          title: agent_user_id
+        agentPublicKey:
+          type: string
+          title: agent_public_key
+        proof:
+          title: proof
+          description: Signed by the registered engine key.
+          $ref: '#/components/schemas/identity.v1.AgentMachineProof'
+      title: RegisterAgentMachineAgentKeyRequest
+      additionalProperties: false
+    identity.v1.RegisterAgentMachineAgentKeyResponse:
+      type: object
+      properties:
+        delegationId:
+          type: string
+          title: delegation_id
+      title: RegisterAgentMachineAgentKeyResponse
+      additionalProperties: false
     identity.v1.RegisterAgentMachineRequest:
       type: object
       properties:
@@ -9843,9 +10004,9 @@ components:
           type: string
           title: machine_id
           description: |-
-            Persist this id and a cryptographically random 32-byte credential locally
-             before sending. Identical retries recover the same result; never retry with
-             a new id after an uncertain response. Only SHA-256 of the canonical base64url credential string is registered.
+            Persist this id and the engine's locally generated Ed25519 key pair before
+             sending. Identical retries recover the same result. Private keys never leave
+             the machine; only the canonical lowercase hex public key is registered.
         clientId:
           type: string
           title: client_id
@@ -9860,9 +10021,10 @@ components:
         displayName:
           type: string
           title: display_name
-        credentialSha256:
+        enginePublicKey:
           type: string
-          title: credential_sha256
+          title: engine_public_key
+          description: Ed25519 public key, 64 lowercase hex characters.
         selection:
           title: selection
           $ref: '#/components/schemas/identity.v1.AgentMachineSelection'

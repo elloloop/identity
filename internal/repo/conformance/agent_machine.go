@@ -35,7 +35,7 @@ func seedAgentMachine(ctx context.Context, t *testing.T, base service.Repository
 	require.True(t, ok)
 	repo, ok := base.(service.AgentMachineRepository)
 	require.True(t, ok)
-	m := &service.AgentMachine{ID: "machine", OwnerID: owner, ClientID: client.ID, ClientRevision: client.Revision, Resource: client.Registration.Resources[0].Resource, Product: "records", Scopes: []string{"read"}, DisplayName: "Acme workstation", CredentialHash: agentOAuthHash("machine-secret"), RegistrationSID: "registration-sid", AllAgents: true, CreatedAtMs: time.Now().UnixMilli(), Revision: 1}
+	m := &service.AgentMachine{ID: "machine", OwnerID: owner, ClientID: client.ID, ClientRevision: client.Revision, Resource: client.Registration.Resources[0].Resource, Product: "records", Scopes: []string{"read"}, DisplayName: "Acme workstation", PublicKey: agentOAuthHash("machine-secret"), RegistrationSID: "registration-sid", AllAgents: true, CreatedAtMs: time.Now().UnixMilli(), Revision: 1}
 	a, err := oauth.AgentOAuthAuthority(ctx, owner, "", m.RegistrationSID, client.ID)
 	require.NoError(t, err)
 	stored, err := repo.CreateAgentMachine(ctx, m, a.Fingerprint())
@@ -49,13 +49,13 @@ func (f machineFixture) candidate(ctx context.Context, t *testing.T, id string) 
 	a, err := f.repo.AgentMachineAuthority(ctx, f.machine.ID, f.agent)
 	require.NoError(t, err)
 	now := time.Now().UnixMilli()
-	return &service.AgentAuthorization{ID: id, MachineID: f.machine.ID, ClientID: f.machine.ClientID, ClientRevision: f.machine.ClientRevision, Resource: f.machine.Resource, Product: f.machine.Product, Scopes: []string{"read"}, OwnerID: f.machine.OwnerID, AgentID: f.agent, SessionID: "machine-session", Decision: service.AgentAuthorizationApproved, CreatedAtMs: now, ConsentAtMs: now, Revision: 1}, a.Fingerprint()
+	return &service.AgentAuthorization{ID: id, MachineID: f.machine.ID, MachinePublicKey: agentOAuthHash(f.agent), ClientID: f.machine.ClientID, ClientRevision: f.machine.ClientRevision, Resource: f.machine.Resource, Product: f.machine.Product, Scopes: []string{"read"}, OwnerID: f.machine.OwnerID, AgentID: f.agent, SessionID: "machine-session", Decision: service.AgentAuthorizationApproved, CreatedAtMs: now, ConsentAtMs: now, Revision: 1}, a.Fingerprint()
 }
 
 func (f machineFixture) ensure(ctx context.Context, t *testing.T, id string) *service.AgentAuthorization {
 	t.Helper()
 	candidate, fingerprint := f.candidate(ctx, t, id)
-	grant, err := f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.CredentialHash, fingerprint)
+	grant, err := f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
 	require.NoError(t, err)
 	return grant
 }
@@ -63,6 +63,7 @@ func (f machineFixture) ensure(ctx context.Context, t *testing.T, id string) *se
 // RunAgentMachineConformance verifies durable machine and per-agent grant boundaries.
 func RunAgentMachineConformance(t *testing.T, driver Driver) {
 	t.Helper()
+	runMachineKeyChallenges(t, driver)
 	t.Run(driver.Name+"/AgentMachine", func(t *testing.T) {
 		ctx := context.Background()
 		t.Run("RegistrationReceiptAndFreshSession", func(t *testing.T) {
@@ -78,7 +79,7 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			got, err := f.repo.CreateAgentMachine(ctx, retry, a.Fingerprint())
 			require.NoError(t, err)
 			require.Equal(t, f.machine, got)
-			retry.CredentialHash = agentOAuthHash("different")
+			retry.PublicKey = agentOAuthHash("different")
 			_, err = f.repo.CreateAgentMachine(ctx, retry, a.Fingerprint())
 			require.ErrorIs(t, err, service.ErrAlreadyExists)
 			retry = f.machine.Clone()
@@ -110,6 +111,37 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			require.NoError(t, err)
 			require.Equal(t, revoked, got)
 		})
+
+		t.Run("AgentKeysAreImmutableDistinctAndProjectScoped", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			original := f.ensure(ctx, t, "key-child")
+			stored, err := f.repo.GetAgentMachineDelegation(ctx, f.machine.ID, f.agent)
+			require.NoError(t, err)
+			require.Equal(t, original, stored)
+			replacement, fingerprint := f.candidate(ctx, t, "replacement-child")
+			replacement.MachinePublicKey = agentOAuthHash("replacement-key")
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, replacement, f.machine.PublicKey, fingerprint)
+			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
+			replacement.MachinePublicKey = f.machine.PublicKey
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, replacement, f.machine.PublicKey, fingerprint)
+			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
+			if driver.BindProject != nil {
+				other := driver.BindProject(t, f.base, "foreign-key-project").(service.AgentMachineRepository)
+				hidden, err := other.GetAgentMachineDelegation(ctx, f.machine.ID, f.agent)
+				require.NoError(t, err)
+				require.Nil(t, hidden)
+			}
+			second, err := f.base.CreateUser(ctx, &service.User{Kind: service.UserKindAgent, Status: service.StatusActive, OwnerUserID: f.machine.OwnerID})
+			require.NoError(t, err)
+			f.agent = second
+			reused, fingerprint := f.candidate(ctx, t, "reused-key-child")
+			reused.MachinePublicKey = original.MachinePublicKey
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, reused, f.machine.PublicKey, fingerprint)
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+			stored, err = f.repo.GetAgentMachineDelegation(ctx, f.machine.ID, second)
+			require.NoError(t, err)
+			require.Nil(t, stored)
+		})
 		t.Run("ConcurrentEnsureAndDurableRetention", func(t *testing.T) {
 			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
 			candidate, fingerprint := f.candidate(ctx, t, "child")
@@ -120,7 +152,7 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 				group.Go(func() {
 					copy := candidate.Clone()
 					copy.ID = fmt.Sprintf("child-%d", i)
-					got, err := f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, copy, f.machine.CredentialHash, fingerprint)
+					got, err := f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, copy, f.machine.PublicKey, fingerprint)
 					if err != nil {
 						failures <- err
 					} else {
@@ -153,7 +185,7 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			candidate, fingerprint = f.candidate(ctx, t, "wrong-proof")
 			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, agentOAuthHash("wrong"), fingerprint)
 			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
-			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.CredentialHash, "stale")
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, "stale")
 			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
 		})
 		t.Run("SelectionAndChildRevocationNeverRevive", func(t *testing.T) {
@@ -182,7 +214,7 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			require.NoError(t, err)
 			require.NotZero(t, stored.RevokedAtMs)
 			candidate, fingerprint := f.candidate(ctx, t, "replacement")
-			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.CredentialHash, fingerprint)
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
 			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
 		})
 		t.Run("TransferBackNeverRevivesChild", func(t *testing.T) {
@@ -194,7 +226,7 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			require.NoError(t, err)
 			require.True(t, changed)
 			candidate, fingerprint := f.candidate(ctx, t, "wrong-owner-child")
-			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.CredentialHash, fingerprint)
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
 			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
 			changed, err = f.base.SetAgentOwnership(ctx, f.agent, other, f.machine.OwnerID, "", time.Now().UnixMilli())
 			require.NoError(t, err)
@@ -301,7 +333,7 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			require.NoError(t, err)
 			require.NotZero(t, stored.RevokedAtMs)
 			candidate, fingerprint := f.candidate(ctx, t, "restored-policy-child")
-			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.CredentialHash, fingerprint)
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
 			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
 		})
 		t.Run("RestartPreservesGrantAndTombstone", func(t *testing.T) {

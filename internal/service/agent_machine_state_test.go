@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -12,9 +11,9 @@ func machineGrantFixture() (*AgentMachine, AgentOAuthAuthority, *AgentAuthorizat
 	_, authority, _ := agentOAuthFixture()
 	authority.Client.Registration.GrantTypes = append(authority.Client.Registration.GrantTypes, OAuthGrantAgentMachine)
 	authority.Client.Registration.Resources[0].Product = "files"
-	machine := &AgentMachine{ID: "machine", OwnerID: authority.Owner.ID, ClientID: authority.Client.ID, ClientRevision: 1, Resource: "https://files.example.test", Product: "files", Scopes: []string{"files:read"}, DisplayName: "Example desktop", CredentialHash: oauthHash("credential"), RegistrationSID: authority.HumanSession.SID, AllAgents: true, CreatedAtMs: 1000, Revision: 1}
+	machine := &AgentMachine{ID: "machine", OwnerID: authority.Owner.ID, ClientID: authority.Client.ID, ClientRevision: 1, Resource: "https://files.example.test", Product: "files", Scopes: []string{"files:read"}, DisplayName: "Example desktop", PublicKey: oauthHash("credential"), RegistrationSID: authority.HumanSession.SID, AllAgents: true, CreatedAtMs: 1000, Revision: 1}
 	authority.Machine = machine
-	grant := &AgentAuthorization{ID: "grant", MachineID: machine.ID, ClientID: machine.ClientID, ClientRevision: 1, Resource: machine.Resource, Product: machine.Product, Scopes: []string{"files:read"}, CreatedAtMs: 2000, ConsentAtMs: 2000, Revision: 1, Decision: AgentAuthorizationApproved, OwnerID: machine.OwnerID, AgentID: authority.Agent.ID, SessionID: "agent-session"}
+	grant := &AgentAuthorization{ID: "grant", MachineID: machine.ID, MachinePublicKey: oauthHash("agent-key"), ClientID: machine.ClientID, ClientRevision: 1, Resource: machine.Resource, Product: machine.Product, Scopes: []string{"files:read"}, CreatedAtMs: 2000, ConsentAtMs: 2000, Revision: 1, Decision: AgentAuthorizationApproved, OwnerID: machine.OwnerID, AgentID: authority.Agent.ID, SessionID: "agent-session"}
 	return machine, authority, grant
 }
 
@@ -26,7 +25,7 @@ func TestMachineAuthoritySurvivesHumanSessionLossButNeverOwnerOrAgentLoss(t *tes
 	require.True(t, authority.ValidMachine(machine))
 	require.True(t, authority.Valid(grant))
 	require.False(t, authority.ValidMachineRegistration(machine))
-	require.NoError(t, ValidateMachineDelegation(machine, authority, grant, machine.CredentialHash, authority.Fingerprint()))
+	require.NoError(t, ValidateMachineDelegation(machine, authority, grant, machine.PublicKey, authority.Fingerprint()))
 	next, err := ApplyAgentOAuthMutation(grant, authority, nil, AgentOAuthMutation{Operation: AgentOAuthValidate, AtMs: 9999999999999, AuthorityFingerprint: authority.Fingerprint()})
 	require.NoError(t, err)
 	require.Equal(t, grant, next)
@@ -75,10 +74,9 @@ func TestMachineInputAndCredentialBounds(t *testing.T) {
 	} {
 		require.False(t, validMachineSelection(selection.all, selection.ids, selection.excluded))
 	}
-	raw := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	require.True(t, validAgentMachineCredential(raw))
-	for _, bad := range []string{"", raw + "=", raw[:42], strings.Repeat("x", 100000), strings.Repeat("/", 43), strings.Repeat("A", 42) + "B"} {
-		require.False(t, validAgentMachineCredential(bad))
+	require.True(t, validMachinePublicKey(strings.Repeat("a", 64)))
+	for _, bad := range []string{"", strings.Repeat("A", 64), strings.Repeat("x", 64), strings.Repeat("a", 63), strings.Repeat("a", 65)} {
+		require.False(t, validMachinePublicKey(bad))
 	}
 	machine, _, _ := machineGrantFixture()
 	clone := machine.Clone()
@@ -88,10 +86,10 @@ func TestMachineInputAndCredentialBounds(t *testing.T) {
 	changed.RegistrationSID = "fresh-human-session"
 	changed.CreatedAtMs++
 	require.True(t, SameAgentMachineRegistration(machine, changed))
-	changed.CredentialHash = oauthHash("different")
+	changed.PublicKey = oauthHash("different")
 	require.False(t, SameAgentMachineRegistration(machine, changed))
 	changed = machine.Clone()
-	changed.CredentialHash = strings.Repeat("A", 64)
+	changed.PublicKey = strings.Repeat("A", 64)
 	require.ErrorIs(t, ValidateAgentMachine(changed), ErrInvalidArgument)
 	require.False(t, SameAgentMachineRegistration(nil, machine))
 }

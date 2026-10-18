@@ -112,7 +112,7 @@ func (r *Repo) EnsureAgentMachineDelegation(_ context.Context, id string, candid
 	}
 	for _, child := range r.agentAuthorizations {
 		if child.MachineID == id && child.AgentID == candidate.AgentID {
-			if !a.Valid(child) {
+			if !a.Valid(child) || child.MachinePublicKey != candidate.MachinePublicKey {
 				return nil, service.ErrAgentOAuthGrant
 			}
 			return child.Clone(), nil
@@ -125,6 +125,11 @@ func (r *Repo) EnsureAgentMachineDelegation(_ context.Context, id string, candid
 	}
 	if r.agentAuthorizations[candidate.ID] != nil {
 		return nil, service.ErrAlreadyExists
+	}
+	for _, other := range r.agentAuthorizations {
+		if other.MachineID == id && other.MachinePublicKey == candidate.MachinePublicKey {
+			return nil, service.ErrAlreadyExists
+		}
 	}
 	r.agentAuthorizations[candidate.ID] = candidate.Clone()
 	return candidate.Clone(), nil

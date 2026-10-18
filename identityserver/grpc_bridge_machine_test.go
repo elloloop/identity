@@ -24,7 +24,7 @@ func TestGRPCMachineUsesSharedBudgetAndRefusesUnboundedRequests(t *testing.T) {
 	require.NoError(t, bridge.admitMachine(ctx, procedure, &identitypb.IntrospectAgentMachineRequest{}))
 	require.Equal(t, codes.ResourceExhausted, status.Code(bridge.admitMachine(ctx, procedure, &identitypb.IntrospectAgentMachineRequest{})))
 	other := peerContext("198.51.100.5", nil)
-	require.Equal(t, codes.ResourceExhausted, status.Code(bridge.admitMachine(other, procedure, &identitypb.IntrospectAgentMachineRequest{MachineCredential: strings.Repeat("x", config.AgentMachineRequestMaxBytes+1)})))
+	require.Equal(t, codes.ResourceExhausted, status.Code(bridge.admitMachine(other, procedure, &identitypb.IntrospectAgentMachineRequest{Proof: &identitypb.AgentMachineProof{ChallengeId: strings.Repeat("x", config.AgentMachineRequestMaxBytes+1)}})))
 	bridge.machineLimits = nil
 	require.Equal(t, codes.FailedPrecondition, status.Code(bridge.admitMachine(other, procedure, &identitypb.IntrospectAgentMachineRequest{})))
 }

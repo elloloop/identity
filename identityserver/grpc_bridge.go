@@ -61,7 +61,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSes
 			zap.String("procedure", identityv1connect.IdentityServiceLookupUsersProcedure))
 	}
 	machineLimits := make(map[string]middleware.PathLimit)
-	for _, procedure := range []string{identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
+	for _, procedure := range []string{identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
 		if limit, found := middleware.MatchPathLimit(built.RateLimits, procedure); found {
 			machineLimits[procedure] = limit
 		}
@@ -890,4 +890,18 @@ func (b *grpcBridge) admitMachine(ctx context.Context, procedure string, message
 		return status.Error(codes.ResourceExhausted, "machine request exceeds size limit")
 	}
 	return nil
+}
+
+func (b *grpcBridge) CreateAgentMachineChallenge(ctx context.Context, in *identitypb.CreateAgentMachineChallengeRequest) (*identitypb.CreateAgentMachineChallengeResponse, error) {
+	if err := b.admitMachine(ctx, identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, in); err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.CreateAgentMachineChallenge)
+}
+
+func (b *grpcBridge) RegisterAgentMachineAgentKey(ctx context.Context, in *identitypb.RegisterAgentMachineAgentKeyRequest) (*identitypb.RegisterAgentMachineAgentKeyResponse, error) {
+	if err := b.admitMachine(ctx, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, in); err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.RegisterAgentMachineAgentKey)
 }

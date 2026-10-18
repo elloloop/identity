@@ -32,6 +32,8 @@ BEGIN
 END; $$;
 DROP TRIGGER agent_machine_revoke ON agent_machines;
 DROP FUNCTION revoke_agent_machine_children();
+DROP INDEX agent_authorizations_machine_key_idx;
 DROP INDEX agent_authorizations_machine_agent_idx;
 ALTER TABLE agent_authorizations DROP COLUMN machine_id;
+DROP TABLE agent_machine_challenges;
 DROP TABLE agent_machines;

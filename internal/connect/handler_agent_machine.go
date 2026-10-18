@@ -13,7 +13,7 @@ func machineToProto(machine *service.AgentMachine) *identitypb.AgentMachine {
 	if machine == nil {
 		return nil
 	}
-	return &identitypb.AgentMachine{MachineId: machine.ID, OwnerUserId: machine.OwnerID, ClientId: machine.ClientID, Resource: machine.Resource, Scopes: machine.Scopes, Product: machine.Product, DisplayName: machine.DisplayName, Selection: &identitypb.AgentMachineSelection{AllAgents: machine.AllAgents, AgentUserIds: machine.AgentIDs, ExcludedAgentUserIds: machine.ExcludedAgentIDs}, CreatedAtMs: machine.CreatedAtMs, Revision: machine.Revision, RevokedAtMs: machine.RevokedAtMs}
+	return &identitypb.AgentMachine{MachineId: machine.ID, OwnerUserId: machine.OwnerID, ClientId: machine.ClientID, Resource: machine.Resource, Scopes: machine.Scopes, Product: machine.Product, DisplayName: machine.DisplayName, Selection: &identitypb.AgentMachineSelection{AllAgents: machine.AllAgents, AgentUserIds: machine.AgentIDs, ExcludedAgentUserIds: machine.ExcludedAgentIDs}, CreatedAtMs: machine.CreatedAtMs, Revision: machine.Revision, RevokedAtMs: machine.RevokedAtMs, EnginePublicKey: machine.PublicKey}
 }
 
 func machineResponse[T any](message *T) *connect.Response[T] {
@@ -41,7 +41,7 @@ func (h *IdentityHandler) RegisterAgentMachine(ctx context.Context, req *connect
 		agents = selection.AgentUserIds
 		excluded = selection.ExcludedAgentUserIds
 	}
-	machine, err := h.agentOAuth.RegisterMachine(ctx, agentOAuthHuman(req.Header()), service.AgentMachineRegistration{ID: req.Msg.MachineId, ClientID: req.Msg.ClientId, Resource: req.Msg.Resource, Scopes: req.Msg.Scopes, DisplayName: req.Msg.DisplayName, CredentialHash: req.Msg.CredentialSha256, AllAgents: all, AgentIDs: agents, ExcludedAgentIDs: excluded})
+	machine, err := h.agentOAuth.RegisterMachine(ctx, agentOAuthHuman(req.Header()), service.AgentMachineRegistration{ID: req.Msg.MachineId, ClientID: req.Msg.ClientId, Resource: req.Msg.Resource, Scopes: req.Msg.Scopes, DisplayName: req.Msg.DisplayName, PublicKey: req.Msg.EnginePublicKey, AllAgents: all, AgentIDs: agents, ExcludedAgentIDs: excluded})
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -93,7 +93,7 @@ func (h *IdentityHandler) ExchangeAgentMachineCredential(ctx context.Context, re
 	if err := h.machineEnabled(); err != nil {
 		return nil, err
 	}
-	tokens, err := h.agentOAuth.ExchangeMachine(ctx, req.Msg.MachineId, req.Msg.MachineCredential, req.Msg.AgentUserId)
+	tokens, err := h.agentOAuth.ExchangeMachine(ctx, req.Msg.MachineId, req.Msg.AgentUserId, machineProof(req.Msg.Proof))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -104,7 +104,7 @@ func (h *IdentityHandler) ListAgentMachineAgents(ctx context.Context, req *conne
 	if err := h.machineEnabled(); err != nil {
 		return nil, err
 	}
-	page, err := h.agentOAuth.MachineAgents(ctx, req.Msg.MachineId, req.Msg.MachineCredential, int(req.Msg.Offset))
+	page, err := h.agentOAuth.MachineAgents(ctx, req.Msg.MachineId, machineProof(req.Msg.Proof), int(req.Msg.Offset))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -128,9 +128,49 @@ func (h *IdentityHandler) IntrospectAgentMachine(ctx context.Context, req *conne
 	if err != nil {
 		return nil, toConnectError(err)
 	}
-	result, err := h.agentOAuth.IntrospectMachine(ctx, resource, req.Msg.MachineId, req.Msg.MachineCredential)
+	result, err := h.agentOAuth.IntrospectMachine(ctx, resource, req.Msg.MachineId, machineProof(req.Msg.Proof))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
 	return machineResponse(&identitypb.IntrospectAgentMachineResponse{Active: result.Active, Machine: machineToProto(result.Machine)}), nil
+}
+
+func machineProof(proof *identitypb.AgentMachineProof) service.AgentMachineProof {
+	if proof == nil {
+		return service.AgentMachineProof{}
+	}
+	return service.AgentMachineProof{ChallengeID: proof.ChallengeId, Signature: proof.Signature}
+}
+
+func (h *IdentityHandler) CreateAgentMachineChallenge(ctx context.Context, req *connect.Request[identitypb.CreateAgentMachineChallengeRequest]) (*connect.Response[identitypb.CreateAgentMachineChallengeResponse], error) {
+	if err := h.machineEnabled(); err != nil {
+		return nil, err
+	}
+	operation := ""
+	switch req.Msg.Operation {
+	case identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_ENROLL_AGENT:
+		operation = service.AgentMachineEnroll
+	case identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_EXCHANGE_AGENT:
+		operation = service.AgentMachineExchange
+	case identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_LIST_AGENTS:
+		operation = service.AgentMachineRoster
+	case identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_INSPECT_MACHINE:
+		operation = service.AgentMachineInspect
+	}
+	challenge, err := h.agentOAuth.CreateMachineChallenge(ctx, service.AgentMachineChallengeRequest{MachineID: req.Msg.MachineId, AgentID: req.Msg.AgentUserId, Operation: operation, PublicKey: req.Msg.AgentPublicKey, Offset: int(req.Msg.Offset)})
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return machineResponse(&identitypb.CreateAgentMachineChallengeResponse{ChallengeId: challenge.ID, Message: []byte(challenge.Message), ExpiresAtMs: challenge.ExpiresAtMs}), nil
+}
+
+func (h *IdentityHandler) RegisterAgentMachineAgentKey(ctx context.Context, req *connect.Request[identitypb.RegisterAgentMachineAgentKeyRequest]) (*connect.Response[identitypb.RegisterAgentMachineAgentKeyResponse], error) {
+	if err := h.machineEnabled(); err != nil {
+		return nil, err
+	}
+	grant, err := h.agentOAuth.RegisterMachineAgentKey(ctx, req.Msg.MachineId, req.Msg.AgentUserId, req.Msg.AgentPublicKey, machineProof(req.Msg.Proof))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return machineResponse(&identitypb.RegisterAgentMachineAgentKeyResponse{DelegationId: grant.ID}), nil
 }

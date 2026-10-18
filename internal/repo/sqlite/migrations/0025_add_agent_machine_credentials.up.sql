@@ -31,3 +31,18 @@ DROP TRIGGER agent_oauth_guardian_delete;
 CREATE TRIGGER agent_oauth_guardian_delete AFTER DELETE ON guardian_edges BEGIN UPDATE agent_machines SET revoked_at_ms=MAX(1,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)),revision=revision+1 WHERE project_id=OLD.project_id AND owner_id=OLD.child_user_id AND revoked_at_ms=0; UPDATE agent_authorizations SET revoked_at_ms=MAX(1,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)),revision=revision+1 WHERE project_id=OLD.project_id AND owner_id=OLD.child_user_id AND revoked_at_ms=0; END;
 DROP TRIGGER agent_oauth_project_policy;
 CREATE TRIGGER agent_oauth_project_policy AFTER UPDATE OF config_json,status ON projects WHEN OLD.config_json IS NOT NEW.config_json OR OLD.status IS NOT NEW.status BEGIN UPDATE agent_machines SET revoked_at_ms=MAX(1,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)),revision=revision+1 WHERE project_id=OLD.id AND revoked_at_ms=0; UPDATE agent_authorizations SET revoked_at_ms=MAX(1,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)),revision=revision+1 WHERE project_id=OLD.id AND revoked_at_ms=0; END;
+
+CREATE TABLE agent_machine_challenges (
+ project_id TEXT NOT NULL,
+ id TEXT NOT NULL,
+ machine_id TEXT NOT NULL,
+ data_json TEXT NOT NULL,
+ created_at_ms INTEGER NOT NULL,
+ expires_at_ms INTEGER NOT NULL,
+ PRIMARY KEY(project_id,id),
+ FOREIGN KEY(project_id,machine_id) REFERENCES agent_machines(project_id,id) ON DELETE CASCADE
+);
+CREATE INDEX agent_machine_challenges_expiry_idx ON agent_machine_challenges(project_id,machine_id,expires_at_ms);
+
+CREATE UNIQUE INDEX agent_authorizations_machine_key_idx ON agent_authorizations(project_id,machine_id,(json_extract(data_json,'$.MachinePublicKey'))) WHERE machine_id IS NOT NULL;
+CREATE INDEX agent_machine_challenges_sweep_idx ON agent_machine_challenges(project_id,expires_at_ms,id);

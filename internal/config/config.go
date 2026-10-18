@@ -1229,7 +1229,7 @@ type Config struct {
 	// Requires agents, session revocation, HTTPS issuer and authenticated
 	// resource credentials. GATEWAY_AGENT_OAUTH_ENABLED defaults to false.
 	AgentOAuthEnabled bool
-	// AgentMachineEnabled enables durable owner-managed machine credentials.
+	// AgentMachineEnabled enables durable owner-managed machine public-key authentication.
 	// GATEWAY_AGENT_MACHINE_ENABLED; disabled by default, requires delegated OAuth.
 	AgentMachineEnabled bool
 	// AgentOAuthAccessSeconds bounds delegated access JWTs to 1–900 seconds.

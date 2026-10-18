@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"encoding/hex"
 	"reflect"
 	"slices"
-	"strings"
 )
 
 const (
@@ -15,8 +13,8 @@ const (
 	MaxAgentMachineSelection = 1000
 )
 
-// AgentMachine is owner-authorized durable machine access. Its credential never
-// enters an agent workspace; only separately attributed short-lived tokens do.
+// AgentMachine is owner-authorized orchestration access. Its engine private key
+// never enters an agent workspace; each child binds a separate agent public key.
 // RegistrationSID is audit provenance, not continuing session authority.
 type AgentMachine struct {
 	ID               string
@@ -27,7 +25,7 @@ type AgentMachine struct {
 	Product          string
 	Scopes           []string
 	DisplayName      string
-	CredentialHash   string
+	PublicKey        string
 	RegistrationSID  string
 	AllAgents        bool
 	AgentIDs         []string
@@ -77,8 +75,7 @@ func ValidateAgentMachine(m *AgentMachine) error {
 	if m == nil || !validOAuthClientID(m.ID) || !validOAuthClientID(m.OwnerID) || !validOAuthClientID(m.ClientID) || m.ClientRevision < 1 || m.RegistrationSID == "" || !validOAuthClientName(m.DisplayName) || m.CreatedAtMs <= 0 || m.Revision != 1 || m.RevokedAtMs != 0 || !boundedOAuthStrings(m.Scopes, maxOAuthScopes) || !validMachineSelection(m.AllAgents, m.AgentIDs, m.ExcludedAgentIDs) {
 		return ErrInvalidArgument
 	}
-	digest, err := hex.DecodeString(m.CredentialHash)
-	if err != nil || len(digest) != 32 || strings.ToLower(m.CredentialHash) != m.CredentialHash {
+	if !validMachinePublicKey(m.PublicKey) {
 		return ErrInvalidArgument
 	}
 	return nil
@@ -146,18 +143,23 @@ func ApplyAgentMachineMutation(current *AgentMachine, mutation AgentMachineMutat
 
 // Stores lock current owner/agent/client authority before the machine and child
 // grant. Ensure never replaces a revoked child. Registration repeats may return
-// the identical record only; a changed hash or selection is a conflict.
+// the identical record only; a changed engine key or selection is a conflict.
 type AgentMachineRepository interface {
 	CreateAgentMachine(context.Context, *AgentMachine, string) (*AgentMachine, error)
 	GetAgentMachine(context.Context, string) (*AgentMachine, error)
 	ListAgentMachines(context.Context, string, string, int) ([]*AgentMachine, error)
 	MutateAgentMachine(context.Context, string, AgentMachineMutation) (*AgentMachine, error)
 	AgentMachineAuthority(context.Context, string, string) (AgentOAuthAuthority, error)
+	GetAgentMachineDelegation(context.Context, string, string) (*AgentAuthorization, error)
+	CreateAgentMachineChallenge(context.Context, *AgentMachineChallenge) error
+	GetAgentMachineChallenge(context.Context, string) (*AgentMachineChallenge, error)
+	ConsumeAgentMachineChallenge(context.Context, string, int64) (bool, error)
+	DeleteExpiredAgentMachineChallenges(context.Context, int64, int) error
 	EnsureAgentMachineDelegation(context.Context, string, *AgentAuthorization, string, string) (*AgentAuthorization, error)
 }
 
-func ValidateMachineDelegation(machine *AgentMachine, authority AgentOAuthAuthority, grant *AgentAuthorization, credentialHash, fingerprint string) error {
-	if !authority.ValidMachine(machine) || !hashEqual(machine.CredentialHash, credentialHash) || authority.Fingerprint() != fingerprint || grant == nil || !validOAuthClientID(grant.ID) || !validOAuthClientID(grant.SessionID) || grant.MachineID != machine.ID || grant.OwnerID != machine.OwnerID || grant.ClientID != machine.ClientID || grant.ClientRevision != machine.ClientRevision || grant.Resource != machine.Resource || grant.Product != machine.Product || !slices.Equal(grant.Scopes, machine.Scopes) || !machine.Allows(grant.AgentID) || !authority.Valid(grant) || grant.Revision != 1 || grant.Decision != AgentAuthorizationApproved || grant.CreatedAtMs <= 0 || grant.ConsentAtMs != grant.CreatedAtMs || grant.GrantExpiresAtMs != 0 || grant.ExpiresAtMs != 0 || grant.RevokedAtMs != 0 || grant.HumanSID != "" || grant.CodeHash != "" || grant.RedirectURI != "" || grant.Challenge != "" {
+func ValidateMachineDelegation(machine *AgentMachine, authority AgentOAuthAuthority, grant *AgentAuthorization, enginePublicKey, fingerprint string) error {
+	if !authority.ValidMachine(machine) || machine.PublicKey != enginePublicKey || authority.Fingerprint() != fingerprint || grant == nil || !validOAuthClientID(grant.ID) || !validOAuthClientID(grant.SessionID) || grant.MachineID != machine.ID || !validMachinePublicKey(grant.MachinePublicKey) || grant.MachinePublicKey == machine.PublicKey || grant.OwnerID != machine.OwnerID || grant.ClientID != machine.ClientID || grant.ClientRevision != machine.ClientRevision || grant.Resource != machine.Resource || grant.Product != machine.Product || !slices.Equal(grant.Scopes, machine.Scopes) || !machine.Allows(grant.AgentID) || !authority.Valid(grant) || grant.Revision != 1 || grant.Decision != AgentAuthorizationApproved || grant.CreatedAtMs <= 0 || grant.ConsentAtMs != grant.CreatedAtMs || grant.GrantExpiresAtMs != 0 || grant.ExpiresAtMs != 0 || grant.RevokedAtMs != 0 || grant.HumanSID != "" || grant.CodeHash != "" || grant.RedirectURI != "" || grant.Challenge != "" {
 		return ErrAgentOAuthGrant
 	}
 	return nil

@@ -14,6 +14,8 @@ var AuthExemptPaths = map[string]bool{
 	// These verify the durable machine credential themselves; human and agent
 	// JWTs are never substitutes for that proof.
 	"/identity.v1.IdentityService/ExchangeAgentMachineCredential": true,
+	"/identity.v1.IdentityService/CreateAgentMachineChallenge":    true,
+	"/identity.v1.IdentityService/RegisterAgentMachineAgentKey":   true,
 	// Dedicated configured resource authentication, verified in the handler.
 	"/identity.v1.IdentityService/IntrospectAgentMachine": true,
 	"/identity.v1.IdentityService/ListAgentMachineAgents": true,
