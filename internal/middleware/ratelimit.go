@@ -130,13 +130,16 @@ func (pl PathLimit) RetryAfterSeconds() int {
 	return max(1, int(math.Ceil(pl.Limiter.Window().Seconds())))
 }
 
-// MatchPathLimit returns the first limit in limits whose prefix matches path
-// and which has a limiter. Every transport that enforces the configured
-// limits selects through it, so an RPC is held to the same budget however
-// it arrives.
+// MatchPathLimit returns the first limit whose prefix matches complete path
+// segments and which has a limiter. Endpoint names that share a prefix must
+// not borrow each other's budgets. Every transport selects through this matcher.
 func MatchPathLimit(limits []PathLimit, path string) (PathLimit, bool) {
 	for _, pl := range limits {
-		if pl.Limiter != nil && pl.PathPrefix != "" && strings.HasPrefix(path, pl.PathPrefix) {
+		if pl.Limiter == nil || pl.PathPrefix == "" {
+			continue
+		}
+		suffix, matches := strings.CutPrefix(path, pl.PathPrefix)
+		if matches && (suffix == "" || strings.HasSuffix(pl.PathPrefix, "/") || strings.HasPrefix(suffix, "/")) {
 			return pl, true
 		}
 	}
