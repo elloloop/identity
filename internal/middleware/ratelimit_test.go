@@ -236,3 +236,25 @@ func TestMatchPathLimit(t *testing.T) {
 	_, ok = MatchPathLimit(limits, "/c")
 	assert.False(t, ok)
 }
+
+func TestMatchPathLimitPathBoundaries(t *testing.T) {
+	limiter := NewFixedWindowLimiter(time.Minute, 1, 0)
+	for _, test := range []struct {
+		name, prefix, path string
+		matches            bool
+	}{
+		{"exact endpoint", "/rpc/CreateAgent", "/rpc/CreateAgent", true},
+		{"endpoint descendant", "/rpc/CreateAgent", "/rpc/CreateAgent/child", true},
+		{"different endpoint", "/rpc/CreateAgent", "/rpc/CreateAgentMachineChallenge", false},
+		{"shorter path", "/rpc/CreateAgent", "/rpc/Create", false},
+		{"directory child", "/scim/v2/", "/scim/v2/Users", true},
+		{"directory root", "/scim/v2/", "/scim/v2/", true},
+		{"different directory", "/scim/v2/", "/scim/v20/Users", false},
+		{"root prefix", "/", "/rpc/CreateAgent", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, matched := MatchPathLimit([]PathLimit{{PathPrefix: test.prefix, Limiter: limiter}}, test.path)
+			assert.Equal(t, test.matches, matched)
+		})
+	}
+}

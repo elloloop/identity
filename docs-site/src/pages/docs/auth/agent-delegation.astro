@@ -91,6 +91,12 @@ Each operation first obtains a <code>CreateAgentMachineChallenge</code> and sign
 its exact message. Challenges bind issuer, project, machine, agent, operation and
 request, expire after 60 seconds and can be consumed once across issuer restarts.
 After response loss, obtain a fresh challenge; do not replay a consumed proof.</p>
+<p>Machine challenge creation shares the
+<code>GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP</code> budget with the other machine
+protocol operations, independently of the signup budget used by
+<code>CreateAgent</code>. Machine introspection uses
+<code>GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP</code>. A throttled request returns
+HTTP 429 with a <code>Retry-After</code> header.</p>
 <p><code>ListAgentMachineAgents</code> pages the selected owned agents. Continue
 until <code>next_offset</code> is -1, even when a filtered page is empty. Its proof
 is bound to that page offset. Keep all private keys outside agent workspaces;

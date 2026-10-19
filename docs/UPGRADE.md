@@ -1,5 +1,14 @@
 # Upgrade guide
 
+## Next — isolate machine challenge and account creation rate limits
+
+`CreateAgentMachineChallenge` now uses the configured
+`GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP` budget instead of accidentally sharing
+`CreateAgent`'s signup budget. Rate-limit prefixes match complete path segments,
+so distinct RPC names cannot capture one another. Directory prefixes such as
+`/scim/v2/` still cover their descendants. No quota, environment variable, schema,
+or wire format changes; no operator action is required.
+
 ## Next — hosted provider sign-in for agent consent
 
 The agent review page now offers only the current project's enabled hosted

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/middleware"
 )
@@ -459,4 +460,37 @@ func TestBuildRateLimits_QrLoginLimited(t *testing.T) {
 	for i := range 50 {
 		require.True(t, pl.Allow("9.9.9.9", now), "a zero quota admits poll %d", i+1)
 	}
+}
+
+func TestBuildRateLimitsAgentMachinePaths(t *testing.T) {
+	limits := buildRateLimits(&config.Config{
+		AgentOAuthEnabled: true, RateLimitWindowSeconds: 60,
+		RateLimitSignupPerIP: 1, AgentOAuthProtocolPerIP: 3, AgentOAuthIntrospectionPerIP: 5,
+	})
+	for _, path := range []string{
+		identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure,
+		identityconnectgen.IdentityServiceRegisterAgentMachineAgentKeyProcedure,
+		identityconnectgen.IdentityServiceRegisterAgentMachineProcedure,
+		identityconnectgen.IdentityServiceListAgentMachinesProcedure,
+		identityconnectgen.IdentityServiceSelectAgentMachineAgentsProcedure,
+		identityconnectgen.IdentityServiceRevokeAgentMachineProcedure,
+		identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure,
+		identityconnectgen.IdentityServiceListAgentMachineAgentsProcedure,
+	} {
+		t.Run(path, func(t *testing.T) {
+			limit, ok := middleware.MatchPathLimit(limits, path)
+			require.True(t, ok)
+			require.Equal(t, "agent_oauth_protocol", limit.Tag)
+		})
+	}
+	limit, ok := middleware.MatchPathLimit(limits, identityconnectgen.IdentityServiceIntrospectAgentMachineProcedure)
+	require.True(t, ok)
+	require.Equal(t, "agent_machine_introspection", limit.Tag)
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, "203.0.113.9", 3)
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceCreateAgentProcedure, "203.0.113.9", 1)
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceIntrospectAgentMachineProcedure, "203.0.113.9", 5)
 }
