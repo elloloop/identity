@@ -9,15 +9,15 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// TracerName is the instrumentation name carried on every outbound span
-// emitted by this server.
-const TracerName = "github.com/elloloop/identity"
+// InstrumentationName is the instrumentation scope carried on every span
+// and exported log record this server emits.
+const InstrumentationName = "github.com/elloloop/identity"
 
 // Tracer returns the named tracer. Callers should not cache the
 // returned trace.Tracer across the global TracerProvider being
 // replaced (currently it isn't, after Setup runs once at boot).
 func Tracer() trace.Tracer {
-	return otel.Tracer(TracerName)
+	return otel.Tracer(InstrumentationName)
 }
 
 // StartClient opens a client-kind span for an outbound call. The

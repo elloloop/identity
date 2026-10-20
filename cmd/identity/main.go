@@ -33,12 +33,12 @@ import (
 )
 
 func main() {
-	logger, err := zap.NewProduction()
-	if err != nil {
-		panic(err)
-	}
-
 	opts := identityserver.OptionsFromEnv()
+	logger, closeLogger, err := newLogger(context.Background(), &opts.Config)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "identity: build the logger: %v\n", err)
+		os.Exit(1)
+	}
 	opts.Logger = logger
 
 	// `identity migrate` runs pending Postgres migrations and exits,
@@ -49,33 +49,33 @@ func main() {
 		cmd, err := parseMigrateCommand(os.Args)
 		if err != nil {
 			logger.Error("identity_migrate_bad_arguments", zap.Error(err), zap.String("usage", migrateUsage))
-			syncLogger(logger)
+			closeLogger()
 			os.Exit(2)
 		}
 		code := runMigrate(opts, cmd, logger)
-		syncLogger(logger)
+		closeLogger()
 		os.Exit(code)
 	}
 	if repairEmailsRequested(os.Args) {
 		apply, err := parseRepairEmailsCommand(os.Args)
 		if err != nil {
 			logger.Error("identity_repair_emails_bad_arguments", zap.Error(err), zap.String("usage", repairEmailsUsage))
-			syncLogger(logger)
+			closeLogger()
 			os.Exit(2)
 		}
 		code := runRepairEmails(opts, apply, logger)
-		syncLogger(logger)
+		closeLogger()
 		os.Exit(code)
 	}
 	if unknownSubcommand(os.Args) {
 		logger.Error("identity_unknown_subcommand",
 			zap.String("arg", os.Args[1]),
 			zap.String("usage", "identity [migrate [force <version>] | "+repairEmailsSubcommand+" ["+repairEmailsApplyArg+"]]"))
-		syncLogger(logger)
+		closeLogger()
 		os.Exit(2)
 	}
 
-	defer syncLogger(logger)
+	defer closeLogger()
 
 	cfg := opts.Config
 

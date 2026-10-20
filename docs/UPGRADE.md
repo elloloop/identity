@@ -1,5 +1,25 @@
 # Upgrade guide
 
+## Next — export log lines to an OpenTelemetry collector (additive)
+
+The `identity` command can send its log lines to an OTLP/HTTP collector beside
+the JSON it writes to its own output. It is off by default: set
+`GATEWAY_OTEL_LOGS_ENABLED=true` and `GATEWAY_OTEL_LOGS_ENDPOINT` to the
+collector's base URL, and records are posted to `<endpoint>/v1/logs`. They
+carry the trace resource's `service.name`, `service.version`
+(`GATEWAY_OTEL_SERVICE_VERSION`) and `deployment.environment.name`
+(`GATEWAY_OTEL_DEPLOYMENT_ENV`); `OTEL_SERVICE_NAME` and
+`OTEL_RESOURCE_ATTRIBUTES` override or add to them. No schema, proto or wire
+change, and no operator action is required.
+
+- With the export enabled, an empty or malformed endpoint stops the process at
+  start; `Config.Validate` checks it too.
+- While the export is on, OpenTelemetry export failures, trace export included,
+  are reported as `otel_export_failed` at most once a minute.
+- Servers embedding `identityserver` are unaffected; they supply their own logger.
+- The internal constant `observability.TracerName` is now `InstrumentationName`,
+  since it names the scope of exported log records too.
+
 ## Next — the log-only email and SMS senders no longer log message content
 
 `email_disabled_no_transport` and `sms_disabled_no_sender` are written when a

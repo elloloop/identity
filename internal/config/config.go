@@ -1190,6 +1190,10 @@ type Config struct {
 	OTelDeploymentEnv string
 	// OTelServiceVersion overrides the build version baked into the binary on emitted traces.
 	OTelServiceVersion string
+	// OTelLogsEnabled turns on the identity command's OTLP/HTTP log export.
+	OTelLogsEnabled bool
+	// OTelLogsEndpoint is the OTLP/HTTP collector base URL logs are posted under (at /v1/logs); required when OTelLogsEnabled.
+	OTelLogsEndpoint string
 
 	// Sweeper (#94) — a background goroutine that periodically deletes
 	// expired-but-uncollected rows from the ephemeral tables (WebAuthn
@@ -1618,6 +1622,8 @@ func loadFromEnv() *Config {
 		OTelSampleRatio:      envFloat("GATEWAY_OTEL_SAMPLE_RATIO", 0.1),
 		OTelDeploymentEnv:    envStr("GATEWAY_OTEL_DEPLOYMENT_ENV", ""),
 		OTelServiceVersion:   envStr("GATEWAY_OTEL_SERVICE_VERSION", ""),
+		OTelLogsEnabled:      envBool("GATEWAY_OTEL_LOGS_ENABLED", false),
+		OTelLogsEndpoint:     envStr("GATEWAY_OTEL_LOGS_ENDPOINT", ""),
 
 		SweeperIntervalSeconds: envInt("GATEWAY_SWEEPER_INTERVAL_SECONDS", 300),
 		SweeperBatchSize:       envInt("GATEWAY_SWEEPER_BATCH_SIZE", 500),
@@ -2059,6 +2065,9 @@ func detectRemovedEnvVars() error {
 
 func (c *Config) Validate() error {
 	if err := c.ValidateAgentOAuth(); err != nil {
+		return err
+	}
+	if err := c.ValidateLogExport(); err != nil {
 		return err
 	}
 	if c.removedEnvVarErr != nil {

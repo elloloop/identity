@@ -1260,6 +1260,24 @@
     "anchor": "opentelemetry"
   },
   {
+    "name": "GATEWAY_OTEL_LOGS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "turns on the identity command's OTLP/HTTP log export.",
+    "category": "OpenTelemetry",
+    "anchor": "opentelemetry"
+  },
+  {
+    "name": "GATEWAY_OTEL_LOGS_ENDPOINT",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the OTLP/HTTP collector base URL logs are posted under (at /v1/logs); required when OTelLogsEnabled.",
+    "category": "OpenTelemetry",
+    "anchor": "opentelemetry"
+  },
+  {
     "name": "GATEWAY_OTEL_SAMPLE_RATIO",
     "type": "number",
     "default": "0.1",
