@@ -7,9 +7,10 @@
 //     and any other provider that exposes SMTP).
 //   - Chain transport that tries multiple transports in order, providing
 //     primary/secondary/tertiary failover.
-//   - LogOnly transport for local development when no SMTP is configured;
-//     it emits a structured WARN log with the recipient and subject so the
-//     developer can manually deliver the message.
+//   - LogOnly transport, used when no SMTP is configured and as the last
+//     link of a chain whose providers all failed; it emits a WARN log that
+//     a message was dropped (redacted recipient, subject, body sizes),
+//     never its body. Point SMTP at a mail catcher to read messages locally.
 //
 // A small templates sub-package embeds plain text+HTML templates for common
 // transactional emails (password reset, email verification, invitations).

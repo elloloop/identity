@@ -2,7 +2,8 @@
 // pkg/email. A Sender delivers a short text Message (a verification
 // OTP) to a phone number. Concrete senders for Twilio, AWS SNS, and
 // Azure Communication Services live in sibling files; NewLogOnly is the
-// disabled/dev default that logs instead of delivering.
+// disabled/dev default that records a dropped message (redacted number,
+// body size) instead of delivering it, never its body.
 //
 // All senders are safe for concurrent use and honor ctx cancellation
 // via the injected *http.Client. Each provider's base URL is an
