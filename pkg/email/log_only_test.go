@@ -3,6 +3,7 @@ package email
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,13 +16,12 @@ func TestLogOnlySendLogsAtWarn(t *testing.T) {
 	t.Parallel()
 
 	core, logs := observer.New(zapcore.WarnLevel)
-	logger := zap.New(core)
-
-	tr := NewLogOnly(logger)
+	tr := NewLogOnly(zap.New(core))
 	err := tr.Send(context.Background(), Message{
 		To:      "user@example.com",
 		Subject: "Welcome",
 		Text:    "hello there",
+		HTML:    "<p>hello there</p>",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -38,57 +38,51 @@ func TestLogOnlySendLogsAtWarn(t *testing.T) {
 	if e.Message != "email_disabled_no_transport" {
 		t.Errorf("message: got %q want email_disabled_no_transport", e.Message)
 	}
-
 	fields := e.ContextMap()
-	if got := fields["to"]; got != "user@example.com" {
-		t.Errorf("to field: got %v", got)
+	if got := fields["to"]; got != "u***@example.com" {
+		t.Errorf("to field: got %v, want the redacted address", got)
 	}
 	if got := fields["subject"]; got != "Welcome" {
 		t.Errorf("subject field: got %v", got)
 	}
-	if _, ok := fields["preview"]; !ok {
-		t.Errorf("missing preview field")
+	if got := fields["text_bytes"]; got != int64(len("hello there")) {
+		t.Errorf("text_bytes field: got %v", got)
+	}
+	if got := fields["html_bytes"]; got != int64(len("<p>hello there</p>")) {
+		t.Errorf("html_bytes field: got %v", got)
 	}
 }
 
-func TestLogOnlyTruncatesPreview(t *testing.T) {
+// The log-only transport is the tail of every SMTP chain, so it runs in
+// production whenever every provider fails. Its line must never carry the
+// credential a sign-in or reset message holds, nor the full address.
+func TestLogOnlyNeverLogsTheBodyOrTheFullAddress(t *testing.T) {
 	t.Parallel()
 
-	core, logs := observer.New(zapcore.WarnLevel)
-	logger := zap.New(core)
-	tr := NewLogOnly(logger)
-
-	long := strings.Repeat("a", previewLen+50)
-	if err := tr.Send(context.Background(), Message{
-		To:      "u@example.com",
-		Subject: "S",
-		Text:    long,
-	}); err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
-	got := logs.All()[0].ContextMap()["preview"].(string)
-	if len(got) != previewLen {
-		t.Fatalf("preview len: got %d want %d", len(got), previewLen)
-	}
-}
-
-func TestLogOnlyFallsBackToHTMLPreview(t *testing.T) {
-	t.Parallel()
-
-	core, logs := observer.New(zapcore.WarnLevel)
-	logger := zap.New(core)
-	tr := NewLogOnly(logger)
-
-	if err := tr.Send(context.Background(), Message{
-		To:      "u@example.com",
-		Subject: "S",
-		HTML:    "<p>html-only</p>",
-	}); err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
-	got := logs.All()[0].ContextMap()["preview"].(string)
-	if !strings.Contains(got, "html-only") {
-		t.Fatalf("expected html preview, got %q", got)
+	const (
+		to   = "alice@example.com"
+		code = "731904"
+		link = "https://auth.example.test/reset?token=s3cr3t-reset-token"
+	)
+	for name, m := range map[string]Message{
+		"text": {To: to, Subject: "Your sign-in code", Text: "Your code is " + code + ". It expires in 10 minutes."},
+		"html": {To: to, Subject: "Reset your password", HTML: `<p><a href="` + link + `">Reset</a></p>`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			core, logs := observer.New(zapcore.WarnLevel)
+			if err := NewLogOnly(zap.New(core)).Send(context.Background(), m); err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			for k, v := range logs.All()[0].ContextMap() {
+				s := fmt.Sprint(v)
+				for _, secret := range []string{code, "s3cr3t-reset-token", to} {
+					if strings.Contains(s, secret) {
+						t.Errorf("field %q = %q carries %q", k, s, secret)
+					}
+				}
+			}
+		})
 	}
 }
 

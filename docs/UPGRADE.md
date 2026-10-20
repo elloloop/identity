@@ -1,5 +1,19 @@
 # Upgrade guide
 
+## Next — the log-only email and SMS senders no longer log message content
+
+`email_disabled_no_transport` and `sms_disabled_no_sender` are written when a
+message is dropped: no SMTP server or SMS provider is configured, or every SMTP
+provider in the chain failed. They used to carry the full recipient and the
+first 240 characters of the body, which for sign-in codes, magic links and
+reset links is a live credential. They now carry the redacted recipient
+(`a***@example.com`, `+1********67`), the email's subject, and the body's size
+(`text_bytes` / `html_bytes`, `body_bytes`); the `preview` field is gone.
+
+Anyone who read sign-in codes from these lines during local development reads
+them from a mail catcher or SMS provider sandbox instead. No configuration,
+schema or wire change.
+
 ## Next — isolate machine challenge and account creation rate limits
 
 `CreateAgentMachineChallenge` now uses the configured

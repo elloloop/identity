@@ -58,15 +58,6 @@ func normalizePhone(raw string) (string, bool) {
 	return p, true
 }
 
-// redactPhone keeps the country prefix and last two digits, masking the
-// middle, so logs never carry a full number.
-func redactPhone(p string) string {
-	if len(p) <= 4 {
-		return "***"
-	}
-	return p[:2] + strings.Repeat("*", len(p)-4) + p[len(p)-2:]
-}
-
 // ── RequestPhoneVerification ───────────────────────────────────────────
 
 // RequestPhoneVerification mints a 6-digit OTP for the user's phone and
@@ -143,15 +134,15 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phon
 		// the caller knows delivery failed (unlike the anti-enumeration
 		// email path, the caller here is authenticated and owns the flow).
 		s.logger.Warn("phone_verification_send_failed",
-			zap.String("user_id", userID), zap.String("phone", redactPhone(phone)), zap.Error(err))
+			zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)), zap.Error(err))
 		return fmt.Errorf("%w: %w", ErrSMSDisabled, err)
 	}
 
 	s.audit.Log(ctx, audit.EventPhoneVerificationRequested,
 		audit.WithActor(userID),
-		audit.WithDetails(map[string]any{"phone": redactPhone(phone)}))
+		audit.WithDetails(map[string]any{"phone": sms.Redact(phone)}))
 	s.logger.Info("phone_verification_requested",
-		zap.String("user_id", userID), zap.String("phone", redactPhone(phone)))
+		zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)))
 	return nil
 }
 
@@ -230,8 +221,8 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, 
 
 	s.audit.Log(ctx, audit.EventPhoneVerified,
 		audit.WithActor(userID), audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"phone": redactPhone(phone)}))
+		audit.WithDetails(map[string]any{"phone": sms.Redact(phone)}))
 	s.logger.Info("phone_verified",
-		zap.String("user_id", userID), zap.String("phone", redactPhone(phone)))
+		zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)))
 	return user, nil
 }

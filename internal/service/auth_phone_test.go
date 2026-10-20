@@ -328,20 +328,6 @@ func TestNormalizePhone(t *testing.T) {
 	}
 }
 
-func TestRedactPhone(t *testing.T) {
-	cases := map[string]string{
-		"+15551234567": "+1********67",
-		"+123":         "***", // <= 4 chars
-		"":             "***",
-		"+123456":      "+1***56",
-	}
-	for in, want := range cases {
-		if got := redactPhone(in); got != want {
-			t.Errorf("redactPhone(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestPhoneCodeTTLAndAttempts(t *testing.T) {
 	// Configured values win.
 	s := &AuthService{cfg: &config.Config{PhoneCodeTTLSeconds: 120, PhoneCodeMaxAttempts: 7}}
