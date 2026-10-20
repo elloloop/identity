@@ -1,7 +1,7 @@
-// Package observability wires OpenTelemetry traces for the identity
-// server. Deployers point the server at any OTLP-compatible collector
-// via GATEWAY_OTEL_*; when disabled, the no-op tracer provider is
-// installed and the server pays no per-request cost.
+// Package observability wires OpenTelemetry traces and the log export
+// for the identity server. Deployers point either at any OTLP-compatible
+// collector via GATEWAY_OTEL_*; when tracing is disabled, the no-op tracer
+// provider is installed and the server pays no per-request cost.
 package observability
 
 import (
@@ -137,14 +137,20 @@ func newOTLPExporter(ctx context.Context, cfg Config) (*otlptrace.Exporter, erro
 }
 
 func newResource(ctx context.Context, cfg Config) (*resource.Resource, error) {
+	return resource.New(ctx, resource.WithAttributes(identityAttributes(cfg.ServiceVersion, cfg.DeploymentEnv)...))
+}
+
+// identityAttributes are the resource attributes that identify this server
+// on both traces and exported logs.
+func identityAttributes(serviceVersionOverride, deploymentEnv string) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		semconv.ServiceName(ServiceName),
-		semconv.ServiceVersion(serviceVersion(cfg.ServiceVersion)),
+		semconv.ServiceVersion(serviceVersion(serviceVersionOverride)),
 	}
-	if cfg.DeploymentEnv != "" {
-		attrs = append(attrs, semconv.DeploymentEnvironmentName(cfg.DeploymentEnv))
+	if deploymentEnv != "" {
+		attrs = append(attrs, semconv.DeploymentEnvironmentName(deploymentEnv))
 	}
-	return resource.New(ctx, resource.WithAttributes(attrs...))
+	return attrs
 }
 
 func serviceVersion(override string) string {

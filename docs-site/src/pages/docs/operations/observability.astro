@@ -52,6 +52,60 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>caller</code></td><td><code>file:line</code></td></tr>
   </table>
 
+  <h3>Log export</h3>
+  <p>
+    Set <code>GATEWAY_OTEL_LOGS_ENABLED=true</code> and
+    <code>GATEWAY_OTEL_LOGS_ENDPOINT</code> to a collector's OTLP/HTTP base URL
+    (for example <code>https://collector.example.test:4318</code>) and the
+    <code>identity</code> command also sends every log line it keeps to
+    <code>&lt;endpoint&gt;/v1/logs</code>, beside the JSON on its own output.
+    The two carry the same lines: the same level and the same sampling. It is
+    off by default, and the SDK's own <code>OTEL_EXPORTER_OTLP_ENDPOINT</code>
+    does not turn it on. A <code>log_export_enabled</code> line at start names
+    the collector's scheme and host.
+  </p>
+  <ul>
+    <li>
+      Records carry the same identity as traces: <code>service.name</code>
+      <code>identity</code>, <code>service.version</code> (the build's, or
+      <code>GATEWAY_OTEL_SERVICE_VERSION</code>) and
+      <code>deployment.environment.name</code> from
+      <code>GATEWAY_OTEL_DEPLOYMENT_ENV</code>. The standard
+      <code>OTEL_SERVICE_NAME</code> and <code>OTEL_RESOURCE_ATTRIBUTES</code>
+      override or add to them on log records only.
+    </li>
+    <li>
+      The endpoint must be an OTLP/HTTP port (typically 4318), not gRPC. The
+      SDK's <code>OTEL_EXPORTER_OTLP_HEADERS</code>, timeout, compression and
+      certificate settings apply; its endpoint and protocol variables do not.
+    </li>
+    <li>
+      Exported lines carry what identity logs: client IP addresses, user IDs
+      and redacted email addresses. Size the collector's access control and
+      retention for that, and prefer <code>https</code> to any collector that
+      is not on the same host or private network.
+    </li>
+    <li>
+      Logging never waits on the collector. Records queue in a bounded buffer
+      and the oldest are dropped when it is full. A failing export is reported
+      as <code>otel_export_failed</code> on the process's own output at most
+      once a minute, and so is a failing trace export while the log export is on.
+    </li>
+    <li>
+      Queued records are flushed on every exit, including <code>identity
+      migrate</code> and a failed start, for at most 5 seconds.
+    </li>
+    <li>
+      With the export enabled, an endpoint that is empty or not an absolute
+      <code>http</code> or <code>https</code> URL (with a host and no query or
+      fragment) stops the process at start with an error naming the variable.
+    </li>
+  </ul>
+  <p>
+    The export is part of the <code>identity</code> command. A server that
+    embeds <code>identityserver</code> keeps the logger it passes in.
+  </p>
+
   <h3>Notable startup events</h3>
   <table>
     <tr><th>Event</th><th>When</th></tr>
