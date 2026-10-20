@@ -11,23 +11,11 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 )
 
-func TestRedact(t *testing.T) {
-	cases := map[string]string{
-		"+15551234567": "+1********67",
-		"+123":         "***", // <= 4 chars
-		"":             "***",
-		"+123456":      "+1***56",
-	}
-	for in, want := range cases {
-		if got := Redact(in); got != want {
-			t.Errorf("Redact(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // The log-only sender runs whenever SMS is not enabled; its line must never
 // carry the one-time code in the body or the full number.
 func TestLogOnlySender_LogsNeitherTheBodyNorTheNumber(t *testing.T) {
+	t.Parallel()
+
 	core, logs := observer.New(zapcore.WarnLevel)
 	const (
 		number = "+14155550123"

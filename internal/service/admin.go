@@ -51,8 +51,9 @@ func (s *AdminService) WithEventPublisher(p events.Publisher) *AdminService {
 // invite/deactivate/reactivate/reset graph writes. This mirrors the
 // dual-handle ProfileService(repo, db, …) pattern.
 //
-// mailer may be nil; if nil, a log-only transport is substituted so
-// invitation emails are at least visible in the logs during local dev.
+// mailer may be nil; if nil, a non-delivering log-only transport is
+// substituted so service code can always call Send; it records that an
+// invitation was dropped, never its link.
 // Email-side-effect failures never block the surrounding RPC.
 func NewAdminService(repo Repository, db DB, projectID string, auditLog *audit.Logger, cfg *config.Config, mailer email.Transport, logger *zap.Logger) *AdminService {
 	if logger == nil {

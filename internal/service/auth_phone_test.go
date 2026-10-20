@@ -328,7 +328,6 @@ func TestNormalizePhone(t *testing.T) {
 	}
 }
 
-
 func TestPhoneCodeTTLAndAttempts(t *testing.T) {
 	// Configured values win.
 	s := &AuthService{cfg: &config.Config{PhoneCodeTTLSeconds: 120, PhoneCodeMaxAttempts: 7}}

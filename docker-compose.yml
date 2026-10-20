@@ -16,8 +16,9 @@
 #
 # Notes:
 #   - SMTP is intentionally unset; the service falls back to the LogOnly
-#     transport, so verification / reset emails appear in identity logs
-#     instead of being delivered.
+#     transport, which logs that a verification / reset email was dropped
+#     (redacted recipient, subject) but never its code or link. To complete
+#     those flows locally, point GATEWAY_SMTP_* at a mail catcher.
 #   - OAuth providers are unset; OAuth RPCs return CodeUnavailable.
 #   - JWT signing key is auto-generated at boot for development. JWKS is
 #     served at /.well-known/jwks.json.
