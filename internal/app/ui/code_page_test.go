@@ -21,6 +21,18 @@ const (
 // that terminates TLS.
 const testCodePageHost = "auth.example.test"
 
+// cspNonce matches a nonce attribute on the page's style and script tags and
+// captures its value. The value is random per response, so it can contain any
+// short fragment.
+var cspNonce = regexp.MustCompile(`nonce="([^"]+)"`)
+
+// pageText is the page a reflection check reads: the body without its random
+// nonces, so a check for a fragment such as "555" fails only when the page
+// reflects the request, never because a nonce happened to contain it.
+func pageText(rec *httptest.ResponseRecorder) string {
+	return cspNonce.ReplaceAllString(rec.Body.String(), `nonce=""`)
+}
+
 func serveCodePage(t *testing.T, method string, query url.Values) *httptest.ResponseRecorder {
 	t.Helper()
 	return serveCodePageNamedBy(t, "https://"+testCodePageHost+CodePagePath, method, query, testCodePageHost)
@@ -69,7 +81,7 @@ func TestCodePageShowsACodeOnlyWhereItIsNamedExactly(t *testing.T) {
 			if rec.Code != tc.want {
 				t.Fatalf("status %d, want %d", rec.Code, tc.want)
 			}
-			body := rec.Body.String()
+			body := pageText(rec)
 			if shown := strings.Contains(body, testBoundCode); shown != (tc.want == http.StatusOK) {
 				t.Fatalf("code shown = %v, want %v:\n%s", shown, tc.want == http.StatusOK, body)
 			}
@@ -132,7 +144,7 @@ func TestCodePageHeaders(t *testing.T) {
 		if strings.Contains(csp, "unsafe-inline") {
 			t.Errorf("query %v: CSP allows inline code: %q", query, csp)
 		}
-		nonces := regexp.MustCompile(`nonce="([^"]+)"`).FindAllStringSubmatch(rec.Body.String(), -1)
+		nonces := cspNonce.FindAllStringSubmatch(rec.Body.String(), -1)
 		if len(nonces) != 2 || nonces[0][1] != nonces[1][1] || !strings.Contains(csp, "script-src 'nonce-"+nonces[0][1]+"'") || !strings.Contains(csp, "style-src 'nonce-"+nonces[0][1]+"'") {
 			t.Fatalf("query %v: the script and style need the CSP's nonce; CSP %q", query, csp)
 		}
@@ -151,7 +163,7 @@ func TestCodePageNeverShowsAnUnboundCode(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", rec.Code)
 	}
-	if body := rec.Body.String(); strings.Contains(body, unbound) || !strings.Contains(body, "did not protect its sign-in with a code challenge") {
+	if body := pageText(rec); strings.Contains(body, unbound) || !strings.Contains(body, "did not protect its sign-in with a code challenge") {
 		t.Fatalf("page reflected the unbound code or did not explain:\n%s", body)
 	}
 }
@@ -168,7 +180,7 @@ func TestCodePageWithoutACode(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status %d, want 400", rec.Code)
 			}
-			body := rec.Body.String()
+			body := pageText(rec)
 			if strings.Contains(body, testState) || strings.Contains(body, "alert(1)") || (!strings.Contains(body, "There is no code to show") && !strings.Contains(body, "This code cannot be shown")) {
 				t.Fatalf("page reflected the request or did not explain:\n%s", body)
 			}
@@ -197,7 +209,7 @@ func TestCodePageRefusesAStateThatCouldCarryAMessage(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status %d, want 400", rec.Code)
 			}
-			body := rec.Body.String()
+			body := pageText(rec)
 			if !strings.Contains(body, "This code cannot be shown") || !strings.Contains(body, "started its sign-in in a form this page cannot show") {
 				t.Fatalf("page does not explain the refusal:\n%s", body)
 			}
@@ -205,6 +217,17 @@ func TestCodePageRefusesAStateThatCouldCarryAMessage(t *testing.T) {
 				t.Fatalf("page reflected the request:\n%s", body)
 			}
 		})
+	}
+}
+
+// A nonce is random and can hold any fragment a reflection check looks for,
+// such as "555". pageText must blank it and keep that fragment elsewhere.
+func TestPageTextLeavesOutTheNonce(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Body.WriteString(`<style nonce="qf66mPt555BOaj9ze6WIEAra6V0MIinj">p{}</style><script nonce="a-b_555">x()</script><p>555 shown</p>`)
+	got := pageText(rec)
+	if want := `<style nonce="">p{}</style><script nonce="">x()</script><p>555 shown</p>`; got != want {
+		t.Fatalf("pageText = %q, want %q", got, want)
 	}
 }
 
@@ -240,7 +263,7 @@ func TestCodePageExplainsARefusedSignIn(t *testing.T) {
 		"call-555-0100-for-help":                 "Sign-in was not allowed.",
 	} {
 		rec := serveCodePage(t, http.MethodGet, url.Values{"error": {code}, "code": {testBoundCode}, "state": {testState}})
-		body := rec.Body.String()
+		body := pageText(rec)
 		if rec.Code != http.StatusOK || !strings.Contains(body, "Sign-in did not finish") || !strings.Contains(body, want) {
 			t.Errorf("error %q: status %d, want 200 with %q:\n%s", code, rec.Code, want, body)
 		}
