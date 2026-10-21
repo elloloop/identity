@@ -596,7 +596,9 @@ message NativeOAuthLoginResponse {
     <code>&lt;identity-origin&gt;/oauth/callback/&lt;provider&gt;</code>,
     so you configure it once per provider and reuse it across all your
     SPA origins (which appear only in the <code>return_to</code>
-    allowlist, not at the provider).
+    allowlist, not at the provider). Identity's own
+    <a href="#hosted-code-page">code page</a> is the one exception: an
+    entry that covers it does not enable it; only an exact entry does.
   </p>
   <h4>Preview deployments: one-label wildcard entries</h4>
   <p>
@@ -727,7 +729,9 @@ RedeemOAuthCode { code: "<code>", code_verifier: "<verifier>" }`} lang="text" />
     yourself, with <code>project_key</code> when the provider is shared from
     the hub. The hosted sign-in page (<code>/auth/</code>) does not carry a
     challenge to its provider links, and password sign-in issues no
-    one-time code.
+    one-time code. Treat the start URL as sensitive, since it carries the
+    app's challenge and state, and after the redeem show the person which
+    account signed in.
   </p>
   <p>
     The page shows only codes minted for a sign-in that sent a challenge, so
@@ -738,12 +742,21 @@ RedeemOAuthCode { code: "<code>", code_verifier: "<verifier>" }`} lang="text" />
     <code>no-referrer</code> and a nonce-only Content-Security-Policy.
   </p>
   <p>
-    It is served while the hosted flow is enabled, and it is opt-in by name.
-    <code>/oauth/start</code> refuses a return to it with 400 unless an
-    allowlist entry names it exactly, the app sent a challenge, and the state
-    is one the page shows. An origin, prefix or wildcard entry that covers
+    It is served while the hosted flow is enabled, and it is opt-in by name,
+    host by host. It shows a code only where an allowlist entry names it
+    exactly for the scheme and host the request reached (as
+    <code>X-Forwarded-Proto</code> and <code>X-Forwarded-Host</code> report
+    them); anywhere else it answers 404 and shows no code, whichever host
+    the sign-in started on. An origin, prefix or wildcard entry that covers
     the page does not enable it. For example:
     <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com,https://auth.example.com/auth/code</code>.
+  </p>
+  <p>
+    So that the app hears of a mistake before the person signs in,
+    <code>/oauth/start</code> answers 400 to a return to the code page on its
+    own hostname unless it names exactly <code>/auth/code</code>, an
+    allowlist entry names the page exactly, the app sent a challenge, and the
+    state is one the page shows.
   </p>
   <p>
     PKCE stops anyone who sees a code from using it. It does not stop

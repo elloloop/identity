@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — bind a hosted sign-in to the app with PKCE, and the `/auth/code` page (migration; `/oauth/start` refuses malformed PKCE parameters (behaviour change); custom repositories must match the code challenge)
+## Next — bind a hosted sign-in to the app with PKCE, and the `/auth/code` page (migration; `/oauth/start` refuses malformed PKCE parameters (behaviour change); `pkg/oauth.IssueHostedStateToken` signature (Go API); custom repositories must match the code challenge)
 
 An app can now bind the hosted flow's one-time code to itself: it sends
 `code_challenge` and `code_challenge_method=S256` to `GET /oauth/start/{provider}`
@@ -26,25 +26,28 @@ Operators:
   together, an old replica ignores `code_challenge` at `/oauth/start` and
   consumes a bound code without checking a verifier. Finish the rollout before
   enabling an app that sends a challenge.
-- **To offer the code page,** add it exactly to the allowlist, for example
+- **To offer the code page,** add it exactly to the allowlist, on each host it
+  should show codes on, for example
   `GATEWAY_OAUTH_ALLOWED_RETURN_URLS=…,https://auth.example.com/auth/code`. It is
   served only while the hosted flow is enabled. An existing origin, path-prefix
-  or wildcard entry that covers identity's own host does not enable it: a
-  sign-in returning to the page needs the exact entry, an S256
-  `code_challenge`, and a `state` the page shows, or `/oauth/start` answers
-  400. Leave the page out unless an app needs it. A person persuaded to sign
-  in through someone else's start URL and hand over the code gives away their
-  account (see `docs/oauth.md`).
+  or wildcard entry that covers identity's own host does not enable it: on a
+  host whose exact entry is missing, the page answers 404 and shows no code,
+  whichever host the sign-in started on. The page compares the scheme and
+  host the request reached, as `X-Forwarded-Proto` and `X-Forwarded-Host`
+  report them, the values the provider redirect URI is already built from.
+  `/oauth/start` also answers 400, before the person signs in, to a return to
+  the code page on its own hostname that lacks the exact entry, an S256
+  `code_challenge`, or a `state` the page shows. Leave the page out unless an
+  app needs it. A person persuaded to sign in through someone else's start URL
+  and hand over the code gives away their account (see `docs/oauth.md`).
 - `/oauth/start` now answers 400 to a `code_challenge_method` other than
   `S256`, to either parameter without the other, and to a malformed challenge.
   It used to ignore them.
 
 Embedders: `oauth.IssueHostedStateToken` takes the app's challenge after the
-CSRF token, `AuthService.BeginHostedOAuth` after the CSRF token, and
-`AuthService.RedeemOAuthCode` takes the verifier after the code.
-`service.Repository.ConsumeOAuthOneTimeCode` takes the challenge after the code
-hash, and a custom repository must consume only on an equal challenge (the
-conformance suite checks it).
+CSRF token. `service.Repository.ConsumeOAuthOneTimeCode` takes the challenge
+after the code hash, and a custom repository must consume only on an equal
+challenge (the conformance suite checks it).
 
 ## Next — export log lines to an OpenTelemetry collector (additive)
 

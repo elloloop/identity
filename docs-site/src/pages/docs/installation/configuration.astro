@@ -212,6 +212,13 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
       backslash is always refused, since browsers read it as <code>/</code>
       and it could otherwise step outside a path prefix.
     </li>
+    <li>
+      <strong>A pattern never enables the code page.</strong> Identity's own
+      <code>/auth/code</code> shows sign-in codes only on a host whose
+      <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code> entry names it exactly;
+      a wildcard, origin or prefix entry that covers it does not count. See
+      <a href="/identity/docs/auth/oauth#hosted-code-page">the code page</a>.
+    </li>
   </ul>
   <p>
     The active patterns are logged at startup, in canonical form (lower case,

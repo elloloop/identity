@@ -309,6 +309,8 @@ https://auth.example.com/oauth/start/google
 3. The person pastes the value into the app. The app checks that the part
    after `#` is the state it generated (so a value from an earlier attempt is
    told apart), then redeems with `RedeemOAuthCode{code, code_verifier}`.
+4. The app shows which account signed in, so a person who pasted someone
+   else's code notices.
 
 The paste has to happen within the one-time code's TTL (a minute), so the
 page suits an app the person can paste into from the browser's machine, such
@@ -320,23 +322,39 @@ copy-and-paste handover, with no polling and no user code to type.
 **Start at `/oauth/start/{provider}`.** The app builds the start URL itself,
 as above, with `project_key` when the provider is shared from the hub. The
 hosted sign-in page (`/auth/`) does not carry a `code_challenge` to its
-provider links, so a sign-in started there reaches the code page unbound and
-is not shown. Password sign-in issues no one-time code and cannot use the code
-page.
+provider links, so it cannot start a sign-in that returns to the code page.
+Password sign-in issues no one-time code and cannot use the code page. Treat
+the start URL as sensitive: it carries the app's challenge and state.
 
-**What `/oauth/start` checks.** A `return_to` naming the code page on the host
-the request reached is refused with 400, before the person signs in, unless:
+**The page is opt-in by name, host by host.** On a host whose allowlist entry
+does not name it exactly, the page shows no code: it answers 404 with a fixed
+message. An origin, a path prefix such as `https://auth.example.com/auth`, or
+a wildcard that covers the page does not enable it. The page checks this
+itself, against the scheme and host the request reached (as
+`X-Forwarded-Proto` and `X-Forwarded-Host` report them, the same values the
+provider redirect URI is built from), so it holds whichever host the sign-in
+started on and however `return_to` spelled the page's host.
 
-- an allowlist entry names the page exactly. An origin, a path prefix such as
-  `https://auth.example.com/auth`, or a wildcard that covers the page does not
-  enable it;
+**What `/oauth/start` checks.** So that an app learns of a mistake before the
+person signs in, a `return_to` naming the code page on the hostname the
+request reached (on any port, after surrounding whitespace is trimmed) is
+refused with 400 unless:
+
+- it names the page as exactly `/auth/code`, with no trailing slash or dot
+  segments;
+- an allowlist entry names the page exactly;
 - the app sent an S256 `code_challenge`;
 - any `state` is 16-64 lowercase hex characters.
 
-**What the page shows.** The page shows only a code minted for a sign-in that
-sent a `code_challenge`. A code it shows is useless without the app's
-verifier, so in a screen share, a proxy log or synced browser history it
-grants nothing. A code minted without a challenge is never shown. A refused
+A sign-in that starts on one host this server serves and returns to the code
+page on another is not refused at `/oauth/start`. The page there still shows
+a code only if its own host's entry names it, the code is bound and the state
+is hex.
+
+**What the page shows.** Where it is enabled, the page shows only a code
+minted for a sign-in that sent a `code_challenge`. A code it shows is useless
+without the app's verifier, so in a screen share, a proxy log or synced
+browser history it grants nothing. A code minted without a challenge is never shown. A refused
 sign-in (`?error=`) is shown as a fixed message per
 [callback error](#callback-errors). The page echoes nothing else from its URL.
 `state` is shown only when it is 16-64 lowercase hex characters, an alphabet
@@ -357,14 +375,12 @@ deployment whose users may be asked for codes by someone else, such as
 support staff.
 
 The page is served only while the hosted flow is enabled. To enable it, add
-the page to the allowlist exactly, on each public origin an app starts from:
+the page to the allowlist exactly, on each public origin it should show codes
+on:
 
 ```bash
 -e GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com,https://auth.example.com/auth/code
 ```
-
-The checks at `/oauth/start` apply to the code page on the host the sign-in
-starts from. Start each sign-in on the host whose code page it returns to.
 
 A pasted code is consumed by the same one-time-code rules below, so it works
 once and within the code's TTL; the app asks the person to sign in again

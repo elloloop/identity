@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/elloloop/identity/internal/service"
@@ -69,16 +68,7 @@ func AgentConsentHandler(cfg *config.Config, options OptionsSource, returnAllow 
 }
 
 func agentConsentReturnURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded != "" {
-		scheme = forwarded
-	}
-	host := r.Host
-	if forwarded := r.Header.Get("X-Forwarded-Host"); forwarded != "" {
-		host = forwarded
-	}
-	return (&url.URL{Scheme: scheme, Host: host, Path: "/auth/agent-consent"}).String()
+	page := RequestOrigin(r)
+	page.Path = "/auth/agent-consent"
+	return page.String()
 }

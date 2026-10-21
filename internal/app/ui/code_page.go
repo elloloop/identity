@@ -16,8 +16,8 @@ import (
 // callback's redirect (a CLI on a remote machine, say) names as return_to.
 // The callback lands the browser here with ?code=, and the page shows the
 // code for the person to copy into the app, which redeems it with its
-// code_verifier. It is served only while the hosted flow is enabled, and
-// only an allowlist entry naming it exactly lets a sign-in return here:
+// code_verifier. It is served only while the hosted flow is enabled, and it
+// shows a code only on a host whose allowlist entry names it exactly:
 // GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://auth.example.com/auth/code.
 const CodePagePath = "/auth/code"
 
@@ -92,15 +92,18 @@ button:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
 </html>
 `))
 
-// CodePageHandler serves CodePagePath. It shows only a code minted for a
-// sign-in the app bound to a PKCE challenge, so the code it shows is
-// useless without that app's code_verifier; a code bound to none is never
-// shown. The app's state, when it sent one, is shown after the code as
+// CodePageHandler serves CodePagePath. The page is opt-in by name: on a host
+// that no exact entry of returnAllow names (an origin, a path prefix or a
+// wildcard that covers it does not count), it shows nothing but a fixed 404,
+// whichever host the sign-in started on. Where it is named, it shows only a
+// code minted for a sign-in the app bound to a PKCE challenge, so the code it
+// shows is useless without that app's code_verifier; a code bound to none is
+// never shown. The app's state, when it sent one, is shown after the code as
 // code#state, so the app can tell a code from an earlier sign-in; it is
 // shown only when ValidCodePageState admits it. The page echoes nothing
 // else from the request: an error= the callback sent is shown as a fixed
 // message, and anything malformed as a fixed explanation.
-func CodePageHandler() http.Handler {
+func CodePageHandler(returnAllow service.ReturnAllowlist) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
@@ -112,7 +115,10 @@ func CodePageHandler() http.Handler {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		view, status := codePageFor(r)
+		view, status := codePageNotNamed, http.StatusNotFound
+		if returnAllow.AllowsExactly(codePageURL(r)) {
+			view, status = codePageFor(r)
+		}
 		// The URL-safe alphabet, so html/template has nothing to escape
 		// in the nonce attributes.
 		view.Nonce = base64.RawURLEncoding.EncodeToString(nonceBytes)
@@ -130,6 +136,20 @@ func CodePageHandler() http.Handler {
 		w.WriteHeader(status)
 		_, _ = w.Write(body.Bytes())
 	})
+}
+
+// codePageURL is the page's URL on the host r reached.
+func codePageURL(r *http.Request) string {
+	page := RequestOrigin(r)
+	page.Path = CodePagePath
+	return page.String()
+}
+
+// codePageNotNamed is what the page says on a host whose operator has not
+// named it in the allowlist.
+var codePageNotNamed = codePageView{
+	Title:   "This page is not available",
+	Message: "This server does not show sign-in codes here. Go back to the app and sign in another way. If you expected a code, tell the app's developer.",
 }
 
 // codePageFor decides what the page says for r's query, and its status.

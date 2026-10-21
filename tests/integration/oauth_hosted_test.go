@@ -188,12 +188,23 @@ func TestHostedOAuth_CodePageEndToEnd(t *testing.T) {
 	)
 	client := noRedirectClient(h)
 	ctx := context.Background()
+	// The browser reaches this server as the code page's host, through a
+	// proxy that terminates TLS.
+	viaProxy := func(target string) *http.Request {
+		req, err := http.NewRequest(http.MethodGet, h.BaseURL+target, nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Host", "auth.example.test")
+		return req
+	}
 
-	startResp, err := client.Get(h.BaseURL + "/oauth/start/google?" + url.Values{
+	startResp, err := client.Do(viaProxy("/oauth/start/google?" + url.Values{
 		"return_to":             {codePage + "?state=" + appState},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
-	}.Encode())
+	}.Encode()))
 	if err != nil {
 		t.Fatalf("GET /oauth/start: %v", err)
 	}
@@ -206,10 +217,7 @@ func TestHostedOAuth_CodePageEndToEnd(t *testing.T) {
 		t.Fatalf("parse provider redirect: %v", err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, h.BaseURL+"/oauth/callback/google?state="+url.QueryEscape(authLoc.Query().Get("state"))+"&code=auth-code-xyz", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
+	req := viaProxy("/oauth/callback/google?state=" + url.QueryEscape(authLoc.Query().Get("state")) + "&code=auth-code-xyz")
 	for _, c := range startResp.Cookies() {
 		req.AddCookie(c)
 	}
@@ -224,9 +232,8 @@ func TestHostedOAuth_CodePageEndToEnd(t *testing.T) {
 	}
 	code := landed.Query().Get("code")
 
-	// The person's browser loads the page; this server stands in for the
-	// code page's host.
-	pageResp, err := client.Get(h.BaseURL + landed.RequestURI())
+	// The person's browser loads the page.
+	pageResp, err := client.Do(viaProxy(landed.RequestURI()))
 	if err != nil {
 		t.Fatalf("GET /auth/code: %v", err)
 	}

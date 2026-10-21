@@ -17,11 +17,70 @@ const (
 	testState     = "8436cfbd3cf94948"
 )
 
+// testCodePageHost is the host the page's requests reach, behind a proxy
+// that terminates TLS.
+const testCodePageHost = "auth.example.test"
+
 func serveCodePage(t *testing.T, method string, query url.Values) *httptest.ResponseRecorder {
 	t.Helper()
+	return serveCodePageNamedBy(t, "https://"+testCodePageHost+CodePagePath, method, query, testCodePageHost)
+}
+
+// serveCodePageNamedBy serves the page under an allowlist of entries to a
+// request that reached host, as the proxy in front reports it.
+func serveCodePageNamedBy(t *testing.T, entries, method string, query url.Values, host string) *httptest.ResponseRecorder {
+	t.Helper()
+	allow, err := service.ParseReturnAllowlist(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(method, CodePagePath+"?"+query.Encode(), nil)
+	req.Host = "backend.internal.test"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", host)
 	rec := httptest.NewRecorder()
-	CodePageHandler().ServeHTTP(rec, httptest.NewRequest(method, CodePagePath+"?"+query.Encode(), nil))
+	CodePageHandler(allow).ServeHTTP(rec, req)
 	return rec
+}
+
+// The page is opt-in by name, host by host: it shows a code only where an
+// allowlist entry names it exactly. Anywhere else it answers a fixed 404 that
+// shows nothing from the request, with the same protections.
+func TestCodePageShowsACodeOnlyWhereItIsNamedExactly(t *testing.T) {
+	page := "https://" + testCodePageHost + CodePagePath
+	for _, tc := range []struct {
+		name, entries, host string
+		want                int
+	}{
+		{name: "named exactly", entries: page, host: testCodePageHost, want: http.StatusOK},
+		{name: "named with its default port", entries: "https://" + testCodePageHost + ":443" + CodePagePath, host: testCodePageHost, want: http.StatusOK},
+		{name: "reached with its default port", entries: page, host: testCodePageHost + ":443", want: http.StatusOK},
+		{name: "named among others", entries: "https://app.example.test," + page, host: testCodePageHost, want: http.StatusOK},
+		{name: "covered by an origin entry", entries: "https://" + testCodePageHost, host: testCodePageHost, want: http.StatusNotFound},
+		{name: "covered by a prefix entry", entries: "https://" + testCodePageHost + "/auth", host: testCodePageHost, want: http.StatusNotFound},
+		{name: "covered by a wildcard entry", entries: "https://*.example.test", host: testCodePageHost, want: http.StatusNotFound},
+		{name: "named on another host", entries: "https://other.example.test" + CodePagePath, host: testCodePageHost, want: http.StatusNotFound},
+		{name: "named on another port", entries: "https://" + testCodePageHost + ":8443" + CodePagePath, host: testCodePageHost, want: http.StatusNotFound},
+		{name: "named for plain http", entries: "http://" + testCodePageHost + CodePagePath, host: testCodePageHost, want: http.StatusNotFound},
+		{name: "a forwarded host list", entries: page, host: testCodePageHost + ", other.example.test", want: http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := serveCodePageNamedBy(t, tc.entries, http.MethodGet, url.Values{"code": {testBoundCode}, "state": {testState}}, tc.host)
+			if rec.Code != tc.want {
+				t.Fatalf("status %d, want %d", rec.Code, tc.want)
+			}
+			body := rec.Body.String()
+			if shown := strings.Contains(body, testBoundCode); shown != (tc.want == http.StatusOK) {
+				t.Fatalf("code shown = %v, want %v:\n%s", shown, tc.want == http.StatusOK, body)
+			}
+			if tc.want == http.StatusNotFound && (strings.Contains(body, testState) || !strings.Contains(body, "This page is not available")) {
+				t.Fatalf("the 404 reflected the request or did not explain:\n%s", body)
+			}
+			if rec.Header().Get("X-Frame-Options") != "DENY" || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+				t.Fatalf("the answer lacks the page's protections: %v", rec.Header())
+			}
+		})
+	}
 }
 
 // The page shows a bound code with the app's state as code#state, and a copy

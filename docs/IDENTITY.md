@@ -1057,10 +1057,16 @@ before you ship.
       origin and anyone can link to it, so it shows the app's `state`
       only as 16-64 lowercase hex characters, an alphabet no one can
       write instructions in. Because a person is asked to hand over what
-      it shows, the page is opt-in by name: `/oauth/start` refuses a
-      return to it unless an allowlist entry names it exactly (an origin,
-      prefix or wildcard entry that covers it does not count), the app
-      sent a challenge, and the state is one the page shows. PKCE stops
+      it shows, the page is opt-in by name, host by host: it shows a code
+      only where an allowlist entry names it exactly for the scheme and
+      host the request reached (an origin, prefix or wildcard entry that
+      covers it does not count), and answers 404 elsewhere. The page
+      checks this itself rather than trusting `/oauth/start`, so the
+      opt-in holds however `return_to` spelled the host and whichever
+      host the sign-in started on. `/oauth/start` repeats the checks for
+      a return to its own hostname so the app hears of a mistake before
+      the person signs in: the exact entry, a challenge, and a state the
+      page shows. PKCE stops
       anyone who sees a code from using it, but not whoever started the
       sign-in, who holds the verifier: a person talked into signing in
       through someone else's start URL and handing the code over gives
