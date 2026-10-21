@@ -624,3 +624,109 @@ func TestHostedHTTP_CancellationReturnsOnlyWithSignedBrowserBoundState(t *testin
 		})
 	}
 }
+
+// The RFC 7636 appendix B pair.
+const (
+	hostedTestCodeVerifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	hostedTestCodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+)
+
+// /start takes an app's own PKCE challenge only as S256, and refuses any
+// half or other form of one before a provider round-trip.
+func TestHostedHTTP_StartValidatesTheAppsCodeChallenge(t *testing.T) {
+	h := newHostedTestHandler(t, "https://app.test/", hostedTestRegistry(&appTestStubProvider{}))
+	for _, tc := range []struct {
+		name, challenge, method string
+		want                    int
+	}{
+		{name: "S256", challenge: hostedTestCodeChallenge, method: "S256", want: http.StatusFound},
+		{name: "none", want: http.StatusFound},
+		{name: "plain", challenge: hostedTestCodeVerifier, method: "plain", want: http.StatusBadRequest},
+		{name: "no method", challenge: hostedTestCodeChallenge, want: http.StatusBadRequest},
+		{name: "method alone", method: "S256", want: http.StatusBadRequest},
+		{name: "lower-case method", challenge: hostedTestCodeChallenge, method: "s256", want: http.StatusBadRequest},
+		{name: "short challenge", challenge: hostedTestCodeChallenge[:42], method: "S256", want: http.StatusBadRequest},
+		{name: "padded challenge", challenge: hostedTestCodeChallenge[:42] + "=", method: "S256", want: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := url.Values{"return_to": {"https://app.test/finish"}}
+			if tc.challenge != "" {
+				q.Set("code_challenge", tc.challenge)
+			}
+			if tc.method != "" {
+				q.Set("code_challenge_method", tc.method)
+			}
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/oauth/start/google?"+q.Encode(), nil))
+			if rr.Code != tc.want {
+				t.Fatalf("status = %d, want %d; body=%q", rr.Code, tc.want, rr.Body.String())
+			}
+		})
+	}
+}
+
+// An app that cannot take the redirect names identity's code page as
+// return_to and sends a code_challenge. The callback lands on the page, which
+// shows code#state; the code redeems only with the app's verifier.
+func TestHostedHTTP_CodePageSignInEndToEnd(t *testing.T) {
+	const codePage = "https://example.com/auth/code"
+	h := newHostedTestHandler(t, codePage, hostedTestRegistry(&appTestStubProvider{}))
+
+	startRR := httptest.NewRecorder()
+	h.ServeHTTP(startRR, httptest.NewRequest(http.MethodGet, "/oauth/start/google?"+url.Values{
+		"return_to":             {codePage + "?state=app-state-1"},
+		"code_challenge":        {hostedTestCodeChallenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil))
+	if startRR.Code != http.StatusFound {
+		t.Fatalf("start status = %d; body=%q", startRR.Code, startRR.Body.String())
+	}
+	provider, _ := url.Parse(startRR.Header().Get("Location"))
+	cbReq := httptest.NewRequest(http.MethodGet,
+		"/oauth/callback/google?state="+url.QueryEscape(provider.Query().Get("state"))+"&code=auth-xyz", nil)
+	for _, c := range startRR.Result().Cookies() {
+		cbReq.AddCookie(c)
+	}
+	cbRR := httptest.NewRecorder()
+	h.ServeHTTP(cbRR, cbReq)
+	landed, err := url.Parse(cbRR.Header().Get("Location"))
+	if cbRR.Code != http.StatusFound || err != nil || landed.Scheme+"://"+landed.Host+landed.Path != codePage {
+		t.Fatalf("callback = %d to %q, want the code page", cbRR.Code, cbRR.Header().Get("Location"))
+	}
+	code := landed.Query().Get("code")
+
+	pageRR := httptest.NewRecorder()
+	h.ServeHTTP(pageRR, httptest.NewRequest(http.MethodGet, landed.RequestURI(), nil))
+	if pageRR.Code != http.StatusOK || !strings.Contains(pageRR.Body.String(), code+"#app-state-1") {
+		t.Fatalf("code page = %d, want it to show code#state:\n%s", pageRR.Code, pageRR.Body.String())
+	}
+
+	redeem := func(verifier string) int {
+		body := `{"code":"` + code + `","codeVerifier":"` + verifier + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/RedeemOAuthCode", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		return rr.Code
+	}
+	if got := redeem(""); got != http.StatusUnauthorized {
+		t.Fatalf("redeem without the verifier = %d, want 401", got)
+	}
+	if got := redeem(hostedTestCodeVerifier); got != http.StatusOK {
+		t.Fatalf("redeem with the verifier = %d, want 200", got)
+	}
+	if got := redeem(hostedTestCodeVerifier); got != http.StatusUnauthorized {
+		t.Fatalf("replay = %d, want 401", got)
+	}
+}
+
+// The code page is part of the hosted flow: without an allowlist it is not
+// served.
+func TestHostedHTTP_CodePageDisabledWithTheHostedFlow(t *testing.T) {
+	h := newHostedTestHandler(t, "", hostedTestRegistry(&appTestStubProvider{}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/auth/code?code=pkce_00&state=s", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}

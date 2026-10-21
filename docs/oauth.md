@@ -183,6 +183,16 @@ Browser                 identity                       Provider
 3. **`RedeemOAuthCode{code}`** (Connect RPC) — the SPA exchanges the
    one-time code for `{user, access_token, refresh_token, expires_in}`.
 
+An app may also bind the one-time code to itself with its own PKCE pair
+(RFC 7636): it sends `code_challenge=<S256 challenge>` and
+`code_challenge_method=S256` to `/oauth/start`, and redeems with
+`RedeemOAuthCode{code, code_verifier}`. The challenge rides in the signed
+state token beside identity's own provider verifier and is stored with the
+code. `/oauth/start` answers 400 to any other pair: `plain`, a method without
+a challenge, a challenge without `S256`, or a challenge that is not 43
+base64url characters. An app that sends no challenge redeems without a
+verifier, exactly as before.
+
 ### Callback errors
 
 A callback without a trusted `return_to` answers `400` on the identity origin,
@@ -276,14 +286,65 @@ is still enforced server-side on every login attempt.)
   button's `/oauth/start` link and scopes its password RPCs with the
   `X-Project-Key` header. An unknown `project_key` is rejected with 401.
 
+### Apps that cannot take the redirect: the code page (`/auth/code`)
+
+A CLI on a remote server, or a device with no browser of its own, cannot
+receive the callback's redirect: the browser that signs in is on another
+machine. Such an app names identity's own code page as `return_to` and binds
+the sign-in with PKCE:
+
+```
+https://auth.example.com/oauth/start/google
+  ?return_to=https%3A%2F%2Fauth.example.com%2Fauth%2Fcode%3Fstate%3D<app-state>
+  &code_challenge=<S256(verifier)>&code_challenge_method=S256
+```
+
+1. The app prints that URL. The person opens it on any device and signs in.
+2. The callback lands on `/auth/code?state=<app-state>&code=<otc>`. The page
+   shows `<otc>#<app-state>` with a copy button, a warning to paste it only
+   into the app where the sign-in started, and how long it lasts. It removes
+   the code from the address bar and history as it loads.
+3. The person pastes the value into the app. The app checks that the part
+   after `#` is the state it generated (so a value from an earlier attempt is
+   told apart), then redeems with `RedeemOAuthCode{code, code_verifier}`.
+
+The page shows only a code minted for a sign-in that sent a
+`code_challenge`, so a code it shows is useless without the app's verifier: in
+a screen share, a proxy log or synced browser history it grants nothing. A
+code minted without a challenge is never shown. A refused sign-in
+(`?error=`) is shown as a fixed message per [callback error](#callback-errors).
+The page echoes nothing else from its URL: `state` must be 1-256 characters
+of `A-Z a-z 0-9 - . _ ~`, and anything malformed gets a fixed explanation and
+400. It answers with `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+`X-Frame-Options: DENY` and a nonce-only Content-Security-Policy.
+
+The page is served only while the hosted flow is enabled, and it is a
+`return_to` like any other: add it to the allowlist exactly, on each public
+origin an app starts from.
+
+```bash
+-e GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com,https://auth.example.com/auth/code
+```
+
+A pasted code is consumed by the same one-time-code rules below, so it works
+once and within the code's TTL; the app asks the person to sign in again
+after that. This is a copy-and-paste handover, not the device authorization
+grant (RFC 8628): there is no polling and no user code to type.
+
 ### The one-time code
 
 - Opaque, single-use, ~60s TTL.
-- Only its SHA-256 hash is stored, bound to the user id. **No token
-  material is persisted** — the token pair is freshly minted on redeem.
+- Only its SHA-256 hash is stored, bound to the user id and to the app's
+  PKCE challenge when it sent one. **No token material is persisted** — the
+  token pair is freshly minted on redeem.
 - Redeeming consumes the code atomically (single winner across
-  replicas). A replay, an expired code, or an unknown code returns
-  `Unauthenticated`.
+  replicas). A replay, an expired code, an unknown code, or a
+  `code_verifier` that does not match the code's challenge returns
+  `Unauthenticated`. A missing verifier for a bound code and a verifier for an
+  unbound one are mismatches too (RFC 9700's downgrade check). A mismatch
+  spends nothing, so the app holding the verifier can still redeem. A
+  `code_verifier` that is not 43-128 characters of `A-Z a-z 0-9 - . _ ~`
+  returns `InvalidArgument`.
 - Chosen over URL-fragment tokens (leak to history / `Referer`) and
   httpOnly cookies (awkward cross-origin and unusable for native).
 

@@ -26,16 +26,22 @@ import (
 // the verifier itself there — so the hosted return_to binding does not
 // become a breaking change for native/mobile callers (#126 stop
 // condition).
+//
+// CodeVerifier is identity's own PKCE secret for the provider exchange.
+// AppCodeChallenge is a different binding: the S256 challenge the app
+// sent to /oauth/start, which the one-time code handed back to the app is
+// bound to; empty when the app sent none.
 type HostedStateClaims struct {
-	Provider     string
-	RedirectURI  string
-	ReturnTo     string
-	State        string
-	CodeVerifier string
-	CSRFToken    string
-	ProjectID    string
-	IssuedAt     int64
-	ExpiresAt    int64
+	Provider         string
+	RedirectURI      string
+	ReturnTo         string
+	State            string
+	CodeVerifier     string
+	CSRFToken        string
+	AppCodeChallenge string
+	ProjectID        string
+	IssuedAt         int64
+	ExpiresAt        int64
 }
 
 // projectKeyStateSeparator joins an optional plaintext project key onto the
@@ -72,11 +78,13 @@ func SplitProjectKeyState(state string) (projectKey, stateToken string) {
 
 // IssueHostedStateToken signs a hosted-flow state token. redirectURI is
 // the identity-owned callback URL registered with the provider;
-// returnTo is the validated app URL the callback redirects to.
+// returnTo is the validated app URL the callback redirects to;
+// appCodeChallenge is the app's validated S256 challenge, or "" when it
+// sent none.
 func IssueHostedStateToken(
 	ctx context.Context,
 	signer identityjwt.Signer,
-	provider, redirectURI, returnTo, state, codeVerifier, csrfToken, projectID string,
+	provider, redirectURI, returnTo, state, codeVerifier, csrfToken, appCodeChallenge, projectID string,
 	expiry time.Duration,
 	now time.Time,
 ) (string, error) {
@@ -104,6 +112,9 @@ func IssueHostedStateToken(
 		"project_id":    projectID,
 		"iat":           now.Unix(),
 		"exp":           now.Add(expiry).Unix(),
+	}
+	if appCodeChallenge != "" {
+		claims["app_code_challenge"] = appCodeChallenge
 	}
 
 	signed, err := signer.SignClaims(ctx, claims)
@@ -164,15 +175,16 @@ func VerifyHostedStateToken(
 	}
 
 	claims := &HostedStateClaims{
-		Provider:     getStringClaim(tok, "provider"),
-		RedirectURI:  getStringClaim(tok, "redirect_uri"),
-		ReturnTo:     getStringClaim(tok, "return_to"),
-		State:        getStringClaim(tok, "oauth_state"),
-		CodeVerifier: getStringClaim(tok, "code_verifier"),
-		CSRFToken:    getStringClaim(tok, "csrf_token"),
-		ProjectID:    getStringClaim(tok, "project_id"),
-		IssuedAt:     tok.IssuedAt().Unix(),
-		ExpiresAt:    tok.Expiration().Unix(),
+		Provider:         getStringClaim(tok, "provider"),
+		RedirectURI:      getStringClaim(tok, "redirect_uri"),
+		ReturnTo:         getStringClaim(tok, "return_to"),
+		State:            getStringClaim(tok, "oauth_state"),
+		CodeVerifier:     getStringClaim(tok, "code_verifier"),
+		CSRFToken:        getStringClaim(tok, "csrf_token"),
+		AppCodeChallenge: getStringClaim(tok, "app_code_challenge"),
+		ProjectID:        getStringClaim(tok, "project_id"),
+		IssuedAt:         tok.IssuedAt().Unix(),
+		ExpiresAt:        tok.Expiration().Unix(),
 	}
 	if claims.Provider == "" || claims.RedirectURI == "" || claims.ReturnTo == "" ||
 		claims.State == "" || claims.CodeVerifier == "" || claims.CSRFToken == "" {

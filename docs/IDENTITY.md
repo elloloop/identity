@@ -1040,6 +1040,24 @@ before you ship.
       an identity-side allowlist instead. The active allowlist is
       logged at startup.
 
+    - **An app may bind the one-time code with its own PKCE pair; the
+      code page shows only bound codes.** An app that cannot take the
+      redirect (a CLI on a remote server) returns to identity's own
+      `/auth/code`, which shows the code for the person to paste. A code
+      shown on a screen and copied through a clipboard is more exposed
+      than one consumed by a redirect, so the app sends
+      `code_challenge` (S256 only) to `/oauth/start`, the challenge rides
+      in the hosted state token as `app_code_challenge`, is stored with
+      the code, and `ConsumeOAuthOneTimeCode` consumes only on an equal
+      challenge — a mismatch spends nothing, so a stray paste cannot burn
+      the code for the app holding the verifier. Codes minted with a
+      challenge start with `pkce_`; the page shows nothing else, so it
+      never displays a code redeemable without the verifier, whatever host
+      or path variant led the browser there. Chosen over the device
+      authorization grant (RFC 8628), which needs a polling endpoint, a
+      typed user code and an approval page; the paste reuses the hosted
+      flow end to end.
+
 11. **identity is embeddable as a library, not only a container.**
     Issue #127. The full wiring already lived in `internal/app`; it was
     promoted to a public `identityserver` package so a host program can

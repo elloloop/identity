@@ -65,7 +65,7 @@ func TestStubRepository_ReturnsServiceUnavailable(t *testing.T) {
 	}
 
 	t.Run("ConsumeOAuthOneTimeCode_nil_record", func(t *testing.T) {
-		rec, err := r.ConsumeOAuthOneTimeCode(ctx, "h", 0)
+		rec, err := r.ConsumeOAuthOneTimeCode(ctx, "h", "", 0)
 		if rec != nil || !errors.Is(err, ErrServiceUnavailable) {
 			t.Errorf("ConsumeOAuthOneTimeCode: rec=%v err=%v", rec, err)
 		}

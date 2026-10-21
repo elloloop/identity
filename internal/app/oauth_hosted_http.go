@@ -10,14 +10,16 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/app/ui"
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
 
 // hostedOAuthHandler serves the browser-facing hosted OAuth endpoints:
 //
-//	GET /oauth/start/{provider}?return_to=<app-url>
+//	GET /oauth/start/{provider}?return_to=<app-url>[&code_challenge=<S256>&code_challenge_method=S256]
 //	GET/POST /oauth/callback/{provider}
+//	GET /auth/code (ui.CodePageHandler)
 //
 // These are plain HTTP routes (not Connect RPCs) because the browser is
 // 302-redirected through them. They are thin wrappers over the existing
@@ -48,6 +50,7 @@ func (h *hostedOAuthHandler) register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("/oauth/start/", h.handleStart)
 	mux.HandleFunc("/oauth/callback/", h.handleCallback)
+	mux.Handle(ui.CodePagePath, ui.CodePageHandler())
 }
 
 func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +71,12 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 		// reflecting attacker-controlled content.
 		h.logger.Info("hosted_oauth_return_to_rejected", zap.String("provider", provider))
 		http.Error(w, "return_to is not allowed", http.StatusBadRequest)
+		return
+	}
+	appCodeChallenge, ok := hostedAppCodeChallenge(r.URL.Query())
+	if !ok {
+		h.logger.Info("hosted_oauth_code_challenge_rejected", zap.String("provider", provider))
+		http.Error(w, "code_challenge must be an S256 challenge sent with code_challenge_method=S256", http.StatusBadRequest)
 		return
 	}
 
@@ -94,7 +103,7 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 	}
 
 	redirectURI := h.callbackURL(r, provider)
-	result, err := h.auth.BeginHostedOAuth(r.Context(), provider, redirectURI, returnTo, csrfToken, projectKey)
+	result, err := h.auth.BeginHostedOAuth(r.Context(), provider, redirectURI, returnTo, csrfToken, appCodeChallenge, projectKey)
 	if err != nil {
 		h.logger.Info("hosted_oauth_start_failed", zap.String("provider", provider), zap.Error(err))
 		status := http.StatusBadRequest
@@ -170,6 +179,19 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 	}
 	h.finishCallback(w, r, provider, csrfTokens, result.CSRFToken,
 		appendQueryParam(result.ReturnTo, "code", result.Code))
+}
+
+// hostedAppCodeChallenge returns the app's own PKCE challenge from a /start
+// query, or "" when it sent neither code_challenge nor code_challenge_method.
+// ok=false refuses any other pair: the method must be S256 (RFC 7636's plain
+// would put the verifier itself in the browser's address bar) and the
+// challenge an S256 challenge.
+func hostedAppCodeChallenge(q url.Values) (challenge string, ok bool) {
+	challenge, method := q.Get("code_challenge"), q.Get("code_challenge_method")
+	if challenge == "" && method == "" {
+		return "", true
+	}
+	return challenge, method == "S256" && service.ValidS256Challenge(challenge)
 }
 
 // finishCallback spends the flow's CSRF token and redirects to target, a

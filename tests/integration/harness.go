@@ -1599,14 +1599,14 @@ func (r *MemRepo) CreateOAuthOneTimeCode(_ context.Context, rec *service.OAuthOn
 	return id, nil
 }
 
-func (r *MemRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, atMs int64) (*service.OAuthOneTimeCodeRecord, error) {
+func (r *MemRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash, codeChallenge string, atMs int64) (*service.OAuthOneTimeCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.oauthOneTimeCodes {
 		if c.CodeHash != codeHash {
 			continue
 		}
-		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || c.CodeChallenge != codeChallenge {
 			return nil, service.ErrOAuthCodeInvalid
 		}
 		c.ConsumedAt = atMs

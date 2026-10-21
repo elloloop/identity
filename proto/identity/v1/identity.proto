@@ -389,6 +389,13 @@ message NativeOAuthLoginResponse {
 // is single-use and short-lived; a replay returns CodeUnauthenticated.
 message RedeemOAuthCodeRequest {
   string code = 1; // opaque one-time code from the hosted callback redirect
+  // The RFC 7636 code_verifier whose S256 challenge the app sent as
+  // code_challenge to GET /oauth/start. Required for a code minted with a
+  // challenge, and refused for one minted without; either mismatch returns
+  // CodeUnauthenticated and leaves the code unspent. A value that is not
+  // 43-128 characters of A-Z, a-z, 0-9, "-", ".", "_" and "~" returns
+  // CodeInvalidArgument.
+  string code_verifier = 2;
 }
 
 message RedeemOAuthCodeResponse {

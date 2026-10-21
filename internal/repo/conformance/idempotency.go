@@ -65,7 +65,7 @@ func runIdempotencyConformance(t *testing.T, driver Driver) {
 		t.Run("ConsumeMissing_DomainSentinel", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
-			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "no-such-code", 100); !errors.Is(err, service.ErrOAuthCodeInvalid) {
+			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "no-such-code", "", 100); !errors.Is(err, service.ErrOAuthCodeInvalid) {
 				t.Errorf("ConsumeOAuthOneTimeCode(missing): want ErrOAuthCodeInvalid, got %v", err)
 			}
 			if err := r.RevokeSession(ctx, "no-such-sid", 100); err != nil {

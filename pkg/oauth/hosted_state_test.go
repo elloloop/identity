@@ -59,7 +59,7 @@ func TestHostedStateToken_RoundTrip(t *testing.T) {
 		"state-abc",
 		"verifier-abc",
 		"csrf-123",
-		"proj-123",
+		"", "proj-123",
 		5*time.Minute,
 		now,
 	)
@@ -99,7 +99,7 @@ func TestHostedStateToken_RejectsExpired(t *testing.T) {
 
 	token, err := IssueHostedStateToken(
 		context.Background(), ring,
-		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c", "proj-123",
+		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c", "", "proj-123",
 		5*time.Minute, now,
 	)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestHostedStateToken_RejectsTampered(t *testing.T) {
 
 	token, err := IssueHostedStateToken(
 		context.Background(), ring,
-		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c", "proj-123",
+		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c", "", "proj-123",
 		5*time.Minute, now,
 	)
 	if err != nil {
@@ -170,8 +170,38 @@ func TestHostedStateToken_MissingClaims(t *testing.T) {
 	ring := newOAuthStateSigner(t)
 	now := time.Now().UTC()
 	if _, err := IssueHostedStateToken(
-		context.Background(), ring, "google", "https://cb", "", "s", "v", "c", "proj-123", time.Minute, now,
+		context.Background(), ring, "google", "https://cb", "", "s", "v", "c", "", "proj-123", time.Minute, now,
 	); err == nil {
 		t.Fatal("IssueHostedStateToken should reject an empty return_to")
+	}
+}
+
+// The app's PKCE challenge rides in the token beside identity's own
+// verifier, and a token minted without one carries none.
+func TestHostedStateToken_CarriesTheAppCodeChallenge(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	ring := newOAuthStateSigner(t)
+	const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+	for _, want := range []string{challenge, ""} {
+		token, err := IssueHostedStateToken(
+			context.Background(), ring,
+			"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c", want, "proj-123",
+			5*time.Minute, now,
+		)
+		if err != nil {
+			t.Fatalf("IssueHostedStateToken: %v", err)
+		}
+		claims, err := VerifyHostedStateToken(token, ring, now.Add(time.Minute))
+		if err != nil {
+			t.Fatalf("VerifyHostedStateToken: %v", err)
+		}
+		if claims.AppCodeChallenge != want {
+			t.Errorf("app_code_challenge = %q, want %q", claims.AppCodeChallenge, want)
+		}
+		if claims.CodeVerifier != "v" {
+			t.Errorf("code_verifier = %q, want identity's own verifier", claims.CodeVerifier)
+		}
 	}
 }

@@ -37,7 +37,7 @@ func TestHostedOAuth_BeginCompleteRedeem(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, begin.AuthorizationURL)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
@@ -48,8 +48,9 @@ func TestHostedOAuth_BeginCompleteRedeem(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://app.test/finish", cb.ReturnTo)
 	require.NotEmpty(t, cb.Code)
+	assert.False(t, PKCEBoundOAuthCode(cb.Code), "a code minted without a challenge must not look bound")
 
-	redeemed, err := svc.RedeemOAuthCode(ctx, cb.Code, "1.2.3.4", "test-agent")
+	redeemed, err := svc.RedeemOAuthCode(ctx, cb.Code, "", "1.2.3.4", "test-agent")
 	require.NoError(t, err)
 	require.NotNil(t, redeemed.User)
 	assert.Equal(t, "hosted@example.com", redeemed.User.Email)
@@ -57,9 +58,106 @@ func TestHostedOAuth_BeginCompleteRedeem(t *testing.T) {
 	assert.NotEmpty(t, redeemed.RefreshToken)
 
 	// Single-use: a replay is rejected.
-	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "1.2.3.4", "test-agent")
+	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "", "1.2.3.4", "test-agent")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrOAuthCodeInvalid))
+}
+
+// The RFC 7636 appendix B pair.
+const (
+	testAppCodeVerifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	testAppCodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+)
+
+// completeHostedSignIn runs Begin and Complete for one sign-in whose app
+// sent appCodeChallenge, and returns the one-time code.
+func completeHostedSignIn(t *testing.T, svc *AuthService, appCodeChallenge string) string {
+	t.Helper()
+	ctx := withProject("proj-1")
+	begin, err := svc.BeginHostedOAuth(ctx, "google",
+		"https://identity.test/oauth/callback/google", "https://identity.test/auth/code?state=app-state", "csrf-123", appCodeChallenge, "")
+	require.NoError(t, err)
+	cb, err := svc.CompleteHostedOAuth(ctx, "google",
+		fakeOAuthCode("bound@example.com", "Bound", "", "google"),
+		stateTokenFromAuthURL(t, begin.AuthorizationURL), "", "1.2.3.4", "test-agent", []string{"csrf-123"})
+	require.NoError(t, err)
+	return cb.Code
+}
+
+// A code minted for a sign-in whose app sent a code_challenge redeems only
+// with that challenge's verifier. A missing or wrong verifier spends nothing,
+// so the app that holds the verifier still signs in.
+func TestHostedOAuth_CodeBoundToTheAppsChallenge(t *testing.T) {
+	svc := newTestAuthService(t, newFakeRepo())
+	ctx := withProject("proj-1")
+	code := completeHostedSignIn(t, svc, testAppCodeChallenge)
+	assert.True(t, PKCEBoundOAuthCode(code), "a code minted with a challenge must look bound, got %q", code)
+
+	for _, verifier := range []string{"", strings.Repeat("a", 43)} {
+		_, err := svc.RedeemOAuthCode(ctx, code, verifier, "1.2.3.4", "test-agent")
+		assert.True(t, errors.Is(err, ErrOAuthCodeInvalid), "verifier %q: got %v", verifier, err)
+	}
+
+	redeemed, err := svc.RedeemOAuthCode(ctx, code, testAppCodeVerifier, "1.2.3.4", "test-agent")
+	require.NoError(t, err)
+	assert.Equal(t, "bound@example.com", redeemed.User.Email)
+	assert.NotEmpty(t, redeemed.AccessToken)
+
+	_, err = svc.RedeemOAuthCode(ctx, code, testAppCodeVerifier, "1.2.3.4", "test-agent")
+	assert.True(t, errors.Is(err, ErrOAuthCodeInvalid), "a replay with the right verifier: got %v", err)
+}
+
+// A verifier sent for a code bound to no challenge is refused (RFC 9700's
+// downgrade check), and the code still redeems the way it was minted.
+func TestHostedOAuth_UnboundCodeRefusesAVerifier(t *testing.T) {
+	svc := newTestAuthService(t, newFakeRepo())
+	ctx := withProject("proj-1")
+	code := completeHostedSignIn(t, svc, "")
+
+	_, err := svc.RedeemOAuthCode(ctx, code, testAppCodeVerifier, "1.2.3.4", "test-agent")
+	assert.True(t, errors.Is(err, ErrOAuthCodeInvalid), "got %v", err)
+	_, err = svc.RedeemOAuthCode(ctx, code, "", "1.2.3.4", "test-agent")
+	require.NoError(t, err)
+}
+
+func TestRedeemOAuthCode_MalformedVerifier(t *testing.T) {
+	svc := newTestAuthService(t, newFakeRepo())
+	ctx := withProject("proj-1")
+	code := completeHostedSignIn(t, svc, testAppCodeChallenge)
+	for _, verifier := range []string{strings.Repeat("a", 42), strings.Repeat("a", 129), testAppCodeVerifier[:42] + "+"} {
+		_, err := svc.RedeemOAuthCode(ctx, code, verifier, "1.2.3.4", "test-agent")
+		assert.True(t, errors.Is(err, ErrInvalidArgument), "verifier %q: got %v", verifier, err)
+	}
+	_, err := svc.RedeemOAuthCode(ctx, code, testAppCodeVerifier, "1.2.3.4", "test-agent")
+	require.NoError(t, err, "a malformed verifier must not spend the code")
+}
+
+func TestHostedOAuth_Begin_RejectsAMalformedChallenge(t *testing.T) {
+	svc := newTestAuthService(t, newFakeRepo())
+	for _, challenge := range []string{testAppCodeVerifier[:42], testAppCodeChallenge + "A", strings.Repeat("a", 42) + "="} {
+		_, err := svc.BeginHostedOAuth(withProject("proj-1"), "google",
+			"https://identity.test/cb", "https://app.test/", "csrf-123", challenge, "")
+		assert.True(t, errors.Is(err, ErrInvalidArgument), "challenge %q: got %v", challenge, err)
+	}
+}
+
+func TestPKCEBoundOAuthCode(t *testing.T) {
+	random := strings.Repeat("0123456789abcdef", 4)
+	for _, tc := range []struct {
+		code string
+		want bool
+	}{
+		{"pkce_" + random, true},
+		{random, false},
+		{"pkce_" + random[:63], false},
+		{"pkce_" + random + "0", false},
+		{"pkce_" + strings.ToUpper(random), false},
+		{"PKCE_" + random, false},
+		{"pkce_" + random[:63] + "g", false},
+		{"", false},
+	} {
+		assert.Equal(t, tc.want, PKCEBoundOAuthCode(tc.code), "code %q", tc.code)
+	}
 }
 
 func TestHostedOAuth_Begin_InputErrors(t *testing.T) {
@@ -67,19 +165,19 @@ func TestHostedOAuth_Begin_InputErrors(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	ctx := withProject("proj-1")
 
-	_, err := svc.BeginHostedOAuth(ctx, "", "https://identity.test/cb", "https://app.test/", "csrf-123", "")
+	_, err := svc.BeginHostedOAuth(ctx, "", "https://identity.test/cb", "https://app.test/", "csrf-123", "", "")
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 
-	_, err = svc.BeginHostedOAuth(ctx, "google", "", "https://app.test/", "csrf-123", "")
+	_, err = svc.BeginHostedOAuth(ctx, "google", "", "https://app.test/", "csrf-123", "", "")
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 
-	_, err = svc.BeginHostedOAuth(ctx, "google", "https://identity.test/cb", "", "csrf-123", "")
+	_, err = svc.BeginHostedOAuth(ctx, "google", "https://identity.test/cb", "", "csrf-123", "", "")
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 
-	_, err = svc.BeginHostedOAuth(ctx, "google", "https://identity.test/cb", "https://app.test/", "", "")
+	_, err = svc.BeginHostedOAuth(ctx, "google", "https://identity.test/cb", "https://app.test/", "", "", "")
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 
-	_, err = svc.BeginHostedOAuth(ctx, "unknown", "https://identity.test/cb", "https://app.test/", "csrf-123", "")
+	_, err = svc.BeginHostedOAuth(ctx, "unknown", "https://identity.test/cb", "https://app.test/", "csrf-123", "", "")
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
 
@@ -89,14 +187,14 @@ func TestHostedOAuth_Begin_MissingScopeRejected(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
 
 	_, err := svc.BeginHostedOAuth(context.Background(), "google",
-		"https://identity.test/cb", "https://app.test/", "csrf-123", "")
+		"https://identity.test/cb", "https://app.test/", "csrf-123", "", "")
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
 
 func TestHostedOAuth_Begin_DisabledNoRegistry(t *testing.T) {
 	svc := newTestAuthServiceNoOAuth(t, newFakeRepo())
 	_, err := svc.BeginHostedOAuth(withProject("proj-1"), "google",
-		"https://identity.test/cb", "https://app.test/", "csrf-123", "")
+		"https://identity.test/cb", "https://app.test/", "csrf-123", "", "")
 	assert.True(t, errors.Is(err, ErrOAuthDisabled))
 }
 
@@ -106,7 +204,7 @@ func TestHostedOAuth_Complete_TamperedStateRejected(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
@@ -135,7 +233,7 @@ func TestHostedOAuth_Complete_CSRFMismatchRejected(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
@@ -152,7 +250,7 @@ func TestHostedOAuth_Complete_ProviderMismatchRejected(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
@@ -172,7 +270,7 @@ func TestHostedOAuth_WithProjectKeyPrefix(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "proj:with:colon")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "proj:with:colon")
 	require.NoError(t, err)
 
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
@@ -192,7 +290,7 @@ func TestHostedOAuth_Complete_ProjectMismatchRejected(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	begin, err := svc.BeginHostedOAuth(withProject("proj-1"), "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "proj-1")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "proj-1")
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
@@ -233,7 +331,7 @@ func TestHostedOAuth_HubSharing_NonDefaultProjectFullFlow(t *testing.T) {
 	ctx := withProject("proj-hub")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://hub.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "pk_hub")
+		"https://hub.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "pk_hub")
 	require.NoError(t, err, "begin must borrow the hub provider for a zero-config project")
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 	require.True(t, strings.HasPrefix(stateToken, "pk_hub:"))
@@ -244,7 +342,7 @@ func TestHostedOAuth_HubSharing_NonDefaultProjectFullFlow(t *testing.T) {
 	require.NoError(t, err, "callback must borrow the hub provider for a zero-config project")
 	require.NotEmpty(t, cb.Code)
 
-	login, err := svc.RedeemOAuthCode(ctx, cb.Code, "1.2.3.4", "test-agent")
+	login, err := svc.RedeemOAuthCode(ctx, cb.Code, "", "1.2.3.4", "test-agent")
 	require.NoError(t, err, "redeem must not report OAuth disabled for a hub-shared project")
 	assert.Equal(t, "hub-user@example.com", login.User.Email)
 }
@@ -256,26 +354,26 @@ func TestHostedOAuth_HubSharingOff_NonDefaultProjectDisabled(t *testing.T) {
 	svc := hubSharingService(t, repo, false)
 
 	_, err := svc.BeginHostedOAuth(withProject("proj-hub"), "google",
-		"https://hub.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "pk_hub")
+		"https://hub.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "pk_hub")
 	assert.True(t, errors.Is(err, ErrOAuthDisabled))
 }
 
 func TestRedeemOAuthCode_DisabledNoRegistry(t *testing.T) {
 	svc := newTestAuthServiceNoOAuth(t, newFakeRepo())
-	_, err := svc.RedeemOAuthCode(context.Background(), "any-code", "", "")
+	_, err := svc.RedeemOAuthCode(context.Background(), "any-code", "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrOAuthDisabled))
 }
 
 func TestRedeemOAuthCode_UnknownCode(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
-	_, err := svc.RedeemOAuthCode(context.Background(), "nonexistent", "", "")
+	_, err := svc.RedeemOAuthCode(context.Background(), "nonexistent", "", "", "")
 	assert.True(t, errors.Is(err, ErrOAuthCodeInvalid))
 }
 
 func TestRedeemOAuthCode_EmptyCode(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
-	_, err := svc.RedeemOAuthCode(context.Background(), "", "", "")
+	_, err := svc.RedeemOAuthCode(context.Background(), "", "", "", "")
 	assert.True(t, errors.Is(err, ErrOAuthCodeInvalid))
 }
 
@@ -356,7 +454,7 @@ func TestHostedOAuth_Complete_RefusalCarriesErrorCode(t *testing.T) {
 			ctx := withProject("proj-1")
 
 			begin, err := svc.BeginHostedOAuth(ctx, "google",
-				"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+				"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 			require.NoError(t, err)
 
 			_, err = svc.CompleteHostedOAuth(ctx, "google", tc.code,
@@ -394,7 +492,7 @@ func TestHostedOAuth_ProviderMismatchLogOmitsProviderInput(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
 	ctx := withProject("proj-1")
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 	require.NoError(t, err)
 	core, logs := observer.New(zap.InfoLevel)
 	svc.logger = zap.New(core)

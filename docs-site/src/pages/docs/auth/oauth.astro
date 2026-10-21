@@ -682,4 +682,46 @@ function signInErrorMessage(code: string): string {
     signed artifact rather than a state-token claim, and why the
     allowlist is fail-closed).
   </p>
+
+  <h3 id="hosted-app-pkce">Binding the code to your app with PKCE</h3>
+  <p>
+    An app can bind the one-time code to itself with its own PKCE pair
+    (RFC 7636). Send <code>code_challenge=&lt;S256 challenge&gt;</code> and
+    <code>code_challenge_method=S256</code> to <code>/oauth/start</code>,
+    and redeem with <code>RedeemOAuthCode{`{code, codeVerifier}`}</code>.
+    The code then redeems only with that verifier, and a wrong or missing
+    verifier spends nothing. <code>/oauth/start</code> answers 400 to
+    <code>plain</code>, to either parameter without the other, and to a
+    challenge that is not 43 base64url characters. Without a challenge,
+    redeem without a verifier, as before.
+  </p>
+
+  <h3 id="hosted-code-page">Apps that cannot take the redirect: the code page</h3>
+  <p>
+    A CLI on a remote server, or a device without a browser, cannot receive
+    the callback's redirect, because the browser that signs in is on another
+    machine. Such an app names identity's code page,
+    <code>&lt;identity-origin&gt;/auth/code?state=&lt;app-state&gt;</code>, as
+    <code>return_to</code> and sends a PKCE challenge. The callback lands on
+    the page, which shows <code>&lt;code&gt;#&lt;app-state&gt;</code> with a
+    copy button. The person pastes it into the app, which checks the state is
+    its own and redeems with its verifier.
+  </p>
+  <Code code={`# The app prints this URL for the person to open on any device.
+https://auth.example.com/oauth/start/google
+  ?return_to=https%3A%2F%2Fauth.example.com%2Fauth%2Fcode%3Fstate%3D<app-state>
+  &code_challenge=<base64url(SHA-256(verifier))>
+  &code_challenge_method=S256
+
+# The person pastes back <code>#<app-state>. The app checks <app-state> and calls
+RedeemOAuthCode { code: "<code>", code_verifier: "<verifier>" }`} lang="text" />
+  <p>
+    The page shows only codes minted for a sign-in that sent a challenge, so
+    any code it shows is useless without the app's verifier. It echoes
+    nothing else from its URL, shows a refused sign-in as a fixed message,
+    and answers with <code>no-store</code>, <code>no-referrer</code> and a
+    nonce-only Content-Security-Policy. It is served while the hosted flow is
+    enabled; admit it exactly in the allowlist, for example
+    <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com,https://auth.example.com/auth/code</code>.
+  </p>
 </DocsLayout>

@@ -1,5 +1,44 @@
 # Upgrade guide
 
+## Next — bind a hosted sign-in to the app with PKCE, and the `/auth/code` page (additive; migration)
+
+An app can now bind the hosted flow's one-time code to itself: it sends
+`code_challenge` and `code_challenge_method=S256` to `GET /oauth/start/{provider}`
+and redeems with the new `RedeemOAuthCodeRequest.code_verifier` field. An app
+that cannot take the callback's redirect (a CLI on a remote server) can name
+the new code page, `<identity-origin>/auth/code?state=<app-state>`, as
+`return_to`: it shows `<code>#<app-state>` with a copy button for the person to
+paste into the app. The page shows only codes bound to a challenge. See the
+hosted flow in `docs/oauth.md`.
+
+Apps that send no challenge are unaffected: their codes redeem without a
+verifier, as before. A verifier sent for such a code is refused.
+
+Operators:
+
+- **Migration.** Postgres `0043_add_oauth_one_time_code_challenge` and SQLite
+  `0026_add_oauth_one_time_code_challenge` add `oauth_one_time_codes.code_challenge`
+  (`TEXT NOT NULL DEFAULT ''`, a catalog-only change). Rolling back drops it,
+  and the outstanding bound codes then redeem without a verifier for the rest
+  of their 60 seconds.
+- **Roll out before apps rely on it.** While old and new replicas serve
+  together, an old replica ignores `code_challenge` at `/oauth/start` and
+  consumes a bound code without checking a verifier. Finish the rollout before
+  enabling an app that sends a challenge.
+- **To offer the code page,** add it exactly to the allowlist, for example
+  `GATEWAY_OAUTH_ALLOWED_RETURN_URLS=…,https://auth.example.com/auth/code`. It is
+  served only while the hosted flow is enabled.
+- `/oauth/start` now answers 400 to a `code_challenge_method` other than
+  `S256`, to either parameter without the other, and to a malformed challenge.
+  It used to ignore them.
+
+Embedders: `oauth.IssueHostedStateToken` takes the app's challenge after the
+CSRF token, `AuthService.BeginHostedOAuth` after the CSRF token, and
+`AuthService.RedeemOAuthCode` takes the verifier after the code.
+`service.Repository.ConsumeOAuthOneTimeCode` takes the challenge after the code
+hash, and a custom repository must consume only on an equal challenge (the
+conformance suite checks it).
+
 ## Next — export log lines to an OpenTelemetry collector (additive)
 
 The `identity` command can send its log lines to an OTLP/HTTP collector beside
