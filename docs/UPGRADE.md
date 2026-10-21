@@ -1,5 +1,17 @@
 # Upgrade guide
 
+## Next — built with Go 1.26.10 for the `crypto/x509` advisory (no API or schema change)
+
+The image and every CI job build with Go 1.26.10, which fixes GO-2026-6809:
+`crypto/x509` now distrusts compromised intermediate certificates. Identity
+reaches it through `x509.Certificate.Verify` in App Attest verification
+(`pkg/assurance/appattest`). Anyone building identity or embedding its `pkg/`
+libraries should build on Go 1.26.10 or later.
+
+v4.23.0 was tagged, but its release stopped at this vulnerability scan, so no
+v4.23.0 image or release was published. The next release carries every change
+listed below as "Next".
+
 ## Next — bind a hosted sign-in to the app with PKCE, and the `/auth/code` page (migration; `/oauth/start` refuses malformed PKCE parameters (behaviour change); `pkg/oauth.IssueHostedStateToken` signature (Go API); custom repositories must match the code challenge)
 
 An app can now bind the hosted flow's one-time code to itself: it sends
