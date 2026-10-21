@@ -15,6 +15,17 @@ paste into the app. The page shows only codes bound to a challenge, and a
 Apps that send no challenge are unaffected: their codes redeem without a
 verifier, as before. A verifier sent for such a code is refused.
 
+**An app that already sent a challenge is affected.** `/oauth/start` used to
+ignore `code_challenge` and `code_challenge_method`. It now binds the code to
+a valid S256 pair, so an app that already sent one (a generic OAuth helper
+may add PKCE to every authorization URL) must redeem with `code_verifier`, or
+`RedeemOAuthCode` answers `Unauthenticated`. Check your apps before
+upgrading: drop the parameters, or send the verifier.
+
+An app's verifier must be at least 32 random octets from a cryptographically
+secure generator, base64url-encoded, and fresh for every sign-in (RFC 7636
+§4.1). Identity checks its alphabet and length, not its randomness.
+
 Operators:
 
 - **Migration.** Postgres `0043_add_oauth_one_time_code_challenge` and SQLite
@@ -24,7 +35,9 @@ Operators:
   of their 60 seconds.
 - **Roll out before apps rely on it.** While old and new replicas serve
   together, an old replica ignores `code_challenge` at `/oauth/start` and
-  consumes a bound code without checking a verifier. Finish the rollout before
+  consumes a bound code without checking a verifier, and an old replica that
+  serves `/oauth/callback` mints an unbound code from a new replica's state
+  token, whose verifier a new replica then refuses. Finish the rollout before
   enabling an app that sends a challenge.
 - **To offer the code page,** add it exactly to the allowlist, on each host it
   should show codes on, for example
@@ -37,7 +50,10 @@ Operators:
   report them, the values the provider redirect URI is already built from.
   `/oauth/start` also answers 400, before the person signs in, to a return to
   the code page on its own hostname that lacks the exact entry, an S256
-  `code_challenge`, or a `state` the page shows. Leave the page out unless an
+  `code_challenge`, or a `state` the page shows. That check matches the
+  hostname on any port, so an app of your own that serves `/auth/code` on
+  identity's hostname at another port (a local development setup, say) now
+  needs the same exact entry, challenge and hex state, or another path. Leave the page out unless an
   app needs it. A person persuaded to sign in through someone else's start URL
   and hand over the code gives away their account (see `docs/oauth.md`).
 - `/oauth/start` now answers 400 to a `code_challenge_method` other than

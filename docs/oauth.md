@@ -312,6 +312,15 @@ https://auth.example.com/oauth/start/google
 4. The app shows which account signed in, so a person who pasted someone
    else's code notices.
 
+**The verifier must be random.** A code the page shows is only as safe as
+the app's verifier: identity checks its alphabet and length but cannot
+check its randomness, and a wrong verifier leaves the code unspent. Generate
+a fresh `code_verifier` for every sign-in from at least 32 random octets from
+a cryptographically secure generator, base64url-encoded (RFC 7636 §4.1).
+Read the pasted value from an interactive prompt or standard input, not a
+command-line argument (a shell may treat `#` specially), and split it on the
+last `#`.
+
 The paste has to happen within the one-time code's TTL (a minute), so the
 page suits an app the person can paste into from the browser's machine, such
 as a terminal with an SSH session to the server. It does not suit a device

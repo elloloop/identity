@@ -1000,7 +1000,7 @@ before you ship.
       `<identity-origin>/oauth/callback/{provider}`, derived from the
       request so `/start` and `/callback` agree.
 
-    Three deliberate choices inside the hosted flow:
+    Four deliberate choices inside the hosted flow:
 
     - **One-time code, not fragment-token or cookie, for the SPA
       handover.** The callback mints an opaque single-use code, stores
@@ -1011,7 +1011,8 @@ before you ship.
       (`ConsumeOAuthOneTimeCode` — the same single-winner CAS shape as
       the refresh-token and QR-login consume paths) and mints a fresh
       token pair through the normal `issueTokens` path. **No token
-      material is persisted at rest** — only the user id is stored, so
+      material is persisted at rest** — only the user id (and the app's
+      PKCE challenge, when it sent one) is stored, so
       a leaked code store yields nothing redeemable after the 60s
       window or a single redeem. Chosen over URL-fragment tokens (leak
       to browser history / `Referer`) and httpOnly cookies (awkward
