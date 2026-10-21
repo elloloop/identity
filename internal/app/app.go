@@ -554,9 +554,9 @@ func logHostedOAuthFlow(logger *zap.Logger, allow service.ReturnAllowlist) {
 			zap.Strings("allowed_return_url_patterns", allow.Patterns()))
 		return
 	}
-	hint := "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"
+	hint := "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start, /oauth/callback and /auth/code"
 	if len(allow.Ignored()) > 0 {
-		hint = "every GATEWAY_OAUTH_ALLOWED_RETURN_URLS entry was ignored (see oauth_allowed_return_url_ignored); fix them to enable GET /oauth/start + /oauth/callback"
+		hint = "every GATEWAY_OAUTH_ALLOWED_RETURN_URLS entry was ignored (see oauth_allowed_return_url_ignored); fix them to enable GET /oauth/start, /oauth/callback and /auth/code"
 	}
 	logger.Info("oauth_hosted_flow_disabled", zap.String("hint", hint))
 }

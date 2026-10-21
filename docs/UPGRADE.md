@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — bind a hosted sign-in to the app with PKCE, and the `/auth/code` page (additive; migration)
+## Next — bind a hosted sign-in to the app with PKCE, and the `/auth/code` page (migration; `/oauth/start` refuses malformed PKCE parameters (behaviour change); custom repositories must match the code challenge)
 
 An app can now bind the hosted flow's one-time code to itself: it sends
 `code_challenge` and `code_challenge_method=S256` to `GET /oauth/start/{provider}`
@@ -8,8 +8,9 @@ and redeems with the new `RedeemOAuthCodeRequest.code_verifier` field. An app
 that cannot take the callback's redirect (a CLI on a remote server) can name
 the new code page, `<identity-origin>/auth/code?state=<app-state>`, as
 `return_to`: it shows `<code>#<app-state>` with a copy button for the person to
-paste into the app. The page shows only codes bound to a challenge. See the
-hosted flow in `docs/oauth.md`.
+paste into the app. The page shows only codes bound to a challenge, and a
+`state` only when it is 16-64 lowercase hex characters. See the hosted flow in
+`docs/oauth.md`, including what PKCE does not protect against there.
 
 Apps that send no challenge are unaffected: their codes redeem without a
 verifier, as before. A verifier sent for such a code is refused.
@@ -27,7 +28,13 @@ Operators:
   enabling an app that sends a challenge.
 - **To offer the code page,** add it exactly to the allowlist, for example
   `GATEWAY_OAUTH_ALLOWED_RETURN_URLS=…,https://auth.example.com/auth/code`. It is
-  served only while the hosted flow is enabled.
+  served only while the hosted flow is enabled. An existing origin, path-prefix
+  or wildcard entry that covers identity's own host does not enable it: a
+  sign-in returning to the page needs the exact entry, an S256
+  `code_challenge`, and a `state` the page shows, or `/oauth/start` answers
+  400. Leave the page out unless an app needs it. A person persuaded to sign
+  in through someone else's start URL and hand over the code gives away their
+  account (see `docs/oauth.md`).
 - `/oauth/start` now answers 400 to a `code_challenge_method` other than
   `S256`, to either parameter without the other, and to a malformed challenge.
   It used to ignore them.

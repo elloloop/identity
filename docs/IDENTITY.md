@@ -1053,10 +1053,23 @@ before you ship.
       the code for the app holding the verifier. Codes minted with a
       challenge start with `pkce_`; the page shows nothing else, so it
       never displays a code redeemable without the verifier, whatever host
-      or path variant led the browser there. Chosen over the device
-      authorization grant (RFC 8628), which needs a polling endpoint, a
-      typed user code and an approval page; the paste reuses the hosted
-      flow end to end.
+      or path variant led the browser there. The page sits on identity's
+      origin and anyone can link to it, so it shows the app's `state`
+      only as 16-64 lowercase hex characters, an alphabet no one can
+      write instructions in. Because a person is asked to hand over what
+      it shows, the page is opt-in by name: `/oauth/start` refuses a
+      return to it unless an allowlist entry names it exactly (an origin,
+      prefix or wildcard entry that covers it does not count), the app
+      sent a challenge, and the state is one the page shows. PKCE stops
+      anyone who sees a code from using it, but not whoever started the
+      sign-in, who holds the verifier: a person talked into signing in
+      through someone else's start URL and handing the code over gives
+      away their account. That consent-phishing risk is the one every
+      copy-and-paste or device-code sign-in carries. Its mitigations are
+      the page's warning and leaving the page off where it is not needed.
+      Chosen over the device authorization grant (RFC 8628), which needs
+      a polling endpoint, a typed user code and an approval page; the
+      paste reuses the hosted flow end to end.
 
 11. **identity is embeddable as a library, not only a container.**
     Issue #127. The full wiring already lived in `internal/app`; it was

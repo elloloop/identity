@@ -15,11 +15,12 @@ import (
 )
 
 // OAuthOneTimeCodeTTL bounds how long the hosted-callback one-time code
-// is valid for. The SPA redeems it on the very next page load after the
-// 302 to return_to, so a tight window suffices and limits the replay
-// surface. Not config-knobbed: 60s is short enough to be safe and long
-// enough for a slow client, and a deployer-tunable here would invite
-// someone to widen it into a security hole.
+// is valid for. A web app redeems it on the very next page load after the
+// 302 to return_to; an app using the code page waits for the person to
+// copy the code from the page and paste it in, which a minute covers when,
+// as intended, the browser and the app are on the same desk. A tight window
+// limits the replay surface. Not config-knobbed: a deployer-tunable here
+// would invite someone to widen it into a security hole.
 const OAuthOneTimeCodeTTL = 60 * time.Second
 
 // oauthOneTimeCodeBytes is the entropy of a one-time code; the code is

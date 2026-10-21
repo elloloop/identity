@@ -669,12 +669,15 @@ func TestHostedHTTP_StartValidatesTheAppsCodeChallenge(t *testing.T) {
 // return_to and sends a code_challenge. The callback lands on the page, which
 // shows code#state; the code redeems only with the app's verifier.
 func TestHostedHTTP_CodePageSignInEndToEnd(t *testing.T) {
-	const codePage = "https://example.com/auth/code"
+	const (
+		codePage = "https://example.com/auth/code"
+		appState = "a1b2c3d4e5f60718"
+	)
 	h := newHostedTestHandler(t, codePage, hostedTestRegistry(&appTestStubProvider{}))
 
 	startRR := httptest.NewRecorder()
 	h.ServeHTTP(startRR, httptest.NewRequest(http.MethodGet, "/oauth/start/google?"+url.Values{
-		"return_to":             {codePage + "?state=app-state-1"},
+		"return_to":             {codePage + "?state=" + appState},
 		"code_challenge":        {hostedTestCodeChallenge},
 		"code_challenge_method": {"S256"},
 	}.Encode(), nil))
@@ -697,7 +700,7 @@ func TestHostedHTTP_CodePageSignInEndToEnd(t *testing.T) {
 
 	pageRR := httptest.NewRecorder()
 	h.ServeHTTP(pageRR, httptest.NewRequest(http.MethodGet, landed.RequestURI(), nil))
-	if pageRR.Code != http.StatusOK || !strings.Contains(pageRR.Body.String(), code+"#app-state-1") {
+	if pageRR.Code != http.StatusOK || !strings.Contains(pageRR.Body.String(), code+"#"+appState) {
 		t.Fatalf("code page = %d, want it to show code#state:\n%s", pageRR.Code, pageRR.Body.String())
 	}
 
@@ -717,6 +720,66 @@ func TestHostedHTTP_CodePageSignInEndToEnd(t *testing.T) {
 	}
 	if got := redeem(hostedTestCodeVerifier); got != http.StatusUnauthorized {
 		t.Fatalf("replay = %d, want 401", got)
+	}
+}
+
+// A sign-in may return to this server's code page only when an allowlist
+// entry names the page exactly, the app sent an S256 challenge, and any state
+// is one the page shows. Each refusal comes at /start, before the person signs
+// in, and an app's own page of the same path on another host is not affected.
+func TestHostedHTTP_StartChecksACodePageReturn(t *testing.T) {
+	const (
+		host     = "auth.example.test"
+		codePage = "https://" + host + "/auth/code"
+		appState = "0123456789abcdef"
+	)
+	for _, tc := range []struct {
+		name, allowlist, returnTo string
+		challenge                 bool
+		want                      int
+	}{
+		{name: "named exactly, bound", allowlist: codePage, returnTo: codePage + "?state=" + appState, challenge: true, want: http.StatusFound},
+		{name: "named exactly, bound, no state", allowlist: codePage, returnTo: codePage, challenge: true, want: http.StatusFound},
+		{name: "unbound", allowlist: codePage, returnTo: codePage + "?state=" + appState, want: http.StatusBadRequest},
+		{name: "a state that carries words", allowlist: codePage, returnTo: codePage + "?state=Call-555-0100-now", challenge: true, want: http.StatusBadRequest},
+		{name: "an empty state", allowlist: codePage, returnTo: codePage + "?state=", challenge: true, want: http.StatusBadRequest},
+		{name: "covered by an origin entry", allowlist: "https://" + host, returnTo: codePage, challenge: true, want: http.StatusBadRequest},
+		{name: "covered by a prefix entry", allowlist: "https://" + host + "/auth", returnTo: codePage, challenge: true, want: http.StatusBadRequest},
+		{name: "covered by a wildcard entry", allowlist: "https://*.example.test", returnTo: codePage, challenge: true, want: http.StatusBadRequest},
+		{name: "dot segments, covered by an origin entry", allowlist: "https://" + host, returnTo: "https://" + host + "/auth/x/../code", challenge: true, want: http.StatusBadRequest},
+		{name: "another host's page of that path", allowlist: "https://app.example.test", returnTo: "https://app.example.test/auth/code?state=anything", want: http.StatusFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHostedTestHandler(t, tc.allowlist, hostedTestRegistry(&appTestStubProvider{}))
+			q := url.Values{"return_to": {tc.returnTo}}
+			if tc.challenge {
+				q.Set("code_challenge", hostedTestCodeChallenge)
+				q.Set("code_challenge_method", "S256")
+			}
+			req := httptest.NewRequest(http.MethodGet, "/oauth/start/google?"+q.Encode(), nil)
+			req.Host = host
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+			if rr.Code != tc.want {
+				t.Fatalf("status = %d, want %d; body=%q", rr.Code, tc.want, rr.Body.String())
+			}
+			if tc.want == http.StatusBadRequest && strings.Contains(rr.Body.String(), "555") {
+				t.Fatalf("the refusal reflected the request: %q", rr.Body.String())
+			}
+		})
+	}
+}
+
+// The host a proxy reports is the one a code page return_to is compared with.
+func TestHostedHTTP_StartComparesACodePageReturnWithTheForwardedHost(t *testing.T) {
+	h := newHostedTestHandler(t, "https://auth.example.test", hostedTestRegistry(&appTestStubProvider{}))
+	req := httptest.NewRequest(http.MethodGet, "/oauth/start/google?"+url.Values{"return_to": {"https://auth.example.test/auth/code"}}.Encode(), nil)
+	req.Host = "backend.internal.test"
+	req.Header.Set("X-Forwarded-Host", "auth.example.test")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unbound return to the forwarded host's code page", rr.Code)
 	}
 }
 

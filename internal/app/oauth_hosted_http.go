@@ -4,8 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"go.uber.org/zap"
@@ -77,6 +79,11 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		h.logger.Info("hosted_oauth_code_challenge_rejected", zap.String("provider", provider))
 		http.Error(w, "code_challenge must be an S256 challenge sent with code_challenge_method=S256", http.StatusBadRequest)
+		return
+	}
+	if refusal := h.codePageReturnRefusal(r, returnTo, appCodeChallenge); refusal != "" {
+		h.logger.Info("hosted_oauth_code_page_return_rejected", zap.String("provider", provider))
+		http.Error(w, refusal, http.StatusBadRequest)
 		return
 	}
 
@@ -286,11 +293,41 @@ func (h *hostedOAuthHandler) callbackURL(r *http.Request, provider string) strin
 	} else if r.TLS != nil {
 		scheme = "https"
 	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
+	return scheme + "://" + requestHost(r) + "/oauth/callback/" + provider
+}
+
+// requestHost is the host the request reached, as the proxy in front of
+// this server reports it. The provider redirect URI is built from it, so
+// in any deployment where sign-in works it names this server.
+func requestHost(r *http.Request) string {
+	if host := r.Header.Get("X-Forwarded-Host"); host != "" {
+		return host
 	}
-	return scheme + "://" + host + "/oauth/callback/" + provider
+	return r.Host
+}
+
+// codePageReturnRefusal says why a sign-in may not return to this server's
+// code page (ui.CodePagePath on the host the request reached), or "" when it
+// may, or when returnTo is some other page. The page shows the code for a
+// person to copy, so the sign-in must be bound to the app with an S256
+// challenge, and any state must be one the page shows. And only an
+// allowlist entry naming the page exactly admits it: an origin, path-prefix
+// or wildcard entry that happens to cover it does not opt a deployment into
+// a page whose code a person is asked to hand over.
+func (h *hostedOAuthHandler) codePageReturnRefusal(r *http.Request, returnTo, appCodeChallenge string) string {
+	u, err := url.Parse(returnTo)
+	if err != nil || !strings.EqualFold(u.Host, requestHost(r)) || path.Clean(u.Path) != ui.CodePagePath {
+		return ""
+	}
+	switch {
+	case !h.allowlist.AllowsExactly(returnTo):
+		return "return_to is not allowed: the code page must be listed exactly"
+	case appCodeChallenge == "":
+		return "a sign-in that returns to the code page needs code_challenge with code_challenge_method=S256"
+	case u.Query().Has("state") && !ui.ValidCodePageState(u.Query().Get("state")):
+		return fmt.Sprintf("the state of a code page return_to must be %d to %d lowercase hex characters", ui.CodePageStateMinLen, ui.CodePageStateMaxLen)
+	}
+	return ""
 }
 
 // pathProvider extracts the {provider} path segment after prefix and

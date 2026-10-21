@@ -288,10 +288,10 @@ is still enforced server-side on every login attempt.)
 
 ### Apps that cannot take the redirect: the code page (`/auth/code`)
 
-A CLI on a remote server, or a device with no browser of its own, cannot
-receive the callback's redirect: the browser that signs in is on another
-machine. Such an app names identity's own code page as `return_to` and binds
-the sign-in with PKCE:
+A CLI on a remote server cannot receive the callback's redirect: the browser
+that signs in runs on the person's own machine, not on the server. Such an
+app names identity's own code page as `return_to` and binds the sign-in with
+PKCE:
 
 ```
 https://auth.example.com/oauth/start/google
@@ -299,37 +299,76 @@ https://auth.example.com/oauth/start/google
   &code_challenge=<S256(verifier)>&code_challenge_method=S256
 ```
 
-1. The app prints that URL. The person opens it on any device and signs in.
+1. The app prints that URL. The person opens it in a browser on the machine
+   they are typing at, and signs in.
 2. The callback lands on `/auth/code?state=<app-state>&code=<otc>`. The page
    shows `<otc>#<app-state>` with a copy button, a warning to paste it only
-   into the app where the sign-in started, and how long it lasts. It removes
-   the code from the address bar and history as it loads.
+   into the app where the sign-in started, and how long it lasts. As it loads,
+   it removes the code from the address bar and the tab's back/forward
+   history.
 3. The person pastes the value into the app. The app checks that the part
    after `#` is the state it generated (so a value from an earlier attempt is
    told apart), then redeems with `RedeemOAuthCode{code, code_verifier}`.
 
-The page shows only a code minted for a sign-in that sent a
-`code_challenge`, so a code it shows is useless without the app's verifier: in
-a screen share, a proxy log or synced browser history it grants nothing. A
-code minted without a challenge is never shown. A refused sign-in
-(`?error=`) is shown as a fixed message per [callback error](#callback-errors).
-The page echoes nothing else from its URL: `state` must be 1-256 characters
-of `A-Z a-z 0-9 - . _ ~`, and anything malformed gets a fixed explanation and
-400. It answers with `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
-`X-Frame-Options: DENY` and a nonce-only Content-Security-Policy.
+The paste has to happen within the one-time code's TTL (a minute), so the
+page suits an app the person can paste into from the browser's machine, such
+as a terminal with an SSH session to the server. It does not suit a device
+with no input to paste into, such as a TV: that needs the device
+authorization grant (RFC 8628), which identity does not offer. This is a
+copy-and-paste handover, with no polling and no user code to type.
 
-The page is served only while the hosted flow is enabled, and it is a
-`return_to` like any other: add it to the allowlist exactly, on each public
-origin an app starts from.
+**Start at `/oauth/start/{provider}`.** The app builds the start URL itself,
+as above, with `project_key` when the provider is shared from the hub. The
+hosted sign-in page (`/auth/`) does not carry a `code_challenge` to its
+provider links, so a sign-in started there reaches the code page unbound and
+is not shown. Password sign-in issues no one-time code and cannot use the code
+page.
+
+**What `/oauth/start` checks.** A `return_to` naming the code page on the host
+the request reached is refused with 400, before the person signs in, unless:
+
+- an allowlist entry names the page exactly. An origin, a path prefix such as
+  `https://auth.example.com/auth`, or a wildcard that covers the page does not
+  enable it;
+- the app sent an S256 `code_challenge`;
+- any `state` is 16-64 lowercase hex characters.
+
+**What the page shows.** The page shows only a code minted for a sign-in that
+sent a `code_challenge`. A code it shows is useless without the app's
+verifier, so in a screen share, a proxy log or synced browser history it
+grants nothing. A code minted without a challenge is never shown. A refused
+sign-in (`?error=`) is shown as a fixed message per
+[callback error](#callback-errors). The page echoes nothing else from its URL.
+`state` is shown only when it is 16-64 lowercase hex characters, an alphabet
+in which no one can write a message on identity's origin. Anything else gets a
+fixed explanation and 400. The page answers with `Cache-Control: no-store`,
+`Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and a nonce-only
+Content-Security-Policy.
+
+**What PKCE does not protect against.** The binding stops anyone who *sees* a
+code from using it. It does not stop someone who *started* the sign-in. That
+person holds the verifier. If they persuade someone to open their start URL,
+sign in, and send them the code from the page, they get that person's
+account. This is the same consent-phishing risk as any copy-and-paste or
+device-code sign-in. The page's warning (paste it only into the app where you
+started signing in, and never give it to anyone who asks) is the only
+mitigation. Enable the page only for apps that need it. Do not enable it on a
+deployment whose users may be asked for codes by someone else, such as
+support staff.
+
+The page is served only while the hosted flow is enabled. To enable it, add
+the page to the allowlist exactly, on each public origin an app starts from:
 
 ```bash
 -e GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com,https://auth.example.com/auth/code
 ```
 
+The checks at `/oauth/start` apply to the code page on the host the sign-in
+starts from. Start each sign-in on the host whose code page it returns to.
+
 A pasted code is consumed by the same one-time-code rules below, so it works
 once and within the code's TTL; the app asks the person to sign in again
-after that. This is a copy-and-paste handover, not the device authorization
-grant (RFC 8628): there is no polling and no user code to type.
+after that.
 
 ### The one-time code
 

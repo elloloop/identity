@@ -179,7 +179,7 @@ func TestHostedOAuth_CodePageEndToEnd(t *testing.T) {
 		codePage  = "https://auth.example.test/auth/code"
 		verifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 		challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-		appState  = "cli-state-0001"
+		appState  = "c11c0de5ea5e0001"
 	)
 	h := StartServer(
 		t,

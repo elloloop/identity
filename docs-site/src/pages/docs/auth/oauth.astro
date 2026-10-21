@@ -688,7 +688,9 @@ function signInErrorMessage(code: string): string {
     An app can bind the one-time code to itself with its own PKCE pair
     (RFC 7636). Send <code>code_challenge=&lt;S256 challenge&gt;</code> and
     <code>code_challenge_method=S256</code> to <code>/oauth/start</code>,
-    and redeem with <code>RedeemOAuthCode{`{code, codeVerifier}`}</code>.
+    and redeem with <code>RedeemOAuthCode</code>, passing the verifier in
+    its <code>code_verifier</code> field (<code>codeVerifier</code> in the
+    TypeScript client).
     The code then redeems only with that verifier, and a wrong or missing
     verifier spends nothing. <code>/oauth/start</code> answers 400 to
     <code>plain</code>, to either parameter without the other, and to a
@@ -698,16 +700,17 @@ function signInErrorMessage(code: string): string {
 
   <h3 id="hosted-code-page">Apps that cannot take the redirect: the code page</h3>
   <p>
-    A CLI on a remote server, or a device without a browser, cannot receive
-    the callback's redirect, because the browser that signs in is on another
-    machine. Such an app names identity's code page,
+    A CLI on a remote server cannot receive the callback's redirect, because
+    the browser that signs in runs on the person's own machine. Such an app
+    names identity's code page,
     <code>&lt;identity-origin&gt;/auth/code?state=&lt;app-state&gt;</code>, as
     <code>return_to</code> and sends a PKCE challenge. The callback lands on
     the page, which shows <code>&lt;code&gt;#&lt;app-state&gt;</code> with a
     copy button. The person pastes it into the app, which checks the state is
     its own and redeems with its verifier.
   </p>
-  <Code code={`# The app prints this URL for the person to open on any device.
+  <Code code={`# The app prints this URL for the person to open in a browser
+# on the machine they are typing at.
 https://auth.example.com/oauth/start/google
   ?return_to=https%3A%2F%2Fauth.example.com%2Fauth%2Fcode%3Fstate%3D<app-state>
   &code_challenge=<base64url(SHA-256(verifier))>
@@ -716,12 +719,38 @@ https://auth.example.com/oauth/start/google
 # The person pastes back <code>#<app-state>. The app checks <app-state> and calls
 RedeemOAuthCode { code: "<code>", code_verifier: "<verifier>" }`} lang="text" />
   <p>
+    The code lasts a minute, so the page suits an app the person can paste
+    into from the browser's machine, such as a terminal with an SSH session
+    to the server. A device with nothing to paste into, such as a TV, needs
+    the device authorization grant (RFC 8628), which identity does not
+    offer. Build the start URL at <code>/oauth/start/{`{provider}`}</code>
+    yourself, with <code>project_key</code> when the provider is shared from
+    the hub. The hosted sign-in page (<code>/auth/</code>) does not carry a
+    challenge to its provider links, and password sign-in issues no
+    one-time code.
+  </p>
+  <p>
     The page shows only codes minted for a sign-in that sent a challenge, so
-    any code it shows is useless without the app's verifier. It echoes
-    nothing else from its URL, shows a refused sign-in as a fixed message,
-    and answers with <code>no-store</code>, <code>no-referrer</code> and a
-    nonce-only Content-Security-Policy. It is served while the hosted flow is
-    enabled; admit it exactly in the allowlist, for example
+    any code it shows is useless without the app's verifier. It shows the
+    app's <code>state</code> only when it is 16-64 lowercase hex characters,
+    and echoes nothing else from its URL. It shows a refused sign-in as a
+    fixed message, and answers with <code>no-store</code>,
+    <code>no-referrer</code> and a nonce-only Content-Security-Policy.
+  </p>
+  <p>
+    It is served while the hosted flow is enabled, and it is opt-in by name.
+    <code>/oauth/start</code> refuses a return to it with 400 unless an
+    allowlist entry names it exactly, the app sent a challenge, and the state
+    is one the page shows. An origin, prefix or wildcard entry that covers
+    the page does not enable it. For example:
     <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com,https://auth.example.com/auth/code</code>.
+  </p>
+  <p>
+    PKCE stops anyone who sees a code from using it. It does not stop
+    whoever started the sign-in, because they hold the verifier. A person
+    talked into signing in through someone else's start URL and handing over
+    the code gives away their account. That is the consent-phishing risk of
+    every copy-and-paste or device-code sign-in. The page warns against it.
+    Leave the page off where no app needs it.
   </p>
 </DocsLayout>

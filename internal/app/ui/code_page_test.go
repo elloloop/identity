@@ -12,7 +12,10 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-const testBoundCode = "pkce_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+const (
+	testBoundCode = "pkce_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	testState     = "8436cfbd3cf94948"
+)
 
 func serveCodePage(t *testing.T, method string, query url.Values) *httptest.ResponseRecorder {
 	t.Helper()
@@ -24,12 +27,12 @@ func serveCodePage(t *testing.T, method string, query url.Values) *httptest.Resp
 // The page shows a bound code with the app's state as code#state, and a copy
 // button the script reveals.
 func TestCodePageShowsABoundCodeWithTheAppsState(t *testing.T) {
-	rec := serveCodePage(t, http.MethodGet, url.Values{"code": {testBoundCode}, "state": {"8436cfbd3cf94948"}})
+	rec := serveCodePage(t, http.MethodGet, url.Values{"code": {testBoundCode}, "state": {testState}})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `<p class="value" id="code">`+testBoundCode+`#8436cfbd3cf94948</p>`) {
+	if !strings.Contains(body, `<p class="value" id="code">`+testBoundCode+"#"+testState+`</p>`) {
 		t.Fatalf("page does not show code#state:\n%s", body)
 	}
 	for _, want := range []string{`id="copy" hidden`, `role="status"`, "Only paste it into the app where you started signing in.", "It works once, within a minute."} {
@@ -50,7 +53,7 @@ func TestCodePageShowsTheCodeAloneWithoutAState(t *testing.T) {
 // style block run only under the per-response nonce.
 func TestCodePageHeaders(t *testing.T) {
 	for _, query := range []url.Values{
-		{"code": {testBoundCode}, "state": {"s"}},
+		{"code": {testBoundCode}, "state": {testState}},
 		{"error": {"access_denied"}},
 		{},
 	} {
@@ -85,7 +88,7 @@ func TestCodePageHeaders(t *testing.T) {
 // page never shows it, nor reflects it.
 func TestCodePageNeverShowsAnUnboundCode(t *testing.T) {
 	unbound := strings.TrimPrefix(testBoundCode, "pkce_")
-	rec := serveCodePage(t, http.MethodGet, url.Values{"code": {unbound}, "state": {"s"}})
+	rec := serveCodePage(t, http.MethodGet, url.Values{"code": {unbound}, "state": {testState}})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", rec.Code)
 	}
@@ -94,16 +97,12 @@ func TestCodePageNeverShowsAnUnboundCode(t *testing.T) {
 	}
 }
 
-// Nothing the request carries is reflected when it is not a code to show.
-func TestCodePageRefusesWhatIsNotACodeToShow(t *testing.T) {
+// Nothing the request carries is reflected when there is no code to show.
+func TestCodePageWithoutACode(t *testing.T) {
 	for name, query := range map[string]url.Values{
-		"no code":            {"state": {"s"}},
-		"empty state":        {"code": {testBoundCode}, "state": {""}},
-		"state with a space": {"code": {testBoundCode}, "state": {"call us"}},
-		"state with a hash":  {"code": {testBoundCode}, "state": {"a#b"}},
-		"markup in state":    {"code": {testBoundCode}, "state": {"<b>x</b>"}},
-		"oversized state":    {"code": {testBoundCode}, "state": {strings.Repeat("s", maxCodePageStateBytes+1)}},
-		"markup as code":     {"code": {"<script>alert(1)</script>"}},
+		"nothing":        {},
+		"only a state":   {"state": {testState}},
+		"markup as code": {"code": {"<script>alert(1)</script>"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := serveCodePage(t, http.MethodGet, query)
@@ -111,10 +110,61 @@ func TestCodePageRefusesWhatIsNotACodeToShow(t *testing.T) {
 				t.Fatalf("status %d, want 400", rec.Code)
 			}
 			body := rec.Body.String()
-			if strings.Contains(body, testBoundCode) || strings.Contains(body, "<b>x</b>") || strings.Contains(body, "alert(1)") || strings.Contains(body, "call us") {
+			if strings.Contains(body, testState) || strings.Contains(body, "alert(1)") || (!strings.Contains(body, "There is no code to show") && !strings.Contains(body, "This code cannot be shown")) {
+				t.Fatalf("page reflected the request or did not explain:\n%s", body)
+			}
+		})
+	}
+}
+
+// The page is on this server's origin and anyone can choose the state in a
+// link to it, so a state that could carry words is never shown, and neither
+// is the code beside it: the page says the sign-in cannot be shown.
+func TestCodePageRefusesAStateThatCouldCarryAMessage(t *testing.T) {
+	for name, state := range map[string]string{
+		"a sentence in hyphens":  "Call-555-0100-to-unlock-your-account",
+		"a domain":               "paste-this-code-at.support.example.net",
+		"a phone number":         "555.0100.555.0100",
+		"a space":                "call us",
+		"a hash":                 "8436cfbd#3cf94948",
+		"markup":                 "<b>x</b>",
+		"uppercase hex":          "8436CFBD3CF94948",
+		"empty":                  "",
+		"shorter than the floor": strings.Repeat("a", CodePageStateMinLen-1),
+		"longer than the cap":    strings.Repeat("a", CodePageStateMaxLen+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := serveCodePage(t, http.MethodGet, url.Values{"code": {testBoundCode}, "state": {state}})
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status %d, want 400", rec.Code)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, "This code cannot be shown") || !strings.Contains(body, "started its sign-in in a form this page cannot show") {
+				t.Fatalf("page does not explain the refusal:\n%s", body)
+			}
+			if strings.Contains(body, testBoundCode) || (state != "" && strings.Contains(body, state)) || strings.Contains(body, "555") || strings.Contains(body, "example.net") || strings.Contains(body, "<b>x</b>") {
 				t.Fatalf("page reflected the request:\n%s", body)
 			}
 		})
+	}
+}
+
+func TestValidCodePageState(t *testing.T) {
+	for state, want := range map[string]bool{
+		testState:                                  true,
+		strings.Repeat("0", CodePageStateMinLen):   true,
+		strings.Repeat("f", CodePageStateMaxLen):   true,
+		"0123456789abcdef0123456789abcdef":         true,
+		strings.Repeat("0", CodePageStateMinLen-1): false,
+		strings.Repeat("f", CodePageStateMaxLen+1): false,
+		"8436cfbd3cf9494g":                         false,
+		"8436CFBD3CF94948":                         false,
+		"8436cfbd-3cf94948":                        false,
+		"":                                         false,
+	} {
+		if got := ValidCodePageState(state); got != want {
+			t.Errorf("ValidCodePageState(%q) = %v, want %v", state, got, want)
+		}
 	}
 }
 
@@ -130,7 +180,7 @@ func TestCodePageExplainsARefusedSignIn(t *testing.T) {
 		service.HostedOAuthErrorAccessDenied:     "Sign-in was not allowed.",
 		"call-555-0100-for-help":                 "Sign-in was not allowed.",
 	} {
-		rec := serveCodePage(t, http.MethodGet, url.Values{"error": {code}, "code": {testBoundCode}, "state": {"s"}})
+		rec := serveCodePage(t, http.MethodGet, url.Values{"error": {code}, "code": {testBoundCode}, "state": {testState}})
 		body := rec.Body.String()
 		if rec.Code != http.StatusOK || !strings.Contains(body, "Sign-in did not finish") || !strings.Contains(body, want) {
 			t.Errorf("error %q: status %d, want 200 with %q:\n%s", code, rec.Code, want, body)

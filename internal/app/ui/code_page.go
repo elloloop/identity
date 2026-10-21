@@ -13,17 +13,22 @@ import (
 )
 
 // CodePagePath is the hosted page an app that cannot take the hosted
-// callback's redirect (a CLI on another machine, a TV) names as return_to.
+// callback's redirect (a CLI on a remote machine, say) names as return_to.
 // The callback lands the browser here with ?code=, and the page shows the
 // code for the person to copy into the app, which redeems it with its
-// code_verifier. It is served only while the hosted flow is enabled, and an
-// operator admits it like any return_to:
+// code_verifier. It is served only while the hosted flow is enabled, and
+// only an allowlist entry naming it exactly lets a sign-in return here:
 // GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://auth.example.com/auth/code.
 const CodePagePath = "/auth/code"
 
-// maxCodePageStateBytes bounds the app's state the page echoes beside the
-// code: enough for any random state, too little to carry a message.
-const maxCodePageStateBytes = 256
+// The app's state, when it sends one, is shown beside the code. It must be
+// lowercase hex of this many characters: room for any random state, and an
+// alphabet no one can write a message in, since the page is on this
+// server's origin and anyone can choose the state in a link to it.
+const (
+	CodePageStateMinLen = 16
+	CodePageStateMaxLen = 64
+)
 
 // codePageView is what the page template renders: a code to copy, or a
 // heading and a message saying why there is none.
@@ -91,9 +96,10 @@ button:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
 // sign-in the app bound to a PKCE challenge, so the code it shows is
 // useless without that app's code_verifier; a code bound to none is never
 // shown. The app's state, when it sent one, is shown after the code as
-// code#state, so the app can tell a code from an earlier sign-in. The page
-// echoes nothing else from the request: an error= the callback sent is
-// shown as a fixed message, and anything malformed as a fixed explanation.
+// code#state, so the app can tell a code from an earlier sign-in; it is
+// shown only when ValidCodePageState admits it. The page echoes nothing
+// else from the request: an error= the callback sent is shown as a fixed
+// message, and anything malformed as a fixed explanation.
 func CodePageHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -133,10 +139,16 @@ func codePageFor(r *http.Request) (codePageView, int) {
 		return codePageView{Title: "Sign-in did not finish", Message: signInRefusalMessage(refusal)}, http.StatusOK
 	}
 	code, state := q.Get("code"), q.Get("state")
-	if code == "" || q.Has("state") && !validCodePageState(state) {
+	if code == "" {
 		return codePageView{
 			Title:   "There is no code to show",
 			Message: "This page shows a sign-in code after you sign in from an app. Go back to the app and start signing in again.",
+		}, http.StatusBadRequest
+	}
+	if q.Has("state") && !ValidCodePageState(state) {
+		return codePageView{
+			Title:   "This code cannot be shown",
+			Message: "The app that sent you here started its sign-in in a form this page cannot show. Go back to the app and start signing in again. If this keeps happening, tell the app's developer.",
 		}, http.StatusBadRequest
 	}
 	if !service.PKCEBoundOAuthCode(code) {
@@ -169,16 +181,18 @@ func signInRefusalMessage(code string) string {
 	}
 }
 
-// validCodePageState admits a state of RFC 3986 unreserved characters, the
-// alphabet of every random state, so '#' can only be the separator.
-func validCodePageState(state string) bool {
-	if state == "" || len(state) > maxCodePageStateBytes {
+// ValidCodePageState reports whether state is one the page shows beside a
+// code: CodePageStateMinLen to CodePageStateMaxLen lowercase hex characters.
+// Hex cannot spell a sentence, a phone number with separators or a domain,
+// and it cannot contain the '#' that separates the state from the code.
+// The hosted start checks it too, so an app learns of a state the page
+// would refuse before the person signs in.
+func ValidCodePageState(state string) bool {
+	if len(state) < CodePageStateMinLen || len(state) > CodePageStateMaxLen {
 		return false
 	}
 	for _, c := range []byte(state) {
-		switch {
-		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-', c == '.', c == '_', c == '~':
-		default:
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}
