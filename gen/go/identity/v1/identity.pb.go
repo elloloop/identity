@@ -2920,8 +2920,15 @@ func (x *NativeOAuthLoginResponse) GetExpiresIn() int32 {
 // 302 return_to?code=<otc>) for a backend-issued token pair. The code
 // is single-use and short-lived; a replay returns CodeUnauthenticated.
 type RedeemOAuthCodeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"` // opaque one-time code from the hosted callback redirect
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Code  string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"` // opaque one-time code from the hosted callback redirect
+	// The RFC 7636 code_verifier whose S256 challenge the app sent as
+	// code_challenge to GET /oauth/start. Required for a code minted with a
+	// challenge, and refused for one minted without; either mismatch returns
+	// CodeUnauthenticated and leaves the code unspent. A value that is not
+	// 43-128 characters of A-Z, a-z, 0-9, "-", ".", "_" and "~" returns
+	// CodeInvalidArgument.
+	CodeVerifier  string `protobuf:"bytes,2,opt,name=code_verifier,json=codeVerifier,proto3" json:"code_verifier,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2959,6 +2966,13 @@ func (*RedeemOAuthCodeRequest) Descriptor() ([]byte, []int) {
 func (x *RedeemOAuthCodeRequest) GetCode() string {
 	if x != nil {
 		return x.Code
+	}
+	return ""
+}
+
+func (x *RedeemOAuthCodeRequest) GetCodeVerifier() string {
+	if x != nil {
+		return x.CodeVerifier
 	}
 	return ""
 }
@@ -20472,9 +20486,10 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x04 \x01(\x05R\texpiresIn\",\n" +
+	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"Q\n" +
 	"\x16RedeemOAuthCodeRequest\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\tR\x04code\"\xa7\x01\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12#\n" +
+	"\rcode_verifier\x18\x02 \x01(\tR\fcodeVerifier\"\xa7\x01\n" +
 	"\x17RedeemOAuthCodeResponse\x12%\n" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +

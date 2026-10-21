@@ -181,7 +181,7 @@ func TestDOBRequired_CompleteHostedOAuth(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
@@ -201,7 +201,7 @@ func TestDOBRequired_RedeemOAuthCode(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 	cb, err := svc.CompleteHostedOAuth(ctx, "google",
@@ -211,7 +211,7 @@ func TestDOBRequired_RedeemOAuthCode(t *testing.T) {
 
 	enableAgeGate(t, svc, true)
 
-	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "1.2.3.4", "agent")
+	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "", "1.2.3.4", "agent")
 	requireDOBRefusal(t, svc, err)
 }
 

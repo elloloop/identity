@@ -14,13 +14,40 @@ import (
 	"github.com/elloloop/identity/pkg/oauth"
 )
 
-// oauthOneTimeCodeTTL bounds how long the hosted-callback one-time code
-// is valid for. The SPA redeems it on the very next page load after the
-// 302 to return_to, so a tight window suffices and limits the replay
-// surface. Not config-knobbed: 60s is short enough to be safe and long
-// enough for a slow client, and a deployer-tunable here would invite
-// someone to widen it into a security hole.
-const oauthOneTimeCodeTTL = 60 * time.Second
+// OAuthOneTimeCodeTTL bounds how long the hosted-callback one-time code
+// is valid for. A web app redeems it on the very next page load after the
+// 302 to return_to; an app using the code page waits for the person to
+// copy the code from the page and paste it in, which a minute covers when,
+// as intended, the browser and the app are on the same desk. A tight window
+// limits the replay surface. Not config-knobbed: a deployer-tunable here
+// would invite someone to widen it into a security hole.
+const OAuthOneTimeCodeTTL = 60 * time.Second
+
+// oauthOneTimeCodeBytes is the entropy of a one-time code; the code is
+// its hex encoding.
+const oauthOneTimeCodeBytes = 32
+
+// pkceBoundOAuthCodePrefix starts every one-time code minted for a sign-in
+// whose app sent a code_challenge to /oauth/start. It is not secret and
+// grants nothing: it lets the code page show only codes that are useless
+// without the app's code_verifier.
+const pkceBoundOAuthCodePrefix = "pkce_"
+
+// PKCEBoundOAuthCode reports whether code has the shape of a one-time code
+// minted for a sign-in bound to a PKCE challenge. Whether the code exists,
+// or is still unspent, only RedeemOAuthCode can tell.
+func PKCEBoundOAuthCode(code string) bool {
+	random, ok := strings.CutPrefix(code, pkceBoundOAuthCodePrefix)
+	if !ok || len(random) != 2*oauthOneTimeCodeBytes {
+		return false
+	}
+	for _, c := range []byte(random) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
 
 // HostedOAuthBeginResult is the output of BeginHostedOAuth: the provider
 // authorization URL the browser should be 302-redirected to. The state
@@ -35,11 +62,14 @@ type HostedOAuthBeginResult struct {
 // the provider authorization URL. redirectURI is the identity-owned
 // callback (e.g. https://identity.example.com/oauth/callback/google);
 // returnTo is the already-allowlist-validated app URL the callback will
-// redirect back to. It reuses the same provider Authorizer the headless
-// BeginOAuthLogin uses — there is no forked authorization path.
+// redirect back to. appCodeChallenge is the app's own S256 PKCE
+// challenge, or "" when it sent none: the one-time code this sign-in ends
+// with is then redeemable only with the matching code_verifier. It reuses
+// the same provider Authorizer the headless BeginOAuthLogin uses — there
+// is no forked authorization path.
 func (s *AuthService) BeginHostedOAuth(
 	ctx context.Context,
-	provider, redirectURI, returnTo, csrfToken, projectKey string,
+	provider, redirectURI, returnTo, csrfToken, appCodeChallenge, projectKey string,
 ) (*HostedOAuthBeginResult, error) {
 	if !s.oauthResolver.available(ctx) {
 		return nil, ErrOAuthDisabled
@@ -56,6 +86,9 @@ func (s *AuthService) BeginHostedOAuth(
 	}
 	if strings.TrimSpace(csrfToken) == "" {
 		return nil, fmt.Errorf("%w: csrf_token is required", ErrInvalidArgument)
+	}
+	if appCodeChallenge != "" && !ValidS256Challenge(appCodeChallenge) {
+		return nil, fmt.Errorf("%w: code_challenge must be an S256 challenge", ErrInvalidArgument)
 	}
 
 	exchanger, ok := s.oauthResolver.exchangerFor(ctx, provider)
@@ -90,6 +123,7 @@ func (s *AuthService) BeginHostedOAuth(
 		state,
 		codeVerifier,
 		csrfToken,
+		appCodeChallenge,
 		scope.ProjectID,
 		oauthStateTokenExpiry,
 		s.nowFunc().UTC(),
@@ -174,7 +208,7 @@ func (s *AuthService) CompleteHostedOAuth(
 		return nil, &HostedOAuthRefusalError{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: hostedOAuthErrorCode(err), Err: err}
 	}
 
-	otc, err := s.mintOAuthOneTimeCode(ctx, result.User.ID)
+	otc, err := s.mintOAuthOneTimeCode(ctx, result.User.ID, claims.AppCodeChallenge)
 	if err != nil {
 		return nil, &HostedOAuthRefusalError{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: HostedOAuthErrorServer, Err: err}
 	}
@@ -247,16 +281,21 @@ func hostedOAuthErrorCode(err error) string {
 }
 
 // mintOAuthOneTimeCode generates an opaque code, stores its hash bound
-// to userID with a short TTL, and returns the plaintext. Only the hash
-// is persisted; the plaintext lives solely in the callback redirect.
-func (s *AuthService) mintOAuthOneTimeCode(ctx context.Context, userID string) (string, error) {
+// to userID and codeChallenge with a short TTL, and returns the
+// plaintext. Only the hash is persisted; the plaintext lives solely in
+// the callback redirect.
+func (s *AuthService) mintOAuthOneTimeCode(ctx context.Context, userID, codeChallenge string) (string, error) {
 	now := s.nowMs()
-	raw := randomToken(32)
+	raw := randomToken(oauthOneTimeCodeBytes)
+	if codeChallenge != "" {
+		raw = pkceBoundOAuthCodePrefix + raw
+	}
 	_, err := s.repo(ctx).CreateOAuthOneTimeCode(ctx, &OAuthOneTimeCodeRecord{
-		CodeHash:  sha256Hex(raw),
-		UserID:    userID,
-		ExpiresAt: now + oauthOneTimeCodeTTL.Milliseconds(),
-		CreatedAt: now,
+		CodeHash:      sha256Hex(raw),
+		UserID:        userID,
+		CodeChallenge: codeChallenge,
+		ExpiresAt:     now + OAuthOneTimeCodeTTL.Milliseconds(),
+		CreatedAt:     now,
 	})
 	if err != nil {
 		return "", fmt.Errorf("creating oauth one-time code: %w", err)
@@ -268,18 +307,28 @@ func (s *AuthService) mintOAuthOneTimeCode(ctx context.Context, userID string) (
 // token pair. The repository's ConsumeOAuthOneTimeCode is the
 // serialization point: it atomically consumes the code (single winner
 // across replicas) and returns the bound user, after which tokens are
-// minted via the same issueTokens path every other login uses. A
-// replay, an expired code, or an unknown code all return
-// ErrOAuthCodeInvalid.
-func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAgent string) (*LoginResult, error) {
+// minted via the same issueTokens path every other login uses.
+// codeVerifier is the app's RFC 7636 verifier when it sent a
+// code_challenge to /oauth/start, else "". A replay, an expired code, an
+// unknown code, and a verifier that does not match the code's challenge
+// (a missing one, or one for a code bound to none, included) all return
+// ErrOAuthCodeInvalid; only the last leaves the code redeemable.
+func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, codeVerifier, ipAddr, userAgent string) (*LoginResult, error) {
 	if !s.oauthResolver.available(ctx) {
 		return nil, ErrOAuthDisabled
 	}
 	if strings.TrimSpace(code) == "" {
 		return nil, ErrOAuthCodeInvalid
 	}
+	codeChallenge := ""
+	if codeVerifier != "" {
+		if !ValidPKCEVerifier(codeVerifier) {
+			return nil, fmt.Errorf("%w: code_verifier must be 43-128 characters of A-Z, a-z, 0-9, -, ., _ and ~", ErrInvalidArgument)
+		}
+		codeChallenge = oauth.CodeChallengeS256(codeVerifier)
+	}
 
-	rec, err := s.repo(ctx).ConsumeOAuthOneTimeCode(ctx, sha256Hex(code), s.nowMs())
+	rec, err := s.repo(ctx).ConsumeOAuthOneTimeCode(ctx, sha256Hex(code), codeChallenge, s.nowMs())
 	if err != nil {
 		if errors.Is(err, ErrOAuthCodeInvalid) {
 			return nil, ErrOAuthCodeInvalid

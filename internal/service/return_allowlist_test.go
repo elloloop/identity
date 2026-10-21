@@ -193,6 +193,40 @@ func TestReturnAllowlist_AllowsPattern(t *testing.T) {
 	}
 }
 
+// Only an entry naming the URL's origin and path admits it exactly; an
+// origin, a path prefix or a wildcard that covers it does not.
+func TestReturnAllowlist_AllowsExactly(t *testing.T) {
+	t.Parallel()
+
+	const page = "https://auth.example.test/auth/code"
+	for _, tc := range []struct {
+		name, csv, returnTo string
+		want                bool
+	}{
+		{"exact entry", page, page, true},
+		{"exact entry with a query", page, page + "?state=0123456789abcdef", true},
+		{"entry with a trailing slash", page + "/", page, true},
+		{"dot segments", page, "https://auth.example.test/auth/./x/../code", true},
+		{"host case", page, "https://AUTH.example.test/auth/code", true},
+		{"origin entry", "https://auth.example.test", page, false},
+		{"root entry", "https://auth.example.test/", page, false},
+		{"prefix entry", "https://auth.example.test/auth", page, false},
+		{"wildcard entry", "https://*.example.test", page, false},
+		{"wildcard entry with the path", "https://*.example.test/auth/code", page, false},
+		{"a page under the entry", page, page + "/more", false},
+		{"another origin", page, "https://app.example.test/auth/code", false},
+		{"another scheme", page, "http://auth.example.test/auth/code", false},
+		{"another port", page, "https://auth.example.test:8443/auth/code", false},
+		{"not a URL", page, "/auth/code", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mustReturnAllowlist(t, tc.csv).AllowsExactly(tc.returnTo); got != tc.want {
+				t.Fatalf("AllowsExactly(%q) with %q = %v, want %v", tc.returnTo, tc.csv, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestReturnAllowlist_IgnoresMalformedExactEntries(t *testing.T) {
 	t.Parallel()
 

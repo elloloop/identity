@@ -521,8 +521,12 @@ type Config struct {
 	// so use one only for a parent whose every subdomain the operator
 	// controls.
 	//
-	// Empty disables the hosted flow entirely — GET /oauth/start and
-	// GET/POST /oauth/callback return 404. The headless BeginOAuthLogin / OAuthLogin
+	// Identity's own code page, /auth/code, is enabled only by an entry that
+	// names it exactly, on each scheme and host it should show codes on; an
+	// origin, prefix or wildcard entry that covers it does not enable it.
+	//
+	// Empty disables the hosted flow entirely — GET /oauth/start,
+	// GET/POST /oauth/callback and GET /auth/code return 404. The headless BeginOAuthLogin / OAuthLogin
 	// RPCs are unaffected. Driven by GATEWAY_OAUTH_ALLOWED_RETURN_URLS.
 	OAuthAllowedReturnURLs string
 

@@ -1000,7 +1000,7 @@ before you ship.
       `<identity-origin>/oauth/callback/{provider}`, derived from the
       request so `/start` and `/callback` agree.
 
-    Three deliberate choices inside the hosted flow:
+    Four deliberate choices inside the hosted flow:
 
     - **One-time code, not fragment-token or cookie, for the SPA
       handover.** The callback mints an opaque single-use code, stores
@@ -1011,7 +1011,8 @@ before you ship.
       (`ConsumeOAuthOneTimeCode` — the same single-winner CAS shape as
       the refresh-token and QR-login consume paths) and mints a fresh
       token pair through the normal `issueTokens` path. **No token
-      material is persisted at rest** — only the user id is stored, so
+      material is persisted at rest** — only the user id (and the app's
+      PKCE challenge, when it sent one) is stored, so
       a leaked code store yields nothing redeemable after the 60s
       window or a single redeem. Chosen over URL-fragment tokens (leak
       to browser history / `Referer`) and httpOnly cookies (awkward
@@ -1039,6 +1040,43 @@ before you ship.
       provider-facing redirect, "where to send the user back" becomes
       an identity-side allowlist instead. The active allowlist is
       logged at startup.
+
+    - **An app may bind the one-time code with its own PKCE pair; the
+      code page shows only bound codes.** An app that cannot take the
+      redirect (a CLI on a remote server) returns to identity's own
+      `/auth/code`, which shows the code for the person to paste. A code
+      shown on a screen and copied through a clipboard is more exposed
+      than one consumed by a redirect, so the app sends
+      `code_challenge` (S256 only) to `/oauth/start`, the challenge rides
+      in the hosted state token as `app_code_challenge`, is stored with
+      the code, and `ConsumeOAuthOneTimeCode` consumes only on an equal
+      challenge — a mismatch spends nothing, so a stray paste cannot burn
+      the code for the app holding the verifier. Codes minted with a
+      challenge start with `pkce_`; the page shows nothing else, so it
+      never displays a code redeemable without the verifier, whatever host
+      or path variant led the browser there. The page sits on identity's
+      origin and anyone can link to it, so it shows the app's `state`
+      only as 16-64 lowercase hex characters, an alphabet no one can
+      write instructions in. Because a person is asked to hand over what
+      it shows, the page is opt-in by name, host by host: it shows a code
+      only where an allowlist entry names it exactly for the scheme and
+      host the request reached (an origin, prefix or wildcard entry that
+      covers it does not count), and answers 404 elsewhere. The page
+      checks this itself rather than trusting `/oauth/start`, so the
+      opt-in holds however `return_to` spelled the host and whichever
+      host the sign-in started on. `/oauth/start` repeats the checks for
+      a return to its own hostname so the app hears of a mistake before
+      the person signs in: the exact entry, a challenge, and a state the
+      page shows. PKCE stops
+      anyone who sees a code from using it, but not whoever started the
+      sign-in, who holds the verifier: a person talked into signing in
+      through someone else's start URL and handing the code over gives
+      away their account. That consent-phishing risk is the one every
+      copy-and-paste or device-code sign-in carries. Its mitigations are
+      the page's warning and leaving the page off where it is not needed.
+      Chosen over the device authorization grant (RFC 8628), which needs
+      a polling endpoint, a typed user code and an approval page; the
+      paste reuses the hosted flow end to end.
 
 11. **identity is embeddable as a library, not only a container.**
     Issue #127. The full wiring already lived in `internal/app`; it was

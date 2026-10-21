@@ -162,7 +162,7 @@ func (StubRepository) CreateOAuthOneTimeCode(context.Context, *OAuthOneTimeCodeR
 	return "", ErrServiceUnavailable
 }
 
-func (StubRepository) ConsumeOAuthOneTimeCode(context.Context, string, int64) (*OAuthOneTimeCodeRecord, error) {
+func (StubRepository) ConsumeOAuthOneTimeCode(context.Context, string, string, int64) (*OAuthOneTimeCodeRecord, error) {
 	return nil, ErrServiceUnavailable
 }
 

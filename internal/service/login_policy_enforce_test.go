@@ -527,7 +527,7 @@ func TestRedeemOAuthCode_DeniedByPolicy(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 	require.NoError(t, err)
 	cb, err := svc.CompleteHostedOAuth(ctx, "google",
 		fakeOAuthCode("alice@acme.com", "Alice", "", "google"),
@@ -536,7 +536,7 @@ func TestRedeemOAuthCode_DeniedByPolicy(t *testing.T) {
 
 	// Policy is consulted at redeem, the point tokens would be issued.
 	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
-	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "1.2.3.4", "test-agent")
+	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "", "1.2.3.4", "test-agent")
 	require.ErrorIs(t, err, ErrPermissionDenied,
 		"oauth redeem must be denied for a password-only tenant")
 }

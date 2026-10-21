@@ -1,5 +1,70 @@
 # Upgrade guide
 
+## Next — bind a hosted sign-in to the app with PKCE, and the `/auth/code` page (migration; `/oauth/start` refuses malformed PKCE parameters (behaviour change); `pkg/oauth.IssueHostedStateToken` signature (Go API); custom repositories must match the code challenge)
+
+An app can now bind the hosted flow's one-time code to itself: it sends
+`code_challenge` and `code_challenge_method=S256` to `GET /oauth/start/{provider}`
+and redeems with the new `RedeemOAuthCodeRequest.code_verifier` field. An app
+that cannot take the callback's redirect (a CLI on a remote server) can name
+the new code page, `<identity-origin>/auth/code?state=<app-state>`, as
+`return_to`: it shows `<code>#<app-state>` with a copy button for the person to
+paste into the app. The page shows only codes bound to a challenge, and a
+`state` only when it is 16-64 lowercase hex characters. See the hosted flow in
+`docs/oauth.md`, including what PKCE does not protect against there.
+
+Apps that send no challenge are unaffected: their codes redeem without a
+verifier, as before. A verifier sent for such a code is refused.
+
+**An app that already sent a challenge is affected.** `/oauth/start` used to
+ignore `code_challenge` and `code_challenge_method`. It now binds the code to
+a valid S256 pair, so an app that already sent one (a generic OAuth helper
+may add PKCE to every authorization URL) must redeem with `code_verifier`, or
+`RedeemOAuthCode` answers `Unauthenticated`. Check your apps before
+upgrading: drop the parameters, or send the verifier.
+
+An app's verifier must be at least 32 random octets from a cryptographically
+secure generator, base64url-encoded, and fresh for every sign-in (RFC 7636
+§4.1). Identity checks its alphabet and length, not its randomness.
+
+Operators:
+
+- **Migration.** Postgres `0043_add_oauth_one_time_code_challenge` and SQLite
+  `0026_add_oauth_one_time_code_challenge` add `oauth_one_time_codes.code_challenge`
+  (`TEXT NOT NULL DEFAULT ''`, a catalog-only change). Rolling back drops it,
+  and the outstanding bound codes then redeem without a verifier for the rest
+  of their 60 seconds.
+- **Roll out before apps rely on it.** While old and new replicas serve
+  together, an old replica ignores `code_challenge` at `/oauth/start` and
+  consumes a bound code without checking a verifier, and an old replica that
+  serves `/oauth/callback` mints an unbound code from a new replica's state
+  token, whose verifier a new replica then refuses. Finish the rollout before
+  enabling an app that sends a challenge.
+- **To offer the code page,** add it exactly to the allowlist, on each host it
+  should show codes on, for example
+  `GATEWAY_OAUTH_ALLOWED_RETURN_URLS=…,https://auth.example.com/auth/code`. It is
+  served only while the hosted flow is enabled. An existing origin, path-prefix
+  or wildcard entry that covers identity's own host does not enable it: on a
+  host whose exact entry is missing, the page answers 404 and shows no code,
+  whichever host the sign-in started on. The page compares the scheme and
+  host the request reached, as `X-Forwarded-Proto` and `X-Forwarded-Host`
+  report them, the values the provider redirect URI is already built from.
+  `/oauth/start` also answers 400, before the person signs in, to a return to
+  the code page on its own hostname that lacks the exact entry, an S256
+  `code_challenge`, or a `state` the page shows. That check matches the
+  hostname on any port, so an app of your own that serves `/auth/code` on
+  identity's hostname at another port (a local development setup, say) now
+  needs the same exact entry, challenge and hex state, or another path. Leave the page out unless an
+  app needs it. A person persuaded to sign in through someone else's start URL
+  and hand over the code gives away their account (see `docs/oauth.md`).
+- `/oauth/start` now answers 400 to a `code_challenge_method` other than
+  `S256`, to either parameter without the other, and to a malformed challenge.
+  It used to ignore them.
+
+Embedders: `oauth.IssueHostedStateToken` takes the app's challenge after the
+CSRF token. `service.Repository.ConsumeOAuthOneTimeCode` takes the challenge
+after the code hash, and a custom repository must consume only on an equal
+challenge (the conformance suite checks it).
+
 ## Next — export log lines to an OpenTelemetry collector (additive)
 
 The `identity` command can send its log lines to an OTLP/HTTP collector beside

@@ -993,18 +993,18 @@ func (r *Repo) CreateOAuthOneTimeCode(_ context.Context, rec *service.OAuthOneTi
 }
 
 // ConsumeOAuthOneTimeCode atomically marks an unconsumed, unexpired
-// code consumed and returns its record. The mutex held across
-// read+check+write makes this CAS trivially correct for the in-process
-// driver: any second caller (or an expired code) returns
-// ErrOAuthCodeInvalid.
-func (r *Repo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, atMs int64) (*service.OAuthOneTimeCodeRecord, error) {
+// code bound to codeChallenge consumed and returns its record. The mutex
+// held across read+check+write makes this CAS trivially correct for the
+// in-process driver: any second caller, an expired code, or another
+// challenge returns ErrOAuthCodeInvalid.
+func (r *Repo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash, codeChallenge string, atMs int64) (*service.OAuthOneTimeCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.oauthOneTimeCodes {
 		if c.CodeHash != codeHash {
 			continue
 		}
-		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || c.CodeChallenge != codeChallenge {
 			return nil, service.ErrOAuthCodeInvalid
 		}
 		c.ConsumedAt = atMs

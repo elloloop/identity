@@ -978,14 +978,14 @@ func (r *fakeRepo) CreateOAuthOneTimeCode(_ context.Context, rec *OAuthOneTimeCo
 	return id, nil
 }
 
-func (r *fakeRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, atMs int64) (*OAuthOneTimeCodeRecord, error) {
+func (r *fakeRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash, codeChallenge string, atMs int64) (*OAuthOneTimeCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.oauthOneTimeCodes {
 		if c.CodeHash != codeHash {
 			continue
 		}
-		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || c.CodeChallenge != codeChallenge {
 			return nil, ErrOAuthCodeInvalid
 		}
 		c.ConsumedAt = atMs

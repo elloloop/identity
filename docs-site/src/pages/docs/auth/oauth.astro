@@ -493,8 +493,8 @@ message NativeOAuthLoginResponse {
   <p>
     On top of the headless RPCs above, identity also exposes a fully
     server-owned OAuth flow that handles the provider redirects and
-    callbacks for you. Two plain HTTP routes (not Connect-RPC) drive
-    it — the browser is 302-redirected through them:
+    callbacks for you. Plain HTTP routes (not Connect-RPC) drive
+    it — the browser is 302-redirected through the first two:
   </p>
   <ul>
     <li>
@@ -509,13 +509,18 @@ message NativeOAuthLoginResponse {
       (<code>OAuthOneTimeCode</code>, 60s TTL), and 302-redirects to
       <code>return_to?code=&lt;otc&gt;</code>.
     </li>
+    <li>
+      <code>GET /auth/code</code> — optional, for apps that cannot take the
+      redirect: shows a PKCE-bound code for the person to paste (see
+      <a href="#hosted-code-page">the code page</a>).
+    </li>
   </ul>
   <p>
     The SPA then exchanges the one-time code for tokens via the
     <code>RedeemOAuthCode</code> RPC. No token material is persisted at
-    rest — only the user id is stored alongside the
-    <code>code_hash</code>, so a leaked code store is useless after the
-    60s window or a single redeem.
+    rest — only the user id, and the app's PKCE challenge when it sent
+    one, are stored alongside the <code>code_hash</code>, so a leaked code
+    store is useless after the 60s window or a single redeem.
   </p>
 
   <h3 id="hosted-callback-errors">Callback errors</h3>
@@ -596,7 +601,9 @@ message NativeOAuthLoginResponse {
     <code>&lt;identity-origin&gt;/oauth/callback/&lt;provider&gt;</code>,
     so you configure it once per provider and reuse it across all your
     SPA origins (which appear only in the <code>return_to</code>
-    allowlist, not at the provider).
+    allowlist, not at the provider). Identity's own
+    <a href="#hosted-code-page">code page</a> is the one exception: an
+    entry that covers it does not enable it; only an exact entry does.
   </p>
   <h4>Preview deployments: one-label wildcard entries</h4>
   <p>
@@ -681,5 +688,98 @@ function signInErrorMessage(code: string): string {
     fragment-token or cookie, why <code>return_to</code> is a separate
     signed artifact rather than a state-token claim, and why the
     allowlist is fail-closed).
+  </p>
+
+  <h3 id="hosted-app-pkce">Binding the code to your app with PKCE</h3>
+  <p>
+    An app can bind the one-time code to itself with its own PKCE pair
+    (RFC 7636). Send <code>code_challenge=&lt;S256 challenge&gt;</code> and
+    <code>code_challenge_method=S256</code> to <code>/oauth/start</code>,
+    and redeem with <code>RedeemOAuthCode</code>, passing the verifier in
+    its <code>code_verifier</code> field (<code>codeVerifier</code> in the
+    TypeScript client).
+    The code then redeems only with that verifier, and a wrong or missing
+    verifier spends nothing. <code>/oauth/start</code> answers 400 to
+    <code>plain</code>, to either parameter without the other, and to a
+    challenge that is not 43 base64url characters. Without a challenge,
+    redeem without a verifier, as before.
+  </p>
+
+  <h3 id="hosted-code-page">Apps that cannot take the redirect: the code page</h3>
+  <p>
+    A CLI on a remote server cannot receive the callback's redirect, because
+    the browser that signs in runs on the person's own machine. Such an app
+    names identity's code page,
+    <code>&lt;identity-origin&gt;/auth/code?state=&lt;app-state&gt;</code>, as
+    <code>return_to</code> and sends a PKCE challenge. The callback lands on
+    the page, which shows <code>&lt;code&gt;#&lt;app-state&gt;</code> with a
+    copy button. The person pastes it into the app, which checks the state is
+    its own and redeems with its verifier.
+  </p>
+  <Code code={`# The app prints this URL for the person to open in a browser
+# on the machine they are typing at.
+https://auth.example.com/oauth/start/google
+  ?return_to=https%3A%2F%2Fauth.example.com%2Fauth%2Fcode%3Fstate%3D<app-state>
+  &code_challenge=<base64url(SHA-256(verifier))>
+  &code_challenge_method=S256
+
+# The person pastes back <code>#<app-state>. The app checks <app-state> and calls
+RedeemOAuthCode { code: "<code>", code_verifier: "<verifier>" }`} lang="text" />
+  <p>
+    The code lasts a minute, so the page suits an app the person can paste
+    into from the browser's machine, such as a terminal with an SSH session
+    to the server. A device with nothing to paste into, such as a TV, needs
+    the device authorization grant (RFC 8628), which identity does not
+    offer. Build the start URL at <code>/oauth/start/{`{provider}`}</code>
+    yourself, with <code>project_key</code> when the provider is shared from
+    the hub. The hosted sign-in page (<code>/auth/</code>) does not carry a
+    challenge to its provider links, and password sign-in issues no
+    one-time code. Treat the start URL as sensitive, since it carries the
+    app's challenge and state, and after the redeem show the person which
+    account signed in.
+  </p>
+  <p>
+    The code page's protection is only as strong as the app's verifier.
+    Generate a fresh <code>code_verifier</code> for every sign-in from at
+    least 32 random octets from a cryptographically secure generator,
+    base64url-encoded (RFC 7636 §4.1). Identity checks its alphabet and
+    length but cannot check its randomness, and a wrong verifier leaves the
+    code unspent. Read the pasted value from an interactive prompt or
+    standard input rather than a command-line argument, where a shell may
+    treat <code>#</code> specially, and split it on the last
+    <code>#</code>.
+  </p>
+  <p>
+    The page shows only codes minted for a sign-in that sent a challenge, so
+    any code it shows is useless without the app's verifier. It shows the
+    app's <code>state</code> only when it is 16-64 lowercase hex characters,
+    and echoes nothing else from its URL. It shows a refused sign-in as a
+    fixed message, and answers with <code>no-store</code>,
+    <code>no-referrer</code> and a nonce-only Content-Security-Policy.
+  </p>
+  <p>
+    It is served while the hosted flow is enabled, and it is opt-in by name,
+    host by host. It shows a code only where an allowlist entry names it
+    exactly for the scheme and host the request reached (as
+    <code>X-Forwarded-Proto</code> and <code>X-Forwarded-Host</code> report
+    them); anywhere else it answers 404 and shows no code, whichever host
+    the sign-in started on. An origin, prefix or wildcard entry that covers
+    the page does not enable it. For example:
+    <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com,https://auth.example.com/auth/code</code>.
+  </p>
+  <p>
+    So that the app hears of a mistake before the person signs in,
+    <code>/oauth/start</code> answers 400 to a return to the code page on its
+    own hostname unless it names exactly <code>/auth/code</code>, an
+    allowlist entry names the page exactly, the app sent a challenge, and the
+    state is one the page shows.
+  </p>
+  <p>
+    PKCE stops anyone who sees a code from using it. It does not stop
+    whoever started the sign-in, because they hold the verifier. A person
+    talked into signing in through someone else's start URL and handing over
+    the code gives away their account. That is the consent-phishing risk of
+    every copy-and-paste or device-code sign-in. The page warns against it.
+    Leave the page off where no app needs it.
   </p>
 </DocsLayout>

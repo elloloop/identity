@@ -108,8 +108,10 @@ func (h *IdentityHandler) NativeOAuthLogin(
 
 // RedeemOAuthCode exchanges the single-use one-time code from the
 // hosted OAuth callback redirect for a backend-issued token pair. The
-// code is consumed atomically; a replay or expired code surfaces as
-// CodeUnauthenticated.
+// code is consumed atomically; a replay, an expired code, or a
+// code_verifier that does not match the code's challenge surfaces as
+// CodeUnauthenticated, and a malformed code_verifier as
+// CodeInvalidArgument.
 func (h *IdentityHandler) RedeemOAuthCode(
 	ctx context.Context,
 	req *connect.Request[identitypb.RedeemOAuthCodeRequest],
@@ -117,7 +119,7 @@ func (h *IdentityHandler) RedeemOAuthCode(
 	ipAddr := clientIP(req.Header())
 	userAgent := clientUserAgent(req.Header())
 
-	result, err := h.auth.RedeemOAuthCode(ctx, req.Msg.Code, ipAddr, userAgent)
+	result, err := h.auth.RedeemOAuthCode(ctx, req.Msg.Code, req.Msg.CodeVerifier, ipAddr, userAgent)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

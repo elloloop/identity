@@ -138,6 +138,26 @@ func (a ReturnAllowlist) Allows(returnTo string) bool {
 	return false
 }
 
+// AllowsExactly reports whether an exact entry names returnTo's origin and
+// its path: not a wildcard, and not an origin or a path prefix that merely
+// covers it. A page an operator must opt into by name, such as the hosted
+// code page, is admitted only this way. A trailing slash on the entry, and
+// "." and ".." segments in returnTo, do not change the path compared.
+func (a ReturnAllowlist) AllowsExactly(returnTo string) bool {
+	returnURL, ok := parseReturnURL(returnTo)
+	if !ok {
+		return false
+	}
+	returnPath := path.Clean(returnURL.Path)
+	for _, e := range a.entries {
+		if e.pattern == nil && e.url.Path != "" && e.url.Path != "/" &&
+			sameReturnOrigin(e.url, returnURL) && path.Clean(e.url.Path) == returnPath {
+			return true
+		}
+	}
+	return false
+}
+
 // parseReturnURL parses an absolute http(s) URL without userinfo. A URL
 // containing a backslash is refused outright: browsers treat "\" as "/" in an
 // http(s) URL, so "/auth/..\x" would pass a "/auth" prefix check here and

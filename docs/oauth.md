@@ -183,6 +183,16 @@ Browser                 identity                       Provider
 3. **`RedeemOAuthCode{code}`** (Connect RPC) — the SPA exchanges the
    one-time code for `{user, access_token, refresh_token, expires_in}`.
 
+An app may also bind the one-time code to itself with its own PKCE pair
+(RFC 7636): it sends `code_challenge=<S256 challenge>` and
+`code_challenge_method=S256` to `/oauth/start`, and redeems with
+`RedeemOAuthCode{code, code_verifier}`. The challenge rides in the signed
+state token beside identity's own provider verifier and is stored with the
+code. `/oauth/start` answers 400 to any other pair: `plain`, a method without
+a challenge, a challenge without `S256`, or a challenge that is not 43
+base64url characters. An app that sends no challenge redeems without a
+verifier, exactly as before.
+
 ### Callback errors
 
 A callback without a trusted `return_to` answers `400` on the identity origin,
@@ -276,14 +286,129 @@ is still enforced server-side on every login attempt.)
   button's `/oauth/start` link and scopes its password RPCs with the
   `X-Project-Key` header. An unknown `project_key` is rejected with 401.
 
+### Apps that cannot take the redirect: the code page (`/auth/code`)
+
+A CLI on a remote server cannot receive the callback's redirect: the browser
+that signs in runs on the person's own machine, not on the server. Such an
+app names identity's own code page as `return_to` and binds the sign-in with
+PKCE:
+
+```
+https://auth.example.com/oauth/start/google
+  ?return_to=https%3A%2F%2Fauth.example.com%2Fauth%2Fcode%3Fstate%3D<app-state>
+  &code_challenge=<S256(verifier)>&code_challenge_method=S256
+```
+
+1. The app prints that URL. The person opens it in a browser on the machine
+   they are typing at, and signs in.
+2. The callback lands on `/auth/code?state=<app-state>&code=<otc>`. The page
+   shows `<otc>#<app-state>` with a copy button, a warning to paste it only
+   into the app where the sign-in started, and how long it lasts. As it loads,
+   it removes the code from the address bar and the tab's back/forward
+   history.
+3. The person pastes the value into the app. The app checks that the part
+   after `#` is the state it generated (so a value from an earlier attempt is
+   told apart), then redeems with `RedeemOAuthCode{code, code_verifier}`.
+4. The app shows which account signed in, so a person who pasted someone
+   else's code notices.
+
+**The verifier must be random.** A code the page shows is only as safe as
+the app's verifier: identity checks its alphabet and length but cannot
+check its randomness, and a wrong verifier leaves the code unspent. Generate
+a fresh `code_verifier` for every sign-in from at least 32 random octets from
+a cryptographically secure generator, base64url-encoded (RFC 7636 §4.1).
+Read the pasted value from an interactive prompt or standard input, not a
+command-line argument (a shell may treat `#` specially), and split it on the
+last `#`.
+
+The paste has to happen within the one-time code's TTL (a minute), so the
+page suits an app the person can paste into from the browser's machine, such
+as a terminal with an SSH session to the server. It does not suit a device
+with no input to paste into, such as a TV: that needs the device
+authorization grant (RFC 8628), which identity does not offer. This is a
+copy-and-paste handover, with no polling and no user code to type.
+
+**Start at `/oauth/start/{provider}`.** The app builds the start URL itself,
+as above, with `project_key` when the provider is shared from the hub. The
+hosted sign-in page (`/auth/`) does not carry a `code_challenge` to its
+provider links, so it cannot start a sign-in that returns to the code page.
+Password sign-in issues no one-time code and cannot use the code page. Treat
+the start URL as sensitive: it carries the app's challenge and state.
+
+**The page is opt-in by name, host by host.** On a host whose allowlist entry
+does not name it exactly, the page shows no code: it answers 404 with a fixed
+message. An origin, a path prefix such as `https://auth.example.com/auth`, or
+a wildcard that covers the page does not enable it. The page checks this
+itself, against the scheme and host the request reached (as
+`X-Forwarded-Proto` and `X-Forwarded-Host` report them, the same values the
+provider redirect URI is built from), so it holds whichever host the sign-in
+started on and however `return_to` spelled the page's host.
+
+**What `/oauth/start` checks.** So that an app learns of a mistake before the
+person signs in, a `return_to` naming the code page on the hostname the
+request reached (on any port, after surrounding whitespace is trimmed) is
+refused with 400 unless:
+
+- it names the page as exactly `/auth/code`, with no trailing slash or dot
+  segments;
+- an allowlist entry names the page exactly;
+- the app sent an S256 `code_challenge`;
+- any `state` is 16-64 lowercase hex characters.
+
+A sign-in that starts on one host this server serves and returns to the code
+page on another is not refused at `/oauth/start`. The page there still shows
+a code only if its own host's entry names it, the code is bound and the state
+is hex.
+
+**What the page shows.** Where it is enabled, the page shows only a code
+minted for a sign-in that sent a `code_challenge`. A code it shows is useless
+without the app's verifier, so in a screen share, a proxy log or synced
+browser history it grants nothing. A code minted without a challenge is never shown. A refused
+sign-in (`?error=`) is shown as a fixed message per
+[callback error](#callback-errors). The page echoes nothing else from its URL.
+`state` is shown only when it is 16-64 lowercase hex characters, an alphabet
+in which no one can write a message on identity's origin. Anything else gets a
+fixed explanation and 400. The page answers with `Cache-Control: no-store`,
+`Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and a nonce-only
+Content-Security-Policy.
+
+**What PKCE does not protect against.** The binding stops anyone who *sees* a
+code from using it. It does not stop someone who *started* the sign-in. That
+person holds the verifier. If they persuade someone to open their start URL,
+sign in, and send them the code from the page, they get that person's
+account. This is the same consent-phishing risk as any copy-and-paste or
+device-code sign-in. The page's warning (paste it only into the app where you
+started signing in, and never give it to anyone who asks) is the only
+mitigation. Enable the page only for apps that need it. Do not enable it on a
+deployment whose users may be asked for codes by someone else, such as
+support staff.
+
+The page is served only while the hosted flow is enabled. To enable it, add
+the page to the allowlist exactly, on each public origin it should show codes
+on:
+
+```bash
+-e GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com,https://auth.example.com/auth/code
+```
+
+A pasted code is consumed by the same one-time-code rules below, so it works
+once and within the code's TTL; the app asks the person to sign in again
+after that.
+
 ### The one-time code
 
 - Opaque, single-use, ~60s TTL.
-- Only its SHA-256 hash is stored, bound to the user id. **No token
-  material is persisted** — the token pair is freshly minted on redeem.
+- Only its SHA-256 hash is stored, bound to the user id and to the app's
+  PKCE challenge when it sent one. **No token material is persisted** — the
+  token pair is freshly minted on redeem.
 - Redeeming consumes the code atomically (single winner across
-  replicas). A replay, an expired code, or an unknown code returns
-  `Unauthenticated`.
+  replicas). A replay, an expired code, an unknown code, or a
+  `code_verifier` that does not match the code's challenge returns
+  `Unauthenticated`. A missing verifier for a bound code and a verifier for an
+  unbound one are mismatches too (RFC 9700's downgrade check). A mismatch
+  spends nothing, so the app holding the verifier can still redeem. A
+  `code_verifier` that is not 43-128 characters of `A-Z a-z 0-9 - . _ ~`
+  returns `InvalidArgument`.
 - Chosen over URL-fragment tokens (leak to history / `Referer`) and
   httpOnly cookies (awkward cross-origin and unusable for native).
 

@@ -301,7 +301,7 @@ func productAgeIssuingPaths() []productAgePath {
 			svc, repo, _ := newProductAgeSvc(t)
 			seedUserAged(t, repo, "user@example.com", dobMs)
 			begin, err := svc.BeginHostedOAuth(ctx, "google",
-				"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-1", "")
+				"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-1", "", "")
 			require.NoError(t, err)
 			// The callback completes an OAuthLogin internally (and discards its
 			// tokens), so the guardrail can refuse here — before a one-time code
@@ -312,7 +312,7 @@ func productAgeIssuingPaths() []productAgePath {
 			if err != nil {
 				return err
 			}
-			_, err = svc.RedeemOAuthCode(ctx, cb.Code, "1.2.3.4", "agent")
+			_, err = svc.RedeemOAuthCode(ctx, cb.Code, "", "1.2.3.4", "agent")
 			return err
 		}},
 		{"passkey_login", func(t *testing.T, ctx context.Context, dobMs int64) error {

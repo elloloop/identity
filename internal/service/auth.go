@@ -499,13 +499,17 @@ type Repository interface {
 	// the single-winner compare-and-set: it marks the row consumed
 	// (consumed_at = atMs) only if it is currently unconsumed
 	// (consumed_at == 0) AND not yet expired (expires_at > atMs),
-	// returning the bound record on success. A replay, an expired code,
-	// or a code that does not exist all return ErrOAuthCodeInvalid so
-	// the redeem endpoint cannot be probed. Like ConsumeQrLoginSession
+	// returning the bound record on success. It also requires the stored
+	// code challenge to equal codeChallenge, so a code bound to a PKCE
+	// challenge is consumed only with that challenge and a code bound to
+	// none only with "". A mismatch consumes nothing and leaves the code
+	// redeemable. A replay, an expired code, a code that does not exist
+	// and a challenge mismatch all return ErrOAuthCodeInvalid so the
+	// redeem endpoint cannot be probed. Like ConsumeQrLoginSession
 	// this is the serialization point across replicas: exactly one of N
 	// concurrent redeems of the same code wins.
 	CreateOAuthOneTimeCode(ctx context.Context, r *OAuthOneTimeCodeRecord) (string, error)
-	ConsumeOAuthOneTimeCode(ctx context.Context, codeHash string, atMs int64) (*OAuthOneTimeCodeRecord, error)
+	ConsumeOAuthOneTimeCode(ctx context.Context, codeHash, codeChallenge string, atMs int64) (*OAuthOneTimeCodeRecord, error)
 
 	// Native ID-token replay cache (bearer-token single-use).
 	//
@@ -970,12 +974,15 @@ type QrLoginSessionRecord struct {
 // it (consumed_at CAS from 0) and mints a fresh token pair. Only the
 // user id is persisted — no token material is stored at rest.
 type OAuthOneTimeCodeRecord struct {
-	NodeID     string
-	CodeHash   string
-	UserID     string
-	ExpiresAt  int64 // epoch ms
-	CreatedAt  int64 // epoch ms
-	ConsumedAt int64 // epoch ms; 0 = unconsumed
+	NodeID   string
+	CodeHash string
+	UserID   string
+	// CodeChallenge is the S256 PKCE challenge the app sent to
+	// /oauth/start, or "" when it sent none.
+	CodeChallenge string
+	ExpiresAt     int64 // epoch ms
+	CreatedAt     int64 // epoch ms
+	ConsumedAt    int64 // epoch ms; 0 = unconsumed
 }
 
 // NativeTokenRedemptionRecord is the replay-cache row that makes a native ID

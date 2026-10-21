@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -159,6 +160,101 @@ func TestHostedOAuth_EndToEnd(t *testing.T) {
 		t.Fatal("second RedeemOAuthCode succeeded, want Unauthenticated")
 	} else if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Fatalf("replay redeem code = %v, want Unauthenticated", connect.CodeOf(err))
+	}
+}
+
+// TestHostedOAuth_CodePageEndToEnd walks the flow for an app that cannot
+// take the redirect (a CLI on another machine): it names identity's code page
+// as return_to and sends a PKCE challenge, the person copies code#state from
+// the page, and the app redeems the code with its verifier.
+//
+//	GET /oauth/start/google?return_to=<identity>/auth/code?state=..&code_challenge=..
+//	GET /oauth/callback/google -> 302 to <identity>/auth/code?state=..&code=<otc>
+//	GET /auth/code -> page showing <otc>#<state>
+//	RedeemOAuthCode{code, code_verifier} -> tokens
+func TestHostedOAuth_CodePageEndToEnd(t *testing.T) {
+	t.Parallel()
+
+	const (
+		codePage  = "https://auth.example.test/auth/code"
+		verifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+		challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+		appState  = "c11c0de5ea5e0001"
+	)
+	h := StartServer(
+		t,
+		WithOAuthRegistry(newHostedRegistry()),
+		WithConfig(func(c *config.Config) { c.OAuthAllowedReturnURLs = codePage }),
+	)
+	client := noRedirectClient(h)
+	ctx := context.Background()
+	// The browser reaches this server as the code page's host, through a
+	// proxy that terminates TLS.
+	viaProxy := func(target string) *http.Request {
+		req, err := http.NewRequest(http.MethodGet, h.BaseURL+target, nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Host", "auth.example.test")
+		return req
+	}
+
+	startResp, err := client.Do(viaProxy("/oauth/start/google?" + url.Values{
+		"return_to":             {codePage + "?state=" + appState},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode()))
+	if err != nil {
+		t.Fatalf("GET /oauth/start: %v", err)
+	}
+	_ = startResp.Body.Close()
+	if startResp.StatusCode != http.StatusFound {
+		t.Fatalf("start status = %d, want 302", startResp.StatusCode)
+	}
+	authLoc, err := url.Parse(startResp.Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("parse provider redirect: %v", err)
+	}
+
+	req := viaProxy("/oauth/callback/google?state=" + url.QueryEscape(authLoc.Query().Get("state")) + "&code=auth-code-xyz")
+	for _, c := range startResp.Cookies() {
+		req.AddCookie(c)
+	}
+	cbResp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /oauth/callback: %v", err)
+	}
+	_ = cbResp.Body.Close()
+	landed, err := url.Parse(cbResp.Header.Get("Location"))
+	if cbResp.StatusCode != http.StatusFound || err != nil || !strings.HasPrefix(landed.String(), codePage+"?") {
+		t.Fatalf("callback = %d to %q, want the code page", cbResp.StatusCode, cbResp.Header.Get("Location"))
+	}
+	code := landed.Query().Get("code")
+
+	// The person's browser loads the page.
+	pageResp, err := client.Do(viaProxy(landed.RequestURI()))
+	if err != nil {
+		t.Fatalf("GET /auth/code: %v", err)
+	}
+	page, err := io.ReadAll(pageResp.Body)
+	_ = pageResp.Body.Close()
+	if err != nil || pageResp.StatusCode != http.StatusOK || !strings.Contains(string(page), code+"#"+appState) {
+		t.Fatalf("code page = %d, want it to show code#state:\n%s", pageResp.StatusCode, page)
+	}
+
+	// The code alone is not enough.
+	if _, err := h.Client.RedeemOAuthCode(ctx, connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: code})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("redeem without the verifier: got %v, want Unauthenticated", err)
+	}
+	redeem, err := h.Client.RedeemOAuthCode(ctx, connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: code, CodeVerifier: verifier}))
+	if err != nil {
+		t.Fatalf("RedeemOAuthCode with the verifier: %v", err)
+	}
+	authed := h.AuthedClient(redeem.Msg.AccessToken)
+	cur, err := authed.GetCurrentUser(ctx, connect.NewRequest(&identitypb.GetCurrentUserRequest{}))
+	if err != nil || cur.Msg.GetUser().GetEmail() != "hosted@example.com" {
+		t.Fatalf("GetCurrentUser after redeem: %v", err)
 	}
 }
 

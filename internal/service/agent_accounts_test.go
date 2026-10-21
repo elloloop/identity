@@ -1120,7 +1120,7 @@ func TestAgentSignIn_HostedOAuth(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := f.svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "", "")
 	require.NoError(t, err)
 	_, err = f.svc.CompleteHostedOAuth(ctx, "google",
 		fakeOAuthCode("hosted-agent@example.com", "Hosted", "", "google"),
