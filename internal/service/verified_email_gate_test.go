@@ -77,13 +77,13 @@ func TestRefreshToken_VerifiedEmailGate(t *testing.T) {
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
 
 	for range 2 {
-		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
+		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "", "")
 		require.ErrorIs(t, err, ErrEmailVerificationRequired, "a retry is refused the same way, not as a replay")
 	}
 	assert.Equal(t, 1, writer.countByEventTypeAndDetail("login_failure", "gate", "refresh"))
 
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": time.Now().UnixMilli()}))
-	_, access, rotated, err := svc.RefreshToken(ctx, refresh, "", "")
+	_, access, rotated, err := svc.RefreshToken(ctx, refresh, "", "", "")
 	require.NoError(t, err)
 	assert.NotEmpty(t, access)
 	assert.NotEqual(t, refresh, rotated)
@@ -100,7 +100,7 @@ func TestRefreshToken_VerifiedEmailGateSendsNoEmail(t *testing.T) {
 
 	svc.cfg.AuthRequireVerifiedEmail = true
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
-	_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, refresh, "", "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Empty(t, rec.Sent())
 }
@@ -196,7 +196,7 @@ func TestIssueTokensWithSessionStart_VerifiedEmailBackstop(t *testing.T) {
 	svc.cfg.AuthRequireVerifiedEmail = true
 	user := seedUser(repo, "backstop@example.com", "", StatusActive)
 
-	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", sessionGateSignIn, 0, 0)
+	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", sessionGateSignIn, 0, 0, "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Zero(t, writer.countByEventType("login_failure"))
 }
@@ -236,7 +236,7 @@ func TestRefreshToken_VerifiedEmailGateRunsBeforeTheDOBStep(t *testing.T) {
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
 
 	for range 2 {
-		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
+		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "", "")
 		require.ErrorIs(t, err, ErrEmailVerificationRequired)
 		require.False(t, errors.Is(err, ErrDOBRequired))
 	}

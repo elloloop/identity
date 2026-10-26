@@ -24,11 +24,16 @@ type lpDomainStore struct {
 	err    error
 }
 
-func (f *lpDomainStore) GetDomainByName(_ context.Context, projectID, domain string) (*Domain, error) {
+// GetVerifiedDomain mirrors the postgres store: only a verified row answers.
+func (f *lpDomainStore) GetVerifiedDomain(_ context.Context, projectID, domain string) (*Domain, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return f.byName[projectID+"|"+domain], nil
+	d := f.byName[projectID+"|"+domain]
+	if d == nil || d.Status != DomainStatusVerified {
+		return nil, nil
+	}
+	return d, nil
 }
 
 // The remaining DomainStore methods are unused by enforcement; they satisfy
@@ -47,9 +52,15 @@ func (f *lpDomainStore) ListDomainsByTenant(context.Context, string, string) ([]
 	return nil, nil
 }
 
+func (f *lpDomainStore) RecordDomainAttempt(context.Context, DomainAttempt) error { return nil }
+
 type lpTenantStore struct {
 	byID map[string]*Tenant // key: projectID + "|" + tenantID
 	err  error
+}
+
+func (f *lpTenantStore) GetTenantStatus(context.Context, string, string) (string, error) {
+	return "", nil
 }
 
 func (f *lpTenantStore) GetTenant(_ context.Context, projectID, tenantID string) (*Tenant, error) {
@@ -64,9 +75,13 @@ func (f *lpTenantStore) GetTenantByPrimaryDomain(context.Context, string, string
 	return nil, nil
 }
 
-func (f *lpTenantStore) SetTenantStatus(context.Context, string, string, string) error { return nil }
+func (f *lpTenantStore) ClaimLatentTenant(context.Context, string, string) error { return nil }
 
 func (f *lpTenantStore) ListTenants(context.Context, string) ([]*Tenant, error) { return nil, nil }
+
+func (f *lpTenantStore) CreateOwnedTenant(context.Context, OwnedTenantRequest) (*Tenant, *TenantMembership, error) {
+	return nil, nil, nil
+}
 
 type fakePolicyStore struct {
 	byTenant map[string]*LoginPolicy // key: projectID + "|" + tenantID

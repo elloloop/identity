@@ -82,7 +82,7 @@ func TestAccessToken_EmailVerifiedAfterVerification(t *testing.T) {
 
 	// A refresh token minted before the proof also picks it up: refresh
 	// reads the claim from the account, not from the session it rotates.
-	_, access, _, err := svc.RefreshToken(ctx, signup.RefreshToken, "", "")
+	_, access, _, err := svc.RefreshToken(ctx, signup.RefreshToken, "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, true, tokenPayload(t, access)["email_verified"])
 }
@@ -105,7 +105,7 @@ func TestAccessToken_EmailVerifiedFollowsAnEmailChangeOnRefresh(t *testing.T) {
 		"email": "after@example.com", "email_verified": false, "email_verified_at": int64(0),
 	}))
 
-	_, access, _, err := svc.RefreshToken(ctx, refresh, "", "")
+	_, access, _, err := svc.RefreshToken(ctx, refresh, "", "", "")
 	require.NoError(t, err)
 	claims := tokenPayload(t, access)
 	assert.Equal(t, "after@example.com", claims["email"])

@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -12,8 +11,8 @@ import (
 
 // AutoFormStore is the postgres implementation of the tenant
 // auto-formation primitive. It writes across the tenants, domains and
-// tenant_memberships tables and is the one place that enforces
-// "one tenant per email domain within a project" under concurrency.
+// tenant_memberships tables and is the one place that decides, under
+// concurrency, which tenant an email domain's signups join.
 
 var _ service.TenantAutoFormStore = (*AutoFormStore)(nil)
 
@@ -54,11 +53,12 @@ func (s *AutoFormStore) EnsureTenantForDomain(ctx context.Context, projectID, do
 	return tenantID, nil
 }
 
-// findOrCreateTenant returns the tenant id for an email domain within a
-// project, creating a latent tenant + its domain in one transaction when
-// none exists. On a lost race (the domain's unique index rejects the
-// insert) the whole transaction rolls back — undoing the tenant insert too,
-// so no orphan is left — and the winner's tenant is re-read.
+// findOrCreateTenant returns the tenant an email domain's signups join
+// within a project, creating a latent tenant + its domain in one
+// transaction when there is none. Registering a domain does not make it a
+// tenant's, so a claim another tenant has not proven is never joined: see
+// tenantIDForDomain. The domain's auto-formation lock (autoformLockKey)
+// serialises that choice, so concurrent signers converge on one tenant.
 func (s *AutoFormStore) findOrCreateTenant(ctx context.Context, projectID, domain string) (string, error) {
 	if id, err := s.tenantIDForDomain(ctx, s.pool, projectID, domain); err != nil || id != "" {
 		return id, err
@@ -69,6 +69,14 @@ func (s *AutoFormStore) findOrCreateTenant(ctx context.Context, projectID, domai
 		return "", wrapPgErr("EnsureTenantForDomain", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := lockXact(ctx, tx, "EnsureTenantForDomain", autoformLockKey(projectID, domain)); err != nil {
+		return "", err
+	}
+	// A signer that held the lock before us may have formed the tenant.
+	if id, err := s.tenantIDForDomain(ctx, tx, projectID, domain); err != nil || id != "" {
+		return id, err
+	}
 
 	now := nowMs()
 	tenantID := newID()
@@ -82,31 +90,17 @@ func (s *AutoFormStore) findOrCreateTenant(ctx context.Context, projectID, domai
 	); err != nil {
 		return "", wrapPgErr("EnsureTenantForDomain(tenant)", err)
 	}
-
-	_, err = tx.Exec(
+	if _, err := tx.Exec(
 		ctx, `
 		INSERT INTO domains (
 			id, project_id, tenant_id, domain, verification_method, status,
 			verified_at_ms, created_at_ms, updated_at_ms
 		) VALUES ($1, $2, $3, $4, 'email', 'pending', 0, $5, $5)`,
 		newID(), projectID, tenantID, domain, now,
-	)
-	if err != nil {
-		// A concurrent signer already created this domain (and its tenant).
-		// Roll back — which also undoes our tenant insert, leaving no orphan
-		// — and resolve the winner's tenant outside the aborted tx.
-		if errors.Is(wrapPgErr("", err), service.ErrAlreadyExists) {
-			_ = tx.Rollback(ctx)
-			return s.tenantIDForDomain(ctx, s.pool, projectID, domain)
-		}
+	); err != nil {
 		return "", wrapPgErr("EnsureTenantForDomain(domain)", err)
 	}
-
 	if err := tx.Commit(ctx); err != nil {
-		// A commit-time unique violation is the same lost race.
-		if errors.Is(wrapPgErr("", err), service.ErrAlreadyExists) {
-			return s.tenantIDForDomain(ctx, s.pool, projectID, domain)
-		}
 		return "", wrapPgErr("EnsureTenantForDomain(commit)", err)
 	}
 	return tenantID, nil
@@ -117,28 +111,63 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// tenantIDForDomain returns the tenant id mapped to a domain within a
-// project (case-insensitive), or "" when none.
+// tenantIDForDomain returns the tenant a domain's signups join within a
+// project (case-insensitive), or "" when none: the tenant that verified the
+// domain, else the latent tenant auto-formation made for it. A claim that is
+// only registered — anyone's pending or failed dns_txt row, or an email row
+// on a tenant that is not auto-formed — is ignored, so registering a domain
+// one does not own captures none of its signups. Nor does a suspended
+// tenant, whether it verified the domain or auto-formation made it: the
+// verified row counts only on a claimed tenant and the email row only on a
+// latent one, so the domain's next signup forms a new latent tenant, which
+// nobody can select until it is claimed by verifying the domain.
+//
+// The two reads are separate so each is one index probe and one tenant read:
+// the verified row through the verified-domain unique index (0045), the
+// oldest email row through the partial index 0046 adds. Neither scans the
+// domain's claims.
 func (s *AutoFormStore) tenantIDForDomain(ctx context.Context, q querier, projectID, domain string) (string, error) {
 	var id string
 	err := q.QueryRow(
 		ctx, `
-		SELECT tenant_id FROM domains
-		WHERE project_id = $1 AND lower(domain) = lower($2)`,
+		SELECT d.tenant_id FROM domains d
+		JOIN tenants t ON t.id = d.tenant_id AND t.project_id = d.project_id
+		WHERE d.project_id = $1 AND lower(d.domain) = lower($2) AND d.status = 'verified'
+		  AND t.status = 'claimed'`,
+		projectID, domain,
+	).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !noRows(err) {
+		return "", wrapPgErr("tenantIDForDomain(verified)", err)
+	}
+	err = q.QueryRow(
+		ctx, `
+		SELECT d.tenant_id FROM domains d
+		JOIN tenants t ON t.id = d.tenant_id AND t.project_id = d.project_id
+		WHERE d.project_id = $1 AND lower(d.domain) = lower($2)
+		  AND d.verification_method = 'email'
+		  AND t.status = 'latent' AND t.created_by = ''
+		ORDER BY d.created_at_ms, d.id
+		LIMIT 1`,
 		projectID, domain,
 	).Scan(&id)
 	if noRows(err) {
 		return "", nil
 	}
 	if err != nil {
-		return "", wrapPgErr("tenantIDForDomain", err)
+		return "", wrapPgErr("tenantIDForDomain(latent)", err)
 	}
 	return id, nil
 }
 
-// upsertDerivedMembership records (or refreshes) a domain-derived,
-// active membership for the user in the tenant. Idempotent on
-// (project, tenant, user).
+// upsertDerivedMembership records a domain-derived, active membership for
+// the user in the tenant, or refreshes the one they hold. Idempotent on
+// (project, tenant, user). A held membership keeps its source: one the user
+// created, was invited to or was added to carries more than their email's
+// domain does, and relabelling it "domain" would hold it to the
+// verified-email rule again.
 func (s *AutoFormStore) upsertDerivedMembership(ctx context.Context, projectID, tenantID, userID string) error {
 	now := nowMs()
 	_, err := s.pool.Exec(
@@ -148,7 +177,7 @@ func (s *AutoFormStore) upsertDerivedMembership(ctx context.Context, projectID, 
 			created_at_ms, updated_at_ms
 		) VALUES ($1, $2, $3, $4, 'domain', 'member', 'active', $5, $5)
 		ON CONFLICT (project_id, tenant_id, user_id) DO UPDATE SET
-			source = 'domain', updated_at_ms = EXCLUDED.updated_at_ms`,
+			updated_at_ms = EXCLUDED.updated_at_ms`,
 		newID(), projectID, tenantID, userID, now,
 	)
 	if err != nil {

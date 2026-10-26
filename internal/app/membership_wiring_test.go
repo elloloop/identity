@@ -32,7 +32,7 @@ func TestBuildMembershipService(t *testing.T) {
 		MembershipStore: &stubMembershipStore{},
 		TenantStore:     &stubTenantStore{},
 	}
-	if got := buildMembershipService(full, users, mailer, logger); got == nil {
+	if got := buildMembershipService(full, users, mailer, nil, logger); got == nil {
 		t.Fatal("all stores present: want non-nil MembershipService, got nil")
 	}
 
@@ -44,7 +44,7 @@ func TestBuildMembershipService(t *testing.T) {
 	} {
 		d := full
 		mutate(&d)
-		if got := buildMembershipService(d, users, mailer, logger); got != nil {
+		if got := buildMembershipService(d, users, mailer, nil, logger); got != nil {
 			t.Errorf("%s: want nil MembershipService, got non-nil", name)
 		}
 	}

@@ -156,6 +156,101 @@ const DefaultAgentsMaxPerOwner = 25
 // one listing page, so ListAgents always returns every agent an owner has.
 const MaxAgentsMaxPerOwner = 500
 
+// DefaultSelfServiceTenantsMaxPerUser is how many tenants one user may create
+// through CreateTenant in each window when
+// GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER is unset or 0.
+const DefaultSelfServiceTenantsMaxPerUser = 10
+
+// MaxSelfServiceTenantsMaxPerUser is the largest
+// GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER accepted. Each tenant is a row
+// set an operator may have to clean up, so the cap stays far below anything
+// a person creates by hand.
+const MaxSelfServiceTenantsMaxPerUser = 1000
+
+// DefaultSelfServiceTenantsWindowSeconds is the window the per-user creation
+// limit counts over when GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS is unset
+// or 0 (one day).
+const DefaultSelfServiceTenantsWindowSeconds = 86400
+
+// MaxSelfServiceTenantsWindowSeconds is the longest window accepted (30
+// days).
+const MaxSelfServiceTenantsWindowSeconds = 30 * 86400
+
+// DefaultTenantInvitationMaxPerTenant is how many invitations one tenant may
+// send in each window when GATEWAY_TENANT_INVITATION_MAX_PER_TENANT is unset
+// or 0.
+const DefaultTenantInvitationMaxPerTenant = 100
+
+// MaxTenantInvitationMaxPerTenant is the largest
+// GATEWAY_TENANT_INVITATION_MAX_PER_TENANT accepted. Every invitation is an
+// email sent from the deployment's sender, so the cap stays bounded even for a
+// tenant onboarding a large organisation.
+const MaxTenantInvitationMaxPerTenant = 100000
+
+// DefaultTenantInvitationWindowSeconds is the window the per-tenant invitation
+// limit counts over when GATEWAY_TENANT_INVITATION_WINDOW_SECONDS is unset or
+// 0 (one day).
+const DefaultTenantInvitationWindowSeconds = 86400
+
+// MaxTenantInvitationWindowSeconds is the longest window accepted (30 days).
+const MaxTenantInvitationWindowSeconds = 30 * 86400
+
+// DefaultTenantInvitationResendCooldownSeconds is how long a tenant must wait
+// before inviting the same address again when
+// GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS is unset or 0.
+const DefaultTenantInvitationResendCooldownSeconds = 300
+
+// MaxTenantInvitationResendCooldownSeconds is the longest resend cooldown
+// accepted (one day).
+const MaxTenantInvitationResendCooldownSeconds = 86400
+
+// DefaultTenantInvitationMaxPerInviter is how many invitations one user may
+// send from all their tenants together in each invitation window when
+// GATEWAY_TENANT_INVITATION_MAX_PER_INVITER is unset or 0: the per-tenant
+// default, so creating more tenants sends no more email.
+const DefaultTenantInvitationMaxPerInviter = 100
+
+// MaxTenantInvitationMaxPerInviter is the largest
+// GATEWAY_TENANT_INVITATION_MAX_PER_INVITER accepted.
+const MaxTenantInvitationMaxPerInviter = 100000
+
+// DefaultTenantInvitationMaxPerRecipient is how many invitations one tenant
+// may send one address in each invitation window when
+// GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT is unset or 0.
+const DefaultTenantInvitationMaxPerRecipient = 10
+
+// MaxTenantInvitationMaxPerRecipient is the largest
+// GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT accepted.
+const MaxTenantInvitationMaxPerRecipient = 1000
+
+// DefaultTenantDomainAttemptsMaxPerTenant is how many domain registrations
+// and verifications one tenant may make in each window when
+// GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT is unset or 0.
+const DefaultTenantDomainAttemptsMaxPerTenant = 100
+
+// MaxTenantDomainAttemptsMaxPerTenant is the largest
+// GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT accepted. Each verification
+// looks up a DNS name the tenant chose, so the cap stays bounded.
+const MaxTenantDomainAttemptsMaxPerTenant = 10000
+
+// DefaultTenantDomainAttemptsWindowSeconds is the window the per-tenant
+// domain-attempt cap counts over when
+// GATEWAY_TENANT_DOMAIN_ATTEMPTS_WINDOW_SECONDS is unset or 0 (one day).
+const DefaultTenantDomainAttemptsWindowSeconds = 86400
+
+// MaxTenantDomainAttemptsWindowSeconds is the longest window accepted (30
+// days).
+const MaxTenantDomainAttemptsWindowSeconds = 30 * 86400
+
+// DefaultTenantStatusCacheTTLSeconds is how long the access-token check may
+// serve a selected tenant's status from its in-process cache when
+// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS is unset.
+const DefaultTenantStatusCacheTTLSeconds = 30
+
+// MaxTenantStatusCacheTTLSeconds is the longest tenant-status cache TTL
+// accepted: suspending a tenant ends its tokens within it.
+const MaxTenantStatusCacheTTLSeconds = 300
+
 // DefaultAuditRetentionDays is the default audit-log retention window in days
 // (730 = 24 months). Audit events record security-relevant actions together
 // with the caller's IP address and user-agent, so retaining them forever holds
@@ -1062,6 +1157,42 @@ type Config struct {
 	// reissued. Longer than an email token because joining a team is a less
 	// time-sensitive action than a password reset.
 	TenantInvitationExpirySeconds int // GATEWAY_TENANT_INVITATION_EXPIRY_SECONDS (default 604800 = 7 days)
+	// TenantInvitationMaxPerTenant caps how many invitations one tenant may
+	// send in each window, from 0 to 100000 (0 selects the default, 100); an
+	// invitation past it is RESOURCE_EXHAUSTED. Driven by
+	// GATEWAY_TENANT_INVITATION_MAX_PER_TENANT.
+	TenantInvitationMaxPerTenant int
+	// TenantInvitationWindowSeconds is the window the per-tenant invitation
+	// limit counts over, from 0 to 2592000 (0 selects the default, 86400).
+	// Driven by GATEWAY_TENANT_INVITATION_WINDOW_SECONDS.
+	TenantInvitationWindowSeconds int
+	// TenantInvitationResendCooldownSeconds is how long a tenant must wait
+	// before inviting the same address again, from 0 to 86400 (0 selects the
+	// default, 300); an invitation inside it is RESOURCE_EXHAUSTED. Driven by
+	// GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS.
+	TenantInvitationResendCooldownSeconds int
+	// TenantInvitationMaxPerInviter caps how many invitations one user may
+	// send from all their tenants together in each invitation window, from 0
+	// to 100000 (0 selects the default, 100); an invitation past it is
+	// RESOURCE_EXHAUSTED. Driven by GATEWAY_TENANT_INVITATION_MAX_PER_INVITER.
+	TenantInvitationMaxPerInviter int
+	// TenantInvitationMaxPerRecipient caps how many invitations one tenant
+	// may send one address in each invitation window, from 0 to 1000 (0
+	// selects the default, 10); an invitation past it is RESOURCE_EXHAUSTED.
+	// Each tenant has its own count, so one tenant reaching it never blocks
+	// another's invitations to the address. Driven by
+	// GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT.
+	TenantInvitationMaxPerRecipient int
+	// TenantDomainAttemptsMaxPerTenant caps how many CreateDomain and
+	// VerifyDomain calls one tenant may make together in each window, from 0
+	// to 10000 (0 selects the default, 100); a call past it is
+	// RESOURCE_EXHAUSTED. Driven by
+	// GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT.
+	TenantDomainAttemptsMaxPerTenant int
+	// TenantDomainAttemptsWindowSeconds is the window the per-tenant domain
+	// cap counts over, from 0 to 2592000 (0 selects the default, 86400).
+	// Driven by GATEWAY_TENANT_DOMAIN_ATTEMPTS_WINDOW_SECONDS.
+	TenantDomainAttemptsWindowSeconds int
 
 	// Per-recipient cooldown between transactional email sends. Defeats
 	// inbox-bombing via repeated unauthenticated RequestPasswordReset /
@@ -1130,6 +1261,14 @@ type Config struct {
 	RateLimitAssurancePerIP int
 	// RateLimitPhonePerIP is the per-IP cap per window on RequestPhoneVerification.
 	RateLimitPhonePerIP int
+	// RateLimitInvitationPerIP is the per-IP cap per window on
+	// CreateTenantInvitation, where every admitted call sends an email. 0
+	// disables it. Driven by GATEWAY_RATE_LIMIT_INVITATION_PER_IP.
+	RateLimitInvitationPerIP int
+	// RateLimitDomainPerIP is the per-IP cap per window on CreateDomain and
+	// VerifyDomain together, where a verification looks up a DNS name the
+	// caller chose. 0 disables it. Driven by GATEWAY_RATE_LIMIT_DOMAIN_PER_IP.
+	RateLimitDomainPerIP int
 	// RateLimitIDVPerIP is the per-IP cap per window on BeginIdentityVerification,
 	// where every admitted call opens a paid provider session.
 	RateLimitIDVPerIP int
@@ -1264,6 +1403,36 @@ type Config struct {
 	// 0 to 500 (0 selects the default, 25); creating or transferring an
 	// agent past it is refused. Driven by GATEWAY_AGENTS_MAX_PER_OWNER.
 	AgentsMaxPerOwner int
+
+	// SelfServiceTenantsEnabled lets a signed-in user of the DEFAULT project
+	// create a tenant they own (CreateTenant). Other projects turn it on with
+	// tenants.self_service in their own config_json. Default OFF. Driven by
+	// GATEWAY_SELF_SERVICE_TENANTS_ENABLED.
+	SelfServiceTenantsEnabled bool
+	// SelfServiceTenantsMaxPerUser caps how many tenants one user may create
+	// in each window, from 0 to 1000 (0 selects the default, 10); a creation
+	// past it is RESOURCE_EXHAUSTED. Deployment-wide. Driven by
+	// GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER.
+	SelfServiceTenantsMaxPerUser int
+	// SelfServiceTenantsWindowSeconds is the window the per-user creation
+	// limit counts over, from 0 to 2592000 (0 selects the default, 86400).
+	// Driven by GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS.
+	SelfServiceTenantsWindowSeconds int
+	// TenantSelectionEnabled lets RefreshToken put a tenant the caller may
+	// act in into the new access token's "tenant" claim, on postgres only;
+	// turn it on only once every replica runs this release and every
+	// resource server that checks "tenant" accepts a selected one. Default
+	// off. The tenant is RefreshTokenRequest.tenant_id. An older replica
+	// answers a selected tenant's token with 401, and turning this off again
+	// rejects every outstanding one at once. Driven by
+	// GATEWAY_TENANT_SELECTION_ENABLED.
+	TenantSelectionEnabled bool
+	// TenantStatusCacheTTLSeconds bounds how long the access-token check may
+	// serve a selected tenant's status from its in-process cache, from 0 to
+	// 300 (default 30), where 0 reads the tenant on every request that
+	// carries a selected-tenant token. Suspending a tenant ends its tokens
+	// within this long. Driven by GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
+	TenantStatusCacheTTLSeconds int
 
 	// AuditRetentionDays is the audit-log retention window in days: on each tick
 	// the background sweeper deletes audit events whose occurred-at instant is
@@ -1590,6 +1759,14 @@ func loadFromEnv() *Config {
 		SignupEmailCooldownSeconds:    envInt("GATEWAY_SIGNUP_EMAIL_COOLDOWN_SECONDS", 60),
 		AuditQueueSize:                envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),
 
+		TenantInvitationMaxPerTenant:          envInt("GATEWAY_TENANT_INVITATION_MAX_PER_TENANT", DefaultTenantInvitationMaxPerTenant),
+		TenantInvitationWindowSeconds:         envInt("GATEWAY_TENANT_INVITATION_WINDOW_SECONDS", DefaultTenantInvitationWindowSeconds),
+		TenantInvitationResendCooldownSeconds: envInt("GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS", DefaultTenantInvitationResendCooldownSeconds),
+		TenantInvitationMaxPerInviter:         envInt("GATEWAY_TENANT_INVITATION_MAX_PER_INVITER", DefaultTenantInvitationMaxPerInviter),
+		TenantInvitationMaxPerRecipient:       envInt("GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT", DefaultTenantInvitationMaxPerRecipient),
+		TenantDomainAttemptsMaxPerTenant:      envInt("GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT", DefaultTenantDomainAttemptsMaxPerTenant),
+		TenantDomainAttemptsWindowSeconds:     envInt("GATEWAY_TENANT_DOMAIN_ATTEMPTS_WINDOW_SECONDS", DefaultTenantDomainAttemptsWindowSeconds),
+
 		HTTPMaxBodyBytes: int64(envInt("GATEWAY_HTTP_MAX_BODY_BYTES", 1<<20)),
 
 		TrustedProxies: envStr(
@@ -1606,6 +1783,8 @@ func loadFromEnv() *Config {
 		RateLimitPasswordlessPerIP:  envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
 		RateLimitAssurancePerIP:     envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
 		RateLimitPhonePerIP:         envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
+		RateLimitInvitationPerIP:    envInt("GATEWAY_RATE_LIMIT_INVITATION_PER_IP", 20),
+		RateLimitDomainPerIP:        envInt("GATEWAY_RATE_LIMIT_DOMAIN_PER_IP", 20),
 		RateLimitIDVPerIP:           envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
 		RateLimitBootstrapPerIP:     envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 		RateLimitDirectoryPerIP:     envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
@@ -1645,6 +1824,11 @@ func loadFromEnv() *Config {
 		AgentOAuthRefreshIdleSeconds:      envInt("GATEWAY_AGENT_OAUTH_REFRESH_IDLE_SECONDS", DefaultAgentOAuthRefreshIdleSeconds),
 		AgentOAuthResourceCredentialsJSON: envStr("GATEWAY_AGENT_OAUTH_RESOURCE_CREDENTIALS_JSON", ""),
 		AgentsMaxPerOwner:                 envInt("GATEWAY_AGENTS_MAX_PER_OWNER", DefaultAgentsMaxPerOwner),
+		SelfServiceTenantsEnabled:         envBool("GATEWAY_SELF_SERVICE_TENANTS_ENABLED", false),
+		SelfServiceTenantsMaxPerUser:      envInt("GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", DefaultSelfServiceTenantsMaxPerUser),
+		SelfServiceTenantsWindowSeconds:   envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
+		TenantSelectionEnabled:            envBool("GATEWAY_TENANT_SELECTION_ENABLED", false),
+		TenantStatusCacheTTLSeconds:       envInt("GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS", DefaultTenantStatusCacheTTLSeconds),
 		AuditRetentionDays:                envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
 
 		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
@@ -2124,6 +2308,9 @@ func (c *Config) Validate() error {
 			"config: GATEWAY_AGENTS_MAX_PER_OWNER=%d must be between 0 and %d (0 selects the default, %d)",
 			c.AgentsMaxPerOwner, MaxAgentsMaxPerOwner, DefaultAgentsMaxPerOwner,
 		)
+	}
+	if err := c.validateTenantGovernance(); err != nil {
+		return err
 	}
 	if c.AccountMergeReauthMaxAgeSeconds < 0 || c.AccountMergeReauthMaxAgeSeconds > MaxAccountMergeReauthMaxAgeSeconds {
 		return fmt.Errorf(
@@ -2775,6 +2962,143 @@ func (c *Config) AgentsPerOwnerLimit() int {
 	default:
 		return c.AgentsMaxPerOwner
 	}
+}
+
+// boundedSetting is a configured value as a getter answers it: def when the
+// value is unset (0 or below), ceiling when it is above ceiling. Validate
+// refuses an out-of-range value at boot; a Config built in code without it
+// still never gets more than the cap.
+func boundedSetting(v, def, ceiling int) int {
+	switch {
+	case v <= 0:
+		return def
+	case v > ceiling:
+		return ceiling
+	default:
+		return v
+	}
+}
+
+// SelfServiceTenantsLimit is how many tenants one user may create in each
+// window: the configured value, or the default when unset.
+func (c *Config) SelfServiceTenantsLimit() int {
+	return boundedSetting(c.SelfServiceTenantsMaxPerUser, DefaultSelfServiceTenantsMaxPerUser, MaxSelfServiceTenantsMaxPerUser)
+}
+
+// SelfServiceTenantsWindow is the window the per-user creation limit counts
+// over: the configured value, or the default when unset.
+func (c *Config) SelfServiceTenantsWindow() time.Duration {
+	return time.Duration(boundedSetting(c.SelfServiceTenantsWindowSeconds,
+		DefaultSelfServiceTenantsWindowSeconds, MaxSelfServiceTenantsWindowSeconds)) * time.Second
+}
+
+// TenantInvitationLimit is how many invitations one tenant may send in each
+// window: the configured value, or the default when unset.
+func (c *Config) TenantInvitationLimit() int {
+	return boundedSetting(c.TenantInvitationMaxPerTenant, DefaultTenantInvitationMaxPerTenant, MaxTenantInvitationMaxPerTenant)
+}
+
+// TenantInvitationWindow is the window the invitation limits count over: the
+// configured value, or the default when unset.
+func (c *Config) TenantInvitationWindow() time.Duration {
+	return time.Duration(boundedSetting(c.TenantInvitationWindowSeconds,
+		DefaultTenantInvitationWindowSeconds, MaxTenantInvitationWindowSeconds)) * time.Second
+}
+
+// TenantInvitationResendCooldown is how long a tenant must wait before
+// inviting the same address again: the configured value, or the default when
+// unset.
+func (c *Config) TenantInvitationResendCooldown() time.Duration {
+	return time.Duration(boundedSetting(c.TenantInvitationResendCooldownSeconds,
+		DefaultTenantInvitationResendCooldownSeconds, MaxTenantInvitationResendCooldownSeconds)) * time.Second
+}
+
+// TenantInvitationInviterLimit is how many invitations one user may send from
+// all their tenants together in each invitation window: the configured
+// value, or the default when unset.
+func (c *Config) TenantInvitationInviterLimit() int {
+	return boundedSetting(c.TenantInvitationMaxPerInviter, DefaultTenantInvitationMaxPerInviter, MaxTenantInvitationMaxPerInviter)
+}
+
+// TenantInvitationRecipientLimit is how many invitations one tenant may send
+// one address in each invitation window: the configured value, or the
+// default when unset.
+func (c *Config) TenantInvitationRecipientLimit() int {
+	return boundedSetting(c.TenantInvitationMaxPerRecipient, DefaultTenantInvitationMaxPerRecipient, MaxTenantInvitationMaxPerRecipient)
+}
+
+// TenantDomainAttemptsLimit is how many domain registrations and
+// verifications one tenant may make in each window: the configured value, or
+// the default when unset.
+func (c *Config) TenantDomainAttemptsLimit() int {
+	return boundedSetting(c.TenantDomainAttemptsMaxPerTenant, DefaultTenantDomainAttemptsMaxPerTenant, MaxTenantDomainAttemptsMaxPerTenant)
+}
+
+// TenantDomainAttemptsWindow is the window the per-tenant domain-attempt cap
+// counts over: the configured value, or the default when unset.
+func (c *Config) TenantDomainAttemptsWindow() time.Duration {
+	return time.Duration(boundedSetting(c.TenantDomainAttemptsWindowSeconds,
+		DefaultTenantDomainAttemptsWindowSeconds, MaxTenantDomainAttemptsWindowSeconds)) * time.Second
+}
+
+// TenantStatusCacheTTL is how long the access-token check may serve a
+// selected tenant's status from its cache. 0 means strict (read on every
+// request), which a Config built in code gets unless it sets one.
+func (c *Config) TenantStatusCacheTTL() time.Duration {
+	if c.TenantStatusCacheTTLSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(min(c.TenantStatusCacheTTLSeconds, MaxTenantStatusCacheTTLSeconds)) * time.Second
+}
+
+// validateTenantGovernance checks the tenant settings: the limits in range,
+// selection given the default tenant it falls back to, and the features
+// that need the postgres governance stores refused on any other driver,
+// where their RPCs would only answer UNIMPLEMENTED.
+func (c *Config) validateTenantGovernance() error {
+	const noOff = "; the limit cannot be turned off"
+	ranges := []struct {
+		env               string
+		v, ceiling, deflt int
+		note              string
+	}{
+		{"GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", c.SelfServiceTenantsMaxPerUser, MaxSelfServiceTenantsMaxPerUser, DefaultSelfServiceTenantsMaxPerUser, noOff},
+		{"GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", c.SelfServiceTenantsWindowSeconds, MaxSelfServiceTenantsWindowSeconds, DefaultSelfServiceTenantsWindowSeconds, ""},
+		{"GATEWAY_TENANT_INVITATION_MAX_PER_TENANT", c.TenantInvitationMaxPerTenant, MaxTenantInvitationMaxPerTenant, DefaultTenantInvitationMaxPerTenant, noOff},
+		{"GATEWAY_TENANT_INVITATION_WINDOW_SECONDS", c.TenantInvitationWindowSeconds, MaxTenantInvitationWindowSeconds, DefaultTenantInvitationWindowSeconds, ""},
+		{"GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS", c.TenantInvitationResendCooldownSeconds, MaxTenantInvitationResendCooldownSeconds, DefaultTenantInvitationResendCooldownSeconds, "; the cooldown cannot be turned off"},
+		{"GATEWAY_TENANT_INVITATION_MAX_PER_INVITER", c.TenantInvitationMaxPerInviter, MaxTenantInvitationMaxPerInviter, DefaultTenantInvitationMaxPerInviter, ""},
+		{"GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT", c.TenantInvitationMaxPerRecipient, MaxTenantInvitationMaxPerRecipient, DefaultTenantInvitationMaxPerRecipient, ""},
+		{"GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT", c.TenantDomainAttemptsMaxPerTenant, MaxTenantDomainAttemptsMaxPerTenant, DefaultTenantDomainAttemptsMaxPerTenant, ""},
+		{"GATEWAY_TENANT_DOMAIN_ATTEMPTS_WINDOW_SECONDS", c.TenantDomainAttemptsWindowSeconds, MaxTenantDomainAttemptsWindowSeconds, DefaultTenantDomainAttemptsWindowSeconds, ""},
+	}
+	for _, r := range ranges {
+		if r.v < 0 || r.v > r.ceiling {
+			return fmt.Errorf("config: %s=%d must be between 0 and %d (0 selects the default, %d%s)", r.env, r.v, r.ceiling, r.deflt, r.note)
+		}
+	}
+	if c.TenantSelectionEnabled && strings.TrimSpace(c.DefaultTenantID) == "" {
+		return errors.New("config: GATEWAY_TENANT_SELECTION_ENABLED needs GATEWAY_DEFAULT_TENANT_ID, the tenant a token falls back to")
+	}
+	if c.TenantStatusCacheTTLSeconds < 0 || c.TenantStatusCacheTTLSeconds > MaxTenantStatusCacheTTLSeconds {
+		return fmt.Errorf("config: GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS=%d must be between 0 and %d (0 reads the tenant on every request)",
+			c.TenantStatusCacheTTLSeconds, MaxTenantStatusCacheTTLSeconds)
+	}
+	if c.RateLimitInvitationPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_INVITATION_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitInvitationPerIP)
+	}
+	if c.RateLimitDomainPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_DOMAIN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitDomainPerIP)
+	}
+	if c.RepoDriver != "" && c.RepoDriver != "postgres" {
+		if c.SelfServiceTenantsEnabled {
+			return fmt.Errorf("config: GATEWAY_SELF_SERVICE_TENANTS_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
+		}
+		if c.TenantSelectionEnabled {
+			return fmt.Errorf("config: GATEWAY_TENANT_SELECTION_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
+		}
+	}
+	return nil
 }
 
 // AccountMergeReauthMaxAge is how recent the kept account's sign-in must be

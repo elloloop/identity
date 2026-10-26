@@ -233,7 +233,7 @@ func TestRequiredPasswordChange_RevokesExistingSessions(t *testing.T) {
 	earlier, err := repo.FindRefreshTokenByHash(ctx, "earlier-session")
 	require.NoError(t, err)
 	require.Nil(t, earlier, "a session opened before the change is gone")
-	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "203.0.113.10", "agent")
+	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
 	require.NoError(t, err, "the session the change opened survives it")
 }
 

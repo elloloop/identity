@@ -21,8 +21,9 @@ const authUserHeader = "X-Authenticated-User-Id"
 // ── Fakes implementing the exported governance store interfaces ─────────
 
 type connectDomainStore struct {
-	byID     map[string]*service.Domain
-	listResp []*service.Domain
+	byID       map[string]*service.Domain
+	listResp   []*service.Domain
+	attemptErr error
 }
 
 func newConnectDomainStore() *connectDomainStore {
@@ -40,8 +41,13 @@ func (s *connectDomainStore) GetDomain(_ context.Context, _, domainID string) (*
 	return s.byID[domainID], nil
 }
 
-func (s *connectDomainStore) GetDomainByName(_ context.Context, _, _ string) (*service.Domain, error) {
+func (s *connectDomainStore) GetVerifiedDomain(_ context.Context, _, _ string) (*service.Domain, error) {
 	return nil, nil
+}
+
+// RecordDomainAttempt refuses with attemptErr when set, else admits.
+func (s *connectDomainStore) RecordDomainAttempt(context.Context, service.DomainAttempt) error {
+	return s.attemptErr
 }
 
 func (s *connectDomainStore) SetDomainStatus(_ context.Context, _, domainID, status string, _ int64) error {
@@ -57,6 +63,9 @@ func (s *connectDomainStore) ListDomainsByTenant(_ context.Context, _, _ string)
 
 type connectTenantStore struct {
 	tenant *service.Tenant
+	// ownedReq records the last CreateOwnedTenant request; ownedErr fails it.
+	ownedReq *service.OwnedTenantRequest
+	ownedErr error
 }
 
 func (s *connectTenantStore) CreateTenant(context.Context, *service.Tenant) (string, error) {
@@ -67,13 +76,26 @@ func (s *connectTenantStore) GetTenant(_ context.Context, _, _ string) (*service
 	return s.tenant, nil
 }
 
+// GetTenantStatus reads the one tenant the store holds as every id.
+func (s *connectTenantStore) GetTenantStatus(context.Context, string, string) (string, error) {
+	if s.tenant == nil {
+		return "", nil
+	}
+	return s.tenant.Status, nil
+}
+
+// claimedTenantStore holds one claimed tenant, which every id reads as.
+func claimedTenantStore() *connectTenantStore {
+	return &connectTenantStore{tenant: &service.Tenant{ID: "t-1", Status: service.TenantStatusClaimed}}
+}
+
 func (s *connectTenantStore) GetTenantByPrimaryDomain(context.Context, string, string) (*service.Tenant, error) {
 	return nil, nil
 }
 
-func (s *connectTenantStore) SetTenantStatus(_ context.Context, _, _, status string) error {
-	if s.tenant != nil {
-		s.tenant.Status = status
+func (s *connectTenantStore) ClaimLatentTenant(context.Context, string, string) error {
+	if s.tenant != nil && s.tenant.Status == service.TenantStatusLatent {
+		s.tenant.Status = service.TenantStatusClaimed
 	}
 	return nil
 }
@@ -82,15 +104,37 @@ func (s *connectTenantStore) ListTenants(context.Context, string) ([]*service.Te
 	return nil, nil
 }
 
+func (s *connectTenantStore) CreateOwnedTenant(_ context.Context, req service.OwnedTenantRequest) (*service.Tenant, *service.TenantMembership, error) {
+	s.ownedReq = &req
+	if s.ownedErr != nil {
+		return nil, nil, s.ownedErr
+	}
+	t := &service.Tenant{ID: "tenant-new", ProjectID: req.ProjectID, Name: req.Name, Status: service.TenantStatusClaimed, CreatedBy: req.OwnerID}
+	m := &service.TenantMembership{
+		ID: "mem-new", ProjectID: req.ProjectID, TenantID: t.ID, UserID: req.OwnerID,
+		Source: service.MembershipSourceCreated, Role: service.RoleOwner, Status: service.MembershipStatusActive,
+	}
+	return t, m, nil
+}
+
 type connectMembershipStore struct {
 	member   *service.TenantMembership
 	upserted *service.TenantMembership
+	// active is what ListActiveTenantsForUser returns.
+	active []*service.UserTenant
 }
 
 func (s *connectMembershipStore) UpsertMembership(_ context.Context, m *service.TenantMembership) (string, error) {
 	cp := *m
 	s.upserted = &cp
 	return "mem-1", nil
+}
+
+func (s *connectMembershipStore) GrantMembership(_ context.Context, m *service.TenantMembership) (*service.TenantMembership, error) {
+	cp := *m
+	cp.ID = "mem-1"
+	s.upserted = &cp
+	return &cp, nil
 }
 
 func (s *connectMembershipStore) GetMembership(_ context.Context, _, _, _ string) (*service.TenantMembership, error) {
@@ -107,6 +151,19 @@ func (s *connectMembershipStore) ListMembershipsForTenant(context.Context, strin
 
 func (s *connectMembershipStore) RemoveMembership(context.Context, string, string, string) error {
 	return nil
+}
+
+func (s *connectMembershipStore) ListActiveTenantsForUser(context.Context, string, string, string) ([]*service.UserTenant, error) {
+	return s.active, nil
+}
+
+func (s *connectMembershipStore) GetActiveTenantForUser(_ context.Context, _, tenantID, _, _ string) (*service.UserTenant, error) {
+	for _, t := range s.active {
+		if t.TenantID == tenantID {
+			return t, nil
+		}
+	}
+	return nil, nil
 }
 
 // connectFakeResolver satisfies the service package's DNSResolver
@@ -185,7 +242,7 @@ func TestCreateDomain_Handler_ReturnsChallenge(t *testing.T) {
 	members := &connectMembershipStore{member: &service.TenantMembership{
 		Role: service.RoleOwner, Status: service.MembershipStatusActive,
 	}}
-	svc := newDomainSvc(domains, &connectTenantStore{}, members, &connectFakeResolver{})
+	svc := newDomainSvc(domains, claimedTenantStore(), members, &connectFakeResolver{})
 	srv := startDomainServer(t, svc)
 
 	resp, err := srv.client.CreateDomain(context.Background(),
@@ -273,7 +330,7 @@ func TestListTenantDomains_Handler(t *testing.T) {
 	members := &connectMembershipStore{member: &service.TenantMembership{
 		Role: service.RoleAdmin, Status: service.MembershipStatusActive,
 	}}
-	svc := newDomainSvc(domains, &connectTenantStore{}, members, &connectFakeResolver{})
+	svc := newDomainSvc(domains, claimedTenantStore(), members, &connectFakeResolver{})
 	srv := startDomainServer(t, svc)
 
 	resp, err := srv.client.ListTenantDomains(context.Background(),

@@ -30,7 +30,7 @@ func TestRedesign_Membership_InviteAcceptList(t *testing.T) {
 	// The user to be invited signs up first (the redeemer must be an
 	// authenticated account whose email matches the invitation).
 	inviteeEmail := fmt.Sprintf("mem-invitee-%d@example-corp.com", time.Now().UnixNano())
-	invitee := signupMembershipUser(t, h, inviteeEmail)
+	invitee := signupVerifiedUser(t, h, inviteeEmail)
 
 	// Owner invites the user as an admin.
 	created, err := owner.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{

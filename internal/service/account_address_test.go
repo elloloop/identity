@@ -370,7 +370,7 @@ func TestAccountAddress_IssuedOnRefresh(t *testing.T) {
 	// The project configures a domain while the session is live: the next
 	// refresh issues the address without a new sign-in.
 	ctx := accountsScope(t, "accounts.example.com")
-	_, _, _, err = svc.RefreshToken(ctx, login.RefreshToken, "1.2.3.4", "agent")
+	_, _, _, err = svc.RefreshToken(ctx, login.RefreshToken, "", "1.2.3.4", "agent")
 	require.NoError(t, err)
 	u, err := repo.FindUserByEmail(ctx, "early@mail.example.com")
 	require.NoError(t, err)

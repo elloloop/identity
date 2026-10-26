@@ -58,6 +58,7 @@ func TestMembershipStore_Smoke(t *testing.T) {
 		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping membership store smoke test")
 	}
 	runMembershipSmoke(t, dsn)
+	runInvitationLimits(t, dsn)
 }
 
 func runMembershipSmoke(t *testing.T, dsn string) {
@@ -121,7 +122,7 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{
 		ProjectID: projectID, TenantID: tenantID, Email: "new@acme.com",
 		TokenHash: "hash-1", InvitedBy: user1, ExpiresAtMs: nowMs() + 86_400_000,
-	})
+	}, unlimitedInvitations)
 	require.NoError(t, err)
 
 	inv1, err := is.GetInvitationByTokenHash(ctx, projectID, "hash-1")
@@ -135,7 +136,7 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{
 		ProjectID: projectID, TenantID: tenantID, Email: "NEW@acme.com", // case-insensitive match
 		TokenHash: "hash-2", InvitedBy: user1, Role: service.RoleAdmin, ExpiresAtMs: nowMs() + 86_400_000,
-	})
+	}, unlimitedInvitations)
 	require.NoError(t, err)
 
 	old, err := is.GetInvitationByTokenHash(ctx, projectID, "hash-1")
@@ -170,21 +171,123 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{
 		ProjectID: projectID, TenantID: tenantID, Email: "other@acme.com",
 		TokenHash: "hash-3", ExpiresAtMs: nowMs() + 86_400_000,
-	})
+	}, unlimitedInvitations)
 	require.NoError(t, err)
 
 	// Misses + validation.
 	miss, err := is.GetInvitationByTokenHash(ctx, projectID, "no-such")
 	require.NoError(t, err)
 	require.Nil(t, miss)
-	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, TokenHash: "h", ExpiresAtMs: 1})
+	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, TokenHash: "h", ExpiresAtMs: 1}, unlimitedInvitations)
 	require.ErrorIs(t, err, service.ErrInvalidArgument, "missing email")
-	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, Email: "x@y.com", ExpiresAtMs: 1})
+	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, Email: "x@y.com", ExpiresAtMs: 1}, unlimitedInvitations)
 	require.ErrorIs(t, err, service.ErrInvalidArgument, "missing token_hash")
-	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, Email: "x@y.com", TokenHash: "h"})
+	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, Email: "x@y.com", TokenHash: "h"}, unlimitedInvitations)
 	require.ErrorIs(t, err, service.ErrInvalidArgument, "missing expires_at_ms")
 	require.ErrorIs(t, is.SetInvitationStatus(ctx, "", "id", service.InvitationStatusRevoked, 0), service.ErrInvalidArgument)
 }
+
+// runInvitationLimits asserts the per-recipient resend cooldown and the
+// per-tenant cap CreateInvitation applies: a refused create writes nothing
+// and leaves the open invite pending, both count invitations of any status,
+// and each tenant has its own cap.
+func runInvitationLimits(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+	otherTenant, err := (&TenantStore{pool: is.pool}).CreateTenant(ctx, &service.Tenant{
+		ProjectID: projectID, Status: service.TenantStatusClaimed,
+	})
+	require.NoError(t, err)
+
+	now := nowMs()
+	invite := func(tenant, email, tokenHash string, limits service.InvitationLimits) error {
+		t.Helper()
+		_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+			ProjectID: projectID, TenantID: tenant, Email: email,
+			TokenHash: tokenHash, ExpiresAtMs: now + 86_400_000, CreatedAtMs: now,
+		}, limits)
+		return err
+	}
+	count := func(tenant string) int {
+		t.Helper()
+		list, err := is.ListInvitationsForTenant(ctx, projectID, tenant)
+		require.NoError(t, err)
+		return len(list)
+	}
+
+	require.ErrorIs(t, invite(tenantID, "a@acme.com", "lim-0", service.InvitationLimits{}),
+		service.ErrInvalidArgument, "a create must be given a cap")
+
+	cooling := service.InvitationLimits{MaxPerTenant: 10, WindowStartMs: now - 3_600_000, ResendCooldownStartMs: now - 60_000}
+	require.NoError(t, invite(tenantID, "a@acme.com", "lim-1", cooling))
+	require.ErrorIs(t, invite(tenantID, "A@acme.com", "lim-2", cooling), service.ErrInvitationResendTooSoon)
+	open, err := is.GetInvitationByTokenHash(ctx, projectID, "lim-1")
+	require.NoError(t, err)
+	require.Equal(t, service.InvitationStatusPending, open.Status, "a refused resend leaves the open invite pending")
+	require.Equal(t, 1, count(tenantID), "a refused resend writes nothing")
+	require.NoError(t, invite(otherTenant, "a@acme.com", "lim-3", cooling), "the cooldown is per tenant")
+
+	require.NoError(t, is.SetInvitationStatus(ctx, projectID, open.ID, service.InvitationStatusRevoked, 0))
+	require.ErrorIs(t, invite(tenantID, "a@acme.com", "lim-4", cooling), service.ErrInvitationResendTooSoon,
+		"revoking the invitation does not reset the cooldown")
+	cooled := cooling
+	cooled.ResendCooldownStartMs = now + 1
+	require.NoError(t, invite(tenantID, "a@acme.com", "lim-5", cooled), "past the cooldown a resend is accepted")
+
+	capped := service.InvitationLimits{MaxPerTenant: 2, WindowStartMs: now - 3_600_000}
+	require.ErrorIs(t, invite(tenantID, "b@acme.com", "lim-6", capped), service.ErrInvitationLimited,
+		"the revoked invitation still counts toward the cap")
+	require.Equal(t, 2, count(tenantID), "a refused create writes nothing")
+	require.NoError(t, invite(otherTenant, "b@acme.com", "lim-7", capped), "the cap is per tenant")
+	movedOn := capped
+	movedOn.WindowStartMs = now + 1
+	require.NoError(t, invite(tenantID, "b@acme.com", "lim-8", movedOn), "invitations before the window do not count")
+}
+
+// TestInvitationStore_ConcurrentCreatesRespectTheCap: creates for one tenant
+// are serialized, so however many race for the last places under the cap,
+// exactly that many succeed.
+func TestInvitationStore_ConcurrentCreatesRespectTheCap(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping concurrent invitation cap test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+
+	const racers, limit = 8, 3
+	limits := service.InvitationLimits{MaxPerTenant: limit, WindowStartMs: nowMs() - 3_600_000}
+	errs := make(chan error, racers)
+	for i := range racers {
+		go func() {
+			_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+				ProjectID: projectID, TenantID: tenantID, Email: fmt.Sprintf("racer-%d@acme.com", i),
+				TokenHash: fmt.Sprintf("cap-race-%d", i), ExpiresAtMs: nowMs() + 86_400_000,
+			}, limits)
+			errs <- err
+		}()
+	}
+	refused := 0
+	for range racers {
+		if err := <-errs; err != nil {
+			require.ErrorIs(t, err, service.ErrInvitationLimited)
+			refused++
+		}
+	}
+	require.Equal(t, racers-limit, refused)
+	list, err := is.ListInvitationsForTenant(ctx, projectID, tenantID)
+	require.NoError(t, err)
+	require.Len(t, list, limit, "exactly the cap's worth of invitations exist")
+}
+
+// unlimitedInvitations holds a create to a cap no test reaches and no
+// resend cooldown, for the tests that are about something else.
+var unlimitedInvitations = service.InvitationLimits{MaxPerTenant: 1000}
 
 // TestInvitationStore_OneOpenInviteUnderFoldEmail: the store compares the
 // canonical address the service gives it under service.FoldEmail, so an
@@ -207,7 +310,7 @@ func TestInvitationStore_OneOpenInviteUnderFoldEmail(t *testing.T) {
 		_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
 			ProjectID: projectID, TenantID: tenantID, Email: email,
 			TokenHash: tokenHash, ExpiresAtMs: nowMs() + 86_400_000,
-		})
+		}, unlimitedInvitations)
 		require.NoError(t, err)
 	}
 	status := func(tokenHash string) string {
@@ -245,7 +348,7 @@ func TestInvitationStore_ConcurrentCreatesLeaveOneOpenInvite(t *testing.T) {
 			_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
 				ProjectID: projectID, TenantID: tenantID, Email: "race@acme.com",
 				TokenHash: fmt.Sprintf("race-%d", i), ExpiresAtMs: nowMs() + 86_400_000,
-			})
+			}, unlimitedInvitations)
 			errs <- err
 		}()
 	}
@@ -262,4 +365,233 @@ func TestInvitationStore_ConcurrentCreatesLeaveOneOpenInvite(t *testing.T) {
 	}
 	require.Len(t, list, racers)
 	require.Equal(t, 1, pending, "one open invite per mailbox, however the creates interleave")
+}
+
+// TestMembershipStore_GrantNeverLowersARole: a grant makes an active member
+// at its role, promotes a lower one, re-activates an ended one at the grant's
+// role, and leaves an active membership at that role or above unchanged —
+// even against a concurrent grant of a lower role.
+func TestMembershipStore_GrantNeverLowersARole(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping membership grant test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	ms, _, projectID, tenantID, user1, user2 := newMembershipFixture(ctx, t, dsn)
+
+	grant := func(userID, role, source string) *service.TenantMembership {
+		t.Helper()
+		m, err := ms.GrantMembership(ctx, &service.TenantMembership{
+			ProjectID: projectID, TenantID: tenantID, UserID: userID, Role: role, Source: source,
+		})
+		require.NoError(t, err)
+		return m
+	}
+
+	m := grant(user1, service.RoleOwner, service.MembershipSourceAdded)
+	require.Equal(t, service.RoleOwner, m.Role)
+	require.Equal(t, service.MembershipStatusActive, m.Status)
+
+	kept := grant(user1, service.RoleMember, service.MembershipSourceInvited)
+	require.Equal(t, service.RoleOwner, kept.Role, "a lower grant never demotes")
+	require.Equal(t, service.MembershipSourceAdded, kept.Source, "nor rewrites the membership")
+	require.Equal(t, m.ID, kept.ID)
+	require.Equal(t, service.RoleOwner, grant(user1, service.RoleOwner, service.MembershipSourceInvited).Role)
+
+	require.Equal(t, service.RoleMember, grant(user2, service.RoleMember, service.MembershipSourceInvited).Role)
+	promoted := grant(user2, service.RoleAdmin, service.MembershipSourceInvited)
+	require.Equal(t, service.RoleAdmin, promoted.Role, "a higher grant promotes")
+
+	_, err := ms.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: service.RoleOwner,
+		Source: service.MembershipSourceAdded, Status: service.MembershipStatusInactive,
+	})
+	require.NoError(t, err)
+	rejoined := grant(user2, service.RoleMember, service.MembershipSourceInvited)
+	require.Equal(t, service.MembershipStatusActive, rejoined.Status)
+	require.Equal(t, service.RoleMember, rejoined.Role, "an ended membership comes back at the grant's role")
+
+	_, err = ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: projectID, TenantID: tenantID})
+	require.ErrorIs(t, err, service.ErrInvalidArgument)
+	_, err = ms.GrantMembership(ctx, nil)
+	require.Error(t, err)
+
+	// However an owner grant and member grants interleave, the owner stays.
+	require.NoError(t, ms.RemoveMembership(ctx, projectID, tenantID, user2))
+	const racers = 8
+	errs := make(chan error, racers)
+	for i := range racers {
+		role := service.RoleMember
+		if i == racers/2 {
+			role = service.RoleOwner
+		}
+		go func() {
+			_, err := ms.GrantMembership(ctx, &service.TenantMembership{
+				ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: role, Source: service.MembershipSourceInvited,
+			})
+			errs <- err
+		}()
+	}
+	for range racers {
+		require.NoError(t, <-errs)
+	}
+	final, err := ms.GetMembership(ctx, projectID, tenantID, user2)
+	require.NoError(t, err)
+	require.Equal(t, service.RoleOwner, final.Role)
+}
+
+// TestMembershipStore_GrantReplacesADomainSource: a membership that came
+// only from the email's domain counts once that email is verified, so a
+// grant at its role or below keeps the role but takes the grant's source;
+// a grant never relabels any other source, and the domain's own refresh
+// leaves a domain membership as it is.
+func TestMembershipStore_GrantReplacesADomainSource(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping membership grant source test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	ms, _, projectID, tenantID, user1, user2 := newMembershipFixture(ctx, t, dsn)
+
+	for _, userID := range []string{user1, user2} {
+		_, err := ms.UpsertMembership(ctx, &service.TenantMembership{
+			ProjectID: projectID, TenantID: tenantID, UserID: userID, Role: service.RoleAdmin,
+			Source: service.MembershipSourceDomain, Status: service.MembershipStatusActive,
+		})
+		require.NoError(t, err)
+	}
+	before, err := ms.GetMembership(ctx, projectID, tenantID, user1)
+	require.NoError(t, err)
+
+	invited, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user1, Role: service.RoleMember, Source: service.MembershipSourceInvited,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.MembershipSourceInvited, invited.Source, "an accepted invitation replaces the domain source")
+	require.Equal(t, service.RoleAdmin, invited.Role, "and keeps the higher role")
+	require.Equal(t, service.MembershipStatusActive, invited.Status)
+	require.Equal(t, before.ID, invited.ID)
+
+	again, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user1, Role: service.RoleMember, Source: service.MembershipSourceAdded,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.MembershipSourceInvited, again.Source, "a grant relabels no source but the domain's")
+
+	domain, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: service.RoleMember, Source: service.MembershipSourceDomain,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.MembershipSourceDomain, domain.Source)
+	require.Equal(t, service.RoleAdmin, domain.Role)
+}
+
+// TestMembershipStore_GrantKeepsAnyOtherSource: a grant that reactivates a
+// membership, or raises its role, keeps a source other than the domain's: a
+// removed creator invited back is still the one who created the tenant.
+func TestMembershipStore_GrantKeepsAnyOtherSource(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping membership grant source test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	ms, _, projectID, tenantID, user1, user2 := newMembershipFixture(ctx, t, dsn)
+
+	_, err := ms.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user1, Role: service.RoleOwner,
+		Source: service.MembershipSourceCreated, Status: service.MembershipStatusInactive,
+	})
+	require.NoError(t, err)
+	back, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user1, Role: service.RoleMember, Source: service.MembershipSourceInvited,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.MembershipStatusActive, back.Status, "the grant reactivates the removed owner")
+	require.Equal(t, service.RoleMember, back.Role, "at the granted role: an inactive membership holds none")
+	require.Equal(t, service.MembershipSourceCreated, back.Source, "and keeps the source")
+
+	_, err = ms.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: service.RoleMember,
+		Source: service.MembershipSourceInvited, Status: service.MembershipStatusActive,
+	})
+	require.NoError(t, err)
+	raised, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: service.RoleAdmin, Source: service.MembershipSourceAdded,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.RoleAdmin, raised.Role)
+	require.Equal(t, service.MembershipSourceInvited, raised.Source, "a raise keeps the source too")
+}
+
+// TestInvitationStore_InviterAndRecipientLimits: the per-inviter cap counts
+// one person's invitations from every tenant, the per-recipient cap one
+// tenant's invitations to one address, and a zero cap is off.
+func TestInvitationStore_InviterAndRecipientLimits(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping invitation sender limits test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantA, user1, user2 := newMembershipFixture(ctx, t, dsn)
+	newTenant := func() string {
+		t.Helper()
+		id, err := (&TenantStore{pool: is.pool}).CreateTenant(ctx, &service.Tenant{ProjectID: projectID, Status: service.TenantStatusClaimed})
+		require.NoError(t, err)
+		return id
+	}
+	tenantB, tenantC := newTenant(), newTenant()
+
+	now := nowMs()
+	n := 0
+	invite := func(tenant, inviter, email string, limits service.InvitationLimits) error {
+		t.Helper()
+		n++
+		_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+			ProjectID: projectID, TenantID: tenant, Email: email, InvitedBy: inviter,
+			TokenHash: fmt.Sprintf("sender-%d", n), ExpiresAtMs: now + 86_400_000, CreatedAtMs: now,
+		}, limits)
+		return err
+	}
+	window := now - 3_600_000
+
+	perInviter := service.InvitationLimits{MaxPerTenant: 100, WindowStartMs: window, MaxPerInviter: 2}
+	require.NoError(t, invite(tenantA, user1, "i1@acme.com", perInviter))
+	require.NoError(t, invite(tenantB, user1, "i2@acme.com", perInviter))
+	require.ErrorIs(t, invite(tenantC, user1, "i3@acme.com", perInviter), service.ErrInviterLimited,
+		"the cap spans the inviter's tenants")
+	require.NoError(t, invite(tenantC, user2, "i3@acme.com", perInviter), "each inviter has their own cap")
+	later := perInviter
+	later.WindowStartMs = now + 1
+	require.NoError(t, invite(tenantC, user1, "i4@acme.com", later), "invitations before the window do not count")
+	off := perInviter
+	off.MaxPerInviter = 0
+	require.NoError(t, invite(tenantC, user1, "i5@acme.com", off), "a zero cap is off")
+
+	perRecipient := service.InvitationLimits{MaxPerTenant: 100, WindowStartMs: window, MaxPerRecipient: 2}
+	require.NoError(t, invite(tenantA, user1, "r@acme.com", perRecipient))
+	require.NoError(t, invite(tenantA, user2, "R@acme.com", perRecipient))
+	require.ErrorIs(t, invite(tenantA, user2, "r@ACME.com", perRecipient), service.ErrInvitationRecipientLimited,
+		"the cap spans the tenant's inviters and the address's case")
+	require.NoError(t, invite(tenantA, user2, "other@acme.com", perRecipient), "each address has its own cap")
+	list, err := is.ListInvitationsForTenant(ctx, projectID, tenantA)
+	require.NoError(t, err)
+	for _, inv := range list {
+		require.NotEqual(t, "r@ACME.com", inv.Email, "a refused invitation writes nothing")
+	}
+
+	// Tenant A using up its cap for the address leaves every other tenant's.
+	require.NoError(t, invite(tenantB, user1, "r@acme.com", perRecipient),
+		"another tenant still invites the address tenant A can no longer")
+	require.NoError(t, invite(tenantB, user2, "R@acme.com", perRecipient))
+	require.ErrorIs(t, invite(tenantB, user2, "r@ACME.com", perRecipient), service.ErrInvitationRecipientLimited,
+		"and has a cap of its own")
+	require.NoError(t, invite(tenantC, user2, "r@acme.com", perRecipient))
 }

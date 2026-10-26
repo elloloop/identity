@@ -759,6 +759,14 @@ func (b *grpcBridge) RemoveTenantMember(ctx context.Context, in *identitypb.Remo
 	return invoke(ctx, b, in, b.h.RemoveTenantMember)
 }
 
+func (b *grpcBridge) CreateTenant(ctx context.Context, in *identitypb.CreateTenantRequest) (*identitypb.CreateTenantResponse, error) {
+	return invoke(ctx, b, in, b.h.CreateTenant)
+}
+
+func (b *grpcBridge) ListMyTenants(ctx context.Context, in *identitypb.ListMyTenantsRequest) (*identitypb.ListMyTenantsResponse, error) {
+	return invoke(ctx, b, in, b.h.ListMyTenants)
+}
+
 func (b *grpcBridge) RequestPhoneVerification(ctx context.Context, in *identitypb.RequestPhoneVerificationRequest) (*identitypb.RequestPhoneVerificationResponse, error) {
 	return invoke(ctx, b, in, b.h.RequestPhoneVerification)
 }

@@ -233,3 +233,79 @@ func TestToConnectErrorUnavailable(t *testing.T) {
 		t.Fatalf("code = %v, want Unavailable", got)
 	}
 }
+
+// TestToConnectErrorSelfServiceTenants pins the tenant refusals: a feature
+// the server or project has not turned on is FailedPrecondition, and every
+// creation, invitation and domain-attempt limit is ResourceExhausted.
+func TestToConnectErrorSelfServiceTenants(t *testing.T) {
+	for err, want := range map[error]connect.Code{
+		service.ErrSelfServiceTenantsDisabled: connect.CodeFailedPrecondition,
+		service.ErrTenantSelectionDisabled:    connect.CodeFailedPrecondition,
+		service.ErrTenantCreationLimited:      connect.CodeResourceExhausted,
+		service.ErrInvitationLimited:          connect.CodeResourceExhausted,
+		service.ErrInviterLimited:             connect.CodeResourceExhausted,
+		service.ErrInvitationRecipientLimited: connect.CodeResourceExhausted,
+		service.ErrDomainAttemptsLimited:      connect.CodeResourceExhausted,
+	} {
+		if got := connect.CodeOf(toConnectError(err)); got != want {
+			t.Errorf("toConnectError(%v) code = %v, want %v", err, got, want)
+		}
+	}
+}
+
+// TestToConnectErrorTenantSelectionRefused pins the selection refusals: each
+// keeps the code its cause maps to and carries a TenantSelectionRefusedDetails
+// naming the reason, the one signal that the refresh token was not consumed.
+// The bare sentinels, which RefreshToken never returns alone, carry none.
+func TestToConnectErrorTenantSelectionRefused(t *testing.T) {
+	for _, tc := range []struct {
+		refusal *service.TenantSelectionRefusedError
+		code    connect.Code
+		reason  identitypb.TenantSelectionRefusal
+	}{
+		{
+			&service.TenantSelectionRefusedError{Reason: service.TenantSelectionNotEnabled, Err: service.ErrTenantSelectionDisabled},
+			connect.CodeFailedPrecondition, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_ENABLED,
+		},
+		{
+			&service.TenantSelectionRefusedError{Reason: service.TenantSelectionNotAMember, Err: fmt.Errorf("%w: not a member", service.ErrPermissionDenied)},
+			connect.CodePermissionDenied, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_A_MEMBER,
+		},
+		{
+			&service.TenantSelectionRefusedError{Reason: service.TenantSelectionUnavailable, Err: fmt.Errorf("%w: store down", service.ErrUnavailable)},
+			connect.CodeUnavailable, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNAVAILABLE,
+		},
+		{
+			&service.TenantSelectionRefusedError{Reason: service.TenantSelectionLoginPolicy, Err: fmt.Errorf("%w: login policy", service.ErrPermissionDenied)},
+			connect.CodePermissionDenied, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_LOGIN_POLICY,
+		},
+		{
+			&service.TenantSelectionRefusedError{Err: service.ErrPermissionDenied},
+			connect.CodePermissionDenied, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED,
+		},
+	} {
+		cerr := toConnectError(fmt.Errorf("refreshing: %w", tc.refusal))
+		if got := connect.CodeOf(cerr); got != tc.code {
+			t.Fatalf("%v: code = %v, want %v", tc.refusal, got, tc.code)
+		}
+		if len(cerr.Details()) != 1 {
+			t.Fatalf("%v: details = %d, want exactly 1", tc.refusal, len(cerr.Details()))
+		}
+		msg, derr := cerr.Details()[0].Value()
+		if derr != nil {
+			t.Fatalf("detail Value: %v", derr)
+		}
+		details, ok := msg.(*identitypb.TenantSelectionRefusedDetails)
+		if !ok {
+			t.Fatalf("detail type = %T, want *TenantSelectionRefusedDetails", msg)
+		}
+		if details.GetReason() != tc.reason {
+			t.Fatalf("%v: reason = %v, want %v", tc.refusal, details.GetReason(), tc.reason)
+		}
+	}
+	for _, err := range []error{service.ErrTenantSelectionDisabled, service.ErrPermissionDenied, service.ErrProductAgeRestricted} {
+		if details := toConnectError(err).Details(); len(details) != 0 {
+			t.Fatalf("toConnectError(%v) carries %d details, want none", err, len(details))
+		}
+	}
+}

@@ -455,3 +455,17 @@ func TestParseProjectConfig_OAuth_EmptyProviderBlockRejected(t *testing.T) {
 		})
 	}
 }
+
+func TestParseProjectConfig_TenantsSelfService(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"tenants":{"self_service":true}}`)
+	require.NoError(t, err)
+	assert.True(t, cfg.Tenants.SelfService)
+	require.NoError(t, cfg.Validate())
+
+	// Absent, the block is off.
+	cfg, err = ParseProjectConfig(`{"cors":{"allowed_origins":["https://a.example.test"]}}`)
+	require.NoError(t, err)
+	assert.False(t, cfg.Tenants.SelfService)
+}

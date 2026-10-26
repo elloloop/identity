@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -15,6 +16,23 @@ import (
 // sessionMetricName is the histogram identifier deployers wire into
 // their dashboards / alerts.
 const sessionMetricName = "identity_session_lookup_duration_seconds"
+
+// cacheLookupBuckets are the buckets of the hot-path cache histograms
+// (sessions, selected-tenant status): warm-cache reads land in
+// sub-microsecond territory, repository round-trips at single-digit
+// milliseconds.
+var cacheLookupBuckets = []float64{
+	0.0000005, // 500ns
+	0.000001,  // 1µs
+	0.000005,  // 5µs
+	0.00001,   // 10µs
+	0.0001,    // 100µs
+	0.001,     // 1ms
+	0.005,     // 5ms
+	0.01,      // 10ms
+	0.05,      // 50ms
+	0.1,       // 100ms
+}
 
 // SessionMetrics owns the Prometheus handles exposed when the service
 // is running in `mode=session`. The histogram measures end-to-end
@@ -34,22 +52,9 @@ func NewSessionMetrics(reg prometheus.Registerer) (*SessionMetrics, error) {
 		reg = prometheus.NewRegistry()
 	}
 	hist := prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: sessionMetricName,
-		Help: "Session lookup duration in seconds (mode=session), labelled by outcome (hit/miss/revoked/missing).",
-		// Custom buckets: warm-cache reads land in sub-microsecond
-		// territory, repo round-trips at single-digit milliseconds.
-		Buckets: []float64{
-			0.0000005, // 500ns
-			0.000001,  // 1µs
-			0.000005,  // 5µs
-			0.00001,   // 10µs
-			0.0001,    // 100µs
-			0.001,     // 1ms
-			0.005,     // 5ms
-			0.01,      // 10ms
-			0.05,      // 50ms
-			0.1,       // 100ms
-		},
+		Name:    sessionMetricName,
+		Help:    "Session lookup duration in seconds (mode=session), labelled by outcome (hit/miss/revoked/missing).",
+		Buckets: cacheLookupBuckets,
 	}, []string{"outcome"})
 	if err := reg.Register(hist); err != nil {
 		return nil, err
@@ -363,11 +368,11 @@ func (r *RevokingSessionRepository) RevokeSessionsForUser(ctx context.Context, u
 //     out in-flight tokens. The hot path stays the same for these.
 //   - Tokens with a sid claim are rejected when the cached/refreshed
 //     state is anything other than Active.
-func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience string, requireAudience bool, cache *SessionCache) func(http.Handler) http.Handler {
+func SessionAuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expectedAudience string, requireAudience bool, cache *SessionCache) func(http.Handler) http.Handler {
 	if cache == nil {
 		// mode=ttl path: identical to AuthMiddleware. Returning the
 		// same function avoids a wrapper layer on the zero-cost path.
-		return AuthMiddleware(kp, expectedTenant, expectedAudience, requireAudience)
+		return AuthMiddleware(kp, tenants, expectedAudience, requireAudience)
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -382,8 +387,16 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 				// mode=session, the session lookup applies — otherwise
 				// a revoked session would still get the "I'm signed in"
 				// view on endpoints like GetCurrentUser.
+				// A token whose selected tenant could not be read may be
+				// good, so the request is answered unavailable rather than
+				// served as signed out.
 				if token := extractBearerToken(r); token != "" {
-					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil {
+					claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience)
+					if errors.Is(err, errTokenTenantLookup) {
+						writeTokenRefusal(w, err)
+						return
+					}
+					if err == nil {
 						if claims.SID != "" {
 							state, lookupErr := cache.Lookup(r.Context(), claims.SID)
 							if lookupErr == nil && state == SessionStateActive {
@@ -409,10 +422,9 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 				http.Error(w, `{"code":"unauthenticated","message":"Missing Authorization header"}`, http.StatusUnauthorized)
 				return
 			}
-			claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience)
+			claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience)
 			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
+				writeTokenRefusal(w, err)
 				return
 			}
 			// A purpose token never authenticates a request:

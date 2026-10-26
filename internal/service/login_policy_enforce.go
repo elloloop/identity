@@ -24,21 +24,97 @@ func (s *AuthService) enforceSessionTimeout(ctx context.Context, email string, n
 	if policy == nil {
 		return nil
 	}
-	if policy.SessionAbsoluteTimeoutSeconds > 0 && sessionStartedAtMs > 0 {
-		if nowMs-sessionStartedAtMs > policy.SessionAbsoluteTimeoutSeconds*msPerSecond {
-			s.logger.Info("session_absolute_timeout_exceeded",
-				zap.String("email_domain", emailDomain(email)))
-			return fmt.Errorf("%w: session exceeded its maximum lifetime", ErrSessionExpired)
+	switch breachedSessionTimeout(policy, nowMs, sessionStartedAtMs, lastUsedAtMs) {
+	case absoluteTimeoutBreached:
+		s.logger.Info("session_absolute_timeout_exceeded",
+			zap.String("email_domain", emailDomain(email)))
+		return fmt.Errorf("%w: session exceeded its maximum lifetime", ErrSessionExpired)
+	case idleTimeoutBreached:
+		s.logger.Info("session_idle_timeout_exceeded",
+			zap.String("email_domain", emailDomain(email)))
+		return fmt.Errorf("%w: session timed out due to inactivity", ErrSessionExpired)
+	default:
+		return nil
+	}
+}
+
+// sessionTimeoutBreach says which of a policy's session timeouts a session
+// has passed.
+type sessionTimeoutBreach int
+
+const (
+	noTimeoutBreached sessionTimeoutBreach = iota
+	absoluteTimeoutBreached
+	idleTimeoutBreached
+)
+
+// breachedSessionTimeout measures a session against p's timeouts: the
+// absolute one from sessionStartedAtMs, the idle one from lastUsedAtMs, all
+// in epoch ms. An unset timeout, or a zero timestamp (a legacy row), passes.
+func breachedSessionTimeout(p *LoginPolicy, nowMs, sessionStartedAtMs, lastUsedAtMs int64) sessionTimeoutBreach {
+	if p.SessionAbsoluteTimeoutSeconds > 0 && sessionStartedAtMs > 0 &&
+		nowMs-sessionStartedAtMs > p.SessionAbsoluteTimeoutSeconds*msPerSecond {
+		return absoluteTimeoutBreached
+	}
+	if p.SessionIdleTimeoutSeconds > 0 && lastUsedAtMs > 0 &&
+		nowMs-lastUsedAtMs > p.SessionIdleTimeoutSeconds*msPerSecond {
+		return idleTimeoutBreached
+	}
+	return noTimeoutBreached
+}
+
+// checkSelectedTenantPolicy holds a session to the login policy of the tenant
+// it selects, which is applied at sign-in only to the users on the tenant's
+// verified domains. A session does not record how it signed in, so a policy
+// that restricts sign-in (restrictsSignIn) admits only a session whose
+// sign-in it governed: one whose account email is on a domain the tenant has
+// verified. Any session is held to the policy's timeouts, measured from its
+// own start and last use. Every refusal is a TenantSelectionRefusedError,
+// made before the refresh token is spent. Without the governance plane no
+// tenant has a policy, and a lookup that fails refuses as unavailable.
+func (s *AuthService) checkSelectedTenantPolicy(ctx context.Context, projectID string, user *User, session *RefreshTokenRecord, tenantID string) error {
+	if s.governance == nil {
+		return nil
+	}
+	policy, err := s.governance.Policies.GetLoginPolicy(ctx, projectID, tenantID)
+	if err != nil {
+		return s.tenantSelectionUnavailable(projectID, tenantID, err)
+	}
+	if policy == nil {
+		return nil
+	}
+	if restrictsSignIn(policy) {
+		governing, _, err := s.governance.resolvePolicy(ctx, projectID, s.logger, user.Email)
+		if err != nil {
+			return s.tenantSelectionUnavailable(projectID, tenantID, err)
+		}
+		if governing == nil || governing.ID != tenantID {
+			return s.loginPolicyRefusal(projectID, tenantID, "sign_in_not_governed",
+				"the tenant's login policy did not govern this session's sign-in")
 		}
 	}
-	if policy.SessionIdleTimeoutSeconds > 0 && lastUsedAtMs > 0 {
-		if nowMs-lastUsedAtMs > policy.SessionIdleTimeoutSeconds*msPerSecond {
-			s.logger.Info("session_idle_timeout_exceeded",
-				zap.String("email_domain", emailDomain(email)))
-			return fmt.Errorf("%w: session timed out due to inactivity", ErrSessionExpired)
-		}
+	if breachedSessionTimeout(policy, s.nowMs(), session.SessionStartedAt, session.LastUsedAt) != noTimeoutBreached {
+		return s.loginPolicyRefusal(projectID, tenantID, "session_timeout",
+			"the session is past the tenant's session timeout")
 	}
 	return nil
+}
+
+// restrictsSignIn reports whether a policy limits how its users sign in, as
+// against only how long their sessions last.
+func restrictsSignIn(p *LoginPolicy) bool {
+	return p.SSORequired || p.Require2FA || strings.TrimSpace(p.AllowedMethods) != ""
+}
+
+// loginPolicyRefusal refuses a selection the tenant's login policy does not
+// admit, logging why for the operator.
+func (s *AuthService) loginPolicyRefusal(projectID, tenantID, reason, msg string) error {
+	s.logger.Info("tenant_selection_refused_by_login_policy",
+		zap.String("project_id", projectID), zap.String("tenant_id", tenantID), zap.String("reason", reason))
+	return &TenantSelectionRefusedError{
+		Reason: TenantSelectionLoginPolicy,
+		Err:    fmt.Errorf("%w: %s", ErrPermissionDenied, msg),
+	}
 }
 
 // emailDomain returns the domain part of an email. It splits on the LAST '@'
@@ -208,7 +284,10 @@ func (g *LoginGovernance) resolvePolicy(ctx context.Context, projectID string, l
 		return nil, nil, nil
 	}
 
-	domain, err := g.Domains.GetDomainByName(ctx, projectID, domainName)
+	// Only a verified domain governs sign-in, so only the verified row is
+	// read: a claim nobody has proven cannot apply a policy, and the read
+	// costs one index probe however many claims the name has.
+	domain, err := g.Domains.GetVerifiedDomain(ctx, projectID, domainName)
 	if err != nil {
 		logger.Warn("login_policy_domain_lookup_failed",
 			zap.String("project_id", projectID), zap.Error(err))

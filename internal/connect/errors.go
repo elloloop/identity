@@ -18,6 +18,10 @@ func toConnectError(err error) *connect.Error {
 	if err == nil {
 		return nil
 	}
+	var refusal *service.TenantSelectionRefusedError
+	if errors.As(err, &refusal) {
+		return tenantSelectionRefusedConnectError(refusal)
+	}
 
 	switch {
 	case errors.Is(err, service.ErrAgentOAuthRevision), errors.Is(err, service.ErrOAuthClientRevision):
@@ -87,7 +91,13 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrAccountLocked),
 		errors.Is(err, service.ErrSignupThrottled),
 		errors.Is(err, service.ErrAgentLimitReached),
-		errors.Is(err, service.ErrAgentMachineChallengeLimit):
+		errors.Is(err, service.ErrAgentMachineChallengeLimit),
+		errors.Is(err, service.ErrTenantCreationLimited),
+		errors.Is(err, service.ErrInvitationLimited),
+		errors.Is(err, service.ErrInvitationResendTooSoon),
+		errors.Is(err, service.ErrInviterLimited),
+		errors.Is(err, service.ErrInvitationRecipientLimited),
+		errors.Is(err, service.ErrDomainAttemptsLimited):
 		// CodeResourceExhausted: lockout is a per-account quota of failed
 		// attempts. ResourceExhausted matches gRPC's documented semantics
 		// for "the resource is exhausted" / rate-limit-style failures and
@@ -116,6 +126,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrMergeRefused),
 		errors.Is(err, service.ErrAccountMergeDisabled),
 		errors.Is(err, service.ErrAgentsDisabled),
+		errors.Is(err, service.ErrSelfServiceTenantsDisabled),
+		errors.Is(err, service.ErrTenantSelectionDisabled),
 		errors.Is(err, service.ErrAgentOAuthDisabled),
 		errors.Is(err, service.ErrReauthenticationRequired),
 		errors.Is(err, service.ErrAccountKindOff),
@@ -209,6 +221,34 @@ func dobRequiredConnectError(err error) *connect.Error {
 		}
 	}
 	return cerr
+}
+
+// tenantSelectionRefusedConnectError is the refusal's own code, carrying a
+// TenantSelectionRefusedDetails: it is the one signal a client has that the
+// refresh token was not consumed and may be presented again.
+func tenantSelectionRefusedConnectError(refusal *service.TenantSelectionRefusedError) *connect.Error {
+	cerr := toConnectError(refusal.Err)
+	if detail, err := connect.NewErrorDetail(&identitypb.TenantSelectionRefusedDetails{
+		Reason: tenantSelectionRefusalToProto(refusal.Reason),
+	}); err == nil {
+		cerr.AddDetail(detail)
+	}
+	return cerr
+}
+
+func tenantSelectionRefusalToProto(r service.TenantSelectionRefusal) identitypb.TenantSelectionRefusal {
+	switch r {
+	case service.TenantSelectionNotEnabled:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_ENABLED
+	case service.TenantSelectionNotAMember:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_A_MEMBER
+	case service.TenantSelectionUnavailable:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNAVAILABLE
+	case service.TenantSelectionLoginPolicy:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_LOGIN_POLICY
+	default:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED
+	}
 }
 
 func passwordChangeRequiredConnectError(err error) *connect.Error {

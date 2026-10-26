@@ -95,6 +95,11 @@ type ProjectConfig struct {
 	// which every permanent account is issued an account address. Empty
 	// issues none. See ProjectAccountsConfig.
 	Accounts ProjectAccountsConfig `json:"accounts"`
+
+	// Tenants holds the project's self-service tenant policy: whether a
+	// signed-in user may create a tenant they own. Default OFF. See
+	// ProjectTenantsConfig.
+	Tenants ProjectTenantsConfig `json:"tenants"`
 }
 
 // ProjectOAuthConfig is a project's per-provider hosted-flow OAuth

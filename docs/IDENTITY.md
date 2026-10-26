@@ -25,7 +25,9 @@ Postgres row-level-security hardening already shipped in v1.0 via migration
 - **`OrganizationSignup` removed**, along with the `Organization` /
   `OrganizationMembership` storage. Multitenancy is now modelled by
   **Projects** (the isolation shard) with **Tenants** auto-formed from
-  verified email domains inside a project (ADR-0002, ADR-0004).
+  verified email domains inside a project (ADR-0002, ADR-0004). Since
+  [ADR-0018](./adr/0018-self-service-tenants-and-tenant-selection.md) a
+  project may also let a signed-in user create a tenant of their own.
 - **`mode=single | multi` removed**, together with its env vars
   (`GATEWAY_IDENTITY_MODE`, `GATEWAY_TENANT_HOST_BASE_DOMAIN`,
   `GATEWAY_TENANT_RESOLUTION_SOURCES`). There is one code path now: every
@@ -103,6 +105,10 @@ suite (email, productivity tools).
 - Membership is derived from a verified domain or materialised by an
   explicit invite / admin grant (`tenant_memberships`). There is no
   "organisation" object — a Tenant IS the company entity.
+- Where the project allows it (`tenants.self_service`), a signed-in user
+  can also create a tenant with no domain (`CreateTenant`), becoming its
+  owner, and invite others to it. It is the same entity as a domain tenant,
+  claimed from creation (ADR-0018).
 - Onboarding:
   1. **Domain self-service** — a user with a company email signs up; the
      tenant auto-forms; once a domain owner verifies the domain, other
@@ -123,7 +129,7 @@ The redesign keeps three "tenant-like" concepts strictly distinct
 |---|---|---|---|
 | **Storage scope** | physical | The physical shard the data lives on (a tenant-shard-db tenant, or a Postgres scope). Equals `GATEWAY_DEFAULT_TENANT_ID` for the default project. | 1 per Project |
 | **Project** | control plane | A *logical* control-plane isolation entity (a Firebase project). Maps onto exactly one storage scope, but `Project.id != storage_scope_id`. | 1 per storage scope |
-| **Tenant** | data plane | A *logical* company entity, auto-formed per verified non-public email domain. | many per Project |
+| **Tenant** | data plane | A *logical* company or team entity: auto-formed per non-public email domain (claimed once a tenant verifies it), created by an operator, or created by a signed-in user where the project allows it (ADR-0018). | many per Project |
 
 The **Project is the isolation shard** (ADR-0002 inverted the old
 "tenant = shard" model). Every data-plane row carries `project_id` as the
@@ -152,9 +158,14 @@ memory drivers run with a nil resolver, so every request pins to the
 default project (steps 1–2 are skipped). The resolved project scope rides
 the request context; services read it to pick the per-project repository.
 
-Once the project is fixed, the **Tenant** is the user's company entity
-inside that project, derived from their verified email domain or from a
-materialised `tenant_memberships` row. A user with a `gmail.com`/`outlook.com`
+Once the project is fixed, the user's **Tenants** are the company or team
+entities inside that project they belong to through a `tenant_memberships`
+row: from their email's domain (counted only while the email is verified and
+on a domain the tenant has verified), an invitation, a grant, or creating the
+tenant. `ListMyTenants` lists them; they do not set the token. A token's
+`tenant` claim is the deployment default, `GATEWAY_DEFAULT_TENANT_ID`, unless,
+with tenant selection on, the user chose one of their tenants on
+`RefreshToken` (ADR-0018). A user with a `gmail.com`/`outlook.com`
 address forms no tenant — public providers are blocklisted at signup,
 domain-verify, and derived-membership (`GATEWAY_PUBLIC_EMAIL_DOMAINS`
 extends the built-in set).
@@ -179,6 +190,8 @@ GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane a
 GATEWAY_PUBLIC_EMAIL_DOMAINS        = <csv>      # extra public domains that never auto-form a tenant
 GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS = <int>  # default 30; in-process cache for credential/Host→project resolution; 0 disables
 GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES = <int>  # default 10000; LRU bound on cached resolution keys
+GATEWAY_TENANT_SELECTION_ENABLED    = <bool>     # default false; RefreshToken may choose the token's tenant (postgres only)
+GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS = <int>  # default 30, at most 300; cache for a selected tenant's status; 0 reads it per request
 ```
 
 Per-request project resolution (credential-key→project and Host→project)
@@ -189,6 +202,15 @@ resolution paths. The TTL is deliberately short so a suspended project or
 revoked credential is never served stale beyond it; there is no explicit
 invalidation. The cache caches misses as well as hits (so a flood of unknown
 keys cannot bypass it) but never caches transient store errors.
+
+A token whose `tenant` was chosen on `RefreshToken` makes the auth middleware
+read that tenant's status, to refuse a suspended one. A second in-process
+cache, keyed by project and tenant and bounded at 10000 entries, fronts that
+read with its own TTL (`GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS`), so a
+suspension takes effect within it. It never caches an error: a read that
+fails answers the request 503. The histogram
+`identity_token_tenant_lookup_duration_seconds` times the reads, labelled
+`outcome` (`hit`, `miss`, `error`).
 
 On boot, the postgres driver seeds the default `Project` (mapped onto the
 `DefaultTenantID` storage scope) and any `DefaultProjectAuthDomains`
@@ -829,6 +851,11 @@ before you ship.
    v1.0.** `OrganizationSignup` and the `Organization` concept no longer
    exist; the company entity is the **Tenant**, which auto-forms from a
    verified email domain (ADR-0004) rather than being created by an RPC.
+   **Amended by [ADR-0018](./adr/0018-self-service-tenants-and-tenant-selection.md):**
+   where a project turns on `tenants.self_service`, a signed-in user may
+   create a tenant through `CreateTenant`. That is not `OrganizationSignup`
+   back: there is still no organisation object, only a tenant, claimed
+   from creation, with no domain, created at a per-user rate limit.
 4. **Identity's `User.Role` does not flow into
    tenant-shard-db's `TenantMember.Role`.** They evolve
    independently. An identity admin demoted to member shouldn't lose
@@ -896,6 +923,10 @@ before you ship.
    longer exist; tenants auto-form from verified email domains (ADR-0004)
    and projects are provisioned by the control-plane admin RPCs. The
    half-created-tenant rollback problem this entry described is moot.
+   **Amended by [ADR-0018](./adr/0018-self-service-tenants-and-tenant-selection.md):**
+   `CreateTenant` lets a signed-in user create a tenant again; it writes the
+   tenant and its owner membership in one transaction, so the problem stays
+   moot.
 9. **tenant-shard-db v1.14.0 alignment — sweeper contract, page
    cap, typed errors.** The v1.14.0 bump (SDK + server image)
    reworked three identity-side seams:
@@ -1212,7 +1243,8 @@ before you ship.
       per person per project (ADR-0003). Auto-create does **not** grant
       tenant membership: the user belongs to a Tenant only by deriving
       from a verified email domain (ADR-0004) or by a `tenant_memberships`
-      row written via invitation (§13) or admin grant. They can
+      row written via invitation (§13), admin grant or creating the tenant
+      (ADR-0018). They can
       authenticate, but tenant-scoped access is still gated on membership.
       This keeps passwordless login a frictionless front door without
       turning it into an unauthenticated path to tenant membership.

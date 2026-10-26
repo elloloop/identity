@@ -850,7 +850,7 @@ func TestDeleteAgent_DelegatesToThePurger(t *testing.T) {
 // chokepoint, the way the delegation flow will: no sign-in.
 func issueAgentTokens(t *testing.T, f *agentFixture, agent *User) (string, string) {
 	t.Helper()
-	access, refresh, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0)
+	access, refresh, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0, "")
 	require.NoError(t, err)
 	return access, refresh
 }
@@ -865,7 +865,7 @@ func TestAgentTokens_CarryTheKindClaim(t *testing.T) {
 	assert.Equal(t, UserKindAgent, claims.Kind)
 	assert.Zero(t, claims.AuthTime, "no sign-in vouches for an agent's session")
 
-	_, access, _, err = f.svc.RefreshToken(context.Background(), refresh, "", "")
+	_, access, _, err = f.svc.RefreshToken(context.Background(), refresh, "", "", "")
 	require.NoError(t, err)
 	claims, err = jwt.VerifyAccessToken(access, f.svc.signer, "", "", false)
 	require.NoError(t, err)
@@ -913,12 +913,12 @@ func TestAgentStanding_FollowsTheOwner(t *testing.T) {
 			_, refresh := issueAgentTokens(t, f, agent)
 
 			tc.lose(f, agent)
-			_, _, _, err := f.svc.RefreshToken(context.Background(), refresh, "", "")
+			_, _, _, err := f.svc.RefreshToken(context.Background(), refresh, "", "", "")
 			require.ErrorIs(t, err, ErrAccountNotActive)
 
 			stored, _ := f.repo.GetUser(context.Background(), agent.ID)
 			if stored != nil {
-				_, _, err = f.svc.issueTokensWithSessionStart(context.Background(), stored, "", "", sessionGateRefresh, 0, 0)
+				_, _, err = f.svc.issueTokensWithSessionStart(context.Background(), stored, "", "", sessionGateRefresh, 0, 0, "")
 				require.ErrorIs(t, err, ErrAccountNotActive)
 			}
 		})
@@ -931,7 +931,7 @@ func TestAgentStanding_RestoredWithTheOwner(t *testing.T) {
 	f := newAgentFixture(t)
 	agent := seedAgent(f.repo, f.owner.ID)
 	f.setStatus(f.owner.ID, StatusDeactivated)
-	_, _, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0)
+	_, _, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0, "")
 	require.ErrorIs(t, err, ErrAccountNotActive)
 
 	f.setStatus(f.owner.ID, StatusActive)
@@ -970,13 +970,13 @@ func TestAgentAdmission_FollowsTheOwner(t *testing.T) {
 			_, refresh := issueAgentTokens(t, f, agent)
 
 			ctx := agentAccessScope(t, tc.cfg)
-			_, _, _, err := f.svc.RefreshToken(ctx, refresh, "", "")
+			_, _, _, err := f.svc.RefreshToken(ctx, refresh, "", "", "")
 			if tc.admit {
 				require.NoError(t, err)
 				return
 			}
 			require.ErrorIs(t, err, ErrAccessNotAllowed)
-			_, _, err = f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0)
+			_, _, err = f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0, "")
 			require.ErrorIs(t, err, ErrAccessNotAllowed, "the token chokepoint refuses too")
 		})
 	}
@@ -990,13 +990,13 @@ func TestAgentAdmission_IdentityVerificationIsTheOwners(t *testing.T) {
 	_, refresh := issueAgentTokens(t, f, agent)
 	f.svc.cfg.IDVRequired = true
 
-	_, _, _, err := f.svc.RefreshToken(context.Background(), refresh, "", "")
+	_, _, _, err := f.svc.RefreshToken(context.Background(), refresh, "", "", "")
 	require.ErrorIs(t, err, ErrIDVRequired, "an unverified owner's agent is refused")
 
 	f.repo.mu.Lock()
 	f.repo.users[f.owner.ID].IDVVerified = true
 	f.repo.mu.Unlock()
-	_, _, _, err = f.svc.RefreshToken(context.Background(), refresh, "", "")
+	_, _, _, err = f.svc.RefreshToken(context.Background(), refresh, "", "", "")
 	require.NoError(t, err, "the refused token was not consumed, and a verified owner's agent is admitted, unverified itself")
 }
 

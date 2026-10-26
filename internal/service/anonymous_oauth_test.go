@@ -260,7 +260,7 @@ func TestUpgradeAnonymousWithPassword_HonoursVerifiedEmailGate(t *testing.T) {
 
 	// The prior anonymous session must not survive as a back door to the
 	// session the gate just withheld.
-	if _, _, _, err := svc.RefreshToken(ctx, signIn.RefreshToken, "1.2.3.4", "ua"); err == nil {
+	if _, _, _, err := svc.RefreshToken(ctx, signIn.RefreshToken, "", "1.2.3.4", "ua"); err == nil {
 		t.Error("the pre-upgrade refresh token still works — the withheld session is reachable anyway")
 	}
 }
@@ -457,7 +457,7 @@ func TestRefreshToken_AnonymousActivityStampFailureIsNotFatal(t *testing.T) {
 	}
 	repo.updateUserErr = errors.New("connection reset")
 
-	if _, access, refresh, err := svc.RefreshToken(ctx, res.RefreshToken, "1.2.3.4", "ua"); err != nil {
+	if _, access, refresh, err := svc.RefreshToken(ctx, res.RefreshToken, "", "1.2.3.4", "ua"); err != nil {
 		t.Fatalf("a failed activity stamp broke the refresh: %v", err)
 	} else if access == "" || refresh == "" {
 		t.Fatal("refresh returned no tokens")
@@ -775,7 +775,7 @@ func TestUpgradeAnonymousWithOAuth_UnprovenAddressIsHeldForVerification(t *testi
 	if up.AccessToken != "" || up.RefreshToken != "" {
 		t.Fatal("an unproven address was given a session")
 	}
-	if _, _, _, err := svc.RefreshToken(ctx, signIn.RefreshToken, "", ""); err == nil {
+	if _, _, _, err := svc.RefreshToken(ctx, signIn.RefreshToken, "", "", ""); err == nil {
 		t.Fatal("the anonymous refresh token survived the promotion")
 	}
 	sess, err := repo.GetSessionBySid(ctx, sid)

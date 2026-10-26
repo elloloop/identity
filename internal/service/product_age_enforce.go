@@ -12,8 +12,8 @@ import (
 // audience rating can only be a real guardrail if it is checked here, at the
 // door, rather than assumed from store listing copy.
 //
-// It runs at issueTokensWithSessionStart — the single point every token pair is
-// minted from, initial login and refresh alike — for two reasons. It is
+// It runs at issueTokensWithSessionStart — the single point every session's
+// token pair is minted from, initial login and refresh alike — for two reasons. It is
 // unconditionally AFTER authentication succeeded, so a denial can never
 // disclose whether an email exists. And it cannot be forgotten: a session-
 // issuing path added later is gated by construction rather than by remembering

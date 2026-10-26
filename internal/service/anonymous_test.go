@@ -322,7 +322,7 @@ func TestRefreshToken_AnonymousSurvivesAClosedProject(t *testing.T) {
 		t.Fatalf("SignInAnonymously: %v", err)
 	}
 
-	user, access, refresh, err := svc.RefreshToken(ctx, res.RefreshToken, "1.2.3.4", "ua")
+	user, access, refresh, err := svc.RefreshToken(ctx, res.RefreshToken, "", "1.2.3.4", "ua")
 	if err != nil {
 		t.Fatalf("anonymous refresh on a closed project failed: %v — the session is unrecoverable", err)
 	}
@@ -348,7 +348,7 @@ func TestRefreshToken_AnonymousStopsWhenTheFeatureIsDisabled(t *testing.T) {
 		t.Fatalf("SignInAnonymously: %v", err)
 	}
 
-	_, _, _, err = svc.RefreshToken(anonCtx(false, AccessModeOpen), res.RefreshToken, "1.2.3.4", "ua")
+	_, _, _, err = svc.RefreshToken(anonCtx(false, AccessModeOpen), res.RefreshToken, "", "1.2.3.4", "ua")
 	if !errors.Is(err, ErrAnonymousRefreshDisabled) {
 		t.Fatalf("refresh after disabling err = %v, want ErrAnonymousRefreshDisabled", err)
 	}
@@ -357,7 +357,7 @@ func TestRefreshToken_AnonymousStopsWhenTheFeatureIsDisabled(t *testing.T) {
 	// credential, so burning it makes re-enabling the feature useless and
 	// leaves the account permanently unreachable — then hard-deleted by the
 	// retention sweep. Re-enable and confirm the same token still works.
-	user, access, refresh, err := svc.RefreshToken(anonCtx(true, AccessModeOpen), res.RefreshToken, "1.2.3.4", "ua")
+	user, access, refresh, err := svc.RefreshToken(anonCtx(true, AccessModeOpen), res.RefreshToken, "", "1.2.3.4", "ua")
 	if err != nil {
 		t.Fatalf("the refusal burned the token: re-enabling did not restore the session: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestRefreshToken_AnonymousAgeGateRefusalDoesNotBurnTheToken(t *testing.T) {
 	}
 
 	gated := productScope(t, anonTeenMinimumJSON, restrictedProduct)
-	_, _, _, err = svc.RefreshToken(gated, res.RefreshToken, "1.2.3.4", "ua")
+	_, _, _, err = svc.RefreshToken(gated, res.RefreshToken, "", "1.2.3.4", "ua")
 	if !errors.Is(err, ErrProductAgeRestricted) {
 		t.Fatalf("refresh under a product minimum err = %v, want ErrProductAgeRestricted", err)
 	}
@@ -395,7 +395,7 @@ func TestRefreshToken_AnonymousAgeGateRefusalDoesNotBurnTheToken(t *testing.T) {
 	// The refusal must NOT have consumed the token: removing the minimum (or
 	// fixing the product header) must restore the session, not find it burned
 	// and the next attempt tripping replay detection.
-	user, access, refresh, err := svc.RefreshToken(open, res.RefreshToken, "1.2.3.4", "ua")
+	user, access, refresh, err := svc.RefreshToken(open, res.RefreshToken, "", "1.2.3.4", "ua")
 	if err != nil {
 		t.Fatalf("the refusal burned the token: removing the minimum did not restore the session: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestRefreshToken_PermanentUserStillGatedByAccessMode(t *testing.T) {
 		t.Fatalf("upgrade: %v", err)
 	}
 
-	_, _, _, err = svc.RefreshToken(anonCtx(true, AccessModeClosed), up.RefreshToken, "1.2.3.4", "ua")
+	_, _, _, err = svc.RefreshToken(anonCtx(true, AccessModeClosed), up.RefreshToken, "", "1.2.3.4", "ua")
 	if err == nil {
 		t.Fatal("an upgraded (permanent) user refreshed on a closed project — the access guard was bypassed")
 	}
@@ -445,7 +445,7 @@ func TestRefreshToken_AnonymousActivityIsStamped(t *testing.T) {
 	created := res.User.AnonymousLastSeenMs
 
 	now += int64(48 * time.Hour / time.Millisecond)
-	if _, _, _, err := svc.RefreshToken(ctx, res.RefreshToken, "1.2.3.4", "ua"); err != nil {
+	if _, _, _, err := svc.RefreshToken(ctx, res.RefreshToken, "", "1.2.3.4", "ua"); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 

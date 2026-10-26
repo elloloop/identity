@@ -591,7 +591,7 @@ func (h *IdentityHandler) RefreshToken(
 	userAgent := clientUserAgent(req.Header())
 
 	user, accessToken, refreshToken, err := h.auth.RefreshToken(
-		ctx, req.Msg.RefreshToken, ipAddr, userAgent,
+		ctx, req.Msg.RefreshToken, req.Msg.GetTenantId(), ipAddr, userAgent,
 	)
 	if err != nil {
 		return nil, toConnectError(err)

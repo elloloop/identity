@@ -24,7 +24,7 @@ func chainHandler(t *testing.T, kr jwtpkg.Signer, allowedOrigins string, inner h
 		t.Fatalf("ParseAllowedOrigins: %v", err)
 	}
 	h := inner
-	h = AuthMiddleware(kr, "", "", false)(h)
+	h = AuthMiddleware(kr, TokenTenants{}, "", false)(h)
 	h = JWKSMiddleware(kr)(h)
 	h = HealthMiddleware(nil, h)
 	h = CORSMiddleware(parsed)(h)

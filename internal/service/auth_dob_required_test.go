@@ -362,7 +362,7 @@ func TestDOBRequired_RefreshToken(t *testing.T) {
 
 	enableAgeGate(t, svc, true)
 
-	_, _, _, err = svc.RefreshToken(context.Background(), res.RefreshToken, "1.2.3.4", "agent")
+	_, _, _, err = svc.RefreshToken(context.Background(), res.RefreshToken, "", "1.2.3.4", "agent")
 	requireDOBRefusal(t, svc, err)
 
 	// The refusal must be NON-DESTRUCTIVE: the presented refresh token is
@@ -376,7 +376,7 @@ func TestDOBRequired_RefreshToken(t *testing.T) {
 	require.Zero(t, stored.ConsumedAtMs, "the refusal must not consume the refresh token")
 
 	// A second attempt gets the same refusal, not a replay-detection wipe.
-	_, _, _, err = svc.RefreshToken(context.Background(), res.RefreshToken, "1.2.3.4", "agent")
+	_, _, _, err = svc.RefreshToken(context.Background(), res.RefreshToken, "", "1.2.3.4", "agent")
 	requireDOBRefusal(t, svc, err)
 }
 
@@ -665,7 +665,7 @@ func TestDOBRequired_FlagOff_PreExistingAccountUnaffected(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, res.AccessToken)
 
-	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "1.2.3.4", "agent")
+	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "1.2.3.4", "agent")
 	require.NoError(t, err)
 }
 

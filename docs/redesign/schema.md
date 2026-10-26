@@ -68,8 +68,9 @@ New data-plane tables:
 - **`tenants`** — logical company entity, auto-forms `latent` from the first
   user of a non-public email domain; becomes `claimed` once a domain is
   verified.
-- **`domains`** — a tenant's email domain (`acme.com`); UNIQUE per
-  `(project_id, domain)` — one tenant per domain.
+- **`domains`** — a tenant's claim on an email domain (`acme.com`). Tenants
+  may contest a domain; the VERIFIED row is unique per `(project_id, domain)`
+  — one tenant per verified domain (0045).
 - **`login_policies`** — 1:1 with a Tenant; controls HOW domain users
   authenticate, never WHETHER.
 - **`tenant_memberships`** — materialized membership for explicit members and
@@ -280,15 +281,28 @@ project; canonical email kept in `email` (H2). Organization linkage dropped.
 | `deactivated_at_ms` | BIGINT | N | Default `0`. |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
+| `email_domain` | TEXT COLLATE "C" | Y | 0046. Stored generated column: the email's lower-cased domain, `substring(lower(email COLLATE "C") FROM '@([^@]*)$')`; `NULL` for an email with no `@`. Read by the agent-governance triggers and by 0047's membership trigger. |
 
 - **PK:** `id`. **Unique:** `users_project_email_uidx (project_id, lower(email))`.
-- **Indexes:** `users_project_status_idx (project_id, status)`.
+- **Indexes:** `users_project_status_idx (project_id, status)`;
+  `users_project_email_domain_idx (project_id, email_domain) WHERE email_domain IS NOT NULL`
+  (0046: the governance triggers find the accounts on a domain through it;
+  a column rather than an expression index, because under `users`' forced
+  row-level security only a leakproof comparison can be an index condition,
+  and `lower()`/`substring()` are not).
+- **Trigger (0047):** `tenant_domain_membership_email`, `AFTER UPDATE OF email`
+  when `email_domain` changes, runs `end_domain_memberships_off_domain()`,
+  which sets `inactive` every `domain`-source membership of the user in a
+  tenant that has not verified the new domain. It covers every path that
+  changes an email (a confirmed change, SCIM, admin, an account merge) in
+  the same transaction.
 - **FKs:** `project_id` → `projects(id)`.
 
 #### `tenants` (Tenant) — NEW
 
-Logical company entity. Auto-forms `latent` from the first user of a non-public
-email domain; `claimed` once a domain is verified.
+Logical company or team entity. Auto-forms `latent` from the first user of a
+non-public email domain, and is `claimed` once a domain is verified; or a
+signed-in user creates it `claimed`, as its owner (`CreateTenant`, 0044).
 
 | Column | Type | Null | Notes |
 |---|---|---|---|
@@ -299,17 +313,24 @@ email domain; `claimed` once a domain is verified.
 | `status` | TEXT | N | `CHECK IN ('latent','claimed','suspended')`. Default `latent`. |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
+| `created_by` | TEXT | N | 0044. Default `''`. The user who created the tenant with `CreateTenant`; `''` for an auto-formed or operator-created tenant. Not an FK, like `invited_by`. |
 
 - **PK:** `id`.
 - **Unique:** none beyond PK (no domain uniqueness on tenant).
 - **Indexes:** `tenants_project_idx (project_id)`,
   `tenants_project_primary_domain_idx (project_id, lower(primary_domain))`,
-  `tenants_project_status_idx (project_id, status)`.
+  `tenants_project_status_idx (project_id, status)`,
+  `tenants_project_created_by_idx (project_id, created_by, created_at_ms) WHERE created_by <> ''`
+  (the per-user creation limit, 0044).
 - **FKs:** `project_id` → `projects(id)` ON DELETE CASCADE.
 
 #### `domains` (Domain — tenant email domain) — NEW
 
-A tenant's verified email domain. One tenant per domain. PUBLIC providers
+A tenant's claim on an email domain. Any tenant may register a domain, once
+per tenant; proving it (verification) makes it the tenant's, and only one
+tenant per project may hold it verified (migration 0045 — before it, one row
+per domain existed at all, so the first registrant reserved the domain while
+it was still pending). PUBLIC providers
 (`gmail.com`, `outlook.com`, `yahoo.com`, …) are blocklisted at THREE gates
 (signup tenant-formation, domain verify, derived-membership) on the canonical
 punycode domain (H3) — enforced in application code on `lower(domain)`.
@@ -319,18 +340,46 @@ punycode domain (H3) — enforced in application code on `lower(domain)`.
 | `id` | TEXT | N | **PK**. |
 | `project_id` | TEXT | N | **FK** → `projects(id)` ON DELETE CASCADE. Leading column. |
 | `tenant_id` | TEXT | N | **FK** → `tenants(id)` ON DELETE CASCADE. Indexed. |
-| `domain` | TEXT | N | Canonical punycode form. **U** per `(project_id, lower(domain))` — one tenant per domain. |
+| `domain` | TEXT | N | Canonical punycode form. **U** per `(project_id, lower(domain))` among verified rows, and per `(project_id, tenant_id, lower(domain))`. |
 | `verification_method` | TEXT | N | `CHECK IN ('dns_txt','email')`. |
 | `status` | TEXT | N | `CHECK IN ('pending','verified','failed')`. Default `pending`. |
 | `verified_at_ms` | BIGINT | N | Default `0` (= unverified). |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
+| `legacy_txt_challenge` | BOOLEAN | N | Default `false`. `true` on a `dns_txt` row registered before 0045, which still accepts the project-wide challenge it was issued; every later row's challenge also names its tenant. |
 
-- **PK:** `id`. **Unique:** `domains_project_domain_uidx (project_id, lower(domain))`.
-- **Indexes:** `domains_project_tenant_idx (project_id, tenant_id)`,
-  `domains_project_status_idx (project_id, status)`.
+- **PK:** `id`. **Unique:** `domains_project_verified_domain_uidx (project_id, lower(domain)) WHERE status = 'verified'`,
+  `domains_project_tenant_domain_uidx (project_id, tenant_id, lower(domain))`.
+- **Indexes:** `domains_project_domain_idx (project_id, lower(domain))`,
+  `domains_project_status_idx (project_id, status)`,
+  `domains_project_email_domain_idx (project_id, lower(domain), created_at_ms, id) WHERE verification_method = 'email'`
+  (the auto-former's fallback, 0046). 0046 dropped `domains_project_tenant_idx (project_id, tenant_id)`,
+  which `domains_project_tenant_domain_uidx` covers.
 - **FKs:** `project_id` → `projects(id)` ON DELETE CASCADE;
   `tenant_id` → `tenants(id)` ON DELETE CASCADE.
+- **Triggers (0046):** a row that is, or becomes, verified changing `status`,
+  `tenant_id` or `domain`, inserted verified or deleted while verified, revokes
+  the agent grants and machines of the members of the tenants involved and of
+  the accounts on the domains involved. `tenants` has the same trigger on a
+  change of `status` or `primary_domain`. Other writes revoke nothing. Both
+  call `invalidate_agent_oauth_governed`, which collects the governed users
+  once — the tenants' members, and the accounts on the domains through
+  `agent_oauth_domain_users` and `users_project_email_domain_idx`, read only
+  when a domain is involved — and revokes their agents.
+
+#### `domain_attempts` (per-tenant domain-attempt history) — 0046
+
+One row per `CreateDomain` or `VerifyDomain` a tenant made, counted for the
+per-tenant cap and pruned as rows leave its window. No row-level security.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | TEXT | N | **PK**. |
+| `project_id` | TEXT | N | **FK** → `projects(id)` ON DELETE CASCADE. |
+| `tenant_id` | TEXT | N | **FK** → `tenants(id)` ON DELETE CASCADE. |
+| `attempted_at_ms` | BIGINT | N | |
+
+- **Indexes:** `domain_attempts_project_tenant_idx (project_id, tenant_id, attempted_at_ms)`.
 
 #### `login_policies` (LoginPolicy) — NEW
 
@@ -369,7 +418,7 @@ when no row exists, and only against a VERIFIED domain of a CLAIMED tenant.
 | `project_id` | TEXT | N | **FK** → `projects(id)` ON DELETE CASCADE. Leading column. |
 | `tenant_id` | TEXT | N | **FK** → `tenants(id)` ON DELETE CASCADE. |
 | `user_id` | TEXT | N | **FK** → `users(id)` ON DELETE CASCADE. |
-| `source` | TEXT | N | `CHECK IN ('domain','invited','added')`. |
+| `source` | TEXT | N | `CHECK IN ('domain','invited','added','created')`; `created` (0044) is the owner membership `CreateTenant` writes. A grant (an accepted invitation, a verifying owner) replaces a `domain` source and keeps any other. A `domain` membership counts only while the user's email is verified and on a domain the tenant has verified (the active-tenant reads), and 0047 ends it when the email leaves. |
 | `role` | TEXT | N | `CHECK IN ('member','admin','owner')`. Default `member`. |
 | `status` | TEXT | N | `CHECK IN ('active','pending','inactive')`. Default `active`. |
 | `created_at_ms` | BIGINT | N | |
@@ -405,7 +454,10 @@ Postgres uses a partial unique index on the open status as defense-in-depth).
 - **PK:** `id`. **Unique:** `tenant_invitations_project_token_uidx (project_id, token_hash)`;
   `tenant_invitations_open_email_uidx (project_id, tenant_id, lower(email)) WHERE status = 'pending'`
   — one open invite per (project, tenant, email).
-- **Indexes:** `tenant_invitations_project_tenant_idx (project_id, tenant_id)`,
+- **Indexes:** `tenant_invitations_project_tenant_created_idx (project_id, tenant_id, created_at_ms)`,
+  `tenant_invitations_project_inviter_created_idx (project_id, invited_by, created_at_ms)`,
+  `tenant_invitations_project_tenant_email_created_idx (project_id, tenant_id, lower(email COLLATE "C"), created_at_ms)`
+  (the invitation limits, 0046, which replaced `tenant_invitations_project_tenant_idx (project_id, tenant_id)`),
   `tenant_invitations_project_expires_idx (project_id, expires_at_ms)` (GC sweeper).
 - **FKs:** `project_id` → `projects(id)` CASCADE; `tenant_id` → `tenants(id)`
   CASCADE. `invited_by` is NOT an FK (free-text provenance, matching

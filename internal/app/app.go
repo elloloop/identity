@@ -289,6 +289,7 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	// IP's sign-up budget is the surface's, not each RPC's.
 	signupLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0)
 	loginLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0)
+	domainLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitDomainPerIP, 0)
 	limits := []middleware.PathLimit{
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
@@ -399,6 +400,36 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// budget, for the same reason as the parent-creates-child path.
 			PathPrefix: "/identity.v1.IdentityService/CreateAgent", Tag: "agent_create",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
+			// Tenant creation by an authenticated person: each admitted call
+			// inserts a tenant and a membership row. The per-user limit
+			// bounds what one account makes; this bounds one address making
+			// accounts to get around it. The signup budget, for the same
+			// reason as agent creation.
+			PathPrefix: "/identity.v1.IdentityService/CreateTenant", Tag: "tenant_create",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
+			// A domain registration writes a claim row and a verification
+			// looks up a DNS name the caller chose. The per-tenant cap bounds
+			// one tenant; this bounds one address spreading calls across
+			// tenants and accounts. Both RPCs spend one budget.
+			PathPrefix: "/identity.v1.IdentityService/CreateDomain", Tag: "tenant_domain",
+			Limiter: domainLimiter,
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/VerifyDomain", Tag: "tenant_domain",
+			Limiter: domainLimiter,
+		},
+		{
+			// Every admitted invitation sends an email from the deployment's
+			// sender to an address the caller chose, and self-service
+			// tenants make anyone a tenant admin. The per-tenant cap and
+			// per-recipient cooldown bound one tenant; this bounds one
+			// address spreading invitations across tenants and accounts.
+			PathPrefix: "/identity.v1.IdentityService/CreateTenantInvitation", Tag: "tenant_invitation",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitInvitationPerIP, 0),
 		},
 		{
 			// The completion half of a login: unauthenticated (it carries a
@@ -573,26 +604,12 @@ func New(deps Deps) (*Built, error) {
 		logger = zap.NewNop()
 	}
 
-	// Validate config invariants that can't be expressed as per-field
-	// defaults (most importantly the mode=ttl access-token TTL cap).
-	// Fail fast before any goroutines start so a misconfigured deploy
-	// never serves a single request.
-	if err := deps.Config.Validate(); err != nil {
+	if err := prepareConfig(deps.Config); err != nil {
 		return nil, err
 	}
-
-	// Normalize an empty DefaultProjectID to a non-empty default. The env
-	// loader (config.Load) already defaults GATEWAY_DEFAULT_PROJECT_ID, but
-	// struct-literal Configs — every test harness and every embedding caller
-	// that builds Config directly — bypass that. This value becomes the
-	// boot-default project shard id for the audit logger and every service
-	// below (and, via requestProjectID, the graph partition key / postgres
-	// WHERE project_id), so it must never be "": the graph transport rejects an empty
-	// partition key outright, and a data-plane row written under "" has no
-	// valid project. Default it rather than reject it, mirroring how the
-	// env loader defaults DefaultTenantID, so embedding ergonomics hold.
-	if deps.Config.DefaultProjectID == "" {
-		deps.Config.DefaultProjectID = config.DefaultProjectIDFallback
+	tenantGov, err := wireTenantGovernance(deps, logger)
+	if err != nil {
+		return nil, err
 	}
 
 	allowedOrigins, err := loadAllowedOrigins(deps.Config, logger)
@@ -735,6 +752,9 @@ func New(deps Deps) (*Built, error) {
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
+		// A nil reader refuses every tenant selection: the switch is off,
+		// or the driver has no governance stores (memory, SQLite).
+		WithTenantSelection(tenantGov.selection).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
@@ -797,7 +817,7 @@ func New(deps Deps) (*Built, error) {
 	}
 
 	domainSvc := buildDomainService(deps, logger)
-	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
+	membershipSvc := buildMembershipService(deps, service.RepositoryUserDirectory(repo), mailer, auditLog, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
@@ -833,10 +853,6 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf("rpc metrics: %w", err)
 	}
 
-	// Every token's "tenant" claim must equal the internal storage tenant
-	// key (DefaultTenantID), so the auth middleware pins it.
-	authExpectedTenant := deps.Config.DefaultTenantID
-
 	// Order (outermost runs first on request path):
 	//   logging → recover → health → project → CORS → product → client-IP → rate-limit → JWKS → auth → project-guard → metrics → Connect
 	// client-IP must precede rate-limit (the limiter keys on the resolved
@@ -863,7 +879,7 @@ func New(deps Deps) (*Built, error) {
 	// project), rejecting an access token replayed across projects.
 	chain = middleware.NewProjectScopeGuard()(chain)
 	chain = middleware.SessionAuthMiddleware(
-		deps.Signer, authExpectedTenant, deps.Config.JWTAudience,
+		deps.Signer, tenantGov.tokens, deps.Config.JWTAudience,
 		deps.Config.JWTRequireAudience, sessionCache,
 	)(chain)
 	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
@@ -924,6 +940,7 @@ func New(deps Deps) (*Built, error) {
 			// from the access mode: the two gate different things.
 			Anonymous: service.ProjectAnonymousConfig{Enabled: deps.Config.AnonymousEnabled},
 			Accounts:  defaultAccounts,
+			Tenants:   service.ProjectTenantsConfig{SelfService: deps.Config.SelfServiceTenantsEnabled},
 		},
 		service.NewCachingProjectResolver(
 			deps.ProjectResolver,
@@ -1073,6 +1090,125 @@ func buildEventing(deps Deps, logger *zap.Logger) (events.Publisher, func(), fun
 // is due.
 const drainPollInterval = time.Second
 
+// checkTenantFeatures refuses a boot whose tenant switches are on without
+// the stores that serve them, which a host injecting its own repository may
+// leave out (Config.Validate refuses the other drivers by name), and logs
+// once, as SCIM and LookupUsers do, whether each feature is served and under
+// which limits.
+// prepareConfig validates the config invariants that can't be expressed as
+// per-field defaults (most importantly the mode=ttl access-token TTL cap),
+// before any goroutine starts, so a misconfigured deploy never serves a
+// single request, and normalizes an empty DefaultProjectID to a non-empty
+// default. The env loader (config.Load) already defaults
+// GATEWAY_DEFAULT_PROJECT_ID, but struct-literal Configs — every test
+// harness and every embedding caller that builds Config directly — bypass
+// that. This value becomes the boot-default project shard id for the audit
+// logger and every service (and, via requestProjectID, the graph partition
+// key / postgres WHERE project_id), so it must never be "": the graph
+// transport rejects an empty partition key outright, and a data-plane row
+// written under "" has no valid project. Default it rather than reject it,
+// mirroring how the env loader defaults DefaultTenantID, so embedding
+// ergonomics hold.
+func prepareConfig(cfg *config.Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	if cfg.DefaultProjectID == "" {
+		cfg.DefaultProjectID = config.DefaultProjectIDFallback
+	}
+	return nil
+}
+
+// tenantGovernance is what the tenant switches wire into the build: the
+// reader RefreshToken resolves a selected tenant through, and the rule the
+// access-token check holds a token's tenant claim to.
+type tenantGovernance struct {
+	selection service.UserTenantReader
+	tokens    middleware.TokenTenants
+}
+
+// wireTenantGovernance refuses a tenant switch the build cannot serve, then
+// wires what the switches turn on.
+func wireTenantGovernance(deps Deps, logger *zap.Logger) (tenantGovernance, error) {
+	if err := checkTenantFeatures(deps, logger); err != nil {
+		return tenantGovernance{}, err
+	}
+	tokens, err := tokenTenants(deps, logger)
+	if err != nil {
+		return tenantGovernance{}, err
+	}
+	return tenantGovernance{selection: tenantSelectionReader(deps), tokens: tokens}, nil
+}
+
+func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
+	cfg := deps.Config
+	if cfg.TenantSelectionEnabled && !tenantSelectionServed(deps) {
+		return errors.New("app: GATEWAY_TENANT_SELECTION_ENABLED needs the tenant and membership stores, which only the postgres driver provides")
+	}
+	if cfg.SelfServiceTenantsEnabled && !membershipServiceServed(deps) {
+		return errors.New("app: GATEWAY_SELF_SERVICE_TENANTS_ENABLED needs the tenant, membership and invitation stores, which only the postgres driver provides")
+	}
+	if cfg.TenantSelectionEnabled {
+		logger.Info("tenant_selection_enabled", zap.Duration("status_cache_ttl", cfg.TenantStatusCacheTTL()))
+	} else {
+		logger.Info("tenant_selection_disabled",
+			zap.String("hint", "set GATEWAY_TENANT_SELECTION_ENABLED=true (postgres only) once every replica runs this release and resource servers accept a selected tenant"))
+	}
+	if cfg.SelfServiceTenantsEnabled {
+		logger.Info("self_service_tenants_enabled",
+			zap.Int("max_per_user", cfg.SelfServiceTenantsLimit()),
+			zap.Duration("window", cfg.SelfServiceTenantsWindow()))
+	} else {
+		logger.Info("self_service_tenants_disabled",
+			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)),
+			zap.String("hint", "set GATEWAY_SELF_SERVICE_TENANTS_ENABLED=true (postgres only) for the default project; other projects set tenants.self_service in their config_json"))
+	}
+	return nil
+}
+
+// tenantSelectionServed reports whether the build has what tenant selection
+// reads: the membership store RefreshToken checks a selection against, and
+// the tenant store the access-token check reads a selected tenant's status
+// from.
+func tenantSelectionServed(deps Deps) bool {
+	return deps.MembershipStore != nil && deps.TenantStore != nil
+}
+
+// membershipServiceServed reports whether the build has the stores the
+// MembershipService is built from, and so serves the invitation RPCs and
+// CreateTenant.
+func membershipServiceServed(deps Deps) bool {
+	return deps.InvitationStore != nil && deps.MembershipStore != nil && deps.TenantStore != nil
+}
+
+// tenantSelectionReader is what RefreshToken resolves a selected tenant
+// through: the membership store when GATEWAY_TENANT_SELECTION_ENABLED is on,
+// nil otherwise. A nil interface, never a typed nil, so the service refuses.
+func tenantSelectionReader(deps Deps) service.UserTenantReader {
+	if !deps.Config.TenantSelectionEnabled || !tenantSelectionServed(deps) {
+		return nil
+	}
+	return deps.MembershipStore
+}
+
+// tokenTenants is the rule the access-token check holds a token's "tenant"
+// claim to: the internal storage tenant key (DefaultTenantID), or a claimed
+// tenant of the token's project that RefreshToken selected for a member,
+// read through a TTL cache. With selection off, or without its stores
+// (memory, SQLite), only the default is accepted.
+func tokenTenants(deps Deps, logger *zap.Logger) (middleware.TokenTenants, error) {
+	tenants := middleware.TokenTenants{Default: deps.Config.DefaultTenantID, Logger: logger}
+	if !deps.Config.TenantSelectionEnabled || !tenantSelectionServed(deps) {
+		return tenants, nil
+	}
+	metrics, err := middleware.NewTenantStatusMetrics(deps.MetricsRegistry)
+	if err != nil {
+		return middleware.TokenTenants{}, fmt.Errorf("tenant status metrics: %w", err)
+	}
+	tenants.Selectable = middleware.NewTenantStatusCache(deps.TenantStore, deps.Config.TenantStatusCacheTTL(), metrics)
+	return tenants, nil
+}
+
 // buildDomainService returns the wired DomainService backing the tenant
 // domain-verification RPCs, or nil when the governance stores are absent
 // (the memory driver has no control plane). The Connect handler treats nil as
@@ -1100,11 +1236,12 @@ func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
 // mailerConfigured tells the service whether outbound mail actually delivers
 // (a real transport is wired, not just the log-only fallback). When it does
 // not, CreateTenantInvitation returns the raw token in its response so a
-// headless deployment can still complete the flow. users is the boot-time
-// repository — the redesign governance plane is a single postgres control
-// database, so there is no per-tenant repo to scope user lookups to.
-func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, logger *zap.Logger) *service.MembershipService {
-	if deps.InvitationStore == nil || deps.MembershipStore == nil || deps.TenantStore == nil {
+// headless deployment can still complete the flow. users resolves a caller
+// in the request's project (RepositoryUserDirectory over the boot
+// repository), as accounts are partitioned by project. auditLog receives the
+// CreateTenant trail.
+func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
+	if !membershipServiceServed(deps) {
 		return nil
 	}
 	return service.NewMembershipService(
@@ -1116,7 +1253,7 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 		mailDeliveryConfigured(deps),
 		deps.Config,
 		logger,
-	)
+	).WithAudit(auditLog)
 }
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService

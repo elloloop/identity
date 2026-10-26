@@ -249,7 +249,7 @@ func TestRefreshToken_MissingTokenFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, _, err := svc.RefreshToken(context.Background(), "", "", "")
+	_, _, _, err := svc.RefreshToken(context.Background(), "", "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -266,7 +266,7 @@ func TestRefreshToken_UserDeletedFails(t *testing.T) {
 	delete(repo.users, result.User.ID)
 	repo.mu.Unlock()
 
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }

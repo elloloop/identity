@@ -37,7 +37,7 @@ func newConnectInvitationStore() *connectInvitationStore {
 	}
 }
 
-func (s *connectInvitationStore) CreateInvitation(_ context.Context, inv *service.TenantInvitation) (string, error) {
+func (s *connectInvitationStore) CreateInvitation(_ context.Context, inv *service.TenantInvitation, _ service.InvitationLimits) (string, error) {
 	s.nextID++
 	id := "inv-1"
 	cp := *inv
@@ -66,12 +66,16 @@ func (s *connectInvitationStore) ListInvitationsForTenant(_ context.Context, _, 
 	return s.listResp, nil
 }
 
-// connectUserDirectory resolves users by id for the email-match policy.
+// connectUserDirectory resolves users by id in the scope's project, the one
+// these handler tests serve; a lookup in any other project finds no one.
 type connectUserDirectory struct {
 	byID map[string]*service.User
 }
 
-func (d *connectUserDirectory) GetUser(_ context.Context, userID string) (*service.User, error) {
+func (d *connectUserDirectory) GetUserInProject(_ context.Context, projectID, userID string) (*service.User, error) {
+	if projectID != testProjectID {
+		return nil, nil
+	}
 	return d.byID[userID], nil
 }
 
@@ -83,6 +87,12 @@ type membershipServer struct {
 
 func startMembershipServer(t *testing.T, svc *service.MembershipService) *membershipServer {
 	t.Helper()
+	return startMembershipServerInScope(t, svc, &service.ProjectScope{ProjectID: testProjectID})
+}
+
+// startMembershipServerInScope serves svc with scope as the resolved project.
+func startMembershipServerInScope(t *testing.T, svc *service.MembershipService, scope *service.ProjectScope) *membershipServer {
+	t.Helper()
 	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, svc, nil, nil, testConfig())
 	mux := http.NewServeMux()
 	path, handler := identityconnectgen.NewIdentityServiceHandler(h)
@@ -90,7 +100,7 @@ func startMembershipServer(t *testing.T, svc *service.MembershipService) *member
 	// Inject the resolved project scope server-side, as the project-resolution
 	// middleware does in the real chain.
 	scoped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := service.WithProjectScope(r.Context(), &service.ProjectScope{ProjectID: testProjectID})
+		ctx := service.WithProjectScope(r.Context(), scope)
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
 	srv := httptest.NewServer(scoped)
@@ -135,6 +145,14 @@ func TestMembershipRPCs_NilService_ReturnUnimplemented(t *testing.T) {
 	_, err = srv.client.RemoveTenantMember(ctx,
 		withAuth(&identitypb.RemoveTenantMemberRequest{TenantId: "t", UserId: "u2"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = srv.client.CreateTenant(ctx,
+		withAuth(&identitypb.CreateTenantRequest{Name: "Acme"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = srv.client.ListMyTenants(ctx,
+		withAuth(&identitypb.ListMyTenantsRequest{}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
 }
 
 // ── missing auth → Unauthenticated ──────────────────────────────────────
@@ -168,6 +186,14 @@ func TestMembershipRPCs_MissingAuth_Unauthenticated(t *testing.T) {
 	_, err = srv.client.RemoveTenantMember(ctx,
 		connect.NewRequest(&identitypb.RemoveTenantMemberRequest{TenantId: "t", UserId: "u2"}))
 	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.CreateTenant(ctx,
+		connect.NewRequest(&identitypb.CreateTenantRequest{Name: "Acme"}))
+	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.ListMyTenants(ctx,
+		connect.NewRequest(&identitypb.ListMyTenantsRequest{}))
+	requireCode(t, err, connect.CodeUnauthenticated)
 }
 
 // ── Invite → Accept happy path through the handler ──────────────────────
@@ -178,9 +204,9 @@ func TestMembership_InviteThenAccept_Handler(t *testing.T) {
 		Role: service.RoleOwner, Status: service.MembershipStatusActive,
 	}}
 	users := &connectUserDirectory{byID: map[string]*service.User{
-		"invitee": {ID: "invitee", Email: "invitee@acme.com"},
+		"invitee": {ID: "invitee", Email: "invitee@acme.com", EmailVerified: true},
 	}}
-	svc := newMembershipSvc(invitations, members, &connectTenantStore{}, users)
+	svc := newMembershipSvc(invitations, members, claimedTenantStore(), users)
 	srv := startMembershipServer(t, svc)
 	ctx := context.Background()
 
@@ -220,7 +246,7 @@ func TestListTenantMembers_Handler(t *testing.T) {
 	members := &connectMembershipStore{member: &service.TenantMembership{
 		Role: service.RoleAdmin, Status: service.MembershipStatusActive,
 	}}
-	svc := newMembershipSvc(newConnectInvitationStore(), members, &connectTenantStore{}, &connectUserDirectory{})
+	svc := newMembershipSvc(newConnectInvitationStore(), members, claimedTenantStore(), &connectUserDirectory{})
 	srv := startMembershipServer(t, svc)
 
 	// connectMembershipStore.ListMembershipsForTenant returns nil; assert the
@@ -233,5 +259,82 @@ func TestListTenantMembers_Handler(t *testing.T) {
 	}
 	if len(resp.Msg.GetMembers()) != 0 {
 		t.Fatalf("got %d members, want 0", len(resp.Msg.GetMembers()))
+	}
+}
+
+// ── CreateTenant / ListMyTenants through the handler ────────────────────
+
+func selfServiceScope(on bool) *service.ProjectScope {
+	return &service.ProjectScope{ProjectID: testProjectID, Tenants: service.ProjectTenantsConfig{SelfService: on}}
+}
+
+func TestCreateTenant_Handler(t *testing.T) {
+	tenants := &connectTenantStore{}
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"owner-1": {ID: "owner-1", Email: "owner@example.test", Status: service.StatusActive, EmailVerified: true},
+	}}
+	svc := newMembershipSvc(newConnectInvitationStore(), &connectMembershipStore{}, tenants, users)
+	srv := startMembershipServerInScope(t, svc, selfServiceScope(true))
+
+	resp, err := srv.client.CreateTenant(context.Background(),
+		withAuth(&identitypb.CreateTenantRequest{Name: " Acme "}, "owner-1"))
+	if err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if resp.Msg.GetTenantId() != "tenant-new" || resp.Msg.GetName() != "Acme" {
+		t.Fatalf("response = %+v", resp.Msg)
+	}
+	m := resp.Msg.GetMembership()
+	if m.GetUserId() != "owner-1" || m.GetRole() != service.RoleOwner || m.GetSource() != service.MembershipSourceCreated ||
+		m.GetStatus() != service.MembershipStatusActive || m.GetTenantId() != "tenant-new" {
+		t.Fatalf("membership = %+v", m)
+	}
+	if tenants.ownedReq == nil || tenants.ownedReq.ProjectID != testProjectID || tenants.ownedReq.OwnerID != "owner-1" {
+		t.Fatalf("store request = %+v", tenants.ownedReq)
+	}
+}
+
+func TestCreateTenant_Handler_Refusals(t *testing.T) {
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"owner-1": {ID: "owner-1", Email: "owner@example.test", Status: service.StatusActive, EmailVerified: true},
+	}}
+	ctx := context.Background()
+
+	off := startMembershipServerInScope(t,
+		newMembershipSvc(newConnectInvitationStore(), &connectMembershipStore{}, &connectTenantStore{}, users), selfServiceScope(false))
+	_, err := off.client.CreateTenant(ctx, withAuth(&identitypb.CreateTenantRequest{Name: "Acme"}, "owner-1"))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+
+	on := startMembershipServerInScope(t,
+		newMembershipSvc(newConnectInvitationStore(), &connectMembershipStore{}, &connectTenantStore{}, users), selfServiceScope(true))
+	_, err = on.client.CreateTenant(ctx, withAuth(&identitypb.CreateTenantRequest{Name: "  "}, "owner-1"))
+	requireCode(t, err, connect.CodeInvalidArgument)
+
+	limited := startMembershipServerInScope(t,
+		newMembershipSvc(newConnectInvitationStore(), &connectMembershipStore{},
+			&connectTenantStore{ownedErr: service.ErrTenantCreationLimited}, users), selfServiceScope(true))
+	_, err = limited.client.CreateTenant(ctx, withAuth(&identitypb.CreateTenantRequest{Name: "Acme"}, "owner-1"))
+	requireCode(t, err, connect.CodeResourceExhausted)
+}
+
+func TestListMyTenants_Handler(t *testing.T) {
+	members := &connectMembershipStore{active: []*service.UserTenant{
+		{TenantID: "t-a", Name: "Alpha", Role: service.RoleAdmin},
+		{TenantID: "t-b", Name: "Beta", Role: service.RoleMember},
+	}}
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"user-1": {ID: "user-1", Email: "user@example.test", Status: service.StatusActive},
+	}}
+	svc := newMembershipSvc(newConnectInvitationStore(), members, &connectTenantStore{}, users)
+	srv := startMembershipServer(t, svc)
+
+	resp, err := srv.client.ListMyTenants(context.Background(), withAuth(&identitypb.ListMyTenantsRequest{}, "user-1"))
+	if err != nil {
+		t.Fatalf("ListMyTenants: %v", err)
+	}
+	got := resp.Msg.GetTenants()
+	if len(got) != 2 || got[0].GetTenantId() != "t-a" || got[0].GetName() != "Alpha" || got[0].GetRole() != service.RoleAdmin ||
+		got[1].GetTenantId() != "t-b" || got[1].GetRole() != service.RoleMember {
+		t.Fatalf("tenants = %+v", got)
 	}
 }

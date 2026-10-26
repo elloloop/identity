@@ -51,13 +51,14 @@ func TestRedesign_AutoFormation_CompanyEmail(t *testing.T) {
 	}
 
 	// The domain row exists, bound to that tenant, pending.
-	dom, err := h.Stores.domains.GetDomainByName(ctx, h.ProjectID, companyDomain)
+	doms, err := h.Stores.domains.ListDomainsByTenant(ctx, h.ProjectID, tenant.ID)
 	if err != nil {
-		t.Fatalf("GetDomainByName: %v", err)
+		t.Fatalf("ListDomainsByTenant: %v", err)
 	}
-	if dom == nil {
-		t.Fatalf("no domain row for %q after company signup", companyDomain)
+	if len(doms) != 1 || doms[0].Domain != companyDomain {
+		t.Fatalf("domain rows for the tenant = %+v, want one row for %q", doms, companyDomain)
 	}
+	dom := doms[0]
 	if dom.TenantID != tenant.ID || dom.Status != service.DomainStatusPending {
 		t.Fatalf("domain row = {tenant=%q status=%q}, want {tenant=%q status=pending}",
 			dom.TenantID, dom.Status, tenant.ID)
@@ -104,12 +105,20 @@ func TestRedesign_AutoFormation_PublicEmail(t *testing.T) {
 	if tenant != nil {
 		t.Fatalf("public email auto-formed a tenant for gmail.com: %+v", tenant)
 	}
-	dom, err := h.Stores.domains.GetDomainByName(ctx, h.ProjectID, "gmail.com")
+	all, err := h.Stores.tenants.ListTenants(ctx, h.ProjectID)
 	if err != nil {
-		t.Fatalf("GetDomainByName(gmail.com): %v", err)
+		t.Fatalf("ListTenants: %v", err)
 	}
-	if dom != nil {
-		t.Fatalf("public email created a domain row for gmail.com: %+v", dom)
+	for _, ten := range all {
+		doms, err := h.Stores.domains.ListDomainsByTenant(ctx, h.ProjectID, ten.ID)
+		if err != nil {
+			t.Fatalf("ListDomainsByTenant(%s): %v", ten.ID, err)
+		}
+		for _, dom := range doms {
+			if dom.Domain == "gmail.com" {
+				t.Fatalf("public email created a domain row for gmail.com: %+v", dom)
+			}
+		}
 	}
 }
 

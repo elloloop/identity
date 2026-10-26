@@ -104,6 +104,12 @@ type ProjectScope struct {
 	// GATEWAY_DEFAULT_EMAIL_DOMAIN. Zero for a project that configures none,
 	// in which case no account addresses are issued.
 	Accounts ProjectAccountsConfig
+
+	// Tenants is the project's self-service tenant policy, parsed from
+	// config_json — or, for the env default project, assembled from
+	// GATEWAY_SELF_SERVICE_TENANTS_ENABLED. Zero (disabled) for a project
+	// that configures none.
+	Tenants ProjectTenantsConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -145,6 +151,7 @@ type ResolvedProject struct {
 	Anonymous          ProjectAnonymousConfig
 	Jurisdictions      ProjectJurisdictionsConfig
 	Accounts           ProjectAccountsConfig
+	Tenants            ProjectTenantsConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

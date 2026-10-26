@@ -2,7 +2,7 @@
 
 {{end}}Hi {{.UserName}},
 
-{{.InviterName}} has invited you to join {{.TenantName}} as a {{.Role}}. Use the link below to accept and become a member.
+{{.InviterName}} has invited you to join {{if .TenantName}}{{.TenantName}}{{else}}a team{{end}} as a {{.Role}}. Use the link below to accept and become a member.
 
 {{.Link}}
 

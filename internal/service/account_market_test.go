@@ -93,7 +93,7 @@ func TestSetAccountMarket_RegateToChild(t *testing.T) {
 
 	// The re-gate revoked every session: the signup-issued refresh token no
 	// longer rotates.
-	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "", "")
 	assert.ErrorIs(t, err, ErrUnauthenticated)
 }
 
@@ -116,7 +116,7 @@ func TestSetAccountMarket_RegateSkipsConsentedChild(t *testing.T) {
 	assert.Equal(t, "CHILD", u.AgeBand)
 	assert.Equal(t, StatusActive, u.Status, "a consented child keeps its active status")
 
-	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "", "")
 	assert.NoError(t, err, "sessions survive when consent covers the re-gate")
 }
 

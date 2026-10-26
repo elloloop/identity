@@ -54,9 +54,11 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     </li>
     <li>
       <strong>One Project per deployment.</strong> A deployment serves one
-      default Project, and the Project is the isolation shard. Tenants form
-      automatically underneath it, one per verified email domain — they are
-      derived from the authenticated user, never a login input.
+      default Project, and the Project is the isolation shard. Tenants live
+      underneath it: formed automatically from the email domains users sign
+      up with, or created by a signed-in user where the Project allows
+      self-service tenants. A token's tenant is derived from the
+      authenticated user, never a login input.
     </li>
   </ul>
 

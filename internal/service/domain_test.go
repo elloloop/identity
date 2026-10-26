@@ -3,10 +3,15 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/internal/config"
 )
@@ -21,6 +26,11 @@ type fakeDomainStore struct {
 	setErr    error
 	listErr   error
 	nextID    int
+	// writes counts SetDomainStatus calls that changed a row; attempts holds
+	// every attempt RecordDomainAttempt admitted, attemptErr fails it.
+	writes     int
+	attempts   []DomainAttempt
+	attemptErr error
 }
 
 func newFakeDomainStore() *fakeDomainStore {
@@ -32,6 +42,12 @@ func (f *fakeDomainStore) key(projectID, id string) string { return projectID + 
 func (f *fakeDomainStore) CreateDomain(_ context.Context, d *Domain) (string, error) {
 	if f.createErr != nil {
 		return "", f.createErr
+	}
+	for _, other := range f.byID {
+		if other.ProjectID == d.ProjectID && strings.EqualFold(other.Domain, d.Domain) &&
+			(other.TenantID == d.TenantID || other.Status == DomainStatusVerified) {
+			return "", ErrAlreadyExists
+		}
 	}
 	f.nextID++
 	id := d.ID
@@ -56,9 +72,9 @@ func (f *fakeDomainStore) GetDomain(_ context.Context, projectID, domainID strin
 	return &out, nil
 }
 
-func (f *fakeDomainStore) GetDomainByName(_ context.Context, projectID, domain string) (*Domain, error) {
+func (f *fakeDomainStore) GetVerifiedDomain(_ context.Context, projectID, domain string) (*Domain, error) {
 	for _, d := range f.byID {
-		if d.ProjectID == projectID && d.Domain == domain {
+		if d.ProjectID == projectID && strings.EqualFold(d.Domain, domain) && d.Status == DomainStatusVerified {
 			out := *d
 			return &out, nil
 		}
@@ -66,15 +82,42 @@ func (f *fakeDomainStore) GetDomainByName(_ context.Context, projectID, domain s
 	return nil, nil
 }
 
+// RecordDomainAttempt mirrors the postgres store: it counts the tenant's
+// attempts at or after WindowStartMs and refuses one past MaxPerWindow.
+func (f *fakeDomainStore) RecordDomainAttempt(_ context.Context, a DomainAttempt) error {
+	if f.attemptErr != nil {
+		return f.attemptErr
+	}
+	n := 0
+	for _, prior := range f.attempts {
+		if prior.ProjectID == a.ProjectID && prior.TenantID == a.TenantID && prior.AtMs >= a.WindowStartMs {
+			n++
+		}
+	}
+	if n >= a.MaxPerWindow {
+		return ErrDomainAttemptsLimited
+	}
+	f.attempts = append(f.attempts, a)
+	return nil
+}
+
 func (f *fakeDomainStore) SetDomainStatus(_ context.Context, projectID, domainID, status string, verifiedAtMs int64) error {
 	if f.setErr != nil {
 		return f.setErr
 	}
 	d, ok := f.byID[f.key(projectID, domainID)]
-	if !ok {
+	if !ok || d.Status == status || (d.Status == DomainStatusVerified && status != DomainStatusVerified) {
 		return nil
 	}
+	if status == DomainStatusVerified {
+		for _, other := range f.byID {
+			if other != d && other.ProjectID == projectID && strings.EqualFold(other.Domain, d.Domain) && other.Status == DomainStatusVerified {
+				return ErrAlreadyExists
+			}
+		}
+	}
 	d.Status = status
+	f.writes++
 	if status == DomainStatusVerified {
 		if verifiedAtMs == 0 {
 			verifiedAtMs = 1
@@ -101,10 +144,24 @@ func (f *fakeDomainStore) ListDomainsByTenant(_ context.Context, projectID, tena
 var _ DomainStore = (*fakeDomainStore)(nil)
 
 // fakeTenantStore is an in-memory TenantStore keyed by (projectID, id).
+// CreateOwnedTenant writes the owner membership into members when the two
+// fakes are linked (linkFakeTenantStores).
 type fakeTenantStore struct {
-	byID   map[string]*Tenant
-	getErr error
-	setErr error
+	byID      map[string]*Tenant
+	getErr    error
+	setErr    error
+	createErr error
+	members   *fakeMembershipStore
+	nextID    int
+	// writes counts ClaimLatentTenant calls that changed a row.
+	writes int
+}
+
+// linkFakeTenantStores lets CreateOwnedTenant write memberships into m and
+// lets m's active-tenant reads see each tenant's status.
+func linkFakeTenantStores(t *fakeTenantStore, m *fakeMembershipStore) {
+	t.members = m
+	m.tenants = t
 }
 
 func newFakeTenantStore() *fakeTenantStore {
@@ -116,9 +173,24 @@ func (f *fakeTenantStore) put(t *Tenant) {
 	f.byID[t.ProjectID+"/"+t.ID] = &cp
 }
 
+// ensure puts a claimed tenant unless the store already holds the id.
+func (f *fakeTenantStore) ensure(projectID, tenantID string) {
+	if _, ok := f.byID[projectID+"/"+tenantID]; !ok {
+		f.put(&Tenant{ID: tenantID, ProjectID: projectID, Status: TenantStatusClaimed})
+	}
+}
+
 func (f *fakeTenantStore) CreateTenant(_ context.Context, t *Tenant) (string, error) {
 	f.put(t)
 	return t.ID, nil
+}
+
+func (f *fakeTenantStore) GetTenantStatus(ctx context.Context, projectID, tenantID string) (string, error) {
+	t, err := f.GetTenant(ctx, projectID, tenantID)
+	if err != nil || t == nil {
+		return "", err
+	}
+	return t.Status, nil
 }
 
 func (f *fakeTenantStore) GetTenant(_ context.Context, projectID, tenantID string) (*Tenant, error) {
@@ -143,15 +215,17 @@ func (f *fakeTenantStore) GetTenantByPrimaryDomain(_ context.Context, projectID,
 	return nil, nil
 }
 
-func (f *fakeTenantStore) SetTenantStatus(_ context.Context, projectID, tenantID, status string) error {
+// ClaimLatentTenant mirrors the postgres store: only a latent tenant moves.
+func (f *fakeTenantStore) ClaimLatentTenant(_ context.Context, projectID, tenantID string) error {
 	if f.setErr != nil {
 		return f.setErr
 	}
 	t, ok := f.byID[projectID+"/"+tenantID]
-	if !ok {
+	if !ok || t.Status != TenantStatusLatent {
 		return nil
 	}
-	t.Status = status
+	t.Status = TenantStatusClaimed
+	f.writes++
 	return nil
 }
 
@@ -166,6 +240,43 @@ func (f *fakeTenantStore) ListTenants(_ context.Context, projectID string) ([]*T
 	return out, nil
 }
 
+// CreateOwnedTenant mirrors the postgres store: the limit counts the
+// owner's tenants created at or after WindowStartMs.
+func (f *fakeTenantStore) CreateOwnedTenant(ctx context.Context, req OwnedTenantRequest) (*Tenant, *TenantMembership, error) {
+	if f.createErr != nil {
+		return nil, nil, f.createErr
+	}
+	created := 0
+	for _, t := range f.byID {
+		if t.ProjectID == req.ProjectID && t.CreatedBy == req.OwnerID && t.CreatedAtMs >= req.WindowStartMs {
+			created++
+		}
+	}
+	if created >= req.MaxPerWindow {
+		return nil, nil, ErrTenantCreationLimited
+	}
+	f.nextID++
+	now := time.Now().UnixMilli()
+	t := &Tenant{
+		ID: "tenant-owned-" + strconv.Itoa(f.nextID), ProjectID: req.ProjectID, Name: req.Name,
+		Status: TenantStatusClaimed, CreatedBy: req.OwnerID, CreatedAtMs: now, UpdatedAtMs: now,
+	}
+	f.put(t)
+	m := &TenantMembership{
+		ProjectID: req.ProjectID, TenantID: t.ID, UserID: req.OwnerID,
+		Source: MembershipSourceCreated, Role: RoleOwner, Status: MembershipStatusActive,
+		CreatedAtMs: now, UpdatedAtMs: now,
+	}
+	if f.members != nil {
+		id, err := f.members.UpsertMembership(ctx, m)
+		if err != nil {
+			return nil, nil, err
+		}
+		m.ID = id
+	}
+	return t, m, nil
+}
+
 var _ TenantStore = (*fakeTenantStore)(nil)
 
 // fakeMembershipStore is an in-memory MembershipStore keyed by
@@ -175,6 +286,24 @@ type fakeMembershipStore struct {
 	getErr    error
 	upsertErr error
 	listErr   error
+	// tenants supplies each tenant's name and status to the active-tenant
+	// reads (linkFakeTenantStores); unlinked, those reads find nothing.
+	tenants *fakeTenantStore
+	// verified holds each tenant's verified domains, keyed project/tenant,
+	// for the active-tenant reads' domain rule (verifyDomain).
+	verified map[string]map[string]bool
+}
+
+// verifyDomain records domain as one tenantID has verified.
+func (f *fakeMembershipStore) verifyDomain(projectID, tenantID, domain string) {
+	if f.verified == nil {
+		f.verified = map[string]map[string]bool{}
+	}
+	k := projectID + "/" + tenantID
+	if f.verified[k] == nil {
+		f.verified[k] = map[string]bool{}
+	}
+	f.verified[k][domain] = true
 }
 
 func newFakeMembershipStore() *fakeMembershipStore {
@@ -198,6 +327,35 @@ func (f *fakeMembershipStore) UpsertMembership(_ context.Context, m *TenantMembe
 	stored.ID = id
 	f.byKey[k] = &stored
 	return id, nil
+}
+
+// fakeRoleRank orders the roles as the postgres store does.
+var fakeRoleRank = map[string]int{RoleOwner: 3, RoleAdmin: 2, RoleMember: 1}
+
+// GrantMembership mirrors the postgres store: an active membership at the
+// role or a higher one keeps its role, and its source too unless that is
+// the domain's; anything else becomes active at m.Role.
+func (f *fakeMembershipStore) GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, error) {
+	if f.upsertErr != nil {
+		return nil, f.upsertErr
+	}
+	k := f.key(m.ProjectID, m.TenantID, m.UserID)
+	granted := *m
+	granted.Status = MembershipStatusActive
+	if prior, ok := f.byKey[k]; ok {
+		granted.ID = prior.ID
+		if prior.Status == MembershipStatusActive && fakeRoleRank[prior.Role] >= fakeRoleRank[m.Role] {
+			if prior.Source != MembershipSourceDomain || m.Source == MembershipSourceDomain {
+				out := *prior
+				return &out, nil
+			}
+			granted.Role = prior.Role
+		}
+	}
+	if _, err := f.UpsertMembership(ctx, &granted); err != nil {
+		return nil, err
+	}
+	return f.GetMembership(ctx, m.ProjectID, m.TenantID, m.UserID)
 }
 
 func (f *fakeMembershipStore) GetMembership(_ context.Context, projectID, tenantID, userID string) (*TenantMembership, error) {
@@ -242,15 +400,68 @@ func (f *fakeMembershipStore) RemoveMembership(_ context.Context, projectID, ten
 	return nil
 }
 
+// ListActiveTenantsForUser mirrors the postgres join: an active membership
+// in a claimed tenant of the project, a domain one only on a domain the
+// tenant verified, ordered by name, then id.
+func (f *fakeMembershipStore) ListActiveTenantsForUser(_ context.Context, projectID, userID, emailDomain string) ([]*UserTenant, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	var out []*UserTenant
+	for _, m := range f.byKey {
+		if ut := f.activeTenant(m, projectID, userID, emailDomain); ut != nil {
+			out = append(out, ut)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].TenantID < out[j].TenantID
+	})
+	return out, nil
+}
+
+func (f *fakeMembershipStore) GetActiveTenantForUser(_ context.Context, projectID, tenantID, userID, emailDomain string) (*UserTenant, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	m, ok := f.byKey[f.key(projectID, tenantID, userID)]
+	if !ok {
+		return nil, nil
+	}
+	return f.activeTenant(m, projectID, userID, emailDomain), nil
+}
+
+func (f *fakeMembershipStore) activeTenant(m *TenantMembership, projectID, userID, emailDomain string) *UserTenant {
+	if f.tenants == nil || m.ProjectID != projectID || m.UserID != userID || m.Status != MembershipStatusActive {
+		return nil
+	}
+	if m.Source == MembershipSourceDomain && !f.verified[projectID+"/"+m.TenantID][emailDomain] {
+		return nil
+	}
+	t, ok := f.tenants.byID[projectID+"/"+m.TenantID]
+	if !ok || t.Status != TenantStatusClaimed {
+		return nil
+	}
+	return &UserTenant{TenantID: t.ID, Name: t.Name, Role: m.Role, Source: m.Source}
+}
+
 var _ MembershipStore = (*fakeMembershipStore)(nil)
 
 // fakeDNSResolver returns a fixed TXT record set (or error) per host.
+// onLookup, when set, runs during the lookup, standing in for a write that
+// lands while the check is in flight.
 type fakeDNSResolver struct {
-	records map[string][]string
-	err     error
+	records  map[string][]string
+	err      error
+	onLookup func()
 }
 
 func (f *fakeDNSResolver) LookupTXT(_ context.Context, host string) ([]string, error) {
+	if f.onLookup != nil {
+		f.onLookup()
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -278,8 +489,10 @@ func newDomainFixture() *domainFixture {
 	return &domainFixture{svc: svc, domains: d, tenants: t, members: m, resolver: r}
 }
 
-// seedAdmin makes userID an active owner of (project, tenant).
+// seedAdmin makes userID an active owner of (project, tenant), a claimed
+// tenant unless the test put it in another status.
 func (f *domainFixture) seedAdmin(projectID, tenantID, userID string) {
+	f.tenants.ensure(projectID, tenantID)
 	_, _ = f.members.UpsertMembership(context.Background(), &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  tenantID,
@@ -310,14 +523,18 @@ func TestCreateDomain_ReturnsDeterministicChallenge(t *testing.T) {
 	require.Equal(t, DomainStatusPending, out.Domain.Status)
 	require.Equal(t, testDomain, out.TXTName)
 
-	_, wantValue := dnsTXTChallenge(testProject, testDomain)
+	_, wantValue := dnsTXTChallenge(testProject, testTenant, testDomain)
 	require.Equal(t, wantValue, out.TXTValue)
 	require.Contains(t, out.TXTValue, domainVerifyTXTPrefix)
 
 	// The challenge must be stable across calls and independent of the
 	// caller's input casing.
-	_, again := dnsTXTChallenge(testProject, "ACME.COM")
+	_, again := dnsTXTChallenge(testProject, testTenant, "ACME.COM")
 	require.Equal(t, wantValue, again)
+
+	// It names the tenant: another tenant's claim on the domain has its own.
+	_, other := dnsTXTChallenge(testProject, "tenant-2", testDomain)
+	require.NotEqual(t, wantValue, other)
 }
 
 func TestCreateDomain_EmailMethodHasNoTXTChallenge(t *testing.T) {
@@ -404,7 +621,7 @@ func TestVerifyDomain_SuccessClaimsTenantAndMakesCallerOwner(t *testing.T) {
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{"some-unrelated-record", want}
 
 	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
@@ -459,7 +676,7 @@ func TestVerifyDomain_FirstVerifierOnLatentTenantBecomesOwner(t *testing.T) {
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 
 	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
@@ -478,7 +695,7 @@ func TestVerifyDomain_NonMemberRejectedOnClaimedTenant(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, "someone-else")
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 
 	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
@@ -493,11 +710,70 @@ func TestVerifyDomain_NonMemberRejectedOnLatentTenantWithMembers(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, "founder")
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 
 	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
 	require.ErrorIs(t, err, ErrPermissionDenied)
+}
+
+// Two tenants claim one domain. The record the domain's owner publishes is
+// the owner's challenge, so it verifies the owner's claim and not the other
+// tenant's; once verified, the other claim cannot verify at all.
+func TestVerifyDomain_ContestedDomainVerifiesOnlyTheOwnersClaim(t *testing.T) {
+	f := newDomainFixture()
+	const squatter, squatterTenant = "user-squatter", "tenant-squatter"
+	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
+	f.tenants.put(&Tenant{ID: squatterTenant, ProjectID: testProject, Status: TenantStatusClaimed})
+	f.seedAdmin(testProject, testTenant, testCaller)
+	f.seedAdmin(testProject, squatterTenant, squatter)
+	squatID := f.seedPendingDomain(t, testProject, squatterTenant, testDomain)
+	ownerID := f.seedPendingDomain(t, testProject, testTenant, testDomain)
+
+	_, owners := dnsTXTChallenge(testProject, testTenant, testDomain)
+	f.resolver.records[testDomain] = []string{owners}
+
+	_, err := f.svc.VerifyDomain(withProject(testProject), squatter, squatID)
+	require.ErrorIs(t, err, ErrPermissionDenied, "the owner's record is not the squatter's challenge")
+
+	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, ownerID)
+	require.NoError(t, err)
+	require.Equal(t, DomainStatusVerified, got.Status)
+
+	_, squatters := dnsTXTChallenge(testProject, squatterTenant, testDomain)
+	f.resolver.records[testDomain] = []string{owners, squatters}
+	_, err = f.svc.VerifyDomain(withProject(testProject), squatter, squatID)
+	require.ErrorIs(t, err, ErrAlreadyExists, "a verified domain admits no second verification")
+}
+
+// A registration made before the challenge named the tenant still verifies
+// with the project-wide value it was given; a registration made since does
+// not.
+func TestVerifyDomain_LegacyChallengeOnlyForLegacyRegistrations(t *testing.T) {
+	_, legacy := legacyDNSTXTChallenge(testProject, testDomain)
+	for name, tc := range map[string]struct {
+		legacy bool
+		want   error
+	}{
+		"legacy registration": {legacy: true},
+		"new registration":    {legacy: false, want: ErrPermissionDenied},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newDomainFixture()
+			f.seedAdmin(testProject, testTenant, testCaller)
+			f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
+			id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
+			f.domains.byID[f.domains.key(testProject, id)].LegacyTXTChallenge = tc.legacy
+			f.resolver.records[testDomain] = []string{legacy}
+
+			_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+			if tc.want == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, tc.want)
+		})
+	}
 }
 
 func TestVerifyDomain_EmailMethodUnimplemented(t *testing.T) {
@@ -596,7 +872,7 @@ func TestVerifyDomain_PropagatesSetDomainStatusError(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 	f.domains.setErr = errBoom
 
@@ -604,12 +880,12 @@ func TestVerifyDomain_PropagatesSetDomainStatusError(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 }
 
-func TestVerifyDomain_PropagatesSetTenantStatusError(t *testing.T) {
+func TestVerifyDomain_PropagatesClaimLatentTenantError(t *testing.T) {
 	f := newDomainFixture()
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 	f.tenants.setErr = errBoom
 
@@ -617,12 +893,12 @@ func TestVerifyDomain_PropagatesSetTenantStatusError(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 }
 
-func TestVerifyDomain_PropagatesUpsertMembershipError(t *testing.T) {
+func TestVerifyDomain_PropagatesGrantMembershipError(t *testing.T) {
 	f := newDomainFixture()
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusClaimed})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 	f.members.upsertErr = errBoom
 
@@ -703,4 +979,163 @@ func TestVerifyDomain_RejectsMissingCallerAndDomainID(t *testing.T) {
 
 	_, err = f.svc.VerifyDomain(withProject(testProject), testCaller, "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
+}
+
+// ── Governance writes and the attempt cap ──────────────────────────────
+
+// publishedClaim seeds a tenant of the given status whose admin holds a
+// pending dns_txt claim with its challenge published, and returns its id.
+func (f *domainFixture) publishedClaim(t *testing.T, tenantStatus string) string {
+	t.Helper()
+	f.seedAdmin(testProject, testTenant, testCaller)
+	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: tenantStatus})
+	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
+	f.resolver.records[testDomain] = []string{want}
+	return id
+}
+
+// Verifying a claim on a tenant that is already claimed writes the domain
+// and leaves the tenant row alone; verifying it again writes nothing at all.
+func TestVerifyDomain_WritesOnlyWhatChanges(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusClaimed)
+	ctx := withProject(testProject)
+
+	_, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	require.NoError(t, err)
+	require.Equal(t, 1, f.domains.writes)
+	require.Zero(t, f.tenants.writes, "a claimed tenant is not claimed again")
+
+	got, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	require.NoError(t, err)
+	require.Equal(t, DomainStatusVerified, got.Status)
+	require.Equal(t, 1, f.domains.writes, "re-verifying a verified domain writes nothing")
+	require.Zero(t, f.tenants.writes)
+	m, _ := f.members.GetMembership(context.Background(), testProject, testTenant, testCaller)
+	require.Equal(t, RoleOwner, m.Role)
+}
+
+// A tenant suspended while its domain's check is in flight stays suspended:
+// the verify claims the tenant only if it is still latent.
+func TestVerifyDomain_SuspensionDuringTheCheckStands(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusLatent)
+	f.resolver.onLookup = func() {
+		f.tenants.byID[testProject+"/"+testTenant].Status = TenantStatusSuspended
+	}
+
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	require.NoError(t, err)
+	tnt, _ := f.tenants.GetTenant(context.Background(), testProject, testTenant)
+	require.Equal(t, TenantStatusSuspended, tnt.Status, "a claim never lifts a suspension")
+}
+
+// A failed re-check of a verified domain does not un-verify it; a failed
+// check of a claim writes failed once, and a repeat of it writes nothing.
+func TestVerifyDomain_FailedChecksWriteOnce(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusClaimed)
+	ctx := withProject(testProject)
+	_, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	require.NoError(t, err)
+
+	f.resolver.records[testDomain] = nil
+	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
+	require.Equal(t, DomainStatusVerified, d.Status, "a lapsed record leaves the domain verified")
+	require.Equal(t, 1, f.domains.writes)
+
+	pending := f.seedPendingDomain(t, testProject, testTenant, "other.example.com")
+	for range 2 {
+		_, err = f.svc.VerifyDomain(ctx, testCaller, pending)
+		require.ErrorIs(t, err, ErrPermissionDenied)
+	}
+	d, _ = f.domains.GetDomain(context.Background(), testProject, pending)
+	require.Equal(t, DomainStatusFailed, d.Status)
+	require.Equal(t, 2, f.domains.writes, "pending to failed is written once")
+}
+
+// A suspended tenant verifies nothing, and the refusal spends no attempt.
+func TestVerifyDomain_SuspendedTenantSpendsNoAttempt(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusSuspended)
+
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	require.Empty(t, f.domains.attempts)
+	require.Zero(t, f.domains.writes)
+}
+
+// Registrations and verifications share one per-tenant cap in a window; a
+// refusal is logged and checks no DNS, and a refused caller spends nothing.
+func TestDomainAttempts_CapRegistrationsAndVerifications(t *testing.T) {
+	f := newDomainFixture()
+	f.svc.cfg = &config.Config{TenantDomainAttemptsMaxPerTenant: 2, TenantDomainAttemptsWindowSeconds: 3600}
+	core, logs := observer.New(zap.InfoLevel)
+	f.svc.logger = zap.New(core)
+	start := time.Now()
+	f.svc.nowFunc = func() time.Time { return start }
+	ctx := withProject(testProject)
+
+	_, err := f.svc.CreateDomain(ctx, "user-stranger", testTenant, testDomain, DomainVerificationDNSTXT)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	require.Empty(t, f.domains.attempts, "a refused caller spends no attempt")
+
+	id := f.publishedClaim(t, TenantStatusLatent)
+	f.resolver.records[testDomain] = nil
+	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "second.example.com", DomainVerificationDNSTXT)
+	require.NoError(t, err)
+	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
+	f.resolver.records[testDomain] = []string{want}
+	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	require.ErrorIs(t, err, ErrDomainAttemptsLimited)
+	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
+	require.Equal(t, DomainStatusFailed, d.Status, "a refused attempt checks nothing")
+	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "third.example.com", DomainVerificationDNSTXT)
+	require.ErrorIs(t, err, ErrDomainAttemptsLimited)
+	list, _ := f.domains.ListDomainsByTenant(context.Background(), testProject, testTenant)
+	require.Len(t, list, 2, "a refused registration writes nothing")
+
+	entries := logs.FilterMessage("tenant_domain_attempts_limited").All()
+	require.Len(t, entries, 2)
+	require.Equal(t, testTenant, entries[0].ContextMap()["tenant_id"])
+
+	f.svc.nowFunc = func() time.Time { return start.Add(time.Hour + time.Second) }
+	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	require.NoError(t, err, "the window has moved on")
+}
+
+func TestDomainAttempts_PropagatesStoreError(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusLatent)
+	f.domains.attemptErr = errBoom
+	ctx := withProject(testProject)
+
+	_, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	require.ErrorIs(t, err, errBoom)
+	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "second.example.com", DomainVerificationDNSTXT)
+	require.ErrorIs(t, err, errBoom)
+	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
+	require.Equal(t, DomainStatusPending, d.Status)
+}
+
+// A suspended tenant's admins can neither register nor list its domains,
+// and a refused registration spends no attempt.
+func TestDomainRPCs_SuspendedTenantRefusesItsAdmins(t *testing.T) {
+	f := newDomainFixture()
+	f.seedAdmin(testProject, testTenant, testCaller)
+	f.tenants.byID[testProject+"/"+testTenant].Status = TenantStatusSuspended
+	ctx := withProject(testProject)
+
+	_, err := f.svc.CreateDomain(ctx, testCaller, testTenant, testDomain, DomainVerificationDNSTXT)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	_, err = f.svc.ListTenantDomains(ctx, testCaller, testTenant)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	require.Empty(t, f.domains.attempts)
+	require.Zero(t, f.domains.writes)
 }

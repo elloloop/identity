@@ -252,7 +252,7 @@ func TestUsernameAccount_AccessRuleOnSignInAndRefresh(t *testing.T) {
 	closed := signupScope(t, `{"access":{"mode":"closed"},"accounts":{"username_signup":"self"}}`)
 	_, err = svc.PasswordLogin(closed, "gina", accessTestPassword, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
-	_, _, _, err = svc.RefreshToken(closed, res.RefreshToken, "1.2.3.4", "agent")
+	_, _, _, err = svc.RefreshToken(closed, res.RefreshToken, "", "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 	allow := signupScope(t, `{"access":{"mode":"allowlist","allowed_domains":["mail.example.com"]}}`)
 	_, err = svc.PasswordLogin(allow, "gina", accessTestPassword, "1.2.3.4", "agent")
@@ -268,7 +268,7 @@ func TestUsernameAccount_AccessRuleOnSignInAndRefresh(t *testing.T) {
 	invite := signupScope(t, `{"access":{"mode":"invite"},"accounts":{"email_signup":"off","username_signup":"admin"}}`)
 	login, err := svc.PasswordLogin(invite, "gina", accessTestPassword, "1.2.3.4", "agent")
 	require.NoError(t, err)
-	_, _, _, err = svc.RefreshToken(invite, login.RefreshToken, "1.2.3.4", "agent")
+	_, _, _, err = svc.RefreshToken(invite, login.RefreshToken, "", "1.2.3.4", "agent")
 	require.NoError(t, err)
 
 	// A managed child keeps signing in and refreshing under closed: its
@@ -277,7 +277,7 @@ func TestUsernameAccount_AccessRuleOnSignInAndRefresh(t *testing.T) {
 	seedGuardianEdge(context.Background(), t, repo, res.User.ID, child.ID)
 	kid, err := svc.PasswordLogin(closed, "kid.closed", strongPW, "1.2.3.4", "agent")
 	require.NoError(t, err)
-	_, _, _, err = svc.RefreshToken(closed, kid.RefreshToken, "1.2.3.4", "agent")
+	_, _, _, err = svc.RefreshToken(closed, kid.RefreshToken, "", "1.2.3.4", "agent")
 	require.NoError(t, err)
 }
 

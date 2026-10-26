@@ -41,7 +41,7 @@ import { Code } from "astro-expressive-code/components";
   "email": "alice@acme.com",   // login key — see Projects, Tenants & Domains
   "email_verified": true,      // owner proved this mailbox; absent when email is empty
   "project": "proj_01HZ...",   // Project (isolation shard) the user belongs to
-  "tenant": "acme",            // logical tenant, derived from verified domain
+  "tenant": "local",           // GATEWAY_DEFAULT_TENANT_ID, or a tenant chosen on RefreshToken
   "role": "admin",             // "admin" | "member" | "guest"
   "sid": "sess_01HZ...",       // session ID
   "auth_time": 1730000000,     // sign-in time; absent on refreshed, QR and anonymous tokens
@@ -137,6 +137,15 @@ import { Code } from "astro-expressive-code/components";
     Downstream services may interpret <code>role</code> however they want.
     Identity does not authorize per-resource access; it authenticates and
     declares a coarse role.
+  </p>
+  <p>
+    <code>role</code> is always the account's role, never a role in a tenant.
+    A token whose <code>tenant</code> was chosen on <code>RefreshToken</code>
+    carries the same <code>role</code> as any other token of that account: the
+    chosen <code>tenant</code> says only that the account is an active member.
+    A service that needs the caller's role in a tenant (owner, admin or
+    member) reads it from <code>ListMyTenants</code>, never from
+    <code>role</code>.
   </p>
 
   <h2>Authorization boundary</h2>
