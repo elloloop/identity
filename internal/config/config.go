@@ -1417,19 +1417,20 @@ type Config struct {
 	// limit counts over, from 0 to 2592000 (0 selects the default, 86400).
 	// Driven by GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS.
 	SelfServiceTenantsWindowSeconds int
-	// TenantSelectionEnabled lets RefreshToken select a tenant the caller
-	// may act in (RefreshTokenRequest.tenant_id), whose id the new access
-	// token then carries in its "tenant" claim. Default OFF: a resource
-	// server that checks "tenant" against the storage tenant must accept a
-	// selected one before this is turned on. Postgres only. Driven by
+	// TenantSelectionEnabled lets RefreshToken put a tenant the caller may
+	// act in into the new access token's "tenant" claim, on postgres only;
+	// turn it on only once every replica runs this release and every
+	// resource server that checks "tenant" accepts a selected one. Default
+	// off. The tenant is RefreshTokenRequest.tenant_id. An older replica
+	// answers a selected tenant's token with 401, and turning this off again
+	// rejects every outstanding one at once. Driven by
 	// GATEWAY_TENANT_SELECTION_ENABLED.
 	TenantSelectionEnabled bool
 	// TenantStatusCacheTTLSeconds bounds how long the access-token check may
-	// serve a selected tenant's status from its in-process cache before
-	// reading it again, from 0 to 300 (default 30). 0 = strict: every
-	// request with a selected-tenant token reads the tenant. Suspending a
-	// tenant ends its tokens within this long. Driven by
-	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
+	// serve a selected tenant's status from its in-process cache, from 0 to
+	// 300 (default 30), where 0 reads the tenant on every request that
+	// carries a selected-tenant token. Suspending a tenant ends its tokens
+	// within this long. Driven by GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
 	TenantStatusCacheTTLSeconds int
 
 	// AuditRetentionDays is the audit-log retention window in days: on each tick

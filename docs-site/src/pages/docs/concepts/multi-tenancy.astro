@@ -17,14 +17,19 @@ import { Code } from "astro-expressive-code/components";
       Each Project maps onto exactly one storage scope (one shard).
     </li>
     <li>
-      <strong>Tenant</strong> — a logical company entity <em>inside</em> a
-      Project. Tenants are formed automatically, one per verified email domain
-      (e.g. <code>acme.com</code>). A single Project can hold many Tenants.
+      <strong>Tenant</strong> — a logical company or team entity
+      <em>inside</em> a Project. Tenants form automatically from the email
+      domains users sign up with (e.g. <code>acme.com</code>), or a signed-in
+      user creates one where the Project allows
+      <a href="#self-service-tenants">self-service tenants</a>. A single
+      Project can hold many Tenants.
     </li>
     <li>
-      <strong>Domain</strong> — a verified DNS domain. Verifying
-      <code>acme.com</code> is what materializes the <code>acme</code> Tenant
-      and lets identity attribute <code>alice@acme.com</code> to it.
+      <strong>Domain</strong> — a DNS domain a Tenant registers and proves
+      it controls. Verifying <code>acme.com</code> binds it to that one
+      Tenant, so identity attributes <code>alice@acme.com</code> to it; until
+      then the registration is only a claim, and several Tenants may hold
+      one.
     </li>
   </ul>
 
@@ -102,13 +107,16 @@ docker run ... \\
     lang="bash"
   />
 
-  <h2>Self-service tenants</h2>
+  <h2 id="self-service-tenants">Self-service tenants</h2>
   <p>
     A Project can let its signed-in users create tenants of their own, for a
     team that has no company domain behind it. It is off by
     default; the Project turns it on in its <code>config_json</code> (the
     default Project takes it from
-    <code>GATEWAY_SELF_SERVICE_TENANTS_ENABLED</code>):
+    <code>GATEWAY_SELF_SERVICE_TENANTS_ENABLED</code> when a request falls
+    through to it; one that reaches the default Project by its own project
+    key or auth hostname reads that Project's <code>config_json</code>
+    instead):
   </p>
   <Code code={`{ "tenants": { "self_service": true } }`} lang="json" />
   <p>
@@ -131,9 +139,14 @@ docker run ... \\
     together (default 100) in
     <code>GATEWAY_TENANT_DOMAIN_ATTEMPTS_WINDOW_SECONDS</code> (default one
     day), and both share a per-IP budget
-    (<code>GATEWAY_RATE_LIMIT_DOMAIN_PER_IP</code>, default 20 per window).
-    A registered domain captures no signups until it is verified, and a
-    failed re-check never un-verifies it.
+    (<code>GATEWAY_RATE_LIMIT_DOMAIN_PER_IP</code>, default 20 per window) on
+    the HTTP surface: over it a call gets HTTP 429 with a
+    <code>Retry-After</code> header, which Connect clients surface as
+    <code>UNAVAILABLE</code>. A host serving identity over native gRPC
+    applies its own. A registered domain captures no signups until it is
+    verified, and a failed re-check never un-verifies it. Registering a
+    domain another tenant has verified is <code>ALREADY_EXISTS</code>, so a
+    tenant admin can learn which domains are onboarded in the Project.
   </p>
 
   <h2>Choosing a tenant for a token</h2>
@@ -154,7 +167,10 @@ docker run ... \\
   <p>
     A member only through their email's domain must have verified that email.
     A refused selection consumes nothing, so the client can refresh again
-    without <code>tenant_id</code>. Each refresh chooses again; one without
+    without <code>tenant_id</code>. <code>RefreshToken</code> also answers
+    <code>FAILED_PRECONDITION</code> for an account refused over its own
+    state, and that refusal does consume the token, so a client sends
+    <code>tenant_id</code> only to a server it knows has selection on. Each refresh chooses again; one without
     <code>tenant_id</code> returns to the default, and the client reads the
     tenant it got from the token's <code>tenant</code> claim. Identity's HTTP
     surface checks the tenant's status through a short cache, so suspending a
@@ -188,7 +204,9 @@ docker run ... \\
     per tenant and recipient by a resend cooldown
     (<code>GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS</code>, default
     300). Past any of these but the per-IP one the call is
-    <code>RESOURCE_EXHAUSTED</code>. The email names an operator's or a domain
+    <code>RESOURCE_EXHAUSTED</code>; past the per-IP one, which applies on the
+    HTTP surface only, it gets HTTP 429 with a <code>Retry-After</code>
+    header, which Connect clients surface as <code>UNAVAILABLE</code>. The email names an operator's or a domain
     tenant, but never a self-service tenant, whose name its creator typed.
     Accepting an invitation never lowers a role, so it cannot demote an owner.
   </p>

@@ -57,9 +57,8 @@ func (s *AutoFormStore) EnsureTenantForDomain(ctx context.Context, projectID, do
 // within a project, creating a latent tenant + its domain in one
 // transaction when there is none. Registering a domain does not make it a
 // tenant's, so a claim another tenant has not proven is never joined: see
-// tenantIDForDomain. No unique index serialises that choice any more, so the
-// domain's auto-formation lock does (autoformLockKey), and concurrent signers
-// converge on one tenant.
+// tenantIDForDomain. The domain's auto-formation lock (autoformLockKey)
+// serialises that choice, so concurrent signers converge on one tenant.
 func (s *AutoFormStore) findOrCreateTenant(ctx context.Context, projectID, domain string) (string, error) {
 	if id, err := s.tenantIDForDomain(ctx, s.pool, projectID, domain); err != nil || id != "" {
 		return id, err
@@ -117,7 +116,9 @@ type querier interface {
 // domain, else the latent tenant auto-formation made for it. A claim that is
 // only registered — anyone's pending or failed dns_txt row, or an email row
 // on a tenant that is not auto-formed — is ignored, so registering a domain
-// one does not own captures none of its signups.
+// one does not own captures none of its signups. Nor does a suspended
+// auto-formed tenant: the domain's next signup forms a new latent tenant,
+// which nobody can select until it is claimed by verifying the domain.
 //
 // The two reads are separate so each is one index probe: the verified row
 // through the verified-domain unique index (0045), the oldest email row
@@ -156,9 +157,12 @@ func (s *AutoFormStore) tenantIDForDomain(ctx context.Context, q querier, projec
 	return id, nil
 }
 
-// upsertDerivedMembership records (or refreshes) a domain-derived,
-// active membership for the user in the tenant. Idempotent on
-// (project, tenant, user).
+// upsertDerivedMembership records a domain-derived, active membership for
+// the user in the tenant, or refreshes the one they hold. Idempotent on
+// (project, tenant, user). A held membership keeps its source: one the user
+// created, was invited to or was added to carries more than their email's
+// domain does, and relabelling it "domain" would hold it to the
+// verified-email rule again.
 func (s *AutoFormStore) upsertDerivedMembership(ctx context.Context, projectID, tenantID, userID string) error {
 	now := nowMs()
 	_, err := s.pool.Exec(
@@ -168,7 +172,7 @@ func (s *AutoFormStore) upsertDerivedMembership(ctx context.Context, projectID, 
 			created_at_ms, updated_at_ms
 		) VALUES ($1, $2, $3, $4, 'domain', 'member', 'active', $5, $5)
 		ON CONFLICT (project_id, tenant_id, user_id) DO UPDATE SET
-			source = 'domain', updated_at_ms = EXCLUDED.updated_at_ms`,
+			updated_at_ms = EXCLUDED.updated_at_ms`,
 		newID(), projectID, tenantID, userID, now,
 	)
 	if err != nil {

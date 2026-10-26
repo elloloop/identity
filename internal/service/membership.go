@@ -106,9 +106,12 @@ type MembershipStore interface {
 	UpsertMembership(ctx context.Context, m *TenantMembership) (string, error)
 	// GrantMembership makes m.UserID an active member of m.TenantID at
 	// m.Role, unless they already hold an active membership there at m.Role
-	// or a higher one (owner, then admin, then member), which is kept
-	// unchanged. It never lowers a role, so it cannot demote an owner.
-	// Returns the surviving membership.
+	// or a higher one (owner, then admin, then member), whose role is then
+	// kept. It never lowers a role, so it cannot demote an owner. A kept
+	// membership whose source is MembershipSourceDomain takes m.Source, so a
+	// grant, an accepted invitation say, lifts the verified-email rule that
+	// source carries; any other source is left unchanged. Returns the
+	// surviving membership.
 	GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, error)
 	// GetMembership returns the membership for (project, tenant, user), or
 	// (nil, nil).
@@ -162,16 +165,19 @@ type InvitationLimits struct {
 	WindowStartMs int64
 	// ResendCooldownStartMs is the per-recipient cooldown: the create is
 	// refused with ErrInvitationResendTooSoon when the tenant already
-	// invited the same address at or after it. Zero applies no cooldown.
+	// invited the same address at or after it.
 	ResendCooldownStartMs int64
 	// MaxPerInviter caps the invitations the inviter (InvitedBy) sent from
 	// every tenant of the project at or after WindowStartMs: past it the
-	// create is refused with ErrInviterLimited. Zero applies no such cap.
+	// create is refused with ErrInviterLimited.
 	MaxPerInviter int
 	// MaxPerRecipient caps the invitations the address was sent from every
 	// tenant of the project at or after WindowStartMs: past it the create is
-	// refused with ErrInvitationRecipientLimited. Zero applies no such cap.
+	// refused with ErrInvitationRecipientLimited.
 	MaxPerRecipient int
+	// A store applies none of the three limits above that is zero. The
+	// MembershipService never passes zero: a deployment cannot switch these
+	// limits off, as 0 in their GATEWAY_* settings selects the default.
 }
 
 // TenantAutoFormStore is the transactional auto-formation primitive: it

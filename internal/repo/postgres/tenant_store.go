@@ -164,6 +164,23 @@ func (s *TenantStore) SetTenantStatus(ctx context.Context, projectID, tenantID, 
 	return nil
 }
 
+// ClaimLatentTenant moves a latent tenant to claimed. The status is
+// compared and set in one statement, so a suspension that lands between a
+// caller's read and this write is kept. Unknown ids, and a tenant in any
+// other status, are a no-op.
+func (s *TenantStore) ClaimLatentTenant(ctx context.Context, projectID, tenantID string) error {
+	if projectID == "" || tenantID == "" {
+		return fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
+	}
+	const q = `
+		UPDATE tenants SET status = 'claimed', updated_at_ms = $3
+		WHERE project_id = $1 AND id = $2 AND status = 'latent'`
+	if _, err := s.pool.Exec(ctx, q, projectID, tenantID, nowMs()); err != nil {
+		return wrapPgErr("ClaimLatentTenant", err)
+	}
+	return nil
+}
+
 // ListTenants returns every tenant in a project, newest first.
 func (s *TenantStore) ListTenants(ctx context.Context, projectID string) ([]*service.Tenant, error) {
 	if projectID == "" {
@@ -430,11 +447,13 @@ func (s *DomainStore) GetVerifiedDomain(ctx context.Context, projectID, domain s
 // stamps verified_at_ms (0 defaults to now on a verify). Unknown ids, and a
 // domain already in the status, are a no-op: a write on a verified domain
 // fires the agent-governance trigger (0046), so one that changes nothing
-// must not be made. Verifying a domain another row of the project has
-// verified breaks the verified-domain unique index, which surfaces
-// service.ErrAlreadyExists; the verify runs under the domain's auto-formation
-// lock, so it cannot interleave with the auto-former choosing a tenant for
-// the domain.
+// must not be made. Nor is a verified domain moved to any other status: a
+// failed check racing a successful one must not un-verify it, and a domain
+// stops being verified only by being removed. Verifying a domain another row
+// of the project has verified breaks the verified-domain unique index, which
+// surfaces service.ErrAlreadyExists; the verify runs under the domain's
+// auto-formation lock, so it cannot interleave with the auto-former choosing
+// a tenant for the domain.
 func (s *DomainStore) SetDomainStatus(ctx context.Context, projectID, domainID, status string, verifiedAtMs int64) error {
 	if projectID == "" || domainID == "" {
 		return fmt.Errorf("%w: project_id and domain_id are required", service.ErrInvalidArgument)
@@ -447,7 +466,7 @@ func (s *DomainStore) SetDomainStatus(ctx context.Context, projectID, domainID, 
 		UPDATE domains SET status = $3, verified_at_ms = $4, updated_at_ms = $5
 		WHERE project_id = $1 AND id = $2 AND status IS DISTINCT FROM $3`
 	if status != service.DomainStatusVerified {
-		if _, err := s.pool.Exec(ctx, q, projectID, domainID, status, verifiedAtMs, now); err != nil {
+		if _, err := s.pool.Exec(ctx, q+` AND status <> 'verified'`, projectID, domainID, status, verifiedAtMs, now); err != nil {
 			return wrapPgErr("SetDomainStatus", err)
 		}
 		return nil

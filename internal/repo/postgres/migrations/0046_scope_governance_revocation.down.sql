@@ -3,16 +3,19 @@
 -- Restores 0041's tenant and domain triggers: unguarded, and revoking every
 -- agent grant and agent machine in the project. Nothing is revoked by the
 -- down migration itself. domain_attempts holds only rate-limit history, so
--- dropping it loses nothing the older code reads. lock_timeout bounds the
--- wait for the locks, as the up migration does.
+-- dropping it loses nothing the older code reads, and users.email_domain is
+-- derived from email. Dropping a column is catalog-only: users is not
+-- rewritten. 0044's source check stays validated, which the older code does
+-- not notice. lock_timeout bounds the wait for the locks, as the up
+-- migration does.
 SET LOCAL lock_timeout = '10s';
 
 CREATE INDEX IF NOT EXISTS domains_project_tenant_idx
     ON domains (project_id, tenant_id);
-DROP INDEX IF EXISTS domains_project_email_domain_idx;
-
 CREATE INDEX IF NOT EXISTS tenant_invitations_project_tenant_idx
     ON tenant_invitations (project_id, tenant_id);
+
+DROP INDEX IF EXISTS domains_project_email_domain_idx;
 DROP INDEX IF EXISTS tenant_invitations_project_email_created_idx;
 DROP INDEX IF EXISTS tenant_invitations_project_inviter_created_idx;
 DROP INDEX IF EXISTS tenant_invitations_project_tenant_created_idx;
@@ -31,4 +34,6 @@ CREATE TRIGGER agent_oauth_verified_domain AFTER INSERT ON domains FOR EACH ROW 
 DROP FUNCTION revoke_agent_oauth_domain_governance();
 DROP FUNCTION revoke_agent_oauth_tenant_governance();
 DROP FUNCTION invalidate_agent_oauth_governed(TEXT, TEXT[], TEXT[]);
-DROP FUNCTION agent_oauth_governed_users(TEXT, TEXT[], TEXT[]);
+DROP FUNCTION agent_oauth_domain_users(TEXT, TEXT[]);
+
+ALTER TABLE users DROP COLUMN IF EXISTS email_domain;

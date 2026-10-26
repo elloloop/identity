@@ -625,6 +625,9 @@ func New(deps Deps) (*Built, error) {
 	if deps.Config.DefaultProjectID == "" {
 		deps.Config.DefaultProjectID = config.DefaultProjectIDFallback
 	}
+	if err := checkTenantFeatures(deps, logger); err != nil {
+		return nil, err
+	}
 
 	allowedOrigins, err := loadAllowedOrigins(deps.Config, logger)
 	if err != nil {
@@ -767,7 +770,7 @@ func New(deps Deps) (*Built, error) {
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
 		// A nil reader refuses every tenant selection: the switch is off,
-		// or the driver has no membership store (memory, SQLite).
+		// or the driver has no governance stores (memory, SQLite).
 		WithTenantSelection(tenantSelectionReader(deps)).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
@@ -1109,11 +1112,57 @@ func buildEventing(deps Deps, logger *zap.Logger) (events.Publisher, func(), fun
 // is due.
 const drainPollInterval = time.Second
 
+// checkTenantFeatures refuses a boot whose tenant switches are on without
+// the stores that serve them, which a host injecting its own repository may
+// leave out (Config.Validate refuses the other drivers by name), and logs
+// once, as SCIM and LookupUsers do, whether each feature is served and under
+// which limits.
+func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
+	cfg := deps.Config
+	if cfg.TenantSelectionEnabled && !tenantSelectionServed(deps) {
+		return errors.New("app: GATEWAY_TENANT_SELECTION_ENABLED needs the tenant and membership stores, which only the postgres driver provides")
+	}
+	if cfg.SelfServiceTenantsEnabled && !membershipServiceServed(deps) {
+		return errors.New("app: GATEWAY_SELF_SERVICE_TENANTS_ENABLED needs the tenant, membership and invitation stores, which only the postgres driver provides")
+	}
+	if cfg.TenantSelectionEnabled {
+		logger.Info("tenant_selection_enabled", zap.Duration("status_cache_ttl", cfg.TenantStatusCacheTTL()))
+	} else {
+		logger.Info("tenant_selection_disabled",
+			zap.String("hint", "set GATEWAY_TENANT_SELECTION_ENABLED=true (postgres only) once every replica runs this release and resource servers accept a selected tenant"))
+	}
+	if cfg.SelfServiceTenantsEnabled {
+		logger.Info("self_service_tenants_enabled",
+			zap.Int("max_per_user", cfg.SelfServiceTenantsLimit()),
+			zap.Duration("window", cfg.SelfServiceTenantsWindow()))
+	} else {
+		logger.Info("self_service_tenants_disabled",
+			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)),
+			zap.String("hint", "set GATEWAY_SELF_SERVICE_TENANTS_ENABLED=true (postgres only) for the default project; other projects set tenants.self_service in their config_json"))
+	}
+	return nil
+}
+
+// tenantSelectionServed reports whether the build has what tenant selection
+// reads: the membership store RefreshToken checks a selection against, and
+// the tenant store the access-token check reads a selected tenant's status
+// from.
+func tenantSelectionServed(deps Deps) bool {
+	return deps.MembershipStore != nil && deps.TenantStore != nil
+}
+
+// membershipServiceServed reports whether the build has the stores the
+// MembershipService is built from, and so serves the invitation RPCs and
+// CreateTenant.
+func membershipServiceServed(deps Deps) bool {
+	return deps.InvitationStore != nil && deps.MembershipStore != nil && deps.TenantStore != nil
+}
+
 // tenantSelectionReader is what RefreshToken resolves a selected tenant
 // through: the membership store when GATEWAY_TENANT_SELECTION_ENABLED is on,
 // nil otherwise. A nil interface, never a typed nil, so the service refuses.
 func tenantSelectionReader(deps Deps) service.UserTenantReader {
-	if !deps.Config.TenantSelectionEnabled || deps.MembershipStore == nil {
+	if !deps.Config.TenantSelectionEnabled || !tenantSelectionServed(deps) {
 		return nil
 	}
 	return deps.MembershipStore
@@ -1122,11 +1171,11 @@ func tenantSelectionReader(deps Deps) service.UserTenantReader {
 // tokenTenants is the rule the access-token check holds a token's "tenant"
 // claim to: the internal storage tenant key (DefaultTenantID), or a claimed
 // tenant of the token's project that RefreshToken selected for a member,
-// read through a TTL cache. With selection off, or without a tenant store
+// read through a TTL cache. With selection off, or without its stores
 // (memory, SQLite), only the default is accepted.
 func tokenTenants(deps Deps, logger *zap.Logger) (middleware.TokenTenants, error) {
 	tenants := middleware.TokenTenants{Default: deps.Config.DefaultTenantID, Logger: logger}
-	if !deps.Config.TenantSelectionEnabled || deps.TenantStore == nil {
+	if !deps.Config.TenantSelectionEnabled || !tenantSelectionServed(deps) {
 		return tenants, nil
 	}
 	metrics, err := middleware.NewTenantStatusMetrics(deps.MetricsRegistry)
@@ -1169,7 +1218,7 @@ func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
 // repository), as accounts are partitioned by project. auditLog receives the
 // CreateTenant trail.
 func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
-	if deps.InvitationStore == nil || deps.MembershipStore == nil || deps.TenantStore == nil {
+	if !membershipServiceServed(deps) {
 		return nil
 	}
 	return service.NewMembershipService(

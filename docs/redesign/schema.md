@@ -281,15 +281,22 @@ project; canonical email kept in `email` (H2). Organization linkage dropped.
 | `deactivated_at_ms` | BIGINT | N | Default `0`. |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
+| `email_domain` | TEXT COLLATE "C" | Y | 0046. Stored generated column: the email's lower-cased domain, `substring(lower(email COLLATE "C") FROM '@([^@]*)$')`; `NULL` for an email with no `@`. Read only by the agent-governance triggers. |
 
 - **PK:** `id`. **Unique:** `users_project_email_uidx (project_id, lower(email))`.
-- **Indexes:** `users_project_status_idx (project_id, status)`.
+- **Indexes:** `users_project_status_idx (project_id, status)`;
+  `users_project_email_domain_idx (project_id, email_domain) WHERE email_domain IS NOT NULL`
+  (0046: the governance triggers find the accounts on a domain through it;
+  a column rather than an expression index, because under `users`' forced
+  row-level security only a leakproof comparison can be an index condition,
+  and `lower()`/`substring()` are not).
 - **FKs:** `project_id` → `projects(id)`.
 
 #### `tenants` (Tenant) — NEW
 
-Logical company entity. Auto-forms `latent` from the first user of a non-public
-email domain; `claimed` once a domain is verified.
+Logical company or team entity. Auto-forms `latent` from the first user of a
+non-public email domain, and is `claimed` once a domain is verified; or a
+signed-in user creates it `claimed`, as its owner (`CreateTenant`, 0044).
 
 | Column | Type | Null | Notes |
 |---|---|---|---|
@@ -300,12 +307,15 @@ email domain; `claimed` once a domain is verified.
 | `status` | TEXT | N | `CHECK IN ('latent','claimed','suspended')`. Default `latent`. |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
+| `created_by` | TEXT | N | 0044. Default `''`. The user who created the tenant with `CreateTenant`; `''` for an auto-formed or operator-created tenant. Not an FK, like `invited_by`. |
 
 - **PK:** `id`.
 - **Unique:** none beyond PK (no domain uniqueness on tenant).
 - **Indexes:** `tenants_project_idx (project_id)`,
   `tenants_project_primary_domain_idx (project_id, lower(primary_domain))`,
-  `tenants_project_status_idx (project_id, status)`.
+  `tenants_project_status_idx (project_id, status)`,
+  `tenants_project_created_by_idx (project_id, created_by, created_at_ms) WHERE created_by <> ''`
+  (the per-user creation limit, 0044).
 - **FKs:** `project_id` → `projects(id)` ON DELETE CASCADE.
 
 #### `domains` (Domain — tenant email domain) — NEW
@@ -345,7 +355,11 @@ punycode domain (H3) — enforced in application code on `lower(domain)`.
   `tenant_id` or `domain`, inserted verified or deleted while verified, revokes
   the agent grants and machines of the members of the tenants involved and of
   the accounts on the domains involved. `tenants` has the same trigger on a
-  change of `status` or `primary_domain`. Other writes revoke nothing.
+  change of `status` or `primary_domain`. Other writes revoke nothing. Both
+  call `invalidate_agent_oauth_governed`, which collects the governed users
+  once — the tenants' members, and the accounts on the domains through
+  `agent_oauth_domain_users` and `users_project_email_domain_idx`, read only
+  when a domain is involved — and revokes their agents.
 
 #### `domain_attempts` (per-tenant domain-attempt history) — 0046
 
@@ -398,7 +412,7 @@ when no row exists, and only against a VERIFIED domain of a CLAIMED tenant.
 | `project_id` | TEXT | N | **FK** → `projects(id)` ON DELETE CASCADE. Leading column. |
 | `tenant_id` | TEXT | N | **FK** → `tenants(id)` ON DELETE CASCADE. |
 | `user_id` | TEXT | N | **FK** → `users(id)` ON DELETE CASCADE. |
-| `source` | TEXT | N | `CHECK IN ('domain','invited','added')`. |
+| `source` | TEXT | N | `CHECK IN ('domain','invited','added','created')`; `created` (0044) is the owner membership `CreateTenant` writes. A grant (an accepted invitation, a verifying owner) replaces a `domain` source and keeps any other. |
 | `role` | TEXT | N | `CHECK IN ('member','admin','owner')`. Default `member`. |
 | `status` | TEXT | N | `CHECK IN ('active','pending','inactive')`. Default `active`. |
 | `created_at_ms` | BIGINT | N | |

@@ -2115,8 +2115,8 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 // vouch for one.
 //
 // tenantID becomes the access token's tenant claim. It is a tenant the caller
-// has already checked the user may act in (only RefreshToken passes one);
-// empty keeps the deployment's default tenant.
+// has already checked the user may act in; empty keeps the deployment's
+// default tenant.
 func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, authTimeMs int64, tenantID string) (string, string, error) {
 	// The verified-email gate's backstop: every path that mints a session (and
 	// any added later) honours it. Sign-ins and refreshes run the audited gate

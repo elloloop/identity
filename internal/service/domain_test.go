@@ -106,7 +106,7 @@ func (f *fakeDomainStore) SetDomainStatus(_ context.Context, projectID, domainID
 		return f.setErr
 	}
 	d, ok := f.byID[f.key(projectID, domainID)]
-	if !ok || d.Status == status {
+	if !ok || d.Status == status || (d.Status == DomainStatusVerified && status != DomainStatusVerified) {
 		return nil
 	}
 	if status == DomainStatusVerified {
@@ -153,7 +153,8 @@ type fakeTenantStore struct {
 	createErr error
 	members   *fakeMembershipStore
 	nextID    int
-	// writes counts SetTenantStatus calls that changed a row.
+	// writes counts SetTenantStatus and ClaimLatentTenant calls that changed
+	// a row.
 	writes int
 }
 
@@ -217,6 +218,20 @@ func (f *fakeTenantStore) SetTenantStatus(_ context.Context, projectID, tenantID
 		return nil
 	}
 	t.Status = status
+	f.writes++
+	return nil
+}
+
+// ClaimLatentTenant mirrors the postgres store: only a latent tenant moves.
+func (f *fakeTenantStore) ClaimLatentTenant(_ context.Context, projectID, tenantID string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	t, ok := f.byID[projectID+"/"+tenantID]
+	if !ok || t.Status != TenantStatusLatent {
+		return nil
+	}
+	t.Status = TenantStatusClaimed
 	f.writes++
 	return nil
 }
@@ -310,21 +325,24 @@ func (f *fakeMembershipStore) UpsertMembership(_ context.Context, m *TenantMembe
 var fakeRoleRank = map[string]int{RoleOwner: 3, RoleAdmin: 2, RoleMember: 1}
 
 // GrantMembership mirrors the postgres store: an active membership at the
-// role or a higher one is kept unchanged, anything else becomes active at
-// m.Role.
+// role or a higher one keeps its role, and its source too unless that is
+// the domain's; anything else becomes active at m.Role.
 func (f *fakeMembershipStore) GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, error) {
 	if f.upsertErr != nil {
 		return nil, f.upsertErr
 	}
 	k := f.key(m.ProjectID, m.TenantID, m.UserID)
-	if prior, ok := f.byKey[k]; ok && prior.Status == MembershipStatusActive && fakeRoleRank[prior.Role] >= fakeRoleRank[m.Role] {
-		out := *prior
-		return &out, nil
-	}
 	granted := *m
 	granted.Status = MembershipStatusActive
 	if prior, ok := f.byKey[k]; ok {
 		granted.ID = prior.ID
+		if prior.Status == MembershipStatusActive && fakeRoleRank[prior.Role] >= fakeRoleRank[m.Role] {
+			if prior.Source != MembershipSourceDomain || m.Source == MembershipSourceDomain {
+				out := *prior
+				return &out, nil
+			}
+			granted.Role = prior.Role
+		}
 	}
 	if _, err := f.UpsertMembership(ctx, &granted); err != nil {
 		return nil, err
@@ -420,12 +438,18 @@ func (f *fakeMembershipStore) activeTenant(m *TenantMembership, projectID, userI
 var _ MembershipStore = (*fakeMembershipStore)(nil)
 
 // fakeDNSResolver returns a fixed TXT record set (or error) per host.
+// onLookup, when set, runs during the lookup, standing in for a write that
+// lands while the check is in flight.
 type fakeDNSResolver struct {
-	records map[string][]string
-	err     error
+	records  map[string][]string
+	err      error
+	onLookup func()
 }
 
 func (f *fakeDNSResolver) LookupTXT(_ context.Context, host string) ([]string, error) {
+	if f.onLookup != nil {
+		f.onLookup()
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -842,7 +866,7 @@ func TestVerifyDomain_PropagatesSetDomainStatusError(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 }
 
-func TestVerifyDomain_PropagatesSetTenantStatusError(t *testing.T) {
+func TestVerifyDomain_PropagatesClaimLatentTenantError(t *testing.T) {
 	f := newDomainFixture()
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
@@ -976,6 +1000,21 @@ func TestVerifyDomain_WritesOnlyWhatChanges(t *testing.T) {
 	require.Zero(t, f.tenants.writes)
 	m, _ := f.members.GetMembership(context.Background(), testProject, testTenant, testCaller)
 	require.Equal(t, RoleOwner, m.Role)
+}
+
+// A tenant suspended while its domain's check is in flight stays suspended:
+// the verify claims the tenant only if it is still latent.
+func TestVerifyDomain_SuspensionDuringTheCheckStands(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusLatent)
+	f.resolver.onLookup = func() {
+		require.NoError(t, f.tenants.SetTenantStatus(context.Background(), testProject, testTenant, TenantStatusSuspended))
+	}
+
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	require.NoError(t, err)
+	tnt, _ := f.tenants.GetTenant(context.Background(), testProject, testTenant)
+	require.Equal(t, TenantStatusSuspended, tnt.Status, "a claim never lifts a suspension")
 }
 
 // A failed re-check of a verified domain does not un-verify it; a failed

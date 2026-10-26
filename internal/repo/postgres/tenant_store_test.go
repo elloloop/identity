@@ -365,3 +365,75 @@ func TestTenantStore_SetTenantStatusSkipsUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, service.TenantStatusSuspended, changed.Status)
 }
+
+// TestTenantStore_ClaimLatentTenantMovesOnlyALatentTenant: claiming compares
+// and sets the status in one statement, so a tenant suspended between a
+// caller's read and the claim stays suspended.
+func TestTenantStore_ClaimLatentTenantMovesOnlyALatentTenant(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping tenant claim test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	projects, tenants, _ := newTenantDomainStores(ctx, t, dsn)
+	proj, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-claim", Name: "Claim"})
+	require.NoError(t, err)
+	status := func(id string) string {
+		t.Helper()
+		got, err := tenants.GetTenantStatus(ctx, proj, id)
+		require.NoError(t, err)
+		return got
+	}
+
+	latent, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Status: service.TenantStatusLatent})
+	require.NoError(t, err)
+	require.NoError(t, tenants.ClaimLatentTenant(ctx, proj, latent))
+	require.Equal(t, service.TenantStatusClaimed, status(latent))
+
+	suspended, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Status: service.TenantStatusSuspended})
+	require.NoError(t, err)
+	require.NoError(t, tenants.ClaimLatentTenant(ctx, proj, suspended))
+	require.Equal(t, service.TenantStatusSuspended, status(suspended), "a suspension is never undone by a claim")
+
+	require.NoError(t, tenants.ClaimLatentTenant(ctx, proj, "no-such"))
+	require.ErrorIs(t, tenants.ClaimLatentTenant(ctx, "", latent), service.ErrInvalidArgument)
+	require.ErrorIs(t, tenants.ClaimLatentTenant(ctx, proj, ""), service.ErrInvalidArgument)
+}
+
+// TestDomainStore_SetDomainStatusNeverUnverifies: a failed check that races a
+// successful one cannot move the verified domain back, which would also
+// fire the 0046 revocation.
+func TestDomainStore_SetDomainStatusNeverUnverifies(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping domain status test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	projects, tenants, domains := newTenantDomainStores(ctx, t, dsn)
+	proj, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-unverify", Name: "Unverify"})
+	require.NoError(t, err)
+	tenant, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Status: service.TenantStatusClaimed})
+	require.NoError(t, err)
+	id, err := domains.CreateDomain(ctx, &service.Domain{ProjectID: proj, TenantID: tenant, Domain: "acme.example.test"})
+	require.NoError(t, err)
+
+	require.NoError(t, domains.SetDomainStatus(ctx, proj, id, service.DomainStatusFailed, 0))
+	failed, err := domains.GetDomain(ctx, proj, id)
+	require.NoError(t, err)
+	require.Equal(t, service.DomainStatusFailed, failed.Status, "an unverified claim records its failed check")
+
+	require.NoError(t, domains.SetDomainStatus(ctx, proj, id, service.DomainStatusVerified, 0))
+	verified, err := domains.GetDomain(ctx, proj, id)
+	require.NoError(t, err)
+	for _, status := range []string{service.DomainStatusFailed, service.DomainStatusPending} {
+		require.NoError(t, domains.SetDomainStatus(ctx, proj, id, status, 0))
+		kept, err := domains.GetDomain(ctx, proj, id)
+		require.NoError(t, err)
+		require.Equal(t, service.DomainStatusVerified, kept.Status, "%s never replaces verified", status)
+		require.Equal(t, verified.UpdatedAtMs, kept.UpdatedAtMs, "nor is anything written")
+	}
+}

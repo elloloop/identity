@@ -31,22 +31,9 @@ func NewTenantStatusMetrics(reg prometheus.Registerer) (*TenantStatusMetrics, er
 		reg = prometheus.NewRegistry()
 	}
 	hist := prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: tenantStatusMetricName,
-		Help: "Selected-tenant status lookup duration in seconds on the access-token check, labelled by outcome (hit/miss/error).",
-		// The session histogram's buckets: the same split between a warm
-		// cache and a repository round-trip.
-		Buckets: []float64{
-			0.0000005, // 500ns
-			0.000001,  // 1µs
-			0.000005,  // 5µs
-			0.00001,   // 10µs
-			0.0001,    // 100µs
-			0.001,     // 1ms
-			0.005,     // 5ms
-			0.01,      // 10ms
-			0.05,      // 50ms
-			0.1,       // 100ms
-		},
+		Name:    tenantStatusMetricName,
+		Help:    "Selected-tenant status lookup duration in seconds on the access-token check, labelled by outcome (hit/miss/error).",
+		Buckets: cacheLookupBuckets,
 	}, []string{"outcome"})
 	if err := reg.Register(hist); err != nil {
 		return nil, err

@@ -442,6 +442,54 @@ func TestMembershipStore_GrantNeverLowersARole(t *testing.T) {
 	require.Equal(t, service.RoleOwner, final.Role)
 }
 
+// TestMembershipStore_GrantReplacesADomainSource: a membership that came
+// only from the email's domain counts once that email is verified, so a
+// grant at its role or below keeps the role but takes the grant's source;
+// a grant never relabels any other source, and the domain's own refresh
+// leaves a domain membership as it is.
+func TestMembershipStore_GrantReplacesADomainSource(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping membership grant source test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	ms, _, projectID, tenantID, user1, user2 := newMembershipFixture(ctx, t, dsn)
+
+	for _, userID := range []string{user1, user2} {
+		_, err := ms.UpsertMembership(ctx, &service.TenantMembership{
+			ProjectID: projectID, TenantID: tenantID, UserID: userID, Role: service.RoleAdmin,
+			Source: service.MembershipSourceDomain, Status: service.MembershipStatusActive,
+		})
+		require.NoError(t, err)
+	}
+	before, err := ms.GetMembership(ctx, projectID, tenantID, user1)
+	require.NoError(t, err)
+
+	invited, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user1, Role: service.RoleMember, Source: service.MembershipSourceInvited,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.MembershipSourceInvited, invited.Source, "an accepted invitation replaces the domain source")
+	require.Equal(t, service.RoleAdmin, invited.Role, "and keeps the higher role")
+	require.Equal(t, service.MembershipStatusActive, invited.Status)
+	require.Equal(t, before.ID, invited.ID)
+
+	again, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user1, Role: service.RoleMember, Source: service.MembershipSourceAdded,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.MembershipSourceInvited, again.Source, "a grant relabels no source but the domain's")
+
+	domain, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: service.RoleMember, Source: service.MembershipSourceDomain,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.MembershipSourceDomain, domain.Source)
+	require.Equal(t, service.RoleAdmin, domain.Role)
+}
+
 // TestInvitationStore_InviterAndRecipientLimits: the per-inviter cap counts
 // one person's invitations from every tenant, the per-recipient cap one
 // address's from every tenant of the project, and a zero cap is off.

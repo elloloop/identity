@@ -4712,8 +4712,15 @@ type RefreshTokenRequest struct {
 	// FAILED_PRECONDITION when the server has tenant selection off
 	// (GATEWAY_TENANT_SELECTION_ENABLED, off by default, and never on the
 	// memory or SQLite drivers), and UNAVAILABLE when the membership could
-	// not be read. On every one of these no token is issued and the refresh
-	// token is NOT consumed, so the client can retry without it. Empty, or the
+	// not be read. On these refusals no token is issued and the refresh
+	// token is NOT consumed, so the client can retry without tenant_id. The
+	// code alone does not say which refusal it is: RefreshToken also answers
+	// FAILED_PRECONDITION for an account refused over its own state (not
+	// active, or needing an identity verification), which is checked first
+	// and DOES consume the token and end the session, and retrying a
+	// consumed token is a replay that signs the account out everywhere. So a
+	// client sends tenant_id only to a server it knows has selection on, and
+	// there treats FAILED_PRECONDITION as the end of the session. Empty, or the
 	// deployment's default tenant, keeps the default claim. The selection is
 	// not remembered: every refresh names the tenant it wants, and a client
 	// reads the tenant it got from the access token's `tenant` claim. A
@@ -13694,7 +13701,7 @@ func (*RemoveTenantMemberResponse) Descriptor() ([]byte, []int) {
 type CreateTenantRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// name is the tenant's display name: required, trimmed, at most 100
-	// characters.
+	// characters, valid UTF-8 and free of control and format characters.
 	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

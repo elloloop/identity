@@ -102,12 +102,37 @@ func (s *MembershipStore) UpsertMembership(ctx context.Context, m *service.Tenan
 // membershipRoleRank orders the roles in SQL: owner, then admin, then member.
 const membershipRoleRank = `CASE %s WHEN 'owner' THEN 3 WHEN 'admin' THEN 2 WHEN 'member' THEN 1 ELSE 0 END`
 
+// grantHoldsRole is true when the existing membership is active at the
+// granted role or a higher one.
+var grantHoldsRole = `tenant_memberships.status = 'active' AND ` +
+	fmt.Sprintf(membershipRoleRank, "tenant_memberships.role") + ` >= ` + fmt.Sprintf(membershipRoleRank, "EXCLUDED.role")
+
+// grantMembershipQuery is GrantMembership's statement. A held role is kept;
+// a membership that came only from the email's domain still takes the
+// grant's source, since such a membership counts only once that email is
+// verified and a grant is a decision about this person; any other source is
+// left alone.
+var grantMembershipQuery = `
+		INSERT INTO tenant_memberships (
+			id, project_id, tenant_id, user_id, source, role, status,
+			created_at_ms, updated_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $7)
+		ON CONFLICT (project_id, tenant_id, user_id) DO UPDATE SET
+			source        = EXCLUDED.source,
+			role          = CASE WHEN ` + grantHoldsRole + ` THEN tenant_memberships.role ELSE EXCLUDED.role END,
+			status        = 'active',
+			updated_at_ms = EXCLUDED.updated_at_ms
+		WHERE NOT (` + grantHoldsRole + `
+		       AND (tenant_memberships.source <> 'domain' OR EXCLUDED.source = 'domain'))
+		RETURNING ` + membershipColumns
+
 // GrantMembership makes m.UserID an active member of m.TenantID at m.Role,
 // unless they already hold an active membership there at m.Role or a higher
-// role, which is then kept unchanged. It never lowers a role, so a grant
-// cannot demote an owner, the last one included. The decision is the
-// statement's own, so it holds against a concurrent grant. Returns the
-// surviving row.
+// role, which is then kept. It never lowers a role, so a grant cannot demote
+// an owner, the last one included. A kept membership that came only from the
+// email's domain takes the grant's source; any other is left unchanged. The
+// decision is the statement's own, so it holds against a concurrent grant.
+// Returns the surviving row.
 func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.TenantMembership) (*service.TenantMembership, error) {
 	if m == nil {
 		return nil, errors.New("postgres: GrantMembership: nil membership")
@@ -124,22 +149,10 @@ func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.Tenant
 		role = service.RoleMember
 	}
 	now := nowMs()
-	q := `
-		INSERT INTO tenant_memberships (
-			id, project_id, tenant_id, user_id, source, role, status,
-			created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $7)
-		ON CONFLICT (project_id, tenant_id, user_id) DO UPDATE SET
-			source        = EXCLUDED.source,
-			role          = EXCLUDED.role,
-			status        = 'active',
-			updated_at_ms = EXCLUDED.updated_at_ms
-		WHERE NOT (tenant_memberships.status = 'active'
-		       AND ` + fmt.Sprintf(membershipRoleRank, "tenant_memberships.role") + ` >= ` + fmt.Sprintf(membershipRoleRank, "EXCLUDED.role") + `)
-		RETURNING ` + membershipColumns
-	granted, err := scanMembership(s.pool.QueryRow(ctx, q, newID(), m.ProjectID, m.TenantID, m.UserID, source, role, now))
+	granted, err := scanMembership(s.pool.QueryRow(ctx, grantMembershipQuery, newID(), m.ProjectID, m.TenantID, m.UserID, source, role, now))
 	if noRows(err) {
-		// The user already holds the role or a higher one: nothing changed.
+		// The user already holds the role or a higher one, from a source the
+		// grant does not replace: nothing changed.
 		kept, getErr := s.GetMembership(ctx, m.ProjectID, m.TenantID, m.UserID)
 		if getErr != nil {
 			return nil, getErr
@@ -490,8 +503,10 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 // legacyInvitationLockKey is the per-mailbox lock replicas built before the
 // per-tenant invitation limits serialise creates on. Its last part is not
 // length-prefixed, as those replicas spell it; the folded email is the final
-// part, so no two distinct triples share a key. It can be dropped once no
-// such replica can be running.
+// part, so no two distinct triples share a key. Remove it, and the lock
+// CreateInvitation takes on it, in v5.0.0: this release's upgrade stops every
+// earlier replica before it migrates (UPGRADE.md), so the lock covers only a
+// deployment that skipped that step.
 func legacyInvitationLockKey(projectID, tenantID, foldedEmail string) string {
 	return advisoryKey("tenant_invitation", projectID, tenantID) + ":" + foldedEmail
 }

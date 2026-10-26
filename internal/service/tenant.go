@@ -139,6 +139,10 @@ type TenantStore interface {
 	// and stamps updated_at. Unknown ids, and a tenant already in the
 	// status, are a no-op.
 	SetTenantStatus(ctx context.Context, projectID, tenantID, status string) error
+	// ClaimLatentTenant moves a latent tenant to claimed, comparing and
+	// setting the status in one step so that a suspension made meanwhile is
+	// kept. Unknown ids, and a tenant in any other status, are a no-op.
+	ClaimLatentTenant(ctx context.Context, projectID, tenantID string) error
 	// ListTenants returns every tenant in a project, newest first.
 	ListTenants(ctx context.Context, projectID string) ([]*Tenant, error)
 	// CreateOwnedTenant creates a claimed tenant and its creator's active
@@ -166,9 +170,10 @@ type DomainStore interface {
 	GetVerifiedDomain(ctx context.Context, projectID, domain string) (*Domain, error)
 	// SetDomainStatus transitions a domain's status and, when verifying,
 	// stamps verified_at_ms (pass 0 to default to now on a verify). Unknown
-	// ids, and a domain already in the status, are a no-op. Verifying a
-	// domain another row of the project has already verified is
-	// ErrAlreadyExists.
+	// ids, a domain already in the status, and a verified domain asked for
+	// any other status, are a no-op: a domain stops being verified only by
+	// being removed. Verifying a domain another row of the project has
+	// already verified is ErrAlreadyExists.
 	SetDomainStatus(ctx context.Context, projectID, domainID, status string, verifiedAtMs int64) error
 	// ListDomainsByTenant returns every domain bound to a tenant, newest
 	// first.

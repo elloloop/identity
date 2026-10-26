@@ -2110,7 +2110,7 @@
     "type": "boolean",
     "default": "false",
     "required": false,
-    "description": "lets RefreshToken select a tenant the caller may act in (RefreshTokenRequest.tenant_id), whose id the new access token then carries in its \"tenant\" claim.",
+    "description": "lets RefreshToken put a tenant the caller may act in into the new access token's \"tenant\" claim, on postgres only; turn it on only once every replica runs this release and every resource server that checks \"tenant\" accepts a selected one.",
     "category": "Projects \u0026 tenancy",
     "anchor": "projects-and-tenancy"
   },
@@ -2119,7 +2119,7 @@
     "type": "integer",
     "default": "30",
     "required": false,
-    "description": "bounds how long the access-token check may serve a selected tenant's status from its in-process cache before reading it again, from 0 to 300.",
+    "description": "bounds how long the access-token check may serve a selected tenant's status from its in-process cache, from 0 to 300, where 0 reads the tenant on every request that carries a selected-tenant token.",
     "category": "Projects \u0026 tenancy",
     "anchor": "projects-and-tenancy"
   },

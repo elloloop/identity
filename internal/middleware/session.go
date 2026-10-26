@@ -17,6 +17,23 @@ import (
 // their dashboards / alerts.
 const sessionMetricName = "identity_session_lookup_duration_seconds"
 
+// cacheLookupBuckets are the buckets of the hot-path cache histograms
+// (sessions, selected-tenant status): warm-cache reads land in
+// sub-microsecond territory, repository round-trips at single-digit
+// milliseconds.
+var cacheLookupBuckets = []float64{
+	0.0000005, // 500ns
+	0.000001,  // 1µs
+	0.000005,  // 5µs
+	0.00001,   // 10µs
+	0.0001,    // 100µs
+	0.001,     // 1ms
+	0.005,     // 5ms
+	0.01,      // 10ms
+	0.05,      // 50ms
+	0.1,       // 100ms
+}
+
 // SessionMetrics owns the Prometheus handles exposed when the service
 // is running in `mode=session`. The histogram measures end-to-end
 // session lookup latency on the auth hot path — cache hits land in
@@ -35,22 +52,9 @@ func NewSessionMetrics(reg prometheus.Registerer) (*SessionMetrics, error) {
 		reg = prometheus.NewRegistry()
 	}
 	hist := prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: sessionMetricName,
-		Help: "Session lookup duration in seconds (mode=session), labelled by outcome (hit/miss/revoked/missing).",
-		// Custom buckets: warm-cache reads land in sub-microsecond
-		// territory, repo round-trips at single-digit milliseconds.
-		Buckets: []float64{
-			0.0000005, // 500ns
-			0.000001,  // 1µs
-			0.000005,  // 5µs
-			0.00001,   // 10µs
-			0.0001,    // 100µs
-			0.001,     // 1ms
-			0.005,     // 5ms
-			0.01,      // 10ms
-			0.05,      // 50ms
-			0.1,       // 100ms
-		},
+		Name:    sessionMetricName,
+		Help:    "Session lookup duration in seconds (mode=session), labelled by outcome (hit/miss/revoked/missing).",
+		Buckets: cacheLookupBuckets,
 	}, []string{"outcome"})
 	if err := reg.Register(hist); err != nil {
 		return nil, err

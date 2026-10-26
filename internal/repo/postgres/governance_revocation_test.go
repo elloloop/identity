@@ -269,10 +269,14 @@ func TestGovernanceRevocation_VerifiedTransitionsRevokeTheGoverned(t *testing.T)
 			t.Helper()
 			require.NoError(t, f.domains.SetDomainStatus(ctx, f.project, d, service.DomainStatusVerified, 0))
 		},
+		// The store never moves a verified domain off verified, so this is
+		// an operator's SQL: the trigger still governs it.
 		"verified to failed": func(t *testing.T, f *governanceFixture, d string) {
 			t.Helper()
 			f.verifyQuietly(ctx, t, d)
-			require.NoError(t, f.domains.SetDomainStatus(ctx, f.project, d, service.DomainStatusFailed, 0))
+			_, err := f.repo.pool.Exec(ctx, `UPDATE domains SET status=$3 WHERE project_id=$1 AND id=$2`,
+				f.project, d, service.DomainStatusFailed)
+			require.NoError(t, err)
 		},
 		"verified domain deleted": func(t *testing.T, f *governanceFixture, d string) {
 			t.Helper()

@@ -143,13 +143,17 @@ bridge drops the key, so an interceptor written before it existed cannot let
 a client vouch for its own sign-in, and every merge over native gRPC is
 refused `reauthentication_required`.
 
-Do not pin the `tenant` claim. A valid token carries the deployment default
-(`GATEWAY_DEFAULT_TENANT_ID`) or a tenant its subject is an active member of,
-chosen on `RefreshToken`, so pass `""` as the expected tenant. Identity's HTTP
-chain also refuses a chosen tenant once it is suspended; nothing does that on
-this path, so a suspended tenant's tokens stay usable here until they expire
-(at most `GATEWAY_JWT_EXPIRY_SECONDS`). Keep that lifetime short, or check the
-tenant's status yourself, if that window matters to you.
+Whether to pin the `tenant` claim depends on tenant selection. With
+`GATEWAY_TENANT_SELECTION_ENABLED` off, the default, every token carries the
+deployment default (`GATEWAY_DEFAULT_TENANT_ID`): pass it as the expected
+tenant and keep the stricter check. With selection on, a valid token may
+instead carry a tenant its subject is an active member of, chosen on
+`RefreshToken`, so pass `""` as the expected tenant before clients select one.
+Identity's HTTP chain also refuses a chosen tenant once it is suspended;
+nothing does that on this path, and identity exports no helper for it yet, so
+a suspended tenant's tokens stay usable here until they expire (at most
+`GATEWAY_JWT_EXPIRY_SECONDS`). Keep that lifetime short if that window
+matters to you.
 
 ```go
 func authInterceptor(kp jwt.KeyProvider, audience string, requireAud bool) grpc.UnaryServerInterceptor {
@@ -165,7 +169,8 @@ func authInterceptor(kp jwt.KeyProvider, audience string, requireAud bool) grpc.
         md.Delete("x-authenticated-auth-time")
         if toks := md.Get("authorization"); len(toks) > 0 {
             // VerifyAccessToken rejects a purpose-bearing ticket for us.
-            // "" accepts the default tenant and a chosen one alike.
+            // "" accepts the default tenant and a chosen one alike, which
+            // tenant selection needs; with it off, pass the default tenant.
             claims, err := jwt.VerifyAccessToken(
                 strings.TrimPrefix(toks[0], "Bearer "), kp, "", audience, requireAud)
             if err == nil {

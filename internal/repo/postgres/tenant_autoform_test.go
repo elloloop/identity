@@ -60,6 +60,69 @@ func TestAutoFormStore_Smoke(t *testing.T) {
 	}
 	runAutoFormSmoke(t, dsn)
 	runAutoFormIgnoresUnprovenClaims(t, dsn)
+	runAutoFormKeepsProvenance(t, dsn)
+	runAutoFormSkipsASuspendedLatentTenant(t, dsn)
+}
+
+// runAutoFormKeepsProvenance: signing in on a tenant's domain never relabels
+// a membership the user created or was invited to as the domain's.
+func runAutoFormKeepsProvenance(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	af, ts, ds, ms, projectID, newUser := newAutoFormFixture(ctx, t, dsn)
+
+	creator := newUser(t)
+	tenant, _, err := ts.CreateOwnedTenant(ctx, service.OwnedTenantRequest{
+		ProjectID: projectID, OwnerID: creator, Name: "Acme", MaxPerWindow: 10,
+	})
+	require.NoError(t, err)
+	domainID, err := ds.CreateDomain(ctx, &service.Domain{ProjectID: projectID, TenantID: tenant.ID, Domain: "acme.com"})
+	require.NoError(t, err)
+	require.NoError(t, ds.SetDomainStatus(ctx, projectID, domainID, service.DomainStatusVerified, 0))
+	invitee := newUser(t)
+	_, err = ms.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenant.ID, UserID: invitee,
+		Source: service.MembershipSourceInvited, Role: service.RoleMember, Status: service.MembershipStatusActive,
+	})
+	require.NoError(t, err)
+
+	for userID, source := range map[string]string{creator: service.MembershipSourceCreated, invitee: service.MembershipSourceInvited} {
+		joined, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", userID)
+		require.NoError(t, err)
+		require.Equal(t, tenant.ID, joined)
+		mem, err := ms.GetMembership(ctx, projectID, tenant.ID, userID)
+		require.NoError(t, err)
+		require.Equal(t, source, mem.Source, "the domain never relabels a membership with a stronger source")
+	}
+}
+
+// runAutoFormSkipsASuspendedLatentTenant: a suspended auto-formed tenant takes
+// no more signups; the domain's next one forms a new latent tenant.
+func runAutoFormSkipsASuspendedLatentTenant(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	af, ts, _, ms, projectID, newUser := newAutoFormFixture(ctx, t, dsn)
+
+	suspended, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", newUser(t))
+	require.NoError(t, err)
+	require.NoError(t, ts.SetTenantStatus(ctx, projectID, suspended, service.TenantStatusSuspended))
+
+	next := newUser(t)
+	formed, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", next)
+	require.NoError(t, err)
+	require.NotEqual(t, suspended, formed)
+	ten, err := ts.GetTenant(ctx, projectID, formed)
+	require.NoError(t, err)
+	require.Equal(t, service.TenantStatusLatent, ten.Status)
+	mem, err := ms.GetMembership(ctx, projectID, suspended, next)
+	require.NoError(t, err)
+	require.Nil(t, mem, "nobody joins a suspended tenant through its domain")
 }
 
 func runAutoFormSmoke(t *testing.T, dsn string) {

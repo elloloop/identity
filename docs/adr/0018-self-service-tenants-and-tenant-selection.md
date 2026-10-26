@@ -107,6 +107,17 @@ token that named any one of them.
    - login-policy and project changes are operator actions and still revoke
      project-wide.
 
+   The trigger collects the governed users once per change and reads
+   accounts only when a domain is involved. It finds the accounts on a
+   domain through a stored column, `users.email_domain`, and an index on
+   `(project_id, email_domain)`, not through an expression index on the
+   email: `users` has forced row-level security, under which only a
+   leakproof comparison can be an index condition, and `lower()` and
+   `substring()` are not, so an expression index would narrow the scan to
+   the project and no further. This is the choice 0034 made for
+   `users.email_fold`. The column costs one rewrite of `users` when the
+   migration runs.
+
 ### Why this is a tenant, not a workspace
 
 ADR-0001 keeps workspaces, and the fine-grained membership inside them, out of
@@ -221,7 +232,12 @@ it lands, suspension is a database-operator action.
   RPC exists.
 - **Negative.** A suspended tenant's selected tokens stay usable on
   identity's HTTP chain for up to the tenant-status cache TTL.
+- **Negative, open.** Three gaps are known and tracked as follow-ups:
+  choosing a tenant does not apply its login policy (above); a refresh that
+  chooses or changes a tenant records no audit event of its own; and
+  suspension, done in SQL, leaves no audit record.
 - **Neutral.** Schema: migration 0044 (`tenants.created_by`, the `created`
   membership source), 0045 (contested domain claims, the per-tenant TXT
-  challenge) and 0046 (guarded, scoped agent-governance triggers, the
-  `domain_attempts` table, the invitation-limit indexes).
+  challenge) and 0046 (guarded, scoped agent-governance triggers,
+  `users.email_domain` and its index, the `domain_attempts` table, the
+  invitation-limit indexes).

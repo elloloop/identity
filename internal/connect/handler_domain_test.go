@@ -91,6 +91,13 @@ func (s *connectTenantStore) SetTenantStatus(_ context.Context, _, _, status str
 	return nil
 }
 
+func (s *connectTenantStore) ClaimLatentTenant(context.Context, string, string) error {
+	if s.tenant != nil && s.tenant.Status == service.TenantStatusLatent {
+		s.tenant.Status = service.TenantStatusClaimed
+	}
+	return nil
+}
+
 func (s *connectTenantStore) ListTenants(context.Context, string) ([]*service.Tenant, error) {
 	return nil, nil
 }

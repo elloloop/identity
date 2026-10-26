@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — self-service tenants and tenant selection on `RefreshToken` (migrations 0044, 0045 and 0046; `RefreshTokenRequest.tenant_id` behind `GATEWAY_TENANT_SELECTION_ENABLED`, off by default (additive); contested domain claims, a per-tenant TXT challenge, domain and invitation limits, agent sign-outs scoped to the users a change governs (behaviour changes); `MembershipStore`, `TenantStore`, `DomainStore`, `InvitationStore`, `UserDirectory`, `AuthService.RefreshToken` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
+## Next — self-service tenants and tenant selection on `RefreshToken` (migrations 0044, 0045 and 0046, which rewrites `users`; stop every earlier replica before migrating; `RefreshTokenRequest.tenant_id` behind `GATEWAY_TENANT_SELECTION_ENABLED`, off by default (additive); contested domain claims, a per-tenant TXT challenge, domain and invitation limits, agent sign-outs scoped to the users a change governs (behaviour changes); `MembershipStore`, `TenantStore`, `DomainStore`, `InvitationStore`, `UserDirectory`, `AuthService.RefreshToken` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
 
 A signed-in person can now create a tenant they own, list the tenants they
 belong to, and get an access token for one of them. The rationale, and what
@@ -17,13 +17,17 @@ the `tenant` claim does and does not assert, is
   ```
 
   The default project takes the same setting from
-  `GATEWAY_SELF_SERVICE_TENANTS_ENABLED` (default `false`). Refusals: no
-  caller → `UNAUTHENTICATED`; the setting off → `FAILED_PRECONDITION`; a name
-  that is blank after trimming, longer than 100 characters, invalid UTF-8 or
-  carrying control or format characters → `INVALID_ARGUMENT`; an anonymous,
-  agent, merged or inactive account → `PERMISSION_DENIED`; over the limit →
-  `RESOURCE_EXHAUSTED`, audited as a failed `tenant_created` with reason
-  `creation_limit`.
+  `GATEWAY_SELF_SERVICE_TENANTS_ENABLED` (default `false`), but only for a
+  request that falls through to it, naming no project by key or auth
+  hostname. A request that reaches the default project by its own project
+  key or auth hostname reads that project's `config_json`, so set
+  `tenants.self_service` there too if clients reach it that way. Refusals:
+  no caller → `UNAUTHENTICATED`; the setting off → `FAILED_PRECONDITION`; a
+  name that is blank after trimming, longer than 100 characters, invalid
+  UTF-8 or carrying control or format characters → `INVALID_ARGUMENT`; an
+  anonymous, agent, merged or inactive account → `PERMISSION_DENIED`; over
+  the limit → `RESOURCE_EXHAUSTED`, audited as a failed `tenant_created`
+  with reason `creation_limit`.
 - **The limit** is deployment-wide: at most
   `GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER` tenants (default 10, at most
   1000; `0` selects the default) per user per project in
@@ -31,7 +35,8 @@ the `tenant` claim does and does not assert, is
   days). Concurrent calls by one user are serialised, so the limit holds
   under a race. The RPC also has a per-IP budget of its own, tag
   `tenant_create`, the size of the signup budget
-  (`GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`) but not shared with it.
+  (`GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`) but not shared with it, on the HTTP
+  surface only ([Per-IP budgets are HTTP only](#per-ip-budgets-are-http-only)).
   `CreateTenant` takes no idempotency key: a retried call can create a
   second tenant, bounded by the limit. Reconcile with `ListMyTenants`.
 - **`ListMyTenants()`** returns `{tenant_id, name, role}` for every claimed
@@ -47,7 +52,14 @@ the `tenant` claim does and does not assert, is
   must have verified that email. Anything else is `PERMISSION_DENIED`
   (`UNAVAILABLE` when the membership could not be read). On every refusal no
   token is issued and the refresh token is **not** consumed, so the client
-  can retry without it. Omitting the field, or sending the default tenant,
+  can retry without it. The code alone does not say which refusal it is:
+  `RefreshToken` also answers `FAILED_PRECONDITION` for an account refused
+  over its own state (not active, or needing an identity verification),
+  which is checked first and **does** consume the token, and retrying a
+  consumed token is a replay that signs the account out everywhere. So a
+  client sends `tenant_id` only to a server it knows has selection on, and
+  there treats `FAILED_PRECONDITION` as the end of the session. Omitting the
+  field, or sending the default tenant,
   keeps today's behaviour: the claim is the deployment default
   (`GATEWAY_DEFAULT_TENANT_ID`). The selection is not sticky: each refresh
   chooses again, and one without `tenant_id` returns to the default. A
@@ -86,7 +98,11 @@ longer captures its signups:
   domain only when the same tenant already holds it, or another tenant has
   verified it (`ALREADY_EXISTS`). The tenant that verifies first holds the
   only verified row; `VerifyDomain` for a later claimant then fails with
-  `ALREADY_EXISTS` ("verified by another tenant").
+  `ALREADY_EXISTS` ("verified by another tenant"). That answer tells a
+  tenant admin that another tenant in the project has onboarded the domain.
+  The disclosure is accepted; every such call, refused or not, counts
+  toward the tenant's attempt limit below, so it cannot sweep a project's
+  domains.
 - **Auto-formation joins only a proven tenant.** A signup on a non-public
   domain joins the tenant that verified the domain, or else the latent tenant
   auto-formation made for it (creating it on the domain's first signup). It
@@ -105,7 +121,8 @@ longer captures its signups:
   `tenant_domain_attempts_limited`. Only a caller who administers the tenant
   spends its budget. Both RPCs also share a per-IP budget,
   `GATEWAY_RATE_LIMIT_DOMAIN_PER_IP` (default 20 per rate-limit window, tag
-  `tenant_domain`; `0` switches it off).
+  `tenant_domain`; `0` switches it off), on the HTTP surface only
+  ([Per-IP budgets are HTTP only](#per-ip-budgets-are-http-only)).
 - **A failed check no longer un-verifies a domain.** `VerifyDomain` on a
   verified domain whose TXT record has gone leaves it verified; only an
   unverified claim is marked `failed`. An operator removes a domain its
@@ -158,10 +175,12 @@ selection but revives no revoked grant.
 Every `CreateTenantInvitation` sends an email, so it is now bounded five
 ways. Past any limit but the per-IP one the call is `RESOURCE_EXHAUSTED`,
 logged as `tenant_invitation_limited` with the recipient redacted, and
-nothing is sent or stored:
+nothing is sent or stored. Past the per-IP one it is refused before the RPC
+runs ([Per-IP budgets are HTTP only](#per-ip-budgets-are-http-only)):
 
 - per client IP: `GATEWAY_RATE_LIMIT_INVITATION_PER_IP` (default 20 per
-  rate-limit window, tag `tenant_invitation`; `0` switches it off);
+  rate-limit window, tag `tenant_invitation`; `0` switches it off), on the
+  HTTP surface only;
 - per tenant: `GATEWAY_TENANT_INVITATION_MAX_PER_TENANT` invitations (default
   100, at most 100000; `0` selects the default) in
   `GATEWAY_TENANT_INVITATION_WINDOW_SECONDS` (default 86400, at most 30 days),
@@ -187,21 +206,103 @@ Accepting an invitation never lowers a role. An owner or admin who accepts
 a `member` invitation keeps the role they hold; it used to replace it, so an
 invitation could demote a tenant's last owner.
 
+### Per-IP budgets are HTTP only
+
+The three per-client-IP budgets above, `tenant_create` (`CreateTenant`),
+`tenant_domain` (`CreateDomain` and `VerifyDomain`) and `tenant_invitation`
+(`CreateTenantInvitation`), are enforced by identity's HTTP middleware
+before the RPC runs. Past one, the call gets HTTP status 429 with a
+`Retry-After` header of the rate-limit window in seconds
+(`GATEWAY_RATE_LIMIT_WINDOW_SECONDS`), which a Connect client surfaces as
+`UNAVAILABLE`, not `RESOURCE_EXHAUSTED`: retry after that many seconds. A
+host that serves identity's services over native gRPC (`docs/embedding.md`)
+gets none of these budgets and applies its own.
+
 ### Migration
 
-`0046_scope_governance_revocation` replaces the tenant and domain agent
-governance triggers with the guarded, scoped ones above, adds the
-`domain_attempts` table, replaces `tenant_invitations (project_id,
-tenant_id)` with three indexes over `created_at_ms` (per tenant, inviter and
-recipient) for the limits, adds a partial index on email-method `domains`
-rows for auto-formation, and drops `domains (project_id, tenant_id)`, which
-0045's unique index covers. Each `CREATE INDEX` holds a `SHARE` lock on its
-table until commit, blocking writes to it while reads continue;
-`lock_timeout = 10s` bounds the wait to acquire them. If it times out,
-version 46 is left dirty: confirm the table `domain_attempts` is absent,
-then run `identity migrate force 45` and `identity migrate` again. The down
-migration restores 0041's unguarded triggers, which revoke project-wide
-again, and drops `domain_attempts`, which holds only limit history.
+`0046_scope_governance_revocation` **rewrites `users`.** It adds
+`users.email_domain`, a stored generated column holding the address's
+domain under 0034's ASCII fold, and `users_project_email_domain_idx` on
+`(project_id, email_domain)`, through which the scoped triggers above find
+the accounts on a domain. It is a column rather than an index on an
+expression for 0034's reason: under `FORCE ROW LEVEL SECURITY` only a
+leakproof comparison can use an index, and `lower()` and `substring()` are
+not leakproof, so an expression index would serve only `project_id` and
+every trigger that fires would read every account in the project. The
+migration also replaces the tenant and domain agent governance triggers
+with the guarded, scoped ones above, adds the `domain_attempts` table,
+replaces `tenant_invitations (project_id, tenant_id)` with three indexes
+over `created_at_ms` (per tenant, inviter and recipient) for the limits,
+adds a partial index on email-method `domains` rows for auto-formation,
+drops `domains (project_id, tenant_id)`, which 0045's unique index covers,
+and validates 0044's widened `tenant_memberships.source` check.
+
+**Locking and sizing.** It takes these locks in this order, and holds each
+until it commits:
+
+- adding the column rewrites the whole `users` table under an `ACCESS
+  EXCLUSIVE` lock, and its index is then built in the same transaction:
+  sign-in, token refresh, SCIM and every other read or write of `users`
+  waits until both finish, for a time that grows with the table;
+- each other `CREATE INDEX` holds a `SHARE` lock on its table, which blocks
+  writes to it but not reads;
+- `VALIDATE CONSTRAINT` holds a `SHARE UPDATE EXCLUSIVE` lock on
+  `tenant_memberships`, which blocks neither;
+- the `DROP INDEX` and `DROP TRIGGER` statements come last and take `ACCESS
+  EXCLUSIVE` locks on `tenant_invitations`, `domains` and `tenants`, so from
+  then until the commit reads of those tables wait too.
+
+Estimate the rewrite by timing the migration on a restored copy of
+production, or at least check the table's size:
+
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('users'));
+```
+
+**Do not rely on auto-migrate for a large `users` table**, for the reason
+given under [migration 0034](#migration-0034-rewrites-users-postgres): a
+probe that gives up first restarts the booting replica part-way through the
+rewrite. Auto-migrate is in any case unsafe for this release while an
+earlier replica runs (see Rolling out). `lock_timeout = 10s` bounds only the
+wait to acquire each lock, not the rewrite.
+
+**Pre-building the column.** Both statements are guarded with `IF NOT
+EXISTS`, so you can add the column and build its index yourself beforehand,
+as a role that owns the tables, while the earlier release still serves (it
+reads only the columns it names):
+
+```sql
+-- 1. In a window: the rewrite (ACCESS EXCLUSIVE on users for its duration).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_domain TEXT COLLATE "C"
+    GENERATED ALWAYS AS (substring(lower(email COLLATE "C") FROM '@([^@]*)$')) STORED;
+-- 2. Afterwards, without blocking writes (not inside a transaction):
+CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_email_domain_idx
+    ON users (project_id, email_domain) WHERE email_domain IS NOT NULL;
+-- 3. Then, with the earlier replicas stopped, `identity migrate`.
+```
+
+Use exactly these names and definitions: the migration skips what exists
+without comparing it. A `CONCURRENTLY` build that fails leaves an invalid
+index under that name, which `IF NOT EXISTS` skips too, and the triggers
+would then scan the project's accounts. Check the index before migrating,
+and drop and rebuild it if it is not valid:
+
+```sql
+SELECT indisvalid FROM pg_index
+ WHERE indexrelid = 'users_project_email_domain_idx'::regclass;
+-- false: DROP INDEX CONCURRENTLY users_project_email_domain_idx; then step 2 again.
+```
+
+**If 0046 fails.** On a lock timeout, or any other failure, the migration
+rolls back as one transaction and version 46 is left dirty: confirm the
+table `domain_attempts` is absent, then run `identity migrate force 45` and
+`identity migrate` again. A column and index you pre-built stay, and are
+skipped.
+
+**Its down migration** restores 0041's unguarded triggers, which revoke
+project-wide again, drops `domain_attempts`, which holds only limit
+history, and drops `users.email_domain` and its index (catalog-only: `users`
+is not rewritten).
 
 `0045_contest_domain_claims` adds `domains.legacy_txt_challenge` (`BOOLEAN
 NOT NULL DEFAULT false`, catalog-only) and sets it on every existing `dns_txt`
@@ -212,8 +313,9 @@ tenant_id, lower(domain))` and a plain lookup index. Its `ALTER` takes an
 so reads and writes on `domains` wait for the index builds; `lock_timeout =
 10s` bounds the wait to acquire it. If it times out, version 45 is left dirty:
 confirm `domains.legacy_txt_challenge` is absent, then run `identity migrate
-force 44` and `identity migrate` again. The down migration keeps one row per domain (the verified one, else
-the oldest) and **deletes the others**, then restores the old index.
+force 44` and `identity migrate` again. The down migration keeps one row per
+domain (the verified one, else the oldest) and **deletes the others**, then
+restores the old index.
 
 `0044_add_self_service_tenants` adds `tenants.created_by` (`TEXT NOT NULL
 DEFAULT ''`, catalog-only), a partial index on `(project_id, created_by,
@@ -221,14 +323,70 @@ created_at_ms)`, and widens the `tenant_memberships.source` check to admit
 `created` (added `NOT VALID`, so no table scan). It takes a short `ACCESS
 EXCLUSIVE` lock on both tables, bounded by `lock_timeout = 10s`. The down
 migration maps `created` memberships to `added` before restoring the old
-check. Self-service tenants need the Postgres driver; on memory and SQLite
-the RPCs answer `UNIMPLEMENTED`, as the other membership RPCs do.
+check.
 
-Finish the rollout before tenants rely on these rules: a replica built
-before this change enforces none of them (contested claims, the per-tenant
-challenge, the limits, the scoped triggers' no-op skips). Invitations are
-the one exception: a new replica also takes the per-mailbox lock older
-replicas take, so creates on the two never interleave for one mailbox.
+Self-service tenants and tenant selection need the Postgres driver. On the
+memory and SQLite drivers, setting `GATEWAY_SELF_SERVICE_TENANTS_ENABLED`
+or `GATEWAY_TENANT_SELECTION_ENABLED` fails at boot, and so does a host that
+injects its own repository without the tenant stores. With both off,
+`CreateTenant` and `ListMyTenants` answer `UNIMPLEMENTED` there, as the
+other membership RPCs do, and `RefreshToken` refuses `tenant_id` with
+`FAILED_PRECONDITION`.
+
+### Rolling out
+
+An earlier replica enforces none of the rules above, and beside migrations
+0045 and 0046 it does harm, so this release does not roll replica by
+replica. In this order:
+
+1. **On the release you run now, settle your domain registrations** in a
+   window in which agents can authorize again (see "Operators who
+   registered a domain" below), and pre-build `users.email_domain` if
+   `users` is large (above).
+2. **Stop every replica of the earlier release before migrating.** Beside
+   0045 and 0046, an earlier replica forms a second latent tenant for a
+   domain that already has one, puts a signup into whichever tenant's
+   unverified claim it reads first, and issues and accepts the old
+   project-wide TXT value for new claims, which one claimant can satisfy
+   with the record another tenant published. Neither a rolling deploy nor
+   `GATEWAY_POSTGRES_AUTO_MIGRATE` beside earlier replicas is safe.
+3. **Migrate, then start this release.** Run `identity migrate` as its own
+   job; this release's replicas need 0044 to 0046 before they serve.
+4. **Turn on self-service tenants** (`tenants.self_service`,
+   `GATEWAY_SELF_SERVICE_TENANTS_ENABLED`) only once every replica runs this
+   release.
+5. **Turn on `GATEWAY_TENANT_SELECTION_ENABLED` on every replica before any
+   client sends `tenant_id`**, and only once every resource server that
+   checks the `tenant` claim accepts a selected one. A replica without it,
+   or an earlier one, answers a selected tenant's token with `401`. On
+   refresh, a replica without it refuses `tenant_id` with the
+   `FAILED_PRECONDITION` a client treats as the end of the session, and an
+   earlier one ignores the field and issues a default-tenant token.
+
+**Rolling back.**
+
+- Have clients stop sending `tenant_id` first. Turning
+  `GATEWAY_TENANT_SELECTION_ENABLED` off then rejects every outstanding
+  selected token at once (`401`); a client refreshes without `tenant_id`,
+  and its refresh token still works. Running an earlier release has the
+  same effect on selected tokens.
+- To migrate down, stop this release's replicas first. The earlier release
+  lets any registration capture its domain's signups, verified or not, so
+  while 0046 is still in place, and its triggers revoke nothing for it,
+  delete the unverified claims of self-service tenants:
+
+  ```sql
+  DELETE FROM domains d USING tenants t
+   WHERE t.project_id = d.project_id AND t.id = d.tenant_id
+     AND t.created_by <> '' AND d.status <> 'verified';
+  ```
+
+  Then 0046's down migration restores 0041's project-wide triggers. 0045's
+  keeps one registration per domain (the verified one, else the oldest) and
+  deletes the other claims; each delete fires those triggers, so every agent
+  in a project that loses a claim signs in again. 0044's maps `created`
+  memberships to `added`. Self-service tenants stay, as claimed tenants with
+  their owners.
 
 ### Who has to act
 
@@ -237,24 +395,79 @@ replicas take, so creates on the two never interleave for one mailbox.
   `tenant` claim to the default, a token with a selected tenant fails there.
   Nothing changes until a client sends `tenant_id`; before you let clients
   select, accept a non-default `tenant` and authorise on it.
-- **Operators who registered a domain and rely on it.** Before upgrading,
-  run `VerifyDomain` on every pending or failed `dns_txt` registration that
-  should capture signups. Signups that arrive while it is unverified form
-  their own latent tenant and are not moved later. Re-register
-  email-method registrations on operator tenants as `dns_txt`, then verify
-  them. To find the registrations to act on:
+- **Operators who registered a domain and rely on it.** On the earlier
+  release any registration captured its domain's signups, verified or not;
+  on this one only a verified registration does, or else the latent tenant
+  the domain formed. A signup on a domain whose registration is unverified
+  when this release starts forms its own latent tenant and is not moved
+  later. Find the registrations to act on. Before the upgrade, when
+  `tenants.created_by` does not exist yet:
 
   ```sql
-  SELECT d.* FROM domains d JOIN tenants t ON t.id=d.tenant_id WHERE d.status<>'verified' AND NOT (d.verification_method='email' AND t.status='latent' AND t.created_by='')
+  SELECT d.* FROM domains d
+    JOIN tenants t ON t.project_id = d.project_id AND t.id = d.tenant_id
+   WHERE d.status <> 'verified'
+     AND NOT (d.verification_method = 'email' AND t.status = 'latent');
   ```
 
-- **Clients that select a tenant.** Turn on
-  `GATEWAY_TENANT_SELECTION_ENABLED` first, and read the granted tenant from
-  the access token's `tenant` claim rather than assuming the request was
-  honoured.
+  After it, the same query with `t.created_by = ''`, which leaves out the
+  claims of self-service tenants, whose admins verify them:
+
+  ```sql
+  SELECT d.* FROM domains d
+    JOIN tenants t ON t.project_id = d.project_id AND t.id = d.tenant_id
+   WHERE d.status <> 'verified' AND t.created_by = ''
+     AND NOT (d.verification_method = 'email' AND t.status = 'latent');
+  ```
+
+  Each row is one of two kinds:
+
+  - **`dns_txt`.** Make sure the TXT record `CreateDomain` gave you is
+    published, then call `VerifyDomain(domain_id)`.
+  - **`email`.** `VerifyDomain` does not implement this method, so replace
+    the row with a `dns_txt` registration. Delete it (`domains` has no
+    row-level security, and no RPC removes a domain):
+
+    ```sql
+    DELETE FROM domains
+     WHERE project_id = '<project>' AND id = '<domain id>'
+       AND verification_method = 'email' AND status <> 'verified';
+    ```
+
+    Then call `CreateDomain(tenant_id, domain, verification_method =
+    "dns_txt")`, publish its `dns_txt_value` as a TXT record at
+    `dns_txt_name`, and call `VerifyDomain` with the new `domain_id`. A
+    record published on the earlier release stays valid after the upgrade:
+    0045 marks every existing `dns_txt` registration legacy, and such a
+    registration keeps accepting the value it was issued.
+
+  Doing this **before the upgrade** is recommended. On the earlier release,
+  0041's triggers revoke every agent grant and agent machine in the project
+  on the `DELETE` and on each `VerifyDomain`, a failed one included (the
+  pending `CreateDomain` insert revokes nothing). Done back to back, in one
+  window in which agents can authorize again, that costs one project-wide
+  agent sign-out and misplaces no signup. Call `CreateDomain` straight after
+  the `DELETE`: the earlier release allows one registration per domain, and
+  a signup in between forms a latent tenant that takes it, after which
+  `CreateDomain` answers `ALREADY_EXISTS` and the domain can only be
+  registered after the upgrade.
+
+  Doing it **after the upgrade** revokes less: 0046 revokes only the agents
+  of the users each change governs, and deleting an unverified row revokes
+  nothing. But from the moment this release starts until each registration
+  is verified, signups on its domain form a latent tenant and stay there;
+  invite them to the operator's tenant afterwards.
+- **Clients that select a tenant.** Send `tenant_id` only once every replica
+  runs this release with `GATEWAY_TENANT_SELECTION_ENABLED` on (Rolling out,
+  step 5), read the granted tenant from the access token's `tenant` claim
+  rather than assuming the request was honoured, and treat
+  `FAILED_PRECONDITION` from `RefreshToken` as the end of the session.
 - **Embedders with their own stores** (these are `internal/` packages, so
   this matters only to forks). `service.TenantStore` gains
-  `CreateOwnedTenant` and `GetTenantStatus`; `service.MembershipStore` gains
+  `CreateOwnedTenant`, `GetTenantStatus` and `ClaimLatentTenant`, which
+  moves a tenant to claimed only while it is still latent, comparing and
+  setting the status in one step, so a suspension made during a
+  verification stands; `service.MembershipStore` gains
   `ListActiveTenantsForUser` and `GetActiveTenantForUser` (through the new
   `UserTenantReader`), which must only return a tenant that is claimed, in
   the given project, with the user's membership active.
@@ -268,8 +481,13 @@ replicas take, so creates on the two never interleave for one mailbox.
   the verified row, and `RecordDomainAttempt` must enforce
   `service.DomainAttempt`'s cap under a per-tenant lock.
   `service.MembershipStore` gains `GrantMembership`, which must never lower
-  a role. `SetTenantStatus` and `SetDomainStatus` should write nothing when
-  the status is unchanged.
+  a role, and gives a kept membership whose source is `domain` the granted
+  source while leaving any other source as it is. `SetTenantStatus` and
+  `SetDomainStatus` should write nothing when the status is unchanged, and
+  `SetDomainStatus` must never move a verified domain to another status: a
+  domain stops being verified only by being removed. A store you supply
+  must be wired for both tenant switches, or `app.New` refuses to start
+  with either on.
 - **Callers of the middleware constructors.** `middleware.AuthMiddleware`
   and `middleware.SessionAuthMiddleware` take a `middleware.TokenTenants`
   where they took the expected tenant string: `TokenTenants{Default: id}`

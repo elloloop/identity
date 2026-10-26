@@ -18,6 +18,14 @@
 -- whose email is on the domains involved (ADR-0018). Login-policy and
 -- project changes are operator actions and still revoke project-wide (0041).
 --
+-- The accounts on a domain are found through users.email_domain, the
+-- address's domain under the ASCII fold of 0034, and its index. It is a
+-- stored column rather than an expression index for 0034's reason: under
+-- FORCE ROW LEVEL SECURITY (0016) a predicate is an index condition only if
+-- every function in it is leakproof, and lower() and substring() are not, so
+-- an index on the expression would serve only project_id and the domain
+-- would be matched by scanning every account in the project.
+--
 -- Also here, for the self-service limits and lookups:
 --   - domain_attempts records each CreateDomain and VerifyDomain a tenant
 --     makes, so the service can cap them per tenant in a window;
@@ -25,43 +33,99 @@
 --     replacing the (project, tenant) one they extend;
 --   - domains gains a partial index for the auto-former's fallback to the
 --     latent tenant an email domain formed, and drops (project, tenant),
---     which 0045's (project, tenant, lower(domain)) unique index covers.
+--     which 0045's (project, tenant, lower(domain)) unique index covers;
+--   - 0044's widened membership-source check, added NOT VALID, is validated.
 --
--- Each CREATE INDEX holds a SHARE lock on its table until commit, blocking
--- writes to it (reads continue); lock_timeout bounds the wait to acquire the
--- locks, as in 0034-0045. On a timeout the file rolls back and version 46 is
--- left dirty: confirm the table domain_attempts is absent, then
--- `identity migrate force 45` and `identity migrate` again.
+-- Locks, in the order taken, each held until commit:
+--   - adding email_domain rewrites users under an ACCESS EXCLUSIVE lock, for
+--     a time proportional to the table's size, and its index is then built in
+--     the same transaction: sign-in, refresh and SCIM wait for both;
+--   - each other CREATE INDEX holds a SHARE lock on its table, blocking writes
+--     to it while reads continue;
+--   - VALIDATE CONSTRAINT holds SHARE UPDATE EXCLUSIVE on tenant_memberships,
+--     which blocks neither reads nor writes;
+--   - DROP INDEX and DROP TRIGGER take ACCESS EXCLUSIVE on tenant_invitations,
+--     domains and tenants, blocking reads too, so they come last, after every
+--     build.
+-- lock_timeout bounds only the wait to ACQUIRE each lock, as in 0034-0045,
+-- not the rewrite: size the maintenance window from users. On a timeout, or
+-- any failure, the file rolls back and version 46 is left dirty: confirm the
+-- table domain_attempts is absent, then `identity migrate force 45` and
+-- `identity migrate` again. The IF NOT EXISTS guards let an operator add the
+-- column by hand in a window and pre-build its index with CREATE INDEX
+-- CONCURRENTLY (docs/UPGRADE.md), and have this file no-op over them.
 SET LOCAL lock_timeout = '10s';
 
--- The users a governance change on these tenants and email domains governs:
--- every member of the tenants, whatever their membership's status, and every
--- account whose email is on one of the domains. users is under row-level
--- security, so the caller sets app.current_project_id first.
-CREATE FUNCTION agent_oauth_governed_users(affected_project TEXT, affected_tenants TEXT[], affected_domains TEXT[])
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS email_domain TEXT COLLATE "C"
+        GENERATED ALWAYS AS (substring(lower(email COLLATE "C") FROM '@([^@]*)$')) STORED;
+CREATE INDEX IF NOT EXISTS users_project_email_domain_idx
+    ON users (project_id, email_domain)
+    WHERE email_domain IS NOT NULL;
+
+-- One row per CreateDomain or VerifyDomain a tenant made. The service counts
+-- a tenant's rows in its window and prunes the older ones as it adds one, so
+-- a tenant holds at most its cap. Governance plane: no row-level security,
+-- like the other governance tables.
+CREATE TABLE domain_attempts (
+    id               TEXT PRIMARY KEY,
+    project_id       TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    tenant_id        TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    attempted_at_ms  BIGINT NOT NULL
+);
+CREATE INDEX domain_attempts_project_tenant_idx
+    ON domain_attempts (project_id, tenant_id, attempted_at_ms);
+
+-- The invitation limits count a tenant's, an inviter's and a recipient's
+-- invitations created since a window start.
+CREATE INDEX IF NOT EXISTS tenant_invitations_project_tenant_created_idx
+    ON tenant_invitations (project_id, tenant_id, created_at_ms);
+CREATE INDEX IF NOT EXISTS tenant_invitations_project_inviter_created_idx
+    ON tenant_invitations (project_id, invited_by, created_at_ms);
+CREATE INDEX IF NOT EXISTS tenant_invitations_project_email_created_idx
+    ON tenant_invitations (project_id, lower(email COLLATE "C"), created_at_ms);
+
+-- The auto-former's fallback: the oldest email-method row on a domain.
+CREATE INDEX IF NOT EXISTS domains_project_email_domain_idx
+    ON domains (project_id, lower(domain), created_at_ms, id)
+    WHERE verification_method = 'email';
+
+ALTER TABLE tenant_memberships VALIDATE CONSTRAINT tenant_memberships_source_check;
+
+-- The accounts whose email is on one of these domains. A plain SQL function,
+-- so the planner inlines it into the caller and the domain predicate is an
+-- index condition on users_project_email_domain_idx. users is under
+-- row-level security, so the caller sets app.current_project_id first.
+CREATE FUNCTION agent_oauth_domain_users(affected_project TEXT, affected_domains TEXT[])
 RETURNS TABLE (user_id TEXT) LANGUAGE sql STABLE AS $$
- SELECT m.user_id FROM tenant_memberships m
-  WHERE m.project_id = affected_project AND m.tenant_id = ANY(affected_tenants)
- UNION
  SELECT u.id FROM users u
-  WHERE u.project_id = affected_project
-    AND lower(substring(u.email from '@([^@]*)$')) = ANY(affected_domains)
+  WHERE u.project_id = affected_project AND u.email_domain = ANY(affected_domains)
 $$;
 
--- Revokes the agent machines those users own and the agent grants they gave
--- or hold. Revoking a machine also revokes its grants (0042).
+-- Revokes the agent machines and the agent grants of the users a change on
+-- these tenants and email domains governs: every member of the tenants,
+-- whatever their membership's status, and every account whose email is on
+-- one of the domains. The set is read once; the accounts on the domains only
+-- when there are domains. Revoking a machine also revokes its grants (0042).
 CREATE FUNCTION invalidate_agent_oauth_governed(affected_project TEXT, affected_tenants TEXT[], affected_domains TEXT[])
 RETURNS VOID LANGUAGE plpgsql AS $$
-DECLARE prior_project TEXT := current_setting('app.current_project_id',true);
+DECLARE
+ prior_project TEXT := current_setting('app.current_project_id',true);
+ governed TEXT[];
 BEGIN
  PERFORM set_config('app.current_project_id',affected_project,true);
- UPDATE agent_machines SET revoked_at_ms=GREATEST(1,(EXTRACT(EPOCH FROM clock_timestamp())*1000)::BIGINT),revision=revision+1
-  WHERE project_id=affected_project AND revoked_at_ms=0
-    AND owner_id IN (SELECT g.user_id FROM agent_oauth_governed_users(affected_project,affected_tenants,affected_domains) g);
- UPDATE agent_authorizations SET revoked_at_ms=GREATEST(1,(EXTRACT(EPOCH FROM clock_timestamp())*1000)::BIGINT),revision=revision+1
-  WHERE project_id=affected_project AND revoked_at_ms=0
-    AND (owner_id IN (SELECT g.user_id FROM agent_oauth_governed_users(affected_project,affected_tenants,affected_domains) g)
-      OR agent_id IN (SELECT g.user_id FROM agent_oauth_governed_users(affected_project,affected_tenants,affected_domains) g));
+ governed := ARRAY(SELECT m.user_id FROM tenant_memberships m
+                    WHERE m.project_id=affected_project AND m.tenant_id = ANY(affected_tenants));
+ IF cardinality(affected_domains) > 0 THEN
+  governed := governed || ARRAY(SELECT d.user_id FROM agent_oauth_domain_users(affected_project,affected_domains) d);
+ END IF;
+ IF cardinality(governed) > 0 THEN
+  UPDATE agent_machines SET revoked_at_ms=GREATEST(1,(EXTRACT(EPOCH FROM clock_timestamp())*1000)::BIGINT),revision=revision+1
+   WHERE project_id=affected_project AND revoked_at_ms=0 AND owner_id = ANY(governed);
+  UPDATE agent_authorizations SET revoked_at_ms=GREATEST(1,(EXTRACT(EPOCH FROM clock_timestamp())*1000)::BIGINT),revision=revision+1
+   WHERE project_id=affected_project AND revoked_at_ms=0
+     AND (owner_id = ANY(governed) OR agent_id = ANY(governed));
+ END IF;
  PERFORM set_config('app.current_project_id',COALESCE(prior_project,''),true);
 END; $$;
 
@@ -114,31 +178,5 @@ CREATE TRIGGER agent_oauth_verified_domain AFTER INSERT ON domains FOR EACH ROW
  WHEN (NEW.status='verified')
  EXECUTE FUNCTION revoke_agent_oauth_domain_governance();
 
--- One row per CreateDomain or VerifyDomain a tenant made. The service counts
--- a tenant's rows in its window and prunes the older ones as it adds one, so
--- a tenant holds at most its cap. Governance plane: no row-level security,
--- like the other governance tables.
-CREATE TABLE domain_attempts (
-    id               TEXT PRIMARY KEY,
-    project_id       TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    tenant_id        TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    attempted_at_ms  BIGINT NOT NULL
-);
-CREATE INDEX domain_attempts_project_tenant_idx
-    ON domain_attempts (project_id, tenant_id, attempted_at_ms);
-
--- The invitation limits count a tenant's, an inviter's and a recipient's
--- invitations created since a window start.
-CREATE INDEX IF NOT EXISTS tenant_invitations_project_tenant_created_idx
-    ON tenant_invitations (project_id, tenant_id, created_at_ms);
-CREATE INDEX IF NOT EXISTS tenant_invitations_project_inviter_created_idx
-    ON tenant_invitations (project_id, invited_by, created_at_ms);
-CREATE INDEX IF NOT EXISTS tenant_invitations_project_email_created_idx
-    ON tenant_invitations (project_id, lower(email COLLATE "C"), created_at_ms);
 DROP INDEX IF EXISTS tenant_invitations_project_tenant_idx;
-
--- The auto-former's fallback: the oldest email-method row on a domain.
-CREATE INDEX IF NOT EXISTS domains_project_email_domain_idx
-    ON domains (project_id, lower(domain), created_at_ms, id)
-    WHERE verification_method = 'email';
 DROP INDEX IF EXISTS domains_project_tenant_idx;

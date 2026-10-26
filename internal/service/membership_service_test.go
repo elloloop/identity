@@ -27,7 +27,9 @@ import (
 type fakeInvitationStore struct {
 	byID map[string]*TenantInvitation
 	// lastLimits is the InvitationLimits the latest CreateInvitation was
-	// given; the fake enforces them as the postgres store does.
+	// given. The fake enforces only the per-tenant cap and the resend
+	// cooldown; the inviter and recipient caps are the postgres store's,
+	// tested there.
 	lastLimits InvitationLimits
 	createErr  error
 	getErr     error

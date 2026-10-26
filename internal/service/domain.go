@@ -232,7 +232,7 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID, domainID str
 		return nil, err
 	}
 	if t.Status == TenantStatusLatent {
-		if err := s.tenants.SetTenantStatus(ctx, projectID, t.ID, TenantStatusClaimed); err != nil {
+		if err := s.tenants.ClaimLatentTenant(ctx, projectID, t.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -301,10 +301,7 @@ func (s *DomainService) authorizeVerify(ctx context.Context, projectID string, t
 // recordAttempt counts one domain registration or verification by tenantID
 // against its cap, refusing it with ErrDomainAttemptsLimited past the cap.
 func (s *DomainService) recordAttempt(ctx context.Context, projectID, tenantID string) error {
-	cfg := s.cfg
-	if cfg == nil {
-		cfg = &config.Config{}
-	}
+	cfg := configOrDefaults(s.cfg)
 	now := s.nowFunc()
 	err := s.domains.RecordDomainAttempt(ctx, DomainAttempt{
 		ProjectID:     projectID,

@@ -162,13 +162,18 @@ func actsInTenant(user *User, t *UserTenant) bool {
 	return t.Source != MembershipSourceDomain || user.EmailVerified
 }
 
-// config is the service's configuration, or the zero Config — whose getters
-// answer the defaults — when none is wired.
+// config is the service's configuration, or the defaults when none is wired.
 func (s *MembershipService) config() *config.Config {
-	if s.cfg == nil {
+	return configOrDefaults(s.cfg)
+}
+
+// configOrDefaults is cfg, or the zero Config — whose getters answer the
+// defaults — when cfg is nil.
+func configOrDefaults(cfg *config.Config) *config.Config {
+	if cfg == nil {
 		return &config.Config{}
 	}
-	return s.cfg
+	return cfg
 }
 
 // auditTenantCreated records one CreateTenant outcome; actor and target are
