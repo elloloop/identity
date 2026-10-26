@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -33,8 +34,9 @@ func startSelfServiceHarness(t *testing.T) *RedesignHarness {
 }
 
 // TestRedesign_TenantSelection_OffByDefault: with the switch off, a refresh
-// that names a tenant the caller owns is FAILED_PRECONDITION, and the refresh
-// token, unspent, still rotates without one.
+// that names a tenant the caller owns is FAILED_PRECONDITION with the
+// selection-refused detail, and the refresh token, unspent, still rotates
+// without one.
 func TestRedesign_TenantSelection_OffByDefault(t *testing.T) {
 	h := startRedesignHarnessWith(t, func(c *config.Config) { c.SelfServiceTenantsEnabled = true })
 	ctx := context.Background()
@@ -54,7 +56,8 @@ func TestRedesign_TenantSelection_OffByDefault(t *testing.T) {
 	_, err = h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
 		RefreshToken: signup.Msg.GetRefreshToken(), TenantId: created.Msg.GetTenantId(),
 	}))
-	requireConnectCode(t, "selecting with selection off", err, connect.CodeFailedPrecondition)
+	requireSelectionRefused(t, "selecting with selection off", err, connect.CodeFailedPrecondition,
+		identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_ENABLED)
 	if _, err := h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
 		RefreshToken: signup.Msg.GetRefreshToken(),
 	})); err != nil {
@@ -291,6 +294,219 @@ func TestRedesign_SelfServiceTenants_DomainSquatting(t *testing.T) {
 	if m := waitForDomainMembership(t, h, late.userID); m.TenantID != companyTenant {
 		t.Fatalf("a signup after verification joined %s, want the company's tenant %s", m.TenantID, companyTenant)
 	}
+}
+
+// TestRedesign_SelfServiceTenants_UnverifiedDomainMemberChangesEmail: an
+// account that signs up unverified on a company's domain gets a domain
+// membership that counts for nothing, and confirming an email change to an
+// address it does control, which verifies the account, does not make it
+// count: the change ends the membership, and a membership left active, as
+// one from before the change ended them, still does not count off the
+// domain. ListMyTenants never lists the tenant and a refresh never selects it.
+func TestRedesign_SelfServiceTenants_UnverifiedDomainMemberChangesEmail(t *testing.T) {
+	h := startSelfServiceHarness(t)
+	ctx := context.Background()
+	companyTenant, domain := companyWithVerifiedDomain(t, h)
+
+	addr := "claimant@" + domain
+	member := signupDomainMember(t, h, addr, companyTenant)
+	member.refresh = requireNotInTenant(t, h, "unverified, on the domain", member.access, member.refresh, companyTenant)
+
+	moved := fmt.Sprintf("claimant-%d@elsewhere.example.com", time.Now().UnixNano())
+	member = changeEmailAndSignIn(t, h, member, moved)
+	if m := domainMembership(t, h, member.userID, companyTenant); m.Status != service.MembershipStatusInactive {
+		t.Fatalf("domain membership after the email change = %q, want inactive", m.Status)
+	}
+	member.refresh = requireNotInTenant(t, h, "verified, off the domain", member.access, member.refresh, companyTenant)
+
+	if _, err := h.Stores.memberships.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: h.ProjectID, TenantID: companyTenant, UserID: member.userID,
+		Source: service.MembershipSourceDomain, Role: service.RoleMember, Status: service.MembershipStatusActive,
+	}); err != nil {
+		t.Fatalf("UpsertMembership: %v", err)
+	}
+	requireNotInTenant(t, h, "verified, off the domain, membership active", member.access, member.refresh, companyTenant)
+}
+
+// TestRedesign_SelfServiceTenants_VerifiedDomainMemberMovesOffTheDomain: a
+// verified account on a company's domain acts in the company's tenant
+// through its domain membership until it moves its email off the domain;
+// then neither ListMyTenants nor a refresh gives it the tenant.
+func TestRedesign_SelfServiceTenants_VerifiedDomainMemberMovesOffTheDomain(t *testing.T) {
+	h := startSelfServiceHarness(t)
+	ctx := context.Background()
+	companyTenant, domain := companyWithVerifiedDomain(t, h)
+
+	addr := "person@" + domain
+	member := signupDomainMember(t, h, addr, companyTenant)
+	if _, err := h.Client.VerifyEmail(ctx, connect.NewRequest(&identitypb.VerifyEmailRequest{
+		Token: extractMailedToken(t, h, addr),
+	})); err != nil {
+		t.Fatalf("VerifyEmail: %v", err)
+	}
+	mine, err := h.AuthedClient(member.access).ListMyTenants(ctx, connect.NewRequest(&identitypb.ListMyTenantsRequest{}))
+	if err != nil {
+		t.Fatalf("ListMyTenants: %v", err)
+	}
+	if !listsTenant(mine.Msg.GetTenants(), companyTenant, service.RoleMember) {
+		t.Fatalf("ListMyTenants = %+v, want the company's tenant once the email is verified", mine.Msg.GetTenants())
+	}
+	selected, err := h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
+		RefreshToken: member.refresh, TenantId: companyTenant,
+	}))
+	if err != nil {
+		t.Fatalf("RefreshToken selecting the company's tenant: %v", err)
+	}
+	if got := decodeTokenTenantClaim(t, selected.Msg.GetAccessToken()); got != companyTenant {
+		t.Fatalf("selected token's tenant claim = %q, want %q", got, companyTenant)
+	}
+	member.refresh = selected.Msg.GetRefreshToken()
+
+	moved := fmt.Sprintf("person-%d@elsewhere.example.com", time.Now().UnixNano())
+	member = changeEmailAndSignIn(t, h, member, moved)
+	requireNotInTenant(t, h, "verified, moved off the domain", member.access, member.refresh, companyTenant)
+}
+
+// domainSession is a signed-in account's id and tokens.
+type domainSession struct {
+	userID, password, access, refresh string
+}
+
+// companyWithVerifiedDomain signs up a company's owner, who creates the
+// company's tenant and verifies a fresh domain for it, so later signups on
+// the domain join that tenant through the domain.
+func companyWithVerifiedDomain(t *testing.T, h *RedesignHarness) (tenantID, domain string) {
+	t.Helper()
+	ctx := context.Background()
+	domain = fmt.Sprintf("company-%d.example.com", time.Now().UnixNano())
+	owner := signupMembershipUser(t, h, "owner@"+domain)
+	created, err := owner.client.CreateTenant(ctx, connect.NewRequest(&identitypb.CreateTenantRequest{Name: "The Company"}))
+	if err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	claim, err := owner.client.CreateDomain(ctx, connect.NewRequest(&identitypb.CreateDomainRequest{
+		TenantId: created.Msg.GetTenantId(), Domain: domain, VerificationMethod: service.DomainVerificationDNSTXT,
+	}))
+	if err != nil {
+		t.Fatalf("CreateDomain: %v", err)
+	}
+	h.DNS.publish(claim.Msg.GetDnsTxtName(), claim.Msg.GetDnsTxtValue())
+	if _, err := owner.client.VerifyDomain(ctx, connect.NewRequest(&identitypb.VerifyDomainRequest{
+		DomainId: claim.Msg.GetDomain().GetId(),
+	})); err != nil {
+		t.Fatalf("VerifyDomain: %v", err)
+	}
+	return created.Msg.GetTenantId(), domain
+}
+
+// signupDomainMember signs up addr, on the company's domain, and waits for
+// the domain membership signup gives it in tenantID.
+func signupDomainMember(t *testing.T, h *RedesignHarness, addr, tenantID string) domainSession {
+	t.Helper()
+	signup, err := h.Client.PasswordSignup(context.Background(), connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email: addr, Password: validPassword,
+	}))
+	if err != nil {
+		t.Fatalf("PasswordSignup(%s): %v", addr, err)
+	}
+	s := domainSession{
+		userID: signup.Msg.GetUser().GetId(), password: validPassword,
+		access: signup.Msg.GetAccessToken(), refresh: signup.Msg.GetRefreshToken(),
+	}
+	if m := waitForDomainMembership(t, h, s.userID); m.TenantID != tenantID || m.Status != service.MembershipStatusActive {
+		t.Fatalf("signup's domain membership = %+v, want an active one in %s", m, tenantID)
+	}
+	return s
+}
+
+// changeEmailAndSignIn confirms an email change to newAddr, which verifies
+// it, and signs in again: the confirmation ends every session.
+func changeEmailAndSignIn(t *testing.T, h *RedesignHarness, s domainSession, newAddr string) domainSession {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := h.AuthedClient(s.access).RequestEmailChange(ctx, connect.NewRequest(&identitypb.RequestEmailChangeRequest{
+		NewEmail: newAddr, CurrentPassword: s.password,
+	})); err != nil {
+		t.Fatalf("RequestEmailChange: %v", err)
+	}
+	confirm, err := h.Client.ConfirmEmailChange(ctx, connect.NewRequest(&identitypb.ConfirmEmailChangeRequest{
+		Token: extractMailedToken(t, h, newAddr),
+	}))
+	if err != nil {
+		t.Fatalf("ConfirmEmailChange: %v", err)
+	}
+	if !confirm.Msg.GetUser().GetEmailVerified() {
+		t.Fatal("the confirmed address must be verified")
+	}
+	login, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
+		Email: newAddr, Password: s.password,
+	}))
+	if err != nil {
+		t.Fatalf("PasswordLogin(%s): %v", newAddr, err)
+	}
+	s.access, s.refresh = login.Msg.GetAccessToken(), login.Msg.GetRefreshToken()
+	return s
+}
+
+// domainMembership is userID's membership in tenantID.
+func domainMembership(t *testing.T, h *RedesignHarness, userID, tenantID string) *service.TenantMembership {
+	t.Helper()
+	m, err := h.Stores.memberships.GetMembership(context.Background(), h.ProjectID, tenantID, userID)
+	if err != nil || m == nil {
+		t.Fatalf("GetMembership(%s, %s) = %v, %v", tenantID, userID, m, err)
+	}
+	return m
+}
+
+// requireNotInTenant asserts the account neither sees tenantID in
+// ListMyTenants nor gets it from a refresh, which is refused as not a member
+// and leaves the refresh token to rotate without a selection. It returns the
+// rotated refresh token.
+func requireNotInTenant(t *testing.T, h *RedesignHarness, what, access, refresh, tenantID string) string {
+	t.Helper()
+	ctx := context.Background()
+	mine, err := h.AuthedClient(access).ListMyTenants(ctx, connect.NewRequest(&identitypb.ListMyTenantsRequest{}))
+	if err != nil {
+		t.Fatalf("%s: ListMyTenants: %v", what, err)
+	}
+	for _, ut := range mine.Msg.GetTenants() {
+		if ut.GetTenantId() == tenantID {
+			t.Fatalf("%s: ListMyTenants lists %s", what, tenantID)
+		}
+	}
+	_, err = h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
+		RefreshToken: refresh, TenantId: tenantID,
+	}))
+	requireSelectionRefused(t, what+": selecting the tenant", err, connect.CodePermissionDenied,
+		identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_A_MEMBER)
+	rotated, err := h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
+		RefreshToken: refresh,
+	}))
+	if err != nil {
+		t.Fatalf("%s: the refused refresh token must still rotate: %v", what, err)
+	}
+	return rotated.Msg.GetRefreshToken()
+}
+
+// requireSelectionRefused asserts err is a tenant-selection refusal with
+// code and reason, carrying the detail that tells a client its refresh token
+// was not consumed.
+func requireSelectionRefused(t *testing.T, what string, err error, code connect.Code, reason identitypb.TenantSelectionRefusal) {
+	t.Helper()
+	requireConnectCode(t, what, err, code)
+	var cerr *connect.Error
+	errors.As(err, &cerr)
+	for _, d := range cerr.Details() {
+		if v, derr := d.Value(); derr == nil {
+			if got, ok := v.(*identitypb.TenantSelectionRefusedDetails); ok {
+				if got.GetReason() != reason {
+					t.Fatalf("%s: refusal reason = %v, want %v", what, got.GetReason(), reason)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("%s: no TenantSelectionRefusedDetails on %v", what, err)
 }
 
 // listsTenant reports whether tenants holds tenantID with role.

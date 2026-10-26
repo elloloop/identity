@@ -490,6 +490,45 @@ func TestMembershipStore_GrantReplacesADomainSource(t *testing.T) {
 	require.Equal(t, service.RoleAdmin, domain.Role)
 }
 
+// TestMembershipStore_GrantKeepsAnyOtherSource: a grant that reactivates a
+// membership, or raises its role, keeps a source other than the domain's: a
+// removed creator invited back is still the one who created the tenant.
+func TestMembershipStore_GrantKeepsAnyOtherSource(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping membership grant source test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	ms, _, projectID, tenantID, user1, user2 := newMembershipFixture(ctx, t, dsn)
+
+	_, err := ms.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user1, Role: service.RoleOwner,
+		Source: service.MembershipSourceCreated, Status: service.MembershipStatusInactive,
+	})
+	require.NoError(t, err)
+	back, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user1, Role: service.RoleMember, Source: service.MembershipSourceInvited,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.MembershipStatusActive, back.Status, "the grant reactivates the removed owner")
+	require.Equal(t, service.RoleMember, back.Role, "at the granted role: an inactive membership holds none")
+	require.Equal(t, service.MembershipSourceCreated, back.Source, "and keeps the source")
+
+	_, err = ms.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: service.RoleMember,
+		Source: service.MembershipSourceInvited, Status: service.MembershipStatusActive,
+	})
+	require.NoError(t, err)
+	raised, err := ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: service.RoleAdmin, Source: service.MembershipSourceAdded,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.RoleAdmin, raised.Role)
+	require.Equal(t, service.MembershipSourceInvited, raised.Source, "a raise keeps the source too")
+}
+
 // TestInvitationStore_InviterAndRecipientLimits: the per-inviter cap counts
 // one person's invitations from every tenant, the per-recipient cap one
 // address's from every tenant of the project, and a zero cap is off.

@@ -158,11 +158,14 @@ memory drivers run with a nil resolver, so every request pins to the
 default project (steps 1–2 are skipped). The resolved project scope rides
 the request context; services read it to pick the per-project repository.
 
-Once the project is fixed, the **Tenant** is the user's company entity
-inside that project, derived from their verified email domain or from a
-materialised `tenant_memberships` row. With tenant selection on, a token's
-`tenant` claim may instead name a tenant the user chose on `RefreshToken`
-(ADR-0018). A user with a `gmail.com`/`outlook.com`
+Once the project is fixed, the user's **Tenants** are the company or team
+entities inside that project they belong to through a `tenant_memberships`
+row: from their email's domain (counted only while the email is verified and
+on a domain the tenant has verified), an invitation, a grant, or creating the
+tenant. `ListMyTenants` lists them; they do not set the token. A token's
+`tenant` claim is the deployment default, `GATEWAY_DEFAULT_TENANT_ID`, unless,
+with tenant selection on, the user chose one of their tenants on
+`RefreshToken` (ADR-0018). A user with a `gmail.com`/`outlook.com`
 address forms no tenant — public providers are blocklisted at signup,
 domain-verify, and derived-membership (`GATEWAY_PUBLIC_EMAIL_DOMAINS`
 extends the built-in set).

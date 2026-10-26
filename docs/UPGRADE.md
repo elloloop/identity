@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — self-service tenants and tenant selection on `RefreshToken` (migrations 0044, 0045 and 0046, which rewrites `users`; stop every earlier replica before migrating; `RefreshTokenRequest.tenant_id` behind `GATEWAY_TENANT_SELECTION_ENABLED`, off by default (additive); contested domain claims, a per-tenant TXT challenge, domain and invitation limits, agent sign-outs scoped to the users a change governs (behaviour changes); `MembershipStore`, `TenantStore`, `DomainStore`, `InvitationStore`, `UserDirectory`, `AuthService.RefreshToken` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
+## Next — self-service tenants and tenant selection on `RefreshToken` (migrations 0044, 0045, 0046, which rewrites `users`, and 0047; stop every earlier replica before migrating; `RefreshTokenRequest.tenant_id` behind `GATEWAY_TENANT_SELECTION_ENABLED`, off by default (additive); contested domain claims, a per-tenant TXT challenge, domain and invitation limits, agent sign-outs scoped to the users a change governs, domain memberships that need a verified email on a verified domain and end when the email leaves it, the product age gate checked before a refresh token is spent (behaviour changes); `MembershipStore`, `TenantStore`, `DomainStore`, `InvitationStore`, `UserDirectory`, `AuthService.RefreshToken` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
 
 A signed-in person can now create a tenant they own, list the tenants they
 belong to, and get an access token for one of them. The rationale, and what
@@ -41,29 +41,39 @@ the `tenant` claim does and does not assert, is
   second tenant, bounded by the limit. Reconcile with `ListMyTenants`.
 - **`ListMyTenants()`** returns `{tenant_id, name, role}` for every claimed
   tenant in the project where the caller's membership is active, ordered by
-  name. A membership that came only from the email's domain is listed once
-  that email is verified. It does not depend on the setting.
+  name. A membership that came from the email's domain is listed only while
+  that email is verified and on a domain the tenant has verified (see
+  [Domain memberships](#domain-memberships-follow-the-verified-email-behaviour-change)).
+  It does not depend on the setting.
 - **`RefreshTokenRequest.tenant_id`** (field 2) asks for an access token
   whose `tenant` claim is that tenant. It is off by default: a server
   answers it only with `GATEWAY_TENANT_SELECTION_ENABLED=true` on the
   Postgres driver, and otherwise refuses it with `FAILED_PRECONDITION`.
   When on, it is granted only to an active member of a claimed tenant in
   the session's project, and a member only through their email's domain
-  must have verified that email. Anything else is `PERMISSION_DENIED`
-  (`UNAVAILABLE` when the membership could not be read). On every refusal no
-  token is issued and the refresh token is **not** consumed, so the client
-  can retry without it. The code alone does not say which refusal it is:
-  `RefreshToken` also answers `FAILED_PRECONDITION` for an account refused
-  over its own state (not active, or needing an identity verification),
-  which is checked first and **does** consume the token, and retrying a
-  consumed token is a replay that signs the account out everywhere. So a
-  client sends `tenant_id` only to a server it knows has selection on, and
-  there treats `FAILED_PRECONDITION` as the end of the session. Omitting the
-  field, or sending the default tenant,
-  keeps today's behaviour: the claim is the deployment default
+  must have verified that email and still be on a domain the tenant has
+  verified. Anything else is `PERMISSION_DENIED` (`UNAVAILABLE` when the
+  membership could not be read). Each of these refusals carries a
+  `TenantSelectionRefusedDetails` error detail naming its reason
+  (`NOT_ENABLED`, `NOT_A_MEMBER` or `UNAVAILABLE`), issues no token and does
+  **not** consume the refresh token, so a client that finds the detail
+  refreshes again without `tenant_id`. The code alone does not say which
+  refusal it is: `RefreshToken` refuses an account over its own state (not
+  active, or needing an identity verification) with the same codes, before
+  it looks at the tenant, and that refusal may have consumed the token,
+  which a retry would replay, signing the account out everywhere. So retry
+  only when the detail is present. Omitting the field, or sending the
+  default tenant, keeps today's behaviour: the claim is the deployment default
   (`GATEWAY_DEFAULT_TENANT_ID`). The selection is not sticky: each refresh
   chooses again, and one without `tenant_id` returns to the default. A
   client reads the tenant it got from the access token's `tenant` claim.
+- **The product age gate is checked before the refresh token is spent.**
+  For an active account, `RefreshToken` now refuses a product the account is
+  too young for (`PERMISSION_DENIED`, as before) before it consumes the
+  refresh token, as it already did for anonymous sessions, so a product that
+  gains a minimum age mid-session no longer spends the account's token.
+  The refusal carries no selection detail: refreshing again without
+  `tenant_id` is refused the same way.
 - **What the claim asserts.** A selected `tenant` asserts membership only.
   The `role` claim is still the account's role and is **never** a role in
   that tenant; a service that needs the tenant role reads it from
@@ -106,7 +116,11 @@ longer captures its signups:
 - **Auto-formation joins only a proven tenant.** A signup on a non-public
   domain joins the tenant that verified the domain, or else the latent tenant
   auto-formation made for it (creating it on the domain's first signup). It
-  never joins a tenant that merely registered the domain.
+  never joins a tenant that merely registered the domain, and no longer
+  joins a suspended latent tenant: the next signup on the domain forms a new
+  latent one. A signup that already holds a membership in the tenant,
+  invited, added or created, keeps that source; auto-formation used to
+  relabel it `domain`.
 - **The DNS TXT challenge now names the tenant.** `CreateDomain` returns a
   value derived from the project, the tenant and the domain, so the record
   one claimant publishes verifies no other claim. A `dns_txt` registration
@@ -130,6 +144,22 @@ longer captures its signups:
 - **A suspended tenant verifies nothing.** Its `VerifyDomain` is
   `PERMISSION_DENIED`: verifying claims the tenant, which would lift the
   suspension.
+
+### Domain memberships follow the verified email (behaviour change)
+
+A membership with source `domain` comes from the account's email, so it
+counts only while the email is the tenant's. `ListMyTenants` lists it and
+a refresh selects its tenant only while the account's email is verified
+and on a domain the tenant has verified; before, an account that signed up
+unverified on the domain, or moved its email off it, kept the tenant.
+Memberships from an invitation, a grant or a tenant's creation are not
+affected.
+
+Migration 0047 also ends a domain membership when the email leaves the
+tenant's verified domains: confirming an email change, a SCIM or admin
+update of the email and an account merge set it `inactive` in the same
+transaction as the change. Coming back to the domain does not rejoin the
+tenant; invite the account again.
 
 ### Agent sign-outs follow the users a change governs (behaviour change)
 
@@ -196,9 +226,12 @@ runs ([Per-IP budgets are HTTP only](#per-ip-budgets-are-http-only)):
   again within `GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS` (default
   300, at most 86400; `0` selects the default) is refused.
 
-The limits apply to every tenant, operator-created ones included: a tenant
-onboarding more than 100 people a day needs a higher
-`GATEWAY_TENANT_INVITATION_MAX_PER_TENANT`. The invitation email no longer
+The limits apply to every tenant, operator-created ones included. Bulk
+onboarding meets three of them: a tenant inviting more than 100 people a
+day needs a higher `GATEWAY_TENANT_INVITATION_MAX_PER_TENANT`, an admin
+sending them a higher `GATEWAY_TENANT_INVITATION_MAX_PER_INVITER`, and one
+client sending more than 20 per rate-limit window a higher
+`GATEWAY_RATE_LIMIT_INVITATION_PER_IP`. The invitation email no longer
 names a self-service tenant, whose name its creator typed; it invites to "a
 team". Operator-created and domain tenants are named as before.
 
@@ -219,6 +252,19 @@ host that serves identity's services over native gRPC (`docs/embedding.md`)
 gets none of these budgets and applies its own.
 
 ### Migration
+
+`0047_end_domain_memberships_off_domain` adds the function
+`end_domain_memberships_off_domain` and an `AFTER UPDATE OF email` trigger
+on `users`, `tenant_domain_membership_email`, which fires only when
+`users.email_domain` changes. It is catalog-only: it rewrites nothing and
+ends no existing membership, since the read rule above already refuses a
+domain membership whose email left the domain before the upgrade. Creating
+the trigger takes a `SHARE ROW EXCLUSIVE` lock on `users`, which blocks
+writes, not reads, for the moment it holds it; `lock_timeout = 10s` bounds
+the wait to acquire it. If it fails, version 47 is left dirty: confirm the
+function is absent, then run `identity migrate force 46` and `identity
+migrate` again. Its down migration drops the trigger and the function;
+memberships it ended stay ended.
 
 `0046_scope_governance_revocation` **rewrites `users`.** It adds
 `users.email_domain`, a stored generated column holding the address's
@@ -351,7 +397,7 @@ replica. In this order:
    with the record another tenant published. Neither a rolling deploy nor
    `GATEWAY_POSTGRES_AUTO_MIGRATE` beside earlier replicas is safe.
 3. **Migrate, then start this release.** Run `identity migrate` as its own
-   job; this release's replicas need 0044 to 0046 before they serve.
+   job; this release's replicas need 0044 to 0047 before they serve.
 4. **Turn on self-service tenants** (`tenants.self_service`,
    `GATEWAY_SELF_SERVICE_TENANTS_ENABLED`) only once every replica runs this
    release.
@@ -359,9 +405,10 @@ replica. In this order:
    client sends `tenant_id`**, and only once every resource server that
    checks the `tenant` claim accepts a selected one. A replica without it,
    or an earlier one, answers a selected tenant's token with `401`. On
-   refresh, a replica without it refuses `tenant_id` with the
-   `FAILED_PRECONDITION` a client treats as the end of the session, and an
-   earlier one ignores the field and issues a default-tenant token.
+   refresh, a replica without it refuses `tenant_id` with
+   `FAILED_PRECONDITION` and the `NOT_ENABLED` detail, leaving the refresh
+   token unspent, and an earlier one ignores the field and issues a
+   default-tenant token.
 
 **Rolling back.**
 
@@ -381,7 +428,8 @@ replica. In this order:
      AND t.created_by <> '' AND d.status <> 'verified';
   ```
 
-  Then 0046's down migration restores 0041's project-wide triggers. 0045's
+  0047's down migration drops its trigger; memberships it ended stay
+  ended. Then 0046's down migration restores 0041's project-wide triggers. 0045's
   keeps one registration per domain (the verified one, else the oldest) and
   deletes the other claims; each delete fires those triggers, so every agent
   in a project that loses a claim signs in again. 0044's maps `created`
@@ -460,8 +508,10 @@ replica. In this order:
 - **Clients that select a tenant.** Send `tenant_id` only once every replica
   runs this release with `GATEWAY_TENANT_SELECTION_ENABLED` on (Rolling out,
   step 5), read the granted tenant from the access token's `tenant` claim
-  rather than assuming the request was honoured, and treat
-  `FAILED_PRECONDITION` from `RefreshToken` as the end of the session.
+  rather than assuming the request was honoured. When `RefreshToken`
+  refuses, refresh again without `tenant_id` only if the error carries
+  `TenantSelectionRefusedDetails`; any other refusal may have spent the
+  refresh token, so do not retry it.
 - **Embedders with their own stores** (these are `internal/` packages, so
   this matters only to forks). `service.TenantStore` gains
   `CreateOwnedTenant`, `GetTenantStatus` and `ClaimLatentTenant`, which
@@ -470,7 +520,10 @@ replica. In this order:
   verification stands; `service.MembershipStore` gains
   `ListActiveTenantsForUser` and `GetActiveTenantForUser` (through the new
   `UserTenantReader`), which must only return a tenant that is claimed, in
-  the given project, with the user's membership active.
+  the given project, with the user's membership active. Both take the
+  caller's email domain, `""` unless the email is verified, and must count
+  a membership whose source is `domain` only when that domain is one the
+  tenant has verified.
   `service.InvitationStore.CreateInvitation` takes a
   `service.InvitationLimits` and must enforce it under a per-tenant lock.
   `service.UserDirectory` is now `GetUserInProject(ctx, projectID, userID)`;

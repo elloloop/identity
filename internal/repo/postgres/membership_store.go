@@ -108,17 +108,18 @@ var grantHoldsRole = `tenant_memberships.status = 'active' AND ` +
 	fmt.Sprintf(membershipRoleRank, "tenant_memberships.role") + ` >= ` + fmt.Sprintf(membershipRoleRank, "EXCLUDED.role")
 
 // grantMembershipQuery is GrantMembership's statement. A held role is kept;
-// a membership that came only from the email's domain still takes the
-// grant's source, since such a membership counts only once that email is
-// verified and a grant is a decision about this person; any other source is
-// left alone.
+// a membership that came only from the email's domain takes the grant's
+// source, since such a membership counts only while that email is verified
+// and on the tenant's domain, and a grant is a decision about this person;
+// any other source is left alone, whether the grant raises the role,
+// reactivates the membership or changes nothing.
 var grantMembershipQuery = `
 		INSERT INTO tenant_memberships (
 			id, project_id, tenant_id, user_id, source, role, status,
 			created_at_ms, updated_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $7)
 		ON CONFLICT (project_id, tenant_id, user_id) DO UPDATE SET
-			source        = EXCLUDED.source,
+			source        = CASE WHEN tenant_memberships.source = 'domain' THEN EXCLUDED.source ELSE tenant_memberships.source END,
 			role          = CASE WHEN ` + grantHoldsRole + ` THEN tenant_memberships.role ELSE EXCLUDED.role END,
 			status        = 'active',
 			updated_at_ms = EXCLUDED.updated_at_ms
@@ -129,8 +130,9 @@ var grantMembershipQuery = `
 // GrantMembership makes m.UserID an active member of m.TenantID at m.Role,
 // unless they already hold an active membership there at m.Role or a higher
 // role, which is then kept. It never lowers a role, so a grant cannot demote
-// an owner, the last one included. A kept membership that came only from the
-// email's domain takes the grant's source; any other is left unchanged. The
+// an owner, the last one included. A membership that came only from the
+// email's domain takes the grant's source; any other source is left
+// unchanged, also when the grant raises the role or reactivates it. The
 // decision is the statement's own, so it holds against a concurrent grant.
 // Returns the surviving row.
 func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.TenantMembership) (*service.TenantMembership, error) {
@@ -200,26 +202,37 @@ func (s *MembershipStore) ListMembershipsForUser(ctx context.Context, projectID,
 }
 
 // activeUserTenantsQuery selects the tenants a user may act in: an active
-// membership in a claimed tenant of the project. ListActiveTenantsForUser
-// and GetActiveTenantForUser share it, so a tenant a refresh may select is
+// membership in a claimed tenant of the project, where one that came from the
+// email's domain counts only when $3, the account's verified email domain,
+// is a domain the tenant has verified. $3 is "" while the email is
+// unverified, and no domain is empty. ListActiveTenantsForUser and
+// GetActiveTenantForUser share it, so a tenant a refresh may select is
 // exactly one the list shows. The schema does not tie a membership's
 // project_id to its tenant's, so the join requires both to be the project.
-// The membership's source rides along: a domain-derived one counts only for an
-// account whose email is verified, which the service checks.
+//
+// The service passes the domain rather than the query reading
+// users.email_domain: users is under row-level security bound to the pool's
+// project, which a governance read for another project cannot see. The
+// domain test is an index condition on 0045's (project_id, tenant_id,
+// lower(domain)) unique index.
 const activeUserTenantsQuery = `
 	SELECT t.id, t.name, m.role, m.source
 	FROM tenant_memberships m
 	JOIN tenants t ON t.project_id = m.project_id AND t.id = m.tenant_id
 	WHERE m.project_id = $1 AND m.user_id = $2
-	  AND m.status = 'active' AND t.status = 'claimed'`
+	  AND m.status = 'active' AND t.status = 'claimed'
+	  AND (m.source <> 'domain' OR EXISTS (
+	        SELECT 1 FROM domains d
+	        WHERE d.project_id = m.project_id AND d.tenant_id = m.tenant_id
+	          AND lower(d.domain) = $3 AND d.status = 'verified'))`
 
 // ListActiveTenantsForUser returns the tenants a user may act in within a
 // project, ordered by name, then id.
-func (s *MembershipStore) ListActiveTenantsForUser(ctx context.Context, projectID, userID string) ([]*service.UserTenant, error) {
+func (s *MembershipStore) ListActiveTenantsForUser(ctx context.Context, projectID, userID, emailDomain string) ([]*service.UserTenant, error) {
 	if projectID == "" || userID == "" {
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, activeUserTenantsQuery+` ORDER BY t.name, t.id`, projectID, userID)
+	rows, err := s.pool.Query(ctx, activeUserTenantsQuery+` ORDER BY t.name, t.id`, projectID, userID, emailDomain)
 	if err != nil {
 		return nil, wrapPgErr("ListActiveTenantsForUser", err)
 	}
@@ -240,12 +253,12 @@ func (s *MembershipStore) ListActiveTenantsForUser(ctx context.Context, projectI
 
 // GetActiveTenantForUser returns the tenant when the user may act in it, or
 // (nil, nil).
-func (s *MembershipStore) GetActiveTenantForUser(ctx context.Context, projectID, tenantID, userID string) (*service.UserTenant, error) {
+func (s *MembershipStore) GetActiveTenantForUser(ctx context.Context, projectID, tenantID, userID, emailDomain string) (*service.UserTenant, error) {
 	if projectID == "" || tenantID == "" || userID == "" {
 		return nil, nil
 	}
 	var ut service.UserTenant
-	err := s.pool.QueryRow(ctx, activeUserTenantsQuery+` AND t.id = $3`, projectID, userID, tenantID).
+	err := s.pool.QueryRow(ctx, activeUserTenantsQuery+` AND t.id = $4`, projectID, userID, emailDomain, tenantID).
 		Scan(&ut.TenantID, &ut.Name, &ut.Role, &ut.Source)
 	if noRows(err) {
 		return nil, nil
@@ -352,11 +365,8 @@ func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 // service.ErrInvitationRecipientLimited. Each counts every invitation,
 // whatever its status, since each one sent an email.
 //
-// The locks are always taken in that order — tenant, inviter, recipient —
-// then the per-mailbox lock replicas built before the per-tenant limits take
-// (legacyInvitationLockKey), so a create on such a replica, still running
-// during a rolling upgrade, cannot interleave with one here for the same
-// mailbox.
+// The locks are always taken in that order — tenant, inviter, recipient — so
+// two creates never wait on each other's locks in opposite orders.
 func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.TenantInvitation, limits service.InvitationLimits) (string, error) {
 	if inv == nil {
 		return "", errors.New("postgres: CreateInvitation: nil invitation")
@@ -400,10 +410,7 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	if inv.InvitedBy != "" {
 		locks = append(locks, advisoryKey("tenant_invitation_inviter", inv.ProjectID, inv.InvitedBy))
 	}
-	locks = append(locks,
-		advisoryKey("tenant_invitation_recipient", inv.ProjectID, key),
-		legacyInvitationLockKey(inv.ProjectID, inv.TenantID, key),
-	)
+	locks = append(locks, advisoryKey("tenant_invitation_recipient", inv.ProjectID, key))
 	for _, lock := range locks {
 		if err := lockXact(ctx, tx, "CreateInvitation", lock); err != nil {
 			return "", err
@@ -498,17 +505,6 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	inv.Role = role
 	inv.Status = service.InvitationStatusPending
 	return id, nil
-}
-
-// legacyInvitationLockKey is the per-mailbox lock replicas built before the
-// per-tenant invitation limits serialise creates on. Its last part is not
-// length-prefixed, as those replicas spell it; the folded email is the final
-// part, so no two distinct triples share a key. Remove it, and the lock
-// CreateInvitation takes on it, in v5.0.0: this release's upgrade stops every
-// earlier replica before it migrates (UPGRADE.md), so the lock covers only a
-// deployment that skipped that step.
-func legacyInvitationLockKey(projectID, tenantID, foldedEmail string) string {
-	return advisoryKey("tenant_invitation", projectID, tenantID) + ":" + foldedEmail
 }
 
 // GetInvitationByTokenHash resolves an invitation by its hashed token

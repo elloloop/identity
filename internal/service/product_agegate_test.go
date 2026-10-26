@@ -444,6 +444,10 @@ func TestProductAgeGate_DefaultProductWhenHeaderAbsent(t *testing.T) {
 // A session issued BEFORE the product was restricted must stop refreshing once
 // it is: the refresh path is the only thing standing between a policy change and
 // an already-signed-in child keeping access until the refresh token expires.
+// The refusal comes before the refresh token is consumed, for an identified
+// account as for an anonymous one, and it is not a tenant-selection refusal
+// even when the refresh names a tenant, so a client never mistakes it for one
+// it may retry.
 func TestProductAgeGate_RefreshRefusesLaterRestrictedProduct(t *testing.T) {
 	svc, repo, _ := newProductAgeSvc(t)
 	seedUserAged(t, repo, "child@example.com", dobAgeMs(8))
@@ -457,6 +461,13 @@ func TestProductAgeGate_RefreshRefusesLaterRestrictedProduct(t *testing.T) {
 	restricted := productScope(t, teenMinimumJSON, restrictedProduct)
 	_, _, _, err = svc.RefreshToken(restricted, login.RefreshToken, "", "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrProductAgeRestricted)
+	_, _, _, err = svc.RefreshToken(restricted, login.RefreshToken, "t-any", "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrProductAgeRestricted)
+	var refusal *TenantSelectionRefusedError
+	assert.NotErrorAs(t, err, &refusal)
+
+	_, _, _, err = svc.RefreshToken(open, login.RefreshToken, "", "1.2.3.4", "agent")
+	require.NoError(t, err, "the refused refresh token is unspent and still rotates")
 }
 
 // ── Account-creating paths ───────────────────────────────────────────────

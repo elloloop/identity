@@ -151,11 +151,11 @@ func (s *connectMembershipStore) RemoveMembership(context.Context, string, strin
 	return nil
 }
 
-func (s *connectMembershipStore) ListActiveTenantsForUser(context.Context, string, string) ([]*service.UserTenant, error) {
+func (s *connectMembershipStore) ListActiveTenantsForUser(context.Context, string, string, string) ([]*service.UserTenant, error) {
 	return s.active, nil
 }
 
-func (s *connectMembershipStore) GetActiveTenantForUser(_ context.Context, _, tenantID, _ string) (*service.UserTenant, error) {
+func (s *connectMembershipStore) GetActiveTenantForUser(_ context.Context, _, tenantID, _, _ string) (*service.UserTenant, error) {
 	for _, t := range s.active {
 		if t.TenantID == tenantID {
 			return t, nil

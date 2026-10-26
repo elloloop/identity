@@ -18,6 +18,10 @@ func toConnectError(err error) *connect.Error {
 	if err == nil {
 		return nil
 	}
+	var refusal *service.TenantSelectionRefusedError
+	if errors.As(err, &refusal) {
+		return tenantSelectionRefusedConnectError(refusal)
+	}
 
 	switch {
 	case errors.Is(err, service.ErrAgentOAuthRevision), errors.Is(err, service.ErrOAuthClientRevision):
@@ -217,6 +221,32 @@ func dobRequiredConnectError(err error) *connect.Error {
 		}
 	}
 	return cerr
+}
+
+// tenantSelectionRefusedConnectError is the refusal's own code, carrying a
+// TenantSelectionRefusedDetails: it is the one signal a client has that the
+// refresh token was not consumed and may be presented again.
+func tenantSelectionRefusedConnectError(refusal *service.TenantSelectionRefusedError) *connect.Error {
+	cerr := toConnectError(refusal.Err)
+	if detail, err := connect.NewErrorDetail(&identitypb.TenantSelectionRefusedDetails{
+		Reason: tenantSelectionRefusalToProto(refusal.Reason),
+	}); err == nil {
+		cerr.AddDetail(detail)
+	}
+	return cerr
+}
+
+func tenantSelectionRefusalToProto(r service.TenantSelectionRefusal) identitypb.TenantSelectionRefusal {
+	switch r {
+	case service.TenantSelectionNotEnabled:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_ENABLED
+	case service.TenantSelectionNotAMember:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_A_MEMBER
+	case service.TenantSelectionUnavailable:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNAVAILABLE
+	default:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED
+	}
 }
 
 func passwordChangeRequiredConnectError(err error) *connect.Error {

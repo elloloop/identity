@@ -296,6 +296,21 @@ type fakeMembershipStore struct {
 	// tenants supplies each tenant's name and status to the active-tenant
 	// reads (linkFakeTenantStores); unlinked, those reads find nothing.
 	tenants *fakeTenantStore
+	// verified holds each tenant's verified domains, keyed project/tenant,
+	// for the active-tenant reads' domain rule (verifyDomain).
+	verified map[string]map[string]bool
+}
+
+// verifyDomain records domain as one tenantID has verified.
+func (f *fakeMembershipStore) verifyDomain(projectID, tenantID, domain string) {
+	if f.verified == nil {
+		f.verified = map[string]map[string]bool{}
+	}
+	k := projectID + "/" + tenantID
+	if f.verified[k] == nil {
+		f.verified[k] = map[string]bool{}
+	}
+	f.verified[k][domain] = true
 }
 
 func newFakeMembershipStore() *fakeMembershipStore {
@@ -393,14 +408,15 @@ func (f *fakeMembershipStore) RemoveMembership(_ context.Context, projectID, ten
 }
 
 // ListActiveTenantsForUser mirrors the postgres join: an active membership
-// in a claimed tenant of the project, ordered by name, then id.
-func (f *fakeMembershipStore) ListActiveTenantsForUser(_ context.Context, projectID, userID string) ([]*UserTenant, error) {
+// in a claimed tenant of the project, a domain one only on a domain the
+// tenant verified, ordered by name, then id.
+func (f *fakeMembershipStore) ListActiveTenantsForUser(_ context.Context, projectID, userID, emailDomain string) ([]*UserTenant, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	var out []*UserTenant
 	for _, m := range f.byKey {
-		if ut := f.activeTenant(m, projectID, userID); ut != nil {
+		if ut := f.activeTenant(m, projectID, userID, emailDomain); ut != nil {
 			out = append(out, ut)
 		}
 	}
@@ -413,7 +429,7 @@ func (f *fakeMembershipStore) ListActiveTenantsForUser(_ context.Context, projec
 	return out, nil
 }
 
-func (f *fakeMembershipStore) GetActiveTenantForUser(_ context.Context, projectID, tenantID, userID string) (*UserTenant, error) {
+func (f *fakeMembershipStore) GetActiveTenantForUser(_ context.Context, projectID, tenantID, userID, emailDomain string) (*UserTenant, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
@@ -421,11 +437,14 @@ func (f *fakeMembershipStore) GetActiveTenantForUser(_ context.Context, projectI
 	if !ok {
 		return nil, nil
 	}
-	return f.activeTenant(m, projectID, userID), nil
+	return f.activeTenant(m, projectID, userID, emailDomain), nil
 }
 
-func (f *fakeMembershipStore) activeTenant(m *TenantMembership, projectID, userID string) *UserTenant {
+func (f *fakeMembershipStore) activeTenant(m *TenantMembership, projectID, userID, emailDomain string) *UserTenant {
 	if f.tenants == nil || m.ProjectID != projectID || m.UserID != userID || m.Status != MembershipStatusActive {
+		return nil
+	}
+	if m.Source == MembershipSourceDomain && !f.verified[projectID+"/"+m.TenantID][emailDomain] {
 		return nil
 	}
 	t, ok := f.tenants.byID[projectID+"/"+m.TenantID]
@@ -879,7 +898,7 @@ func TestVerifyDomain_PropagatesClaimLatentTenantError(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 }
 
-func TestVerifyDomain_PropagatesUpsertMembershipError(t *testing.T) {
+func TestVerifyDomain_PropagatesGrantMembershipError(t *testing.T) {
 	f := newDomainFixture()
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusClaimed})

@@ -34,7 +34,13 @@ import { Code } from "astro-expressive-code/components";
       passkey or provider sign-in is refused but mails a verification link;
       a passwordless code or magic link proves the address and starts a
       fresh session). The same refresh token rotates again once the link is
-      redeemed.
+      redeemed. A refresh that names a tenant (<code>tenant_id</code>) and is
+      refused for it carries a <code>TenantSelectionRefusedDetails</code>
+      error detail and leaves the token unspent: refresh again without
+      <code>tenant_id</code>. Any other refusal of a refresh that names a
+      tenant may have spent the token, so retry only when that detail is
+      present (see
+      <a href="/docs/concepts/multi-tenancy#choosing-a-tenant-for-a-token">Choosing a tenant for a token</a>).
     </li>
     <li>
       <strong>Revoke.</strong>

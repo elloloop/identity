@@ -39,6 +39,35 @@ var (
 	ErrTenantCreationLimited = errors.New("too many tenants created recently; try again later")
 )
 
+// TenantSelectionRefusal says why RefreshToken refused the tenant it named.
+type TenantSelectionRefusal int
+
+const (
+	// TenantSelectionNotEnabled: the server does not select tenants
+	// (ErrTenantSelectionDisabled).
+	TenantSelectionNotEnabled TenantSelectionRefusal = iota + 1
+	// TenantSelectionNotAMember: the user may not act in the tenant
+	// (ErrPermissionDenied).
+	TenantSelectionNotAMember
+	// TenantSelectionUnavailable: the membership could not be read
+	// (ErrUnavailable).
+	TenantSelectionUnavailable
+)
+
+// TenantSelectionRefusedError is RefreshToken's refusal of the tenant it was
+// asked to select. It is made before the refresh token is consumed, so the
+// same token still rotates, which is what lets a client retry with it; no
+// other RefreshToken error says so. Err is the refusal, whose sentinel sets
+// the code.
+type TenantSelectionRefusedError struct {
+	Reason TenantSelectionRefusal
+	Err    error
+}
+
+func (e *TenantSelectionRefusedError) Error() string { return e.Err.Error() }
+
+func (e *TenantSelectionRefusedError) Unwrap() error { return e.Err }
+
 // auditReasonCreationLimit is the `reason` detail of a creation refused by
 // the per-user limit.
 const auditReasonCreationLimit = "creation_limit"
@@ -121,9 +150,10 @@ func (s *MembershipService) CreateTenant(ctx context.Context, callerID, name, ip
 // ListMyTenants returns the tenants callerID may act in within the caller's
 // project: every claimed tenant they hold an active membership in, however
 // the membership began — except one they belong to only through their
-// email's domain while that email is unverified. Suspended tenants and
-// memberships that are not active are left out too, so the list is exactly
-// the set RefreshToken may select from.
+// email's domain while that email is unverified or no longer on a domain the
+// tenant has verified. Suspended tenants and memberships that are not active
+// are left out too, so the list is exactly the set RefreshToken may select
+// from.
 func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string) ([]*UserTenant, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -132,16 +162,16 @@ func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string) 
 	if callerID == "" {
 		return nil, ErrUnauthenticated
 	}
-	tenants, err := s.memberships.ListActiveTenantsForUser(ctx, projectID, callerID)
-	if err != nil || len(tenants) == 0 {
-		return tenants, err
-	}
 	caller, err := s.users.GetUserInProject(ctx, projectID, callerID)
 	if err != nil {
 		return nil, err
 	}
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
+	}
+	tenants, err := s.memberships.ListActiveTenantsForUser(ctx, projectID, callerID, verifiedEmailDomain(caller))
+	if err != nil {
+		return nil, err
 	}
 	out := tenants[:0]
 	for _, t := range tenants {
@@ -152,14 +182,31 @@ func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string) 
 	return out, nil
 }
 
-// actsInTenant reports whether user may act in t, one of their active
-// memberships in a claimed tenant. A membership derived from the email's
+// actsInTenant reports whether user may act in t, a tenant a
+// UserTenantReader returned for them. A membership derived from the email's
 // domain proves nothing until the email is: with
 // GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL off, anyone may sign up with an
 // address on a company's domain, and must not be able to act as that
-// company's member.
+// company's member. The reader applies the whole rule, since only it holds
+// the tenant's verified domains; this checks again the part the service can,
+// so a reader that ignores emailDomain still never admits an unverified
+// address.
 func actsInTenant(user *User, t *UserTenant) bool {
-	return t.Source != MembershipSourceDomain || user.EmailVerified
+	return t.Source != MembershipSourceDomain || verifiedEmailDomain(user) != ""
+}
+
+// verifiedEmailDomain is the domain user's email may make them a member
+// through: the part after the address's last '@' under FoldEmail, as
+// users.email_domain holds it, once the email is verified, and "" while it
+// is not. An account that changes its email to another verified address
+// keeps no membership the old domain gave it: the reader matches the new
+// domain against the tenant's, and the store ends the old domain's
+// memberships with the change (migration 0047).
+func verifiedEmailDomain(user *User) string {
+	if !user.EmailVerified {
+		return ""
+	}
+	return emailDomain(FoldEmail(user.Email))
 }
 
 // config is the service's configuration, or the defaults when none is wired.
@@ -192,7 +239,9 @@ func (s *MembershipService) auditTenantCreated(ctx context.Context, callerID str
 // normalizeTenantName trims a tenant name and refuses one that is blank,
 // longer than tenantNameMaxRunes, not valid UTF-8, or carrying control or
 // invisible formatting characters, such as the bidirectional overrides,
-// which would let one name render as another. The zero-width joiner and
+// which would let one name render as another, or the line and paragraph
+// separators (U+2028, U+2029), which break the line a name is shown on and
+// are neither controls nor formatting characters. The zero-width joiner and
 // non-joiner are formatting characters too, but Persian, the Indic scripts
 // and emoji sequences need them, so they are allowed.
 func normalizeTenantName(name string) (string, error) {
@@ -213,11 +262,11 @@ func normalizeTenantName(name string) (string, error) {
 }
 
 // refusedNameRune reports whether r may not appear in a tenant name: a
-// control character, or a formatting one other than the zero-width
-// non-joiner (U+200C) and joiner (U+200D).
+// control character, a line or paragraph separator, or a formatting
+// character other than the zero-width non-joiner (U+200C) and joiner (U+200D).
 func refusedNameRune(r rune) bool {
 	if r == '\u200c' || r == '\u200d' {
 		return false
 	}
-	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	return unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp)
 }

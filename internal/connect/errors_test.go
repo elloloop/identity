@@ -252,3 +252,56 @@ func TestToConnectErrorSelfServiceTenants(t *testing.T) {
 		}
 	}
 }
+
+// TestToConnectErrorTenantSelectionRefused pins the selection refusals: each
+// keeps the code its cause maps to and carries a TenantSelectionRefusedDetails
+// naming the reason, the one signal that the refresh token was not consumed.
+// The bare sentinels, which RefreshToken never returns alone, carry none.
+func TestToConnectErrorTenantSelectionRefused(t *testing.T) {
+	for _, tc := range []struct {
+		refusal *service.TenantSelectionRefusedError
+		code    connect.Code
+		reason  identitypb.TenantSelectionRefusal
+	}{
+		{
+			&service.TenantSelectionRefusedError{Reason: service.TenantSelectionNotEnabled, Err: service.ErrTenantSelectionDisabled},
+			connect.CodeFailedPrecondition, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_ENABLED,
+		},
+		{
+			&service.TenantSelectionRefusedError{Reason: service.TenantSelectionNotAMember, Err: fmt.Errorf("%w: not a member", service.ErrPermissionDenied)},
+			connect.CodePermissionDenied, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_A_MEMBER,
+		},
+		{
+			&service.TenantSelectionRefusedError{Reason: service.TenantSelectionUnavailable, Err: fmt.Errorf("%w: store down", service.ErrUnavailable)},
+			connect.CodeUnavailable, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNAVAILABLE,
+		},
+		{
+			&service.TenantSelectionRefusedError{Err: service.ErrPermissionDenied},
+			connect.CodePermissionDenied, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED,
+		},
+	} {
+		cerr := toConnectError(fmt.Errorf("refreshing: %w", tc.refusal))
+		if got := connect.CodeOf(cerr); got != tc.code {
+			t.Fatalf("%v: code = %v, want %v", tc.refusal, got, tc.code)
+		}
+		if len(cerr.Details()) != 1 {
+			t.Fatalf("%v: details = %d, want exactly 1", tc.refusal, len(cerr.Details()))
+		}
+		msg, derr := cerr.Details()[0].Value()
+		if derr != nil {
+			t.Fatalf("detail Value: %v", derr)
+		}
+		details, ok := msg.(*identitypb.TenantSelectionRefusedDetails)
+		if !ok {
+			t.Fatalf("detail type = %T, want *TenantSelectionRefusedDetails", msg)
+		}
+		if details.GetReason() != tc.reason {
+			t.Fatalf("%v: reason = %v, want %v", tc.refusal, details.GetReason(), tc.reason)
+		}
+	}
+	for _, err := range []error{service.ErrTenantSelectionDisabled, service.ErrPermissionDenied, service.ErrProductAgeRestricted} {
+		if details := toConnectError(err).Details(); len(details) != 0 {
+			t.Fatalf("toConnectError(%v) carries %d details, want none", err, len(details))
+		}
+	}
+}

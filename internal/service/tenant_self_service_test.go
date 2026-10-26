@@ -391,6 +391,7 @@ func TestRefreshToken_RefusalsDoNotConsumeTheToken(t *testing.T) {
 
 			_, access, refresh, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
 			require.ErrorIs(t, err, ErrPermissionDenied)
+			requireSelectionRefusal(t, err, TenantSelectionNotAMember)
 			assert.Empty(t, access, "no token on a refusal")
 			assert.Empty(t, refresh)
 
@@ -411,6 +412,8 @@ func TestRefreshToken_InactiveAccountIsRefusedBeforeSelection(t *testing.T) {
 	_, _, _, err := f.svc.RefreshToken(ctx, f.refresh, "t-not-a-member", "", "")
 	require.ErrorIs(t, err, ErrAccountNotActive)
 	assert.NotErrorIs(t, err, ErrPermissionDenied)
+	var refusal *TenantSelectionRefusedError
+	assert.NotErrorAs(t, err, &refusal, "an account-status refusal is not a selection refusal a client may retry")
 
 	stored, err := f.repo.FindRefreshTokenByHashIncludingConsumed(ctx, hashRefreshToken(f.refresh))
 	require.NoError(t, err)
@@ -426,6 +429,7 @@ func TestRefreshToken_ReaderErrorDoesNotConsume(t *testing.T) {
 	_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
 	require.ErrorIs(t, err, boom)
 	require.ErrorIs(t, err, ErrUnavailable, "a failed read is not a verdict on the selection")
+	requireSelectionRefusal(t, err, TenantSelectionUnavailable)
 
 	f.members.getErr = nil
 	_, _, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
@@ -484,6 +488,7 @@ func TestRefreshToken_SelectionDisabled(t *testing.T) {
 	_, access, refresh, err := f.svc.RefreshToken(ctx, f.refresh, "t-acme", "", "")
 	require.ErrorIs(t, err, ErrTenantSelectionDisabled)
 	assert.NotErrorIs(t, err, ErrPermissionDenied)
+	requireSelectionRefusal(t, err, TenantSelectionNotEnabled)
 	assert.Empty(t, access)
 	assert.Empty(t, refresh)
 
@@ -494,11 +499,13 @@ func TestRefreshToken_SelectionDisabled(t *testing.T) {
 }
 
 // A membership that comes only from the email's domain does not let an
-// unverified address act in the tenant; once the address is verified it does.
-func TestRefreshToken_DomainMembershipNeedsAVerifiedEmail(t *testing.T) {
+// unverified address act in the tenant; once the address is verified it does,
+// and only while it is on a domain the tenant has verified.
+func TestRefreshToken_DomainMembershipNeedsAVerifiedEmailOnTheDomain(t *testing.T) {
 	f := newSelectionFixture(t)
 	ctx := context.Background()
 	f.tenants.put(&Tenant{ID: "t-acme", ProjectID: f.project(), Name: "Acme", Status: TenantStatusClaimed})
+	f.members.verifyDomain(f.project(), "t-acme", "example.com")
 	_, err := f.members.UpsertMembership(ctx, &TenantMembership{
 		ProjectID: f.project(), TenantID: "t-acme", UserID: f.user.ID,
 		Source: MembershipSourceDomain, Role: RoleMember, Status: MembershipStatusActive,
@@ -507,17 +514,34 @@ func TestRefreshToken_DomainMembershipNeedsAVerifiedEmail(t *testing.T) {
 
 	_, _, _, err = f.svc.RefreshToken(ctx, f.refresh, "t-acme", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
+	requireSelectionRefusal(t, err, TenantSelectionNotAMember)
 
 	require.NoError(t, f.repo.UpdateUser(ctx, f.user.ID, map[string]any{"email_verified": true}))
-	_, access, _, err := f.svc.RefreshToken(ctx, f.refresh, "t-acme", "", "")
+	_, access, refresh, err := f.svc.RefreshToken(ctx, f.refresh, "t-acme", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "t-acme", f.tenantClaim(t, access))
+
+	// A verified address on another domain is no member through this one.
+	require.NoError(t, f.repo.UpdateUser(ctx, f.user.ID, map[string]any{"email": "member@elsewhere.test"}))
+	_, _, _, err = f.svc.RefreshToken(ctx, refresh, "t-acme", "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	requireSelectionRefusal(t, err, TenantSelectionNotAMember)
 }
 
-func TestListMyTenants_DomainMembershipNeedsAVerifiedEmail(t *testing.T) {
+// requireSelectionRefusal asserts err is a TenantSelectionRefusedError for
+// reason.
+func requireSelectionRefusal(t *testing.T, err error, reason TenantSelectionRefusal) {
+	t.Helper()
+	var refusal *TenantSelectionRefusedError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, reason, refusal.Reason)
+}
+
+func TestListMyTenants_DomainMembershipNeedsAVerifiedEmailOnTheDomain(t *testing.T) {
 	f := newSelfServiceFixture(&config.Config{})
 	ctx := context.Background()
 	f.tenants.put(&Tenant{ID: "t-dom", ProjectID: ssProject, Name: "Domain", Status: TenantStatusClaimed})
+	f.members.verifyDomain(ssProject, "t-dom", "example.test")
 	f.tenants.put(&Tenant{ID: "t-inv", ProjectID: ssProject, Name: "Invited", Status: TenantStatusClaimed})
 	for id, source := range map[string]string{"t-dom": MembershipSourceDomain, "t-inv": MembershipSourceInvited} {
 		_, err := f.members.UpsertMembership(ctx, &TenantMembership{
@@ -532,10 +556,17 @@ func TestListMyTenants_DomainMembershipNeedsAVerifiedEmail(t *testing.T) {
 	require.Len(t, got, 1, "the domain membership is left out while the email is unverified")
 	assert.Equal(t, "t-inv", got[0].TenantID)
 
-	f.users.set(ssProject, &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive, EmailVerified: true})
+	// The domain is matched under FoldEmail, as users.email_domain stores it.
+	f.users.set(ssProject, &User{ID: ssOwnerID, Email: "owner@EXAMPLE.test", Status: StatusActive, EmailVerified: true})
 	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
+
+	f.users.set(ssProject, &User{ID: ssOwnerID, Email: "owner@elsewhere.test", Status: StatusActive, EmailVerified: true})
+	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "a verified address off the tenant's domain is no member through it")
+	assert.Equal(t, "t-inv", got[0].TenantID)
 
 	boom := errors.New("directory down")
 	f.users.getErr = boom
@@ -548,14 +579,15 @@ func TestListMyTenants_DomainMembershipNeedsAVerifiedEmail(t *testing.T) {
 }
 
 // The joiners Persian, the Indic scripts and emoji sequences need are kept;
-// the bidirectional overrides that make one name render as another are not.
+// the bidirectional overrides that make one name render as another, and the
+// line and paragraph separators that break the line it is shown on, are not.
 func TestNormalizeTenantName_FormattingCharacters(t *testing.T) {
 	for _, ok := range []string{"\u0645\u06cc\u200c\u062e\u0648\u0627\u0645", "\u0915\u094d\u200d\u0937", "Acme \U0001F468\u200d\U0001F4BB"} {
 		got, err := normalizeTenantName(ok)
 		require.NoError(t, err, "%q", ok)
 		assert.Equal(t, ok, got)
 	}
-	for _, bad := range []string{"Acme\u202egnp.exe", "Ac\u2066me", "Acme\u200b", "Acme\x00", "Ac\tme"} {
+	for _, bad := range []string{"Acme\u202egnp.exe", "Ac\u2066me", "Acme\u200b", "Acme\x00", "Ac\tme", "Acme\u2028Corp", "Acme\u2029Corp"} {
 		_, err := normalizeTenantName(bad)
 		require.ErrorIs(t, err, ErrInvalidArgument, "%q", bad)
 	}

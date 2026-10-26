@@ -1570,7 +1570,7 @@ func (s *AuthService) WithTenantAutoFormer(af TenantAutoFormStore) *AuthService 
 // selected tenant against, and returns the service for chaining. app.New
 // passes the postgres membership store when GATEWAY_TENANT_SELECTION_ENABLED
 // is on; without one a refresh that selects a tenant is refused with
-// ErrTenantSelectionDisabled.
+// ErrTenantSelectionDisabled, inside a TenantSelectionRefusedError.
 func (s *AuthService) WithTenantSelection(r UserTenantReader) *AuthService {
 	s.tenantSelection = r
 	return s
@@ -2478,9 +2478,12 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*User,
 //
 // Tenant selection: a non-empty tenantID becomes the new access token's
 // tenant claim when the user is an active member of that claimed tenant in
-// the request's project, and the refresh is refused with ErrPermissionDenied
-// otherwise. The refusal comes before the refresh token is consumed, so the
-// client keeps it and may refresh again without a selection. Empty tenantID
+// the request's project, and the refresh is refused with a
+// TenantSelectionRefusedError otherwise. The refusal comes before the refresh
+// token is consumed, so the client keeps it and may refresh again without a
+// selection; every other check that can refuse an account in good standing
+// runs before it too, so a selection accepted is not followed by a refusal
+// that spends the token. Empty tenantID
 // keeps the default tenant. The selection is not remembered: the next refresh
 // that names no tenant returns to the default, and switching tenants is a
 // refresh naming another.
@@ -2566,16 +2569,6 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 		if !s.anonymousEnabled(ctx) {
 			return nil, "", "", ErrAnonymousRefreshDisabled
 		}
-		// The product age gate denies anonymous accounts outright when the
-		// requested product sets a minimum band, and that is reachable
-		// mid-session: a product can gain a minimum_age_band between
-		// sign-in and the next rotation, or the refresh can carry a
-		// different X-Product than the sign-in did. The gate still runs
-		// inside issueTokensWithSessionStart; this early pass exists only
-		// so the refusal is non-destructive.
-		if err := s.enforceProductAgeGate(ctx, timeoutUser); err != nil {
-			return nil, "", "", err
-		}
 	}
 
 	// The verified-email gate, early for the same reason: an account whose
@@ -2654,9 +2647,24 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	if tenantID == s.tenantID(ctx) {
 		tenantID = ""
 	}
-	if tenantID != "" && statusErr == nil {
-		if err := s.checkTenantSelection(ctx, timeoutUser, tenantID); err != nil {
+	if statusErr == nil {
+		// The product age gate, early for every account in good standing. It
+		// is reachable mid-session: a product can gain a minimum_age_band
+		// between sign-in and the next rotation, or the refresh can carry a
+		// different X-Product than the sign-in did, and it denies an anonymous
+		// account outright when the product sets a minimum. Refused after the
+		// consume, it would burn an anonymous account's only credential, and
+		// would spend a token whose tenant selection had just been accepted,
+		// leaving the client unable to tell a selection it may retry from one
+		// it may not. The gate still runs inside issueTokensWithSessionStart.
+		s.stampAgeBand(ctx, timeoutUser)
+		if err := s.enforceProductAgeGate(ctx, timeoutUser); err != nil {
 			return nil, "", "", err
+		}
+		if tenantID != "" {
+			if err := s.checkTenantSelection(ctx, timeoutUser, tenantID); err != nil {
+				return nil, "", "", err
+			}
 		}
 	}
 
@@ -2722,19 +2730,27 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 // checkTenantSelection refuses a tenant the user may not act in: one that is
 // not a claimed tenant of the request's project, one where the user holds no
 // active membership, or one they belong to only through their email's domain
-// while that email is unverified. The refusal does not say which. Without a
-// reader (GATEWAY_TENANT_SELECTION_ENABLED off, or a driver with no tenants)
-// every selection is refused as not enabled.
+// while that email is unverified or not on a domain the tenant has verified.
+// The refusal does not say which. Without a reader
+// (GATEWAY_TENANT_SELECTION_ENABLED off, or a driver with no tenants) every
+// selection is refused as not enabled. Every refusal is a
+// TenantSelectionRefusedError.
 func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, tenantID string) error {
 	if s.tenantSelection == nil {
-		return ErrTenantSelectionDisabled
+		return &TenantSelectionRefusedError{Reason: TenantSelectionNotEnabled, Err: ErrTenantSelectionDisabled}
 	}
-	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, s.projectID(ctx), tenantID, user.ID)
+	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, s.projectID(ctx), tenantID, user.ID, verifiedEmailDomain(user))
 	if err != nil {
-		return fmt.Errorf("%w: checking tenant selection: %w", ErrUnavailable, err)
+		return &TenantSelectionRefusedError{
+			Reason: TenantSelectionUnavailable,
+			Err:    fmt.Errorf("%w: checking tenant selection: %w", ErrUnavailable, err),
+		}
 	}
 	if t == nil || !actsInTenant(user, t) {
-		return fmt.Errorf("%w: not an active member of that tenant", ErrPermissionDenied)
+		return &TenantSelectionRefusedError{
+			Reason: TenantSelectionNotAMember,
+			Err:    fmt.Errorf("%w: not an active member of that tenant", ErrPermissionDenied),
+		}
 	}
 	return nil
 }

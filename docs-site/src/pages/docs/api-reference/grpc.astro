@@ -45,7 +45,7 @@ import { Code } from "astro-expressive-code/components";
   <table>
     <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
     <tr><td><code>GetCurrentUser</code></td><td>optional bearer</td><td>Return the caller's profile, or empty if unauthenticated</td></tr>
-    <tr><td><code>RefreshToken</code></td><td>none</td><td>Rotate a refresh token to fresh access + refresh</td></tr>
+    <tr><td><code>RefreshToken</code></td><td>none</td><td>Rotate a refresh token to fresh access + refresh. An optional <code>tenant_id</code> chooses the token's tenant; a refused choice carries <code>TenantSelectionRefusedDetails</code> and leaves the refresh token unspent, so retry without <code>tenant_id</code> only when that detail is present</td></tr>
     <tr><td><code>Logout</code></td><td>none</td><td>Revoke a single refresh token</td></tr>
     <tr><td><code>UpdateProfile</code></td><td>bearer</td><td>Self-service name / avatar update</td></tr>
   </table>

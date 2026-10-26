@@ -41,12 +41,18 @@ token that named any one of them.
    tenant in the session's project; the resulting access token carries that
    tenant in its existing `tenant` claim. A refused choice issues nothing and
    leaves the refresh token unspent. Omitting it keeps the default. The
-   choice is made again on every refresh. A membership that came only from
-   the email's domain counts once that email is verified: an unverified
-   address proves nothing about the domain. Selection is a server switch,
-   off by default and available only on the Postgres driver; with it off a
-   `tenant_id` is `FAILED_PRECONDITION`, so a client can tell a server that
-   does not select from a tenant it may not have.
+   choice is made again on every refresh. A membership that came from the
+   email's domain counts only while that email is verified and on a domain
+   the tenant has verified: an unverified address proves nothing about the
+   domain, and an address moved off it no longer belongs to it. Moving the
+   email off the tenant's verified domains also ends the membership
+   (migration 0047), and moving back does not rejoin. Selection is a server
+   switch, off by default and available only on the Postgres driver; with it
+   off a `tenant_id` is `FAILED_PRECONDITION`, so a client can tell a server
+   that does not select from a tenant it may not have. Every refused choice
+   carries a `TenantSelectionRefusedDetails` error detail naming its reason;
+   a refresh refused for any other reason may have spent the token, so a
+   client retries without `tenant_id` only when the detail is present.
 
 3. **The claim is re-checked where identity can.** Identity's HTTP middleware
    accepts a token whose `tenant` is the default or a claimed tenant of the
@@ -232,6 +238,8 @@ it lands, suspension is a database-operator action.
   RPC exists.
 - **Negative.** A suspended tenant's selected tokens stay usable on
   identity's HTTP chain for up to the tenant-status cache TTL.
+- **Negative.** A self-service tenant cannot be renamed or deleted yet, and a
+  member cannot leave one; each needs an RPC of its own.
 - **Negative, open.** Three gaps are known and tracked as follow-ups:
   choosing a tenant does not apply its login policy (above); a refresh that
   chooses or changes a tenant records no audit event of its own; and
@@ -240,4 +248,5 @@ it lands, suspension is a database-operator action.
   membership source), 0045 (contested domain claims, the per-tenant TXT
   challenge) and 0046 (guarded, scoped agent-governance triggers,
   `users.email_domain` and its index, the `domain_attempts` table, the
-  invitation-limit indexes).
+  invitation-limit indexes) and 0047 (a trigger on `users` that ends a domain
+  membership when the email leaves the tenant's verified domains).

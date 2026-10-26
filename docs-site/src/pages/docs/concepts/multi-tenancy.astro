@@ -39,8 +39,11 @@ import { Code } from "astro-expressive-code/components";
     per-request resolution starts by resolving the Project (the shard), either
     by API credential (<code>public_id</code> on a publishable / secret /
     mTLS credential) or by the <code>Host</code> header matching a configured
-    project auth-domain. The Tenant is resolved <em>afterward</em>, from the
-    authenticated user's email domain.
+    project auth-domain. The user's Tenants are resolved <em>afterward</em>,
+    from their memberships, and never select the Project. A token's
+    <code>tenant</code> claim is the deployment default
+    (<code>GATEWAY_DEFAULT_TENANT_ID</code>) unless the client
+    <a href="#choosing-a-tenant-for-a-token">chooses a tenant</a> on refresh.
   </p>
   <p>
     This inversion means a single B2C product (millions of users, no company
@@ -54,15 +57,18 @@ import { Code } from "astro-expressive-code/components";
     <code>(project_id, lower(email))</code> — exactly one identity per person
     per Project, no matter how many company domains they touch. Authentication
     always resolves the identity by <code>(project_id, email)</code> first; the
-    Tenant is derived afterward from the verified email domain and membership.
-    The Tenant is never an input to login.
+    user's Tenants are derived afterward from their memberships, a domain one
+    counting only while the email is verified and on a domain the tenant has
+    verified. The Tenant is never an input to login, and signing in leaves the
+    token's <code>tenant</code> claim at the deployment default.
   </p>
   <Code
     code={`# A user proves: "I am alice@acme.com in project P"
-# identity then derives: "...and acme.com is the Acme tenant"
+# identity then derives: "...and acme.com makes her a member of Acme"
 PasswordLogin(project=P, email="alice@acme.com", password=...)
-  -> identity (project_id=P, email=alice@acme.com)
-  -> tenant   (acme, derived from the verified acme.com domain)`}
+  -> identity   (project_id=P, email=alice@acme.com)
+  -> membership (Acme, from the verified acme.com domain; see ListMyTenants)
+  -> token      ("tenant": GATEWAY_DEFAULT_TENANT_ID until a refresh chooses Acme)`}
     lang="bash"
   />
 
@@ -129,8 +135,9 @@ docker run ... \\
     <code>FAILED_PRECONDITION</code>. A retried call can create a second
     tenant, so reconcile with <code>ListMyTenants</code>, which returns every
     claimed tenant the caller is an active member of, with their role. A
-    membership that came only from the email's domain is listed once that
-    email is verified.
+    membership that came from the email's domain is listed only while that
+    email is verified and on a domain the tenant has verified. A self-service
+    tenant cannot be renamed or deleted yet, and a member cannot leave one.
   </p>
   <p>
     A tenant admin registers and verifies email domains with
@@ -159,18 +166,22 @@ docker run ... \\
   </p>
   <Code
     code={`RefreshToken(refresh_token=..., tenant_id="tenant_01HZ...")
-  -> access token with "tenant": "tenant_01HZ..."    # an active member of a claimed tenant
-  -> PERMISSION_DENIED, refresh token still valid    # not a member, or not claimed
-  -> FAILED_PRECONDITION, refresh token still valid  # selection is off on this server`}
+  -> access token with "tenant": "tenant_01HZ..."  # an active member of a claimed tenant
+  -> PERMISSION_DENIED, detail NOT_A_MEMBER        # not a member, or not claimed; token unspent
+  -> UNAVAILABLE, detail UNAVAILABLE               # membership unreadable; token unspent
+  -> FAILED_PRECONDITION, detail NOT_ENABLED       # selection is off on this server; token unspent`}
     lang="bash"
   />
   <p>
-    A member only through their email's domain must have verified that email.
-    A refused selection consumes nothing, so the client can refresh again
-    without <code>tenant_id</code>. <code>RefreshToken</code> also answers
-    <code>FAILED_PRECONDITION</code> for an account refused over its own
-    state, and that refusal does consume the token, so a client sends
-    <code>tenant_id</code> only to a server it knows has selection on. Each refresh chooses again; one without
+    A member only through their email's domain must have verified that email
+    and still be on a domain the tenant has verified; moving the email off the
+    domain ends the membership, and moving back does not rejoin. Every refused
+    selection carries a <code>TenantSelectionRefusedDetails</code> error
+    detail and consumes nothing, so a client that finds the detail refreshes
+    again without <code>tenant_id</code>. <code>RefreshToken</code> refuses an
+    account over its own state with the same codes and no such detail, and
+    that refusal may have spent the token, so retry only when the detail is
+    present. Each refresh chooses again; one without
     <code>tenant_id</code> returns to the default, and the client reads the
     tenant it got from the token's <code>tenant</code> claim. Identity's HTTP
     surface checks the tenant's status through a short cache, so suspending a

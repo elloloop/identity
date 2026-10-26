@@ -281,7 +281,7 @@ project; canonical email kept in `email` (H2). Organization linkage dropped.
 | `deactivated_at_ms` | BIGINT | N | Default `0`. |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
-| `email_domain` | TEXT COLLATE "C" | Y | 0046. Stored generated column: the email's lower-cased domain, `substring(lower(email COLLATE "C") FROM '@([^@]*)$')`; `NULL` for an email with no `@`. Read only by the agent-governance triggers. |
+| `email_domain` | TEXT COLLATE "C" | Y | 0046. Stored generated column: the email's lower-cased domain, `substring(lower(email COLLATE "C") FROM '@([^@]*)$')`; `NULL` for an email with no `@`. Read by the agent-governance triggers and by 0047's membership trigger. |
 
 - **PK:** `id`. **Unique:** `users_project_email_uidx (project_id, lower(email))`.
 - **Indexes:** `users_project_status_idx (project_id, status)`;
@@ -290,6 +290,12 @@ project; canonical email kept in `email` (H2). Organization linkage dropped.
   a column rather than an expression index, because under `users`' forced
   row-level security only a leakproof comparison can be an index condition,
   and `lower()`/`substring()` are not).
+- **Trigger (0047):** `tenant_domain_membership_email`, `AFTER UPDATE OF email`
+  when `email_domain` changes, runs `end_domain_memberships_off_domain()`,
+  which sets `inactive` every `domain`-source membership of the user in a
+  tenant that has not verified the new domain. It covers every path that
+  changes an email (a confirmed change, SCIM, admin, an account merge) in
+  the same transaction.
 - **FKs:** `project_id` → `projects(id)`.
 
 #### `tenants` (Tenant) — NEW
@@ -412,7 +418,7 @@ when no row exists, and only against a VERIFIED domain of a CLAIMED tenant.
 | `project_id` | TEXT | N | **FK** → `projects(id)` ON DELETE CASCADE. Leading column. |
 | `tenant_id` | TEXT | N | **FK** → `tenants(id)` ON DELETE CASCADE. |
 | `user_id` | TEXT | N | **FK** → `users(id)` ON DELETE CASCADE. |
-| `source` | TEXT | N | `CHECK IN ('domain','invited','added','created')`; `created` (0044) is the owner membership `CreateTenant` writes. A grant (an accepted invitation, a verifying owner) replaces a `domain` source and keeps any other. |
+| `source` | TEXT | N | `CHECK IN ('domain','invited','added','created')`; `created` (0044) is the owner membership `CreateTenant` writes. A grant (an accepted invitation, a verifying owner) replaces a `domain` source and keeps any other. A `domain` membership counts only while the user's email is verified and on a domain the tenant has verified (the active-tenant reads), and 0047 ends it when the email leaves. |
 | `role` | TEXT | N | `CHECK IN ('member','admin','owner')`. Default `member`. |
 | `status` | TEXT | N | `CHECK IN ('active','pending','inactive')`. Default `active`. |
 | `created_at_ms` | BIGINT | N | |

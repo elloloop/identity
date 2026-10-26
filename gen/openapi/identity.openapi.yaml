@@ -10114,27 +10114,28 @@ components:
           description: |-
             tenant_id, when set, asks for an access token whose `tenant` claim is
              this tenant instead of the deployment's default. The caller must be an
-             active member of a claimed tenant in the session's project, and a
-             member only through their email's domain must have verified that
-             email; otherwise the call is PERMISSION_DENIED. It is
-             FAILED_PRECONDITION when the server has tenant selection off
-             (GATEWAY_TENANT_SELECTION_ENABLED, off by default, and never on the
-             memory or SQLite drivers), and UNAVAILABLE when the membership could
-             not be read. On these refusals no token is issued and the refresh
-             token is NOT consumed, so the client can retry without tenant_id. The
-             code alone does not say which refusal it is: RefreshToken also answers
-             FAILED_PRECONDITION for an account refused over its own state (not
-             active, or needing an identity verification), which is checked first
-             and DOES consume the token and end the session, and retrying a
-             consumed token is a replay that signs the account out everywhere. So a
-             client sends tenant_id only to a server it knows has selection on, and
-             there treats FAILED_PRECONDITION as the end of the session. Empty, or the
-             deployment's default tenant, keeps the default claim. The selection is
-             not remembered: every refresh names the tenant it wants, and a client
-             reads the tenant it got from the access token's `tenant` claim. A
-             membership that ends stops the next refresh, so an access token
-             outlives it by at most its own lifetime; a tenant that is suspended
-             stops its tokens within GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
+             active member of a claimed tenant in the session's project; a member
+             only through their email's domain must have verified that email, and
+             it must be on a domain the tenant has verified. Otherwise the call is
+             PERMISSION_DENIED. It is FAILED_PRECONDITION when the server has tenant
+             selection off (GATEWAY_TENANT_SELECTION_ENABLED, off by default, and
+             never on the memory or SQLite drivers), and UNAVAILABLE when the
+             membership could not be read. Each of these refusals carries a
+             TenantSelectionRefusedDetails error detail: no token is issued, the
+             refresh token is NOT consumed, and the client may retry with it,
+             without tenant_id or once the reason is gone. An error without that
+             detail is not a selection refusal and may have consumed the token: an
+             account refused over its own state (not active, or needing an identity
+             verification), which is checked first, consumes it and ends the
+             session, and retrying a consumed token is a replay that signs the
+             account out everywhere. So a client retries the same token after a
+             selection only when the detail is present. Empty, or the deployment's
+             default tenant, keeps the default claim. The selection is not
+             remembered: every refresh names the tenant it wants, and a client reads
+             the tenant it got from the access token's `tenant` claim. A membership
+             that ends stops the next refresh, so an access token outlives it by at
+             most its own lifetime; a tenant that is suspended stops its tokens
+             within GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
       title: RefreshTokenRequest
       additionalProperties: false
     identity.v1.RefreshTokenResponse:
@@ -10925,6 +10926,29 @@ components:
       description: |-
         TenantMembership is a user's materialized relationship to a Tenant within
          the caller's Project.
+    identity.v1.TenantSelectionRefusal:
+      type: string
+      title: TenantSelectionRefusal
+      enum:
+        - TENANT_SELECTION_REFUSAL_UNSPECIFIED
+        - TENANT_SELECTION_REFUSAL_NOT_ENABLED
+        - TENANT_SELECTION_REFUSAL_NOT_A_MEMBER
+        - TENANT_SELECTION_REFUSAL_UNAVAILABLE
+      description: TenantSelectionRefusal says why RefreshToken refused a tenant selection.
+    identity.v1.TenantSelectionRefusedDetails:
+      type: object
+      properties:
+        reason:
+          title: reason
+          $ref: '#/components/schemas/identity.v1.TenantSelectionRefusal'
+      title: TenantSelectionRefusedDetails
+      additionalProperties: false
+      description: |-
+        TenantSelectionRefusedDetails is the error detail on a RefreshToken that
+         refused the tenant its tenant_id named. The refusal is made before the
+         refresh token is consumed, so the same token still rotates: the client may
+         retry with it, without tenant_id or once the reason is gone. Only this
+         detail says so; see RefreshTokenRequest.tenant_id.
     identity.v1.TransferAgentRequest:
       type: object
       properties:

@@ -149,6 +149,7 @@ deployment default (`GATEWAY_DEFAULT_TENANT_ID`): pass it as the expected
 tenant and keep the stricter check. With selection on, a valid token may
 instead carry a tenant its subject is an active member of, chosen on
 `RefreshToken`, so pass `""` as the expected tenant before clients select one.
+The sample below takes the expected tenant as `tenant`.
 Identity's HTTP chain also refuses a chosen tenant once it is suspended;
 nothing does that on this path, and identity exports no helper for it yet, so
 a suspended tenant's tokens stay usable here until they expire (at most
@@ -156,7 +157,9 @@ a suspended tenant's tokens stay usable here until they expire (at most
 matters to you.
 
 ```go
-func authInterceptor(kp jwt.KeyProvider, audience string, requireAud bool) grpc.UnaryServerInterceptor {
+// tenant is the expected tenant claim: GATEWAY_DEFAULT_TENANT_ID while tenant
+// selection is off, "" once clients may choose a tenant.
+func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud bool) grpc.UnaryServerInterceptor {
     return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
         md, _ := metadata.FromIncomingContext(ctx)
         md = md.Copy()
@@ -169,10 +172,8 @@ func authInterceptor(kp jwt.KeyProvider, audience string, requireAud bool) grpc.
         md.Delete("x-authenticated-auth-time")
         if toks := md.Get("authorization"); len(toks) > 0 {
             // VerifyAccessToken rejects a purpose-bearing ticket for us.
-            // "" accepts the default tenant and a chosen one alike, which
-            // tenant selection needs; with it off, pass the default tenant.
             claims, err := jwt.VerifyAccessToken(
-                strings.TrimPrefix(toks[0], "Bearer "), kp, "", audience, requireAud)
+                strings.TrimPrefix(toks[0], "Bearer "), kp, tenant, audience, requireAud)
             if err == nil {
                 md.Set("x-authenticated-user-id", claims.Sub)
                 if claims.AuthTime > 0 {

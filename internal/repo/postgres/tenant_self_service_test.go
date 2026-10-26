@@ -231,22 +231,22 @@ func runActiveTenantsForUser(t *testing.T, dsn string) {
 	member(f.projB, elsewhere, f.user1, service.RoleMember, service.MembershipStatusActive)
 	member(f.projA, alpha, f.user2, service.RoleMember, service.MembershipStatusActive)
 
-	got, err := f.members.ListActiveTenantsForUser(ctx, f.projA, f.user1)
+	got, err := f.members.ListActiveTenantsForUser(ctx, f.projA, f.user1, "")
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.Equal(t, service.UserTenant{TenantID: alpha, Name: "Alpha", Role: service.RoleAdmin, Source: service.MembershipSourceAdded}, *got[0])
 	assert.Equal(t, service.UserTenant{TenantID: zeta, Name: "Zeta", Role: service.RoleMember, Source: service.MembershipSourceAdded}, *got[1])
 
-	other, err := f.members.ListActiveTenantsForUser(ctx, f.projB, f.user1)
+	other, err := f.members.ListActiveTenantsForUser(ctx, f.projB, f.user1, "")
 	require.NoError(t, err)
 	require.Len(t, other, 1)
 	assert.Equal(t, elsewhere, other[0].TenantID)
 
-	none, err := f.members.ListActiveTenantsForUser(ctx, f.projB, f.user2)
+	none, err := f.members.ListActiveTenantsForUser(ctx, f.projB, f.user2, "")
 	require.NoError(t, err)
 	assert.Empty(t, none)
 
-	one, err := f.members.GetActiveTenantForUser(ctx, f.projA, alpha, f.user1)
+	one, err := f.members.GetActiveTenantForUser(ctx, f.projA, alpha, f.user1, "")
 	require.NoError(t, err)
 	require.NotNil(t, one)
 	assert.Equal(t, service.RoleAdmin, one.Role)
@@ -260,14 +260,14 @@ func runActiveTenantsForUser(t *testing.T, dsn string) {
 		"not a member":             {f.projA, zeta, f.user2},
 		"unknown tenant":           {f.projA, "tenant-missing", f.user1},
 	} {
-		got, err := f.members.GetActiveTenantForUser(ctx, tc.project, tc.tenant, tc.user)
+		got, err := f.members.GetActiveTenantForUser(ctx, tc.project, tc.tenant, tc.user, "")
 		require.NoError(t, err, name)
 		assert.Nil(t, got, name)
 	}
 
 	// Suspending a tenant removes it from the list.
 	require.NoError(t, f.tenants.SetTenantStatus(ctx, f.projA, zeta, service.TenantStatusSuspended))
-	got, err = f.members.ListActiveTenantsForUser(ctx, f.projA, f.user1)
+	got, err = f.members.ListActiveTenantsForUser(ctx, f.projA, f.user1, "")
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, alpha, got[0].TenantID)

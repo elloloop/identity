@@ -10,9 +10,7 @@ import (
 
 // advisoryKey names a transaction-scoped advisory lock: the namespace, then
 // each part length-prefixed, so no two distinct part lists in one namespace
-// share a key whatever characters they hold. The governance stores have
-// always spelled their keys this way, so a replica built before this helper
-// takes the same lock for the same rows.
+// share a key whatever characters they hold.
 func advisoryKey(namespace string, parts ...string) string {
 	var b strings.Builder
 	b.WriteString(namespace)

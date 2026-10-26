@@ -314,9 +314,6 @@ func (c ProjectConfig) Validate() error {
 	if err := c.Accounts.validate(); err != nil {
 		return err
 	}
-	if err := c.Tenants.validate(); err != nil {
-		return err
-	}
 	return nil
 }
 
