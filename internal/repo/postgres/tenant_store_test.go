@@ -85,7 +85,7 @@ func runTenantDomainSmoke(t *testing.T, dsn string) {
 	require.Equal(t, tenID, byDom.ID)
 
 	// Claim it.
-	require.NoError(t, tenants.SetTenantStatus(ctx, projA, tenID, service.TenantStatusClaimed))
+	require.NoError(t, tenants.ClaimLatentTenant(ctx, projA, tenID))
 	ten, err = tenants.GetTenant(ctx, projA, tenID)
 	require.NoError(t, err)
 	require.Equal(t, service.TenantStatusClaimed, ten.Status)
@@ -123,10 +123,6 @@ func runTenantDomainSmoke(t *testing.T, dsn string) {
 	require.Nil(t, miss)
 	_, err = tenants.CreateTenant(ctx, &service.Tenant{})
 	require.ErrorIs(t, err, service.ErrInvalidArgument)
-	require.ErrorIs(t, tenants.SetTenantStatus(ctx, "", tenID, service.TenantStatusClaimed), service.ErrInvalidArgument)
-	require.ErrorIs(t, tenants.SetTenantStatus(ctx, projA, "", service.TenantStatusClaimed), service.ErrInvalidArgument)
-	// Setting status on an unknown (but well-formed) id is a silent no-op.
-	require.NoError(t, tenants.SetTenantStatus(ctx, projA, "no-such", service.TenantStatusSuspended))
 
 	// ── domain round-trip ───────────────────────────────────────────
 	domID, err := domains.CreateDomain(ctx, &service.Domain{
@@ -337,33 +333,14 @@ func TestDomainStore_RecordDomainAttempt(t *testing.T) {
 	require.Equal(t, limit, rows(fresh))
 }
 
-// TestTenantStore_SetTenantStatusSkipsUnchanged: writing the status a tenant
-// already has changes nothing, so it moves no governance (migration 0046).
-func TestTenantStore_SetTenantStatusSkipsUnchanged(t *testing.T) {
-	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping tenant status test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	require.NoError(t, truncateAll(ctx, dsn))
-	projects, tenants, _ := newTenantDomainStores(ctx, t, dsn)
-	proj, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-status", Name: "Status"})
+// suspendTenant suspends a tenant the way an operator does, in SQL
+// (docs/UPGRADE.md, Suspending a tenant): no store method moves a tenant out
+// of claimed.
+func suspendTenant(ctx context.Context, t *testing.T, ts *TenantStore, projectID, tenantID string) {
+	t.Helper()
+	_, err := ts.pool.Exec(ctx, `UPDATE tenants SET status = 'suspended', updated_at_ms = $3 WHERE project_id = $1 AND id = $2`,
+		projectID, tenantID, nowMs())
 	require.NoError(t, err)
-	id, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Status: service.TenantStatusClaimed, UpdatedAtMs: 1})
-	require.NoError(t, err)
-	before, err := tenants.GetTenant(ctx, proj, id)
-	require.NoError(t, err)
-
-	require.NoError(t, tenants.SetTenantStatus(ctx, proj, id, service.TenantStatusClaimed))
-	same, err := tenants.GetTenant(ctx, proj, id)
-	require.NoError(t, err)
-	require.Equal(t, before.UpdatedAtMs, same.UpdatedAtMs, "an unchanged status is not written")
-
-	require.NoError(t, tenants.SetTenantStatus(ctx, proj, id, service.TenantStatusSuspended))
-	changed, err := tenants.GetTenant(ctx, proj, id)
-	require.NoError(t, err)
-	require.Equal(t, service.TenantStatusSuspended, changed.Status)
 }
 
 // TestTenantStore_ClaimLatentTenantMovesOnlyALatentTenant: claiming compares

@@ -248,7 +248,7 @@ func TestGovernanceRevocation_UnchangedWritesRevokeNothing(t *testing.T) {
 
 	// A re-verify on a claimed tenant: the store skips both writes.
 	require.NoError(t, f.domains.SetDomainStatus(ctx, f.project, d, service.DomainStatusVerified, 0))
-	require.NoError(t, f.tenants.SetTenantStatus(ctx, f.project, f.tenant, service.TenantStatusClaimed))
+	require.NoError(t, f.tenants.ClaimLatentTenant(ctx, f.project, f.tenant))
 	f.requireNothingRevoked(ctx, t, e)
 
 	// Written outright, an unchanged row still fires nothing.
@@ -293,7 +293,7 @@ func TestGovernanceRevocation_VerifiedTransitionsRevokeTheGoverned(t *testing.T)
 		"tenant suspended": func(t *testing.T, f *governanceFixture, d string) {
 			t.Helper()
 			f.verifyQuietly(ctx, t, d)
-			require.NoError(t, f.tenants.SetTenantStatus(ctx, f.project, f.tenant, service.TenantStatusSuspended))
+			suspendTenant(ctx, t, f.tenants, f.project, f.tenant)
 		},
 	}
 	for name, change := range cases {
@@ -340,7 +340,7 @@ func TestGovernanceRevocation_StaysInItsProject(t *testing.T) {
 
 	d := f.claim(ctx, t, f.tenant, govDomain, service.DomainStatusPending)
 	require.NoError(t, f.domains.SetDomainStatus(ctx, f.project, d, service.DomainStatusVerified, 0))
-	require.NoError(t, f.tenants.SetTenantStatus(ctx, f.project, f.tenant, service.TenantStatusSuspended))
+	suspendTenant(ctx, t, f.tenants, f.project, f.tenant)
 
 	g.requireNothingRevoked(ctx, t, theirs)
 }

@@ -35,8 +35,8 @@ func newSelfServiceFixture(cfg *config.Config) *selfServiceFixture {
 	mem, tnt := newFakeMembershipStore(), newFakeTenantStore()
 	linkFakeTenantStores(tnt, mem)
 	usr := newFakeUserDirectory()
-	usr.set(ssProject, &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive})
-	usr.set(ssProject, &User{ID: ssOtherID, Email: "other@example.test", Status: StatusActive})
+	usr.set(ssProject, &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive, EmailVerified: true})
+	usr.set(ssProject, &User{ID: ssOtherID, Email: "other@example.test", Status: StatusActive, EmailVerified: true})
 	w := newRecordingAuditWriter()
 	svc := NewMembershipService(newFakeInvitationStore(), mem, tnt, usr, &recordingMailer{}, true, cfg, nil).
 		WithAudit(audit.NewLogger(w, "test-tenant", nil))
@@ -88,7 +88,7 @@ func TestCreateTenant_CreatesClaimedTenantOwnedByCaller(t *testing.T) {
 // lives: a user of another project is found there, and only there.
 func TestCreateTenant_ResolvesCallerInRequestProject(t *testing.T) {
 	f := newSelfServiceFixture(&config.Config{})
-	f.users.set("proj-2", &User{ID: "user-p2", Email: "p2@example.test", Status: StatusActive})
+	f.users.set("proj-2", &User{ID: "user-p2", Email: "p2@example.test", Status: StatusActive, EmailVerified: true})
 	inProj2 := WithProjectScope(context.Background(), &ProjectScope{
 		ProjectID: "proj-2", Tenants: ProjectTenantsConfig{SelfService: true},
 	})
@@ -302,6 +302,9 @@ func newSelectionFixture(t *testing.T) *selectionFixture {
 	t.Helper()
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
+	// A named project, as every deployment has one (app.prepareConfig): login
+	// governance governs nothing in the empty project.
+	svc.cfg.DefaultProjectID = "proj-select"
 	mem, tnt := newFakeMembershipStore(), newFakeTenantStore()
 	linkFakeTenantStores(tnt, mem)
 	svc.WithTenantSelection(mem)
@@ -427,9 +430,10 @@ func TestRefreshToken_ReaderErrorDoesNotConsume(t *testing.T) {
 	f.members.getErr = boom
 
 	_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
-	require.ErrorIs(t, err, boom)
 	require.ErrorIs(t, err, ErrUnavailable, "a failed read is not a verdict on the selection")
 	requireSelectionRefusal(t, err, TenantSelectionUnavailable)
+	assert.NotErrorIs(t, err, boom, "the store's error is logged, not returned")
+	assert.NotContains(t, err.Error(), boom.Error())
 
 	f.members.getErr = nil
 	_, _, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
@@ -551,6 +555,7 @@ func TestListMyTenants_DomainMembershipNeedsAVerifiedEmailOnTheDomain(t *testing
 		require.NoError(t, err)
 	}
 
+	f.users.set(ssProject, &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive})
 	got, err := f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
 	require.NoError(t, err)
 	require.Len(t, got, 1, "the domain membership is left out while the email is unverified")
@@ -591,4 +596,127 @@ func TestNormalizeTenantName_FormattingCharacters(t *testing.T) {
 		_, err := normalizeTenantName(bad)
 		require.ErrorIs(t, err, ErrInvalidArgument, "%q", bad)
 	}
+}
+
+// A tenant_id no tenant could have is refused as malformed before the
+// refresh token is read, so the token still rotates; a 64-character id of
+// the allowed characters is well formed.
+func TestRefreshToken_MalformedTenantIDRefusedBeforeTheTokenIsRead(t *testing.T) {
+	f := newSelectionFixture(t)
+	ctx := context.Background()
+	for name, id := range map[string]string{
+		"too long":            strings.Repeat("a", maxTenantIDLen+1),
+		"a space inside":      "acme corp",
+		"a slash":             "acme/other",
+		"non-ASCII":           "acm\u00e9",
+		"a control character": "acme\x00",
+	} {
+		_, _, _, err := f.svc.RefreshToken(ctx, f.refresh, id, "", "")
+		require.ErrorIs(t, err, ErrInvalidArgument, name)
+		var refusal *TenantSelectionRefusedError
+		assert.NotErrorAs(t, err, &refusal, name)
+	}
+
+	longest := strings.Repeat("a", maxTenantIDLen-2) + "-_"
+	f.seedTenant(t, longest, TenantStatusClaimed, MembershipStatusActive)
+	_, access, _, err := f.svc.RefreshToken(ctx, f.refresh, longest, "", "")
+	require.NoError(t, err, "the refused ids left the refresh token unspent")
+	assert.Equal(t, longest, f.tenantClaim(t, access))
+}
+
+// governTenant gives the fixture's project a governance plane in which the
+// claimed tenant id has verified domain and, unless p is nil, the login
+// policy p. It returns the policy store, for a test to fail.
+func (f *selectionFixture) governTenant(id, domain string, p *LoginPolicy) *fakePolicyStore {
+	project := f.project()
+	policies := &fakePolicyStore{byTenant: map[string]*LoginPolicy{}}
+	if p != nil {
+		p.ProjectID, p.TenantID = project, id
+		policies.byTenant[project+"|"+id] = p
+	}
+	f.svc.WithLoginGovernance(&LoginGovernance{
+		Domains: &lpDomainStore{byName: map[string]*Domain{
+			project + "|" + domain: {ProjectID: project, TenantID: id, Domain: domain, Status: DomainStatusVerified},
+		}},
+		Tenants:  &lpTenantStore{byID: map[string]*Tenant{project + "|" + id: {ID: id, ProjectID: project, Status: TenantStatusClaimed}}},
+		Policies: policies,
+	})
+	return policies
+}
+
+// Selecting a tenant holds the session to that tenant's login policy. A
+// policy that restricts sign-in admits only a session it governed, one
+// whose account is on the tenant's domain, since a session does not record
+// how it signed in; any policy's timeouts apply. A refusal leaves the
+// refresh token unspent.
+func TestRefreshToken_SelectionHeldToTheTenantsLoginPolicy(t *testing.T) {
+	const memberDomain = "example.com" // the fixture's member signs up on it
+	for _, tc := range []struct {
+		name     string
+		domain   string
+		policy   *LoginPolicy
+		later    time.Duration
+		admitted bool
+	}{
+		{name: "no policy", domain: "acme.example.test", admitted: true},
+		{name: "SSO required, member on another domain", domain: "acme.example.test", policy: &LoginPolicy{SSORequired: true}},
+		{name: "2FA required, member on another domain", domain: "acme.example.test", policy: &LoginPolicy{Require2FA: true}},
+		{name: "methods limited, member on another domain", domain: "acme.example.test", policy: &LoginPolicy{AllowedMethods: LoginMethodOAuth}},
+		{name: "SSO required, member on the tenant's domain", domain: memberDomain, policy: &LoginPolicy{SSORequired: true}, admitted: true},
+		{name: "timeouts only, within them", domain: "acme.example.test", policy: &LoginPolicy{SessionAbsoluteTimeoutSeconds: 3600}, admitted: true},
+		{name: "timeouts only, past the absolute one", domain: "acme.example.test", policy: &LoginPolicy{SessionAbsoluteTimeoutSeconds: 60}, later: 2 * time.Minute},
+		{name: "timeouts only, past the idle one", domain: "acme.example.test", policy: &LoginPolicy{SessionIdleTimeoutSeconds: 60}, later: 2 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSelectionFixture(t)
+			f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
+			f.governTenant("t-acme", tc.domain, tc.policy)
+			if tc.later > 0 {
+				later := time.Now().Add(tc.later)
+				f.svc.nowFunc = func() time.Time { return later }
+			}
+
+			_, access, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
+			if tc.admitted {
+				require.NoError(t, err)
+				assert.Equal(t, "t-acme", f.tenantClaim(t, access))
+				return
+			}
+			require.ErrorIs(t, err, ErrPermissionDenied)
+			requireSelectionRefusal(t, err, TenantSelectionLoginPolicy)
+			_, access, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
+			require.NoError(t, err, "the refused selection left the refresh token unspent")
+			assert.Equal(t, f.svc.cfg.DefaultTenantID, f.tenantClaim(t, access))
+		})
+	}
+}
+
+// A policy that cannot be read refuses the selection as unavailable, with a
+// message that does not carry the store's error, and spends nothing.
+func TestRefreshToken_SelectionPolicyLookupFailureIsUnavailable(t *testing.T) {
+	f := newSelectionFixture(t)
+	f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
+	boom := errors.New("policy store down")
+	f.governTenant("t-acme", "acme.example.test", &LoginPolicy{SSORequired: true}).err = boom
+
+	_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
+	require.ErrorIs(t, err, ErrUnavailable)
+	requireSelectionRefusal(t, err, TenantSelectionUnavailable)
+	assert.NotErrorIs(t, err, boom)
+	assert.NotContains(t, err.Error(), boom.Error())
+
+	_, _, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
+	require.NoError(t, err)
+}
+
+// Creating a tenant needs a proven address: an unverified account is
+// refused and nothing is created or audited.
+func TestCreateTenant_RequiresAVerifiedEmail(t *testing.T) {
+	f := newSelfServiceFixture(&config.Config{})
+	f.users.set(ssProject, &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive})
+
+	_, err := f.svc.CreateTenant(withTenantsProject(true), ssOwnerID, "Acme", "", "")
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	assert.Empty(t, f.tenants.byID)
+	assert.Zero(t, f.audit.countByEventTypeActorTarget(string(audit.EventTenantCreated), ssOwnerID, ssOwnerID))
 }

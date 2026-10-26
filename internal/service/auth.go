@@ -2478,18 +2478,23 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*User,
 //
 // Tenant selection: a non-empty tenantID becomes the new access token's
 // tenant claim when the user is an active member of that claimed tenant in
-// the request's project, and the refresh is refused with a
-// TenantSelectionRefusedError otherwise. The refusal comes before the refresh
-// token is consumed, so the client keeps it and may refresh again without a
-// selection; every other check that can refuse an account in good standing
-// runs before it too, so a selection accepted is not followed by a refusal
-// that spends the token. Empty tenantID
-// keeps the default tenant. The selection is not remembered: the next refresh
-// that names no tenant returns to the default, and switching tenants is a
-// refresh naming another.
+// the request's project and the tenant's login policy admits the session,
+// and the refresh is refused with a TenantSelectionRefusedError otherwise.
+// The refusal comes before the refresh token is consumed, so the client
+// keeps it and may refresh again without a selection; every other check that
+// can refuse an account in good standing runs before it too, so a selection
+// accepted is not followed by a refusal that spends the token. A tenantID no
+// tenant could have is ErrInvalidArgument before the refresh token is read.
+// Empty tenantID keeps the default tenant. The selection is not remembered:
+// the next refresh that names no tenant returns to the default, and
+// switching tenants is a refresh naming another.
 func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantID, ipAddr, userAgent string) (*User, string, string, error) {
 	if rawRefreshToken == "" {
 		return nil, "", "", fmt.Errorf("%w: missing refresh token", ErrUnauthenticated)
+	}
+	tenantID, err := s.selectedTenant(ctx, tenantID)
+	if err != nil {
+		return nil, "", "", err
 	}
 	tokenHash := hashRefreshToken(rawRefreshToken)
 
@@ -2641,12 +2646,6 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// without one. Only for an account in good standing: an account refused
 	// over its own state takes that refusal below (its token spent, its
 	// session ended), not a selection refusal that would leave both intact.
-	// Naming the deployment's storage tenant selects nothing: it is the
-	// tenant every unselected token carries.
-	tenantID = strings.TrimSpace(tenantID)
-	if tenantID == s.tenantID(ctx) {
-		tenantID = ""
-	}
 	if statusErr == nil {
 		// The product age gate, early for every account in good standing. It
 		// is reachable mid-session: a product can gain a minimum_age_band
@@ -2662,7 +2661,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 			return nil, "", "", err
 		}
 		if tenantID != "" {
-			if err := s.checkTenantSelection(ctx, timeoutUser, tenantID); err != nil {
+			if err := s.checkTenantSelection(ctx, timeoutUser, record, tenantID); err != nil {
 				return nil, "", "", err
 			}
 		}
@@ -2727,24 +2726,54 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	return user, accessToken, newRefresh, nil
 }
 
+// maxTenantIDLen bounds the tenant_id a refresh may name. Identity mints
+// tenant ids of 32 hex characters; the bound leaves room for a store that
+// mints its own and refuses what no tenant id could be before anything is
+// read for it.
+const maxTenantIDLen = 64
+
+// selectedTenant is the tenant a refresh names, trimmed: "" when it names
+// none or the deployment's storage tenant, which every unselected token
+// carries. An id longer than maxTenantIDLen, or holding anything but ASCII
+// letters, digits, '-' and '_', is ErrInvalidArgument.
+func (s *AuthService) selectedTenant(ctx context.Context, tenantID string) (string, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" || tenantID == s.tenantID(ctx) {
+		return "", nil
+	}
+	if len(tenantID) > maxTenantIDLen || strings.IndexFunc(tenantID, notTenantIDRune) >= 0 {
+		return "", fmt.Errorf("%w: tenant_id must be at most %d ASCII letters, digits, '-' or '_'", ErrInvalidArgument, maxTenantIDLen)
+	}
+	return tenantID, nil
+}
+
+// notTenantIDRune reports whether r may not appear in a tenant id.
+func notTenantIDRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		return false
+	default:
+		return true
+	}
+}
+
 // checkTenantSelection refuses a tenant the user may not act in: one that is
 // not a claimed tenant of the request's project, one where the user holds no
 // active membership, or one they belong to only through their email's domain
 // while that email is unverified or not on a domain the tenant has verified.
-// The refusal does not say which. Without a reader
+// The refusal does not say which. A member is then held to the tenant's
+// login policy (checkSelectedTenantPolicy). Without a reader
 // (GATEWAY_TENANT_SELECTION_ENABLED off, or a driver with no tenants) every
 // selection is refused as not enabled. Every refusal is a
 // TenantSelectionRefusedError.
-func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, tenantID string) error {
+func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, session *RefreshTokenRecord, tenantID string) error {
 	if s.tenantSelection == nil {
 		return &TenantSelectionRefusedError{Reason: TenantSelectionNotEnabled, Err: ErrTenantSelectionDisabled}
 	}
-	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, s.projectID(ctx), tenantID, user.ID, verifiedEmailDomain(user))
+	projectID := s.projectID(ctx)
+	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, projectID, tenantID, user.ID, verifiedEmailDomain(user))
 	if err != nil {
-		return &TenantSelectionRefusedError{
-			Reason: TenantSelectionUnavailable,
-			Err:    fmt.Errorf("%w: checking tenant selection: %w", ErrUnavailable, err),
-		}
+		return s.tenantSelectionUnavailable(projectID, tenantID, err)
 	}
 	if t == nil || !actsInTenant(user, t) {
 		return &TenantSelectionRefusedError{
@@ -2752,7 +2781,19 @@ func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, tena
 			Err:    fmt.Errorf("%w: not an active member of that tenant", ErrPermissionDenied),
 		}
 	}
-	return nil
+	return s.checkSelectedTenantPolicy(ctx, projectID, user, session, tenantID)
+}
+
+// tenantSelectionUnavailable refuses a selection that could not be checked.
+// The store's error is logged here and kept off the wire, which carries only
+// ErrUnavailable: the RPC needs nothing but a refresh token.
+func (s *AuthService) tenantSelectionUnavailable(projectID, tenantID string, err error) error {
+	s.logger.Warn("tenant_selection_lookup_failed",
+		zap.String("project_id", projectID), zap.String("tenant_id", tenantID), zap.Error(err))
+	return &TenantSelectionRefusedError{
+		Reason: TenantSelectionUnavailable,
+		Err:    fmt.Errorf("%w: the tenant could not be checked", ErrUnavailable),
+	}
 }
 
 // ── Logout ─────────────────────────────────────────────────────────────

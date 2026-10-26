@@ -266,7 +266,7 @@ func runActiveTenantsForUser(t *testing.T, dsn string) {
 	}
 
 	// Suspending a tenant removes it from the list.
-	require.NoError(t, f.tenants.SetTenantStatus(ctx, f.projA, zeta, service.TenantStatusSuspended))
+	suspendTenant(ctx, t, f.tenants, f.projA, zeta)
 	got, err = f.members.ListActiveTenantsForUser(ctx, f.projA, f.user1, "")
 	require.NoError(t, err)
 	require.Len(t, got, 1)

@@ -33,14 +33,19 @@ token that named any one of them.
    `created`) in one transaction. The tenant is `claimed` from creation, has
    no domain, and records its creator in `tenants.created_by`. Creation is
    bounded per user per window and per client IP, and refused to anonymous,
-   agent, merged and inactive accounts. `ListMyTenants` lists the claimed
+   agent, merged and inactive accounts, and to an account that has not
+   verified its email: an unproven address makes an owner nobody can reach.
+   `ListMyTenants` lists the claimed
    tenants the caller is an active member of, with their role.
 
 2. **A refresh may choose the token's tenant.** `RefreshToken` takes an
    optional `tenant_id`. It is granted only to an active member of a claimed
-   tenant in the session's project; the resulting access token carries that
-   tenant in its existing `tenant` claim. A refused choice issues nothing and
-   leaves the refresh token unspent. Omitting it keeps the default. The
+   tenant in the session's project whose login policy admits the session
+   (below); the resulting access token carries that tenant in its existing
+   `tenant` claim. A refused choice issues nothing and leaves the refresh
+   token unspent. A `tenant_id` no tenant could have, longer than 64
+   characters or holding anything but ASCII letters, digits, `-` and `_`, is
+   `INVALID_ARGUMENT` before the refresh token is read. Omitting it keeps the default. The
    choice is made again on every refresh. A membership that came from the
    email's domain counts only while that email is verified and on a domain
    the tenant has verified: an unverified address proves nothing about the
@@ -81,19 +86,24 @@ token that named any one of them.
    tenants sends no more email), per recipient across all of a project's
    tenants, and per tenant and recipient by a resend cooldown. The name of a
    self-service tenant, which its creator typed, never appears in the email.
-   Accepting an invitation never lowers a role, so an invitation cannot
-   demote a tenant's last owner.
+   Accepting an invitation needs a verified email at the invited address,
+   and never lowers a role, so an invitation cannot demote a tenant's last
+   owner.
 
 6. **Domain registrations and verifications are bounded.** Each
    `VerifyDomain` makes identity look up a DNS name the tenant chose, and
    each `CreateDomain` answers whether another tenant verified a name. A
    tenant may make a bounded number of both together per window, spent only
-   by a caller who administers it, and the two share a per-IP budget. A
+   by a caller who administers it or, for a latent tenant, may claim it,
+   and the two share a per-IP budget. A
    failed re-check leaves a verified domain verified: a lapsed or flapping
    record must not drop its login policy and sign its users' agents out; an
    operator removes a domain its tenant no longer holds. A suspended tenant
    verifies nothing, because verifying claims the tenant and would lift the
-   suspension.
+   suspension. It is not administered at all: every domain and membership
+   RPC refuses its owners and admins, and an invitation to it cannot be
+   accepted, through one check shared by both services, so a suspension
+   stops a tenant growing as well as acting.
 
 7. **A tenant or domain change signs out only the agents it governs.**
    Delegated agent grants and agent machines are revoked when the
@@ -158,25 +168,30 @@ model in two, with invitations, roles and suspension implemented twice.
 
 ### What the claim asserts, and what it does not
 
-A chosen `tenant` asserts **membership only**: when the token was refreshed,
-its subject held an active membership in that claimed tenant of the token's
-project. It does not assert:
+A chosen `tenant` asserts **membership, under the tenant's login policy**:
+when the token was refreshed, its subject held an active membership in that
+claimed tenant of the token's project, and the tenant's login policy
+(ADR-0006) admitted the session. A policy that limits how its users sign in
+(SSO required, 2FA required, or allowed methods) admits only a session it
+governed at sign-in, which is one whose account's email is on a domain the
+tenant has verified. Identity applies such a policy at sign-in by that
+domain, and a session does not record how it signed in, so a member from
+another domain is refused whatever method they used: identity fails closed
+rather than trust a sign-in it cannot see. The policy's session timeouts
+apply to every selection, against the session's start and last use. A
+policy that cannot be read refuses the selection as unavailable. It does
+not assert:
 
 - **A role in the tenant.** `role` remains the account-wide role on every
   token, chosen tenant or not. A service that needs the caller's role in a
   tenant reads it from `ListMyTenants`.
-- **That the tenant's login policy was met.** A login policy (ADR-0006) is
-  applied at sign-in, by the verified domain of the account's email. It is
-  not applied when a tenant is chosen: a member who signed in some other way
-  can choose a tenant whose policy would have required SSO. A tenant that
-  needs its policy to gate access verifies its domain, so the policy applies
-  to everyone signing in with it.
 - **That the membership still exists.** It is re-checked at the next refresh,
-  so the claim can outlive a membership by one access-token lifetime. Tenant
+  so the claim can outlive a membership by one access-token lifetime, in
+  `mode=session` too: removing a member ends none of their sessions. Tenant
   suspension is re-checked by identity's HTTP chain within the tenant-status
   cache TTL; a host that verifies tokens itself, including over native gRPC,
   sees a suspension only when the token expires unless it checks the
-  tenant's status too.
+  tenant's status too (`docs/embedding.md` says how).
 
 ### Suspension has no RPC yet
 
@@ -192,7 +207,8 @@ UPDATE tenants
 ```
 
 That revokes its members' agent grants and machines (decision 7) and ends
-its selected tokens within the cache TTL. It is not audited and needs
+its selected tokens within the cache TTL, and stops its admins
+administering it (decision 4). It is not audited and needs
 database access. An operator RPC that suspends and audits is open work; until
 it lands, suspension is a database-operator action.
 
@@ -240,10 +256,19 @@ it lands, suspension is a database-operator action.
   identity's HTTP chain for up to the tenant-status cache TTL.
 - **Negative.** A self-service tenant cannot be renamed or deleted yet, and a
   member cannot leave one; each needs an RPC of its own.
-- **Negative, open.** Three gaps are known and tracked as follow-ups:
-  choosing a tenant does not apply its login policy (above); a refresh that
-  chooses or changes a tenant records no audit event of its own; and
-  suspension, done in SQL, leaves no audit record.
+- **Negative.** A member from outside a tenant's verified domains cannot
+  choose a tenant whose login policy limits sign-in, even after signing in
+  through the tenant's SSO, until sessions record how they signed in.
+- **Negative.** Removing a member ends none of their sessions, so a token
+  carrying the tenant outlives the membership by one access-token lifetime,
+  in `mode=session` as in `mode=ttl`.
+- **Negative, open.** These gaps are known and tracked as follow-ups: a
+  session records no sign-in method, which would let a tenant's policy
+  admit a cross-domain member it did govern; a refresh that chooses or
+  changes a tenant records no audit event of its own; suspension, done in
+  SQL, leaves no audit record; and the verifications that claim a latent
+  tenant, made by callers who are not yet its members, count against that
+  tenant's attempt budget rather than the caller's.
 - **Neutral.** Schema: migration 0044 (`tenants.created_by`, the `created`
   membership source), 0045 (contested domain claims, the per-tenant TXT
   challenge) and 0046 (guarded, scoped agent-governance triggers,

@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/jackc/pgx/v5"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
@@ -41,13 +43,14 @@ func TestRedesign_TenantSelection_OffByDefault(t *testing.T) {
 	h := startRedesignHarnessWith(t, func(c *config.Config) { c.SelfServiceTenantsEnabled = true })
 	ctx := context.Background()
 
+	addr := fmt.Sprintf("ss-off-%d@example.com", time.Now().UnixNano())
 	signup, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
-		Email:    fmt.Sprintf("ss-off-%d@example.com", time.Now().UnixNano()),
-		Password: validPassword,
+		Email: addr, Password: validPassword,
 	}))
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
+	verifyMailedEmail(t, h, h.Client, addr)
 	created, err := h.AuthedClient(signup.Msg.GetAccessToken()).CreateTenant(ctx,
 		connect.NewRequest(&identitypb.CreateTenantRequest{Name: "Acme"}))
 	if err != nil {
@@ -66,22 +69,24 @@ func TestRedesign_TenantSelection_OffByDefault(t *testing.T) {
 }
 
 // TestRedesign_SelfServiceTenants_EndToEnd drives a self-service tenant
-// through its life over the wire: a person signs up, creates a tenant and
-// sees it in ListMyTenants; a refresh that selects it mints a token whose
-// tenant claim is that tenant, and the token authenticates; suspending the
-// tenant ends the token at its next request and refuses a new selection,
-// while a plain refresh still rotates; and the creation is audited.
+// through its life over the wire: a person signs up, verifies their email,
+// creates a tenant and sees it in ListMyTenants; a refresh that selects it
+// mints a token whose tenant claim is that tenant, and the token
+// authenticates; suspending the tenant ends the token at its next request,
+// refuses a new selection and stops its owner administering it, while a
+// plain refresh still rotates; and the creation is audited.
 func TestRedesign_SelfServiceTenants_EndToEnd(t *testing.T) {
 	h := startSelfServiceHarness(t)
 	ctx := context.Background()
 
+	addr := fmt.Sprintf("ss-owner-%d@example.com", time.Now().UnixNano())
 	signup, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
-		Email:    fmt.Sprintf("ss-owner-%d@example.com", time.Now().UnixNano()),
-		Password: validPassword,
+		Email: addr, Password: validPassword,
 	}))
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
+	verifyMailedEmail(t, h, h.Client, addr)
 	userID := signup.Msg.GetUser().GetId()
 	owner := h.AuthedClient(signup.Msg.GetAccessToken())
 
@@ -117,11 +122,13 @@ func TestRedesign_SelfServiceTenants_EndToEnd(t *testing.T) {
 		t.Fatalf("an authenticated RPC with the tenant's token: %v", err)
 	}
 
-	if err := h.Stores.tenants.SetTenantStatus(ctx, h.ProjectID, tenantID, service.TenantStatusSuspended); err != nil {
-		t.Fatalf("SetTenantStatus(suspended): %v", err)
-	}
+	suspendTenant(t, h, tenantID)
 	_, err = inTenant.ListMyTenants(ctx, connect.NewRequest(&identitypb.ListMyTenantsRequest{}))
 	requireConnectCode(t, "a suspended tenant's token", err, connect.CodeUnauthenticated)
+	_, err = owner.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+		TenantId: tenantID, Email: "colleague@example.com", Role: service.RoleMember,
+	}))
+	requireConnectCode(t, "inviting into a suspended tenant", err, connect.CodePermissionDenied)
 
 	_, err = h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
 		RefreshToken: selected.Msg.GetRefreshToken(),
@@ -184,13 +191,14 @@ func TestRedesign_SelfServiceTenants_CallerInAnotherProject(t *testing.T) {
 
 	signupOnHost := func(label string) (identityconnectgen.IdentityServiceClient, string, string) {
 		t.Helper()
-		addr := fmt.Sprintf("%s-%d@example-corp.com", label, unique)
+		addr := fmt.Sprintf("%s-%d@corp.example.com", label, unique)
 		resp, err := h.ClientWithHost(host, nil).PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
 			Email: addr, Password: validPassword,
 		}))
 		if err != nil {
 			t.Fatalf("PasswordSignup(%s) on %s: %v", label, host, err)
 		}
+		verifyMailedEmail(t, h, h.ClientWithHost(host, nil), addr)
 		if got := decodeTokenProjectClaim(t, resp.Msg.GetAccessToken()); got != projectID {
 			t.Fatalf("%s signed up into project %q, want %q", label, got, projectID)
 		}
@@ -239,11 +247,11 @@ func TestRedesign_SelfServiceTenants_DomainSquatting(t *testing.T) {
 	h := startSelfServiceHarness(t)
 	ctx := context.Background()
 	unique := time.Now().UnixNano()
-	domain := fmt.Sprintf("squatted-%d.com", unique)
+	domain := fmt.Sprintf("squatted-%d.example.com", unique)
 
 	newTenantOwner := func(addr, name string) (identityconnectgen.IdentityServiceClient, string) {
 		t.Helper()
-		user := signupMembershipUser(t, h, addr)
+		user := signupVerifiedUser(t, h, addr)
 		created, err := user.client.CreateTenant(ctx, connect.NewRequest(&identitypb.CreateTenantRequest{Name: name}))
 		if err != nil {
 			t.Fatalf("CreateTenant(%s): %v", name, err)
@@ -261,7 +269,7 @@ func TestRedesign_SelfServiceTenants_DomainSquatting(t *testing.T) {
 		return resp.Msg
 	}
 
-	squatter, squatTenant := newTenantOwner(fmt.Sprintf("squatter-%d@example-corp.com", unique), "Not The Company")
+	squatter, squatTenant := newTenantOwner(fmt.Sprintf("squatter-%d@corp.example.com", unique), "Not The Company")
 	squat := registerDomain(squatter, squatTenant)
 
 	early := signupMembershipUser(t, h, "early@"+domain)
@@ -367,6 +375,45 @@ func TestRedesign_SelfServiceTenants_VerifiedDomainMemberMovesOffTheDomain(t *te
 	requireNotInTenant(t, h, "verified, moved off the domain", member.access, member.refresh, companyTenant)
 }
 
+// verifyMailedEmail verifies addr with the link signup mailed it, through
+// client, which must reach addr's project.
+func verifyMailedEmail(t *testing.T, h *RedesignHarness, client identityconnectgen.IdentityServiceClient, addr string) {
+	t.Helper()
+	if _, err := client.VerifyEmail(context.Background(), connect.NewRequest(&identitypb.VerifyEmailRequest{
+		Token: extractMailedToken(t, h, addr),
+	})); err != nil {
+		t.Fatalf("VerifyEmail(%s): %v", addr, err)
+	}
+}
+
+// signupVerifiedUser signs up addr and verifies it, as creating a tenant and
+// accepting an invitation require.
+func signupVerifiedUser(t *testing.T, h *RedesignHarness, addr string) membershipUser {
+	t.Helper()
+	user := signupMembershipUser(t, h, addr)
+	verifyMailedEmail(t, h, h.Client, addr)
+	return user
+}
+
+// suspendTenant suspends tenantID with the SQL an operator runs
+// (docs/UPGRADE.md, Suspending a tenant): there is no RPC for it.
+func suspendTenant(t *testing.T, h *RedesignHarness, tenantID string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, os.Getenv("GATEWAY_POSTGRES_DSN"))
+	if err != nil {
+		t.Fatalf("connect to suspend %s: %v", tenantID, err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	if _, err := conn.Exec(ctx, `
+		UPDATE tenants
+		   SET status = 'suspended',
+		       updated_at_ms = (extract(epoch from clock_timestamp()) * 1000)::bigint
+		 WHERE project_id = $1 AND id = $2`, h.ProjectID, tenantID); err != nil {
+		t.Fatalf("suspend %s: %v", tenantID, err)
+	}
+}
+
 // domainSession is a signed-in account's id and tokens.
 type domainSession struct {
 	userID, password, access, refresh string
@@ -379,7 +426,7 @@ func companyWithVerifiedDomain(t *testing.T, h *RedesignHarness) (tenantID, doma
 	t.Helper()
 	ctx := context.Background()
 	domain = fmt.Sprintf("company-%d.example.com", time.Now().UnixNano())
-	owner := signupMembershipUser(t, h, "owner@"+domain)
+	owner := signupVerifiedUser(t, h, "owner@"+domain)
 	created, err := owner.client.CreateTenant(ctx, connect.NewRequest(&identitypb.CreateTenantRequest{Name: "The Company"}))
 	if err != nil {
 		t.Fatalf("CreateTenant: %v", err)

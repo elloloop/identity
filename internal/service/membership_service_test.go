@@ -157,8 +157,10 @@ func (d *fakeUserDirectory) key(projectID, userID string) string { return projec
 
 func (d *fakeUserDirectory) set(projectID string, u *User) { d.byID[d.key(projectID, u.ID)] = u }
 
+// put adds a user whose email is verified, as every action on an
+// invitation requires.
 func (d *fakeUserDirectory) put(projectID, id, emailAddr string) {
-	d.set(projectID, &User{ID: id, Email: emailAddr})
+	d.set(projectID, &User{ID: id, Email: emailAddr, EmailVerified: true})
 }
 
 func (d *fakeUserDirectory) GetUserInProject(_ context.Context, projectID, userID string) (*User, error) {
@@ -240,8 +242,10 @@ func newMembershipFixtureWith(mailerConfigured bool) *membershipFixture {
 	}
 }
 
-// seedAdmin makes userID an active owner of (project, tenant).
+// seedAdmin makes userID an active owner of (project, tenant), a claimed
+// tenant unless the test put it in another status.
 func (f *membershipFixture) seedAdmin(projectID, tenantID, userID string) {
+	f.tenants.ensure(projectID, tenantID)
 	_, _ = f.memberships.UpsertMembership(context.Background(), &TenantMembership{
 		ProjectID: projectID, TenantID: tenantID, UserID: userID,
 		Source: MembershipSourceAdded, Role: RoleOwner, Status: MembershipStatusActive,
@@ -249,6 +253,7 @@ func (f *membershipFixture) seedAdmin(projectID, tenantID, userID string) {
 }
 
 func (f *membershipFixture) seedMember(projectID, tenantID, userID, role string) {
+	f.tenants.ensure(projectID, tenantID)
 	_, _ = f.memberships.UpsertMembership(context.Background(), &TenantMembership{
 		ProjectID: projectID, TenantID: tenantID, UserID: userID,
 		Source: MembershipSourceAdded, Role: role, Status: MembershipStatusActive,
@@ -895,4 +900,85 @@ func TestCreateTenantInvitation_SenderLimits(t *testing.T) {
 	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "colleague@acme.com", RoleMember)
 	require.ErrorIs(t, err, errBoom)
 	require.Len(t, logs.FilterMessage("tenant_invitation_limited").All(), 2, "a store failure is not a limit")
+}
+
+// A tenant is administered only while it is claimed or latent: a suspended
+// one, or one the store does not hold, refuses its admins.
+func TestTenantAdmin_OnlyAClaimedOrLatentTenantIsAdministered(t *testing.T) {
+	for status, refused := range map[string]bool{
+		TenantStatusClaimed: false, TenantStatusLatent: false, TenantStatusSuspended: true, "": true,
+	} {
+		f := newMembershipFixture()
+		f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+		key := mTestProject + "/" + mTestTenant
+		if status == "" {
+			delete(f.tenants.byID, key)
+		} else {
+			f.tenants.byID[key].Status = status
+		}
+		_, err := f.svc.ListTenantMembers(withProject(mTestProject), mAdminID, mTestTenant)
+		if refused {
+			require.ErrorIs(t, err, ErrPermissionDenied, "status %q", status)
+		} else {
+			require.NoError(t, err, "status %q", status)
+		}
+	}
+
+	f := newMembershipFixture()
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+	f.tenants.getErr = errBoom
+	_, err := f.svc.ListTenantMembers(withProject(mTestProject), mAdminID, mTestTenant)
+	require.ErrorIs(t, err, errBoom, "a failed status read is not a verdict")
+}
+
+// A suspended tenant's admins can neither invite, list nor remove, and an
+// invitation to it cannot be accepted; each refusal changes nothing.
+func TestTenantAdmin_SuspendedTenantRefusesEveryAdminAction(t *testing.T) {
+	f := newMembershipFixtureNoMail()
+	rawToken := f.seedInvite(t)
+	f.seedMember(mTestProject, mTestTenant, "user-bob", RoleMember)
+	f.users.put(mTestProject, mInviteeID, mInvitee)
+	f.tenants.byID[mTestProject+"/"+mTestTenant].Status = TenantStatusSuspended
+	ctx := withProject(mTestProject)
+
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "colleague@acme.com", RoleMember)
+	require.ErrorIs(t, err, ErrPermissionDenied, "invite")
+	_, err = f.svc.ListTenantInvitations(ctx, mAdminID, mTestTenant)
+	require.ErrorIs(t, err, ErrPermissionDenied, "list invitations")
+	_, err = f.svc.ListTenantMembers(ctx, mAdminID, mTestTenant)
+	require.ErrorIs(t, err, ErrPermissionDenied, "list members")
+	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "user-bob"), ErrPermissionDenied, "remove")
+	_, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
+	require.ErrorIs(t, err, ErrPermissionDenied, "accept")
+
+	bob, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, "user-bob")
+	require.NotNil(t, bob, "the refused removal removed no one")
+	invitee, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mInviteeID)
+	require.Nil(t, invitee, "the refused acceptance made no member")
+	invs, _ := f.invitations.ListInvitationsForTenant(context.Background(), mTestProject, mTestTenant)
+	require.Len(t, invs, 1, "the refused invitation sent nothing")
+	require.Equal(t, InvitationStatusPending, invs[0].Status)
+}
+
+// Accepting needs the address proven: an unverified account at the invited
+// address is refused and the invitation stays open, to be accepted once the
+// address is verified.
+func TestAcceptTenantInvitation_UnverifiedEmailRefused(t *testing.T) {
+	f := newMembershipFixtureNoMail()
+	rawToken := f.seedInvite(t)
+	f.users.set(mTestProject, &User{ID: mInviteeID, Email: mInvitee})
+	ctx := withProject(mTestProject)
+
+	_, err := f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
+	require.ErrorIs(t, err, ErrEmailVerificationRequired)
+	m, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mInviteeID)
+	require.Nil(t, m)
+	invs, _ := f.invitations.ListInvitationsForTenant(context.Background(), mTestProject, mTestTenant)
+	require.Len(t, invs, 1)
+	require.Equal(t, InvitationStatusPending, invs[0].Status)
+
+	f.users.put(mTestProject, mInviteeID, mInvitee)
+	m, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
+	require.NoError(t, err)
+	require.Equal(t, MembershipStatusActive, m.Status)
 }

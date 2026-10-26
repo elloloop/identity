@@ -111,7 +111,7 @@ func runAutoFormSkipsASuspendedLatentTenant(t *testing.T, dsn string) {
 
 	suspended, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", newUser(t))
 	require.NoError(t, err)
-	require.NoError(t, ts.SetTenantStatus(ctx, projectID, suspended, service.TenantStatusSuspended))
+	suspendTenant(ctx, t, ts, projectID, suspended)
 
 	next := newUser(t)
 	formed, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", next)
@@ -204,7 +204,7 @@ func runAutoFormSmoke(t *testing.T, dsn string) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = af.EnsureTenantForDomain(ctx, projectID, "race.com", users[i])
+			results[i], errs[i] = af.EnsureTenantForDomain(ctx, projectID, "race.example.test", users[i])
 		}(i)
 	}
 	wg.Wait()
@@ -219,17 +219,17 @@ func runAutoFormSmoke(t *testing.T, dsn string) {
 		require.Equal(t, winner, results[i], "racer %d formed a different tenant — convergence failed", i)
 	}
 
-	// Exactly one tenant and one domain exist for race.com (no orphans from
+	// Exactly one tenant and one domain exist for race.example.test (no orphans from
 	// rolled-back losers), and every racer is a member.
 	raceDoms, err := ds.ListDomainsByTenant(ctx, projectID, winner)
 	require.NoError(t, err)
-	require.Len(t, raceDoms, 1, "one domain row for race.com")
-	require.Equal(t, "race.com", raceDoms[0].Domain)
+	require.Len(t, raceDoms, 1, "one domain row for race.example.test")
+	require.Equal(t, "race.example.test", raceDoms[0].Domain)
 	raceMembers, err := ms.ListMembershipsForTenant(ctx, projectID, winner)
 	require.NoError(t, err)
 	require.Len(t, raceMembers, racers, "every concurrent signer is a member of the one tenant")
 
-	// Two tenants total now (acme.com + race.com) — losers left no orphan.
+	// Two tenants total now (acme.com + race.example.test) — losers left no orphan.
 	tenants, err = ts.ListTenants(ctx, projectID)
 	require.NoError(t, err)
 	require.Len(t, tenants, 2, "a lost race must not leave an orphan tenant")

@@ -217,9 +217,17 @@ const (
 	// unverified or not on a domain the tenant has verified. The refusal does
 	// not say which. The code is PERMISSION_DENIED.
 	TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_A_MEMBER TenantSelectionRefusal = 2
-	// The membership could not be read. The code is UNAVAILABLE; retry, with
-	// or without tenant_id.
+	// The membership or the tenant's login policy could not be read. The code
+	// is UNAVAILABLE; retry, with or without tenant_id.
 	TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNAVAILABLE TenantSelectionRefusal = 3
+	// The tenant's login policy does not admit the session. A session does
+	// not record how it signed in, so a tenant whose policy restricts sign-in
+	// (requires SSO or two-factor, or limits the methods) admits only a
+	// session whose account email is on a domain the tenant has verified:
+	// the sign-ins that policy governed. A member on any other domain is
+	// refused, and so is a session past the policy's idle or absolute
+	// timeout. The code is PERMISSION_DENIED; retry without tenant_id.
+	TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_LOGIN_POLICY TenantSelectionRefusal = 4
 )
 
 // Enum value maps for TenantSelectionRefusal.
@@ -229,12 +237,14 @@ var (
 		1: "TENANT_SELECTION_REFUSAL_NOT_ENABLED",
 		2: "TENANT_SELECTION_REFUSAL_NOT_A_MEMBER",
 		3: "TENANT_SELECTION_REFUSAL_UNAVAILABLE",
+		4: "TENANT_SELECTION_REFUSAL_LOGIN_POLICY",
 	}
 	TenantSelectionRefusal_value = map[string]int32{
 		"TENANT_SELECTION_REFUSAL_UNSPECIFIED":  0,
 		"TENANT_SELECTION_REFUSAL_NOT_ENABLED":  1,
 		"TENANT_SELECTION_REFUSAL_NOT_A_MEMBER": 2,
 		"TENANT_SELECTION_REFUSAL_UNAVAILABLE":  3,
+		"TENANT_SELECTION_REFUSAL_LOGIN_POLICY": 4,
 	}
 )
 
@@ -4767,15 +4777,20 @@ type RefreshTokenRequest struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	RefreshToken string                 `protobuf:"bytes,1,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
 	// tenant_id, when set, asks for an access token whose `tenant` claim is
-	// this tenant instead of the deployment's default. The caller must be an
-	// active member of a claimed tenant in the session's project; a member
-	// only through their email's domain must have verified that email, and
-	// it must be on a domain the tenant has verified. Otherwise the call is
-	// PERMISSION_DENIED. It is FAILED_PRECONDITION when the server has tenant
-	// selection off (GATEWAY_TENANT_SELECTION_ENABLED, off by default, and
-	// never on the memory or SQLite drivers), and UNAVAILABLE when the
-	// membership could not be read. Each of these refusals carries a
-	// TenantSelectionRefusedDetails error detail: no token is issued, the
+	// this tenant instead of the deployment's default. It is at most 64 ASCII
+	// letters, digits, '-' or '_'; any other value is INVALID_ARGUMENT,
+	// refused before the refresh token is read, which is not consumed. The
+	// caller must be an active member of a claimed tenant in the session's
+	// project; a member only through their email's domain must have verified
+	// that email, and it must be on a domain the tenant has verified.
+	// Otherwise the call is PERMISSION_DENIED with reason NOT_A_MEMBER. The
+	// tenant's login policy must admit the session too, or the call is
+	// PERMISSION_DENIED with reason LOGIN_POLICY. It is FAILED_PRECONDITION
+	// when the server has tenant selection off
+	// (GATEWAY_TENANT_SELECTION_ENABLED, off by default, and never on the
+	// memory or SQLite drivers), and UNAVAILABLE when the membership or the
+	// tenant's login policy could not be read. Each of these refusals carries
+	// a TenantSelectionRefusedDetails error detail: no token is issued, the
 	// refresh token is NOT consumed, and the client may retry with it,
 	// without tenant_id or once the reason is gone. An error without that
 	// detail is not a selection refusal and may have consumed the token: an
@@ -4788,8 +4803,9 @@ type RefreshTokenRequest struct {
 	// remembered: every refresh names the tenant it wants, and a client reads
 	// the tenant it got from the access token's `tenant` claim. A membership
 	// that ends stops the next refresh, so an access token outlives it by at
-	// most its own lifetime; a tenant that is suspended stops its tokens
-	// within GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
+	// most its own lifetime, in mode=session too: removing a member ends none
+	// of their sessions. A tenant that is suspended stops its tokens on
+	// identity's HTTP surface within GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
 	TenantId      string `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -22093,12 +22109,13 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\bUserKind\x12\x19\n" +
 	"\x15USER_KIND_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10USER_KIND_PERSON\x10\x01\x12\x13\n" +
-	"\x0fUSER_KIND_AGENT\x10\x02*\xc1\x01\n" +
+	"\x0fUSER_KIND_AGENT\x10\x02*\xec\x01\n" +
 	"\x16TenantSelectionRefusal\x12(\n" +
 	"$TENANT_SELECTION_REFUSAL_UNSPECIFIED\x10\x00\x12(\n" +
 	"$TENANT_SELECTION_REFUSAL_NOT_ENABLED\x10\x01\x12)\n" +
 	"%TENANT_SELECTION_REFUSAL_NOT_A_MEMBER\x10\x02\x12(\n" +
-	"$TENANT_SELECTION_REFUSAL_UNAVAILABLE\x10\x03*\xa0\x02\n" +
+	"$TENANT_SELECTION_REFUSAL_UNAVAILABLE\x10\x03\x12)\n" +
+	"%TENANT_SELECTION_REFUSAL_LOGIN_POLICY\x10\x04*\xa0\x02\n" +
 	"\x1aIdentityVerificationStatus\x12,\n" +
 	"(IDENTITY_VERIFICATION_STATUS_UNSPECIFIED\x10\x00\x12(\n" +
 	"$IDENTITY_VERIFICATION_STATUS_PENDING\x10\x01\x12*\n" +

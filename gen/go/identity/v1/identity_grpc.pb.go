@@ -390,45 +390,46 @@ type IdentityServiceClient interface {
 	AddGroupMember(ctx context.Context, in *AddGroupMemberRequest, opts ...grpc.CallOption) (*AddGroupMemberResponse, error)
 	RemoveGroupMember(ctx context.Context, in *RemoveGroupMemberRequest, opts ...grpc.CallOption) (*RemoveGroupMemberResponse, error)
 	ListGroupMembers(ctx context.Context, in *ListGroupMembersRequest, opts ...grpc.CallOption) (*ListGroupMembersResponse, error)
-	// Tenant domains (redesign). Authenticated, project-scoped, and gated
-	// on the caller being an owner/admin member of the target tenant — with
-	// one exception: VerifyDomain on a still-latent tenant that has no
-	// members yet is open, so the first verifier becomes its owner.
-	// CreateDomain and VerifyDomain together are RESOURCE_EXHAUSTED past the
-	// per-tenant attempt cap in its window
-	// (GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT). They also share a
+	// Tenant domains (redesign). Authenticated, project-scoped, and gated on
+	// the caller being an owner/admin member of the target tenant — with one
+	// exception: VerifyDomain on a still-latent tenant that has no members yet
+	// is open, so the first verifier becomes its owner. Every one is
+	// PERMISSION_DENIED for a suspended tenant. CreateDomain and VerifyDomain
+	// together are RESOURCE_EXHAUSTED past the per-tenant attempt cap in its
+	// window (GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT). They also share a
 	// per-client-IP budget (GATEWAY_RATE_LIMIT_DOMAIN_PER_IP per
-	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it
-	// the call is refused before the RPC runs with HTTP status 429 and a
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it the
+	// call is refused before the RPC runs with HTTP status 429 and a
 	// Retry-After header of the window in seconds, which Connect clients
 	// surface as UNAVAILABLE; the native gRPC registration does not apply it.
 	// CreateDomain is ALREADY_EXISTS when the tenant already registered the
 	// name or another tenant has verified it, which tells a tenant admin that
 	// the domain is onboarded elsewhere in the project; VerifyDomain is
 	// ALREADY_EXISTS when another tenant has verified it, PERMISSION_DENIED
-	// when the TXT challenge is not published or the tenant is suspended,
-	// and UNIMPLEMENTED for the email method. A failed check marks a pending
-	// claim failed; it never un-verifies a verified one. Available only on
-	// the postgres control-plane driver; the memory and SQLite drivers
-	// return Unimplemented.
+	// when the TXT challenge is not published, and UNIMPLEMENTED for the email
+	// method. A failed check marks a pending claim failed; it never un-verifies
+	// a verified one. Available only on the postgres control-plane driver; the
+	// memory and SQLite drivers return Unimplemented.
 	CreateDomain(ctx context.Context, in *CreateDomainRequest, opts ...grpc.CallOption) (*CreateDomainResponse, error)
 	VerifyDomain(ctx context.Context, in *VerifyDomainRequest, opts ...grpc.CallOption) (*VerifyDomainResponse, error)
 	ListTenantDomains(ctx context.Context, in *ListTenantDomainsRequest, opts ...grpc.CallOption) (*ListTenantDomainsResponse, error)
-	// Tenant membership (redesign). Authenticated, project-scoped, and —
-	// except for AcceptTenantInvitation — gated on the caller being an
-	// owner/admin member of the target tenant. AcceptTenantInvitation is the
-	// redeemer's own action: any authenticated caller may redeem a token, but
-	// only for an invitation addressed to their own account email (compared in
-	// the canonical form sign-in uses, so a "+tag" spelling of it matches;
-	// PERMISSION_DENIED otherwise). Accepting never lowers a role the caller
-	// already holds in the tenant: an owner who accepts a member invitation
-	// stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED past the
-	// tenant's cap in the window, the inviter's cap across every tenant, the
-	// recipient address's cap across the project's tenants, or the
+	// Tenant membership (redesign). Authenticated, project-scoped, and — except
+	// for AcceptTenantInvitation — gated on the caller being an owner/admin
+	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
+	// action: any authenticated caller may redeem a token, but only for an
+	// invitation addressed to their own account email (compared in the
+	// canonical form sign-in uses, so a "+tag" spelling of it matches;
+	// PERMISSION_DENIED otherwise), and only once they have verified that email
+	// (FAILED_PRECONDITION before). Every one, accepting included, is
+	// PERMISSION_DENIED for a suspended tenant. Accepting never lowers a role
+	// the caller already holds in the tenant: an owner who accepts a member
+	// invitation stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED
+	// past the tenant's cap in the window, the inviter's cap across every
+	// tenant, the recipient address's cap across the project's tenants, or the
 	// per-recipient resend cooldown. It also has a per-client-IP budget
 	// (GATEWAY_RATE_LIMIT_INVITATION_PER_IP per
-	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it
-	// the call is refused before the RPC runs with HTTP status 429 and a
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it the
+	// call is refused before the RPC runs with HTTP status 429 and a
 	// Retry-After header of the window in seconds, which Connect clients
 	// surface as UNAVAILABLE; the native gRPC registration does not apply it.
 	// Available only on the postgres control-plane driver; the memory and
@@ -439,25 +440,25 @@ type IdentityServiceClient interface {
 	ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error)
 	RemoveTenantMember(ctx context.Context, in *RemoveTenantMemberRequest, opts ...grpc.CallOption) (*RemoveTenantMemberResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
-	// makes a claimed tenant with the caller as its owner, in one
-	// transaction; it is FAILED_PRECONDITION unless the project's config
-	// sets tenants.self_service, PERMISSION_DENIED for an anonymous, agent,
-	// merged or inactive account, INVALID_ARGUMENT for a name that is blank
-	// after trimming, longer than 100 characters, not valid UTF-8 or
-	// carrying control or format characters, and RESOURCE_EXHAUSTED once the
-	// caller has created the per-user number of tenants allowed in the
-	// window. It also has a per-client-IP budget of its own, the size of
-	// GATEWAY_RATE_LIMIT_SIGNUP_PER_IP but not shared with signup, on the
-	// HTTP handler only: over it the call gets HTTP status 429 and a
-	// Retry-After header, which Connect clients surface as UNAVAILABLE; the
-	// native gRPC registration does not apply it. It carries no idempotency
-	// key: a retry after a lost response creates a second tenant, so
-	// reconcile with ListMyTenants. ListMyTenants returns the claimed tenants
-	// the caller may act in within this project (see ListMyTenantsResponse).
+	// makes a claimed tenant with the caller as its owner, in one transaction;
+	// it is FAILED_PRECONDITION unless the project's config sets
+	// tenants.self_service, and until the caller has verified their email,
+	// PERMISSION_DENIED for an anonymous, agent, merged or inactive account,
+	// INVALID_ARGUMENT for a name that is blank after trimming, longer than 100
+	// characters, not valid UTF-8 or carrying control or format characters, and
+	// RESOURCE_EXHAUSTED once the caller has created the per-user number of
+	// tenants allowed in the window. It also has a per-client-IP budget of its
+	// own, the size of GATEWAY_RATE_LIMIT_SIGNUP_PER_IP but not shared with
+	// signup, on the HTTP handler only: over it the call gets HTTP status 429
+	// and a Retry-After header, which Connect clients surface as UNAVAILABLE;
+	// the native gRPC registration does not apply it. It carries no idempotency
+	// key: a retry after a lost response creates a second tenant, so reconcile
+	// with ListMyTenants. ListMyTenants returns the claimed tenants the caller
+	// may act in within this project (see ListMyTenantsResponse).
 	// RefreshToken's tenant_id selects one of them for the access token when
-	// the server has tenant selection on. Available only on the postgres
-	// control-plane driver; the memory and SQLite drivers return
-	// Unimplemented.
+	// the server has tenant selection on and the tenant's login policy admits
+	// the session. Available only on the postgres control-plane driver; the
+	// memory and SQLite drivers return Unimplemented.
 	CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error)
 	ListMyTenants(ctx context.Context, in *ListMyTenantsRequest, opts ...grpc.CallOption) (*ListMyTenantsResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
@@ -2359,45 +2360,46 @@ type IdentityServiceServer interface {
 	AddGroupMember(context.Context, *AddGroupMemberRequest) (*AddGroupMemberResponse, error)
 	RemoveGroupMember(context.Context, *RemoveGroupMemberRequest) (*RemoveGroupMemberResponse, error)
 	ListGroupMembers(context.Context, *ListGroupMembersRequest) (*ListGroupMembersResponse, error)
-	// Tenant domains (redesign). Authenticated, project-scoped, and gated
-	// on the caller being an owner/admin member of the target tenant — with
-	// one exception: VerifyDomain on a still-latent tenant that has no
-	// members yet is open, so the first verifier becomes its owner.
-	// CreateDomain and VerifyDomain together are RESOURCE_EXHAUSTED past the
-	// per-tenant attempt cap in its window
-	// (GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT). They also share a
+	// Tenant domains (redesign). Authenticated, project-scoped, and gated on
+	// the caller being an owner/admin member of the target tenant — with one
+	// exception: VerifyDomain on a still-latent tenant that has no members yet
+	// is open, so the first verifier becomes its owner. Every one is
+	// PERMISSION_DENIED for a suspended tenant. CreateDomain and VerifyDomain
+	// together are RESOURCE_EXHAUSTED past the per-tenant attempt cap in its
+	// window (GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT). They also share a
 	// per-client-IP budget (GATEWAY_RATE_LIMIT_DOMAIN_PER_IP per
-	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it
-	// the call is refused before the RPC runs with HTTP status 429 and a
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it the
+	// call is refused before the RPC runs with HTTP status 429 and a
 	// Retry-After header of the window in seconds, which Connect clients
 	// surface as UNAVAILABLE; the native gRPC registration does not apply it.
 	// CreateDomain is ALREADY_EXISTS when the tenant already registered the
 	// name or another tenant has verified it, which tells a tenant admin that
 	// the domain is onboarded elsewhere in the project; VerifyDomain is
 	// ALREADY_EXISTS when another tenant has verified it, PERMISSION_DENIED
-	// when the TXT challenge is not published or the tenant is suspended,
-	// and UNIMPLEMENTED for the email method. A failed check marks a pending
-	// claim failed; it never un-verifies a verified one. Available only on
-	// the postgres control-plane driver; the memory and SQLite drivers
-	// return Unimplemented.
+	// when the TXT challenge is not published, and UNIMPLEMENTED for the email
+	// method. A failed check marks a pending claim failed; it never un-verifies
+	// a verified one. Available only on the postgres control-plane driver; the
+	// memory and SQLite drivers return Unimplemented.
 	CreateDomain(context.Context, *CreateDomainRequest) (*CreateDomainResponse, error)
 	VerifyDomain(context.Context, *VerifyDomainRequest) (*VerifyDomainResponse, error)
 	ListTenantDomains(context.Context, *ListTenantDomainsRequest) (*ListTenantDomainsResponse, error)
-	// Tenant membership (redesign). Authenticated, project-scoped, and —
-	// except for AcceptTenantInvitation — gated on the caller being an
-	// owner/admin member of the target tenant. AcceptTenantInvitation is the
-	// redeemer's own action: any authenticated caller may redeem a token, but
-	// only for an invitation addressed to their own account email (compared in
-	// the canonical form sign-in uses, so a "+tag" spelling of it matches;
-	// PERMISSION_DENIED otherwise). Accepting never lowers a role the caller
-	// already holds in the tenant: an owner who accepts a member invitation
-	// stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED past the
-	// tenant's cap in the window, the inviter's cap across every tenant, the
-	// recipient address's cap across the project's tenants, or the
+	// Tenant membership (redesign). Authenticated, project-scoped, and — except
+	// for AcceptTenantInvitation — gated on the caller being an owner/admin
+	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
+	// action: any authenticated caller may redeem a token, but only for an
+	// invitation addressed to their own account email (compared in the
+	// canonical form sign-in uses, so a "+tag" spelling of it matches;
+	// PERMISSION_DENIED otherwise), and only once they have verified that email
+	// (FAILED_PRECONDITION before). Every one, accepting included, is
+	// PERMISSION_DENIED for a suspended tenant. Accepting never lowers a role
+	// the caller already holds in the tenant: an owner who accepts a member
+	// invitation stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED
+	// past the tenant's cap in the window, the inviter's cap across every
+	// tenant, the recipient address's cap across the project's tenants, or the
 	// per-recipient resend cooldown. It also has a per-client-IP budget
 	// (GATEWAY_RATE_LIMIT_INVITATION_PER_IP per
-	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it
-	// the call is refused before the RPC runs with HTTP status 429 and a
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it the
+	// call is refused before the RPC runs with HTTP status 429 and a
 	// Retry-After header of the window in seconds, which Connect clients
 	// surface as UNAVAILABLE; the native gRPC registration does not apply it.
 	// Available only on the postgres control-plane driver; the memory and
@@ -2408,25 +2410,25 @@ type IdentityServiceServer interface {
 	ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error)
 	RemoveTenantMember(context.Context, *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
-	// makes a claimed tenant with the caller as its owner, in one
-	// transaction; it is FAILED_PRECONDITION unless the project's config
-	// sets tenants.self_service, PERMISSION_DENIED for an anonymous, agent,
-	// merged or inactive account, INVALID_ARGUMENT for a name that is blank
-	// after trimming, longer than 100 characters, not valid UTF-8 or
-	// carrying control or format characters, and RESOURCE_EXHAUSTED once the
-	// caller has created the per-user number of tenants allowed in the
-	// window. It also has a per-client-IP budget of its own, the size of
-	// GATEWAY_RATE_LIMIT_SIGNUP_PER_IP but not shared with signup, on the
-	// HTTP handler only: over it the call gets HTTP status 429 and a
-	// Retry-After header, which Connect clients surface as UNAVAILABLE; the
-	// native gRPC registration does not apply it. It carries no idempotency
-	// key: a retry after a lost response creates a second tenant, so
-	// reconcile with ListMyTenants. ListMyTenants returns the claimed tenants
-	// the caller may act in within this project (see ListMyTenantsResponse).
+	// makes a claimed tenant with the caller as its owner, in one transaction;
+	// it is FAILED_PRECONDITION unless the project's config sets
+	// tenants.self_service, and until the caller has verified their email,
+	// PERMISSION_DENIED for an anonymous, agent, merged or inactive account,
+	// INVALID_ARGUMENT for a name that is blank after trimming, longer than 100
+	// characters, not valid UTF-8 or carrying control or format characters, and
+	// RESOURCE_EXHAUSTED once the caller has created the per-user number of
+	// tenants allowed in the window. It also has a per-client-IP budget of its
+	// own, the size of GATEWAY_RATE_LIMIT_SIGNUP_PER_IP but not shared with
+	// signup, on the HTTP handler only: over it the call gets HTTP status 429
+	// and a Retry-After header, which Connect clients surface as UNAVAILABLE;
+	// the native gRPC registration does not apply it. It carries no idempotency
+	// key: a retry after a lost response creates a second tenant, so reconcile
+	// with ListMyTenants. ListMyTenants returns the claimed tenants the caller
+	// may act in within this project (see ListMyTenantsResponse).
 	// RefreshToken's tenant_id selects one of them for the access token when
-	// the server has tenant selection on. Available only on the postgres
-	// control-plane driver; the memory and SQLite drivers return
-	// Unimplemented.
+	// the server has tenant selection on and the tenant's login policy admits
+	// the session. Available only on the postgres control-plane driver; the
+	// memory and SQLite drivers return Unimplemented.
 	CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error)
 	ListMyTenants(context.Context, *ListMyTenantsRequest) (*ListMyTenantsResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the

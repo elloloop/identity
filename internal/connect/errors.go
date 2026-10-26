@@ -244,6 +244,8 @@ func tenantSelectionRefusalToProto(r service.TenantSelectionRefusal) identitypb.
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_A_MEMBER
 	case service.TenantSelectionUnavailable:
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNAVAILABLE
+	case service.TenantSelectionLoginPolicy:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_LOGIN_POLICY
 	default:
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED
 	}

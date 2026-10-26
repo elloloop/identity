@@ -204,9 +204,9 @@ func TestMembership_InviteThenAccept_Handler(t *testing.T) {
 		Role: service.RoleOwner, Status: service.MembershipStatusActive,
 	}}
 	users := &connectUserDirectory{byID: map[string]*service.User{
-		"invitee": {ID: "invitee", Email: "invitee@acme.com"},
+		"invitee": {ID: "invitee", Email: "invitee@acme.com", EmailVerified: true},
 	}}
-	svc := newMembershipSvc(invitations, members, &connectTenantStore{}, users)
+	svc := newMembershipSvc(invitations, members, claimedTenantStore(), users)
 	srv := startMembershipServer(t, svc)
 	ctx := context.Background()
 
@@ -246,7 +246,7 @@ func TestListTenantMembers_Handler(t *testing.T) {
 	members := &connectMembershipStore{member: &service.TenantMembership{
 		Role: service.RoleAdmin, Status: service.MembershipStatusActive,
 	}}
-	svc := newMembershipSvc(newConnectInvitationStore(), members, &connectTenantStore{}, &connectUserDirectory{})
+	svc := newMembershipSvc(newConnectInvitationStore(), members, claimedTenantStore(), &connectUserDirectory{})
 	srv := startMembershipServer(t, svc)
 
 	// connectMembershipStore.ListMembershipsForTenant returns nil; assert the
@@ -271,7 +271,7 @@ func selfServiceScope(on bool) *service.ProjectScope {
 func TestCreateTenant_Handler(t *testing.T) {
 	tenants := &connectTenantStore{}
 	users := &connectUserDirectory{byID: map[string]*service.User{
-		"owner-1": {ID: "owner-1", Email: "owner@example.test", Status: service.StatusActive},
+		"owner-1": {ID: "owner-1", Email: "owner@example.test", Status: service.StatusActive, EmailVerified: true},
 	}}
 	svc := newMembershipSvc(newConnectInvitationStore(), &connectMembershipStore{}, tenants, users)
 	srv := startMembershipServerInScope(t, svc, selfServiceScope(true))
@@ -296,7 +296,7 @@ func TestCreateTenant_Handler(t *testing.T) {
 
 func TestCreateTenant_Handler_Refusals(t *testing.T) {
 	users := &connectUserDirectory{byID: map[string]*service.User{
-		"owner-1": {ID: "owner-1", Email: "owner@example.test", Status: service.StatusActive},
+		"owner-1": {ID: "owner-1", Email: "owner@example.test", Status: service.StatusActive, EmailVerified: true},
 	}}
 	ctx := context.Background()
 

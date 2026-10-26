@@ -76,19 +76,21 @@ func (s *connectTenantStore) GetTenant(_ context.Context, _, _ string) (*service
 	return s.tenant, nil
 }
 
+// GetTenantStatus reads the one tenant the store holds as every id.
 func (s *connectTenantStore) GetTenantStatus(context.Context, string, string) (string, error) {
-	return "", nil
+	if s.tenant == nil {
+		return "", nil
+	}
+	return s.tenant.Status, nil
+}
+
+// claimedTenantStore holds one claimed tenant, which every id reads as.
+func claimedTenantStore() *connectTenantStore {
+	return &connectTenantStore{tenant: &service.Tenant{ID: "t-1", Status: service.TenantStatusClaimed}}
 }
 
 func (s *connectTenantStore) GetTenantByPrimaryDomain(context.Context, string, string) (*service.Tenant, error) {
 	return nil, nil
-}
-
-func (s *connectTenantStore) SetTenantStatus(_ context.Context, _, _, status string) error {
-	if s.tenant != nil {
-		s.tenant.Status = status
-	}
-	return nil
 }
 
 func (s *connectTenantStore) ClaimLatentTenant(context.Context, string, string) error {
@@ -240,7 +242,7 @@ func TestCreateDomain_Handler_ReturnsChallenge(t *testing.T) {
 	members := &connectMembershipStore{member: &service.TenantMembership{
 		Role: service.RoleOwner, Status: service.MembershipStatusActive,
 	}}
-	svc := newDomainSvc(domains, &connectTenantStore{}, members, &connectFakeResolver{})
+	svc := newDomainSvc(domains, claimedTenantStore(), members, &connectFakeResolver{})
 	srv := startDomainServer(t, svc)
 
 	resp, err := srv.client.CreateDomain(context.Background(),
@@ -328,7 +330,7 @@ func TestListTenantDomains_Handler(t *testing.T) {
 	members := &connectMembershipStore{member: &service.TenantMembership{
 		Role: service.RoleAdmin, Status: service.MembershipStatusActive,
 	}}
-	svc := newDomainSvc(domains, &connectTenantStore{}, members, &connectFakeResolver{})
+	svc := newDomainSvc(domains, claimedTenantStore(), members, &connectFakeResolver{})
 	srv := startDomainServer(t, svc)
 
 	resp, err := srv.client.ListTenantDomains(context.Background(),

@@ -147,23 +147,6 @@ func (s *TenantStore) GetTenantByPrimaryDomain(ctx context.Context, projectID, d
 	return t, nil
 }
 
-// SetTenantStatus transitions a tenant's status and stamps updated_at.
-// Unknown ids, and a tenant already in the status, are a no-op: a status
-// write fires the agent-governance trigger (0046), so one that changes
-// nothing must not be made.
-func (s *TenantStore) SetTenantStatus(ctx context.Context, projectID, tenantID, status string) error {
-	if projectID == "" || tenantID == "" {
-		return fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
-	}
-	const q = `
-		UPDATE tenants SET status = $3, updated_at_ms = $4
-		WHERE project_id = $1 AND id = $2 AND status IS DISTINCT FROM $3`
-	if _, err := s.pool.Exec(ctx, q, projectID, tenantID, status, nowMs()); err != nil {
-		return wrapPgErr("SetTenantStatus", err)
-	}
-	return nil
-}
-
 // ClaimLatentTenant moves a latent tenant to claimed. The status is
 // compared and set in one statement, so a suspension that lands between a
 // caller's read and this write is kept. Unknown ids, and a tenant in any

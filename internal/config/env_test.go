@@ -656,6 +656,20 @@ func TestTenantFeaturesNeedPostgres(t *testing.T) {
 	}
 }
 
+// Selection falls back to the default tenant, so it is refused without one.
+func TestTenantSelectionNeedsADefaultTenant(t *testing.T) {
+	c := Load()
+	c.TenantSelectionEnabled = true
+	c.DefaultTenantID = " "
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_DEFAULT_TENANT_ID") {
+		t.Fatalf("selection without a default tenant must be refused, got %v", err)
+	}
+	c.DefaultTenantID = "local"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("selection with a default tenant: %v", err)
+	}
+}
+
 // Tenant selection is opt-in.
 func TestTenantSelectionEnabled_DefaultsOff(t *testing.T) {
 	t.Setenv("GATEWAY_TENANT_SELECTION_ENABLED", "")

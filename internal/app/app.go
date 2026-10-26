@@ -604,28 +604,11 @@ func New(deps Deps) (*Built, error) {
 		logger = zap.NewNop()
 	}
 
-	// Validate config invariants that can't be expressed as per-field
-	// defaults (most importantly the mode=ttl access-token TTL cap).
-	// Fail fast before any goroutines start so a misconfigured deploy
-	// never serves a single request.
-	if err := deps.Config.Validate(); err != nil {
+	if err := prepareConfig(deps.Config); err != nil {
 		return nil, err
 	}
-
-	// Normalize an empty DefaultProjectID to a non-empty default. The env
-	// loader (config.Load) already defaults GATEWAY_DEFAULT_PROJECT_ID, but
-	// struct-literal Configs — every test harness and every embedding caller
-	// that builds Config directly — bypass that. This value becomes the
-	// boot-default project shard id for the audit logger and every service
-	// below (and, via requestProjectID, the graph partition key / postgres
-	// WHERE project_id), so it must never be "": the graph transport rejects an empty
-	// partition key outright, and a data-plane row written under "" has no
-	// valid project. Default it rather than reject it, mirroring how the
-	// env loader defaults DefaultTenantID, so embedding ergonomics hold.
-	if deps.Config.DefaultProjectID == "" {
-		deps.Config.DefaultProjectID = config.DefaultProjectIDFallback
-	}
-	if err := checkTenantFeatures(deps, logger); err != nil {
+	tenantGov, err := wireTenantGovernance(deps, logger)
+	if err != nil {
 		return nil, err
 	}
 
@@ -771,7 +754,7 @@ func New(deps Deps) (*Built, error) {
 		WithLoginGovernance(deps.LoginGovernance).
 		// A nil reader refuses every tenant selection: the switch is off,
 		// or the driver has no governance stores (memory, SQLite).
-		WithTenantSelection(tenantSelectionReader(deps)).
+		WithTenantSelection(tenantGov.selection).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
@@ -870,11 +853,6 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf("rpc metrics: %w", err)
 	}
 
-	authTenants, err := tokenTenants(deps, logger)
-	if err != nil {
-		return nil, err
-	}
-
 	// Order (outermost runs first on request path):
 	//   logging → recover → health → project → CORS → product → client-IP → rate-limit → JWKS → auth → project-guard → metrics → Connect
 	// client-IP must precede rate-limit (the limiter keys on the resolved
@@ -901,7 +879,7 @@ func New(deps Deps) (*Built, error) {
 	// project), rejecting an access token replayed across projects.
 	chain = middleware.NewProjectScopeGuard()(chain)
 	chain = middleware.SessionAuthMiddleware(
-		deps.Signer, authTenants, deps.Config.JWTAudience,
+		deps.Signer, tenantGov.tokens, deps.Config.JWTAudience,
 		deps.Config.JWTRequireAudience, sessionCache,
 	)(chain)
 	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
@@ -1117,6 +1095,51 @@ const drainPollInterval = time.Second
 // leave out (Config.Validate refuses the other drivers by name), and logs
 // once, as SCIM and LookupUsers do, whether each feature is served and under
 // which limits.
+// prepareConfig validates the config invariants that can't be expressed as
+// per-field defaults (most importantly the mode=ttl access-token TTL cap),
+// before any goroutine starts, so a misconfigured deploy never serves a
+// single request, and normalizes an empty DefaultProjectID to a non-empty
+// default. The env loader (config.Load) already defaults
+// GATEWAY_DEFAULT_PROJECT_ID, but struct-literal Configs — every test
+// harness and every embedding caller that builds Config directly — bypass
+// that. This value becomes the boot-default project shard id for the audit
+// logger and every service (and, via requestProjectID, the graph partition
+// key / postgres WHERE project_id), so it must never be "": the graph
+// transport rejects an empty partition key outright, and a data-plane row
+// written under "" has no valid project. Default it rather than reject it,
+// mirroring how the env loader defaults DefaultTenantID, so embedding
+// ergonomics hold.
+func prepareConfig(cfg *config.Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	if cfg.DefaultProjectID == "" {
+		cfg.DefaultProjectID = config.DefaultProjectIDFallback
+	}
+	return nil
+}
+
+// tenantGovernance is what the tenant switches wire into the build: the
+// reader RefreshToken resolves a selected tenant through, and the rule the
+// access-token check holds a token's tenant claim to.
+type tenantGovernance struct {
+	selection service.UserTenantReader
+	tokens    middleware.TokenTenants
+}
+
+// wireTenantGovernance refuses a tenant switch the build cannot serve, then
+// wires what the switches turn on.
+func wireTenantGovernance(deps Deps, logger *zap.Logger) (tenantGovernance, error) {
+	if err := checkTenantFeatures(deps, logger); err != nil {
+		return tenantGovernance{}, err
+	}
+	tokens, err := tokenTenants(deps, logger)
+	if err != nil {
+		return tenantGovernance{}, err
+	}
+	return tenantGovernance{selection: tenantSelectionReader(deps), tokens: tokens}, nil
+}
+
 func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
 	cfg := deps.Config
 	if cfg.TenantSelectionEnabled && !tenantSelectionServed(deps) {

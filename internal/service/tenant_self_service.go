@@ -49,9 +49,12 @@ const (
 	// TenantSelectionNotAMember: the user may not act in the tenant
 	// (ErrPermissionDenied).
 	TenantSelectionNotAMember
-	// TenantSelectionUnavailable: the membership could not be read
-	// (ErrUnavailable).
+	// TenantSelectionUnavailable: the membership or the tenant's login
+	// policy could not be read (ErrUnavailable).
 	TenantSelectionUnavailable
+	// TenantSelectionLoginPolicy: the tenant's login policy does not admit
+	// the session (ErrPermissionDenied).
+	TenantSelectionLoginPolicy
 )
 
 // TenantSelectionRefusedError is RefreshToken's refusal of the tenant it was
@@ -88,9 +91,9 @@ type CreatedTenant struct {
 
 // CreateTenant creates a claimed tenant named name with callerID as its
 // active owner. The project must allow it (ProjectTenantsConfig.SelfService)
-// and the caller must be an active, permanent person: an anonymous account is
-// swept by retention and an agent cannot hold what it would own, so either
-// would leave an ownerless tenant behind.
+// and the caller must be an active, permanent person with a verified email:
+// an anonymous account is swept by retention and an agent cannot hold what it
+// would own, so either would leave an ownerless tenant behind.
 //
 // There is no idempotency key, as for the other governance creates: a client
 // that retries after a lost response may create a second tenant, bounded by
@@ -120,6 +123,11 @@ func (s *MembershipService) CreateTenant(ctx context.Context, callerID, name, ip
 	}
 	if !isPermanentPerson(caller) || !isActiveStatus(caller.Status) {
 		return nil, fmt.Errorf("%w: only an active, signed-up person may create a tenant", ErrPermissionDenied)
+	}
+	// A tenant's owner sends its invitations, so an address nobody has
+	// proven may not make one: throwaway accounts would multiply that mail.
+	if !caller.EmailVerified {
+		return nil, fmt.Errorf("%w: verify your email before creating a tenant", ErrEmailVerificationRequired)
 	}
 
 	cfg := s.config()

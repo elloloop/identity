@@ -276,6 +276,10 @@ func TestToConnectErrorTenantSelectionRefused(t *testing.T) {
 			connect.CodeUnavailable, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNAVAILABLE,
 		},
 		{
+			&service.TenantSelectionRefusedError{Reason: service.TenantSelectionLoginPolicy, Err: fmt.Errorf("%w: login policy", service.ErrPermissionDenied)},
+			connect.CodePermissionDenied, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_LOGIN_POLICY,
+		},
+		{
 			&service.TenantSelectionRefusedError{Err: service.ErrPermissionDenied},
 			connect.CodePermissionDenied, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED,
 		},

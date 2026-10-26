@@ -2308,37 +2308,7 @@ func (c *Config) Validate() error {
 			c.AgentsMaxPerOwner, MaxAgentsMaxPerOwner, DefaultAgentsMaxPerOwner,
 		)
 	}
-	if c.SelfServiceTenantsMaxPerUser < 0 || c.SelfServiceTenantsMaxPerUser > MaxSelfServiceTenantsMaxPerUser {
-		return fmt.Errorf(
-			"config: GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER=%d must be between 0 and %d (0 selects the default, %d; the limit cannot be turned off)",
-			c.SelfServiceTenantsMaxPerUser, MaxSelfServiceTenantsMaxPerUser, DefaultSelfServiceTenantsMaxPerUser,
-		)
-	}
-	if c.SelfServiceTenantsWindowSeconds < 0 || c.SelfServiceTenantsWindowSeconds > MaxSelfServiceTenantsWindowSeconds {
-		return fmt.Errorf(
-			"config: GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS=%d must be between 0 and %d (0 selects the default, %d)",
-			c.SelfServiceTenantsWindowSeconds, MaxSelfServiceTenantsWindowSeconds, DefaultSelfServiceTenantsWindowSeconds,
-		)
-	}
-	if c.TenantInvitationMaxPerTenant < 0 || c.TenantInvitationMaxPerTenant > MaxTenantInvitationMaxPerTenant {
-		return fmt.Errorf(
-			"config: GATEWAY_TENANT_INVITATION_MAX_PER_TENANT=%d must be between 0 and %d (0 selects the default, %d; the limit cannot be turned off)",
-			c.TenantInvitationMaxPerTenant, MaxTenantInvitationMaxPerTenant, DefaultTenantInvitationMaxPerTenant,
-		)
-	}
-	if c.TenantInvitationWindowSeconds < 0 || c.TenantInvitationWindowSeconds > MaxTenantInvitationWindowSeconds {
-		return fmt.Errorf(
-			"config: GATEWAY_TENANT_INVITATION_WINDOW_SECONDS=%d must be between 0 and %d (0 selects the default, %d)",
-			c.TenantInvitationWindowSeconds, MaxTenantInvitationWindowSeconds, DefaultTenantInvitationWindowSeconds,
-		)
-	}
-	if c.TenantInvitationResendCooldownSeconds < 0 || c.TenantInvitationResendCooldownSeconds > MaxTenantInvitationResendCooldownSeconds {
-		return fmt.Errorf(
-			"config: GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS=%d must be between 0 and %d (0 selects the default, %d; the cooldown cannot be turned off)",
-			c.TenantInvitationResendCooldownSeconds, MaxTenantInvitationResendCooldownSeconds, DefaultTenantInvitationResendCooldownSeconds,
-		)
-	}
-	if err := c.validateTenantSelfService(); err != nil {
+	if err := c.validateTenantGovernance(); err != nil {
 		return err
 	}
 	if c.AccountMergeReauthMaxAgeSeconds < 0 || c.AccountMergeReauthMaxAgeSeconds > MaxAccountMergeReauthMaxAgeSeconds {
@@ -3080,24 +3050,34 @@ func (c *Config) TenantStatusCacheTTL() time.Duration {
 	return time.Duration(min(c.TenantStatusCacheTTLSeconds, MaxTenantStatusCacheTTLSeconds)) * time.Second
 }
 
-// validateTenantSelfService checks the self-service tenant settings: the
-// limits in range, and the features that need the postgres governance
-// stores refused on any other driver, where their RPCs would only answer
-// UNIMPLEMENTED.
-func (c *Config) validateTenantSelfService() error {
+// validateTenantGovernance checks the tenant settings: the limits in range,
+// selection given the default tenant it falls back to, and the features
+// that need the postgres governance stores refused on any other driver,
+// where their RPCs would only answer UNIMPLEMENTED.
+func (c *Config) validateTenantGovernance() error {
+	const noOff = "; the limit cannot be turned off"
 	ranges := []struct {
 		env               string
 		v, ceiling, deflt int
+		note              string
 	}{
-		{"GATEWAY_TENANT_INVITATION_MAX_PER_INVITER", c.TenantInvitationMaxPerInviter, MaxTenantInvitationMaxPerInviter, DefaultTenantInvitationMaxPerInviter},
-		{"GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT", c.TenantInvitationMaxPerRecipient, MaxTenantInvitationMaxPerRecipient, DefaultTenantInvitationMaxPerRecipient},
-		{"GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT", c.TenantDomainAttemptsMaxPerTenant, MaxTenantDomainAttemptsMaxPerTenant, DefaultTenantDomainAttemptsMaxPerTenant},
-		{"GATEWAY_TENANT_DOMAIN_ATTEMPTS_WINDOW_SECONDS", c.TenantDomainAttemptsWindowSeconds, MaxTenantDomainAttemptsWindowSeconds, DefaultTenantDomainAttemptsWindowSeconds},
+		{"GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", c.SelfServiceTenantsMaxPerUser, MaxSelfServiceTenantsMaxPerUser, DefaultSelfServiceTenantsMaxPerUser, noOff},
+		{"GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", c.SelfServiceTenantsWindowSeconds, MaxSelfServiceTenantsWindowSeconds, DefaultSelfServiceTenantsWindowSeconds, ""},
+		{"GATEWAY_TENANT_INVITATION_MAX_PER_TENANT", c.TenantInvitationMaxPerTenant, MaxTenantInvitationMaxPerTenant, DefaultTenantInvitationMaxPerTenant, noOff},
+		{"GATEWAY_TENANT_INVITATION_WINDOW_SECONDS", c.TenantInvitationWindowSeconds, MaxTenantInvitationWindowSeconds, DefaultTenantInvitationWindowSeconds, ""},
+		{"GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS", c.TenantInvitationResendCooldownSeconds, MaxTenantInvitationResendCooldownSeconds, DefaultTenantInvitationResendCooldownSeconds, "; the cooldown cannot be turned off"},
+		{"GATEWAY_TENANT_INVITATION_MAX_PER_INVITER", c.TenantInvitationMaxPerInviter, MaxTenantInvitationMaxPerInviter, DefaultTenantInvitationMaxPerInviter, ""},
+		{"GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT", c.TenantInvitationMaxPerRecipient, MaxTenantInvitationMaxPerRecipient, DefaultTenantInvitationMaxPerRecipient, ""},
+		{"GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT", c.TenantDomainAttemptsMaxPerTenant, MaxTenantDomainAttemptsMaxPerTenant, DefaultTenantDomainAttemptsMaxPerTenant, ""},
+		{"GATEWAY_TENANT_DOMAIN_ATTEMPTS_WINDOW_SECONDS", c.TenantDomainAttemptsWindowSeconds, MaxTenantDomainAttemptsWindowSeconds, DefaultTenantDomainAttemptsWindowSeconds, ""},
 	}
 	for _, r := range ranges {
 		if r.v < 0 || r.v > r.ceiling {
-			return fmt.Errorf("config: %s=%d must be between 0 and %d (0 selects the default, %d)", r.env, r.v, r.ceiling, r.deflt)
+			return fmt.Errorf("config: %s=%d must be between 0 and %d (0 selects the default, %d%s)", r.env, r.v, r.ceiling, r.deflt, r.note)
 		}
+	}
+	if c.TenantSelectionEnabled && strings.TrimSpace(c.DefaultTenantID) == "" {
+		return errors.New("config: GATEWAY_TENANT_SELECTION_ENABLED needs GATEWAY_DEFAULT_TENANT_ID, the tenant a token falls back to")
 	}
 	if c.TenantStatusCacheTTLSeconds < 0 || c.TenantStatusCacheTTLSeconds > MaxTenantStatusCacheTTLSeconds {
 		return fmt.Errorf("config: GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS=%d must be between 0 and %d (0 reads the tenant on every request)",

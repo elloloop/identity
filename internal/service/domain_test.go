@@ -153,8 +153,7 @@ type fakeTenantStore struct {
 	createErr error
 	members   *fakeMembershipStore
 	nextID    int
-	// writes counts SetTenantStatus and ClaimLatentTenant calls that changed
-	// a row.
+	// writes counts ClaimLatentTenant calls that changed a row.
 	writes int
 }
 
@@ -172,6 +171,13 @@ func newFakeTenantStore() *fakeTenantStore {
 func (f *fakeTenantStore) put(t *Tenant) {
 	cp := *t
 	f.byID[t.ProjectID+"/"+t.ID] = &cp
+}
+
+// ensure puts a claimed tenant unless the store already holds the id.
+func (f *fakeTenantStore) ensure(projectID, tenantID string) {
+	if _, ok := f.byID[projectID+"/"+tenantID]; !ok {
+		f.put(&Tenant{ID: tenantID, ProjectID: projectID, Status: TenantStatusClaimed})
+	}
 }
 
 func (f *fakeTenantStore) CreateTenant(_ context.Context, t *Tenant) (string, error) {
@@ -207,19 +213,6 @@ func (f *fakeTenantStore) GetTenantByPrimaryDomain(_ context.Context, projectID,
 		}
 	}
 	return nil, nil
-}
-
-func (f *fakeTenantStore) SetTenantStatus(_ context.Context, projectID, tenantID, status string) error {
-	if f.setErr != nil {
-		return f.setErr
-	}
-	t, ok := f.byID[projectID+"/"+tenantID]
-	if !ok || t.Status == status {
-		return nil
-	}
-	t.Status = status
-	f.writes++
-	return nil
 }
 
 // ClaimLatentTenant mirrors the postgres store: only a latent tenant moves.
@@ -496,8 +489,10 @@ func newDomainFixture() *domainFixture {
 	return &domainFixture{svc: svc, domains: d, tenants: t, members: m, resolver: r}
 }
 
-// seedAdmin makes userID an active owner of (project, tenant).
+// seedAdmin makes userID an active owner of (project, tenant), a claimed
+// tenant unless the test put it in another status.
 func (f *domainFixture) seedAdmin(projectID, tenantID, userID string) {
+	f.tenants.ensure(projectID, tenantID)
 	_, _ = f.members.UpsertMembership(context.Background(), &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  tenantID,
@@ -1027,7 +1022,7 @@ func TestVerifyDomain_SuspensionDuringTheCheckStands(t *testing.T) {
 	f := newDomainFixture()
 	id := f.publishedClaim(t, TenantStatusLatent)
 	f.resolver.onLookup = func() {
-		require.NoError(t, f.tenants.SetTenantStatus(context.Background(), testProject, testTenant, TenantStatusSuspended))
+		f.tenants.byID[testProject+"/"+testTenant].Status = TenantStatusSuspended
 	}
 
 	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
@@ -1127,4 +1122,20 @@ func TestDomainAttempts_PropagatesStoreError(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
 	require.Equal(t, DomainStatusPending, d.Status)
+}
+
+// A suspended tenant's admins can neither register nor list its domains,
+// and a refused registration spends no attempt.
+func TestDomainRPCs_SuspendedTenantRefusesItsAdmins(t *testing.T) {
+	f := newDomainFixture()
+	f.seedAdmin(testProject, testTenant, testCaller)
+	f.tenants.byID[testProject+"/"+testTenant].Status = TenantStatusSuspended
+	ctx := withProject(testProject)
+
+	_, err := f.svc.CreateDomain(ctx, testCaller, testTenant, testDomain, DomainVerificationDNSTXT)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	_, err = f.svc.ListTenantDomains(ctx, testCaller, testTenant)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	require.Empty(t, f.domains.attempts)
+	require.Zero(t, f.domains.writes)
 }

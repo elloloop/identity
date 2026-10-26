@@ -127,7 +127,8 @@ docker run ... \\
   <Code code={`{ "tenants": { "self_service": true } }`} lang="json" />
   <p>
     <code>CreateTenant(name)</code> then creates a claimed tenant and makes the
-    caller its <code>owner</code>, in one transaction. Each user may create at
+    caller its <code>owner</code>, in one transaction. A caller who has not
+    verified their email is refused with <code>FAILED_PRECONDITION</code>. Each user may create at
     most <code>GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER</code> tenants (default
     10) per Project in <code>GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS</code>
     (default one day); past that the call is refused with
@@ -155,8 +156,16 @@ docker run ... \\
     domain another tenant has verified is <code>ALREADY_EXISTS</code>, so a
     tenant admin can learn which domains are onboarded in the Project.
   </p>
+  <p>
+    A tenant is administered only while it is claimed or latent. Once an
+    operator suspends it, its owners and admins are refused with
+    <code>PERMISSION_DENIED</code> by every domain and membership call
+    (registering, verifying and listing domains; inviting; listing
+    invitations and members; removing a member), and an invitation to it can no longer
+    be accepted. Nothing they had set up is changed.
+  </p>
 
-  <h2>Choosing a tenant for a token</h2>
+  <h2 id="choosing-a-tenant-for-a-token">Choosing a tenant for a token</h2>
   <p>
     An access token's <code>tenant</code> claim is the deployment default
     unless the client asks for another on refresh. Selection is off by
@@ -165,11 +174,13 @@ docker run ... \\
     only:
   </p>
   <Code
-    code={`RefreshToken(refresh_token=..., tenant_id="tenant_01HZ...")
-  -> access token with "tenant": "tenant_01HZ..."  # an active member of a claimed tenant
-  -> PERMISSION_DENIED, detail NOT_A_MEMBER        # not a member, or not claimed; token unspent
-  -> UNAVAILABLE, detail UNAVAILABLE               # membership unreadable; token unspent
-  -> FAILED_PRECONDITION, detail NOT_ENABLED       # selection is off on this server; token unspent`}
+    code={`RefreshToken(refresh_token=..., tenant_id="3f9c2a7b5e1d4c8fa06b9e2d7c41f5a3")
+  -> access token with "tenant": "3f9c2a7b..."  # an active member the tenant's login policy admits
+  -> PERMISSION_DENIED, detail NOT_A_MEMBER     # not a member, or not claimed; token unspent
+  -> PERMISSION_DENIED, detail LOGIN_POLICY     # the tenant's login policy refuses this session; token unspent
+  -> UNAVAILABLE, detail UNAVAILABLE            # membership or policy unreadable; token unspent
+  -> FAILED_PRECONDITION, detail NOT_ENABLED    # selection is off on this server; token unspent
+  -> INVALID_ARGUMENT, no detail                # not a tenant id at all; token not read`}
     lang="bash"
   />
   <p>
@@ -181,23 +192,35 @@ docker run ... \\
     again without <code>tenant_id</code>. <code>RefreshToken</code> refuses an
     account over its own state with the same codes and no such detail, and
     that refusal may have spent the token, so retry only when the detail is
-    present. Each refresh chooses again; one without
+    present. A <code>tenant_id</code> longer than 64 characters, or holding
+    anything but ASCII letters, digits, <code>-</code> and <code>_</code>, is
+    <code>INVALID_ARGUMENT</code> before the refresh token is read. Each refresh chooses again; one without
     <code>tenant_id</code> returns to the default, and the client reads the
     tenant it got from the token's <code>tenant</code> claim. Identity's HTTP
     surface checks the tenant's status through a short cache, so suspending a
     tenant refuses its tokens there within
     <code>GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS</code> (default 30); ending
     a membership takes effect at the next
-    refresh, within the access-token lifetime. A service that verifies tokens
+    refresh, within the access-token lifetime. That holds in
+    <code>mode=session</code> too: removing a member ends none of their
+    sessions, so a token that already carries the tenant stays valid until it
+    expires. A service that verifies tokens
     itself, as a host serving identity over native gRPC does, must accept a
     non-default <code>tenant</code> before its clients select one, and sees a
     suspension only when the token expires unless it checks the tenant too.
   </p>
   <p>
-    The claim asserts membership only. <code>role</code> stays the account's
-    role and is never a role in the chosen tenant (read that from
-    <code>ListMyTenants</code>), and choosing a tenant does not apply its login
-    policy, which applies at sign-in through a verified domain.
+    The claim asserts membership, and that the tenant's login policy admitted
+    the session when the token was issued. <code>role</code> stays the
+    account's role and is never a role in the chosen tenant (read that from
+    <code>ListMyTenants</code>). A policy that limits how its users sign in
+    (SSO required, 2FA required, or a list of allowed methods) admits only a
+    session it governed at sign-in, one whose account's email is on a domain
+    the tenant has verified. A session does not record how it signed in, so a
+    member from another domain is refused with <code>LOGIN_POLICY</code>
+    even if they did sign in through the tenant's SSO; the tenant can invite
+    them on its own domain instead. The policy's session timeouts apply to
+    every selection, and a session past them is refused the same way.
   </p>
 
   <h2>Invitations</h2>
@@ -219,7 +242,9 @@ docker run ... \\
     HTTP surface only, it gets HTTP 429 with a <code>Retry-After</code>
     header, which Connect clients surface as <code>UNAVAILABLE</code>. The email names an operator's or a domain
     tenant, but never a self-service tenant, whose name its creator typed.
-    Accepting an invitation never lowers a role, so it cannot demote an owner.
+    Accepting an invitation needs a verified email at the invited address
+    (<code>FAILED_PRECONDITION</code> until then; the invitation stays open),
+    and never lowers a role, so it cannot demote an owner.
   </p>
 
   <p>

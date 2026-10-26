@@ -233,9 +233,11 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 // Email-match policy: a leaked token must not let the wrong account join. The
 // caller is looked up and their email compared to the invitation email, both
 // canonicalized as sign-in canonicalizes an address (emailaddr.Canonicalize); a
-// mismatch is PermissionDenied. An expired invitation is marked expired and
-// rejected; an unknown/revoked/already-accepted token is
-// rejected without mutation.
+// mismatch is PermissionDenied, and an unverified email is
+// ErrEmailVerificationRequired. A suspended tenant admits nobody
+// (requireGovernableTenant); the invitation stays pending through either. An
+// expired invitation is marked expired and rejected; an
+// unknown/revoked/already-accepted token is rejected without mutation.
 func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID, rawToken string) (*TenantMembership, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -283,6 +285,14 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	}
 	if !emailaddr.SameMailbox(caller.Email, inv.Email) {
 		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
+	}
+	// Holding the token proves nothing about the address: without a mailer
+	// the inviter is handed it. The invitation stays pending meanwhile.
+	if !caller.EmailVerified {
+		return nil, fmt.Errorf("%w: verify your email before accepting an invitation", ErrEmailVerificationRequired)
+	}
+	if err := requireGovernableTenant(ctx, s.tenants, projectID, inv.TenantID); err != nil {
+		return nil, err
 	}
 
 	m, err := s.memberships.GrantMembership(ctx, &TenantMembership{
@@ -512,18 +522,47 @@ func (s *MembershipService) requireProject(ctx context.Context) (string, error) 
 	return "", fmt.Errorf("%w: no project in request scope", ErrPermissionDenied)
 }
 
-// requireTenantAdmin returns the caller's membership when it is an active
-// owner/admin of the tenant, or ErrPermissionDenied otherwise. It mirrors
-// DomainService.requireTenantAdmin (same isAdminRole rule).
+// requireTenantAdmin is authorizeTenantAdmin over this service's stores.
 func (s *MembershipService) requireTenantAdmin(ctx context.Context, projectID, tenantID, callerID string) (*TenantMembership, error) {
-	m, err := s.memberships.GetMembership(ctx, projectID, tenantID, callerID)
+	return authorizeTenantAdmin(ctx, s.memberships, s.tenants, projectID, tenantID, callerID)
+}
+
+// authorizeTenantAdmin is the rule every tenant-admin RPC of both the
+// membership and the domain service applies: it returns the caller's
+// membership when that is an active owner/admin one and the tenant may be
+// governed (requireGovernableTenant), and refuses with ErrPermissionDenied
+// otherwise. Only an admin learns that a tenant is suspended.
+func authorizeTenantAdmin(ctx context.Context, memberships MembershipStore, tenants TenantStore, projectID, tenantID, callerID string) (*TenantMembership, error) {
+	m, err := memberships.GetMembership(ctx, projectID, tenantID, callerID)
 	if err != nil {
 		return nil, err
 	}
 	if m == nil || m.Status != MembershipStatusActive || !isAdminRole(m.Role) {
 		return nil, ErrPermissionDenied
 	}
+	if err := requireGovernableTenant(ctx, tenants, projectID, tenantID); err != nil {
+		return nil, err
+	}
 	return m, nil
+}
+
+// requireGovernableTenant refuses, with ErrPermissionDenied, a tenant that is
+// neither claimed nor latent. A suspended tenant is stopped: its admins may
+// not invite, list or remove members, or register, list or verify domains,
+// and no invitation to it may be accepted, until an operator sets it back.
+func requireGovernableTenant(ctx context.Context, tenants TenantStore, projectID, tenantID string) error {
+	status, err := tenants.GetTenantStatus(ctx, projectID, tenantID)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case TenantStatusClaimed, TenantStatusLatent:
+		return nil
+	case TenantStatusSuspended:
+		return fmt.Errorf("%w: the tenant is suspended", ErrPermissionDenied)
+	default:
+		return ErrPermissionDenied
+	}
 }
 
 // normalizeInvitationEmail canonicalizes an invitation email as sign-up

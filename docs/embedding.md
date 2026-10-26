@@ -133,7 +133,8 @@ metadata. Two rules it must follow, both of them load-bearing:
 2. **Strip the identity metadata a client sent.** The bridge copies incoming
    metadata verbatim, and `AppendToIncomingContext` puts your value *after*
    any the client supplied — so a client-set `x-authenticated-user-id` would
-   win. Delete the identity keys before appending your own.
+   win. Delete every `x-authenticated-` key before appending your own,
+   including any a later identity release starts reading.
 
 `MergeAccounts` also reads `x-authenticated-auth-time`, the token's
 `auth_time` claim (epoch seconds, present only on a token a sign-in
@@ -151,10 +152,20 @@ instead carry a tenant its subject is an active member of, chosen on
 `RefreshToken`, so pass `""` as the expected tenant before clients select one.
 The sample below takes the expected tenant as `tenant`.
 Identity's HTTP chain also refuses a chosen tenant once it is suspended;
-nothing does that on this path, and identity exports no helper for it yet, so
-a suspended tenant's tokens stay usable here until they expire (at most
-`GATEWAY_JWT_EXPIRY_SECONDS`). Keep that lifetime short if that window
-matters to you.
+nothing does that on this path, and identity exports no helper for it yet.
+So when a token carries a tenant other than the deployment default, check
+that tenant yourself before handing the call on: accept it only while
+
+```sql
+SELECT status FROM tenants WHERE project_id = $1 AND id = $2
+```
+
+returns `claimed`, for the token's project and `tenant` claim. Cache the
+answer briefly, as identity's HTTP chain does
+(`GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS`, default 30), and refuse the call
+when the status cannot be read. A host that skips the check leaves a
+suspended tenant's tokens usable here until they expire (at most
+`GATEWAY_JWT_EXPIRY_SECONDS`), so it should keep that lifetime short.
 
 ```go
 // tenant is the expected tenant claim: GATEWAY_DEFAULT_TENANT_ID while tenant
@@ -163,13 +174,13 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
     return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
         md, _ := metadata.FromIncomingContext(ctx)
         md = md.Copy()
-        // Never trust these from the wire — identity's handlers read them
-        // as the verified caller.
-        md.Delete("x-authenticated-user-id")
-        md.Delete("x-authenticated-tenant")
-        md.Delete("x-authenticated-project")
-        md.Delete("x-authenticated-session-id")
-        md.Delete("x-authenticated-auth-time")
+        // Never trust these from the wire — identity's handlers read every
+        // x-authenticated-* key as the verified caller.
+        for k := range md {
+            if strings.HasPrefix(k, "x-authenticated-") {
+                delete(md, k)
+            }
+        }
         if toks := md.Get("authorization"); len(toks) > 0 {
             // VerifyAccessToken rejects a purpose-bearing ticket for us.
             claims, err := jwt.VerifyAccessToken(

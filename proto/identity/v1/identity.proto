@@ -704,15 +704,20 @@ message GetCurrentUserResponse {
 message RefreshTokenRequest {
   string refresh_token = 1;
   // tenant_id, when set, asks for an access token whose `tenant` claim is
-  // this tenant instead of the deployment's default. The caller must be an
-  // active member of a claimed tenant in the session's project; a member
-  // only through their email's domain must have verified that email, and
-  // it must be on a domain the tenant has verified. Otherwise the call is
-  // PERMISSION_DENIED. It is FAILED_PRECONDITION when the server has tenant
-  // selection off (GATEWAY_TENANT_SELECTION_ENABLED, off by default, and
-  // never on the memory or SQLite drivers), and UNAVAILABLE when the
-  // membership could not be read. Each of these refusals carries a
-  // TenantSelectionRefusedDetails error detail: no token is issued, the
+  // this tenant instead of the deployment's default. It is at most 64 ASCII
+  // letters, digits, '-' or '_'; any other value is INVALID_ARGUMENT,
+  // refused before the refresh token is read, which is not consumed. The
+  // caller must be an active member of a claimed tenant in the session's
+  // project; a member only through their email's domain must have verified
+  // that email, and it must be on a domain the tenant has verified.
+  // Otherwise the call is PERMISSION_DENIED with reason NOT_A_MEMBER. The
+  // tenant's login policy must admit the session too, or the call is
+  // PERMISSION_DENIED with reason LOGIN_POLICY. It is FAILED_PRECONDITION
+  // when the server has tenant selection off
+  // (GATEWAY_TENANT_SELECTION_ENABLED, off by default, and never on the
+  // memory or SQLite drivers), and UNAVAILABLE when the membership or the
+  // tenant's login policy could not be read. Each of these refusals carries
+  // a TenantSelectionRefusedDetails error detail: no token is issued, the
   // refresh token is NOT consumed, and the client may retry with it,
   // without tenant_id or once the reason is gone. An error without that
   // detail is not a selection refusal and may have consumed the token: an
@@ -725,8 +730,9 @@ message RefreshTokenRequest {
   // remembered: every refresh names the tenant it wants, and a client reads
   // the tenant it got from the access token's `tenant` claim. A membership
   // that ends stops the next refresh, so an access token outlives it by at
-  // most its own lifetime; a tenant that is suspended stops its tokens
-  // within GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
+  // most its own lifetime, in mode=session too: removing a member ends none
+  // of their sessions. A tenant that is suspended stops its tokens on
+  // identity's HTTP surface within GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
   string tenant_id = 2;
 }
 
@@ -757,9 +763,17 @@ enum TenantSelectionRefusal {
   // unverified or not on a domain the tenant has verified. The refusal does
   // not say which. The code is PERMISSION_DENIED.
   TENANT_SELECTION_REFUSAL_NOT_A_MEMBER = 2;
-  // The membership could not be read. The code is UNAVAILABLE; retry, with
-  // or without tenant_id.
+  // The membership or the tenant's login policy could not be read. The code
+  // is UNAVAILABLE; retry, with or without tenant_id.
   TENANT_SELECTION_REFUSAL_UNAVAILABLE = 3;
+  // The tenant's login policy does not admit the session. A session does
+  // not record how it signed in, so a tenant whose policy restricts sign-in
+  // (requires SSO or two-factor, or limits the methods) admits only a
+  // session whose account email is on a domain the tenant has verified:
+  // the sign-ins that policy governed. A member on any other domain is
+  // refused, and so is a session past the policy's idle or absolute
+  // timeout. The code is PERMISSION_DENIED; retry without tenant_id.
+  TENANT_SELECTION_REFUSAL_LOGIN_POLICY = 4;
 }
 
 message LogoutRequest {
@@ -3280,46 +3294,47 @@ service IdentityService {
   rpc RemoveGroupMember(RemoveGroupMemberRequest) returns (RemoveGroupMemberResponse);
   rpc ListGroupMembers(ListGroupMembersRequest) returns (ListGroupMembersResponse);
 
-  // Tenant domains (redesign). Authenticated, project-scoped, and gated
-  // on the caller being an owner/admin member of the target tenant — with
-  // one exception: VerifyDomain on a still-latent tenant that has no
-  // members yet is open, so the first verifier becomes its owner.
-  // CreateDomain and VerifyDomain together are RESOURCE_EXHAUSTED past the
-  // per-tenant attempt cap in its window
-  // (GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT). They also share a
+  // Tenant domains (redesign). Authenticated, project-scoped, and gated on
+  // the caller being an owner/admin member of the target tenant — with one
+  // exception: VerifyDomain on a still-latent tenant that has no members yet
+  // is open, so the first verifier becomes its owner. Every one is
+  // PERMISSION_DENIED for a suspended tenant. CreateDomain and VerifyDomain
+  // together are RESOURCE_EXHAUSTED past the per-tenant attempt cap in its
+  // window (GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT). They also share a
   // per-client-IP budget (GATEWAY_RATE_LIMIT_DOMAIN_PER_IP per
-  // GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it
-  // the call is refused before the RPC runs with HTTP status 429 and a
+  // GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it the
+  // call is refused before the RPC runs with HTTP status 429 and a
   // Retry-After header of the window in seconds, which Connect clients
   // surface as UNAVAILABLE; the native gRPC registration does not apply it.
   // CreateDomain is ALREADY_EXISTS when the tenant already registered the
   // name or another tenant has verified it, which tells a tenant admin that
   // the domain is onboarded elsewhere in the project; VerifyDomain is
   // ALREADY_EXISTS when another tenant has verified it, PERMISSION_DENIED
-  // when the TXT challenge is not published or the tenant is suspended,
-  // and UNIMPLEMENTED for the email method. A failed check marks a pending
-  // claim failed; it never un-verifies a verified one. Available only on
-  // the postgres control-plane driver; the memory and SQLite drivers
-  // return Unimplemented.
+  // when the TXT challenge is not published, and UNIMPLEMENTED for the email
+  // method. A failed check marks a pending claim failed; it never un-verifies
+  // a verified one. Available only on the postgres control-plane driver; the
+  // memory and SQLite drivers return Unimplemented.
   rpc CreateDomain(CreateDomainRequest) returns (CreateDomainResponse);
   rpc VerifyDomain(VerifyDomainRequest) returns (VerifyDomainResponse);
   rpc ListTenantDomains(ListTenantDomainsRequest) returns (ListTenantDomainsResponse);
 
-  // Tenant membership (redesign). Authenticated, project-scoped, and —
-  // except for AcceptTenantInvitation — gated on the caller being an
-  // owner/admin member of the target tenant. AcceptTenantInvitation is the
-  // redeemer's own action: any authenticated caller may redeem a token, but
-  // only for an invitation addressed to their own account email (compared in
-  // the canonical form sign-in uses, so a "+tag" spelling of it matches;
-  // PERMISSION_DENIED otherwise). Accepting never lowers a role the caller
-  // already holds in the tenant: an owner who accepts a member invitation
-  // stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED past the
-  // tenant's cap in the window, the inviter's cap across every tenant, the
-  // recipient address's cap across the project's tenants, or the
+  // Tenant membership (redesign). Authenticated, project-scoped, and — except
+  // for AcceptTenantInvitation — gated on the caller being an owner/admin
+  // member of the target tenant. AcceptTenantInvitation is the redeemer's own
+  // action: any authenticated caller may redeem a token, but only for an
+  // invitation addressed to their own account email (compared in the
+  // canonical form sign-in uses, so a "+tag" spelling of it matches;
+  // PERMISSION_DENIED otherwise), and only once they have verified that email
+  // (FAILED_PRECONDITION before). Every one, accepting included, is
+  // PERMISSION_DENIED for a suspended tenant. Accepting never lowers a role
+  // the caller already holds in the tenant: an owner who accepts a member
+  // invitation stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED
+  // past the tenant's cap in the window, the inviter's cap across every
+  // tenant, the recipient address's cap across the project's tenants, or the
   // per-recipient resend cooldown. It also has a per-client-IP budget
   // (GATEWAY_RATE_LIMIT_INVITATION_PER_IP per
-  // GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it
-  // the call is refused before the RPC runs with HTTP status 429 and a
+  // GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it the
+  // call is refused before the RPC runs with HTTP status 429 and a
   // Retry-After header of the window in seconds, which Connect clients
   // surface as UNAVAILABLE; the native gRPC registration does not apply it.
   // Available only on the postgres control-plane driver; the memory and
@@ -3331,25 +3346,25 @@ service IdentityService {
   rpc RemoveTenantMember(RemoveTenantMemberRequest) returns (RemoveTenantMemberResponse);
 
   // Self-service tenants. Authenticated and project-scoped. CreateTenant
-  // makes a claimed tenant with the caller as its owner, in one
-  // transaction; it is FAILED_PRECONDITION unless the project's config
-  // sets tenants.self_service, PERMISSION_DENIED for an anonymous, agent,
-  // merged or inactive account, INVALID_ARGUMENT for a name that is blank
-  // after trimming, longer than 100 characters, not valid UTF-8 or
-  // carrying control or format characters, and RESOURCE_EXHAUSTED once the
-  // caller has created the per-user number of tenants allowed in the
-  // window. It also has a per-client-IP budget of its own, the size of
-  // GATEWAY_RATE_LIMIT_SIGNUP_PER_IP but not shared with signup, on the
-  // HTTP handler only: over it the call gets HTTP status 429 and a
-  // Retry-After header, which Connect clients surface as UNAVAILABLE; the
-  // native gRPC registration does not apply it. It carries no idempotency
-  // key: a retry after a lost response creates a second tenant, so
-  // reconcile with ListMyTenants. ListMyTenants returns the claimed tenants
-  // the caller may act in within this project (see ListMyTenantsResponse).
+  // makes a claimed tenant with the caller as its owner, in one transaction;
+  // it is FAILED_PRECONDITION unless the project's config sets
+  // tenants.self_service, and until the caller has verified their email,
+  // PERMISSION_DENIED for an anonymous, agent, merged or inactive account,
+  // INVALID_ARGUMENT for a name that is blank after trimming, longer than 100
+  // characters, not valid UTF-8 or carrying control or format characters, and
+  // RESOURCE_EXHAUSTED once the caller has created the per-user number of
+  // tenants allowed in the window. It also has a per-client-IP budget of its
+  // own, the size of GATEWAY_RATE_LIMIT_SIGNUP_PER_IP but not shared with
+  // signup, on the HTTP handler only: over it the call gets HTTP status 429
+  // and a Retry-After header, which Connect clients surface as UNAVAILABLE;
+  // the native gRPC registration does not apply it. It carries no idempotency
+  // key: a retry after a lost response creates a second tenant, so reconcile
+  // with ListMyTenants. ListMyTenants returns the claimed tenants the caller
+  // may act in within this project (see ListMyTenantsResponse).
   // RefreshToken's tenant_id selects one of them for the access token when
-  // the server has tenant selection on. Available only on the postgres
-  // control-plane driver; the memory and SQLite drivers return
-  // Unimplemented.
+  // the server has tenant selection on and the tenant's login policy admits
+  // the session. Available only on the postgres control-plane driver; the
+  // memory and SQLite drivers return Unimplemented.
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse);
   rpc ListMyTenants(ListMyTenantsRequest) returns (ListMyTenantsResponse);
 

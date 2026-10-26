@@ -197,9 +197,6 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID, domainID str
 	if err := s.authorizeVerify(ctx, projectID, t, callerID); err != nil {
 		return nil, err
 	}
-	if t.Status == TenantStatusSuspended {
-		return nil, fmt.Errorf("%w: the tenant is suspended", ErrPermissionDenied)
-	}
 
 	switch d.VerificationMethod {
 	case DomainVerificationDNSTXT:
@@ -277,6 +274,8 @@ func (s *DomainService) ListTenantDomains(ctx context.Context, callerID, tenantI
 // authorizeVerify enforces VerifyDomain's access rule: an owner/admin
 // member normally, but an open first-verify on a latent tenant that has no
 // members yet (the bootstrap case that makes the verifier its first owner).
+// A suspended tenant verifies nothing, since verifying would claim it and
+// lift the suspension: requireTenantAdmin refuses it, and it is not latent.
 func (s *DomainService) authorizeVerify(ctx context.Context, projectID string, t *Tenant, callerID string) error {
 	_, err := s.requireTenantAdmin(ctx, projectID, t.ID, callerID)
 	if err == nil {
@@ -286,7 +285,7 @@ func (s *DomainService) authorizeVerify(ctx context.Context, projectID string, t
 		return err
 	}
 	if t.Status != TenantStatusLatent {
-		return ErrPermissionDenied
+		return err
 	}
 	members, err := s.memberships.ListMembershipsForTenant(ctx, projectID, t.ID)
 	if err != nil {
@@ -317,17 +316,9 @@ func (s *DomainService) recordAttempt(ctx context.Context, projectID, tenantID s
 	return err
 }
 
-// requireTenantAdmin returns the caller's membership when it is an active
-// owner/admin of the tenant, or ErrPermissionDenied otherwise.
+// requireTenantAdmin is authorizeTenantAdmin over this service's stores.
 func (s *DomainService) requireTenantAdmin(ctx context.Context, projectID, tenantID, callerID string) (*TenantMembership, error) {
-	m, err := s.memberships.GetMembership(ctx, projectID, tenantID, callerID)
-	if err != nil {
-		return nil, err
-	}
-	if m == nil || m.Status != MembershipStatusActive || !isAdminRole(m.Role) {
-		return nil, ErrPermissionDenied
-	}
-	return m, nil
+	return authorizeTenantAdmin(ctx, s.memberships, s.tenants, projectID, tenantID, callerID)
 }
 
 // checkDNSTXT resolves the domain's TXT records and confirms the

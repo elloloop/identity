@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — self-service tenants and tenant selection on `RefreshToken` (migrations 0044, 0045, 0046, which rewrites `users`, and 0047; stop every earlier replica before migrating; `RefreshTokenRequest.tenant_id` behind `GATEWAY_TENANT_SELECTION_ENABLED`, off by default (additive); contested domain claims, a per-tenant TXT challenge, domain and invitation limits, agent sign-outs scoped to the users a change governs, domain memberships that need a verified email on a verified domain and end when the email leaves it, the product age gate checked before a refresh token is spent (behaviour changes); `MembershipStore`, `TenantStore`, `DomainStore`, `InvitationStore`, `UserDirectory`, `AuthService.RefreshToken` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
+## Next — self-service tenants and tenant selection on `RefreshToken` (migrations 0044, 0045, 0046, which rewrites `users`, and 0047; stop every earlier replica before migrating; `RefreshTokenRequest.tenant_id` behind `GATEWAY_TENANT_SELECTION_ENABLED`, off by default (additive); contested domain claims, a per-tenant TXT challenge, domain and invitation limits, agent sign-outs scoped to the users a change governs, domain memberships that need a verified email on a verified domain and end when the email leaves it, the product age gate checked before a refresh token is spent, a suspended tenant's admin calls refused, accepting an invitation only with a verified email (behaviour changes); `MembershipStore`, `TenantStore`, `DomainStore`, `InvitationStore`, `UserDirectory`, `AuthService.RefreshToken` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
 
 A signed-in person can now create a tenant they own, list the tenants they
 belong to, and get an access token for one of them. The rationale, and what
@@ -22,7 +22,8 @@ the `tenant` claim does and does not assert, is
   hostname. A request that reaches the default project by its own project
   key or auth hostname reads that project's `config_json`, so set
   `tenants.self_service` there too if clients reach it that way. Refusals:
-  no caller → `UNAUTHENTICATED`; the setting off → `FAILED_PRECONDITION`; a
+  no caller → `UNAUTHENTICATED`; the setting off, or a caller who has not
+  verified their email → `FAILED_PRECONDITION`; a
   name that is blank after trimming, longer than 100 characters, invalid
   UTF-8 or carrying control or format characters → `INVALID_ARGUMENT`; an
   anonymous, agent, merged or inactive account → `PERMISSION_DENIED`; over
@@ -52,10 +53,13 @@ the `tenant` claim does and does not assert, is
   When on, it is granted only to an active member of a claimed tenant in
   the session's project, and a member only through their email's domain
   must have verified that email and still be on a domain the tenant has
-  verified. Anything else is `PERMISSION_DENIED` (`UNAVAILABLE` when the
-  membership could not be read). Each of these refusals carries a
+  verified, and the tenant's login policy must admit the session (see What
+  the claim asserts). Anything else is `PERMISSION_DENIED` (`UNAVAILABLE`
+  when the membership or the policy could not be read; the message is
+  generic, and the store's error is logged as
+  `tenant_selection_lookup_failed`). Each of these refusals carries a
   `TenantSelectionRefusedDetails` error detail naming its reason
-  (`NOT_ENABLED`, `NOT_A_MEMBER` or `UNAVAILABLE`), issues no token and does
+  (`NOT_ENABLED`, `NOT_A_MEMBER`, `LOGIN_POLICY` or `UNAVAILABLE`), issues no token and does
   **not** consume the refresh token, so a client that finds the detail
   refreshes again without `tenant_id`. The code alone does not say which
   refusal it is: `RefreshToken` refuses an account over its own state (not
@@ -67,6 +71,10 @@ the `tenant` claim does and does not assert, is
   (`GATEWAY_DEFAULT_TENANT_ID`). The selection is not sticky: each refresh
   chooses again, and one without `tenant_id` returns to the default. A
   client reads the tenant it got from the access token's `tenant` claim.
+  A `tenant_id` longer than 64 characters, or holding anything but ASCII
+  letters, digits, `-` and `_`, is `INVALID_ARGUMENT`, with no detail,
+  before the refresh token is read. A server with selection on and
+  `GATEWAY_DEFAULT_TENANT_ID` empty refuses to start.
 - **The product age gate is checked before the refresh token is spent.**
   For an active account, `RefreshToken` now refuses a product the account is
   too young for (`PERMISSION_DENIED`, as before) before it consumes the
@@ -74,11 +82,18 @@ the `tenant` claim does and does not assert, is
   gains a minimum age mid-session no longer spends the account's token.
   The refusal carries no selection detail: refreshing again without
   `tenant_id` is refused the same way.
-- **What the claim asserts.** A selected `tenant` asserts membership only.
-  The `role` claim is still the account's role and is **never** a role in
-  that tenant; a service that needs the tenant role reads it from
-  `ListMyTenants`. Selecting a tenant does not apply its login policy, which
-  applies at sign-in through a verified domain.
+- **What the claim asserts.** A selected `tenant` asserts membership, and
+  that the tenant's login policy admitted the session when the token was
+  issued. The `role` claim is still the account's role and is **never** a
+  role in that tenant; a service that needs the tenant role reads it from
+  `ListMyTenants`. A policy that limits how its users sign in (SSO
+  required, 2FA required, or allowed methods) admits only a session it
+  governed at sign-in, one whose account's email is on a domain the tenant
+  has verified: a session does not record how it signed in, so a member
+  from another domain is refused with `LOGIN_POLICY` whatever method they
+  used. The policy's session timeouts apply to every selection, and a
+  session past them is refused the same way, logged as
+  `tenant_selection_refused_by_login_policy`.
 - **Revocation.** Identity's own HTTP middleware accepts a token whose
   `tenant` claim is the default or a claimed tenant of the token's project.
   It reads a selected tenant's status through an in-process cache, so
@@ -90,9 +105,11 @@ the `tenant` claim does and does not assert, is
   `identity_token_tenant_lookup_duration_seconds` times the reads, labelled
   `outcome` (`hit`, `miss`, `error`). Ending a membership takes
   effect at the next refresh, so a selected token outlives it by at most the
-  access-token lifetime (`GATEWAY_JWT_EXPIRY_SECONDS`). Over native gRPC the
-  host verifies tokens itself (see `docs/embedding.md`), so a suspension
-  takes effect there when the token expires unless the host checks.
+  access-token lifetime (`GATEWAY_JWT_EXPIRY_SECONDS`), in `mode=session`
+  too: removing a member ends none of their sessions. Over native gRPC the
+  host verifies tokens itself, so a suspension takes effect there when the
+  token expires unless the host checks the tenant's status as
+  `docs/embedding.md` describes.
 - **Accounts in other projects.** `CreateTenant` and
   `AcceptTenantInvitation` look the caller up in the request's project.
   `AcceptTenantInvitation` used to look in the default project, so a caller
@@ -197,8 +214,18 @@ The update revokes the agent grants and machines of the tenant's members and
 of the accounts on its verified domains. Its selected tokens are refused by
 identity's HTTP chain within the tenant-status cache TTL, and by a host that
 verifies tokens itself only when they expire. Its members' accounts and
-default-tenant tokens are not affected. Setting it back to `claimed` restores
-selection but revives no revoked grant.
+default-tenant tokens are not affected. Its owners and admins are refused
+(`PERMISSION_DENIED`) by every domain and membership RPC, and an invitation
+to it can no longer be accepted; its domains, members and pending
+invitations are kept. Setting it back to `claimed` restores selection and
+administration but revives no revoked grant.
+
+### Accepting an invitation needs a verified email (behaviour change)
+
+`AcceptTenantInvitation` now refuses a caller whose email is unverified with
+`FAILED_PRECONDITION`, after checking that it is the invited address. The
+invitation stays pending, so the invitee verifies their email and accepts
+again. `CreateTenant` asks the same of its caller.
 
 ### Invitation limits (behaviour change)
 
@@ -535,10 +562,12 @@ replica. In this order:
   `service.DomainAttempt`'s cap under a per-tenant lock.
   `service.MembershipStore` gains `GrantMembership`, which must never lower
   a role, and gives a kept membership whose source is `domain` the granted
-  source while leaving any other source as it is. `SetTenantStatus` and
+  source while leaving any other source as it is. `SetTenantStatus` is
+  removed in favour of `ClaimLatentTenant`: no store method moves a tenant to any
+  other status, and an operator suspends one in SQL (Suspending a tenant).
   `SetDomainStatus` should write nothing when the status is unchanged, and
-  `SetDomainStatus` must never move a verified domain to another status: a
-  domain stops being verified only by being removed. A store you supply
+  must never move a verified domain to another status: a domain stops being
+  verified only by being removed. A store you supply
   must be wired for both tenant switches, or `app.New` refuses to start
   with either on.
 - **Callers of the middleware constructors.** `middleware.AuthMiddleware`
