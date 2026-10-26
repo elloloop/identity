@@ -159,8 +159,9 @@ func authInterceptor(kp jwt.KeyProvider, audience string, requireAud bool) grpc.
         // Never trust these from the wire — identity's handlers read them
         // as the verified caller.
         md.Delete("x-authenticated-user-id")
-        md.Delete("x-authenticated-tenant-id")
-        md.Delete("x-authenticated-project-id")
+        md.Delete("x-authenticated-tenant")
+        md.Delete("x-authenticated-project")
+        md.Delete("x-authenticated-session-id")
         md.Delete("x-authenticated-auth-time")
         if toks := md.Get("authorization"); len(toks) > 0 {
             // VerifyAccessToken rejects a purpose-bearing ticket for us.

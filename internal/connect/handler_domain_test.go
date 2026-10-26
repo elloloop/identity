@@ -21,8 +21,9 @@ const authUserHeader = "X-Authenticated-User-Id"
 // ── Fakes implementing the exported governance store interfaces ─────────
 
 type connectDomainStore struct {
-	byID     map[string]*service.Domain
-	listResp []*service.Domain
+	byID       map[string]*service.Domain
+	listResp   []*service.Domain
+	attemptErr error
 }
 
 func newConnectDomainStore() *connectDomainStore {
@@ -40,8 +41,13 @@ func (s *connectDomainStore) GetDomain(_ context.Context, _, domainID string) (*
 	return s.byID[domainID], nil
 }
 
-func (s *connectDomainStore) GetDomainByName(_ context.Context, _, _ string) (*service.Domain, error) {
+func (s *connectDomainStore) GetVerifiedDomain(_ context.Context, _, _ string) (*service.Domain, error) {
 	return nil, nil
+}
+
+// RecordDomainAttempt refuses with attemptErr when set, else admits.
+func (s *connectDomainStore) RecordDomainAttempt(context.Context, service.DomainAttempt) error {
+	return s.attemptErr
 }
 
 func (s *connectDomainStore) SetDomainStatus(_ context.Context, _, domainID, status string, _ int64) error {
@@ -113,6 +119,13 @@ func (s *connectMembershipStore) UpsertMembership(_ context.Context, m *service.
 	cp := *m
 	s.upserted = &cp
 	return "mem-1", nil
+}
+
+func (s *connectMembershipStore) GrantMembership(_ context.Context, m *service.TenantMembership) (*service.TenantMembership, error) {
+	cp := *m
+	cp.ID = "mem-1"
+	s.upserted = &cp
+	return &cp, nil
 }
 
 func (s *connectMembershipStore) GetMembership(_ context.Context, _, _, _ string) (*service.TenantMembership, error) {

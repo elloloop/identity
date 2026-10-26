@@ -120,26 +120,47 @@ docker run ... \\
     <code>RESOURCE_EXHAUSTED</code>. With the setting off it is
     <code>FAILED_PRECONDITION</code>. A retried call can create a second
     tenant, so reconcile with <code>ListMyTenants</code>, which returns every
-    claimed tenant the caller is an active member of, with their role.
+    claimed tenant the caller is an active member of, with their role. A
+    membership that came only from the email's domain is listed once that
+    email is verified.
+  </p>
+  <p>
+    A tenant admin registers and verifies email domains with
+    <code>CreateDomain</code> and <code>VerifyDomain</code>. A tenant may make
+    <code>GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT</code> of them
+    together (default 100) in
+    <code>GATEWAY_TENANT_DOMAIN_ATTEMPTS_WINDOW_SECONDS</code> (default one
+    day), and both share a per-IP budget
+    (<code>GATEWAY_RATE_LIMIT_DOMAIN_PER_IP</code>, default 20 per window).
+    A registered domain captures no signups until it is verified, and a
+    failed re-check never un-verifies it.
   </p>
 
   <h2>Choosing a tenant for a token</h2>
   <p>
     An access token's <code>tenant</code> claim is the deployment default
-    unless the client asks for another on refresh:
+    unless the client asks for another on refresh. Selection is off by
+    default; a server turns it on with
+    <code>GATEWAY_TENANT_SELECTION_ENABLED</code>, on the Postgres driver
+    only:
   </p>
   <Code
     code={`RefreshToken(refresh_token=..., tenant_id="tenant_01HZ...")
-  -> access token with "tenant": "tenant_01HZ..."   # an active member of a claimed tenant
-  -> PERMISSION_DENIED, refresh token still valid   # anything else`}
+  -> access token with "tenant": "tenant_01HZ..."    # an active member of a claimed tenant
+  -> PERMISSION_DENIED, refresh token still valid    # not a member, or not claimed
+  -> FAILED_PRECONDITION, refresh token still valid  # selection is off on this server`}
     lang="bash"
   />
   <p>
+    A member only through their email's domain must have verified that email.
     A refused selection consumes nothing, so the client can refresh again
     without <code>tenant_id</code>. Each refresh chooses again; one without
-    <code>tenant_id</code> returns to the default. Identity's HTTP surface
-    checks the tenant on every request, so suspending a tenant refuses its
-    tokens there at once; ending a membership takes effect at the next
+    <code>tenant_id</code> returns to the default, and the client reads the
+    tenant it got from the token's <code>tenant</code> claim. Identity's HTTP
+    surface checks the tenant's status through a short cache, so suspending a
+    tenant refuses its tokens there within
+    <code>GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS</code> (default 30); ending
+    a membership takes effect at the next
     refresh, within the access-token lifetime. A service that verifies tokens
     itself, as a host serving identity over native gRPC does, must accept a
     non-default <code>tenant</code> before its clients select one, and sees a
@@ -160,11 +181,16 @@ docker run ... \\
     (<code>GATEWAY_RATE_LIMIT_INVITATION_PER_IP</code>, default 20 per window),
     per tenant (<code>GATEWAY_TENANT_INVITATION_MAX_PER_TENANT</code>, default
     100, in <code>GATEWAY_TENANT_INVITATION_WINDOW_SECONDS</code>, default one
-    day) and per recipient
+    day), per inviter across their tenants
+    (<code>GATEWAY_TENANT_INVITATION_MAX_PER_INVITER</code>, default 100), per
+    recipient across the Project's tenants
+    (<code>GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT</code>, default 10), and
+    per tenant and recipient by a resend cooldown
     (<code>GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS</code>, default
-    300). Past the per-tenant or per-recipient limit the call is
+    300). Past any of these but the per-IP one the call is
     <code>RESOURCE_EXHAUSTED</code>. The email names an operator's or a domain
     tenant, but never a self-service tenant, whose name its creator typed.
+    Accepting an invitation never lowers a role, so it cannot demote an owner.
   </p>
 
   <p>

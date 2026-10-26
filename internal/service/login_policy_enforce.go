@@ -208,7 +208,10 @@ func (g *LoginGovernance) resolvePolicy(ctx context.Context, projectID string, l
 		return nil, nil, nil
 	}
 
-	domain, err := g.Domains.GetDomainByName(ctx, projectID, domainName)
+	// Only a verified domain governs sign-in, so only the verified row is
+	// read: a claim nobody has proven cannot apply a policy, and the read
+	// costs one index probe however many claims the name has.
+	domain, err := g.Domains.GetVerifiedDomain(ctx, projectID, domainName)
 	if err != nil {
 		logger.Warn("login_policy_domain_lookup_failed",
 			zap.String("project_id", projectID), zap.Error(err))

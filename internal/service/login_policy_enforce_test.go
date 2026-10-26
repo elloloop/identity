@@ -24,11 +24,16 @@ type lpDomainStore struct {
 	err    error
 }
 
-func (f *lpDomainStore) GetDomainByName(_ context.Context, projectID, domain string) (*Domain, error) {
+// GetVerifiedDomain mirrors the postgres store: only a verified row answers.
+func (f *lpDomainStore) GetVerifiedDomain(_ context.Context, projectID, domain string) (*Domain, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return f.byName[projectID+"|"+domain], nil
+	d := f.byName[projectID+"|"+domain]
+	if d == nil || d.Status != DomainStatusVerified {
+		return nil, nil
+	}
+	return d, nil
 }
 
 // The remaining DomainStore methods are unused by enforcement; they satisfy
@@ -46,6 +51,8 @@ func (f *lpDomainStore) SetDomainStatus(context.Context, string, string, string,
 func (f *lpDomainStore) ListDomainsByTenant(context.Context, string, string) ([]*Domain, error) {
 	return nil, nil
 }
+
+func (f *lpDomainStore) RecordDomainAttempt(context.Context, DomainAttempt) error { return nil }
 
 type lpTenantStore struct {
 	byID map[string]*Tenant // key: projectID + "|" + tenantID

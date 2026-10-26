@@ -129,7 +129,7 @@ The redesign keeps three "tenant-like" concepts strictly distinct
 |---|---|---|---|
 | **Storage scope** | physical | The physical shard the data lives on (a tenant-shard-db tenant, or a Postgres scope). Equals `GATEWAY_DEFAULT_TENANT_ID` for the default project. | 1 per Project |
 | **Project** | control plane | A *logical* control-plane isolation entity (a Firebase project). Maps onto exactly one storage scope, but `Project.id != storage_scope_id`. | 1 per storage scope |
-| **Tenant** | data plane | A *logical* company entity, auto-formed per verified non-public email domain. | many per Project |
+| **Tenant** | data plane | A *logical* company or team entity: auto-formed per non-public email domain (claimed once a tenant verifies it), created by an operator, or created by a signed-in user where the project allows it (ADR-0018). | many per Project |
 
 The **Project is the isolation shard** (ADR-0002 inverted the old
 "tenant = shard" model). Every data-plane row carries `project_id` as the
@@ -160,7 +160,9 @@ the request context; services read it to pick the per-project repository.
 
 Once the project is fixed, the **Tenant** is the user's company entity
 inside that project, derived from their verified email domain or from a
-materialised `tenant_memberships` row. A user with a `gmail.com`/`outlook.com`
+materialised `tenant_memberships` row. With tenant selection on, a token's
+`tenant` claim may instead name a tenant the user chose on `RefreshToken`
+(ADR-0018). A user with a `gmail.com`/`outlook.com`
 address forms no tenant — public providers are blocklisted at signup,
 domain-verify, and derived-membership (`GATEWAY_PUBLIC_EMAIL_DOMAINS`
 extends the built-in set).
@@ -185,6 +187,8 @@ GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane a
 GATEWAY_PUBLIC_EMAIL_DOMAINS        = <csv>      # extra public domains that never auto-form a tenant
 GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS = <int>  # default 30; in-process cache for credential/Host→project resolution; 0 disables
 GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES = <int>  # default 10000; LRU bound on cached resolution keys
+GATEWAY_TENANT_SELECTION_ENABLED    = <bool>     # default false; RefreshToken may choose the token's tenant (postgres only)
+GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS = <int>  # default 30, at most 300; cache for a selected tenant's status; 0 reads it per request
 ```
 
 Per-request project resolution (credential-key→project and Host→project)
@@ -195,6 +199,15 @@ resolution paths. The TTL is deliberately short so a suspended project or
 revoked credential is never served stale beyond it; there is no explicit
 invalidation. The cache caches misses as well as hits (so a flood of unknown
 keys cannot bypass it) but never caches transient store errors.
+
+A token whose `tenant` was chosen on `RefreshToken` makes the auth middleware
+read that tenant's status, to refuse a suspended one. A second in-process
+cache, keyed by project and tenant and bounded at 10000 entries, fronts that
+read with its own TTL (`GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS`), so a
+suspension takes effect within it. It never caches an error: a read that
+fails answers the request 503. The histogram
+`identity_token_tenant_lookup_duration_seconds` times the reads, labelled
+`outcome` (`hit`, `miss`, `error`).
 
 On boot, the postgres driver seeds the default `Project` (mapped onto the
 `DefaultTenantID` storage scope) and any `DefaultProjectAuthDomains`

@@ -2,11 +2,12 @@
 
 ## Status
 
-Accepted (2026-10-26). Off by default: a project turns it on with
-`tenants.self_service` in its `config_json`, and the default project with
-`GATEWAY_SELF_SERVICE_TENANTS_ENABLED`.
+Accepted (2026-10-26). Off by default: a project turns self-service tenants
+on with `tenants.self_service` in its `config_json`, and the default project
+with `GATEWAY_SELF_SERVICE_TENANTS_ENABLED`; a server turns tenant selection
+on with `GATEWAY_TENANT_SELECTION_ENABLED`.
 
-**Amends** ADR-0001, ADR-0002 and ADR-0004, as listed under
+**Amends** ADR-0001, ADR-0002, ADR-0004 and ADR-0016, as listed under
 [What this amends](#what-this-amends). It supersedes none of them.
 
 ## Context
@@ -40,13 +41,23 @@ token that named any one of them.
    tenant in the session's project; the resulting access token carries that
    tenant in its existing `tenant` claim. A refused choice issues nothing and
    leaves the refresh token unspent. Omitting it keeps the default. The
-   choice is made again on every refresh.
+   choice is made again on every refresh. A membership that came only from
+   the email's domain counts once that email is verified: an unverified
+   address proves nothing about the domain. Selection is a server switch,
+   off by default and available only on the Postgres driver; with it off a
+   `tenant_id` is `FAILED_PRECONDITION`, so a client can tell a server that
+   does not select from a tenant it may not have.
 
 3. **The claim is re-checked where identity can.** Identity's HTTP middleware
    accepts a token whose `tenant` is the default or a claimed tenant of the
-   token's project, reading the tenant's status on every request, so a
-   suspended tenant's tokens are refused at once. A membership that ends
-   takes effect at the next refresh, within one access-token lifetime.
+   token's project. It reads a selected tenant's status through an
+   in-process cache with a short TTL (default 30 seconds, at most 300; `0`
+   reads on every request), so a suspended tenant's tokens are refused
+   within it. Without the cache every request carrying a selected tenant
+   would cost a database read. A failed read is never cached and refuses the
+   request as unavailable rather than serving it as signed out; a histogram
+   times the reads by outcome. A membership that ends takes effect at the
+   next refresh, within one access-token lifetime.
 
 4. **A registered domain captures nothing until it is verified.** Once anyone
    can be a tenant admin, registering a domain must not be a way to collect
@@ -60,8 +71,41 @@ token that named any one of them.
 5. **Invitations are bounded.** Every invitation is an email from the
    deployment's sender to an address the inviter chose, and self-service
    tenants make anyone an inviter. Invitations are limited per client IP,
-   per tenant per window, and per recipient by a resend cooldown. The name of
-   a self-service tenant, which its creator typed, never appears in the email.
+   per tenant per window, per inviter across all their tenants (so creating
+   tenants sends no more email), per recipient across all of a project's
+   tenants, and per tenant and recipient by a resend cooldown. The name of a
+   self-service tenant, which its creator typed, never appears in the email.
+   Accepting an invitation never lowers a role, so an invitation cannot
+   demote a tenant's last owner.
+
+6. **Domain registrations and verifications are bounded.** Each
+   `VerifyDomain` makes identity look up a DNS name the tenant chose, and
+   each `CreateDomain` answers whether another tenant verified a name. A
+   tenant may make a bounded number of both together per window, spent only
+   by a caller who administers it, and the two share a per-IP budget. A
+   failed re-check leaves a verified domain verified: a lapsed or flapping
+   record must not drop its login policy and sign its users' agents out; an
+   operator removes a domain its tenant no longer holds. A suspended tenant
+   verifies nothing, because verifying claims the tenant and would lift the
+   suspension.
+
+7. **A tenant or domain change signs out only the agents it governs.**
+   Delegated agent grants and agent machines are revoked when the
+   governance behind them changes (ADR-0016). Until now every write to a
+   tenant's status or primary domain, or to a domain row, revoked every
+   agent grant and machine in the project. Once anyone can own a tenant,
+   that let any tenant owner sign out the whole project's agents, by calling
+   `VerifyDomain` on a claim that fails. Now:
+   - only a change that moves governance revokes: a domain row that is, or
+     becomes, verified changing status, tenant or name, or one inserted
+     verified or deleted while verified; a tenant changing status or primary
+     domain. Writes that change nothing are not made;
+   - it revokes only the governed users' agents: the members of the tenants
+     involved, in any membership status, and the accounts whose email is on
+     the domains involved. A pending agent request with no owner yet is not
+     revoked by these changes;
+   - login-policy and project changes are operator actions and still revoke
+     project-wide.
 
 ### Why this is a tenant, not a workspace
 
@@ -112,9 +156,28 @@ project. It does not assert:
   to everyone signing in with it.
 - **That the membership still exists.** It is re-checked at the next refresh,
   so the claim can outlive a membership by one access-token lifetime. Tenant
-  suspension is re-checked per request by identity's HTTP chain; a host that
-  verifies tokens itself, including over native gRPC, sees a suspension only
-  when the token expires unless it checks the tenant's status too.
+  suspension is re-checked by identity's HTTP chain within the tenant-status
+  cache TTL; a host that verifies tokens itself, including over native gRPC,
+  sees a suspension only when the token expires unless it checks the
+  tenant's status too.
+
+### Suspension has no RPC yet
+
+Suspension is the lever this design relies on to stop a tenant, and there is
+no RPC for it. An operator suspends a tenant in SQL (the `tenants` table has
+no row-level security):
+
+```sql
+UPDATE tenants
+   SET status = 'suspended',
+       updated_at_ms = (extract(epoch from clock_timestamp()) * 1000)::bigint
+ WHERE project_id = '<project>' AND id = '<tenant>';
+```
+
+That revokes its members' agent grants and machines (decision 7) and ends
+its selected tokens within the cache TTL. It is not audited and needs
+database access. An operator RPC that suspends and audits is open work; until
+it lands, suspension is a database-operator action.
 
 ## What this amends
 
@@ -134,6 +197,10 @@ project. It does not assert:
   has no domain. "One tenant per email domain" now holds for verified
   domains only: several tenants may hold a pending claim on one domain, and
   auto-formation never joins a pending claim.
+- **ADR-0016**, which has sensitive tenant and domain changes "conservatively
+  require fresh consent across that project". Tenant and domain changes now
+  require it only of the users they govern (decision 7); login-policy and
+  project changes still require it across the project.
 
 ## Consequences
 
@@ -144,11 +211,17 @@ project. It does not assert:
   the default claim is unchanged for every client that does not ask.
 - **Negative.** Tenant-admin RPCs that were reachable only by vetted admins
   are now reachable by anyone a project lets create a tenant. Domain
-  registration and invitations were hardened for that (decisions 4 and 5),
-  and any tenant-admin RPC added later must assume an untrusted admin.
+  registration, invitations and agent sign-outs were hardened for that
+  (decisions 4 to 7), and any tenant-admin RPC added later must assume an
+  untrusted admin.
 - **Negative.** A verifier outside identity's HTTP chain has to accept a
   non-default `tenant`, and does not see a suspension before the token
   expires unless it checks the tenant itself.
+- **Negative.** Suspending a tenant is SQL only, unaudited, until an operator
+  RPC exists.
+- **Negative.** A suspended tenant's selected tokens stay usable on
+  identity's HTTP chain for up to the tenant-status cache TTL.
 - **Neutral.** Schema: migration 0044 (`tenants.created_by`, the `created`
-  membership source) and 0045 (contested domain claims, the per-tenant TXT
-  challenge).
+  membership source), 0045 (contested domain claims, the per-tenant TXT
+  challenge) and 0046 (guarded, scoped agent-governance triggers, the
+  `domain_attempts` table, the invitation-limit indexes).

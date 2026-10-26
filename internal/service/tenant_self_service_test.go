@@ -214,6 +214,7 @@ func TestCreateTenant_WithoutAuditRecordsNothing(t *testing.T) {
 	f.svc.WithAudit(nil)
 	_, err := f.svc.CreateTenant(withTenantsProject(true), ssOwnerID, "Acme", "", "")
 	require.NoError(t, err)
+	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantCreated)), "the detached logger records nothing")
 }
 
 // ── ListMyTenants ────────────────────────────────────────────────────────
@@ -252,8 +253,8 @@ func TestListMyTenants_OnlyTheCallersActiveTenants(t *testing.T) {
 	got, err := f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
 	require.NoError(t, err)
 	assert.Equal(t, []*UserTenant{
-		{TenantID: "t-a", Name: "Alpha", Role: RoleAdmin},
-		{TenantID: "t-b", Name: "Beta", Role: RoleMember},
+		{TenantID: "t-a", Name: "Alpha", Role: RoleAdmin, Source: MembershipSourceInvited},
+		{TenantID: "t-b", Name: "Beta", Role: RoleMember, Source: MembershipSourceInvited},
 	}, got, "ordered by name; suspended tenants, ended memberships, other users and other projects left out")
 }
 
@@ -264,7 +265,7 @@ func TestListMyTenants_IncludesACreatedTenant(t *testing.T) {
 
 	got, err := f.svc.ListMyTenants(withTenantsProject(true), ssOwnerID)
 	require.NoError(t, err)
-	assert.Equal(t, []*UserTenant{{TenantID: out.Tenant.ID, Name: "Acme", Role: RoleOwner}}, got)
+	assert.Equal(t, []*UserTenant{{TenantID: out.Tenant.ID, Name: "Acme", Role: RoleOwner, Source: MembershipSourceCreated}}, got)
 
 	others, err := f.svc.ListMyTenants(withTenantsProject(true), ssOtherID)
 	require.NoError(t, err)
@@ -373,7 +374,6 @@ func TestRefreshToken_RefusalsDoNotConsumeTheToken(t *testing.T) {
 			t.Helper()
 			f.seedTenant(t, "t-acme", TenantStatusLatent, MembershipStatusActive)
 		},
-		"no selection store": func(_ *testing.T, f *selectionFixture) { f.svc.WithTenantSelection(nil) },
 		"another project's tenant": func(t *testing.T, f *selectionFixture) {
 			t.Helper()
 			f.tenants.put(&Tenant{ID: "t-acme", ProjectID: "proj-elsewhere", Name: "x", Status: TenantStatusClaimed})
@@ -425,6 +425,7 @@ func TestRefreshToken_ReaderErrorDoesNotConsume(t *testing.T) {
 
 	_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
 	require.ErrorIs(t, err, boom)
+	require.ErrorIs(t, err, ErrUnavailable, "a failed read is not a verdict on the selection")
 
 	f.members.getErr = nil
 	_, _, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
@@ -470,4 +471,92 @@ func TestRefreshToken_EndedMembershipStopsNextRefresh(t *testing.T) {
 	require.NoError(t, f.members.RemoveMembership(ctx, f.project(), "t-acme", f.user.ID))
 	_, _, _, err = f.svc.RefreshToken(ctx, refresh, "t-acme", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
+}
+
+// With selection off, naming a tenant is refused as not enabled — not as a
+// membership refusal — and the refresh token is left unspent; naming the
+// deployment's own tenant selects nothing and is not refused.
+func TestRefreshToken_SelectionDisabled(t *testing.T) {
+	f := newSelectionFixture(t)
+	f.svc.WithTenantSelection(nil)
+	ctx := context.Background()
+
+	_, access, refresh, err := f.svc.RefreshToken(ctx, f.refresh, "t-acme", "", "")
+	require.ErrorIs(t, err, ErrTenantSelectionDisabled)
+	assert.NotErrorIs(t, err, ErrPermissionDenied)
+	assert.Empty(t, access)
+	assert.Empty(t, refresh)
+
+	_, access, refresh, err = f.svc.RefreshToken(ctx, f.refresh, " "+f.svc.tenantID(ctx)+" ", "", "")
+	require.NoError(t, err, "the refused refresh token still rotates, and the default tenant is no selection")
+	assert.Equal(t, f.svc.tenantID(ctx), f.tenantClaim(t, access))
+	assert.NotEmpty(t, refresh)
+}
+
+// A membership that comes only from the email's domain does not let an
+// unverified address act in the tenant; once the address is verified it does.
+func TestRefreshToken_DomainMembershipNeedsAVerifiedEmail(t *testing.T) {
+	f := newSelectionFixture(t)
+	ctx := context.Background()
+	f.tenants.put(&Tenant{ID: "t-acme", ProjectID: f.project(), Name: "Acme", Status: TenantStatusClaimed})
+	_, err := f.members.UpsertMembership(ctx, &TenantMembership{
+		ProjectID: f.project(), TenantID: "t-acme", UserID: f.user.ID,
+		Source: MembershipSourceDomain, Role: RoleMember, Status: MembershipStatusActive,
+	})
+	require.NoError(t, err)
+
+	_, _, _, err = f.svc.RefreshToken(ctx, f.refresh, "t-acme", "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+
+	require.NoError(t, f.repo.UpdateUser(ctx, f.user.ID, map[string]any{"email_verified": true}))
+	_, access, _, err := f.svc.RefreshToken(ctx, f.refresh, "t-acme", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "t-acme", f.tenantClaim(t, access))
+}
+
+func TestListMyTenants_DomainMembershipNeedsAVerifiedEmail(t *testing.T) {
+	f := newSelfServiceFixture(&config.Config{})
+	ctx := context.Background()
+	f.tenants.put(&Tenant{ID: "t-dom", ProjectID: ssProject, Name: "Domain", Status: TenantStatusClaimed})
+	f.tenants.put(&Tenant{ID: "t-inv", ProjectID: ssProject, Name: "Invited", Status: TenantStatusClaimed})
+	for id, source := range map[string]string{"t-dom": MembershipSourceDomain, "t-inv": MembershipSourceInvited} {
+		_, err := f.members.UpsertMembership(ctx, &TenantMembership{
+			ProjectID: ssProject, TenantID: id, UserID: ssOwnerID,
+			Source: source, Role: RoleMember, Status: MembershipStatusActive,
+		})
+		require.NoError(t, err)
+	}
+
+	got, err := f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "the domain membership is left out while the email is unverified")
+	assert.Equal(t, "t-inv", got[0].TenantID)
+
+	f.users.set(ssProject, &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive, EmailVerified: true})
+	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+
+	boom := errors.New("directory down")
+	f.users.getErr = boom
+	_, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	require.ErrorIs(t, err, boom)
+	f.users.getErr = nil
+	delete(f.users.byID, f.users.key(ssProject, ssOwnerID))
+	_, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// The joiners Persian, the Indic scripts and emoji sequences need are kept;
+// the bidirectional overrides that make one name render as another are not.
+func TestNormalizeTenantName_FormattingCharacters(t *testing.T) {
+	for _, ok := range []string{"\u0645\u06cc\u200c\u062e\u0648\u0627\u0645", "\u0915\u094d\u200d\u0937", "Acme \U0001F468\u200d\U0001F4BB"} {
+		got, err := normalizeTenantName(ok)
+		require.NoError(t, err, "%q", ok)
+		assert.Equal(t, ok, got)
+	}
+	for _, bad := range []string{"Acme\u202egnp.exe", "Ac\u2066me", "Acme\u200b", "Acme\x00", "Ac\tme"} {
+		_, err := normalizeTenantName(bad)
+		require.ErrorIs(t, err, ErrInvalidArgument, "%q", bad)
+	}
 }

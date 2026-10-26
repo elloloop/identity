@@ -83,9 +83,11 @@ func runAutoFormSmoke(t *testing.T, dsn string) {
 	require.Equal(t, service.TenantStatusLatent, ten.Status, "auto-formed tenant is latent until verified")
 	require.Equal(t, "acme.com", ten.PrimaryDomain)
 
-	dom, err := ds.GetDomainByName(ctx, projectID, "acme.com")
+	doms, err := ds.ListDomainsByTenant(ctx, projectID, tenantID)
 	require.NoError(t, err)
-	require.NotNil(t, dom)
+	require.Len(t, doms, 1)
+	dom := doms[0]
+	require.Equal(t, "acme.com", dom.Domain)
 	require.Equal(t, tenantID, dom.TenantID)
 	require.Equal(t, service.DomainStatusPending, dom.Status)
 	require.Equal(t, service.DomainVerificationEmail, dom.VerificationMethod)
@@ -156,10 +158,10 @@ func runAutoFormSmoke(t *testing.T, dsn string) {
 
 	// Exactly one tenant and one domain exist for race.com (no orphans from
 	// rolled-back losers), and every racer is a member.
-	raceDom, err := ds.GetDomainByName(ctx, projectID, "race.com")
+	raceDoms, err := ds.ListDomainsByTenant(ctx, projectID, winner)
 	require.NoError(t, err)
-	require.NotNil(t, raceDom)
-	require.Equal(t, winner, raceDom.TenantID)
+	require.Len(t, raceDoms, 1, "one domain row for race.com")
+	require.Equal(t, "race.com", raceDoms[0].Domain)
 	raceMembers, err := ms.ListMembershipsForTenant(ctx, projectID, winner)
 	require.NoError(t, err)
 	require.Len(t, raceMembers, racers, "every concurrent signer is a member of the one tenant")

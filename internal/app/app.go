@@ -289,6 +289,7 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	// IP's sign-up budget is the surface's, not each RPC's.
 	signupLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0)
 	loginLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0)
+	domainLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitDomainPerIP, 0)
 	limits := []middleware.PathLimit{
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
@@ -408,6 +409,18 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// reason as agent creation.
 			PathPrefix: "/identity.v1.IdentityService/CreateTenant", Tag: "tenant_create",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
+			// A domain registration writes a claim row and a verification
+			// looks up a DNS name the caller chose. The per-tenant cap bounds
+			// one tenant; this bounds one address spreading calls across
+			// tenants and accounts. Both RPCs spend one budget.
+			PathPrefix: "/identity.v1.IdentityService/CreateDomain", Tag: "tenant_domain",
+			Limiter: domainLimiter,
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/VerifyDomain", Tag: "tenant_domain",
+			Limiter: domainLimiter,
 		},
 		{
 			// Every admitted invitation sends an email from the deployment's
@@ -753,9 +766,9 @@ func New(deps Deps) (*Built, error) {
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
-		// A nil membership store (the memory driver) converts to a nil
-		// reader, which refuses every tenant selection.
-		WithTenantSelection(deps.MembershipStore).
+		// A nil reader refuses every tenant selection: the switch is off,
+		// or the driver has no membership store (memory, SQLite).
+		WithTenantSelection(tenantSelectionReader(deps)).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
@@ -854,13 +867,9 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf("rpc metrics: %w", err)
 	}
 
-	// A token's "tenant" claim is the internal storage tenant key
-	// (DefaultTenantID), or a claimed tenant of the token's project that
-	// RefreshToken selected for a member. Without a tenant store (the memory
-	// driver) no tenant can be selected, so only the default is accepted.
-	authTenants := middleware.TokenTenants{Default: deps.Config.DefaultTenantID, Logger: logger}
-	if deps.TenantStore != nil {
-		authTenants.Selectable = deps.TenantStore
+	authTenants, err := tokenTenants(deps, logger)
+	if err != nil {
+		return nil, err
 	}
 
 	// Order (outermost runs first on request path):
@@ -1099,6 +1108,34 @@ func buildEventing(deps Deps, logger *zap.Logger) (events.Publisher, func(), fun
 // drainPollInterval is how often DrainEvents looks for deliveries whose retry
 // is due.
 const drainPollInterval = time.Second
+
+// tenantSelectionReader is what RefreshToken resolves a selected tenant
+// through: the membership store when GATEWAY_TENANT_SELECTION_ENABLED is on,
+// nil otherwise. A nil interface, never a typed nil, so the service refuses.
+func tenantSelectionReader(deps Deps) service.UserTenantReader {
+	if !deps.Config.TenantSelectionEnabled || deps.MembershipStore == nil {
+		return nil
+	}
+	return deps.MembershipStore
+}
+
+// tokenTenants is the rule the access-token check holds a token's "tenant"
+// claim to: the internal storage tenant key (DefaultTenantID), or a claimed
+// tenant of the token's project that RefreshToken selected for a member,
+// read through a TTL cache. With selection off, or without a tenant store
+// (memory, SQLite), only the default is accepted.
+func tokenTenants(deps Deps, logger *zap.Logger) (middleware.TokenTenants, error) {
+	tenants := middleware.TokenTenants{Default: deps.Config.DefaultTenantID, Logger: logger}
+	if !deps.Config.TenantSelectionEnabled || deps.TenantStore == nil {
+		return tenants, nil
+	}
+	metrics, err := middleware.NewTenantStatusMetrics(deps.MetricsRegistry)
+	if err != nil {
+		return middleware.TokenTenants{}, fmt.Errorf("tenant status metrics: %w", err)
+	}
+	tenants.Selectable = middleware.NewTenantStatusCache(deps.TenantStore, deps.Config.TenantStatusCacheTTL(), metrics)
+	return tenants, nil
+}
 
 // buildDomainService returns the wired DomainService backing the tenant
 // domain-verification RPCs, or nil when the governance stores are absent

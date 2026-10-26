@@ -76,6 +76,25 @@ type OwnedTenantRequest struct {
 	// WindowStartMs.
 	MaxPerWindow  int
 	WindowStartMs int64
+	// NowMs stamps the new rows: the clock WindowStartMs was measured on, so
+	// a creation and the window it counts against agree. 0 means now.
+	NowMs int64
+}
+
+// DomainAttempt asks DomainStore.RecordDomainAttempt to count one
+// CreateDomain or VerifyDomain by a tenant. Each verify makes the server look
+// up a DNS name the tenant chose, so a tenant admin is held to a cap.
+type DomainAttempt struct {
+	ProjectID string
+	TenantID  string
+	// AtMs stamps the attempt; 0 means now.
+	AtMs int64
+	// MaxPerWindow and WindowStartMs cap the tenant's attempts: the attempt
+	// is refused with ErrDomainAttemptsLimited when the tenant already made
+	// MaxPerWindow attempts at or after WindowStartMs. MaxPerWindow must be
+	// positive.
+	MaxPerWindow  int
+	WindowStartMs int64
 }
 
 // Domain is an email domain bound to a Tenant within a Project. Verifying
@@ -117,7 +136,8 @@ type TenantStore interface {
 	// equals domain (case-insensitive) within a project, or (nil, nil).
 	GetTenantByPrimaryDomain(ctx context.Context, projectID, domain string) (*Tenant, error)
 	// SetTenantStatus transitions a tenant's status (e.g. latent→claimed)
-	// and stamps updated_at. Unknown ids are a no-op.
+	// and stamps updated_at. Unknown ids, and a tenant already in the
+	// status, are a no-op.
 	SetTenantStatus(ctx context.Context, projectID, tenantID, status string) error
 	// ListTenants returns every tenant in a project, newest first.
 	ListTenants(ctx context.Context, projectID string) ([]*Tenant, error)
@@ -139,16 +159,23 @@ type DomainStore interface {
 	CreateDomain(ctx context.Context, d *Domain) (string, error)
 	// GetDomain returns the domain by id within a project, or (nil, nil).
 	GetDomain(ctx context.Context, projectID, domainID string) (*Domain, error)
-	// GetDomainByName returns the domain row for a name (case-insensitive)
-	// within a project, or (nil, nil): the verified row when there is one,
-	// else the oldest claim.
-	GetDomainByName(ctx context.Context, projectID, domain string) (*Domain, error)
+	// GetVerifiedDomain returns the verified row for a domain name
+	// (case-insensitive) within a project, or (nil, nil) when no tenant has
+	// verified it. A claim nobody has verified governs nothing, so it is
+	// never returned.
+	GetVerifiedDomain(ctx context.Context, projectID, domain string) (*Domain, error)
 	// SetDomainStatus transitions a domain's status and, when verifying,
 	// stamps verified_at_ms (pass 0 to default to now on a verify). Unknown
-	// ids are a no-op. Verifying a domain another row of the project has
-	// already verified is ErrAlreadyExists.
+	// ids, and a domain already in the status, are a no-op. Verifying a
+	// domain another row of the project has already verified is
+	// ErrAlreadyExists.
 	SetDomainStatus(ctx context.Context, projectID, domainID, status string, verifiedAtMs int64) error
 	// ListDomainsByTenant returns every domain bound to a tenant, newest
 	// first.
 	ListDomainsByTenant(ctx context.Context, projectID, tenantID string) ([]*Domain, error)
+	// RecordDomainAttempt counts one domain registration or verification by
+	// a tenant: ErrDomainAttemptsLimited past the cap in a, else the attempt
+	// is recorded. Attempts by one tenant are serialised, so concurrent ones
+	// cannot both pass a cap only one of them fits under.
+	RecordDomainAttempt(ctx context.Context, a DomainAttempt) error
 }

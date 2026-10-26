@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -27,6 +26,11 @@ var (
 	// (tenants.self_service, or GATEWAY_SELF_SERVICE_TENANTS_ENABLED for the
 	// default project). Mapped to CodeFailedPrecondition.
 	ErrSelfServiceTenantsDisabled = errors.New("this project does not let users create tenants")
+	// ErrTenantSelectionDisabled is returned by RefreshToken when it names a
+	// tenant and the server does not select tenants
+	// (GATEWAY_TENANT_SELECTION_ENABLED off, or a driver without tenants).
+	// Mapped to CodeFailedPrecondition.
+	ErrTenantSelectionDisabled = errors.New("tenant selection is not enabled on this server")
 	// ErrTenantCreationLimited is returned when the caller has already created
 	// the configured number of tenants in the current window
 	// (GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER per
@@ -89,13 +93,15 @@ func (s *MembershipService) CreateTenant(ctx context.Context, callerID, name, ip
 		return nil, fmt.Errorf("%w: only an active, signed-up person may create a tenant", ErrPermissionDenied)
 	}
 
-	limit, window := s.tenantCreationLimit()
+	cfg := s.config()
+	now := s.nowFunc()
 	tenant, membership, err := s.tenants.CreateOwnedTenant(ctx, OwnedTenantRequest{
 		ProjectID:     projectID,
 		Name:          name,
 		OwnerID:       callerID,
-		MaxPerWindow:  limit,
-		WindowStartMs: s.nowFunc().Add(-window).UnixMilli(),
+		MaxPerWindow:  cfg.SelfServiceTenantsLimit(),
+		WindowStartMs: now.Add(-cfg.SelfServiceTenantsWindow()).UnixMilli(),
+		NowMs:         now.UnixMilli(),
 	})
 	if errors.Is(err, ErrTenantCreationLimited) {
 		s.auditTenantCreated(ctx, callerID, false, ip, userAgent, map[string]any{
@@ -114,8 +120,10 @@ func (s *MembershipService) CreateTenant(ctx context.Context, callerID, name, ip
 
 // ListMyTenants returns the tenants callerID may act in within the caller's
 // project: every claimed tenant they hold an active membership in, however
-// the membership began. Suspended tenants and memberships that are not active
-// are left out, so the list is exactly the set RefreshToken may select from.
+// the membership began — except one they belong to only through their
+// email's domain while that email is unverified. Suspended tenants and
+// memberships that are not active are left out too, so the list is exactly
+// the set RefreshToken may select from.
 func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string) ([]*UserTenant, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -124,16 +132,43 @@ func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string) 
 	if callerID == "" {
 		return nil, ErrUnauthenticated
 	}
-	return s.memberships.ListActiveTenantsForUser(ctx, projectID, callerID)
+	tenants, err := s.memberships.ListActiveTenantsForUser(ctx, projectID, callerID)
+	if err != nil || len(tenants) == 0 {
+		return tenants, err
+	}
+	caller, err := s.users.GetUserInProject(ctx, projectID, callerID)
+	if err != nil {
+		return nil, err
+	}
+	if caller == nil {
+		return nil, fmt.Errorf("%w: caller", ErrNotFound)
+	}
+	out := tenants[:0]
+	for _, t := range tenants {
+		if actsInTenant(caller, t) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
-// tenantCreationLimit is the per-user creation limit and the window it
-// counts over, the defaults when the service has no config.
-func (s *MembershipService) tenantCreationLimit() (int, time.Duration) {
+// actsInTenant reports whether user may act in t, one of their active
+// memberships in a claimed tenant. A membership derived from the email's
+// domain proves nothing until the email is: with
+// GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL off, anyone may sign up with an
+// address on a company's domain, and must not be able to act as that
+// company's member.
+func actsInTenant(user *User, t *UserTenant) bool {
+	return t.Source != MembershipSourceDomain || user.EmailVerified
+}
+
+// config is the service's configuration, or the zero Config — whose getters
+// answer the defaults — when none is wired.
+func (s *MembershipService) config() *config.Config {
 	if s.cfg == nil {
-		return config.DefaultSelfServiceTenantsMaxPerUser, config.DefaultSelfServiceTenantsWindowSeconds * time.Second
+		return &config.Config{}
 	}
-	return s.cfg.SelfServiceTenantsLimit(), s.cfg.SelfServiceTenantsWindow()
+	return s.cfg
 }
 
 // auditTenantCreated records one CreateTenant outcome; actor and target are
@@ -151,7 +186,10 @@ func (s *MembershipService) auditTenantCreated(ctx context.Context, callerID str
 
 // normalizeTenantName trims a tenant name and refuses one that is blank,
 // longer than tenantNameMaxRunes, not valid UTF-8, or carrying control or
-// format characters (which would let one name render as another).
+// invisible formatting characters, such as the bidirectional overrides,
+// which would let one name render as another. The zero-width joiner and
+// non-joiner are formatting characters too, but Persian, the Indic scripts
+// and emoji sequences need them, so they are allowed.
 func normalizeTenantName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -163,8 +201,18 @@ func normalizeTenantName(name string) (string, error) {
 	if utf8.RuneCountInString(name) > tenantNameMaxRunes {
 		return "", fmt.Errorf("%w: name is longer than %d characters", ErrInvalidArgument, tenantNameMaxRunes)
 	}
-	if strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
-		return "", fmt.Errorf("%w: name contains control characters", ErrInvalidArgument)
+	if strings.ContainsFunc(name, refusedNameRune) {
+		return "", fmt.Errorf("%w: name contains control or invisible formatting characters", ErrInvalidArgument)
 	}
 	return name, nil
+}
+
+// refusedNameRune reports whether r may not appear in a tenant name: a
+// control character, or a formatting one other than the zero-width
+// non-joiner (U+200C) and joiner (U+200D).
+func refusedNameRune(r rune) bool {
+	if r == '\u200c' || r == '\u200d' {
+		return false
+	}
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
 }

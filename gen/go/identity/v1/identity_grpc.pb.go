@@ -394,8 +394,17 @@ type IdentityServiceClient interface {
 	// on the caller being an owner/admin member of the target tenant — with
 	// one exception: VerifyDomain on a still-latent tenant that has no
 	// members yet is open, so the first verifier becomes its owner.
-	// Available only on the postgres control-plane driver; the memory driver
-	// deployments return Unimplemented.
+	// CreateDomain and VerifyDomain together are RESOURCE_EXHAUSTED past the
+	// per-tenant attempt cap in its window
+	// (GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT) and past the per-IP
+	// GATEWAY_RATE_LIMIT_DOMAIN_PER_IP. CreateDomain is ALREADY_EXISTS when
+	// the tenant already registered the name or another tenant has verified
+	// it; VerifyDomain is ALREADY_EXISTS when another tenant has verified it, PERMISSION_DENIED when the TXT
+	// challenge is not published or the tenant is suspended, and
+	// UNIMPLEMENTED for the email method. A failed check marks a pending
+	// claim failed; it never un-verifies a verified one. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
 	CreateDomain(ctx context.Context, in *CreateDomainRequest, opts ...grpc.CallOption) (*CreateDomainResponse, error)
 	VerifyDomain(ctx context.Context, in *VerifyDomainRequest, opts ...grpc.CallOption) (*VerifyDomainResponse, error)
 	ListTenantDomains(ctx context.Context, in *ListTenantDomainsRequest, opts ...grpc.CallOption) (*ListTenantDomainsResponse, error)
@@ -405,26 +414,32 @@ type IdentityServiceClient interface {
 	// redeemer's own action: any authenticated caller may redeem a token, but
 	// only for an invitation addressed to their own account email (compared in
 	// the canonical form sign-in uses, so a "+tag" spelling of it matches;
-	// PERMISSION_DENIED otherwise). Available
-	// only on the postgres control-plane driver; memory deployments
-	// return Unimplemented.
+	// PERMISSION_DENIED otherwise). Accepting never lowers a role the caller
+	// already holds in the tenant: an owner who accepts a member invitation
+	// stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED past the
+	// tenant's cap in the window, the inviter's cap across every tenant, the
+	// recipient address's cap across the project's tenants, the per-recipient
+	// resend cooldown, or the per-IP GATEWAY_RATE_LIMIT_INVITATION_PER_IP.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
 	CreateTenantInvitation(ctx context.Context, in *CreateTenantInvitationRequest, opts ...grpc.CallOption) (*CreateTenantInvitationResponse, error)
 	AcceptTenantInvitation(ctx context.Context, in *AcceptTenantInvitationRequest, opts ...grpc.CallOption) (*AcceptTenantInvitationResponse, error)
 	ListTenantInvitations(ctx context.Context, in *ListTenantInvitationsRequest, opts ...grpc.CallOption) (*ListTenantInvitationsResponse, error)
 	ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error)
 	RemoveTenantMember(ctx context.Context, in *RemoveTenantMemberRequest, opts ...grpc.CallOption) (*RemoveTenantMemberResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
-	// makes an active tenant with the caller as its owner, in one
+	// makes a claimed tenant with the caller as its owner, in one
 	// transaction; it is FAILED_PRECONDITION unless the project's config
 	// sets tenants.self_service, PERMISSION_DENIED for an anonymous or agent
 	// account, INVALID_ARGUMENT for a blank or over-long name, and
 	// RESOURCE_EXHAUSTED once the caller has created the per-user number of
 	// tenants allowed in the window. It carries no idempotency key: a retry
 	// after a lost response creates a second tenant, so reconcile with
-	// ListMyTenants. ListMyTenants returns the active tenants the caller is
-	// an active member of in this project. RefreshToken's tenant_id selects
-	// one of them for the access token. Available only on the postgres
-	// control-plane driver; memory deployments return Unimplemented.
+	// ListMyTenants. ListMyTenants returns the claimed tenants the caller may
+	// act in within this project (see ListMyTenantsResponse). RefreshToken's
+	// tenant_id selects one of them for the access token when the server has
+	// tenant selection on. Available only on the postgres control-plane
+	// driver; the memory and SQLite drivers return Unimplemented.
 	CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error)
 	ListMyTenants(ctx context.Context, in *ListMyTenantsRequest, opts ...grpc.CallOption) (*ListMyTenantsResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
@@ -2330,8 +2345,17 @@ type IdentityServiceServer interface {
 	// on the caller being an owner/admin member of the target tenant — with
 	// one exception: VerifyDomain on a still-latent tenant that has no
 	// members yet is open, so the first verifier becomes its owner.
-	// Available only on the postgres control-plane driver; the memory driver
-	// deployments return Unimplemented.
+	// CreateDomain and VerifyDomain together are RESOURCE_EXHAUSTED past the
+	// per-tenant attempt cap in its window
+	// (GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT) and past the per-IP
+	// GATEWAY_RATE_LIMIT_DOMAIN_PER_IP. CreateDomain is ALREADY_EXISTS when
+	// the tenant already registered the name or another tenant has verified
+	// it; VerifyDomain is ALREADY_EXISTS when another tenant has verified it, PERMISSION_DENIED when the TXT
+	// challenge is not published or the tenant is suspended, and
+	// UNIMPLEMENTED for the email method. A failed check marks a pending
+	// claim failed; it never un-verifies a verified one. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
 	CreateDomain(context.Context, *CreateDomainRequest) (*CreateDomainResponse, error)
 	VerifyDomain(context.Context, *VerifyDomainRequest) (*VerifyDomainResponse, error)
 	ListTenantDomains(context.Context, *ListTenantDomainsRequest) (*ListTenantDomainsResponse, error)
@@ -2341,26 +2365,32 @@ type IdentityServiceServer interface {
 	// redeemer's own action: any authenticated caller may redeem a token, but
 	// only for an invitation addressed to their own account email (compared in
 	// the canonical form sign-in uses, so a "+tag" spelling of it matches;
-	// PERMISSION_DENIED otherwise). Available
-	// only on the postgres control-plane driver; memory deployments
-	// return Unimplemented.
+	// PERMISSION_DENIED otherwise). Accepting never lowers a role the caller
+	// already holds in the tenant: an owner who accepts a member invitation
+	// stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED past the
+	// tenant's cap in the window, the inviter's cap across every tenant, the
+	// recipient address's cap across the project's tenants, the per-recipient
+	// resend cooldown, or the per-IP GATEWAY_RATE_LIMIT_INVITATION_PER_IP.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
 	CreateTenantInvitation(context.Context, *CreateTenantInvitationRequest) (*CreateTenantInvitationResponse, error)
 	AcceptTenantInvitation(context.Context, *AcceptTenantInvitationRequest) (*AcceptTenantInvitationResponse, error)
 	ListTenantInvitations(context.Context, *ListTenantInvitationsRequest) (*ListTenantInvitationsResponse, error)
 	ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error)
 	RemoveTenantMember(context.Context, *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
-	// makes an active tenant with the caller as its owner, in one
+	// makes a claimed tenant with the caller as its owner, in one
 	// transaction; it is FAILED_PRECONDITION unless the project's config
 	// sets tenants.self_service, PERMISSION_DENIED for an anonymous or agent
 	// account, INVALID_ARGUMENT for a blank or over-long name, and
 	// RESOURCE_EXHAUSTED once the caller has created the per-user number of
 	// tenants allowed in the window. It carries no idempotency key: a retry
 	// after a lost response creates a second tenant, so reconcile with
-	// ListMyTenants. ListMyTenants returns the active tenants the caller is
-	// an active member of in this project. RefreshToken's tenant_id selects
-	// one of them for the access token. Available only on the postgres
-	// control-plane driver; memory deployments return Unimplemented.
+	// ListMyTenants. ListMyTenants returns the claimed tenants the caller may
+	// act in within this project (see ListMyTenantsResponse). RefreshToken's
+	// tenant_id selects one of them for the access token when the server has
+	// tenant selection on. Available only on the postgres control-plane
+	// driver; the memory and SQLite drivers return Unimplemented.
 	CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error)
 	ListMyTenants(context.Context, *ListMyTenantsRequest) (*ListMyTenantsResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the

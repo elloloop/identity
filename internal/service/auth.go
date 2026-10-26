@@ -1568,8 +1568,9 @@ func (s *AuthService) WithTenantAutoFormer(af TenantAutoFormStore) *AuthService 
 
 // WithTenantSelection wires the reader RefreshToken checks a
 // selected tenant against, and returns the service for chaining. app.New
-// passes the postgres membership store; without one (the memory driver) a
-// refresh that selects a tenant is refused.
+// passes the postgres membership store when GATEWAY_TENANT_SELECTION_ENABLED
+// is on; without one a refresh that selects a tenant is refused with
+// ErrTenantSelectionDisabled.
 func (s *AuthService) WithTenantSelection(r UserTenantReader) *AuthService {
 	s.tenantSelection = r
 	return s
@@ -2647,9 +2648,14 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// without one. Only for an account in good standing: an account refused
 	// over its own state takes that refusal below (its token spent, its
 	// session ended), not a selection refusal that would leave both intact.
+	// Naming the deployment's storage tenant selects nothing: it is the
+	// tenant every unselected token carries.
 	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == s.tenantID(ctx) {
+		tenantID = ""
+	}
 	if tenantID != "" && statusErr == nil {
-		if err := s.checkTenantSelection(ctx, timeoutUser.ID, tenantID); err != nil {
+		if err := s.checkTenantSelection(ctx, timeoutUser, tenantID); err != nil {
 			return nil, "", "", err
 		}
 	}
@@ -2714,17 +2720,20 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 }
 
 // checkTenantSelection refuses a tenant the user may not act in: one that is
-// not a claimed tenant of the request's project, or one where the user holds
-// no active membership. The refusal does not say which.
-func (s *AuthService) checkTenantSelection(ctx context.Context, userID, tenantID string) error {
+// not a claimed tenant of the request's project, one where the user holds no
+// active membership, or one they belong to only through their email's domain
+// while that email is unverified. The refusal does not say which. Without a
+// reader (GATEWAY_TENANT_SELECTION_ENABLED off, or a driver with no tenants)
+// every selection is refused as not enabled.
+func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, tenantID string) error {
 	if s.tenantSelection == nil {
-		return fmt.Errorf("%w: tenant selection is not available on this server", ErrPermissionDenied)
+		return ErrTenantSelectionDisabled
 	}
-	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, s.projectID(ctx), tenantID, userID)
+	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, s.projectID(ctx), tenantID, user.ID)
 	if err != nil {
-		return fmt.Errorf("checking tenant selection: %w", err)
+		return fmt.Errorf("%w: checking tenant selection: %w", ErrUnavailable, err)
 	}
-	if t == nil {
+	if t == nil || !actsInTenant(user, t) {
 		return fmt.Errorf("%w: not an active member of that tenant", ErrPermissionDenied)
 	}
 	return nil

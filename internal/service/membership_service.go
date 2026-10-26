@@ -45,7 +45,18 @@ var (
 	// ErrInvitationResendTooSoon is returned when the tenant invited the same
 	// address within GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS.
 	// Mapped to CodeResourceExhausted.
-	ErrInvitationResendTooSoon = errors.New("this address was invited moments ago; try again later")
+	ErrInvitationResendTooSoon = errors.New("this address was invited recently; try again later")
+	// ErrInviterLimited is returned when the caller has already sent the
+	// configured number of invitations, from all their tenants together, in
+	// the current window (GATEWAY_TENANT_INVITATION_MAX_PER_INVITER). Mapped
+	// to CodeResourceExhausted.
+	ErrInviterLimited = errors.New("too many invitations sent by you recently; try again later")
+	// ErrInvitationRecipientLimited is returned when the address has already
+	// been sent the configured number of invitations, from all the project's
+	// tenants together, in the current window
+	// (GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT). Mapped to
+	// CodeResourceExhausted.
+	ErrInvitationRecipientLimited = errors.New("this address has been invited too often recently; try again later")
 )
 
 // UserDirectory is the narrow user-lookup boundary MembershipService needs:
@@ -139,9 +150,12 @@ type CreatedInvitation struct {
 // atomically revokes any prior open invite for the same recipient), and
 // best-effort dispatches a branded invitation email carrying the raw token.
 //
-// Every invitation sends an email, so the store refuses one past the tenant's
-// limits (see invitationLimits): ErrInvitationLimited past the per-tenant cap,
-// ErrInvitationResendTooSoon inside the per-recipient cooldown.
+// Every invitation sends an email, so the store refuses one past the limits
+// (see invitationLimits): ErrInvitationLimited past the per-tenant cap,
+// ErrInviterLimited past the caller's cap across all their tenants,
+// ErrInvitationRecipientLimited past the address's cap across the project,
+// and ErrInvitationResendTooSoon inside the per-recipient cooldown. Each
+// refusal is logged.
 func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID, tenantID, emailAddr, role string) (*CreatedInvitation, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -183,6 +197,14 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	}
 	id, err := s.invitations.CreateInvitation(ctx, inv, s.invitationLimits(now))
 	if err != nil {
+		if isInvitationLimit(err) {
+			// Refusals are what an operator watches for abuse, so each is
+			// recorded; the recipient only redacted.
+			s.logger.Info("tenant_invitation_limited",
+				zap.String("project_id", projectID), zap.String("tenant_id", tenantID),
+				zap.String("inviter_id", callerID), zap.String("to", redactEmail(normEmail)),
+				zap.Error(err))
+		}
 		return nil, err
 	}
 	inv.ID = id
@@ -202,9 +224,11 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 
 // AcceptTenantInvitation redeems a raw invitation token for the authenticated
 // caller. It validates the token (must be pending and unexpired), enforces
-// that the caller's account email equals the invitation email, then upserts
+// that the caller's account email equals the invitation email, then grants
 // an active invited-source membership at the invitation's role and marks the
-// invitation accepted.
+// invitation accepted. Accepting never lowers a role: a caller who already
+// holds an active membership at that role or a higher one keeps it unchanged,
+// so an invitation cannot demote an owner, the last one included.
 //
 // Email-match policy: a leaked token must not let the wrong account join. The
 // caller is looked up and their email compared to the invitation email, both
@@ -261,15 +285,15 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
 	}
 
-	m := &TenantMembership{
+	m, err := s.memberships.GrantMembership(ctx, &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  inv.TenantID,
 		UserID:    callerID,
 		Source:    MembershipSourceInvited,
 		Role:      inv.Role,
 		Status:    MembershipStatusActive,
-	}
-	if _, err := s.memberships.UpsertMembership(ctx, m); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	if err := s.invitations.SetInvitationStatus(ctx, projectID, inv.ID, InvitationStatusAccepted, s.nowFunc().UnixMilli()); err != nil {
@@ -458,19 +482,25 @@ func (s *MembershipService) invitationTTL() time.Duration {
 	return defaultInvitationTTL
 }
 
-// invitationLimits is the per-tenant cap and per-recipient cooldown a create
-// at now is held to, from the deployment's configuration (the defaults when
-// none is wired).
+// invitationLimits is the per-tenant, per-inviter and per-recipient caps and
+// the per-recipient cooldown a create at now is held to, from the
+// deployment's configuration (the defaults when none is wired).
 func (s *MembershipService) invitationLimits(now time.Time) InvitationLimits {
-	cfg := s.cfg
-	if cfg == nil {
-		cfg = &config.Config{}
-	}
+	cfg := s.config()
 	return InvitationLimits{
 		MaxPerTenant:          cfg.TenantInvitationLimit(),
 		WindowStartMs:         now.Add(-cfg.TenantInvitationWindow()).UnixMilli(),
 		ResendCooldownStartMs: now.Add(-cfg.TenantInvitationResendCooldown()).UnixMilli(),
+		MaxPerInviter:         cfg.TenantInvitationInviterLimit(),
+		MaxPerRecipient:       cfg.TenantInvitationRecipientLimit(),
 	}
+}
+
+// isInvitationLimit reports whether err is one of the refusals
+// InvitationStore.CreateInvitation answers past a limit.
+func isInvitationLimit(err error) bool {
+	return errors.Is(err, ErrInvitationLimited) || errors.Is(err, ErrInvitationResendTooSoon) ||
+		errors.Is(err, ErrInviterLimited) || errors.Is(err, ErrInvitationRecipientLimited)
 }
 
 // requireProject resolves the caller's project, rejecting when none is in the

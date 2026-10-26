@@ -281,10 +281,19 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expectedAudienc
 
 			// Skip auth for exempt paths.
 			if isAuthExempt(path) {
-				// Still try to parse auth if present (for GetCurrentUser).
+				// Still try to parse auth if present (for GetCurrentUser). A
+				// token that fails verification leaves the request
+				// unauthenticated; one whose selected tenant could not be read
+				// may be good, so the request is answered unavailable rather
+				// than served as signed out.
 				if token := extractBearerToken(r); token != "" {
-					if claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience); err == nil {
+					claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience)
+					switch {
+					case err == nil:
 						setAuthHeaders(r, claims)
+					case errors.Is(err, errTokenTenantLookup):
+						writeTokenRefusal(w, err)
+						return
 					}
 				}
 				next.ServeHTTP(w, r)

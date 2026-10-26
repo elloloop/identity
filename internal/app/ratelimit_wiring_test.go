@@ -567,3 +567,44 @@ func TestBuildRateLimits_TenantInvitationLimited(t *testing.T) {
 		require.True(t, pl.Allow("198.51.100.7", now), "a zero quota admits invitation %d", i+1)
 	}
 }
+
+// TestBuildRateLimits_TenantDomainLimited asserts CreateDomain and
+// VerifyDomain spend one per-IP budget, apart from every other RPC's, and
+// that a zero quota switches it off.
+func TestBuildRateLimits_TenantDomainLimited(t *testing.T) {
+	const (
+		create = "/identity.v1.IdentityService/CreateDomain"
+		verify = "/identity.v1.IdentityService/VerifyDomain"
+		list   = "/identity.v1.IdentityService/ListTenantDomains"
+	)
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitDomainPerIP: 3, RateLimitInvitationPerIP: 1}
+	limits := buildRateLimits(cfg)
+	for _, path := range []string{create, verify} {
+		pl, ok := middleware.MatchPathLimit(limits, path)
+		require.True(t, ok, "%s must carry a rate limit", path)
+		require.Equal(t, "tenant_domain", pl.Tag)
+	}
+	if got, ok := middleware.MatchPathLimit(limits, list); ok {
+		require.NotEqual(t, "tenant_domain", got.Tag, "listing must not spend the domain budget")
+	}
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for _, path := range []string{create, create} {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "198.51.100.9")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+	}
+	assertQuotaExhausts(t, handler, verify, "198.51.100.9", 1)
+	assertQuotaExhausts(t, handler, "/identity.v1.IdentityService/CreateTenantInvitation", "198.51.100.9", 1)
+
+	cfg.RateLimitDomainPerIP = 0
+	pl, _ := middleware.MatchPathLimit(buildRateLimits(cfg), verify)
+	now := time.Now()
+	for i := range 50 {
+		require.True(t, pl.Allow("198.51.100.9", now), "a zero quota admits attempt %d", i+1)
+	}
+}

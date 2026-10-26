@@ -322,7 +322,10 @@ func TestListMyTenants_Handler(t *testing.T) {
 		{TenantID: "t-a", Name: "Alpha", Role: service.RoleAdmin},
 		{TenantID: "t-b", Name: "Beta", Role: service.RoleMember},
 	}}
-	svc := newMembershipSvc(newConnectInvitationStore(), members, &connectTenantStore{}, &connectUserDirectory{})
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"user-1": {ID: "user-1", Email: "user@example.test", Status: service.StatusActive},
+	}}
+	svc := newMembershipSvc(newConnectInvitationStore(), members, &connectTenantStore{}, users)
 	srv := startMembershipServer(t, svc)
 
 	resp, err := srv.client.ListMyTenants(context.Background(), withAuth(&identitypb.ListMyTenantsRequest{}, "user-1"))

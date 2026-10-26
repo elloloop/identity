@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/internal/config"
 )
@@ -24,6 +26,11 @@ type fakeDomainStore struct {
 	setErr    error
 	listErr   error
 	nextID    int
+	// writes counts SetDomainStatus calls that changed a row; attempts holds
+	// every attempt RecordDomainAttempt admitted, attemptErr fails it.
+	writes     int
+	attempts   []DomainAttempt
+	attemptErr error
 }
 
 func newFakeDomainStore() *fakeDomainStore {
@@ -65,18 +72,33 @@ func (f *fakeDomainStore) GetDomain(_ context.Context, projectID, domainID strin
 	return &out, nil
 }
 
-func (f *fakeDomainStore) GetDomainByName(_ context.Context, projectID, domain string) (*Domain, error) {
-	var found *Domain
+func (f *fakeDomainStore) GetVerifiedDomain(_ context.Context, projectID, domain string) (*Domain, error) {
 	for _, d := range f.byID {
-		if d.ProjectID == projectID && d.Domain == domain && (found == nil || d.Status == DomainStatusVerified) {
-			found = d
+		if d.ProjectID == projectID && strings.EqualFold(d.Domain, domain) && d.Status == DomainStatusVerified {
+			out := *d
+			return &out, nil
 		}
 	}
-	if found == nil {
-		return nil, nil
+	return nil, nil
+}
+
+// RecordDomainAttempt mirrors the postgres store: it counts the tenant's
+// attempts at or after WindowStartMs and refuses one past MaxPerWindow.
+func (f *fakeDomainStore) RecordDomainAttempt(_ context.Context, a DomainAttempt) error {
+	if f.attemptErr != nil {
+		return f.attemptErr
 	}
-	out := *found
-	return &out, nil
+	n := 0
+	for _, prior := range f.attempts {
+		if prior.ProjectID == a.ProjectID && prior.TenantID == a.TenantID && prior.AtMs >= a.WindowStartMs {
+			n++
+		}
+	}
+	if n >= a.MaxPerWindow {
+		return ErrDomainAttemptsLimited
+	}
+	f.attempts = append(f.attempts, a)
+	return nil
 }
 
 func (f *fakeDomainStore) SetDomainStatus(_ context.Context, projectID, domainID, status string, verifiedAtMs int64) error {
@@ -84,7 +106,7 @@ func (f *fakeDomainStore) SetDomainStatus(_ context.Context, projectID, domainID
 		return f.setErr
 	}
 	d, ok := f.byID[f.key(projectID, domainID)]
-	if !ok {
+	if !ok || d.Status == status {
 		return nil
 	}
 	if status == DomainStatusVerified {
@@ -95,6 +117,7 @@ func (f *fakeDomainStore) SetDomainStatus(_ context.Context, projectID, domainID
 		}
 	}
 	d.Status = status
+	f.writes++
 	if status == DomainStatusVerified {
 		if verifiedAtMs == 0 {
 			verifiedAtMs = 1
@@ -130,6 +153,8 @@ type fakeTenantStore struct {
 	createErr error
 	members   *fakeMembershipStore
 	nextID    int
+	// writes counts SetTenantStatus calls that changed a row.
+	writes int
 }
 
 // linkFakeTenantStores lets CreateOwnedTenant write memberships into m and
@@ -188,10 +213,11 @@ func (f *fakeTenantStore) SetTenantStatus(_ context.Context, projectID, tenantID
 		return f.setErr
 	}
 	t, ok := f.byID[projectID+"/"+tenantID]
-	if !ok {
+	if !ok || t.Status == status {
 		return nil
 	}
 	t.Status = status
+	f.writes++
 	return nil
 }
 
@@ -280,6 +306,32 @@ func (f *fakeMembershipStore) UpsertMembership(_ context.Context, m *TenantMembe
 	return id, nil
 }
 
+// fakeRoleRank orders the roles as the postgres store does.
+var fakeRoleRank = map[string]int{RoleOwner: 3, RoleAdmin: 2, RoleMember: 1}
+
+// GrantMembership mirrors the postgres store: an active membership at the
+// role or a higher one is kept unchanged, anything else becomes active at
+// m.Role.
+func (f *fakeMembershipStore) GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, error) {
+	if f.upsertErr != nil {
+		return nil, f.upsertErr
+	}
+	k := f.key(m.ProjectID, m.TenantID, m.UserID)
+	if prior, ok := f.byKey[k]; ok && prior.Status == MembershipStatusActive && fakeRoleRank[prior.Role] >= fakeRoleRank[m.Role] {
+		out := *prior
+		return &out, nil
+	}
+	granted := *m
+	granted.Status = MembershipStatusActive
+	if prior, ok := f.byKey[k]; ok {
+		granted.ID = prior.ID
+	}
+	if _, err := f.UpsertMembership(ctx, &granted); err != nil {
+		return nil, err
+	}
+	return f.GetMembership(ctx, m.ProjectID, m.TenantID, m.UserID)
+}
+
 func (f *fakeMembershipStore) GetMembership(_ context.Context, projectID, tenantID, userID string) (*TenantMembership, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
@@ -362,7 +414,7 @@ func (f *fakeMembershipStore) activeTenant(m *TenantMembership, projectID, userI
 	if !ok || t.Status != TenantStatusClaimed {
 		return nil
 	}
-	return &UserTenant{TenantID: t.ID, Name: t.Name, Role: m.Role}
+	return &UserTenant{TenantID: t.ID, Name: t.Name, Role: m.Role, Source: m.Source}
 }
 
 var _ MembershipStore = (*fakeMembershipStore)(nil)
@@ -889,4 +941,132 @@ func TestVerifyDomain_RejectsMissingCallerAndDomainID(t *testing.T) {
 
 	_, err = f.svc.VerifyDomain(withProject(testProject), testCaller, "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
+}
+
+// ── Governance writes and the attempt cap ──────────────────────────────
+
+// publishedClaim seeds a tenant of the given status whose admin holds a
+// pending dns_txt claim with its challenge published, and returns its id.
+func (f *domainFixture) publishedClaim(t *testing.T, tenantStatus string) string {
+	t.Helper()
+	f.seedAdmin(testProject, testTenant, testCaller)
+	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: tenantStatus})
+	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
+	f.resolver.records[testDomain] = []string{want}
+	return id
+}
+
+// Verifying a claim on a tenant that is already claimed writes the domain
+// and leaves the tenant row alone; verifying it again writes nothing at all.
+func TestVerifyDomain_WritesOnlyWhatChanges(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusClaimed)
+	ctx := withProject(testProject)
+
+	_, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	require.NoError(t, err)
+	require.Equal(t, 1, f.domains.writes)
+	require.Zero(t, f.tenants.writes, "a claimed tenant is not claimed again")
+
+	got, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	require.NoError(t, err)
+	require.Equal(t, DomainStatusVerified, got.Status)
+	require.Equal(t, 1, f.domains.writes, "re-verifying a verified domain writes nothing")
+	require.Zero(t, f.tenants.writes)
+	m, _ := f.members.GetMembership(context.Background(), testProject, testTenant, testCaller)
+	require.Equal(t, RoleOwner, m.Role)
+}
+
+// A failed re-check of a verified domain does not un-verify it; a failed
+// check of a claim writes failed once, and a repeat of it writes nothing.
+func TestVerifyDomain_FailedChecksWriteOnce(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusClaimed)
+	ctx := withProject(testProject)
+	_, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	require.NoError(t, err)
+
+	f.resolver.records[testDomain] = nil
+	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
+	require.Equal(t, DomainStatusVerified, d.Status, "a lapsed record leaves the domain verified")
+	require.Equal(t, 1, f.domains.writes)
+
+	pending := f.seedPendingDomain(t, testProject, testTenant, "other.example.com")
+	for range 2 {
+		_, err = f.svc.VerifyDomain(ctx, testCaller, pending)
+		require.ErrorIs(t, err, ErrPermissionDenied)
+	}
+	d, _ = f.domains.GetDomain(context.Background(), testProject, pending)
+	require.Equal(t, DomainStatusFailed, d.Status)
+	require.Equal(t, 2, f.domains.writes, "pending to failed is written once")
+}
+
+// A suspended tenant verifies nothing, and the refusal spends no attempt.
+func TestVerifyDomain_SuspendedTenantSpendsNoAttempt(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusSuspended)
+
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	require.Empty(t, f.domains.attempts)
+	require.Zero(t, f.domains.writes)
+}
+
+// Registrations and verifications share one per-tenant cap in a window; a
+// refusal is logged and checks no DNS, and a refused caller spends nothing.
+func TestDomainAttempts_CapRegistrationsAndVerifications(t *testing.T) {
+	f := newDomainFixture()
+	f.svc.cfg = &config.Config{TenantDomainAttemptsMaxPerTenant: 2, TenantDomainAttemptsWindowSeconds: 3600}
+	core, logs := observer.New(zap.InfoLevel)
+	f.svc.logger = zap.New(core)
+	start := time.Now()
+	f.svc.nowFunc = func() time.Time { return start }
+	ctx := withProject(testProject)
+
+	_, err := f.svc.CreateDomain(ctx, "user-stranger", testTenant, testDomain, DomainVerificationDNSTXT)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	require.Empty(t, f.domains.attempts, "a refused caller spends no attempt")
+
+	id := f.publishedClaim(t, TenantStatusLatent)
+	f.resolver.records[testDomain] = nil
+	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "second.example.com", DomainVerificationDNSTXT)
+	require.NoError(t, err)
+	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	require.ErrorIs(t, err, ErrPermissionDenied)
+
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
+	f.resolver.records[testDomain] = []string{want}
+	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	require.ErrorIs(t, err, ErrDomainAttemptsLimited)
+	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
+	require.Equal(t, DomainStatusFailed, d.Status, "a refused attempt checks nothing")
+	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "third.example.com", DomainVerificationDNSTXT)
+	require.ErrorIs(t, err, ErrDomainAttemptsLimited)
+	list, _ := f.domains.ListDomainsByTenant(context.Background(), testProject, testTenant)
+	require.Len(t, list, 2, "a refused registration writes nothing")
+
+	entries := logs.FilterMessage("tenant_domain_attempts_limited").All()
+	require.Len(t, entries, 2)
+	require.Equal(t, testTenant, entries[0].ContextMap()["tenant_id"])
+
+	f.svc.nowFunc = func() time.Time { return start.Add(time.Hour + time.Second) }
+	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	require.NoError(t, err, "the window has moved on")
+}
+
+func TestDomainAttempts_PropagatesStoreError(t *testing.T) {
+	f := newDomainFixture()
+	id := f.publishedClaim(t, TenantStatusLatent)
+	f.domains.attemptErr = errBoom
+	ctx := withProject(testProject)
+
+	_, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	require.ErrorIs(t, err, errBoom)
+	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "second.example.com", DomainVerificationDNSTXT)
+	require.ErrorIs(t, err, errBoom)
+	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
+	require.Equal(t, DomainStatusPending, d.Status)
 }

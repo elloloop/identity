@@ -73,11 +73,14 @@ type TenantInvitation struct {
 }
 
 // UserTenant is a tenant a user may act in: an active membership in a
-// claimed tenant, with the role the user holds there.
+// claimed tenant, with the role the user holds there and how the membership
+// began. A domain-derived one (MembershipSourceDomain) counts only for an
+// account whose email is verified: see actsInTenant.
 type UserTenant struct {
 	TenantID string
 	Name     string
 	Role     string
+	Source   string
 }
 
 // UserTenantReader reads the tenants a user may act in. Both methods apply
@@ -101,6 +104,12 @@ type MembershipStore interface {
 	// updates source/role/status in place (keeping id + created_at_ms).
 	// Returns the surviving row id.
 	UpsertMembership(ctx context.Context, m *TenantMembership) (string, error)
+	// GrantMembership makes m.UserID an active member of m.TenantID at
+	// m.Role, unless they already hold an active membership there at m.Role
+	// or a higher one (owner, then admin, then member), which is kept
+	// unchanged. It never lowers a role, so it cannot demote an owner.
+	// Returns the surviving membership.
+	GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, error)
 	// GetMembership returns the membership for (project, tenant, user), or
 	// (nil, nil).
 	GetMembership(ctx context.Context, projectID, tenantID, userID string) (*TenantMembership, error)
@@ -122,9 +131,10 @@ type InvitationStore interface {
 	// (project, tenant, lower(email)) and inserts the new one. A blank id
 	// is generated and written back. Returns the new invitation id.
 	//
-	// limits bounds how many invitations the tenant sends; the check and
-	// the insert run serialised per tenant, so concurrent creates cannot
-	// both pass a limit only one of them fits under.
+	// limits bounds how many invitations the tenant, the inviter and the
+	// recipient account for; the checks and the insert run serialised per
+	// tenant, inviter and recipient, so concurrent creates cannot both pass
+	// a limit only one of them fits under.
 	CreateInvitation(ctx context.Context, inv *TenantInvitation, limits InvitationLimits) (string, error)
 	// GetInvitationByTokenHash resolves an invitation by its hashed token
 	// within a project, or (nil, nil).
@@ -139,9 +149,10 @@ type InvitationStore interface {
 }
 
 // InvitationLimits bounds how many invitations InvitationStore.CreateInvitation
-// lets one tenant send. Each invitation is an email from the deployment's
-// sender, so the limits keep a tenant admin from using it to mail arbitrary
-// addresses without end.
+// lets one tenant, one inviter and one recipient account for. Each invitation
+// is an email from the deployment's sender, so the limits keep a tenant admin
+// from using it to mail arbitrary addresses without end — however many
+// tenants they create to spread the sending over.
 type InvitationLimits struct {
 	// MaxPerTenant and WindowStartMs cap the tenant's invitations: the create
 	// is refused with ErrInvitationLimited when the tenant already has
@@ -153,6 +164,14 @@ type InvitationLimits struct {
 	// refused with ErrInvitationResendTooSoon when the tenant already
 	// invited the same address at or after it. Zero applies no cooldown.
 	ResendCooldownStartMs int64
+	// MaxPerInviter caps the invitations the inviter (InvitedBy) sent from
+	// every tenant of the project at or after WindowStartMs: past it the
+	// create is refused with ErrInviterLimited. Zero applies no such cap.
+	MaxPerInviter int
+	// MaxPerRecipient caps the invitations the address was sent from every
+	// tenant of the project at or after WindowStartMs: past it the create is
+	// refused with ErrInvitationRecipientLimited. Zero applies no such cap.
+	MaxPerRecipient int
 }
 
 // TenantAutoFormStore is the transactional auto-formation primitive: it

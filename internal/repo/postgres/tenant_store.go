@@ -148,14 +148,16 @@ func (s *TenantStore) GetTenantByPrimaryDomain(ctx context.Context, projectID, d
 }
 
 // SetTenantStatus transitions a tenant's status and stamps updated_at.
-// Unknown ids are a no-op.
+// Unknown ids, and a tenant already in the status, are a no-op: a status
+// write fires the agent-governance trigger (0046), so one that changes
+// nothing must not be made.
 func (s *TenantStore) SetTenantStatus(ctx context.Context, projectID, tenantID, status string) error {
 	if projectID == "" || tenantID == "" {
 		return fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
 	}
 	const q = `
 		UPDATE tenants SET status = $3, updated_at_ms = $4
-		WHERE project_id = $1 AND id = $2`
+		WHERE project_id = $1 AND id = $2 AND status IS DISTINCT FROM $3`
 	if _, err := s.pool.Exec(ctx, q, projectID, tenantID, status, nowMs()); err != nil {
 		return wrapPgErr("SetTenantStatus", err)
 	}
@@ -193,8 +195,8 @@ func (s *TenantStore) ListTenants(ctx context.Context, projectID string) ([]*ser
 // membership in one transaction. The per-user limit is counted under a
 // transaction-scoped advisory lock keyed on (project, owner), so two
 // concurrent requests from one user are serialized and cannot both pass a
-// limit only one of them fits under. Each key part is length-prefixed, so no
-// two distinct pairs share a key.
+// limit only one of them fits under. The rows are stamped req.NowMs, the
+// clock the window was measured on (now when 0).
 func (s *TenantStore) CreateOwnedTenant(ctx context.Context, req service.OwnedTenantRequest) (*service.Tenant, *service.TenantMembership, error) {
 	if req.ProjectID == "" || req.OwnerID == "" {
 		return nil, nil, fmt.Errorf("%w: project_id and owner_id are required", service.ErrInvalidArgument)
@@ -209,10 +211,8 @@ func (s *TenantStore) CreateOwnedTenant(ctx context.Context, req service.OwnedTe
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	lockKey := fmt.Sprintf("tenant_create:%d:%s:%d:%s",
-		len(req.ProjectID), req.ProjectID, len(req.OwnerID), req.OwnerID)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
-		return nil, nil, wrapPgErr("CreateOwnedTenant(lock)", err)
+	if err := lockXact(ctx, tx, "CreateOwnedTenant", advisoryKey("tenant_create", req.ProjectID, req.OwnerID)); err != nil {
+		return nil, nil, err
 	}
 
 	var created int
@@ -229,7 +229,10 @@ func (s *TenantStore) CreateOwnedTenant(ctx context.Context, req service.OwnedTe
 		return nil, nil, service.ErrTenantCreationLimited
 	}
 
-	now := nowMs()
+	now := req.NowMs
+	if now == 0 {
+		now = nowMs()
+	}
 	t := &service.Tenant{
 		ID:          newID(),
 		ProjectID:   req.ProjectID,
@@ -310,7 +313,9 @@ func scanDomain(row pgx.Row) (*service.Domain, error) {
 // domain, so the insert is refused with service.ErrAlreadyExists only when
 // the tenant already holds the domain or another tenant has verified it. A
 // new registration never takes the legacy challenge: migration 0045 sets
-// that on the registrations that predate it.
+// that on the registrations that predate it. The insert runs under the
+// domain's auto-formation lock, so it cannot interleave with the auto-former
+// choosing a tenant for the domain or with a claim on it being verified.
 func (s *DomainStore) CreateDomain(ctx context.Context, d *service.Domain) (string, error) {
 	if d == nil {
 		return "", errors.New("postgres: CreateDomain: nil domain")
@@ -343,6 +348,15 @@ func (s *DomainStore) CreateDomain(ctx context.Context, d *service.Domain) (stri
 	if id == "" {
 		id = newID()
 	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", wrapPgErr("CreateDomain", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockXact(ctx, tx, "CreateDomain", autoformLockKey(d.ProjectID, d.Domain)); err != nil {
+		return "", err
+	}
 	const q = `
 		INSERT INTO domains (
 			id, project_id, tenant_id, domain, verification_method, status,
@@ -354,7 +368,7 @@ func (s *DomainStore) CreateDomain(ctx context.Context, d *service.Domain) (stri
 			WHERE project_id = $2 AND lower(domain) = lower($4)
 			  AND status = 'verified' AND tenant_id <> $3
 		)`
-	tag, err := s.pool.Exec(
+	tag, err := tx.Exec(
 		ctx, q,
 		id, d.ProjectID, d.TenantID, d.Domain, method, status,
 		d.VerifiedAtMs, d.CreatedAtMs, d.UpdatedAtMs,
@@ -364,6 +378,9 @@ func (s *DomainStore) CreateDomain(ctx context.Context, d *service.Domain) (stri
 	}
 	if tag.RowsAffected() == 0 {
 		return "", fmt.Errorf("postgres: CreateDomain: verified by another tenant: %w", service.ErrAlreadyExists)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", wrapPgErr("CreateDomain(commit)", err)
 	}
 	d.ID = id
 	d.LegacyTXTChallenge = false
@@ -388,31 +405,36 @@ func (s *DomainStore) GetDomain(ctx context.Context, projectID, domainID string)
 	return d, nil
 }
 
-// GetDomainByName returns the domain row for a name (case-insensitive)
-// within a project, or (nil, nil): the verified row when there is one, else
-// the oldest claim on the name.
-func (s *DomainStore) GetDomainByName(ctx context.Context, projectID, domain string) (*service.Domain, error) {
+// GetVerifiedDomain returns the verified row for a domain name
+// (case-insensitive) within a project, or (nil, nil) when no tenant has
+// verified it. The verified-domain unique index (0045) makes it at most one
+// row and serves the lookup, however many claims the name has.
+func (s *DomainStore) GetVerifiedDomain(ctx context.Context, projectID, domain string) (*service.Domain, error) {
 	if projectID == "" || domain == "" {
 		return nil, nil
 	}
 	const q = `SELECT ` + domainColumns + `
-		FROM domains WHERE project_id = $1 AND lower(domain) = lower($2)
-		ORDER BY (status = 'verified') DESC, created_at_ms, id
-		LIMIT 1`
+		FROM domains
+		WHERE project_id = $1 AND lower(domain) = lower($2) AND status = 'verified'`
 	d, err := scanDomain(s.pool.QueryRow(ctx, q, projectID, domain))
 	if noRows(err) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, wrapPgErr("GetDomainByName", err)
+		return nil, wrapPgErr("GetVerifiedDomain", err)
 	}
 	return d, nil
 }
 
 // SetDomainStatus transitions a domain's status and, when verifying,
-// stamps verified_at_ms (0 defaults to now on a verify). Unknown ids are a
-// no-op. Verifying a domain another row of the project has verified breaks
-// the verified-domain unique index, which surfaces service.ErrAlreadyExists.
+// stamps verified_at_ms (0 defaults to now on a verify). Unknown ids, and a
+// domain already in the status, are a no-op: a write on a verified domain
+// fires the agent-governance trigger (0046), so one that changes nothing
+// must not be made. Verifying a domain another row of the project has
+// verified breaks the verified-domain unique index, which surfaces
+// service.ErrAlreadyExists; the verify runs under the domain's auto-formation
+// lock, so it cannot interleave with the auto-former choosing a tenant for
+// the domain.
 func (s *DomainStore) SetDomainStatus(ctx context.Context, projectID, domainID, status string, verifiedAtMs int64) error {
 	if projectID == "" || domainID == "" {
 		return fmt.Errorf("%w: project_id and domain_id are required", service.ErrInvalidArgument)
@@ -423,9 +445,35 @@ func (s *DomainStore) SetDomainStatus(ctx context.Context, projectID, domainID, 
 	}
 	const q = `
 		UPDATE domains SET status = $3, verified_at_ms = $4, updated_at_ms = $5
-		WHERE project_id = $1 AND id = $2`
-	if _, err := s.pool.Exec(ctx, q, projectID, domainID, status, verifiedAtMs, now); err != nil {
+		WHERE project_id = $1 AND id = $2 AND status IS DISTINCT FROM $3`
+	if status != service.DomainStatusVerified {
+		if _, err := s.pool.Exec(ctx, q, projectID, domainID, status, verifiedAtMs, now); err != nil {
+			return wrapPgErr("SetDomainStatus", err)
+		}
+		return nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
 		return wrapPgErr("SetDomainStatus", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var name string
+	err = tx.QueryRow(ctx, `SELECT domain FROM domains WHERE project_id = $1 AND id = $2`, projectID, domainID).Scan(&name)
+	if noRows(err) {
+		return nil
+	}
+	if err != nil {
+		return wrapPgErr("SetDomainStatus(read)", err)
+	}
+	if err := lockXact(ctx, tx, "SetDomainStatus", autoformLockKey(projectID, name)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, q, projectID, domainID, status, verifiedAtMs, now); err != nil {
+		return wrapPgErr("SetDomainStatus", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return wrapPgErr("SetDomainStatus(commit)", err)
 	}
 	return nil
 }
@@ -455,4 +503,65 @@ func (s *DomainStore) ListDomainsByTenant(ctx context.Context, projectID, tenant
 		return nil, wrapPgErr("ListDomainsByTenant rows", err)
 	}
 	return out, nil
+}
+
+// RecordDomainAttempt counts one CreateDomain or VerifyDomain by a tenant
+// against its cap: service.ErrDomainAttemptsLimited when the tenant already
+// made a.MaxPerWindow attempts at or after a.WindowStartMs, else the attempt
+// is recorded and the tenant's attempts older than the window are pruned, so
+// the table holds at most the cap per tenant. Attempts by one tenant are
+// serialised by an advisory lock, so concurrent ones cannot both pass a cap
+// only one of them fits under.
+func (s *DomainStore) RecordDomainAttempt(ctx context.Context, a service.DomainAttempt) error {
+	if a.ProjectID == "" || a.TenantID == "" {
+		return fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
+	}
+	if a.MaxPerWindow <= 0 {
+		return fmt.Errorf("%w: max_per_window must be positive", service.ErrInvalidArgument)
+	}
+	at := a.AtMs
+	if at == 0 {
+		at = nowMs()
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return wrapPgErr("RecordDomainAttempt", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockXact(ctx, tx, "RecordDomainAttempt", advisoryKey("domain_attempts", a.ProjectID, a.TenantID)); err != nil {
+		return err
+	}
+	var made int
+	if err := tx.QueryRow(
+		ctx, `
+		SELECT count(*) FROM domain_attempts
+		WHERE project_id = $1 AND tenant_id = $2 AND attempted_at_ms >= $3`,
+		a.ProjectID, a.TenantID, a.WindowStartMs,
+	).Scan(&made); err != nil {
+		return wrapPgErr("RecordDomainAttempt(count)", err)
+	}
+	if made >= a.MaxPerWindow {
+		return service.ErrDomainAttemptsLimited
+	}
+	if _, err := tx.Exec(
+		ctx, `
+		INSERT INTO domain_attempts (id, project_id, tenant_id, attempted_at_ms)
+		VALUES ($1, $2, $3, $4)`,
+		newID(), a.ProjectID, a.TenantID, at,
+	); err != nil {
+		return wrapPgErr("RecordDomainAttempt(insert)", err)
+	}
+	if _, err := tx.Exec(
+		ctx, `
+		DELETE FROM domain_attempts
+		WHERE project_id = $1 AND tenant_id = $2 AND attempted_at_ms < $3`,
+		a.ProjectID, a.TenantID, a.WindowStartMs,
+	); err != nil {
+		return wrapPgErr("RecordDomainAttempt(prune)", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return wrapPgErr("RecordDomainAttempt(commit)", err)
+	}
+	return nil
 }

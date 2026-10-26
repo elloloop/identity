@@ -4706,12 +4706,20 @@ type RefreshTokenRequest struct {
 	RefreshToken string                 `protobuf:"bytes,1,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
 	// tenant_id, when set, asks for an access token whose `tenant` claim is
 	// this tenant instead of the deployment's default. The caller must be an
-	// active member of an active tenant in the session's project; otherwise
-	// the call is PERMISSION_DENIED, no token is issued and the refresh token
-	// is NOT consumed, so the client can retry without it. Empty keeps the
-	// default claim. The selection is not remembered: every refresh names the
-	// tenant it wants. A membership that ends stops the next refresh, so an
-	// access token outlives it by at most its own lifetime.
+	// active member of a claimed tenant in the session's project, and a
+	// member only through their email's domain must have verified that
+	// email; otherwise the call is PERMISSION_DENIED. It is
+	// FAILED_PRECONDITION when the server has tenant selection off
+	// (GATEWAY_TENANT_SELECTION_ENABLED, off by default, and never on the
+	// memory or SQLite drivers), and UNAVAILABLE when the membership could
+	// not be read. On every one of these no token is issued and the refresh
+	// token is NOT consumed, so the client can retry without it. Empty, or the
+	// deployment's default tenant, keeps the default claim. The selection is
+	// not remembered: every refresh names the tenant it wants, and a client
+	// reads the tenant it got from the access token's `tenant` claim. A
+	// membership that ends stops the next refresh, so an access token
+	// outlives it by at most its own lifetime; a tenant that is suspended
+	// stops its tokens within GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS.
 	TenantId      string `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -13790,8 +13798,8 @@ func (x *CreateTenantResponse) GetMembership() *TenantMembership {
 	return nil
 }
 
-// UserTenant is a tenant the caller is an active member of, with the role
-// the caller holds in it.
+// UserTenant is a claimed tenant the caller is an active member of, with
+// the role the caller holds in it.
 type UserTenant struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
@@ -13890,8 +13898,9 @@ func (*ListMyTenantsRequest) Descriptor() ([]byte, []int) {
 
 type ListMyTenantsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// tenants are ordered by name, then id. Suspended tenants and
-	// memberships that are not active are left out.
+	// tenants are ordered by name, then id. Latent and suspended tenants,
+	// memberships that are not active, and memberships through the email's
+	// domain while that email is unverified are left out.
 	Tenants       []*UserTenant `protobuf:"bytes,1,rep,name=tenants,proto3" json:"tenants,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

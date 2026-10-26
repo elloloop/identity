@@ -1837,8 +1837,9 @@ func TestApproveQrLogin_BadSession(t *testing.T) {
 var _ = strings.Contains
 
 // TestRefreshToken_TenantSelectionRefusedKeepsToken drives tenant_id through
-// the handler: the memory driver can select no tenant, so the refresh is
-// PermissionDenied, and the refresh token, unspent, still rotates without one.
+// the handler: the memory driver has no tenant selection, so the refresh is
+// FailedPrecondition, and the refresh token, unspent, still rotates without
+// one.
 func TestRefreshToken_TenantSelectionRefusedKeepsToken(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -1853,7 +1854,7 @@ func TestRefreshToken_TenantSelectionRefusedKeepsToken(t *testing.T) {
 	_, err = h.client.RefreshToken(ctx, withClientHeaders(connect.NewRequest(&identitypb.RefreshTokenRequest{
 		RefreshToken: signup.Msg.RefreshToken, TenantId: "t-acme",
 	})))
-	requireCode(t, err, connect.CodePermissionDenied)
+	requireCode(t, err, connect.CodeFailedPrecondition)
 
 	rotated, err := h.client.RefreshToken(ctx, withClientHeaders(connect.NewRequest(&identitypb.RefreshTokenRequest{
 		RefreshToken: signup.Msg.RefreshToken,

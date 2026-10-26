@@ -366,3 +366,137 @@ func TestInvitationStore_ConcurrentCreatesLeaveOneOpenInvite(t *testing.T) {
 	require.Len(t, list, racers)
 	require.Equal(t, 1, pending, "one open invite per mailbox, however the creates interleave")
 }
+
+// TestMembershipStore_GrantNeverLowersARole: a grant makes an active member
+// at its role, promotes a lower one, re-activates an ended one at the grant's
+// role, and leaves an active membership at that role or above unchanged —
+// even against a concurrent grant of a lower role.
+func TestMembershipStore_GrantNeverLowersARole(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping membership grant test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	ms, _, projectID, tenantID, user1, user2 := newMembershipFixture(ctx, t, dsn)
+
+	grant := func(userID, role, source string) *service.TenantMembership {
+		t.Helper()
+		m, err := ms.GrantMembership(ctx, &service.TenantMembership{
+			ProjectID: projectID, TenantID: tenantID, UserID: userID, Role: role, Source: source,
+		})
+		require.NoError(t, err)
+		return m
+	}
+
+	m := grant(user1, service.RoleOwner, service.MembershipSourceAdded)
+	require.Equal(t, service.RoleOwner, m.Role)
+	require.Equal(t, service.MembershipStatusActive, m.Status)
+
+	kept := grant(user1, service.RoleMember, service.MembershipSourceInvited)
+	require.Equal(t, service.RoleOwner, kept.Role, "a lower grant never demotes")
+	require.Equal(t, service.MembershipSourceAdded, kept.Source, "nor rewrites the membership")
+	require.Equal(t, m.ID, kept.ID)
+	require.Equal(t, service.RoleOwner, grant(user1, service.RoleOwner, service.MembershipSourceInvited).Role)
+
+	require.Equal(t, service.RoleMember, grant(user2, service.RoleMember, service.MembershipSourceInvited).Role)
+	promoted := grant(user2, service.RoleAdmin, service.MembershipSourceInvited)
+	require.Equal(t, service.RoleAdmin, promoted.Role, "a higher grant promotes")
+
+	_, err := ms.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: service.RoleOwner,
+		Source: service.MembershipSourceAdded, Status: service.MembershipStatusInactive,
+	})
+	require.NoError(t, err)
+	rejoined := grant(user2, service.RoleMember, service.MembershipSourceInvited)
+	require.Equal(t, service.MembershipStatusActive, rejoined.Status)
+	require.Equal(t, service.RoleMember, rejoined.Role, "an ended membership comes back at the grant's role")
+
+	_, err = ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: projectID, TenantID: tenantID})
+	require.ErrorIs(t, err, service.ErrInvalidArgument)
+	_, err = ms.GrantMembership(ctx, nil)
+	require.Error(t, err)
+
+	// However an owner grant and member grants interleave, the owner stays.
+	require.NoError(t, ms.RemoveMembership(ctx, projectID, tenantID, user2))
+	const racers = 8
+	errs := make(chan error, racers)
+	for i := range racers {
+		role := service.RoleMember
+		if i == racers/2 {
+			role = service.RoleOwner
+		}
+		go func() {
+			_, err := ms.GrantMembership(ctx, &service.TenantMembership{
+				ProjectID: projectID, TenantID: tenantID, UserID: user2, Role: role, Source: service.MembershipSourceInvited,
+			})
+			errs <- err
+		}()
+	}
+	for range racers {
+		require.NoError(t, <-errs)
+	}
+	final, err := ms.GetMembership(ctx, projectID, tenantID, user2)
+	require.NoError(t, err)
+	require.Equal(t, service.RoleOwner, final.Role)
+}
+
+// TestInvitationStore_InviterAndRecipientLimits: the per-inviter cap counts
+// one person's invitations from every tenant, the per-recipient cap one
+// address's from every tenant of the project, and a zero cap is off.
+func TestInvitationStore_InviterAndRecipientLimits(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping invitation sender limits test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantA, user1, user2 := newMembershipFixture(ctx, t, dsn)
+	newTenant := func() string {
+		t.Helper()
+		id, err := (&TenantStore{pool: is.pool}).CreateTenant(ctx, &service.Tenant{ProjectID: projectID, Status: service.TenantStatusClaimed})
+		require.NoError(t, err)
+		return id
+	}
+	tenantB, tenantC := newTenant(), newTenant()
+
+	now := nowMs()
+	n := 0
+	invite := func(tenant, inviter, email string, limits service.InvitationLimits) error {
+		t.Helper()
+		n++
+		_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+			ProjectID: projectID, TenantID: tenant, Email: email, InvitedBy: inviter,
+			TokenHash: fmt.Sprintf("sender-%d", n), ExpiresAtMs: now + 86_400_000, CreatedAtMs: now,
+		}, limits)
+		return err
+	}
+	window := now - 3_600_000
+
+	perInviter := service.InvitationLimits{MaxPerTenant: 100, WindowStartMs: window, MaxPerInviter: 2}
+	require.NoError(t, invite(tenantA, user1, "i1@acme.com", perInviter))
+	require.NoError(t, invite(tenantB, user1, "i2@acme.com", perInviter))
+	require.ErrorIs(t, invite(tenantC, user1, "i3@acme.com", perInviter), service.ErrInviterLimited,
+		"the cap spans the inviter's tenants")
+	require.NoError(t, invite(tenantC, user2, "i3@acme.com", perInviter), "each inviter has their own cap")
+	later := perInviter
+	later.WindowStartMs = now + 1
+	require.NoError(t, invite(tenantC, user1, "i4@acme.com", later), "invitations before the window do not count")
+	off := perInviter
+	off.MaxPerInviter = 0
+	require.NoError(t, invite(tenantC, user1, "i5@acme.com", off), "a zero cap is off")
+
+	perRecipient := service.InvitationLimits{MaxPerTenant: 100, WindowStartMs: window, MaxPerRecipient: 2}
+	require.NoError(t, invite(tenantA, user1, "r@acme.com", perRecipient))
+	require.NoError(t, invite(tenantB, user2, "R@acme.com", perRecipient))
+	require.ErrorIs(t, invite(tenantC, user2, "r@ACME.com", perRecipient), service.ErrInvitationRecipientLimited,
+		"the cap spans the project's tenants and the address's case")
+	require.NoError(t, invite(tenantC, user2, "other@acme.com", perRecipient), "each address has its own cap")
+	list, err := is.ListInvitationsForTenant(ctx, projectID, tenantC)
+	require.NoError(t, err)
+	for _, inv := range list {
+		require.NotEqual(t, "r@acme.com", inv.Email, "a refused invitation writes nothing")
+	}
+}

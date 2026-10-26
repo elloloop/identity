@@ -68,12 +68,27 @@ func TestAgentOAuthRowLevelSecurityAndControlPlaneRevocation(t *testing.T) {
 	require.NotZero(t, stored.RevokedAtMs, "project control-plane mutation must fence grants even without data-plane GUC")
 	tenantID, err := NewTenantStore(repo).CreateTenant(ctx, &service.Tenant{ProjectID: projectA, Status: service.TenantStatusClaimed})
 	require.NoError(t, err)
-	verifiedDomainGrant := request.Clone()
-	verifiedDomainGrant.ID = "new-verified-domain"
-	require.NoError(t, repo.CreateAgentAuthorization(ctx, verifiedDomainGrant))
+	// Tenant and domain changes revoke only the authority of the people they
+	// govern (0046): give each grant they must revoke an owner on the domain.
+	now := time.Now()
+	governed, err := repo.CreateUser(ctx, &service.User{Email: "person@governance.example.test", Status: "active", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	createOwned := func(id string) {
+		t.Helper()
+		grant := request.Clone()
+		grant.ID = id
+		require.NoError(t, repo.CreateAgentAuthorization(ctx, grant))
+		_, err := raw.Exec(ctx, `SELECT set_config('app.current_project_id',$1,false)`, projectA)
+		require.NoError(t, err)
+		_, err = raw.Exec(ctx, `UPDATE agent_authorizations SET owner_id=$2 WHERE project_id=$1 AND id=$3`, projectA, governed, id)
+		require.NoError(t, err)
+		_, err = raw.Exec(ctx, `SELECT set_config('app.current_project_id','',false)`)
+		require.NoError(t, err)
+	}
+	createOwned("new-verified-domain")
 	domainID, err := NewDomainStore(repo).CreateDomain(ctx, &service.Domain{ProjectID: projectA, TenantID: tenantID, Domain: "governance.example.test", VerificationMethod: "dns_txt", Status: service.DomainStatusVerified})
 	require.NoError(t, err)
-	stored, err = repo.GetAgentAuthorization(ctx, verifiedDomainGrant.ID)
+	stored, err = repo.GetAgentAuthorization(ctx, "new-verified-domain")
 	require.NoError(t, err)
 	require.NotZero(t, stored.RevokedAtMs)
 	other := repo.WithProject(projectB)
@@ -81,26 +96,35 @@ func TestAgentOAuthRowLevelSecurityAndControlPlaneRevocation(t *testing.T) {
 	otherGrant := request.Clone()
 	otherGrant.ID = "other-project-request"
 	require.NoError(t, other.(service.AgentOAuthRepository).CreateAgentAuthorization(ctx, otherGrant))
+	// Login-policy changes revoke project-wide, so even an ownerless pending
+	// request goes; tenant and domain changes revoke the governed person's
+	// grant and leave the ownerless one.
 	operations := []struct {
 		name, query string
 		args        []any
+		projectWide bool
 	}{
-		{"policy-insert", `INSERT INTO login_policies(id,project_id,tenant_id,created_at_ms,updated_at_ms) VALUES('delegation-policy',$1,$2,1,1)`, []any{projectA, tenantID}},
-		{"policy-update", `UPDATE login_policies SET require_2fa=true WHERE project_id=$1 AND tenant_id=$2`, []any{projectA, tenantID}},
-		{"policy-delete", `DELETE FROM login_policies WHERE project_id=$1 AND tenant_id=$2`, []any{projectA, tenantID}},
-		{"tenant-status", `UPDATE tenants SET status='suspended' WHERE project_id=$1 AND id=$2`, []any{projectA, tenantID}},
-		{"domain-status", `UPDATE domains SET status='failed' WHERE project_id=$1 AND id=$2`, []any{projectA, domainID}},
-		{"domain-delete", `DELETE FROM domains WHERE project_id=$1 AND id=$2`, []any{projectA, domainID}},
+		{"policy-insert", `INSERT INTO login_policies(id,project_id,tenant_id,created_at_ms,updated_at_ms) VALUES('delegation-policy',$1,$2,1,1)`, []any{projectA, tenantID}, true},
+		{"policy-update", `UPDATE login_policies SET require_2fa=true WHERE project_id=$1 AND tenant_id=$2`, []any{projectA, tenantID}, true},
+		{"policy-delete", `DELETE FROM login_policies WHERE project_id=$1 AND tenant_id=$2`, []any{projectA, tenantID}, true},
+		{"tenant-status", `UPDATE tenants SET status='suspended' WHERE project_id=$1 AND id=$2`, []any{projectA, tenantID}, false},
+		{"domain-status", `UPDATE domains SET status='failed' WHERE project_id=$1 AND id=$2`, []any{projectA, domainID}, false},
+		{"domain-reverified", `UPDATE domains SET status='verified' WHERE project_id=$1 AND id=$2`, []any{projectA, domainID}, false},
+		{"domain-delete", `DELETE FROM domains WHERE project_id=$1 AND id=$2`, []any{projectA, domainID}, false},
 	}
 	for _, operation := range operations {
-		pending := request.Clone()
-		pending.ID = operation.name
-		require.NoError(t, repo.CreateAgentAuthorization(ctx, pending))
+		ownerless := request.Clone()
+		ownerless.ID = operation.name + "-ownerless"
+		require.NoError(t, repo.CreateAgentAuthorization(ctx, ownerless))
+		createOwned(operation.name)
 		_, err = raw.Exec(ctx, operation.query, operation.args...)
 		require.NoError(t, err)
-		stored, err = repo.GetAgentAuthorization(ctx, pending.ID)
+		stored, err = repo.GetAgentAuthorization(ctx, operation.name)
 		require.NoError(t, err)
 		require.NotZero(t, stored.RevokedAtMs, operation.name)
+		stored, err = repo.GetAgentAuthorization(ctx, ownerless.ID)
+		require.NoError(t, err)
+		require.Equal(t, operation.projectWide, stored.RevokedAtMs != 0, operation.name+": the ownerless request")
 		require.NoError(t, raw.QueryRow(ctx, `SELECT current_setting('app.current_project_id',true)`).Scan(&originalScope))
 		require.Empty(t, originalScope)
 	}

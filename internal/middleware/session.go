@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -382,8 +383,16 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expected
 				// mode=session, the session lookup applies — otherwise
 				// a revoked session would still get the "I'm signed in"
 				// view on endpoints like GetCurrentUser.
+				// A token whose selected tenant could not be read may be
+				// good, so the request is answered unavailable rather than
+				// served as signed out.
 				if token := extractBearerToken(r); token != "" {
-					if claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience); err == nil {
+					claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience)
+					if errors.Is(err, errTokenTenantLookup) {
+						writeTokenRefusal(w, err)
+						return
+					}
+					if err == nil {
 						if claims.SID != "" {
 							state, lookupErr := cache.Lookup(r.Context(), claims.SID)
 							if lookupErr == nil && state == SessionStateActive {

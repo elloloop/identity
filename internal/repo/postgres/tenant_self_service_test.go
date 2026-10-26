@@ -234,8 +234,8 @@ func runActiveTenantsForUser(t *testing.T, dsn string) {
 	got, err := f.members.ListActiveTenantsForUser(ctx, f.projA, f.user1)
 	require.NoError(t, err)
 	require.Len(t, got, 2)
-	assert.Equal(t, service.UserTenant{TenantID: alpha, Name: "Alpha", Role: service.RoleAdmin}, *got[0])
-	assert.Equal(t, service.UserTenant{TenantID: zeta, Name: "Zeta", Role: service.RoleMember}, *got[1])
+	assert.Equal(t, service.UserTenant{TenantID: alpha, Name: "Alpha", Role: service.RoleAdmin, Source: service.MembershipSourceAdded}, *got[0])
+	assert.Equal(t, service.UserTenant{TenantID: zeta, Name: "Zeta", Role: service.RoleMember, Source: service.MembershipSourceAdded}, *got[1])
 
 	other, err := f.members.ListActiveTenantsForUser(ctx, f.projB, f.user1)
 	require.NoError(t, err)
@@ -250,6 +250,7 @@ func runActiveTenantsForUser(t *testing.T, dsn string) {
 	require.NoError(t, err)
 	require.NotNil(t, one)
 	assert.Equal(t, service.RoleAdmin, one.Role)
+	assert.Equal(t, service.MembershipSourceAdded, one.Source)
 
 	for name, tc := range map[string]struct{ project, tenant, user string }{
 		"suspended tenant":         {f.projA, suspended, f.user1},

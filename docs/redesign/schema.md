@@ -335,10 +335,31 @@ punycode domain (H3) — enforced in application code on `lower(domain)`.
 - **PK:** `id`. **Unique:** `domains_project_verified_domain_uidx (project_id, lower(domain)) WHERE status = 'verified'`,
   `domains_project_tenant_domain_uidx (project_id, tenant_id, lower(domain))`.
 - **Indexes:** `domains_project_domain_idx (project_id, lower(domain))`,
-  `domains_project_tenant_idx (project_id, tenant_id)`,
-  `domains_project_status_idx (project_id, status)`.
+  `domains_project_status_idx (project_id, status)`,
+  `domains_project_email_domain_idx (project_id, lower(domain), created_at_ms, id) WHERE verification_method = 'email'`
+  (the auto-former's fallback, 0046). 0046 dropped `domains_project_tenant_idx (project_id, tenant_id)`,
+  which `domains_project_tenant_domain_uidx` covers.
 - **FKs:** `project_id` → `projects(id)` ON DELETE CASCADE;
   `tenant_id` → `tenants(id)` ON DELETE CASCADE.
+- **Triggers (0046):** a row that is, or becomes, verified changing `status`,
+  `tenant_id` or `domain`, inserted verified or deleted while verified, revokes
+  the agent grants and machines of the members of the tenants involved and of
+  the accounts on the domains involved. `tenants` has the same trigger on a
+  change of `status` or `primary_domain`. Other writes revoke nothing.
+
+#### `domain_attempts` (per-tenant domain-attempt history) — 0046
+
+One row per `CreateDomain` or `VerifyDomain` a tenant made, counted for the
+per-tenant cap and pruned as rows leave its window. No row-level security.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | TEXT | N | **PK**. |
+| `project_id` | TEXT | N | **FK** → `projects(id)` ON DELETE CASCADE. |
+| `tenant_id` | TEXT | N | **FK** → `tenants(id)` ON DELETE CASCADE. |
+| `attempted_at_ms` | BIGINT | N | |
+
+- **Indexes:** `domain_attempts_project_tenant_idx (project_id, tenant_id, attempted_at_ms)`.
 
 #### `login_policies` (LoginPolicy) — NEW
 
@@ -413,7 +434,10 @@ Postgres uses a partial unique index on the open status as defense-in-depth).
 - **PK:** `id`. **Unique:** `tenant_invitations_project_token_uidx (project_id, token_hash)`;
   `tenant_invitations_open_email_uidx (project_id, tenant_id, lower(email)) WHERE status = 'pending'`
   — one open invite per (project, tenant, email).
-- **Indexes:** `tenant_invitations_project_tenant_idx (project_id, tenant_id)`,
+- **Indexes:** `tenant_invitations_project_tenant_created_idx (project_id, tenant_id, created_at_ms)`,
+  `tenant_invitations_project_inviter_created_idx (project_id, invited_by, created_at_ms)`,
+  `tenant_invitations_project_email_created_idx (project_id, lower(email COLLATE "C"), created_at_ms)`
+  (the invitation limits, 0046, which replaced `tenant_invitations_project_tenant_idx (project_id, tenant_id)`),
   `tenant_invitations_project_expires_idx (project_id, expires_at_ms)` (GC sweeper).
 - **FKs:** `project_id` → `projects(id)` CASCADE; `tenant_id` → `tenants(id)`
   CASCADE. `invited_by` is NOT an FK (free-text provenance, matching

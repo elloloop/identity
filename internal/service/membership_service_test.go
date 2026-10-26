@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/email"
@@ -427,6 +429,8 @@ func TestCreateTenantInvitation_PassesConfiguredLimits(t *testing.T) {
 		MaxPerTenant:          7,
 		WindowStartMs:         now.Add(-time.Hour).UnixMilli(),
 		ResendCooldownStartMs: now.Add(-time.Minute).UnixMilli(),
+		MaxPerInviter:         config.DefaultTenantInvitationMaxPerInviter,
+		MaxPerRecipient:       config.DefaultTenantInvitationMaxPerRecipient,
 	}, f.invitations.lastLimits)
 
 	f.svc.cfg = nil
@@ -834,4 +838,59 @@ func TestMembershipService_InvitationTTLFromConfig(t *testing.T) {
 		newFakeUserDirectory(), &recordingMailer{}, false, cfg, nil,
 	)
 	require.Equal(t, time.Hour, svc.invitationTTL())
+}
+
+// Accepting an invitation never lowers a role the invitee already holds: an
+// owner who accepts a member invitation stays the owner.
+func TestAcceptTenantInvitation_NeverDemotes(t *testing.T) {
+	f := newMembershipFixtureNoMail()
+	rawToken := f.seedInvite(t)
+	f.users.put(mTestProject, mInviteeID, mInvitee)
+	_, err := f.memberships.UpsertMembership(context.Background(), &TenantMembership{
+		ProjectID: mTestProject, TenantID: mTestTenant, UserID: mInviteeID,
+		Source: MembershipSourceCreated, Role: RoleOwner, Status: MembershipStatusActive,
+	})
+	require.NoError(t, err)
+
+	m, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, rawToken)
+	require.NoError(t, err)
+	require.Equal(t, RoleOwner, m.Role)
+	stored, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mInviteeID)
+	require.Equal(t, RoleOwner, stored.Role, "the stored membership keeps the owner role")
+	require.Equal(t, MembershipSourceCreated, stored.Source)
+	invs, _ := f.invitations.ListInvitationsForTenant(context.Background(), mTestProject, mTestTenant)
+	require.Equal(t, InvitationStatusAccepted, invs[0].Status, "the invitation is still used up")
+}
+
+// The per-inviter and per-recipient caps reach the store from config, and a
+// refusal on either is logged with the recipient redacted.
+func TestCreateTenantInvitation_SenderLimits(t *testing.T) {
+	f := newMembershipFixture()
+	f.svc.cfg = &config.Config{TenantInvitationMaxPerInviter: 7, TenantInvitationMaxPerRecipient: 2}
+	core, logs := observer.New(zap.InfoLevel)
+	f.svc.logger = zap.New(core)
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+	ctx := withProject(mTestProject)
+
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+	require.NoError(t, err)
+	require.Equal(t, 7, f.invitations.lastLimits.MaxPerInviter)
+	require.Equal(t, 2, f.invitations.lastLimits.MaxPerRecipient)
+
+	for _, refusal := range []error{ErrInviterLimited, ErrInvitationRecipientLimited} {
+		f.invitations.createErr = refusal
+		_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "colleague@acme.com", RoleMember)
+		require.ErrorIs(t, err, refusal)
+	}
+	entries := logs.FilterMessage("tenant_invitation_limited").All()
+	require.Len(t, entries, 2)
+	for _, e := range entries {
+		require.Equal(t, mAdminID, e.ContextMap()["inviter_id"])
+		require.NotContains(t, e.ContextMap()["to"], "colleague", "the recipient is redacted")
+	}
+
+	f.invitations.createErr = errBoom
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "colleague@acme.com", RoleMember)
+	require.ErrorIs(t, err, errBoom)
+	require.Len(t, logs.FilterMessage("tenant_invitation_limited").All(), 2, "a store failure is not a limit")
 }

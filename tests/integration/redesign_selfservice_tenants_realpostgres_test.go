@@ -21,10 +21,45 @@ import (
 )
 
 // startSelfServiceHarness boots the redesign harness with self-service
-// tenants on for the default project.
+// tenants on for the default project and tenant selection on, its status
+// cache strict so a suspension is seen on the very next request.
 func startSelfServiceHarness(t *testing.T) *RedesignHarness {
 	t.Helper()
-	return startRedesignHarnessWith(t, func(c *config.Config) { c.SelfServiceTenantsEnabled = true })
+	return startRedesignHarnessWith(t, func(c *config.Config) {
+		c.SelfServiceTenantsEnabled = true
+		c.TenantSelectionEnabled = true
+		c.TenantStatusCacheTTLSeconds = 0
+	})
+}
+
+// TestRedesign_TenantSelection_OffByDefault: with the switch off, a refresh
+// that names a tenant the caller owns is FAILED_PRECONDITION, and the refresh
+// token, unspent, still rotates without one.
+func TestRedesign_TenantSelection_OffByDefault(t *testing.T) {
+	h := startRedesignHarnessWith(t, func(c *config.Config) { c.SelfServiceTenantsEnabled = true })
+	ctx := context.Background()
+
+	signup, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email:    fmt.Sprintf("ss-off-%d@example.com", time.Now().UnixNano()),
+		Password: validPassword,
+	}))
+	if err != nil {
+		t.Fatalf("PasswordSignup: %v", err)
+	}
+	created, err := h.AuthedClient(signup.Msg.GetAccessToken()).CreateTenant(ctx,
+		connect.NewRequest(&identitypb.CreateTenantRequest{Name: "Acme"}))
+	if err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	_, err = h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
+		RefreshToken: signup.Msg.GetRefreshToken(), TenantId: created.Msg.GetTenantId(),
+	}))
+	requireConnectCode(t, "selecting with selection off", err, connect.CodeFailedPrecondition)
+	if _, err := h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
+		RefreshToken: signup.Msg.GetRefreshToken(),
+	})); err != nil {
+		t.Fatalf("the refused refresh token must still rotate: %v", err)
+	}
 }
 
 // TestRedesign_SelfServiceTenants_EndToEnd drives a self-service tenant

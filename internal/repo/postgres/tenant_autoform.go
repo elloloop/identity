@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -58,9 +57,9 @@ func (s *AutoFormStore) EnsureTenantForDomain(ctx context.Context, projectID, do
 // within a project, creating a latent tenant + its domain in one
 // transaction when there is none. Registering a domain does not make it a
 // tenant's, so a claim another tenant has not proven is never joined: see
-// tenantIDForDomain. No unique index serialises that choice any more, so an
-// advisory lock on (project, domain) does, and concurrent signers converge
-// on one tenant.
+// tenantIDForDomain. No unique index serialises that choice any more, so the
+// domain's auto-formation lock does (autoformLockKey), and concurrent signers
+// converge on one tenant.
 func (s *AutoFormStore) findOrCreateTenant(ctx context.Context, projectID, domain string) (string, error) {
 	if id, err := s.tenantIDForDomain(ctx, s.pool, projectID, domain); err != nil || id != "" {
 		return id, err
@@ -72,10 +71,8 @@ func (s *AutoFormStore) findOrCreateTenant(ctx context.Context, projectID, domai
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	lockKey := fmt.Sprintf("tenant_autoform:%d:%s:%d:%s",
-		len(projectID), projectID, len(domain), strings.ToLower(domain))
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
-		return "", wrapPgErr("EnsureTenantForDomain(lock)", err)
+	if err := lockXact(ctx, tx, "EnsureTenantForDomain", autoformLockKey(projectID, domain)); err != nil {
+		return "", err
 	}
 	// A signer that held the lock before us may have formed the tenant.
 	if id, err := s.tenantIDForDomain(ctx, tx, projectID, domain); err != nil || id != "" {
@@ -121,16 +118,32 @@ type querier interface {
 // only registered — anyone's pending or failed dns_txt row, or an email row
 // on a tenant that is not auto-formed — is ignored, so registering a domain
 // one does not own captures none of its signups.
+//
+// The two reads are separate so each is one index probe: the verified row
+// through the verified-domain unique index (0045), the oldest email row
+// through the partial index 0046 adds. Neither scans the domain's claims.
 func (s *AutoFormStore) tenantIDForDomain(ctx context.Context, q querier, projectID, domain string) (string, error) {
 	var id string
 	err := q.QueryRow(
 		ctx, `
+		SELECT tenant_id FROM domains
+		WHERE project_id = $1 AND lower(domain) = lower($2) AND status = 'verified'`,
+		projectID, domain,
+	).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !noRows(err) {
+		return "", wrapPgErr("tenantIDForDomain(verified)", err)
+	}
+	err = q.QueryRow(
+		ctx, `
 		SELECT d.tenant_id FROM domains d
 		JOIN tenants t ON t.id = d.tenant_id AND t.project_id = d.project_id
 		WHERE d.project_id = $1 AND lower(d.domain) = lower($2)
-		  AND (d.status = 'verified'
-		       OR (d.verification_method = 'email' AND t.status = 'latent' AND t.created_by = ''))
-		ORDER BY (d.status = 'verified') DESC, d.created_at_ms, d.id
+		  AND d.verification_method = 'email'
+		  AND t.status = 'latent' AND t.created_by = ''
+		ORDER BY d.created_at_ms, d.id
 		LIMIT 1`,
 		projectID, domain,
 	).Scan(&id)
@@ -138,7 +151,7 @@ func (s *AutoFormStore) tenantIDForDomain(ctx context.Context, q querier, projec
 		return "", nil
 	}
 	if err != nil {
-		return "", wrapPgErr("tenantIDForDomain", err)
+		return "", wrapPgErr("tenantIDForDomain(latent)", err)
 	}
 	return id, nil
 }

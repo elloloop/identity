@@ -167,9 +167,9 @@ func TestTokenTenants_ZeroValueAcceptsAnyTenant(t *testing.T) {
 	}
 }
 
-// A failed read of a selected tenant is not a verdict on the token: a
-// non-exempt request is answered 503, and an exempt one goes on
-// unauthenticated.
+// A failed read of a selected tenant is not a verdict on the token: every
+// request carrying it is answered 503, an exempt one too, so a sign-in path
+// never runs as though the caller had sent no token.
 func TestTokenTenants_LookupErrorIsUnavailable(t *testing.T) {
 	signer := testSigner(t)
 	lookup := newTenantLookup()
@@ -186,9 +186,8 @@ func TestTokenTenants_LookupErrorIsUnavailable(t *testing.T) {
 
 			cap = &tenantCapture{}
 			rec = serveWithToken(mw(cap.handler()), "/identity.v1.IdentityService/PasswordLogin", token)
-			assert.Equal(t, http.StatusOK, rec.Code)
-			assert.True(t, cap.called)
-			assert.Empty(t, cap.userID, "an exempt path does not authenticate an unverified tenant")
+			assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "an exempt path is answered 503 too")
+			assert.False(t, cap.called)
 		})
 	}
 }
