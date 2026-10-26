@@ -56,8 +56,9 @@ type TenantStatusCache struct {
 	now        func() time.Time
 	maxEntries int
 
-	mu      sync.RWMutex
-	entries map[tenantStatusKey]tenantStatusEntry
+	mu        sync.RWMutex
+	entries   map[tenantStatusKey]tenantStatusEntry
+	lastSweep time.Time // when store last swept expired entries; guarded by mu
 }
 
 type tenantStatusKey struct {
@@ -113,16 +114,20 @@ func (c *TenantStatusCache) GetTenantStatus(ctx context.Context, projectID, tena
 	return status, nil
 }
 
-// store records entry under key, making room first when the cache is full:
-// expired entries go, and when none had expired, one arbitrary entry does.
+// store records entry under key, making room first when the cache is full.
+// At most once per TTL that sweeps every expired entry; otherwise, and when
+// none had expired, one arbitrary entry goes. A miss at capacity therefore
+// walks the map at most once per TTL, not on every call.
 func (c *TenantStatusCache) store(key tenantStatusKey, entry tenantStatusEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.entries[key]; !ok && len(c.entries) >= c.maxEntries {
-		now := c.now()
-		for k, e := range c.entries {
-			if !now.Before(e.deadline) {
-				delete(c.entries, k)
+		if now := c.now(); now.Sub(c.lastSweep) >= c.ttl {
+			c.lastSweep = now
+			for k, e := range c.entries {
+				if !now.Before(e.deadline) {
+					delete(c.entries, k)
+				}
 			}
 		}
 		if len(c.entries) >= c.maxEntries {

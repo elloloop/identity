@@ -51,10 +51,9 @@ var (
 	// the current window (GATEWAY_TENANT_INVITATION_MAX_PER_INVITER). Mapped
 	// to CodeResourceExhausted.
 	ErrInviterLimited = errors.New("too many invitations sent by you recently; try again later")
-	// ErrInvitationRecipientLimited is returned when the address has already
-	// been sent the configured number of invitations, from all the project's
-	// tenants together, in the current window
-	// (GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT). Mapped to
+	// ErrInvitationRecipientLimited is returned when the tenant has already
+	// sent the address the configured number of invitations in the current
+	// window (GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT). Mapped to
 	// CodeResourceExhausted.
 	ErrInvitationRecipientLimited = errors.New("this address has been invited too often recently; try again later")
 )
@@ -153,7 +152,7 @@ type CreatedInvitation struct {
 // Every invitation sends an email, so the store refuses one past the limits
 // (see invitationLimits): ErrInvitationLimited past the per-tenant cap,
 // ErrInviterLimited past the caller's cap across all their tenants,
-// ErrInvitationRecipientLimited past the address's cap across the project,
+// ErrInvitationRecipientLimited past the tenant's cap for the address,
 // and ErrInvitationResendTooSoon inside the per-recipient cooldown. Each
 // refusal is logged.
 func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID, tenantID, emailAddr, role string) (*CreatedInvitation, error) {

@@ -134,8 +134,9 @@ longer captures its signups:
   domain joins the tenant that verified the domain, or else the latent tenant
   auto-formation made for it (creating it on the domain's first signup). It
   never joins a tenant that merely registered the domain, and no longer
-  joins a suspended latent tenant: the next signup on the domain forms a new
-  latent one. A signup that already holds a membership in the tenant,
+  joins a suspended tenant, whether it verified the domain or auto-formation
+  made it: the next signup on the domain joins or forms a latent tenant
+  instead, and a reinstated tenant takes the domain's signups again. A signup that already holds a membership in the tenant,
   invited, added or created, keeps that source; auto-formation used to
   relabel it `domain`.
 - **The DNS TXT challenge now names the tenant.** `CreateDomain` returns a
@@ -246,11 +247,12 @@ runs ([Per-IP budgets are HTTP only](#per-ip-budgets-are-http-only)):
   (default 100, at most 100000; `0` selects the default) from one user's
   tenants together in the same window, so creating more tenants sends no
   more email;
-- per recipient: `GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT` invitations
-  (default 10, at most 1000; `0` selects the default) to one address from
-  all of a project's tenants together in the same window;
-- per tenant and recipient: inviting the same address from the same tenant
-  again within `GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS` (default
+- per tenant and recipient: `GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT`
+  invitations (default 10, at most 1000; `0` selects the default) from one
+  tenant to one address in the same window. Each tenant has its own count,
+  so one tenant reaching it never stops another inviting that address;
+- resend cooldown: inviting the same address from the same tenant again
+  within `GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS` (default
   300, at most 86400; `0` selects the default) is refused.
 
 The limits apply to every tenant, operator-created ones included. Bulk
@@ -305,7 +307,8 @@ every trigger that fires would read every account in the project. The
 migration also replaces the tenant and domain agent governance triggers
 with the guarded, scoped ones above, adds the `domain_attempts` table,
 replaces `tenant_invitations (project_id, tenant_id)` with three indexes
-over `created_at_ms` (per tenant, inviter and recipient) for the limits,
+over `created_at_ms` (per tenant, per inviter, and per tenant and recipient)
+for the limits,
 adds a partial index on email-method `domains` rows for auto-formation,
 drops `domains (project_id, tenant_id)`, which 0045's unique index covers,
 and validates 0044's widened `tenant_memberships.source` check.

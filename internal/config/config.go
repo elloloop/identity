@@ -214,9 +214,9 @@ const DefaultTenantInvitationMaxPerInviter = 100
 // GATEWAY_TENANT_INVITATION_MAX_PER_INVITER accepted.
 const MaxTenantInvitationMaxPerInviter = 100000
 
-// DefaultTenantInvitationMaxPerRecipient is how many invitations one address
-// may be sent from all of a project's tenants together in each invitation
-// window when GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT is unset or 0.
+// DefaultTenantInvitationMaxPerRecipient is how many invitations one tenant
+// may send one address in each invitation window when
+// GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT is unset or 0.
 const DefaultTenantInvitationMaxPerRecipient = 10
 
 // MaxTenantInvitationMaxPerRecipient is the largest
@@ -1176,10 +1176,11 @@ type Config struct {
 	// to 100000 (0 selects the default, 100); an invitation past it is
 	// RESOURCE_EXHAUSTED. Driven by GATEWAY_TENANT_INVITATION_MAX_PER_INVITER.
 	TenantInvitationMaxPerInviter int
-	// TenantInvitationMaxPerRecipient caps how many invitations one address
-	// may be sent from all of a project's tenants together in each invitation
-	// window, from 0 to 1000 (0 selects the default, 10); an invitation past
-	// it is RESOURCE_EXHAUSTED. Driven by
+	// TenantInvitationMaxPerRecipient caps how many invitations one tenant
+	// may send one address in each invitation window, from 0 to 1000 (0
+	// selects the default, 10); an invitation past it is RESOURCE_EXHAUSTED.
+	// Each tenant has its own count, so one tenant reaching it never blocks
+	// another's invitations to the address. Driven by
 	// GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT.
 	TenantInvitationMaxPerRecipient int
 	// TenantDomainAttemptsMaxPerTenant caps how many CreateDomain and
@@ -3019,9 +3020,9 @@ func (c *Config) TenantInvitationInviterLimit() int {
 	return boundedSetting(c.TenantInvitationMaxPerInviter, DefaultTenantInvitationMaxPerInviter, MaxTenantInvitationMaxPerInviter)
 }
 
-// TenantInvitationRecipientLimit is how many invitations one address may be
-// sent from all of a project's tenants together in each invitation window:
-// the configured value, or the default when unset.
+// TenantInvitationRecipientLimit is how many invitations one tenant may send
+// one address in each invitation window: the configured value, or the
+// default when unset.
 func (c *Config) TenantInvitationRecipientLimit() int {
 	return boundedSetting(c.TenantInvitationMaxPerRecipient, DefaultTenantInvitationMaxPerRecipient, MaxTenantInvitationMaxPerRecipient)
 }

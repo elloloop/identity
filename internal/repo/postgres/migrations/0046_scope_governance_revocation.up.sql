@@ -76,14 +76,14 @@ CREATE TABLE domain_attempts (
 CREATE INDEX domain_attempts_project_tenant_idx
     ON domain_attempts (project_id, tenant_id, attempted_at_ms);
 
--- The invitation limits count a tenant's, an inviter's and a recipient's
--- invitations created since a window start.
+-- The invitation limits count a tenant's, an inviter's, and a tenant's to
+-- one recipient, invitations created since a window start.
 CREATE INDEX IF NOT EXISTS tenant_invitations_project_tenant_created_idx
     ON tenant_invitations (project_id, tenant_id, created_at_ms);
 CREATE INDEX IF NOT EXISTS tenant_invitations_project_inviter_created_idx
     ON tenant_invitations (project_id, invited_by, created_at_ms);
-CREATE INDEX IF NOT EXISTS tenant_invitations_project_email_created_idx
-    ON tenant_invitations (project_id, lower(email COLLATE "C"), created_at_ms);
+CREATE INDEX IF NOT EXISTS tenant_invitations_project_tenant_email_created_idx
+    ON tenant_invitations (project_id, tenant_id, lower(email COLLATE "C"), created_at_ms);
 
 -- The auto-former's fallback: the oldest email-method row on a domain.
 CREATE INDEX IF NOT EXISTS domains_project_email_domain_idx

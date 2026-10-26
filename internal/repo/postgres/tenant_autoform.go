@@ -117,18 +117,23 @@ type querier interface {
 // only registered — anyone's pending or failed dns_txt row, or an email row
 // on a tenant that is not auto-formed — is ignored, so registering a domain
 // one does not own captures none of its signups. Nor does a suspended
-// auto-formed tenant: the domain's next signup forms a new latent tenant,
-// which nobody can select until it is claimed by verifying the domain.
+// tenant, whether it verified the domain or auto-formation made it: the
+// verified row counts only on a claimed tenant and the email row only on a
+// latent one, so the domain's next signup forms a new latent tenant, which
+// nobody can select until it is claimed by verifying the domain.
 //
-// The two reads are separate so each is one index probe: the verified row
-// through the verified-domain unique index (0045), the oldest email row
-// through the partial index 0046 adds. Neither scans the domain's claims.
+// The two reads are separate so each is one index probe and one tenant read:
+// the verified row through the verified-domain unique index (0045), the
+// oldest email row through the partial index 0046 adds. Neither scans the
+// domain's claims.
 func (s *AutoFormStore) tenantIDForDomain(ctx context.Context, q querier, projectID, domain string) (string, error) {
 	var id string
 	err := q.QueryRow(
 		ctx, `
-		SELECT tenant_id FROM domains
-		WHERE project_id = $1 AND lower(domain) = lower($2) AND status = 'verified'`,
+		SELECT d.tenant_id FROM domains d
+		JOIN tenants t ON t.id = d.tenant_id AND t.project_id = d.project_id
+		WHERE d.project_id = $1 AND lower(d.domain) = lower($2) AND d.status = 'verified'
+		  AND t.status = 'claimed'`,
 		projectID, domain,
 	).Scan(&id)
 	if err == nil {

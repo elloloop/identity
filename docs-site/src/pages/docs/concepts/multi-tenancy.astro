@@ -233,9 +233,9 @@ docker run ... \\
     100, in <code>GATEWAY_TENANT_INVITATION_WINDOW_SECONDS</code>, default one
     day), per inviter across their tenants
     (<code>GATEWAY_TENANT_INVITATION_MAX_PER_INVITER</code>, default 100), per
-    recipient across the Project's tenants
-    (<code>GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT</code>, default 10), and
-    per tenant and recipient by a resend cooldown
+    tenant and recipient
+    (<code>GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT</code>, default 10, each
+    tenant counting its own), and per tenant and recipient by a resend cooldown
     (<code>GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS</code>, default
     300). Past any of these but the per-IP one the call is
     <code>RESOURCE_EXHAUSTED</code>; past the per-IP one, which applies on the

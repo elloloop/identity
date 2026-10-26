@@ -83,9 +83,11 @@ token that named any one of them.
    deployment's sender to an address the inviter chose, and self-service
    tenants make anyone an inviter. Invitations are limited per client IP,
    per tenant per window, per inviter across all their tenants (so creating
-   tenants sends no more email), per recipient across all of a project's
-   tenants, and per tenant and recipient by a resend cooldown. The name of a
-   self-service tenant, which its creator typed, never appears in the email.
+   tenants sends no more email), per tenant and recipient in a window, and
+   per tenant and recipient by a resend cooldown. The per-recipient count is
+   each tenant's own, so one tenant using it up cannot stop another tenant
+   inviting the same address. The name of a self-service tenant, which its
+   creator typed, never appears in the email.
    Accepting an invitation needs a verified email at the invited address,
    and never lowers a role, so an invitation cannot demote a tenant's last
    owner.
@@ -103,7 +105,8 @@ token that named any one of them.
    suspension. It is not administered at all: every domain and membership
    RPC refuses its owners and admins, and an invitation to it cannot be
    accepted, through one check shared by both services, so a suspension
-   stops a tenant growing as well as acting.
+   stops a tenant growing as well as acting. Nor does auto-formation add
+   anyone to it, through a domain it verified or one it was formed for.
 
 7. **A tenant or domain change signs out only the agents it governs.**
    Delegated agent grants and agent machines are revoked when the

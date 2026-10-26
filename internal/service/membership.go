@@ -177,9 +177,10 @@ type InvitationLimits struct {
 	// every tenant of the project at or after WindowStartMs: past it the
 	// create is refused with ErrInviterLimited.
 	MaxPerInviter int
-	// MaxPerRecipient caps the invitations the address was sent from every
-	// tenant of the project at or after WindowStartMs: past it the create is
-	// refused with ErrInvitationRecipientLimited.
+	// MaxPerRecipient caps the invitations the tenant sent the address at or
+	// after WindowStartMs: past it the create is refused with
+	// ErrInvitationRecipientLimited. Each tenant has its own count, so one
+	// tenant reaching it never stops another inviting the address.
 	MaxPerRecipient int
 	// A store applies none of the three limits above that is zero. The
 	// MembershipService never passes zero: a deployment cannot switch these

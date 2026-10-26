@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,6 +146,49 @@ func TestTenantStatusCache_StaysWithinItsBound(t *testing.T) {
 	assert.Len(t, c.entries, 2)
 }
 
+// A full cache sweeps its expired entries at most once per TTL. Between two
+// sweeps a miss makes room by evicting one entry, leaving the expired ones
+// for the next sweep, so it does not walk the map.
+func TestTenantStatusCache_SweepsAtMostOncePerTTL(t *testing.T) {
+	c, _, now := cacheAt(t, newTenantLookup(), time.Minute)
+	c.maxEntries = 8
+	ctx := context.Background()
+	start := *now
+	expired := func() int {
+		n := 0
+		for _, e := range c.entries {
+			if !now.Before(e.deadline) {
+				n++
+			}
+		}
+		return n
+	}
+
+	for i := range 6 {
+		_, _ = c.GetTenantStatus(ctx, ttProject, "old-"+strconv.Itoa(i))
+	}
+	*now = start.Add(30 * time.Second)
+	_, _ = c.GetTenantStatus(ctx, ttProject, "new-0")
+	_, _ = c.GetTenantStatus(ctx, ttProject, "new-1")
+	_, _ = c.GetTenantStatus(ctx, ttProject, "first") // the first miss at capacity sweeps: nothing has expired
+	require.Len(t, c.entries, 8)
+	assert.Equal(t, start.Add(30*time.Second), c.lastSweep)
+
+	*now = start.Add(61 * time.Second) // the old-* entries have expired
+	_, _ = c.GetTenantStatus(ctx, ttProject, "within")
+	require.Len(t, c.entries, 8, "within a TTL of the last sweep, one entry makes room")
+	assert.GreaterOrEqual(t, expired(), 4, "and the expired entries stay for the next sweep")
+	assert.Equal(t, start.Add(30*time.Second), c.lastSweep)
+
+	*now = start.Add(90 * time.Second) // a TTL after the last sweep
+	_, _ = c.GetTenantStatus(ctx, ttProject, "after")
+	assert.Zero(t, expired(), "the next miss at capacity sweeps every expired entry")
+	assert.Len(t, c.entries, 2)
+	assert.Contains(t, c.entries, tenantStatusKey{project: ttProject, tenant: "within"})
+	assert.Contains(t, c.entries, tenantStatusKey{project: ttProject, tenant: "after"})
+	assert.Equal(t, start.Add(90*time.Second), c.lastSweep)
+}
+
 func TestTenantStatusCache_Construction(t *testing.T) {
 	assert.Nil(t, NewTenantStatusCache(nil, time.Minute, nil), "no source, no cache")
 
@@ -200,6 +245,80 @@ func BenchmarkTenantStatusCacheHit(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			if _, err := c.GetTenantStatus(ctx, ttProject, "t-claimed"); err != nil {
+				b.Error(err)
+				return
+			}
+		}
+	})
+}
+
+// constantTenantLookup answers every tenant as claimed; it is safe for
+// concurrent use, which fakeTenantLookup is not.
+type constantTenantLookup struct{}
+
+func (constantTenantLookup) GetTenantStatus(context.Context, string, string) (string, error) {
+	return service.TenantStatusClaimed, nil
+}
+
+// fullCache is a cache at a bound of size, its first sweep taken, with a TTL
+// no benchmark outlasts: every new key is a miss at capacity between sweeps.
+func fullCache(b *testing.B, size int) *TenantStatusCache {
+	b.Helper()
+	metrics, err := NewTenantStatusMetrics(prometheus.NewRegistry())
+	if err != nil {
+		b.Fatal(err)
+	}
+	c := NewTenantStatusCache(constantTenantLookup{}, time.Hour, metrics)
+	c.maxEntries = size
+	ctx := context.Background()
+	for i := range size + 1 {
+		if _, err := c.GetTenantStatus(ctx, ttProject, "fill-"+strconv.Itoa(i)); err != nil {
+			b.Fatal(err)
+		}
+	}
+	return c
+}
+
+// BenchmarkTenantStatusCacheMissAtCapacity is a miss on a full cache: it
+// evicts one entry, so its cost stays flat as the bound grows.
+func BenchmarkTenantStatusCacheMissAtCapacity(b *testing.B) {
+	for _, size := range []int{1_000, 10_000, 100_000} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			c := fullCache(b, size)
+			ctx := context.Background()
+			b.ReportAllocs()
+			i := 0
+			for b.Loop() {
+				i++
+				if _, err := c.GetTenantStatus(ctx, ttProject, "miss-"+strconv.Itoa(i)); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkTenantStatusCacheHitWithChurn is hits on one cached tenant from
+// every goroutine while one lookup in sixteen is a miss on the full cache.
+// Each miss holds the write lock for one eviction, not a walk of the map, so
+// the hits beside it stay within a small factor of
+// BenchmarkTenantStatusCacheHit.
+func BenchmarkTenantStatusCacheHitWithChurn(b *testing.B) {
+	c := fullCache(b, maxTenantStatusEntries)
+	ctx := context.Background()
+	if _, err := c.GetTenantStatus(ctx, ttProject, "hot"); err != nil {
+		b.Fatal(err)
+	}
+	var misses atomic.Int64
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for i := 0; pb.Next(); i++ {
+			tenant := "hot"
+			if i%16 == 0 {
+				tenant = "churn-" + strconv.FormatInt(misses.Add(1), 10)
+			}
+			if _, err := c.GetTenantStatus(ctx, ttProject, tenant); err != nil {
 				b.Error(err)
 				return
 			}

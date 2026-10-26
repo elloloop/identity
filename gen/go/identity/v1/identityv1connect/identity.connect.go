@@ -749,8 +749,8 @@ type IdentityServiceClient interface {
 	// the caller already holds in the tenant: an owner who accepts a member
 	// invitation stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED
 	// past the tenant's cap in the window, the inviter's cap across every
-	// tenant, the recipient address's cap across the project's tenants, or the
-	// per-recipient resend cooldown. It also has a per-client-IP budget
+	// tenant, the tenant's cap for the recipient address, or the per-recipient
+	// resend cooldown. It also has a per-client-IP budget
 	// (GATEWAY_RATE_LIMIT_INVITATION_PER_IP per
 	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it the
 	// call is refused before the RPC runs with HTTP status 429 and a
@@ -3042,8 +3042,8 @@ type IdentityServiceHandler interface {
 	// the caller already holds in the tenant: an owner who accepts a member
 	// invitation stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED
 	// past the tenant's cap in the window, the inviter's cap across every
-	// tenant, the recipient address's cap across the project's tenants, or the
-	// per-recipient resend cooldown. It also has a per-client-IP budget
+	// tenant, the tenant's cap for the recipient address, or the per-recipient
+	// resend cooldown. It also has a per-client-IP budget
 	// (GATEWAY_RATE_LIMIT_INVITATION_PER_IP per
 	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS) on the HTTP handler only: over it the
 	// call is refused before the RPC runs with HTTP status 429 and a

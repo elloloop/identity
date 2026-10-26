@@ -456,7 +456,7 @@ Postgres uses a partial unique index on the open status as defense-in-depth).
   — one open invite per (project, tenant, email).
 - **Indexes:** `tenant_invitations_project_tenant_created_idx (project_id, tenant_id, created_at_ms)`,
   `tenant_invitations_project_inviter_created_idx (project_id, invited_by, created_at_ms)`,
-  `tenant_invitations_project_email_created_idx (project_id, lower(email COLLATE "C"), created_at_ms)`
+  `tenant_invitations_project_tenant_email_created_idx (project_id, tenant_id, lower(email COLLATE "C"), created_at_ms)`
   (the invitation limits, 0046, which replaced `tenant_invitations_project_tenant_idx (project_id, tenant_id)`),
   `tenant_invitations_project_expires_idx (project_id, expires_at_ms)` (GC sweeper).
 - **FKs:** `project_id` → `projects(id)` CASCADE; `tenant_id` → `tenants(id)`

@@ -16,7 +16,7 @@ CREATE INDEX IF NOT EXISTS tenant_invitations_project_tenant_idx
     ON tenant_invitations (project_id, tenant_id);
 
 DROP INDEX IF EXISTS domains_project_email_domain_idx;
-DROP INDEX IF EXISTS tenant_invitations_project_email_created_idx;
+DROP INDEX IF EXISTS tenant_invitations_project_tenant_email_created_idx;
 DROP INDEX IF EXISTS tenant_invitations_project_inviter_created_idx;
 DROP INDEX IF EXISTS tenant_invitations_project_tenant_created_idx;
 

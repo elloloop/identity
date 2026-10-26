@@ -531,7 +531,7 @@ func TestMembershipStore_GrantKeepsAnyOtherSource(t *testing.T) {
 
 // TestInvitationStore_InviterAndRecipientLimits: the per-inviter cap counts
 // one person's invitations from every tenant, the per-recipient cap one
-// address's from every tenant of the project, and a zero cap is off.
+// tenant's invitations to one address, and a zero cap is off.
 func TestInvitationStore_InviterAndRecipientLimits(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -577,13 +577,21 @@ func TestInvitationStore_InviterAndRecipientLimits(t *testing.T) {
 
 	perRecipient := service.InvitationLimits{MaxPerTenant: 100, WindowStartMs: window, MaxPerRecipient: 2}
 	require.NoError(t, invite(tenantA, user1, "r@acme.com", perRecipient))
-	require.NoError(t, invite(tenantB, user2, "R@acme.com", perRecipient))
-	require.ErrorIs(t, invite(tenantC, user2, "r@ACME.com", perRecipient), service.ErrInvitationRecipientLimited,
-		"the cap spans the project's tenants and the address's case")
-	require.NoError(t, invite(tenantC, user2, "other@acme.com", perRecipient), "each address has its own cap")
-	list, err := is.ListInvitationsForTenant(ctx, projectID, tenantC)
+	require.NoError(t, invite(tenantA, user2, "R@acme.com", perRecipient))
+	require.ErrorIs(t, invite(tenantA, user2, "r@ACME.com", perRecipient), service.ErrInvitationRecipientLimited,
+		"the cap spans the tenant's inviters and the address's case")
+	require.NoError(t, invite(tenantA, user2, "other@acme.com", perRecipient), "each address has its own cap")
+	list, err := is.ListInvitationsForTenant(ctx, projectID, tenantA)
 	require.NoError(t, err)
 	for _, inv := range list {
-		require.NotEqual(t, "r@acme.com", inv.Email, "a refused invitation writes nothing")
+		require.NotEqual(t, "r@ACME.com", inv.Email, "a refused invitation writes nothing")
 	}
+
+	// Tenant A using up its cap for the address leaves every other tenant's.
+	require.NoError(t, invite(tenantB, user1, "r@acme.com", perRecipient),
+		"another tenant still invites the address tenant A can no longer")
+	require.NoError(t, invite(tenantB, user2, "R@acme.com", perRecipient))
+	require.ErrorIs(t, invite(tenantB, user2, "r@ACME.com", perRecipient), service.ErrInvitationRecipientLimited,
+		"and has a cap of its own")
+	require.NoError(t, invite(tenantC, user2, "r@acme.com", perRecipient))
 }

@@ -354,19 +354,20 @@ func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 // and the memory driver — should they ever gain invitations — must
 // match these revoke-then-insert semantics).
 //
-// Under the same lock, and the inviter's and the recipient's locks, it
-// applies limits: an invitation to an address the tenant invited at or after
+// Under the same lock, and the inviter's lock, it applies limits: an
+// invitation to an address the tenant invited at or after
 // limits.ResendCooldownStartMs is service.ErrInvitationResendTooSoon; one past
 // limits.MaxPerTenant invitations the tenant created at or after
 // limits.WindowStartMs is service.ErrInvitationLimited; one past
 // limits.MaxPerInviter the inviter sent from any tenant in that window is
-// service.ErrInviterLimited; and one past limits.MaxPerRecipient the address
-// was sent from any tenant of the project in that window is
-// service.ErrInvitationRecipientLimited. Each counts every invitation,
-// whatever its status, since each one sent an email.
+// service.ErrInviterLimited; and one past limits.MaxPerRecipient the tenant
+// sent the address in that window is service.ErrInvitationRecipientLimited.
+// Each counts every invitation, whatever its status, since each one sent an
+// email. The recipient's count is the tenant's alone, so the tenant's lock
+// covers it: one tenant reaching it never stops another inviting the address.
 //
-// The locks are always taken in that order — tenant, inviter, recipient — so
-// two creates never wait on each other's locks in opposite orders.
+// The locks are always taken in that order — tenant, then inviter — so two
+// creates never wait on each other's locks in opposite orders.
 func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.TenantInvitation, limits service.InvitationLimits) (string, error) {
 	if inv == nil {
 		return "", errors.New("postgres: CreateInvitation: nil invitation")
@@ -410,7 +411,6 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	if inv.InvitedBy != "" {
 		locks = append(locks, advisoryKey("tenant_invitation_inviter", inv.ProjectID, inv.InvitedBy))
 	}
-	locks = append(locks, advisoryKey("tenant_invitation_recipient", inv.ProjectID, key))
 	for _, lock := range locks {
 		if err := lockXact(ctx, tx, "CreateInvitation", lock); err != nil {
 			return "", err
@@ -464,8 +464,9 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 		if err := tx.QueryRow(
 			ctx, `
 			SELECT count(*) FROM tenant_invitations
-			WHERE project_id = $1 AND lower(email COLLATE "C") = $2 AND created_at_ms >= $3`,
-			inv.ProjectID, key, limits.WindowStartMs,
+			WHERE project_id = $1 AND tenant_id = $2
+			  AND lower(email COLLATE "C") = $3 AND created_at_ms >= $4`,
+			inv.ProjectID, inv.TenantID, key, limits.WindowStartMs,
 		).Scan(&toRecipient); err != nil {
 			return "", wrapPgErr("CreateInvitation(recipient)", err)
 		}

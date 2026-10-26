@@ -62,6 +62,7 @@ func TestAutoFormStore_Smoke(t *testing.T) {
 	runAutoFormIgnoresUnprovenClaims(t, dsn)
 	runAutoFormKeepsProvenance(t, dsn)
 	runAutoFormSkipsASuspendedLatentTenant(t, dsn)
+	runAutoFormSkipsASuspendedVerifiedTenant(t, dsn)
 }
 
 // runAutoFormKeepsProvenance: signing in on a tenant's domain never relabels
@@ -123,6 +124,47 @@ func runAutoFormSkipsASuspendedLatentTenant(t *testing.T, dsn string) {
 	mem, err := ms.GetMembership(ctx, projectID, suspended, next)
 	require.NoError(t, err)
 	require.Nil(t, mem, "nobody joins a suspended tenant through its domain")
+}
+
+// runAutoFormSkipsASuspendedVerifiedTenant: a suspended tenant takes no more
+// signups through the domain it verified; the domain's next one forms a new
+// latent tenant, and once the tenant is reinstated signups join it again.
+func runAutoFormSkipsASuspendedVerifiedTenant(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	af, ts, ds, ms, projectID, newUser := newAutoFormFixture(ctx, t, dsn)
+
+	tenant, _, err := ts.CreateOwnedTenant(ctx, service.OwnedTenantRequest{
+		ProjectID: projectID, OwnerID: newUser(t), Name: "Acme", MaxPerWindow: 10,
+	})
+	require.NoError(t, err)
+	domainID, err := ds.CreateDomain(ctx, &service.Domain{ProjectID: projectID, TenantID: tenant.ID, Domain: "acme.com"})
+	require.NoError(t, err)
+	require.NoError(t, ds.SetDomainStatus(ctx, projectID, domainID, service.DomainStatusVerified, 0))
+	joined, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", newUser(t))
+	require.NoError(t, err)
+	require.Equal(t, tenant.ID, joined, "a claimed tenant takes its verified domain's signups")
+
+	suspendTenant(ctx, t, ts, projectID, tenant.ID)
+	next := newUser(t)
+	formed, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", next)
+	require.NoError(t, err)
+	require.NotEqual(t, tenant.ID, formed)
+	ten, err := ts.GetTenant(ctx, projectID, formed)
+	require.NoError(t, err)
+	require.Equal(t, service.TenantStatusLatent, ten.Status)
+	mem, err := ms.GetMembership(ctx, projectID, tenant.ID, next)
+	require.NoError(t, err)
+	require.Nil(t, mem, "nobody joins a suspended tenant through the domain it verified")
+
+	_, err = ts.pool.Exec(ctx, `UPDATE tenants SET status = 'claimed' WHERE project_id = $1 AND id = $2`, projectID, tenant.ID)
+	require.NoError(t, err)
+	rejoined, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", newUser(t))
+	require.NoError(t, err)
+	require.Equal(t, tenant.ID, rejoined, "a reinstated tenant takes its domain's signups again")
 }
 
 func runAutoFormSmoke(t *testing.T, dsn string) {
