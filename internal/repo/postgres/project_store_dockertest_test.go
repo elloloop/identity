@@ -101,6 +101,7 @@ func TestTenantDomainStore_Container(t *testing.T) {
 
 	dsn := startPostgresContainer(ctx, t)
 	runTenantDomainSmoke(t, dsn)
+	runContestedDomainClaims(t, dsn)
 }
 
 // TestLoginPolicyStore_Container runs the login-policy store body against a
@@ -142,6 +143,7 @@ func TestMembershipStore_Container(t *testing.T) {
 
 	dsn := startPostgresContainer(ctx, t)
 	runMembershipSmoke(t, dsn)
+	runInvitationLimits(t, dsn)
 }
 
 // TestSelfServiceTenants_Container runs the self-service tenant store body
@@ -215,4 +217,5 @@ func TestAutoFormStore_Container(t *testing.T) {
 
 	dsn := startPostgresContainer(ctx, t)
 	runAutoFormSmoke(t, dsn)
+	runAutoFormIgnoresUnprovenClaims(t, dsn)
 }

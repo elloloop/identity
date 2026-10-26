@@ -1566,7 +1566,7 @@ func (s *AuthService) WithTenantAutoFormer(af TenantAutoFormStore) *AuthService 
 	return s
 }
 
-// WithTenantSelection wires the reader RefreshTokenInTenant checks a
+// WithTenantSelection wires the reader RefreshToken checks a
 // selected tenant against, and returns the service for chaining. app.New
 // passes the postgres membership store; without one (the memory driver) a
 // refresh that selects a tenant is refused.
@@ -2017,7 +2017,7 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 		return "", "", err
 	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs)
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, "")
 	if err != nil {
 		return "", "", err
 	}
@@ -2101,23 +2101,22 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 	return ErrEmailVerificationRequired
 }
 
-// issueTokensWithSessionStart mints a token pair, anchoring the session's
-// absolute lifetime at sessionStartedAtMs (<= 0 anchors a new session at
-// now) and stamping authTimeMs as the token's auth_time: the sign-in that
-// opened the session, which only a credential proof may set to now. A
-// session no sign-in vouches for passes 0 and carries no auth_time, so it
-// can never count as a recent sign-in. The refresh path passes the consumed
-// token's SessionStartedAt as the anchor, so the absolute timeout keeps
-// measuring from the original sign-in, and no auth_time: a refresh is not a
-// sign-in, and only the tokens a sign-in issues vouch for one.
-func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
-	return s.issueTokensInTenant(ctx, user, ipAddr, userAgent, gate, sessionStartedAtMs, authTimeMs, "")
-}
-
-// issueTokensInTenant is issueTokensWithSessionStart with the access token's
-// tenant claim set to tenantID, a tenant the caller has already checked the
-// user may act in. Empty keeps the deployment's default tenant.
-func (s *AuthService) issueTokensInTenant(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, authTimeMs int64, tenantID string) (string, string, error) {
+// issueTokensWithSessionStart is the single point every session's token pair
+// is minted (the duplicate-signup decoy signs a token for a subject that does
+// not exist and opens no session). It anchors the session's absolute lifetime at sessionStartedAtMs
+// (<= 0 anchors a new session at now) and stamps authTimeMs as the token's
+// auth_time: the sign-in that opened the session, which only a credential
+// proof may set to now. A session no sign-in vouches for passes 0 and
+// carries no auth_time, so it can never count as a recent sign-in. The
+// refresh path passes the consumed token's SessionStartedAt as the anchor, so
+// the absolute timeout keeps measuring from the original sign-in, and no
+// auth_time: a refresh is not a sign-in, and only the tokens a sign-in issues
+// vouch for one.
+//
+// tenantID becomes the access token's tenant claim. It is a tenant the caller
+// has already checked the user may act in (only RefreshToken passes one);
+// empty keeps the deployment's default tenant.
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, authTimeMs int64, tenantID string) (string, string, error) {
 	// The verified-email gate's backstop: every path that mints a session (and
 	// any added later) honours it. Sign-ins and refreshes run the audited gate
 	// before reaching here, so this refuses silently.
@@ -2475,20 +2474,16 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*User,
 // Background sweep: rows whose ConsumedAtMs is older than the desired
 // retention window (e.g. 90 days) may be hard-deleted by a periodic job.
 // That sweep is intentionally NOT implemented here.
-func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr, userAgent string) (*User, string, string, error) {
-	return s.RefreshTokenInTenant(ctx, rawRefreshToken, "", ipAddr, userAgent)
-}
-
-// RefreshTokenInTenant is RefreshToken with a tenant selected for the new
-// access token: its tenant claim becomes tenantID when the user is an active
-// member of that claimed tenant in the request's project, and the refresh is
-// refused with ErrPermissionDenied otherwise. The refusal comes before the
-// refresh token is consumed, so the client keeps it and may refresh again
-// without a selection. Empty tenantID keeps the default tenant.
 //
-// The selection is not remembered: the next refresh that names no tenant
-// returns to the default, and switching tenants is a refresh naming another.
-func (s *AuthService) RefreshTokenInTenant(ctx context.Context, rawRefreshToken, tenantID, ipAddr, userAgent string) (*User, string, string, error) {
+// Tenant selection: a non-empty tenantID becomes the new access token's
+// tenant claim when the user is an active member of that claimed tenant in
+// the request's project, and the refresh is refused with ErrPermissionDenied
+// otherwise. The refusal comes before the refresh token is consumed, so the
+// client keeps it and may refresh again without a selection. Empty tenantID
+// keeps the default tenant. The selection is not remembered: the next refresh
+// that names no tenant returns to the default, and switching tenants is a
+// refresh naming another.
+func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantID, ipAddr, userAgent string) (*User, string, string, error) {
 	if rawRefreshToken == "" {
 		return nil, "", "", fmt.Errorf("%w: missing refresh token", ErrUnauthenticated)
 	}
@@ -2649,9 +2644,11 @@ func (s *AuthService) RefreshTokenInTenant(ctx context.Context, rawRefreshToken,
 
 	// The selected tenant, checked before the token is consumed: a client
 	// that names a tenant it has left keeps its session and can refresh
-	// without one.
+	// without one. Only for an account in good standing: an account refused
+	// over its own state takes that refusal below (its token spent, its
+	// session ended), not a selection refusal that would leave both intact.
 	tenantID = strings.TrimSpace(tenantID)
-	if tenantID != "" {
+	if tenantID != "" && statusErr == nil {
 		if err := s.checkTenantSelection(ctx, timeoutUser.ID, tenantID); err != nil {
 			return nil, "", "", err
 		}
@@ -2709,7 +2706,7 @@ func (s *AuthService) RefreshTokenInTenant(ctx context.Context, rawRefreshToken,
 	// absolute timeout keeps measuring from the original login. A legacy row
 	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
 	// issueTokensWithSessionStart. No auth_time: a rotation is not a sign-in.
-	accessToken, newRefresh, err := s.issueTokensInTenant(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, tenantID)
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, tenantID)
 	if err != nil {
 		return nil, "", "", err
 	}

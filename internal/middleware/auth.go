@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/elloloop/identity/internal/service"
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
 )
@@ -175,10 +177,10 @@ func isAuthExempt(path string) bool {
 		strings.HasPrefix(path, SCIMPathPrefix)
 }
 
-// TenantLookup reads a tenant of a project; (nil, nil) when there is none.
-// service.TenantStore satisfies it.
+// TenantLookup reads the status of a tenant of a project; "" when there is
+// none. service.TenantStore satisfies it.
 type TenantLookup interface {
-	GetTenant(ctx context.Context, projectID, tenantID string) (*service.Tenant, error)
+	GetTenantStatus(ctx context.Context, projectID, tenantID string) (string, error)
 }
 
 // TokenTenants is the rule a verified token's "tenant" claim must meet.
@@ -194,6 +196,9 @@ type TokenTenants struct {
 	Default string
 	// Selectable resolves a selected tenant. nil accepts only Default.
 	Selectable TenantLookup
+	// Logger records a failed read of a selected tenant, which answers the
+	// request 503; nil records nothing. The token itself is never logged.
+	Logger *zap.Logger
 }
 
 var (
@@ -212,11 +217,18 @@ func (t TokenTenants) accept(ctx context.Context, claims *jwtpkg.Claims) error {
 	if t.Selectable == nil || claims.Tenant == "" || claims.Project == "" {
 		return errTokenTenantRejected
 	}
-	tenant, err := t.Selectable.GetTenant(ctx, claims.Project, claims.Tenant)
+	status, err := t.Selectable.GetTenantStatus(ctx, claims.Project, claims.Tenant)
 	if err != nil {
+		if t.Logger != nil {
+			t.Logger.Warn("token_tenant_lookup_failed",
+				zap.String("project_id", claims.Project),
+				zap.String("tenant_id", claims.Tenant),
+				zap.Error(err),
+			)
+		}
 		return fmt.Errorf("%w: %w", errTokenTenantLookup, err)
 	}
-	if tenant == nil || tenant.Status != service.TenantStatusClaimed {
+	if status != service.TenantStatusClaimed {
 		return errTokenTenantRejected
 	}
 	return nil

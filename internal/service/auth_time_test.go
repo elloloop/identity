@@ -42,7 +42,7 @@ func TestAuthTime_QrHandoffIsNotASignIn(t *testing.T) {
 
 	_, err = svc.MergeAccounts(ctx, user.ID, authTime, "other@example.com", strongPW, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrReauthenticationRequired)
-	_, newAccess, _, err := svc.RefreshToken(ctx, res.RefreshToken, "203.0.113.10", "agent")
+	_, newAccess, _, err := svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Zero(t, authTimeOf(t, svc, newAccess), "nor does its refresh")
 }
@@ -60,7 +60,7 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	svc.nowFunc = time.Now
 
 	enableAgeGate(t, svc, true)
-	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "203.0.113.10", "agent")
+	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
 	ticket := dobTicketFrom(t, err)
 	done, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestAuthTime_UnanchoredRefreshHasNone(t *testing.T) {
 	require.NoError(t, err)
 	row.SessionStartedAt = 0
 
-	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "203.0.113.10", "agent")
+	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Zero(t, authTimeOf(t, svc, access))
 }

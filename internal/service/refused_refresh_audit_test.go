@@ -34,17 +34,17 @@ func TestRefusedRefreshAudit_OncePerAccountPerWindow(t *testing.T) {
 	refused := func() int { return writer.countByEventTypeAndDetail("login_failure", "reason", "email_not_verified") }
 
 	for range 5 {
-		_, _, _, err := svc.RefreshToken(ctx, refreshes[0], "", "")
+		_, _, _, err := svc.RefreshToken(ctx, refreshes[0], "", "", "")
 		require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	}
 	assert.Equal(t, 1, refused())
 
-	_, _, _, err := svc.RefreshToken(ctx, refreshes[1], "", "")
+	_, _, _, err := svc.RefreshToken(ctx, refreshes[1], "", "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Equal(t, 2, refused(), "another account's refusal is its own")
 
 	now = now.Add(replayedRefusalAuditWindow)
-	_, _, _, err = svc.RefreshToken(ctx, refreshes[0], "", "")
+	_, _, _, err = svc.RefreshToken(ctx, refreshes[0], "", "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Equal(t, 3, refused(), "the next window records the refusal again")
 }
@@ -63,7 +63,7 @@ func TestRefusedRefreshAudit_DOBStepPacedOnRefreshOnly(t *testing.T) {
 	enableAgeGate(t, svc, true)
 
 	for range 3 {
-		_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "")
+		_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "", "")
 		require.ErrorIs(t, err, ErrDOBRequired)
 	}
 	for range 2 {
@@ -91,7 +91,7 @@ func TestRefusedRefreshAudit_LockoutPacedOnRefreshOnly(t *testing.T) {
 
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"locked_until": now.Add(time.Hour).UnixMilli()}))
 	for range 5 {
-		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
+		_, _, _, err = svc.RefreshToken(ctx, refresh, "", "", "")
 		require.ErrorIs(t, err, ErrAccountLocked)
 	}
 	locked := func() int { return writer.countByEventType("login_locked") }
@@ -107,7 +107,7 @@ func TestRefusedRefreshAudit_LockoutPacedOnRefreshOnly(t *testing.T) {
 	assert.Equal(t, 2, writer.countByEventTypeAndDetail("login_locked", "gate", "sign_in"))
 
 	now = now.Add(replayedRefusalAuditWindow)
-	_, _, _, err = svc.RefreshToken(ctx, refresh, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, refresh, "", "", "")
 	require.ErrorIs(t, err, ErrAccountLocked)
 	assert.Equal(t, 4, locked(), "the next window records the refusal again")
 }

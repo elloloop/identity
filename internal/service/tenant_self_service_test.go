@@ -35,8 +35,8 @@ func newSelfServiceFixture(cfg *config.Config) *selfServiceFixture {
 	mem, tnt := newFakeMembershipStore(), newFakeTenantStore()
 	linkFakeTenantStores(tnt, mem)
 	usr := newFakeUserDirectory()
-	usr.byID[ssOwnerID] = &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive}
-	usr.byID[ssOtherID] = &User{ID: ssOtherID, Email: "other@example.test", Status: StatusActive}
+	usr.set(ssProject, &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive})
+	usr.set(ssProject, &User{ID: ssOtherID, Email: "other@example.test", Status: StatusActive})
 	w := newRecordingAuditWriter()
 	svc := NewMembershipService(newFakeInvitationStore(), mem, tnt, usr, &recordingMailer{}, true, cfg, nil).
 		WithAudit(audit.NewLogger(w, "test-tenant", nil))
@@ -84,6 +84,23 @@ func TestCreateTenant_CreatesClaimedTenantOwnedByCaller(t *testing.T) {
 	assert.Equal(t, 1, f.audit.countByEventTypeAndDetail(string(audit.EventTenantCreated), "tenant_id", out.Tenant.ID))
 }
 
+// The caller is looked up in the request's project, where their account
+// lives: a user of another project is found there, and only there.
+func TestCreateTenant_ResolvesCallerInRequestProject(t *testing.T) {
+	f := newSelfServiceFixture(&config.Config{})
+	f.users.set("proj-2", &User{ID: "user-p2", Email: "p2@example.test", Status: StatusActive})
+	inProj2 := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "proj-2", Tenants: ProjectTenantsConfig{SelfService: true},
+	})
+
+	out, err := f.svc.CreateTenant(inProj2, "user-p2", "Acme", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "proj-2", out.Tenant.ProjectID)
+
+	_, err = f.svc.CreateTenant(withTenantsProject(true), "user-p2", "Acme", "", "")
+	require.ErrorIs(t, err, ErrNotFound, "not an account of the request's project")
+}
+
 func TestCreateTenant_SettingOffIsFailedPrecondition(t *testing.T) {
 	f := newSelfServiceFixture(&config.Config{})
 
@@ -125,10 +142,10 @@ func TestCreateTenant_RejectsBadNames(t *testing.T) {
 
 func TestCreateTenant_RefusesAccountsThatCannotOwn(t *testing.T) {
 	f := newSelfServiceFixture(&config.Config{})
-	f.users.byID["anon"] = &User{ID: "anon", IsAnonymous: true, Status: StatusActive}
-	f.users.byID["agent"] = &User{ID: "agent", Kind: UserKindAgent, OwnerUserID: ssOwnerID, Status: StatusActive}
-	f.users.byID["merged"] = &User{ID: "merged", Email: "m@example.test", MergedIntoUserID: ssOwnerID, Status: StatusActive}
-	f.users.byID["inactive"] = &User{ID: "inactive", Email: "i@example.test", Status: StatusDeactivated}
+	f.users.set(ssProject, &User{ID: "anon", IsAnonymous: true, Status: StatusActive})
+	f.users.set(ssProject, &User{ID: "agent", Kind: UserKindAgent, OwnerUserID: ssOwnerID, Status: StatusActive})
+	f.users.set(ssProject, &User{ID: "merged", Email: "m@example.test", MergedIntoUserID: ssOwnerID, Status: StatusActive})
+	f.users.set(ssProject, &User{ID: "inactive", Email: "i@example.test", Status: StatusDeactivated})
 
 	for _, id := range []string{"anon", "agent", "merged", "inactive"} {
 		_, err := f.svc.CreateTenant(withTenantsProject(true), id, "Acme", "", "")
@@ -267,12 +284,13 @@ func TestListMyTenants_RequiresCallerAndProject(t *testing.T) {
 	require.ErrorIs(t, err, boom)
 }
 
-// ── RefreshTokenInTenant ─────────────────────────────────────────────────
+// ── RefreshToken ─────────────────────────────────────────────────
 
 // selectionFixture is an AuthService whose tenant selection reads linked
 // tenant and membership fakes in the default project.
 type selectionFixture struct {
 	svc     *AuthService
+	repo    *fakeRepo
 	tenants *fakeTenantStore
 	members *fakeMembershipStore
 	user    *User
@@ -289,7 +307,7 @@ func newSelectionFixture(t *testing.T) *selectionFixture {
 
 	signup, err := svc.PasswordSignup(context.Background(), "member@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
-	return &selectionFixture{svc: svc, tenants: tnt, members: mem, user: signup.User, refresh: signup.RefreshToken}
+	return &selectionFixture{svc: svc, repo: repo, tenants: tnt, members: mem, user: signup.User, refresh: signup.RefreshToken}
 }
 
 func (f *selectionFixture) project() string { return f.svc.cfg.DefaultProjectID }
@@ -311,22 +329,22 @@ func (f *selectionFixture) tenantClaim(t *testing.T, access string) string {
 	return claims.Tenant
 }
 
-func TestRefreshTokenInTenant_ActiveMemberGetsTenantClaim(t *testing.T) {
+func TestRefreshToken_ActiveMemberGetsTenantClaim(t *testing.T) {
 	f := newSelectionFixture(t)
 	f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
 
-	_, access, refresh, err := f.svc.RefreshTokenInTenant(context.Background(), f.refresh, "t-acme", "", "")
+	_, access, refresh, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
 	require.NoError(t, err)
 	assert.NotEmpty(t, refresh)
 	assert.Equal(t, "t-acme", f.tenantClaim(t, access))
 }
 
-func TestRefreshTokenInTenant_OmittedKeepsDefault(t *testing.T) {
+func TestRefreshToken_OmittedKeepsDefault(t *testing.T) {
 	f := newSelectionFixture(t)
 	f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
 
 	for _, sel := range []string{"", "   "} {
-		_, access, refresh, err := f.svc.RefreshTokenInTenant(context.Background(), f.refresh, sel, "", "")
+		_, access, refresh, err := f.svc.RefreshToken(context.Background(), f.refresh, sel, "", "")
 		require.NoError(t, err)
 		assert.Equal(t, f.svc.tenantID(context.Background()), f.tenantClaim(t, access))
 		f.refresh = refresh
@@ -336,89 +354,120 @@ func TestRefreshTokenInTenant_OmittedKeepsDefault(t *testing.T) {
 // Every refusal leaves the refresh token unspent: the same token still
 // rotates without a selection, which a consumed token would not (it would
 // trip replay detection instead).
-func TestRefreshTokenInTenant_RefusalsDoNotConsumeTheToken(t *testing.T) {
-	cases := map[string]func(f *selectionFixture){
-		"not a member":       func(*selectionFixture) {},
-		"suspended member":   func(f *selectionFixture) { f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusInactive) },
-		"pending member":     func(f *selectionFixture) { f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusPending) },
-		"suspended tenant":   func(f *selectionFixture) { f.seedTenant(t, "t-acme", TenantStatusSuspended, MembershipStatusActive) },
-		"latent tenant":      func(f *selectionFixture) { f.seedTenant(t, "t-acme", TenantStatusLatent, MembershipStatusActive) },
-		"no selection store": func(f *selectionFixture) { f.svc.WithTenantSelection(nil) },
-		"another project's tenant": func(f *selectionFixture) {
+func TestRefreshToken_RefusalsDoNotConsumeTheToken(t *testing.T) {
+	cases := map[string]func(t *testing.T, f *selectionFixture){
+		"not a member": func(*testing.T, *selectionFixture) {},
+		"suspended member": func(t *testing.T, f *selectionFixture) {
+			t.Helper()
+			f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusInactive)
+		},
+		"pending member": func(t *testing.T, f *selectionFixture) {
+			t.Helper()
+			f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusPending)
+		},
+		"suspended tenant": func(t *testing.T, f *selectionFixture) {
+			t.Helper()
+			f.seedTenant(t, "t-acme", TenantStatusSuspended, MembershipStatusActive)
+		},
+		"latent tenant": func(t *testing.T, f *selectionFixture) {
+			t.Helper()
+			f.seedTenant(t, "t-acme", TenantStatusLatent, MembershipStatusActive)
+		},
+		"no selection store": func(_ *testing.T, f *selectionFixture) { f.svc.WithTenantSelection(nil) },
+		"another project's tenant": func(t *testing.T, f *selectionFixture) {
+			t.Helper()
 			f.tenants.put(&Tenant{ID: "t-acme", ProjectID: "proj-elsewhere", Name: "x", Status: TenantStatusClaimed})
-			_, _ = f.members.UpsertMembership(context.Background(), &TenantMembership{
+			_, err := f.members.UpsertMembership(context.Background(), &TenantMembership{
 				ProjectID: "proj-elsewhere", TenantID: "t-acme", UserID: f.user.ID,
 				Source: MembershipSourceInvited, Role: RoleMember, Status: MembershipStatusActive,
 			})
+			require.NoError(t, err)
 		},
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := newSelectionFixture(t)
-			setup(f)
+			setup(t, f)
 
-			_, access, refresh, err := f.svc.RefreshTokenInTenant(context.Background(), f.refresh, "t-acme", "", "")
+			_, access, refresh, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
 			require.ErrorIs(t, err, ErrPermissionDenied)
 			assert.Empty(t, access, "no token on a refusal")
 			assert.Empty(t, refresh)
 
-			_, access, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "")
+			_, access, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
 			require.NoError(t, err, "the refused refresh token still rotates")
 			assert.Equal(t, f.svc.tenantID(context.Background()), f.tenantClaim(t, access))
 		})
 	}
 }
 
-func TestRefreshTokenInTenant_ReaderErrorDoesNotConsume(t *testing.T) {
+// An account refused over its own state takes that refusal, not a selection
+// refusal: its token is spent and the session ends, whatever tenant it names.
+func TestRefreshToken_InactiveAccountIsRefusedBeforeSelection(t *testing.T) {
+	f := newSelectionFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.repo.UpdateUser(ctx, f.user.ID, map[string]any{"status": StatusDeactivated}))
+
+	_, _, _, err := f.svc.RefreshToken(ctx, f.refresh, "t-not-a-member", "", "")
+	require.ErrorIs(t, err, ErrAccountNotActive)
+	assert.NotErrorIs(t, err, ErrPermissionDenied)
+
+	stored, err := f.repo.FindRefreshTokenByHashIncludingConsumed(ctx, hashRefreshToken(f.refresh))
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.NotZero(t, stored.ConsumedAtMs, "the account-status refusal spends the token")
+}
+
+func TestRefreshToken_ReaderErrorDoesNotConsume(t *testing.T) {
 	f := newSelectionFixture(t)
 	boom := errors.New("store down")
 	f.members.getErr = boom
 
-	_, _, _, err := f.svc.RefreshTokenInTenant(context.Background(), f.refresh, "t-acme", "", "")
+	_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
 	require.ErrorIs(t, err, boom)
 
 	f.members.getErr = nil
-	_, _, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "")
+	_, _, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
 	require.NoError(t, err)
 }
 
 // Switching is a refresh naming another tenant; each one re-issues the
 // token, and the selection is not remembered.
-func TestRefreshTokenInTenant_SwitchingReissues(t *testing.T) {
+func TestRefreshToken_SwitchingReissues(t *testing.T) {
 	f := newSelectionFixture(t)
 	f.seedTenant(t, "t-one", TenantStatusClaimed, MembershipStatusActive)
 	f.seedTenant(t, "t-two", TenantStatusClaimed, MembershipStatusActive)
 	ctx := context.Background()
 
-	_, access1, refresh1, err := f.svc.RefreshTokenInTenant(ctx, f.refresh, "t-one", "", "")
+	_, access1, refresh1, err := f.svc.RefreshToken(ctx, f.refresh, "t-one", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "t-one", f.tenantClaim(t, access1))
 
-	_, access2, refresh2, err := f.svc.RefreshTokenInTenant(ctx, refresh1, "t-two", "", "")
+	_, access2, refresh2, err := f.svc.RefreshToken(ctx, refresh1, "t-two", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "t-two", f.tenantClaim(t, access2))
 	assert.NotEqual(t, access1, access2)
 	assert.NotEqual(t, refresh1, refresh2, "the refresh token rotates on a switch")
 
-	_, access3, _, err := f.svc.RefreshTokenInTenant(ctx, refresh2, "", "", "")
+	_, access3, _, err := f.svc.RefreshToken(ctx, refresh2, "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, f.svc.tenantID(ctx), f.tenantClaim(t, access3), "no selection returns to the default")
 
 	// The rotated-away token is spent.
-	_, _, _, err = f.svc.RefreshTokenInTenant(ctx, refresh1, "t-two", "", "")
+	_, _, _, err = f.svc.RefreshToken(ctx, refresh1, "t-two", "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 }
 
 // A membership that ends stops the next refresh into that tenant.
-func TestRefreshTokenInTenant_EndedMembershipStopsNextRefresh(t *testing.T) {
+func TestRefreshToken_EndedMembershipStopsNextRefresh(t *testing.T) {
 	f := newSelectionFixture(t)
 	f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
 	ctx := context.Background()
 
-	_, _, refresh, err := f.svc.RefreshTokenInTenant(ctx, f.refresh, "t-acme", "", "")
+	_, _, refresh, err := f.svc.RefreshToken(ctx, f.refresh, "t-acme", "", "")
 	require.NoError(t, err)
 
 	require.NoError(t, f.members.RemoveMembership(ctx, f.project(), "t-acme", f.user.ID))
-	_, _, _, err = f.svc.RefreshTokenInTenant(ctx, refresh, "t-acme", "", "")
+	_, _, _, err = f.svc.RefreshToken(ctx, refresh, "t-acme", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }

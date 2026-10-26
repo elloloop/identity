@@ -40,17 +40,17 @@ func TestSecExt_RefreshTokenReplay_RevokesAllSessions(t *testing.T) {
 	require.NotEqual(t, stolenRefresh, otherRefresh)
 
 	// Attacker uses the stolen refresh token first — succeeds (rotates).
-	_, _, _, err = svc.RefreshToken(context.Background(), stolenRefresh, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), stolenRefresh, "", "", "")
 	require.NoError(t, err)
 
 	// (1) Replay of the now-rotated token: MUST fail.
-	_, _, _, err = svc.RefreshToken(context.Background(), stolenRefresh, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), stolenRefresh, "", "", "")
 	require.Error(t, err, "rotated refresh token MUST not be reusable")
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 
 	// (2) On replay, all sessions for this user are invalidated — the
 	// legitimate user's other refresh token must also be revoked.
-	_, _, _, err = svc.RefreshToken(context.Background(), otherRefresh, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), otherRefresh, "", "", "")
 	require.Error(t, err, "replay must revoke ALL refresh tokens for the user (OAuth 2.1 §4.13)")
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -70,7 +70,7 @@ func TestRefresh_ConsumedTokensSurviveRestart(t *testing.T) {
 	require.NoError(t, err)
 	stolen := r1.RefreshToken
 
-	_, _, _, err = svc1.RefreshToken(context.Background(), stolen, "", "")
+	_, _, _, err = svc1.RefreshToken(context.Background(), stolen, "", "", "")
 	require.NoError(t, err)
 
 	// "Restart": throw svc1 away and build a fresh AuthService against
@@ -79,7 +79,7 @@ func TestRefresh_ConsumedTokensSurviveRestart(t *testing.T) {
 
 	// Replay of the rotated token via the fresh instance must still be
 	// detected and must revoke all of the user's refresh tokens.
-	_, _, _, err = svc2.RefreshToken(context.Background(), stolen, "", "")
+	_, _, _, err = svc2.RefreshToken(context.Background(), stolen, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated),
 		"replay detection must survive AuthService restart")
@@ -122,7 +122,7 @@ func TestRefresh_ConcurrentRotationRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, _, _, err := svc.RefreshToken(context.Background(), target, "", "")
+			_, _, _, err := svc.RefreshToken(context.Background(), target, "", "", "")
 			results[i] = result{ok: err == nil, err: err}
 		}()
 	}

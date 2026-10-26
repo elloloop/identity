@@ -39,12 +39,13 @@ func TestTenantDomainStore_Smoke(t *testing.T) {
 		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping tenant/domain store smoke test")
 	}
 	runTenantDomainSmoke(t, dsn)
+	runContestedDomainClaims(t, dsn)
 }
 
 // runTenantDomainSmoke asserts tenant + domain CRUD, status transitions,
-// case-insensitive domain lookup, the one-tenant-per-domain uniqueness
-// rule, project-scoping (a row in project A is invisible from project B),
-// and argument validation.
+// case-insensitive domain lookup, the domain uniqueness rules (once per
+// tenant, one verified row per project), project-scoping (a row in project
+// A is invisible from project B), and argument validation.
 func runTenantDomainSmoke(t *testing.T, dsn string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -90,6 +91,15 @@ func runTenantDomainSmoke(t *testing.T, dsn string) {
 	require.Equal(t, service.TenantStatusClaimed, ten.Status)
 	require.GreaterOrEqual(t, ten.UpdatedAtMs, ten.CreatedAtMs)
 
+	status, err := tenants.GetTenantStatus(ctx, projA, tenID)
+	require.NoError(t, err)
+	require.Equal(t, service.TenantStatusClaimed, status)
+	for _, key := range [][2]string{{projB, tenID}, {projA, "no-such"}, {"", tenID}, {projA, ""}} {
+		status, err = tenants.GetTenantStatus(ctx, key[0], key[1])
+		require.NoError(t, err)
+		require.Empty(t, status, "no status for %v", key)
+	}
+
 	// Project-scoping: project B cannot see project A's tenant.
 	cross, err := tenants.GetTenant(ctx, projB, tenID)
 	require.NoError(t, err)
@@ -102,6 +112,7 @@ func runTenantDomainSmoke(t *testing.T, dsn string) {
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	require.Equal(t, tenID, list[0].ID)
+
 	listB, err := tenants.ListTenants(ctx, projB)
 	require.NoError(t, err)
 	require.Empty(t, listB, "project B has no tenants yet")
@@ -147,11 +158,19 @@ func runTenantDomainSmoke(t *testing.T, dsn string) {
 	require.Equal(t, service.DomainStatusVerified, dom.Status)
 	require.NotZero(t, dom.VerifiedAtMs, "verify stamps verified_at_ms")
 
-	// One tenant per domain within a project: duplicate (project, domain).
+	require.False(t, dom.LegacyTXTChallenge, "a new registration never takes the legacy challenge")
+
+	// A tenant holds a domain once.
 	_, err = domains.CreateDomain(ctx, &service.Domain{
 		ProjectID: projA, TenantID: tenID, Domain: "ACME.com",
 	})
-	require.ErrorIs(t, err, service.ErrAlreadyExists, "duplicate domain in a project must conflict")
+	require.ErrorIs(t, err, service.ErrAlreadyExists, "a tenant registering its own domain again must conflict")
+
+	// Another tenant of the project cannot register a domain that is verified.
+	other, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: projA, Name: "Other"})
+	require.NoError(t, err)
+	_, err = domains.CreateDomain(ctx, &service.Domain{ProjectID: projA, TenantID: other, Domain: "acme.com"})
+	require.ErrorIs(t, err, service.ErrAlreadyExists, "a verified domain admits no other tenant's claim")
 
 	// The same domain string IS allowed in a different project.
 	tenB, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: projB, PrimaryDomain: "acme.com"})
@@ -180,4 +199,57 @@ func runTenantDomainSmoke(t *testing.T, dsn string) {
 	require.ErrorIs(t, err, service.ErrInvalidArgument)
 	require.ErrorIs(t, domains.SetDomainStatus(ctx, "", domID, service.DomainStatusFailed, 0), service.ErrInvalidArgument)
 	require.NoError(t, domains.SetDomainStatus(ctx, projA, "no-such", service.DomainStatusFailed, 0))
+}
+
+// runContestedDomainClaims asserts that tenants may contest a domain until
+// one verifies it: unproven claims coexist, the by-name lookup prefers the
+// verified row and otherwise the oldest claim, and once one claim is
+// verified no other can be verified or made.
+func runContestedDomainClaims(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	projects, tenants, domains := newTenantDomainStores(ctx, t, dsn)
+	proj, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-contest", Name: "Contest"})
+	require.NoError(t, err)
+
+	newTenant := func(name string) string {
+		t.Helper()
+		id, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Name: name, Status: service.TenantStatusClaimed})
+		require.NoError(t, err)
+		return id
+	}
+	squatter, owner, late := newTenant("Squatter"), newTenant("Owner"), newTenant("Late")
+
+	squatID, err := domains.CreateDomain(ctx, &service.Domain{ProjectID: proj, TenantID: squatter, Domain: "acme.com"})
+	require.NoError(t, err)
+	ownerID, err := domains.CreateDomain(ctx, &service.Domain{ProjectID: proj, TenantID: owner, Domain: "ACME.com"})
+	require.NoError(t, err, "a pending claim does not keep another tenant from registering the domain")
+
+	byName, err := domains.GetDomainByName(ctx, proj, "acme.com")
+	require.NoError(t, err)
+	require.Equal(t, squatID, byName.ID, "with no verified row the oldest claim is returned")
+
+	require.NoError(t, domains.SetDomainStatus(ctx, proj, ownerID, service.DomainStatusVerified, 0))
+	byName, err = domains.GetDomainByName(ctx, proj, "acme.com")
+	require.NoError(t, err)
+	require.Equal(t, ownerID, byName.ID, "the verified row wins the by-name lookup")
+	require.Equal(t, owner, byName.TenantID)
+
+	err = domains.SetDomainStatus(ctx, proj, squatID, service.DomainStatusVerified, 0)
+	require.ErrorIs(t, err, service.ErrAlreadyExists, "a domain is verified by one tenant at a time")
+	squat, err := domains.GetDomain(ctx, proj, squatID)
+	require.NoError(t, err)
+	require.Equal(t, service.DomainStatusPending, squat.Status, "the refused verify changed nothing")
+	require.NoError(t, domains.SetDomainStatus(ctx, proj, squatID, service.DomainStatusFailed, 0),
+		"an unproven claim may still fail")
+
+	_, err = domains.CreateDomain(ctx, &service.Domain{ProjectID: proj, TenantID: late, Domain: "acme.com"})
+	require.ErrorIs(t, err, service.ErrAlreadyExists)
+	_, err = domains.CreateDomain(ctx, &service.Domain{
+		ProjectID: proj, TenantID: late, Domain: "acme.com", Status: service.DomainStatusVerified,
+	})
+	require.ErrorIs(t, err, service.ErrAlreadyExists, "nor may a second verified row be inserted outright")
 }

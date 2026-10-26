@@ -1,9 +1,11 @@
 # Upgrade guide
 
-## Next — self-service tenants and tenant selection on `RefreshToken` (migration 0044; `RefreshTokenRequest.tenant_id` (additive); `MembershipStore`, `TenantStore` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
+## Next — self-service tenants and tenant selection on `RefreshToken` (migrations 0044 and 0045; `RefreshTokenRequest.tenant_id` (additive); contested domain claims and a per-tenant TXT challenge, invitation limits (behaviour changes); `MembershipStore`, `TenantStore`, `InvitationStore`, `UserDirectory`, `AuthService.RefreshToken` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
 
 A signed-in person can now create a tenant they own, list the tenants they
-belong to, and get an access token for one of them.
+belong to, and get an access token for one of them. The rationale, and what
+the `tenant` claim does and does not assert, is
+[ADR-0018](./adr/0018-self-service-tenants-and-tenant-selection.md).
 
 - **`CreateTenant(name)`** creates a claimed tenant and the caller's active
   `owner` membership (source `created`) in one transaction, and records a
@@ -27,8 +29,9 @@ belong to, and get an access token for one of them.
   1000; `0` selects the default) per user per project in
   `GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS` (default 86400, at most 30
   days). Concurrent calls by one user are serialised, so the limit holds
-  under a race. The RPC also shares the per-IP signup budget
-  (`GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`, tag `tenant_create`).
+  under a race. The RPC also has a per-IP budget of its own, tag
+  `tenant_create`, the size of the signup budget
+  (`GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`) but not shared with it.
   `CreateTenant` takes no idempotency key: a retried call can create a
   second tenant, bounded by the limit. Reconcile with `ListMyTenants`.
 - **`ListMyTenants()`** returns `{tenant_id, name, role}` for every claimed
@@ -42,14 +45,82 @@ belong to, and get an access token for one of them.
   today's behaviour: the claim is the deployment default
   (`GATEWAY_DEFAULT_TENANT_ID`). The selection is not sticky: each refresh
   chooses again, and one without `tenant_id` returns to the default.
-- **Revocation.** Identity's own middleware accepts a token whose `tenant`
-  claim is the default or a claimed tenant of the token's project, and reads
-  the tenant on each request, so suspending a tenant refuses its tokens at
-  once (`503` when the tenant cannot be read). Ending a membership takes
-  effect at the next refresh, so a selected token outlives it by at most
-  the access-token lifetime (`GATEWAY_JWT_EXPIRY_SECONDS`).
+- **What the claim asserts.** A selected `tenant` asserts membership only.
+  The `role` claim is still the account's role and is **never** a role in
+  that tenant; a service that needs the tenant role reads it from
+  `ListMyTenants`. Selecting a tenant does not apply its login policy, which
+  applies at sign-in through a verified domain.
+- **Revocation.** Identity's own HTTP middleware accepts a token whose
+  `tenant` claim is the default or a claimed tenant of the token's project,
+  and reads the tenant's status on each request, so suspending a tenant
+  refuses its tokens at once (`503` when the tenant cannot be read, logged as
+  `token_tenant_lookup_failed` without the token). Ending a membership takes
+  effect at the next refresh, so a selected token outlives it by at most the
+  access-token lifetime (`GATEWAY_JWT_EXPIRY_SECONDS`). Over native gRPC the
+  host verifies tokens itself (see `docs/embedding.md`), so a suspension
+  takes effect there when the token expires unless the host checks.
+- **Accounts in other projects.** `CreateTenant` and
+  `AcceptTenantInvitation` look the caller up in the request's project.
+  `AcceptTenantInvitation` used to look in the default project, so a caller
+  signed in to any other project could not accept an invitation; that is
+  fixed.
+
+### Domain registrations are claims until verified (behaviour change)
+
+Self-service tenants make anyone a tenant admin, so registering a domain no
+longer captures its signups:
+
+- **Several tenants may register the same domain.** `CreateDomain` refuses a
+  domain only when the same tenant already holds it, or another tenant has
+  verified it (`ALREADY_EXISTS`). The tenant that verifies first holds the
+  only verified row; `VerifyDomain` for a later claimant then fails with
+  `ALREADY_EXISTS` ("verified by another tenant").
+- **Auto-formation joins only a proven tenant.** A signup on a non-public
+  domain joins the tenant that verified the domain, or else the latent tenant
+  auto-formation made for it (creating it on the domain's first signup). It
+  never joins a tenant that merely registered the domain.
+- **The DNS TXT challenge now names the tenant.** `CreateDomain` returns a
+  value derived from the project, the tenant and the domain, so the record
+  one claimant publishes verifies no other claim. A `dns_txt` registration
+  made before migration 0045 keeps accepting the value it was issued, so a
+  record you already published still verifies; new registrations must
+  publish the value they are given.
+
+### Invitation limits (behaviour change)
+
+Every `CreateTenantInvitation` sends an email, so it is now bounded three
+ways. Past the per-tenant or per-recipient limit the call is
+`RESOURCE_EXHAUSTED` and nothing is sent or stored:
+
+- per client IP: `GATEWAY_RATE_LIMIT_INVITATION_PER_IP` (default 20 per
+  rate-limit window, tag `tenant_invitation`; `0` switches it off);
+- per tenant: `GATEWAY_TENANT_INVITATION_MAX_PER_TENANT` invitations (default
+  100, at most 100000; `0` selects the default) in
+  `GATEWAY_TENANT_INVITATION_WINDOW_SECONDS` (default 86400, at most 30 days),
+  counting every invitation created, whatever its status;
+- per recipient: inviting the same address from the same tenant again
+  within `GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS` (default 300, at
+  most 86400; `0` selects the default) is refused.
+
+The limits apply to every tenant, operator-created ones included: a tenant
+onboarding more than 100 people a day needs a higher
+`GATEWAY_TENANT_INVITATION_MAX_PER_TENANT`. The invitation email no longer
+names a self-service tenant, whose name its creator typed; it invites to "a
+team". Operator-created and domain tenants are named as before.
 
 ### Migration
+
+`0045_contest_domain_claims` adds `domains.legacy_txt_challenge` (`BOOLEAN
+NOT NULL DEFAULT false`, catalog-only) and sets it on every existing `dns_txt`
+row. It replaces the unique index on `(project_id, lower(domain))` with a
+unique index over verified rows only, a unique index on `(project_id,
+tenant_id, lower(domain))` and a plain lookup index. Its `ALTER` takes an
+`ACCESS EXCLUSIVE` lock on `domains` that is held until the migration commits,
+so reads and writes on `domains` wait for the index builds; `lock_timeout =
+10s` bounds the wait to acquire it. If it times out, version 45 is left dirty:
+confirm `domains.legacy_txt_challenge` is absent, then run `identity migrate
+force 44` and `identity migrate` again. The down migration keeps one row per domain (the verified one, else
+the oldest) and **deletes the others**, then restores the old index.
 
 `0044_add_self_service_tenants` adds `tenants.created_by` (`TEXT NOT NULL
 DEFAULT ''`, catalog-only), a partial index on `(project_id, created_by,
@@ -67,19 +138,30 @@ the RPCs answer `UNIMPLEMENTED`, as the other membership RPCs do.
   `tenant` claim to the default, a token with a selected tenant fails there.
   Nothing changes until a client sends `tenant_id`; before you let clients
   select, accept a non-default `tenant` and authorise on it.
-- **Embedders with their own stores.** `service.TenantStore` gains
-  `CreateOwnedTenant`, and `service.MembershipStore` gains
+- **Operators who registered a domain and rely on it.** Nothing to do for a
+  verified domain or a published TXT record; see the domain section above for
+  what a new registration publishes.
+- **Embedders with their own stores** (these are `internal/` packages, so
+  this matters only to forks). `service.TenantStore` gains
+  `CreateOwnedTenant` and `GetTenantStatus`; `service.MembershipStore` gains
   `ListActiveTenantsForUser` and `GetActiveTenantForUser` (through the new
-  `UserTenantReader`). `UserTenantReader` must only return a tenant that is
-  claimed, in the given project, with the user's membership active.
+  `UserTenantReader`), which must only return a tenant that is claimed, in
+  the given project, with the user's membership active.
+  `service.InvitationStore.CreateInvitation` takes a
+  `service.InvitationLimits` and must enforce it under a per-tenant lock.
+  `service.UserDirectory` is now `GetUserInProject(ctx, projectID, userID)`;
+  `service.RepositoryUserDirectory` adapts a `Repository`.
+  `service.DomainStore.CreateDomain` must allow several tenants' claims on one
+  domain and refuse one only against the same tenant or a verified row.
 - **Callers of the middleware constructors.** `middleware.AuthMiddleware`
   and `middleware.SessionAuthMiddleware` take a `middleware.TokenTenants`
   where they took the expected tenant string: `TokenTenants{Default: id}`
   keeps the old check, and setting `Selectable` (a `TenantLookup`, which
-  `TenantStore` satisfies) also accepts selected tenants.
-- **Callers of `AuthService.RefreshToken`** are unaffected;
-  `RefreshTokenInTenant` adds the tenant argument, and
-  `AuthService.WithTenantSelection` supplies the reader it checks against.
+  `TenantStore` satisfies through `GetTenantStatus`) also accepts selected
+  tenants. `Logger` records failed tenant reads.
+- **Callers of `AuthService.RefreshToken`** pass the tenant to select as a
+  new third argument, `""` for the default; `AuthService.WithTenantSelection`
+  supplies the reader it checks against.
 
 ## Next — built with Go 1.26.10 for the `crypto/x509` advisory (no API or schema change)
 

@@ -18,7 +18,7 @@ func TestAgentStanding_InheritsOwnerEmailVerification(t *testing.T) {
 	agent := seedAgent(f.repo, f.owner.ID)
 	ctx := context.Background()
 
-	access, refresh, err := f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0)
+	access, refresh, err := f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0, "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Empty(t, access)
 	assert.Empty(t, refresh)
@@ -36,7 +36,7 @@ func TestAgentStanding_InheritsOwnerEmailVerification(t *testing.T) {
 	f.repo.users[f.owner.ID].EmailVerified = false
 	f.repo.mu.Unlock()
 	for range 2 {
-		_, access, rotated, refreshErr := f.svc.RefreshToken(ctx, refresh, "", "")
+		_, access, rotated, refreshErr := f.svc.RefreshToken(ctx, refresh, "", "", "")
 		require.ErrorIs(t, refreshErr, ErrEmailVerificationRequired)
 		assert.Empty(t, access)
 		assert.Empty(t, rotated)
@@ -46,7 +46,7 @@ func TestAgentStanding_InheritsOwnerEmailVerification(t *testing.T) {
 	f.repo.mu.Lock()
 	f.repo.users[f.owner.ID].EmailVerified = true
 	f.repo.mu.Unlock()
-	_, _, rotated, err := f.svc.RefreshToken(ctx, refresh, "", "")
+	_, _, rotated, err := f.svc.RefreshToken(ctx, refresh, "", "", "")
 	require.NoError(t, err)
 	assert.NotEqual(t, refresh, rotated)
 }

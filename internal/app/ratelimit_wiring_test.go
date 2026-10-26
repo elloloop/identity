@@ -531,3 +531,39 @@ func TestBuildRateLimits_TenantCreationLimited(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code, "CreateTenantInvitation must not share CreateTenant's budget")
 }
+
+// TestBuildRateLimits_TenantInvitationLimited asserts CreateTenantInvitation,
+// which sends an email per admitted call, is metered per IP on its own budget,
+// apart from CreateTenant's, and that a zero quota switches it off.
+func TestBuildRateLimits_TenantInvitationLimited(t *testing.T) {
+	const (
+		invite = "/identity.v1.IdentityService/CreateTenantInvitation"
+		create = "/identity.v1.IdentityService/CreateTenant"
+	)
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitSignupPerIP: 2, RateLimitInvitationPerIP: 3}
+	limits := buildRateLimits(cfg)
+	pl, ok := middleware.MatchPathLimit(limits, invite)
+	require.True(t, ok, "CreateTenantInvitation must carry a rate limit")
+	require.Equal(t, "tenant_invitation", pl.Tag)
+	for _, other := range []string{
+		"/identity.v1.IdentityService/AcceptTenantInvitation",
+		"/identity.v1.IdentityService/ListTenantInvitations",
+	} {
+		if got, ok := middleware.MatchPathLimit(limits, other); ok {
+			require.NotEqual(t, "tenant_invitation", got.Tag, "%s must not spend the invitation budget", other)
+		}
+	}
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, invite, "198.51.100.7", 3)
+	assertQuotaExhausts(t, handler, create, "198.51.100.7", 2)
+
+	cfg.RateLimitInvitationPerIP = 0
+	pl, _ = middleware.MatchPathLimit(buildRateLimits(cfg), invite)
+	now := time.Now()
+	for i := range 50 {
+		require.True(t, pl.Allow("198.51.100.7", now), "a zero quota admits invitation %d", i+1)
+	}
+}

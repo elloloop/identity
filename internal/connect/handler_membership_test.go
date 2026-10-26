@@ -37,7 +37,7 @@ func newConnectInvitationStore() *connectInvitationStore {
 	}
 }
 
-func (s *connectInvitationStore) CreateInvitation(_ context.Context, inv *service.TenantInvitation) (string, error) {
+func (s *connectInvitationStore) CreateInvitation(_ context.Context, inv *service.TenantInvitation, _ service.InvitationLimits) (string, error) {
 	s.nextID++
 	id := "inv-1"
 	cp := *inv
@@ -66,12 +66,16 @@ func (s *connectInvitationStore) ListInvitationsForTenant(_ context.Context, _, 
 	return s.listResp, nil
 }
 
-// connectUserDirectory resolves users by id for the email-match policy.
+// connectUserDirectory resolves users by id in the scope's project, the one
+// these handler tests serve; a lookup in any other project finds no one.
 type connectUserDirectory struct {
 	byID map[string]*service.User
 }
 
-func (d *connectUserDirectory) GetUser(_ context.Context, userID string) (*service.User, error) {
+func (d *connectUserDirectory) GetUserInProject(_ context.Context, projectID, userID string) (*service.User, error) {
+	if projectID != testProjectID {
+		return nil, nil
+	}
 	return d.byID[userID], nil
 }
 

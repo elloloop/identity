@@ -263,15 +263,25 @@ func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 // (project, tenant, email under service.FoldEmail) and inserts the new one.
 // The service stores invitations in canonical form, and migration 0034
 // canonicalized the pending ones stored before it did, so the fold key names
-// the mailbox. Creates for one mailbox are serialized by a transaction-scoped
+// the mailbox. Creates for one tenant are serialized by a transaction-scoped
 // advisory lock, so concurrent ones each revoke the one before and exactly
 // one stays pending; the fold-keyed partial unique index is the backstop. This is the
 // authoritative enforcement (the partial unique index is defense-in-depth,
 // and the memory driver — should they ever gain invitations — must
 // match these revoke-then-insert semantics).
-func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.TenantInvitation) (string, error) {
+//
+// Under the same lock it applies limits: an invitation to an address the
+// tenant invited at or after limits.ResendCooldownStartMs is
+// service.ErrInvitationResendTooSoon, and one past limits.MaxPerTenant
+// invitations created at or after limits.WindowStartMs is
+// service.ErrInvitationLimited. Both count every invitation the tenant
+// created, whatever its status, since each one sent an email.
+func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.TenantInvitation, limits service.InvitationLimits) (string, error) {
 	if inv == nil {
 		return "", errors.New("postgres: CreateInvitation: nil invitation")
+	}
+	if limits.MaxPerTenant <= 0 {
+		return "", fmt.Errorf("%w: max_per_tenant must be positive", service.ErrInvalidArgument)
 	}
 	if inv.ProjectID == "" || inv.TenantID == "" {
 		return "", fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
@@ -304,14 +314,44 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Revoke any open invite for the same recipient first, so the new one
-	// is the only pending row — one open invite per (project, tenant, email).
 	key := service.FoldEmail(inv.Email)
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-		invitationLockKey(inv.ProjectID, inv.TenantID, key),
+		invitationLockKey(inv.ProjectID, inv.TenantID),
 	); err != nil {
 		return "", wrapPgErr("CreateInvitation(lock)", err)
 	}
+
+	if limits.ResendCooldownStartMs > 0 {
+		var recent bool
+		if err := tx.QueryRow(
+			ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM tenant_invitations
+				WHERE project_id = $1 AND tenant_id = $2
+				  AND lower(email COLLATE "C") = $3 AND created_at_ms >= $4)`,
+			inv.ProjectID, inv.TenantID, key, limits.ResendCooldownStartMs,
+		).Scan(&recent); err != nil {
+			return "", wrapPgErr("CreateInvitation(cooldown)", err)
+		}
+		if recent {
+			return "", service.ErrInvitationResendTooSoon
+		}
+	}
+	var sent int
+	if err := tx.QueryRow(
+		ctx, `
+		SELECT count(*) FROM tenant_invitations
+		WHERE project_id = $1 AND tenant_id = $2 AND created_at_ms >= $3`,
+		inv.ProjectID, inv.TenantID, limits.WindowStartMs,
+	).Scan(&sent); err != nil {
+		return "", wrapPgErr("CreateInvitation(count)", err)
+	}
+	if sent >= limits.MaxPerTenant {
+		return "", service.ErrInvitationLimited
+	}
+
+	// Revoke any open invite for the same recipient first, so the new one
+	// is the only pending row — one open invite per (project, tenant, email).
 	if _, err := tx.Exec(
 		ctx, `
 		UPDATE tenant_invitations SET status = 'revoked'
@@ -344,11 +384,13 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 }
 
 // invitationLockKey names the advisory lock that serializes invitation
-// creates for one (project, tenant, folded email). The length prefixes keep
-// distinct triples from sharing a key string whatever characters they hold.
-func invitationLockKey(projectID, tenantID, foldedEmail string) string {
-	return fmt.Sprintf("tenant_invitation:%d:%s:%d:%s:%s",
-		len(projectID), projectID, len(tenantID), tenantID, foldedEmail)
+// creates for one (project, tenant): the per-tenant limit counts every
+// recipient, so creates for different mailboxes must not interleave either.
+// The length prefixes keep distinct pairs from sharing a key string whatever
+// characters they hold.
+func invitationLockKey(projectID, tenantID string) string {
+	return fmt.Sprintf("tenant_invitation:%d:%s:%d:%s",
+		len(projectID), projectID, len(tenantID), tenantID)
 }
 
 // GetInvitationByTokenHash resolves an invitation by its hashed token

@@ -382,7 +382,7 @@ func productAgeIssuingPaths() []productAgePath {
 				"user@example.com", productAgePassword, "1.2.3.4", "agent",
 			)
 			require.NoError(t, err)
-			_, _, _, err = svc.RefreshToken(ctx, login.RefreshToken, "1.2.3.4", "agent")
+			_, _, _, err = svc.RefreshToken(ctx, login.RefreshToken, "", "1.2.3.4", "agent")
 			return err
 		}},
 	}
@@ -455,7 +455,7 @@ func TestProductAgeGate_RefreshRefusesLaterRestrictedProduct(t *testing.T) {
 
 	// The operator now sets a teen minimum on the product.
 	restricted := productScope(t, teenMinimumJSON, restrictedProduct)
-	_, _, _, err = svc.RefreshToken(restricted, login.RefreshToken, "1.2.3.4", "agent")
+	_, _, _, err = svc.RefreshToken(restricted, login.RefreshToken, "", "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrProductAgeRestricted)
 }
 

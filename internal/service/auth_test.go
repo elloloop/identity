@@ -82,7 +82,7 @@ func TestPasswordSignup_DuplicateEmail_NoEnumeration(t *testing.T) {
 	assert.Len(t, repo.users, 1, "duplicate signup must not create a second user")
 	assert.Len(t, repo.refreshTokens, 1, "duplicate signup must not mint a stored refresh token")
 
-	_, _, _, err = svc.RefreshToken(context.Background(), dup.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), dup.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -122,7 +122,7 @@ func TestPasswordSignup_DuplicateCreateRaceReturnsDecoy(t *testing.T) {
 	assert.NotEmpty(t, result.RefreshToken)
 	assert.Len(t, rec.Sent(), 1)
 
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 	got, findErr := repo.FindUserByEmail(context.Background(), "race@example.com")
@@ -368,7 +368,7 @@ func TestRefreshToken_RotatesToken(t *testing.T) {
 	originalRefresh := result.RefreshToken
 
 	// Refresh.
-	user, newAccess, newRefresh, err := svc.RefreshToken(context.Background(), originalRefresh, "", "")
+	user, newAccess, newRefresh, err := svc.RefreshToken(context.Background(), originalRefresh, "", "", "")
 	require.NoError(t, err)
 	assert.NotNil(t, user)
 	assert.NotEmpty(t, newAccess)
@@ -376,7 +376,7 @@ func TestRefreshToken_RotatesToken(t *testing.T) {
 	assert.NotEqual(t, originalRefresh, newRefresh, "refresh token should be rotated")
 
 	// Old token should not work anymore.
-	_, _, _, err = svc.RefreshToken(context.Background(), originalRefresh, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), originalRefresh, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -393,7 +393,7 @@ func TestRefreshToken_ExpiredTokenFails(t *testing.T) {
 	// Advance the clock past the refresh token expiry.
 	svc.nowFunc = func() time.Time { return futureTime }
 
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTokenExpired))
 }
@@ -402,7 +402,7 @@ func TestRefreshToken_InvalidTokenFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, _, err := svc.RefreshToken(context.Background(), "bogus-token", "", "")
+	_, _, _, err := svc.RefreshToken(context.Background(), "bogus-token", "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -412,7 +412,7 @@ func TestRefreshToken_LookupErrorFailsClosed(t *testing.T) {
 	svc := newTestAuthServiceErr(t, repo)
 
 	repo.failFindRefreshTokenIncluding = true
-	_, _, _, err := svc.RefreshToken(context.Background(), "raw-token", "", "")
+	_, _, _, err := svc.RefreshToken(context.Background(), "raw-token", "", "", "")
 	require.Error(t, err)
 }
 
@@ -423,7 +423,7 @@ func TestRefreshToken_ConsumeFailureDoesNotMintReplacement(t *testing.T) {
 	require.NoError(t, err)
 
 	repo.failConsumeRefreshToken = true
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	list, snapErr := repo.refreshTokenSnapshot()
 	require.NoError(t, snapErr)
@@ -440,11 +440,11 @@ func TestRefreshToken_ReplayRevokeFailureStillRejectsReplay(t *testing.T) {
 	result, err := svc.PasswordSignup(context.Background(), "replay-delete@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
 
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.NoError(t, err)
 
 	repo.failDeleteRefreshTokensForUser = true
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -462,7 +462,7 @@ func TestLogout_DeletesRefreshToken(t *testing.T) {
 	require.NoError(t, err)
 
 	// Token should be gone.
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 }
 
@@ -1056,7 +1056,7 @@ func TestPasswordSignup_PerEmailThrottle_ReturnsDecoy(t *testing.T) {
 
 	// The decoy refresh token must NOT be persisted — proves the
 	// throttled caller cannot redeem it.
-	_, _, _, err = svc.RefreshToken(context.Background(), res2.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), res2.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated),
 		"throttled-signup decoy refresh token must not be redeemable")

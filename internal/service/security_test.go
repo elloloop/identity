@@ -188,12 +188,12 @@ func TestSecurity_RefreshTokenRotation_OldTokenInvalidated(t *testing.T) {
 	oldRefresh := result.RefreshToken
 
 	// Use the refresh token.
-	_, _, newRefresh, err := svc.RefreshToken(context.Background(), oldRefresh, "", "")
+	_, _, newRefresh, err := svc.RefreshToken(context.Background(), oldRefresh, "", "", "")
 	require.NoError(t, err)
 	assert.NotEqual(t, oldRefresh, newRefresh, "new refresh token should differ")
 
 	// Old token should now fail.
-	_, _, _, err = svc.RefreshToken(context.Background(), oldRefresh, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), oldRefresh, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }

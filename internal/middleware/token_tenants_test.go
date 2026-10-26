@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/internal/service"
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
@@ -29,12 +32,15 @@ type fakeTenantLookup struct {
 	calls int
 }
 
-func (f *fakeTenantLookup) GetTenant(_ context.Context, projectID, tenantID string) (*service.Tenant, error) {
+func (f *fakeTenantLookup) GetTenantStatus(_ context.Context, projectID, tenantID string) (string, error) {
 	f.calls++
 	if f.err != nil {
-		return nil, f.err
+		return "", f.err
 	}
-	return f.byKey[projectID+"/"+tenantID], nil
+	if t := f.byKey[projectID+"/"+tenantID]; t != nil {
+		return t.Status, nil
+	}
+	return "", nil
 }
 
 func newTenantLookup() *fakeTenantLookup {
@@ -184,6 +190,29 @@ func TestTokenTenants_LookupErrorIsUnavailable(t *testing.T) {
 			assert.True(t, cap.called)
 			assert.Empty(t, cap.userID, "an exempt path does not authenticate an unverified tenant")
 		})
+	}
+}
+
+// The 503 is logged with the tenant it was for and the cause, never the token.
+func TestTokenTenants_LookupErrorIsLoggedWithoutTheToken(t *testing.T) {
+	signer := testSigner(t)
+	lookup := newTenantLookup()
+	lookup.err = errors.New("database down")
+	core, logs := observer.New(zap.WarnLevel)
+	mw := AuthMiddleware(signer, TokenTenants{Default: ttDefault, Selectable: lookup, Logger: zap.New(core)}, "", false)
+	token := tenantToken(t, signer, ttProject, "t-claimed")
+
+	rec := serveWithToken(mw((&tenantCapture{}).handler()), ttPath, token)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	entries := logs.FilterMessage("token_tenant_lookup_failed").All()
+	require.Len(t, entries, 1)
+	fields := entries[0].ContextMap()
+	assert.Equal(t, ttProject, fields["project_id"])
+	assert.Equal(t, "t-claimed", fields["tenant_id"])
+	assert.Equal(t, "database down", fields["error"])
+	for key, v := range fields {
+		assert.NotContains(t, fmt.Sprint(v), token, "field %s must not carry the token", key)
 	}
 }
 

@@ -70,6 +70,10 @@ func (s *connectTenantStore) GetTenant(_ context.Context, _, _ string) (*service
 	return s.tenant, nil
 }
 
+func (s *connectTenantStore) GetTenantStatus(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (s *connectTenantStore) GetTenantByPrimaryDomain(context.Context, string, string) (*service.Tenant, error) {
 	return nil, nil
 }

@@ -78,7 +78,7 @@ func (s *MembershipService) CreateTenant(ctx context.Context, callerID, name, ip
 		return nil, err
 	}
 
-	caller, err := s.users.GetUser(ctx, callerID)
+	caller, err := s.users.GetUserInProject(ctx, projectID, callerID)
 	if err != nil {
 		return nil, err
 	}

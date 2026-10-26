@@ -138,6 +138,15 @@ import { Code } from "astro-expressive-code/components";
     Identity does not authorize per-resource access; it authenticates and
     declares a coarse role.
   </p>
+  <p>
+    <code>role</code> is always the account's role, never a role in a tenant.
+    A token whose <code>tenant</code> was chosen on <code>RefreshToken</code>
+    carries the same <code>role</code> as any other token of that account: the
+    chosen <code>tenant</code> says only that the account is an active member.
+    A service that needs the caller's role in a tenant (owner, admin or
+    member) reads it from <code>ListMyTenants</code>, never from
+    <code>role</code>.
+  </p>
 
   <h2>Authorization boundary</h2>
   <p>

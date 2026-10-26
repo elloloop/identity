@@ -143,8 +143,16 @@ bridge drops the key, so an interceptor written before it existed cannot let
 a client vouch for its own sign-in, and every merge over native gRPC is
 refused `reauthentication_required`.
 
+Do not pin the `tenant` claim. A valid token carries the deployment default
+(`GATEWAY_DEFAULT_TENANT_ID`) or a tenant its subject is an active member of,
+chosen on `RefreshToken`, so pass `""` as the expected tenant. Identity's HTTP
+chain also refuses a chosen tenant once it is suspended; nothing does that on
+this path, so a suspended tenant's tokens stay usable here until they expire
+(at most `GATEWAY_JWT_EXPIRY_SECONDS`). Keep that lifetime short, or check the
+tenant's status yourself, if that window matters to you.
+
 ```go
-func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud bool) grpc.UnaryServerInterceptor {
+func authInterceptor(kp jwt.KeyProvider, audience string, requireAud bool) grpc.UnaryServerInterceptor {
     return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
         md, _ := metadata.FromIncomingContext(ctx)
         md = md.Copy()
@@ -156,8 +164,9 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
         md.Delete("x-authenticated-auth-time")
         if toks := md.Get("authorization"); len(toks) > 0 {
             // VerifyAccessToken rejects a purpose-bearing ticket for us.
+            // "" accepts the default tenant and a chosen one alike.
             claims, err := jwt.VerifyAccessToken(
-                strings.TrimPrefix(toks[0], "Bearer "), kp, tenant, audience, requireAud)
+                strings.TrimPrefix(toks[0], "Bearer "), kp, "", audience, requireAud)
             if err == nil {
                 md.Set("x-authenticated-user-id", claims.Sub)
                 if claims.AuthTime > 0 {

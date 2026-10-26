@@ -59,6 +59,7 @@ func TestAutoFormStore_Smoke(t *testing.T) {
 		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping auto-form smoke test")
 	}
 	runAutoFormSmoke(t, dsn)
+	runAutoFormIgnoresUnprovenClaims(t, dsn)
 }
 
 func runAutoFormSmoke(t *testing.T, dsn string) {
@@ -167,4 +168,70 @@ func runAutoFormSmoke(t *testing.T, dsn string) {
 	tenants, err = ts.ListTenants(ctx, projectID)
 	require.NoError(t, err)
 	require.Len(t, tenants, 2, "a lost race must not leave an orphan tenant")
+}
+
+// runAutoFormIgnoresUnprovenClaims asserts that registering a domain one
+// has not proven captures none of its signups: a self-service tenant's
+// pending dns_txt or email claim is passed over for the domain's own latent
+// tenant, and once a tenant verifies the domain, its later signups join
+// that tenant.
+func runAutoFormIgnoresUnprovenClaims(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	af, ts, ds, ms, projectID, newUser := newAutoFormFixture(ctx, t, dsn)
+
+	owned := func(owner, name string) string {
+		t.Helper()
+		tenant, _, err := ts.CreateOwnedTenant(ctx, service.OwnedTenantRequest{
+			ProjectID: projectID, OwnerID: owner, Name: name, MaxPerWindow: 10,
+		})
+		require.NoError(t, err)
+		return tenant.ID
+	}
+	// One self-service tenant claims the domain by DNS, another by email;
+	// neither has proven it.
+	squatter := owned(newUser(t), "Squatter")
+	_, err := ds.CreateDomain(ctx, &service.Domain{ProjectID: projectID, TenantID: squatter, Domain: "acme.com"})
+	require.NoError(t, err)
+	_, err = ds.CreateDomain(ctx, &service.Domain{
+		ProjectID: projectID, TenantID: squatter, Domain: "acme.com", VerificationMethod: service.DomainVerificationEmail,
+	})
+	require.ErrorIs(t, err, service.ErrAlreadyExists, "a tenant holds a domain once, whatever the method")
+	emailSquatter := owned(newUser(t), "Email squatter")
+	_, err = ds.CreateDomain(ctx, &service.Domain{
+		ProjectID: projectID, TenantID: emailSquatter, Domain: "acme.com", VerificationMethod: service.DomainVerificationEmail,
+	})
+	require.NoError(t, err)
+
+	first := newUser(t)
+	latent, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", first)
+	require.NoError(t, err)
+	require.NotContains(t, []string{squatter, emailSquatter}, latent, "a pending claim captures no signup")
+	ten, err := ts.GetTenant(ctx, projectID, latent)
+	require.NoError(t, err)
+	require.Equal(t, service.TenantStatusLatent, ten.Status)
+	squatterMember, err := ms.GetMembership(ctx, projectID, squatter, first)
+	require.NoError(t, err)
+	require.Nil(t, squatterMember)
+
+	again, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", newUser(t))
+	require.NoError(t, err)
+	require.Equal(t, latent, again, "later signups join the domain's one latent tenant")
+
+	owner := owned(newUser(t), "Owner")
+	ownerDomain, err := ds.CreateDomain(ctx, &service.Domain{ProjectID: projectID, TenantID: owner, Domain: "acme.com"})
+	require.NoError(t, err)
+	require.NoError(t, ds.SetDomainStatus(ctx, projectID, ownerDomain, service.DomainStatusVerified, 0))
+
+	late := newUser(t)
+	joined, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", late)
+	require.NoError(t, err)
+	require.Equal(t, owner, joined, "once verified, the domain's signups join the verifying tenant")
+	mem, err := ms.GetMembership(ctx, projectID, owner, late)
+	require.NoError(t, err)
+	require.NotNil(t, mem)
+	require.Equal(t, service.MembershipSourceDomain, mem.Source)
 }

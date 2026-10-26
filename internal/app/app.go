@@ -410,6 +410,15 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
+			// Every admitted invitation sends an email from the deployment's
+			// sender to an address the caller chose, and self-service
+			// tenants make anyone a tenant admin. The per-tenant cap and
+			// per-recipient cooldown bound one tenant; this bounds one
+			// address spreading invitations across tenants and accounts.
+			PathPrefix: "/identity.v1.IdentityService/CreateTenantInvitation", Tag: "tenant_invitation",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitInvitationPerIP, 0),
+		},
+		{
 			// The completion half of a login: unauthenticated (it carries a
 			// purpose ticket, not a session) and it mints a token pair, so it
 			// is bound by the same per-IP budget as the login paths.
@@ -809,7 +818,7 @@ func New(deps Deps) (*Built, error) {
 	}
 
 	domainSvc := buildDomainService(deps, logger)
-	membershipSvc := buildMembershipService(deps, repo, mailer, auditLog, logger)
+	membershipSvc := buildMembershipService(deps, service.RepositoryUserDirectory(repo), mailer, auditLog, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
@@ -849,7 +858,7 @@ func New(deps Deps) (*Built, error) {
 	// (DefaultTenantID), or a claimed tenant of the token's project that
 	// RefreshToken selected for a member. Without a tenant store (the memory
 	// driver) no tenant can be selected, so only the default is accepted.
-	authTenants := middleware.TokenTenants{Default: deps.Config.DefaultTenantID}
+	authTenants := middleware.TokenTenants{Default: deps.Config.DefaultTenantID, Logger: logger}
 	if deps.TenantStore != nil {
 		authTenants.Selectable = deps.TenantStore
 	}
@@ -1118,10 +1127,10 @@ func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
 // mailerConfigured tells the service whether outbound mail actually delivers
 // (a real transport is wired, not just the log-only fallback). When it does
 // not, CreateTenantInvitation returns the raw token in its response so a
-// headless deployment can still complete the flow. users is the boot-time
-// repository — the redesign governance plane is a single postgres control
-// database, so there is no per-tenant repo to scope user lookups to.
-// auditLog receives the CreateTenant trail.
+// headless deployment can still complete the flow. users resolves a caller
+// in the request's project (RepositoryUserDirectory over the boot
+// repository), as accounts are partitioned by project. auditLog receives the
+// CreateTenant trail.
 func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
 	if deps.InvitationStore == nil || deps.MembershipStore == nil || deps.TenantStore == nil {
 		return nil

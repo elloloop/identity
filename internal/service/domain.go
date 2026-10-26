@@ -25,9 +25,8 @@ import (
 
 // domainVerifyTXTPrefix is the prefix of the DNS TXT record value a
 // tenant publishes to prove control of a domain. The full value is
-// domainVerifyTXTPrefix + hex(sha256(projectID + ":" + lower(domain))),
-// which is deterministic — derivable by both the server (to challenge)
-// and the verifier (to publish) without persisting a per-domain token.
+// deterministic per (project, tenant, domain) — derivable by the server
+// without persisting a per-domain token — see dnsTXTChallenge.
 const domainVerifyTXTPrefix = "identity-domain-verify="
 
 // DNSResolver looks up DNS TXT records. It is the single I/O boundary of
@@ -129,7 +128,7 @@ func (s *DomainService) CreateDomain(ctx context.Context, callerID, tenantID, do
 
 	out := &CreatedDomain{Domain: d}
 	if method == DomainVerificationDNSTXT {
-		out.TXTName, out.TXTValue = dnsTXTChallenge(projectID, normDomain)
+		out.TXTName, out.TXTValue = dnsTXTChallenge(projectID, tenantID, normDomain)
 	}
 	return out, nil
 }
@@ -177,7 +176,7 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID, domainID str
 		return nil, fmt.Errorf("%w: verification method %q", ErrInvalidArgument, d.VerificationMethod)
 	}
 
-	if err := s.checkDNSTXT(ctx, projectID, d.Domain); err != nil {
+	if err := s.checkDNSTXT(ctx, projectID, d); err != nil {
 		// A missing/mismatched challenge is a verification failure, not an
 		// infrastructure error: record it and surface PermissionDenied.
 		if setErr := s.domains.SetDomainStatus(ctx, projectID, d.ID, DomainStatusFailed, 0); setErr != nil {
@@ -187,6 +186,9 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID, domainID str
 	}
 
 	if err := s.domains.SetDomainStatus(ctx, projectID, d.ID, DomainStatusVerified, 0); err != nil {
+		if errors.Is(err, ErrAlreadyExists) {
+			return nil, fmt.Errorf("%w: %s is verified by another tenant", ErrAlreadyExists, d.Domain)
+		}
 		return nil, err
 	}
 	if err := s.tenants.SetTenantStatus(ctx, projectID, d.TenantID, TenantStatusClaimed); err != nil {
@@ -286,10 +288,18 @@ func (s *DomainService) requireTenantAdmin(ctx context.Context, projectID, tenan
 }
 
 // checkDNSTXT resolves the domain's TXT records and confirms the
-// deterministic challenge is present. An absent/mismatched challenge is
-// ErrPermissionDenied (a verification failure, not an infra error).
-func (s *DomainService) checkDNSTXT(ctx context.Context, projectID, domain string) error {
-	_, want := dnsTXTChallenge(projectID, domain)
+// registration's challenge is present: the one naming its tenant, or for a
+// legacy registration also the project-wide one it was given. An
+// absent/mismatched challenge is ErrPermissionDenied (a verification
+// failure, not an infra error).
+func (s *DomainService) checkDNSTXT(ctx context.Context, projectID string, d *Domain) error {
+	domain := d.Domain
+	_, tenantValue := dnsTXTChallenge(projectID, d.TenantID, domain)
+	want := map[string]bool{tenantValue: true}
+	if d.LegacyTXTChallenge {
+		_, legacyValue := legacyDNSTXTChallenge(projectID, domain)
+		want[legacyValue] = true
+	}
 	records, err := s.resolver.LookupTXT(ctx, domain)
 	if err != nil {
 		// A lookup error (NXDOMAIN, SERVFAIL, timeout) means the challenge
@@ -299,7 +309,7 @@ func (s *DomainService) checkDNSTXT(ctx context.Context, projectID, domain strin
 		return fmt.Errorf("%w: DNS TXT challenge not found for %s", ErrPermissionDenied, domain)
 	}
 	for _, rec := range records {
-		if strings.TrimSpace(rec) == want {
+		if want[strings.TrimSpace(rec)] {
 			return nil
 		}
 	}
@@ -317,18 +327,32 @@ func (s *DomainService) requireProject(ctx context.Context) (string, error) {
 
 // txtOwnershipChallenge returns the TXT record name and value a host must
 // publish to prove ownership, under the given verification prefix. The name is
-// the host itself; the value is deterministic per (project, host), so no
-// per-host token is stored. Shared by email-domain verification
-// (dnsTXTChallenge) and custom auth-domain verification (authDomainTXTChallenge
-// in admin_api.go) — the same proof shape, differing only by prefix.
-func txtOwnershipChallenge(prefix, projectID, host string) (name, value string) {
-	digest := sha256Hex(projectID + ":" + strings.ToLower(host))
+// the host itself; the value is deterministic per (scope, host), so no
+// per-host token is stored. scope is whoever the proof is for: the project for
+// a custom auth domain (authDomainTXTChallenge in admin_api.go), the project
+// and tenant for an email domain (dnsTXTChallenge) — the same proof shape,
+// differing by prefix and scope.
+func txtOwnershipChallenge(prefix, scope, host string) (name, value string) {
+	digest := sha256Hex(scope + ":" + strings.ToLower(host))
 	return host, prefix + digest
 }
 
-// dnsTXTChallenge returns the TXT record name and value an email domain must
-// publish to prove ownership.
-func dnsTXTChallenge(projectID, domain string) (name, value string) {
+// dnsTXTChallenge returns the TXT record name and value tenantID publishes
+// to prove it controls an email domain. The value names the tenant as well
+// as the project, because several tenants may hold a claim on one domain:
+// the record the domain's owner publishes then verifies the owner's claim
+// and no one else's. Each part is length-prefixed, so no two distinct
+// (project, tenant) pairs share a value.
+func dnsTXTChallenge(projectID, tenantID, domain string) (name, value string) {
+	scope := fmt.Sprintf("%d:%s:%d:%s", len(projectID), projectID, len(tenantID), tenantID)
+	return txtOwnershipChallenge(domainVerifyTXTPrefix, scope, domain)
+}
+
+// legacyDNSTXTChallenge is the project-wide value CreateDomain handed out
+// while a domain could have only one claim in a project. A registration
+// made then (Domain.LegacyTXTChallenge) still verifies with it; it is never
+// handed out again, so no later claim can be verified by it.
+func legacyDNSTXTChallenge(projectID, domain string) (name, value string) {
 	return txtOwnershipChallenge(domainVerifyTXTPrefix, projectID, domain)
 }
 

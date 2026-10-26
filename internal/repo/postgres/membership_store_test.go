@@ -58,6 +58,7 @@ func TestMembershipStore_Smoke(t *testing.T) {
 		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping membership store smoke test")
 	}
 	runMembershipSmoke(t, dsn)
+	runInvitationLimits(t, dsn)
 }
 
 func runMembershipSmoke(t *testing.T, dsn string) {
@@ -121,7 +122,7 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{
 		ProjectID: projectID, TenantID: tenantID, Email: "new@acme.com",
 		TokenHash: "hash-1", InvitedBy: user1, ExpiresAtMs: nowMs() + 86_400_000,
-	})
+	}, unlimitedInvitations)
 	require.NoError(t, err)
 
 	inv1, err := is.GetInvitationByTokenHash(ctx, projectID, "hash-1")
@@ -135,7 +136,7 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{
 		ProjectID: projectID, TenantID: tenantID, Email: "NEW@acme.com", // case-insensitive match
 		TokenHash: "hash-2", InvitedBy: user1, Role: service.RoleAdmin, ExpiresAtMs: nowMs() + 86_400_000,
-	})
+	}, unlimitedInvitations)
 	require.NoError(t, err)
 
 	old, err := is.GetInvitationByTokenHash(ctx, projectID, "hash-1")
@@ -170,21 +171,123 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{
 		ProjectID: projectID, TenantID: tenantID, Email: "other@acme.com",
 		TokenHash: "hash-3", ExpiresAtMs: nowMs() + 86_400_000,
-	})
+	}, unlimitedInvitations)
 	require.NoError(t, err)
 
 	// Misses + validation.
 	miss, err := is.GetInvitationByTokenHash(ctx, projectID, "no-such")
 	require.NoError(t, err)
 	require.Nil(t, miss)
-	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, TokenHash: "h", ExpiresAtMs: 1})
+	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, TokenHash: "h", ExpiresAtMs: 1}, unlimitedInvitations)
 	require.ErrorIs(t, err, service.ErrInvalidArgument, "missing email")
-	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, Email: "x@y.com", ExpiresAtMs: 1})
+	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, Email: "x@y.com", ExpiresAtMs: 1}, unlimitedInvitations)
 	require.ErrorIs(t, err, service.ErrInvalidArgument, "missing token_hash")
-	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, Email: "x@y.com", TokenHash: "h"})
+	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{ProjectID: projectID, TenantID: tenantID, Email: "x@y.com", TokenHash: "h"}, unlimitedInvitations)
 	require.ErrorIs(t, err, service.ErrInvalidArgument, "missing expires_at_ms")
 	require.ErrorIs(t, is.SetInvitationStatus(ctx, "", "id", service.InvitationStatusRevoked, 0), service.ErrInvalidArgument)
 }
+
+// runInvitationLimits asserts the per-recipient resend cooldown and the
+// per-tenant cap CreateInvitation applies: a refused create writes nothing
+// and leaves the open invite pending, both count invitations of any status,
+// and each tenant has its own cap.
+func runInvitationLimits(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+	otherTenant, err := (&TenantStore{pool: is.pool}).CreateTenant(ctx, &service.Tenant{
+		ProjectID: projectID, Status: service.TenantStatusClaimed,
+	})
+	require.NoError(t, err)
+
+	now := nowMs()
+	invite := func(tenant, email, tokenHash string, limits service.InvitationLimits) error {
+		t.Helper()
+		_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+			ProjectID: projectID, TenantID: tenant, Email: email,
+			TokenHash: tokenHash, ExpiresAtMs: now + 86_400_000, CreatedAtMs: now,
+		}, limits)
+		return err
+	}
+	count := func(tenant string) int {
+		t.Helper()
+		list, err := is.ListInvitationsForTenant(ctx, projectID, tenant)
+		require.NoError(t, err)
+		return len(list)
+	}
+
+	require.ErrorIs(t, invite(tenantID, "a@acme.com", "lim-0", service.InvitationLimits{}),
+		service.ErrInvalidArgument, "a create must be given a cap")
+
+	cooling := service.InvitationLimits{MaxPerTenant: 10, WindowStartMs: now - 3_600_000, ResendCooldownStartMs: now - 60_000}
+	require.NoError(t, invite(tenantID, "a@acme.com", "lim-1", cooling))
+	require.ErrorIs(t, invite(tenantID, "A@acme.com", "lim-2", cooling), service.ErrInvitationResendTooSoon)
+	open, err := is.GetInvitationByTokenHash(ctx, projectID, "lim-1")
+	require.NoError(t, err)
+	require.Equal(t, service.InvitationStatusPending, open.Status, "a refused resend leaves the open invite pending")
+	require.Equal(t, 1, count(tenantID), "a refused resend writes nothing")
+	require.NoError(t, invite(otherTenant, "a@acme.com", "lim-3", cooling), "the cooldown is per tenant")
+
+	require.NoError(t, is.SetInvitationStatus(ctx, projectID, open.ID, service.InvitationStatusRevoked, 0))
+	require.ErrorIs(t, invite(tenantID, "a@acme.com", "lim-4", cooling), service.ErrInvitationResendTooSoon,
+		"revoking the invitation does not reset the cooldown")
+	cooled := cooling
+	cooled.ResendCooldownStartMs = now + 1
+	require.NoError(t, invite(tenantID, "a@acme.com", "lim-5", cooled), "past the cooldown a resend is accepted")
+
+	capped := service.InvitationLimits{MaxPerTenant: 2, WindowStartMs: now - 3_600_000}
+	require.ErrorIs(t, invite(tenantID, "b@acme.com", "lim-6", capped), service.ErrInvitationLimited,
+		"the revoked invitation still counts toward the cap")
+	require.Equal(t, 2, count(tenantID), "a refused create writes nothing")
+	require.NoError(t, invite(otherTenant, "b@acme.com", "lim-7", capped), "the cap is per tenant")
+	movedOn := capped
+	movedOn.WindowStartMs = now + 1
+	require.NoError(t, invite(tenantID, "b@acme.com", "lim-8", movedOn), "invitations before the window do not count")
+}
+
+// TestInvitationStore_ConcurrentCreatesRespectTheCap: creates for one tenant
+// are serialized, so however many race for the last places under the cap,
+// exactly that many succeed.
+func TestInvitationStore_ConcurrentCreatesRespectTheCap(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping concurrent invitation cap test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+
+	const racers, limit = 8, 3
+	limits := service.InvitationLimits{MaxPerTenant: limit, WindowStartMs: nowMs() - 3_600_000}
+	errs := make(chan error, racers)
+	for i := range racers {
+		go func() {
+			_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+				ProjectID: projectID, TenantID: tenantID, Email: fmt.Sprintf("racer-%d@acme.com", i),
+				TokenHash: fmt.Sprintf("cap-race-%d", i), ExpiresAtMs: nowMs() + 86_400_000,
+			}, limits)
+			errs <- err
+		}()
+	}
+	refused := 0
+	for range racers {
+		if err := <-errs; err != nil {
+			require.ErrorIs(t, err, service.ErrInvitationLimited)
+			refused++
+		}
+	}
+	require.Equal(t, racers-limit, refused)
+	list, err := is.ListInvitationsForTenant(ctx, projectID, tenantID)
+	require.NoError(t, err)
+	require.Len(t, list, limit, "exactly the cap's worth of invitations exist")
+}
+
+// unlimitedInvitations holds a create to a cap no test reaches and no
+// resend cooldown, for the tests that are about something else.
+var unlimitedInvitations = service.InvitationLimits{MaxPerTenant: 1000}
 
 // TestInvitationStore_OneOpenInviteUnderFoldEmail: the store compares the
 // canonical address the service gives it under service.FoldEmail, so an
@@ -207,7 +310,7 @@ func TestInvitationStore_OneOpenInviteUnderFoldEmail(t *testing.T) {
 		_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
 			ProjectID: projectID, TenantID: tenantID, Email: email,
 			TokenHash: tokenHash, ExpiresAtMs: nowMs() + 86_400_000,
-		})
+		}, unlimitedInvitations)
 		require.NoError(t, err)
 	}
 	status := func(tokenHash string) string {
@@ -245,7 +348,7 @@ func TestInvitationStore_ConcurrentCreatesLeaveOneOpenInvite(t *testing.T) {
 			_, err := is.CreateInvitation(ctx, &service.TenantInvitation{
 				ProjectID: projectID, TenantID: tenantID, Email: "race@acme.com",
 				TokenHash: fmt.Sprintf("race-%d", i), ExpiresAtMs: nowMs() + 86_400_000,
-			})
+			}, unlimitedInvitations)
 			errs <- err
 		}()
 	}

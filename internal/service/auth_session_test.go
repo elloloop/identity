@@ -69,7 +69,7 @@ func TestRefreshToken_DeactivatedUser_Rejected(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.UpdateUser(context.Background(), user.ID, map[string]any{"status": "deactivated"}))
 
-	_, access, refresh, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, access, refresh, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrAccountNotActive)
 	assert.Empty(t, access, "no access token must be minted for a deactivated user")
@@ -89,7 +89,7 @@ func TestRefreshToken_LockedUser_Rejected(t *testing.T) {
 		"locked_until": svc.nowMs() + 60_000,
 	}))
 
-	_, access, _, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, access, _, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrAccountLocked)
 	assert.Empty(t, access, "no access token must be minted for a locked user")
@@ -132,7 +132,7 @@ func TestModeSession_RefreshRotatesSID(t *testing.T) {
 	originalClaims, err := jwt.VerifyAccessToken(result.AccessToken, svc.signer, "", "", false)
 	require.NoError(t, err)
 
-	_, newAccess, _, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, newAccess, _, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.NoError(t, err)
 
 	newClaims, err := jwt.VerifyAccessToken(newAccess, svc.signer, "", "", false)
@@ -158,11 +158,11 @@ func TestModeSession_RefreshReplayRevokesAllSessions(t *testing.T) {
 	require.NoError(t, err)
 
 	// First refresh consumes the original token.
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.NoError(t, err)
 
 	// Replay: the same refresh token must trigger the replay branch.
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 
@@ -235,7 +235,7 @@ func TestModeSession_ExpiredRefreshToken_RevokesAccessSession(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTokenExpired))
 
@@ -274,7 +274,7 @@ func TestModeSession_LegacyRowWithoutSID_FallsBackToUserScopedRevoke(t *testing.
 	}
 	repo.mu.Unlock()
 
-	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTokenExpired))
 
@@ -440,12 +440,12 @@ func TestModeSession_RefreshRefusedForUnverifiedAddress_RevokesAccessSession(t *
 
 	svc.cfg.AuthRequireVerifiedEmail = true
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
-	_, _, _, err := svc.RefreshToken(ctx, refresh, "", "")
+	_, _, _, err := svc.RefreshToken(ctx, refresh, "", "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.True(t, sessionRevoked(t, repo, sid), "the refused account's access session must end")
 
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
-	_, access, _, err := svc.RefreshToken(ctx, refresh, "", "")
+	_, access, _, err := svc.RefreshToken(ctx, refresh, "", "", "")
 	require.NoError(t, err)
 	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 	require.NoError(t, err)
@@ -464,7 +464,7 @@ func TestModeSession_RefreshRefusedForInactiveAccount_RevokesAccessSession(t *te
 			refresh, sid := openSession(t, svc, user)
 
 			require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"status": status}))
-			_, _, _, err := svc.RefreshToken(ctx, refresh, "", "")
+			_, _, _, err := svc.RefreshToken(ctx, refresh, "", "", "")
 			require.Error(t, err)
 			assert.True(t, sessionRevoked(t, repo, sid), "the refused account's access session must end")
 		})
@@ -483,7 +483,7 @@ func TestModeSession_RefreshRefusedNotForAccountState_KeepsAccessSession(t *test
 		refresh, sid := openSession(t, svc, user)
 
 		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"locked_until": svc.nowMs() + 60_000}))
-		_, _, _, err := svc.RefreshToken(ctx, refresh, "", "")
+		_, _, _, err := svc.RefreshToken(ctx, refresh, "", "", "")
 		require.ErrorIs(t, err, ErrAccountLocked)
 		assert.False(t, sessionRevoked(t, repo, sid))
 	})
@@ -495,7 +495,7 @@ func TestModeSession_RefreshRefusedNotForAccountState_KeepsAccessSession(t *test
 		refresh, sid := openSession(t, svc, user)
 
 		repo.failConsumeRefreshToken = true
-		_, _, _, err := svc.RefreshToken(context.Background(), refresh, "", "")
+		_, _, _, err := svc.RefreshToken(context.Background(), refresh, "", "", "")
 		require.Error(t, err)
 		assert.False(t, sessionRevoked(t, repo, sid))
 	})
@@ -521,7 +521,7 @@ func TestModeSession_RefreshRefusedForLockout_KeepsTokenForRetry(t *testing.T) {
 	lockout := time.Minute
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"locked_until": now.Add(lockout).UnixMilli()}))
 	for range 3 {
-		_, _, _, err := svc.RefreshToken(ctx, refresh, "", "")
+		_, _, _, err := svc.RefreshToken(ctx, refresh, "", "", "")
 		require.ErrorIs(t, err, ErrAccountLocked)
 	}
 	assert.Zero(t, writer.countByEventTypeAndDetail("login_failure", "reason", "refresh_token_replay"))
@@ -530,7 +530,7 @@ func TestModeSession_RefreshRefusedForLockout_KeepsTokenForRetry(t *testing.T) {
 
 	now = now.Add(lockout + time.Second)
 	for _, r := range []string{refresh, otherRefresh} {
-		_, access, _, err := svc.RefreshToken(ctx, r, "", "")
+		_, access, _, err := svc.RefreshToken(ctx, r, "", "", "")
 		require.NoError(t, err)
 		claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 		require.NoError(t, err)

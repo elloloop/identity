@@ -643,7 +643,7 @@ func TestProjectAccess_RefreshToken_RevalidatesMode(t *testing.T) {
 	require.NotEmpty(t, reg.RefreshToken)
 
 	// Under an open project the refresh rotates normally.
-	_, at, rt, err := svc.RefreshToken(open, reg.RefreshToken, "1.2.3.4", "a")
+	_, at, rt, err := svc.RefreshToken(open, reg.RefreshToken, "", "1.2.3.4", "a")
 	require.NoError(t, err)
 	require.NotEmpty(t, at)
 	require.NotEmpty(t, rt)
@@ -651,7 +651,7 @@ func TestProjectAccess_RefreshToken_RevalidatesMode(t *testing.T) {
 	// Flip the project to closed: the still-valid refresh token can no longer
 	// mint fresh access tokens.
 	closed := accessScope(t, `{"access":{"mode":"closed"}}`)
-	_, _, _, err = svc.RefreshToken(closed, rt, "1.2.3.4", "a")
+	_, _, _, err = svc.RefreshToken(closed, rt, "", "1.2.3.4", "a")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 }
 
@@ -870,14 +870,14 @@ func TestProjectAccess_NonCanonical_RefreshTokenRevalidates(t *testing.T) {
 	// gate wraps the canonical user.Email and still admits under the allowlist.
 	reg, err := svc.PasswordSignup(ctx, nonCanonSignup, accessTestPassword, "Alice", "", 0, "", EmailLinkParams{})
 	require.NoError(t, err)
-	_, at, rt, err := svc.RefreshToken(ctx, reg.RefreshToken, "1.2.3.4", "a")
+	_, at, rt, err := svc.RefreshToken(ctx, reg.RefreshToken, "", "1.2.3.4", "a")
 	require.NoError(t, err)
 	require.NotEmpty(t, at)
 	require.NotEmpty(t, rt)
 
 	// Flip the project to closed: the still-valid refresh token can no longer mint.
 	closed := accessScope(t, `{"access":{"mode":"closed"}}`)
-	_, _, _, err = svc.RefreshToken(closed, rt, "1.2.3.4", "a")
+	_, _, _, err = svc.RefreshToken(closed, rt, "", "1.2.3.4", "a")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 }
 

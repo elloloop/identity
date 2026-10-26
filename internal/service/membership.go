@@ -121,7 +121,11 @@ type InvitationStore interface {
 	// transaction it revokes any existing pending invitation for the same
 	// (project, tenant, lower(email)) and inserts the new one. A blank id
 	// is generated and written back. Returns the new invitation id.
-	CreateInvitation(ctx context.Context, inv *TenantInvitation) (string, error)
+	//
+	// limits bounds how many invitations the tenant sends; the check and
+	// the insert run serialised per tenant, so concurrent creates cannot
+	// both pass a limit only one of them fits under.
+	CreateInvitation(ctx context.Context, inv *TenantInvitation, limits InvitationLimits) (string, error)
 	// GetInvitationByTokenHash resolves an invitation by its hashed token
 	// within a project, or (nil, nil).
 	GetInvitationByTokenHash(ctx context.Context, projectID, tokenHash string) (*TenantInvitation, error)
@@ -134,17 +138,35 @@ type InvitationStore interface {
 	ListInvitationsForTenant(ctx context.Context, projectID, tenantID string) ([]*TenantInvitation, error)
 }
 
+// InvitationLimits bounds how many invitations InvitationStore.CreateInvitation
+// lets one tenant send. Each invitation is an email from the deployment's
+// sender, so the limits keep a tenant admin from using it to mail arbitrary
+// addresses without end.
+type InvitationLimits struct {
+	// MaxPerTenant and WindowStartMs cap the tenant's invitations: the create
+	// is refused with ErrInvitationLimited when the tenant already has
+	// MaxPerTenant invitations, whatever their status, created at or after
+	// WindowStartMs. MaxPerTenant must be positive.
+	MaxPerTenant  int
+	WindowStartMs int64
+	// ResendCooldownStartMs is the per-recipient cooldown: the create is
+	// refused with ErrInvitationResendTooSoon when the tenant already
+	// invited the same address at or after it. Zero applies no cooldown.
+	ResendCooldownStartMs int64
+}
+
 // TenantAutoFormStore is the transactional auto-formation primitive: it
 // turns "a user signed up with a company email domain" into the governance
 // rows that represent it, atomically and idempotently.
 type TenantAutoFormStore interface {
-	// EnsureTenantForDomain idempotently ensures a latent Tenant and its
-	// email Domain exist for (projectID, domain), then records a
-	// domain-derived membership for userID. One tenant per email domain
-	// within a project is enforced transactionally — the tenant and domain
-	// are created in a single transaction, so a lost race against a
-	// concurrent signer rolls BOTH back (no orphan tenant) and the winner's
-	// tenant is used. Returns the resolved tenant id.
+	// EnsureTenantForDomain records a domain-derived membership for userID
+	// in the tenant that verified the domain or, when none has, in the
+	// latent tenant auto-formation made for it, creating that tenant and its
+	// email Domain on the domain's first signup. A registration nobody has
+	// verified is never joined, so registering a domain captures none of
+	// its signups. Concurrent signers on one domain converge on one tenant:
+	// the choice and the creation run serialised in one transaction, so no
+	// orphan tenant is left. Returns the resolved tenant id.
 	//
 	// The caller must only invoke this for a non-public domain (see
 	// config.IsPublicEmailDomain); the store does not re-check.

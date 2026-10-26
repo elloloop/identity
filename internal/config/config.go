@@ -176,6 +176,34 @@ const DefaultSelfServiceTenantsWindowSeconds = 86400
 // days).
 const MaxSelfServiceTenantsWindowSeconds = 30 * 86400
 
+// DefaultTenantInvitationMaxPerTenant is how many invitations one tenant may
+// send in each window when GATEWAY_TENANT_INVITATION_MAX_PER_TENANT is unset
+// or 0.
+const DefaultTenantInvitationMaxPerTenant = 100
+
+// MaxTenantInvitationMaxPerTenant is the largest
+// GATEWAY_TENANT_INVITATION_MAX_PER_TENANT accepted. Every invitation is an
+// email sent from the deployment's sender, so the cap stays bounded even for a
+// tenant onboarding a large organisation.
+const MaxTenantInvitationMaxPerTenant = 100000
+
+// DefaultTenantInvitationWindowSeconds is the window the per-tenant invitation
+// limit counts over when GATEWAY_TENANT_INVITATION_WINDOW_SECONDS is unset or
+// 0 (one day).
+const DefaultTenantInvitationWindowSeconds = 86400
+
+// MaxTenantInvitationWindowSeconds is the longest window accepted (30 days).
+const MaxTenantInvitationWindowSeconds = 30 * 86400
+
+// DefaultTenantInvitationResendCooldownSeconds is how long a tenant must wait
+// before inviting the same address again when
+// GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS is unset or 0.
+const DefaultTenantInvitationResendCooldownSeconds = 300
+
+// MaxTenantInvitationResendCooldownSeconds is the longest resend cooldown
+// accepted (one day).
+const MaxTenantInvitationResendCooldownSeconds = 86400
+
 // DefaultAuditRetentionDays is the default audit-log retention window in days
 // (730 = 24 months). Audit events record security-relevant actions together
 // with the caller's IP address and user-agent, so retaining them forever holds
@@ -1082,6 +1110,20 @@ type Config struct {
 	// reissued. Longer than an email token because joining a team is a less
 	// time-sensitive action than a password reset.
 	TenantInvitationExpirySeconds int // GATEWAY_TENANT_INVITATION_EXPIRY_SECONDS (default 604800 = 7 days)
+	// TenantInvitationMaxPerTenant caps how many invitations one tenant may
+	// send in each window, from 0 to 100000 (0 selects the default, 100); an
+	// invitation past it is RESOURCE_EXHAUSTED. Driven by
+	// GATEWAY_TENANT_INVITATION_MAX_PER_TENANT.
+	TenantInvitationMaxPerTenant int
+	// TenantInvitationWindowSeconds is the window the per-tenant invitation
+	// limit counts over, from 0 to 2592000 (0 selects the default, 86400).
+	// Driven by GATEWAY_TENANT_INVITATION_WINDOW_SECONDS.
+	TenantInvitationWindowSeconds int
+	// TenantInvitationResendCooldownSeconds is how long a tenant must wait
+	// before inviting the same address again, from 0 to 86400 (0 selects the
+	// default, 300); an invitation inside it is RESOURCE_EXHAUSTED. Driven by
+	// GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS.
+	TenantInvitationResendCooldownSeconds int
 
 	// Per-recipient cooldown between transactional email sends. Defeats
 	// inbox-bombing via repeated unauthenticated RequestPasswordReset /
@@ -1150,6 +1192,9 @@ type Config struct {
 	RateLimitAssurancePerIP int
 	// RateLimitPhonePerIP is the per-IP cap per window on RequestPhoneVerification.
 	RateLimitPhonePerIP int
+	// RateLimitInvitationPerIP is the per-IP cap per window on
+	// CreateTenantInvitation, where every admitted call sends an email.
+	RateLimitInvitationPerIP int
 	// RateLimitIDVPerIP is the per-IP cap per window on BeginIdentityVerification,
 	// where every admitted call opens a paid provider session.
 	RateLimitIDVPerIP int
@@ -1625,6 +1670,10 @@ func loadFromEnv() *Config {
 		SignupEmailCooldownSeconds:    envInt("GATEWAY_SIGNUP_EMAIL_COOLDOWN_SECONDS", 60),
 		AuditQueueSize:                envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),
 
+		TenantInvitationMaxPerTenant:          envInt("GATEWAY_TENANT_INVITATION_MAX_PER_TENANT", DefaultTenantInvitationMaxPerTenant),
+		TenantInvitationWindowSeconds:         envInt("GATEWAY_TENANT_INVITATION_WINDOW_SECONDS", DefaultTenantInvitationWindowSeconds),
+		TenantInvitationResendCooldownSeconds: envInt("GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS", DefaultTenantInvitationResendCooldownSeconds),
+
 		HTTPMaxBodyBytes: int64(envInt("GATEWAY_HTTP_MAX_BODY_BYTES", 1<<20)),
 
 		TrustedProxies: envStr(
@@ -1641,6 +1690,7 @@ func loadFromEnv() *Config {
 		RateLimitPasswordlessPerIP:  envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
 		RateLimitAssurancePerIP:     envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
 		RateLimitPhonePerIP:         envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
+		RateLimitInvitationPerIP:    envInt("GATEWAY_RATE_LIMIT_INVITATION_PER_IP", 20),
 		RateLimitIDVPerIP:           envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
 		RateLimitBootstrapPerIP:     envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 		RateLimitDirectoryPerIP:     envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
@@ -2173,6 +2223,24 @@ func (c *Config) Validate() error {
 		return fmt.Errorf(
 			"config: GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS=%d must be between 0 and %d (0 selects the default, %d)",
 			c.SelfServiceTenantsWindowSeconds, MaxSelfServiceTenantsWindowSeconds, DefaultSelfServiceTenantsWindowSeconds,
+		)
+	}
+	if c.TenantInvitationMaxPerTenant < 0 || c.TenantInvitationMaxPerTenant > MaxTenantInvitationMaxPerTenant {
+		return fmt.Errorf(
+			"config: GATEWAY_TENANT_INVITATION_MAX_PER_TENANT=%d must be between 0 and %d (0 selects the default, %d; the limit cannot be turned off)",
+			c.TenantInvitationMaxPerTenant, MaxTenantInvitationMaxPerTenant, DefaultTenantInvitationMaxPerTenant,
+		)
+	}
+	if c.TenantInvitationWindowSeconds < 0 || c.TenantInvitationWindowSeconds > MaxTenantInvitationWindowSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_TENANT_INVITATION_WINDOW_SECONDS=%d must be between 0 and %d (0 selects the default, %d)",
+			c.TenantInvitationWindowSeconds, MaxTenantInvitationWindowSeconds, DefaultTenantInvitationWindowSeconds,
+		)
+	}
+	if c.TenantInvitationResendCooldownSeconds < 0 || c.TenantInvitationResendCooldownSeconds > MaxTenantInvitationResendCooldownSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS=%d must be between 0 and %d (0 selects the default, %d; the cooldown cannot be turned off)",
+			c.TenantInvitationResendCooldownSeconds, MaxTenantInvitationResendCooldownSeconds, DefaultTenantInvitationResendCooldownSeconds,
 		)
 	}
 	if c.AccountMergeReauthMaxAgeSeconds < 0 || c.AccountMergeReauthMaxAgeSeconds > MaxAccountMergeReauthMaxAgeSeconds {
@@ -2852,6 +2920,48 @@ func (c *Config) SelfServiceTenantsWindow() time.Duration {
 		return MaxSelfServiceTenantsWindowSeconds * time.Second
 	default:
 		return time.Duration(c.SelfServiceTenantsWindowSeconds) * time.Second
+	}
+}
+
+// TenantInvitationLimit is how many invitations one tenant may send in each
+// window: the configured value, or the default when unset.
+func (c *Config) TenantInvitationLimit() int {
+	switch {
+	case c.TenantInvitationMaxPerTenant <= 0:
+		return DefaultTenantInvitationMaxPerTenant
+	case c.TenantInvitationMaxPerTenant > MaxTenantInvitationMaxPerTenant:
+		// Validate refuses this at boot; a Config built in code without it
+		// still never allows more than the cap.
+		return MaxTenantInvitationMaxPerTenant
+	default:
+		return c.TenantInvitationMaxPerTenant
+	}
+}
+
+// TenantInvitationWindow is the window the per-tenant invitation limit counts
+// over: the configured value, or the default when unset.
+func (c *Config) TenantInvitationWindow() time.Duration {
+	switch {
+	case c.TenantInvitationWindowSeconds <= 0:
+		return DefaultTenantInvitationWindowSeconds * time.Second
+	case c.TenantInvitationWindowSeconds > MaxTenantInvitationWindowSeconds:
+		return MaxTenantInvitationWindowSeconds * time.Second
+	default:
+		return time.Duration(c.TenantInvitationWindowSeconds) * time.Second
+	}
+}
+
+// TenantInvitationResendCooldown is how long a tenant must wait before
+// inviting the same address again: the configured value, or the default when
+// unset.
+func (c *Config) TenantInvitationResendCooldown() time.Duration {
+	switch {
+	case c.TenantInvitationResendCooldownSeconds <= 0:
+		return DefaultTenantInvitationResendCooldownSeconds * time.Second
+	case c.TenantInvitationResendCooldownSeconds > MaxTenantInvitationResendCooldownSeconds:
+		return MaxTenantInvitationResendCooldownSeconds * time.Second
+	default:
+		return time.Duration(c.TenantInvitationResendCooldownSeconds) * time.Second
 	}
 }
 

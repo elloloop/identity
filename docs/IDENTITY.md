@@ -25,7 +25,9 @@ Postgres row-level-security hardening already shipped in v1.0 via migration
 - **`OrganizationSignup` removed**, along with the `Organization` /
   `OrganizationMembership` storage. Multitenancy is now modelled by
   **Projects** (the isolation shard) with **Tenants** auto-formed from
-  verified email domains inside a project (ADR-0002, ADR-0004).
+  verified email domains inside a project (ADR-0002, ADR-0004). Since
+  [ADR-0018](./adr/0018-self-service-tenants-and-tenant-selection.md) a
+  project may also let a signed-in user create a tenant of their own.
 - **`mode=single | multi` removed**, together with its env vars
   (`GATEWAY_IDENTITY_MODE`, `GATEWAY_TENANT_HOST_BASE_DOMAIN`,
   `GATEWAY_TENANT_RESOLUTION_SOURCES`). There is one code path now: every
@@ -103,6 +105,10 @@ suite (email, productivity tools).
 - Membership is derived from a verified domain or materialised by an
   explicit invite / admin grant (`tenant_memberships`). There is no
   "organisation" object — a Tenant IS the company entity.
+- Where the project allows it (`tenants.self_service`), a signed-in user
+  can also create a tenant with no domain (`CreateTenant`), becoming its
+  owner, and invite others to it. It is the same entity as a domain tenant,
+  claimed from creation (ADR-0018).
 - Onboarding:
   1. **Domain self-service** — a user with a company email signs up; the
      tenant auto-forms; once a domain owner verifies the domain, other
@@ -829,6 +835,11 @@ before you ship.
    v1.0.** `OrganizationSignup` and the `Organization` concept no longer
    exist; the company entity is the **Tenant**, which auto-forms from a
    verified email domain (ADR-0004) rather than being created by an RPC.
+   **Amended by [ADR-0018](./adr/0018-self-service-tenants-and-tenant-selection.md):**
+   where a project turns on `tenants.self_service`, a signed-in user may
+   create a tenant through `CreateTenant`. That is not `OrganizationSignup`
+   back: there is still no organisation object, only a tenant, claimed
+   from creation, with no domain, created at a per-user rate limit.
 4. **Identity's `User.Role` does not flow into
    tenant-shard-db's `TenantMember.Role`.** They evolve
    independently. An identity admin demoted to member shouldn't lose
@@ -896,6 +907,10 @@ before you ship.
    longer exist; tenants auto-form from verified email domains (ADR-0004)
    and projects are provisioned by the control-plane admin RPCs. The
    half-created-tenant rollback problem this entry described is moot.
+   **Amended by [ADR-0018](./adr/0018-self-service-tenants-and-tenant-selection.md):**
+   `CreateTenant` lets a signed-in user create a tenant again; it writes the
+   tenant and its owner membership in one transaction, so the problem stays
+   moot.
 9. **tenant-shard-db v1.14.0 alignment — sweeper contract, page
    cap, typed errors.** The v1.14.0 bump (SDK + server image)
    reworked three identity-side seams:
@@ -1212,7 +1227,8 @@ before you ship.
       per person per project (ADR-0003). Auto-create does **not** grant
       tenant membership: the user belongs to a Tenant only by deriving
       from a verified email domain (ADR-0004) or by a `tenant_memberships`
-      row written via invitation (§13) or admin grant. They can
+      row written via invitation (§13), admin grant or creating the tenant
+      (ADR-0018). They can
       authenticate, but tenant-scoped access is still gated on membership.
       This keeps passwordless login a frictionless front door without
       turning it into an unauthenticated path to tenant membership.

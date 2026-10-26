@@ -92,6 +92,34 @@ func TestRenderTenantInvitation(t *testing.T) {
 	}
 }
 
+// TestRenderTenantInvitation_WithoutTenantName: an invitation whose tenant
+// name is left out names no tenant at all, in either part.
+func TestRenderTenantInvitation_WithoutTenantName(t *testing.T) {
+	t.Parallel()
+	html, text, err := Render(TemplateTenantInvitation, map[string]any{
+		"UserName":    "Erin",
+		"InviterName": "Frank",
+		"TenantName":  "",
+		"Role":        "member",
+		"ExpiresIn":   "7 days",
+		"Link":        "https://example.com/invite?t=bar",
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for name, body := range map[string]string{"html": html, "text": text} {
+		if !strings.Contains(body, "invited you to join a team as a member") {
+			t.Errorf("%s does not invite to a team: %s", name, body)
+		}
+		if strings.Contains(body, "<strong></strong>") || strings.Contains(body, "join  as") {
+			t.Errorf("%s leaves a hole where the name was: %s", name, body)
+		}
+	}
+	if !strings.Contains(html, "<title>You're invited to join a team</title>") {
+		t.Errorf("html title names a tenant: %s", html)
+	}
+}
+
 func TestRenderHTMLAutoEscaping(t *testing.T) {
 	t.Parallel()
 	html, _, err := Render(TemplatePasswordReset, map[string]any{

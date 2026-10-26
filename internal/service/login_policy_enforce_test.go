@@ -52,6 +52,10 @@ type lpTenantStore struct {
 	err  error
 }
 
+func (f *lpTenantStore) GetTenantStatus(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (f *lpTenantStore) GetTenant(_ context.Context, projectID, tenantID string) (*Tenant, error) {
 	if f.err != nil {
 		return nil, f.err

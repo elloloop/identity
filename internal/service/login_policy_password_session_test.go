@@ -141,7 +141,7 @@ func TestRefreshToken_TenantIdleTimeout(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, _, _, err = svc.RefreshToken(ctx, rawToken, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, rawToken, "", "", "")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrSessionExpired))
 
@@ -182,7 +182,7 @@ func TestRefreshToken_SessionMode_IdleTimeoutRevokesAccessSession(t *testing.T) 
 
 	// Advance past the idle window and refresh: the timeout fires.
 	cur = start.Add(61 * time.Second)
-	_, _, _, err = svc.RefreshToken(ctx, raw, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, raw, "", "", "")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrSessionExpired))
 
@@ -220,7 +220,7 @@ func TestRefreshToken_TTLMode_IdleTimeoutLeavesSessionStoreUntouched(t *testing.
 	require.Empty(t, claims.SID)
 
 	cur = start.Add(61 * time.Second)
-	_, _, _, err = svc.RefreshToken(ctx, raw, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, raw, "", "", "")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrSessionExpired))
 
@@ -255,7 +255,7 @@ func TestRefreshToken_TenantTimeout_FreshSessionPasses(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	gotUser, access, refresh, err := svc.RefreshToken(ctx, rawToken, "", "")
+	gotUser, access, refresh, err := svc.RefreshToken(ctx, rawToken, "", "", "")
 	require.NoError(t, err)
 	require.Equal(t, user.ID, gotUser.ID)
 	require.NotEmpty(t, access)
@@ -290,7 +290,7 @@ func TestRefreshToken_AbsoluteTimeoutAnchoredAcrossRefreshes(t *testing.T) {
 	// and rotate the token — yet the absolute anchor stays pinned to `start`.
 	for _, mins := range []int{30, 60, 90, 120} {
 		cur = start.Add(time.Duration(mins) * time.Minute)
-		_, _, raw, err = svc.RefreshToken(ctx, raw, "", "")
+		_, _, raw, err = svc.RefreshToken(ctx, raw, "", "", "")
 		require.NoErrorf(t, err, "refresh at +%dm should be within the absolute window", mins)
 		require.NotEmpty(t, raw)
 	}
@@ -299,7 +299,7 @@ func TestRefreshToken_AbsoluteTimeoutAnchoredAcrossRefreshes(t *testing.T) {
 	// refresh) but past the 2h absolute cap. With the bug, CreatedAt would
 	// have been re-stamped to +120m and this would wrongly succeed.
 	cur = start.Add(150 * time.Minute)
-	_, _, _, err = svc.RefreshToken(ctx, raw, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, raw, "", "", "")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrSessionExpired), "absolute cap must fire once the session is older than 2h")
 }

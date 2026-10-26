@@ -20,8 +20,11 @@ const (
 	// that has not yet had that domain verified. It governs nothing until
 	// claimed.
 	TenantStatusLatent = "latent"
-	// TenantStatusClaimed is a tenant whose domain has been verified; its
-	// login policy and membership are now authoritative.
+	// TenantStatusClaimed is a tenant that governs: one whose domain has
+	// been verified, one an operator created, or one a signed-in user
+	// created through CreateTenant (ADR-0018). Its membership is
+	// authoritative, and its login policy applies to sign-ins through a
+	// domain it has verified.
 	TenantStatusClaimed = "claimed"
 	// TenantStatusSuspended is an administratively disabled tenant.
 	TenantStatusSuspended = "suspended"
@@ -40,10 +43,13 @@ const (
 	DomainVerificationEmail  = "email"
 )
 
-// Tenant is a company-governance entity within a Project, auto-formed per
-// verified non-public email domain. It owns email Domains, a LoginPolicy,
-// and tenant memberships. A Tenant is `latent` until one of its domains is
-// verified, at which point it becomes `claimed` and authoritative.
+// Tenant is a governance entity within a Project: a company or a team. It
+// forms in one of three ways: auto-formed from a user's non-public email
+// domain, `latent` until one of its domains is verified and then `claimed`;
+// created `claimed` by an operator; or created `claimed`, with no domain, by
+// a signed-in user through CreateTenant where the project allows it
+// (ADR-0018). It owns email Domains, a LoginPolicy and tenant memberships.
+// It is never a workspace: identity models nothing below a tenant.
 type Tenant struct {
 	ID            string
 	ProjectID     string
@@ -74,8 +80,11 @@ type OwnedTenantRequest struct {
 
 // Domain is an email domain bound to a Tenant within a Project. Verifying
 // it (DNS TXT or email) flips its status to `verified` and claims the
-// owning tenant. (project_id, lower(domain)) is unique — one tenant per
-// email domain within a project.
+// owning tenant. A registration is only a claim: several tenants may hold
+// pending rows for one domain, and the one that proves control first
+// verifies it. Once verified it is the domain's only verified row in the
+// project — one tenant per verified email domain — and no other tenant may
+// register it.
 type Domain struct {
 	ID                 string
 	ProjectID          string
@@ -86,6 +95,10 @@ type Domain struct {
 	VerifiedAtMs       int64
 	CreatedAtMs        int64
 	UpdatedAtMs        int64
+	// LegacyTXTChallenge marks a DNS TXT registration made before the
+	// challenge named the tenant: it still verifies with the value it was
+	// given then (see dnsTXTChallenge). Registrations made since never do.
+	LegacyTXTChallenge bool
 }
 
 // TenantStore persists Tenants within a Project. Reads that miss return
@@ -96,6 +109,10 @@ type TenantStore interface {
 	CreateTenant(ctx context.Context, t *Tenant) (string, error)
 	// GetTenant returns the tenant by id within a project, or (nil, nil).
 	GetTenant(ctx context.Context, projectID, tenantID string) (*Tenant, error)
+	// GetTenantStatus returns the status of the tenant by id within a
+	// project, or "" when the project has no such tenant. It reads nothing
+	// else, for the check every request with a selected-tenant token makes.
+	GetTenantStatus(ctx context.Context, projectID, tenantID string) (string, error)
 	// GetTenantByPrimaryDomain returns the tenant whose primary_domain
 	// equals domain (case-insensitive) within a project, or (nil, nil).
 	GetTenantByPrimaryDomain(ctx context.Context, projectID, domain string) (*Tenant, error)
@@ -116,17 +133,20 @@ type TenantStore interface {
 // (nil, nil), never an error.
 type DomainStore interface {
 	// CreateDomain inserts a domain. ProjectID, TenantID and Domain are
-	// required; a blank id is generated and written back. A duplicate
-	// (project_id, lower(domain)) surfaces ErrAlreadyExists.
+	// required; a blank id is generated and written back. ErrAlreadyExists
+	// when the tenant already holds the domain, or another tenant of the
+	// project has verified it.
 	CreateDomain(ctx context.Context, d *Domain) (string, error)
 	// GetDomain returns the domain by id within a project, or (nil, nil).
 	GetDomain(ctx context.Context, projectID, domainID string) (*Domain, error)
 	// GetDomainByName returns the domain row for a name (case-insensitive)
-	// within a project, or (nil, nil).
+	// within a project, or (nil, nil): the verified row when there is one,
+	// else the oldest claim.
 	GetDomainByName(ctx context.Context, projectID, domain string) (*Domain, error)
 	// SetDomainStatus transitions a domain's status and, when verifying,
 	// stamps verified_at_ms (pass 0 to default to now on a verify). Unknown
-	// ids are a no-op.
+	// ids are a no-op. Verifying a domain another row of the project has
+	// already verified is ErrAlreadyExists.
 	SetDomainStatus(ctx context.Context, projectID, domainID, status string, verifiedAtMs int64) error
 	// ListDomainsByTenant returns every domain bound to a tenant, newest
 	// first.

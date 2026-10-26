@@ -326,7 +326,7 @@ func TestTokens_AuthTimeIsTheSignIn(t *testing.T) {
 	require.Equal(t, signedInAt.Unix(), claims.AuthTime)
 
 	svc.nowFunc = time.Now
-	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "203.0.113.10", "agent")
+	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
 	claims, err = jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 	require.NoError(t, err)

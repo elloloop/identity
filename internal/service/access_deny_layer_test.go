@@ -426,17 +426,17 @@ func TestAccessDenyLayer_RefreshDenialDoesNotBurnTheToken(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := accessScope(t, workEmailOnlyJSON)
-	_, _, _, err = svc.RefreshToken(ctx, result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, result.RefreshToken, "", "", "")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 
 	// The retry returns the SAME refusal rather than tripping replay detection,
 	// which is only possible if the first attempt left the token unconsumed.
-	_, _, _, err = svc.RefreshToken(ctx, result.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(ctx, result.RefreshToken, "", "", "")
 	require.ErrorIs(t, err, ErrAccessNotAllowed,
 		"a denied refresh must be retryable, not escalate to replay detection")
 
 	// And the token still works once the project admits the address again.
-	_, _, newRefresh, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	_, _, newRefresh, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "", "")
 	require.NoError(t, err, "the credential survived the refusal intact")
 	require.NotEqual(t, result.RefreshToken, newRefresh)
 }

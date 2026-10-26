@@ -108,6 +108,25 @@ func (s *TenantStore) GetTenant(ctx context.Context, projectID, tenantID string)
 	return t, nil
 }
 
+// GetTenantStatus returns the status of the tenant by id within a project,
+// or "" when there is none. It selects the one column, since the access-token
+// check calls it on every request a selected-tenant token makes.
+func (s *TenantStore) GetTenantStatus(ctx context.Context, projectID, tenantID string) (string, error) {
+	if projectID == "" || tenantID == "" {
+		return "", nil
+	}
+	var status string
+	err := s.pool.QueryRow(ctx, `SELECT status FROM tenants WHERE project_id = $1 AND id = $2`,
+		projectID, tenantID).Scan(&status)
+	if noRows(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", wrapPgErr("GetTenantStatus", err)
+	}
+	return status, nil
+}
+
 // GetTenantByPrimaryDomain returns the tenant whose primary_domain equals
 // domain (case-insensitive) within a project, or (nil, nil). A blank
 // domain never matches.
@@ -200,7 +219,8 @@ func (s *TenantStore) CreateOwnedTenant(ctx context.Context, req service.OwnedTe
 	if err := tx.QueryRow(
 		ctx, `
 		SELECT count(*) FROM tenants
-		WHERE project_id = $1 AND created_by = $2 AND created_at_ms >= $3`,
+		WHERE project_id = $1 AND created_by = $2 AND created_by <> ''
+		  AND created_at_ms >= $3`,
 		req.ProjectID, req.OwnerID, req.WindowStartMs,
 	).Scan(&created); err != nil {
 		return nil, nil, wrapPgErr("CreateOwnedTenant(count)", err)
@@ -272,13 +292,13 @@ func NewDomainStore(r *pgRepository) *DomainStore {
 
 const domainColumns = `
 	id, project_id, tenant_id, domain, verification_method, status,
-	verified_at_ms, created_at_ms, updated_at_ms`
+	verified_at_ms, created_at_ms, updated_at_ms, legacy_txt_challenge`
 
 func scanDomain(row pgx.Row) (*service.Domain, error) {
 	var d service.Domain
 	if err := row.Scan(
 		&d.ID, &d.ProjectID, &d.TenantID, &d.Domain, &d.VerificationMethod, &d.Status,
-		&d.VerifiedAtMs, &d.CreatedAtMs, &d.UpdatedAtMs,
+		&d.VerifiedAtMs, &d.CreatedAtMs, &d.UpdatedAtMs, &d.LegacyTXTChallenge,
 	); err != nil {
 		return nil, err
 	}
@@ -286,8 +306,11 @@ func scanDomain(row pgx.Row) (*service.Domain, error) {
 }
 
 // CreateDomain inserts a domain. ProjectID, TenantID and Domain are
-// required; a blank id is generated and written back. A duplicate
-// (project_id, lower(domain)) surfaces service.ErrAlreadyExists.
+// required; a blank id is generated and written back. Tenants may contest a
+// domain, so the insert is refused with service.ErrAlreadyExists only when
+// the tenant already holds the domain or another tenant has verified it. A
+// new registration never takes the legacy challenge: migration 0045 sets
+// that on the registrations that predate it.
 func (s *DomainStore) CreateDomain(ctx context.Context, d *service.Domain) (string, error) {
 	if d == nil {
 		return "", errors.New("postgres: CreateDomain: nil domain")
@@ -324,15 +347,26 @@ func (s *DomainStore) CreateDomain(ctx context.Context, d *service.Domain) (stri
 		INSERT INTO domains (
 			id, project_id, tenant_id, domain, verification_method, status,
 			verified_at_ms, created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	if _, err := s.pool.Exec(
+		)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+		WHERE NOT EXISTS (
+			SELECT 1 FROM domains
+			WHERE project_id = $2 AND lower(domain) = lower($4)
+			  AND status = 'verified' AND tenant_id <> $3
+		)`
+	tag, err := s.pool.Exec(
 		ctx, q,
 		id, d.ProjectID, d.TenantID, d.Domain, method, status,
 		d.VerifiedAtMs, d.CreatedAtMs, d.UpdatedAtMs,
-	); err != nil {
+	)
+	if err != nil {
 		return "", wrapPgErr("CreateDomain", err)
 	}
+	if tag.RowsAffected() == 0 {
+		return "", fmt.Errorf("postgres: CreateDomain: verified by another tenant: %w", service.ErrAlreadyExists)
+	}
 	d.ID = id
+	d.LegacyTXTChallenge = false
 	d.VerificationMethod = method
 	d.Status = status
 	return id, nil
@@ -355,13 +389,16 @@ func (s *DomainStore) GetDomain(ctx context.Context, projectID, domainID string)
 }
 
 // GetDomainByName returns the domain row for a name (case-insensitive)
-// within a project, or (nil, nil).
+// within a project, or (nil, nil): the verified row when there is one, else
+// the oldest claim on the name.
 func (s *DomainStore) GetDomainByName(ctx context.Context, projectID, domain string) (*service.Domain, error) {
 	if projectID == "" || domain == "" {
 		return nil, nil
 	}
 	const q = `SELECT ` + domainColumns + `
-		FROM domains WHERE project_id = $1 AND lower(domain) = lower($2)`
+		FROM domains WHERE project_id = $1 AND lower(domain) = lower($2)
+		ORDER BY (status = 'verified') DESC, created_at_ms, id
+		LIMIT 1`
 	d, err := scanDomain(s.pool.QueryRow(ctx, q, projectID, domain))
 	if noRows(err) {
 		return nil, nil
@@ -374,7 +411,8 @@ func (s *DomainStore) GetDomainByName(ctx context.Context, projectID, domain str
 
 // SetDomainStatus transitions a domain's status and, when verifying,
 // stamps verified_at_ms (0 defaults to now on a verify). Unknown ids are a
-// no-op.
+// no-op. Verifying a domain another row of the project has verified breaks
+// the verified-domain unique index, which surfaces service.ErrAlreadyExists.
 func (s *DomainStore) SetDomainStatus(ctx context.Context, projectID, domainID, status string, verifiedAtMs int64) error {
 	if projectID == "" || domainID == "" {
 		return fmt.Errorf("%w: project_id and domain_id are required", service.ErrInvalidArgument)

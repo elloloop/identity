@@ -23,12 +23,15 @@ import (
 // fakeInvitationStore is an in-memory InvitationStore that mirrors the
 // postgres store's revoke-then-insert one-open-invite semantics.
 type fakeInvitationStore struct {
-	byID      map[string]*TenantInvitation
-	createErr error
-	getErr    error
-	setErr    error
-	listErr   error
-	nextID    int
+	byID map[string]*TenantInvitation
+	// lastLimits is the InvitationLimits the latest CreateInvitation was
+	// given; the fake enforces them as the postgres store does.
+	lastLimits InvitationLimits
+	createErr  error
+	getErr     error
+	setErr     error
+	listErr    error
+	nextID     int
 }
 
 func newFakeInvitationStore() *fakeInvitationStore {
@@ -37,9 +40,29 @@ func newFakeInvitationStore() *fakeInvitationStore {
 
 func (f *fakeInvitationStore) key(projectID, id string) string { return projectID + "/" + id }
 
-func (f *fakeInvitationStore) CreateInvitation(_ context.Context, inv *TenantInvitation) (string, error) {
+func (f *fakeInvitationStore) CreateInvitation(_ context.Context, inv *TenantInvitation, limits InvitationLimits) (string, error) {
+	f.lastLimits = limits
 	if f.createErr != nil {
 		return "", f.createErr
+	}
+	if limits.MaxPerTenant <= 0 {
+		return "", ErrInvalidArgument
+	}
+	sent := 0
+	for _, existing := range f.byID {
+		if existing.ProjectID != inv.ProjectID || existing.TenantID != inv.TenantID {
+			continue
+		}
+		if limits.ResendCooldownStartMs > 0 && strings.EqualFold(existing.Email, inv.Email) &&
+			existing.CreatedAtMs >= limits.ResendCooldownStartMs {
+			return "", ErrInvitationResendTooSoon
+		}
+		if existing.CreatedAtMs >= limits.WindowStartMs {
+			sent++
+		}
+	}
+	if sent >= limits.MaxPerTenant {
+		return "", ErrInvitationLimited
 	}
 	// Revoke any existing pending invite for the same (project, tenant, lower(email)).
 	for _, existing := range f.byID {
@@ -115,7 +138,8 @@ func (f *fakeInvitationStore) ListInvitationsForTenant(_ context.Context, projec
 
 var _ InvitationStore = (*fakeInvitationStore)(nil)
 
-// fakeUserDirectory resolves users by id for the email-match policy.
+// fakeUserDirectory resolves users by project and id, as accounts are
+// partitioned: a user put in one project is not found in another.
 type fakeUserDirectory struct {
 	byID   map[string]*User
 	getErr error
@@ -125,15 +149,19 @@ func newFakeUserDirectory() *fakeUserDirectory {
 	return &fakeUserDirectory{byID: map[string]*User{}}
 }
 
-func (d *fakeUserDirectory) put(id, emailAddr string) {
-	d.byID[id] = &User{ID: id, Email: emailAddr}
+func (d *fakeUserDirectory) key(projectID, userID string) string { return projectID + "/" + userID }
+
+func (d *fakeUserDirectory) set(projectID string, u *User) { d.byID[d.key(projectID, u.ID)] = u }
+
+func (d *fakeUserDirectory) put(projectID, id, emailAddr string) {
+	d.set(projectID, &User{ID: id, Email: emailAddr})
 }
 
-func (d *fakeUserDirectory) GetUser(_ context.Context, userID string) (*User, error) {
+func (d *fakeUserDirectory) GetUserInProject(_ context.Context, projectID, userID string) (*User, error) {
 	if d.getErr != nil {
 		return nil, d.getErr
 	}
-	u, ok := d.byID[userID]
+	u, ok := d.byID[d.key(projectID, userID)]
 	if !ok {
 		return nil, nil
 	}
@@ -321,6 +349,9 @@ func TestCreateTenantInvitation_OneOpenInviteRevokesPrior(t *testing.T) {
 	first, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 
+	// A resend waits out the per-recipient cooldown.
+	later := time.Now().Add(config.DefaultTenantInvitationResendCooldownSeconds*time.Second + time.Second)
+	f.svc.nowFunc = func() time.Time { return later }
 	second, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleAdmin)
 	require.NoError(t, err)
 	require.NotEqual(t, first.Invitation.ID, second.Invitation.ID)
@@ -336,9 +367,128 @@ func TestCreateTenantInvitation_OneOpenInviteRevokesPrior(t *testing.T) {
 	require.Equal(t, InvitationStatusPending, statusByID[second.Invitation.ID])
 
 	// The first (revoked) token can no longer be accepted.
-	f.users.put(mInviteeID, mInvitee)
+	f.users.put(mTestProject, mInviteeID, mInvitee)
 	_, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, first.RawToken)
 	require.ErrorIs(t, err, ErrPermissionDenied, "a revoked invite is not redeemable")
+}
+
+// A self-service tenant's name is whatever its creator typed, so the email
+// leaves it out; an operator-made tenant's name is the operator's and is shown.
+func TestCreateTenantInvitation_SelfServiceTenantNameLeftOut(t *testing.T) {
+	const crafted = "Payroll update: sign in at payroll.example.com"
+	cases := []struct {
+		name      string
+		createdBy string
+		wantName  bool
+	}{
+		{"operator tenant", "", true},
+		{"self-service tenant", mAdminID, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newMembershipFixture()
+			f.tenants.put(&Tenant{
+				ID: mTestTenant, ProjectID: mTestProject, Name: crafted,
+				Status: TenantStatusClaimed, CreatedBy: tc.createdBy,
+			})
+			f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+
+			_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+			require.NoError(t, err)
+			require.Equal(t, 1, f.mailer.count())
+			msg := f.mailer.last()
+			for part, body := range map[string]string{"text": msg.Text, "html": msg.HTML} {
+				if tc.wantName {
+					require.Contains(t, body, crafted, "%s part names the operator's tenant", part)
+					continue
+				}
+				require.NotContains(t, body, crafted, "%s part must not carry the creator's text", part)
+				require.NotContains(t, body, "payroll.example.com", "%s part must not carry the creator's text", part)
+				require.Contains(t, body, "a team", part)
+			}
+		})
+	}
+}
+
+// The limits a create is held to come from the configuration and the clock.
+func TestCreateTenantInvitation_PassesConfiguredLimits(t *testing.T) {
+	f := newMembershipFixture()
+	f.svc.cfg = &config.Config{
+		TenantInvitationMaxPerTenant: 7, TenantInvitationWindowSeconds: 3600,
+		TenantInvitationResendCooldownSeconds: 60,
+	}
+	now := time.UnixMilli(1_900_000_000_000)
+	f.svc.nowFunc = func() time.Time { return now }
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+
+	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	require.NoError(t, err)
+	require.Equal(t, InvitationLimits{
+		MaxPerTenant:          7,
+		WindowStartMs:         now.Add(-time.Hour).UnixMilli(),
+		ResendCooldownStartMs: now.Add(-time.Minute).UnixMilli(),
+	}, f.invitations.lastLimits)
+
+	f.svc.cfg = nil
+	_, err = f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, "second@acme.com", RoleMember)
+	require.NoError(t, err)
+	require.Equal(t, config.DefaultTenantInvitationMaxPerTenant, f.invitations.lastLimits.MaxPerTenant,
+		"no configuration falls back to the defaults")
+}
+
+// Inviting one address again inside the cooldown is refused and sends
+// nothing; another address is unaffected, and the same one is accepted once
+// the cooldown has passed.
+func TestCreateTenantInvitation_ResendCooldown(t *testing.T) {
+	f := newMembershipFixture()
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+	ctx := withProject(mTestProject)
+	start := time.Now()
+	f.svc.nowFunc = func() time.Time { return start }
+
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+	require.NoError(t, err)
+
+	f.svc.nowFunc = func() time.Time { return start.Add(time.Minute) }
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "INVITEE@acme.com", RoleMember)
+	require.ErrorIs(t, err, ErrInvitationResendTooSoon)
+	require.Equal(t, 1, f.mailer.count(), "a refused resend sends no email")
+
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "colleague@acme.com", RoleMember)
+	require.NoError(t, err, "the cooldown is per recipient")
+
+	f.svc.nowFunc = func() time.Time {
+		return start.Add(config.DefaultTenantInvitationResendCooldownSeconds*time.Second + time.Second)
+	}
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+	require.NoError(t, err, "a resend after the cooldown is accepted")
+}
+
+// A tenant past its cap in the window is refused until the window moves on;
+// another tenant has its own cap.
+func TestCreateTenantInvitation_PerTenantCap(t *testing.T) {
+	f := newMembershipFixture()
+	f.svc.cfg = &config.Config{TenantInvitationMaxPerTenant: 2, TenantInvitationWindowSeconds: 3600}
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+	f.seedAdmin(mTestProject, "tenant-2", mAdminID)
+	ctx := withProject(mTestProject)
+	start := time.Now()
+	f.svc.nowFunc = func() time.Time { return start }
+
+	for _, addr := range []string{"a@acme.com", "b@acme.com"} {
+		_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, addr, RoleMember)
+		require.NoError(t, err)
+	}
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "c@acme.com", RoleMember)
+	require.ErrorIs(t, err, ErrInvitationLimited)
+	require.Equal(t, 2, f.mailer.count(), "a refused invitation sends no email")
+
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, "tenant-2", "c@acme.com", RoleMember)
+	require.NoError(t, err, "the cap is per tenant")
+
+	f.svc.nowFunc = func() time.Time { return start.Add(time.Hour + time.Second) }
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "c@acme.com", RoleMember)
+	require.NoError(t, err, "the window has moved on")
 }
 
 func TestCreateTenantInvitation_PropagatesStoreError(t *testing.T) {
@@ -367,7 +517,7 @@ func (f *membershipFixture) seedInvite(t *testing.T) string {
 func TestAcceptTenantInvitation_MatchingEmailBecomesMember(t *testing.T) {
 	f := newMembershipFixtureNoMail()
 	rawToken := f.seedInvite(t)
-	f.users.put(mInviteeID, "Invitee@Acme.com") // case-insensitive match
+	f.users.put(mTestProject, mInviteeID, "Invitee@Acme.com") // case-insensitive match
 	ctx := withProject(mTestProject)
 
 	m, err := f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
@@ -392,7 +542,7 @@ func TestAcceptTenantInvitation_MatchingEmailBecomesMember(t *testing.T) {
 func TestAcceptTenantInvitation_WrongEmailDenied(t *testing.T) {
 	f := newMembershipFixtureNoMail()
 	rawToken := f.seedInvite(t)
-	f.users.put("user-eve", "eve@evil.com") // does NOT match the invitee email
+	f.users.put(mTestProject, "user-eve", "eve@evil.com") // does NOT match the invitee email
 	ctx := withProject(mTestProject)
 
 	_, err := f.svc.AcceptTenantInvitation(ctx, "user-eve", rawToken)
@@ -422,7 +572,7 @@ func TestAcceptTenantInvitation_ComparesCanonicalAddresses(t *testing.T) {
 		t.Run(tc.callerEmail, func(t *testing.T) {
 			f := newMembershipFixtureNoMail()
 			rawToken := f.seedInvite(t)
-			f.users.put(mInviteeID, tc.callerEmail)
+			f.users.put(mTestProject, mInviteeID, tc.callerEmail)
 			_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, rawToken)
 			if tc.wantErr == nil {
 				require.NoError(t, err)
@@ -448,7 +598,7 @@ func TestCreateTenantInvitation_StoresCanonicalEmail(t *testing.T) {
 
 func TestAcceptTenantInvitation_UnknownTokenNotFound(t *testing.T) {
 	f := newMembershipFixtureNoMail()
-	f.users.put(mInviteeID, mInvitee)
+	f.users.put(mTestProject, mInviteeID, mInvitee)
 
 	_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, "deadbeef")
 	require.ErrorIs(t, err, ErrNotFound)
@@ -457,7 +607,7 @@ func TestAcceptTenantInvitation_UnknownTokenNotFound(t *testing.T) {
 func TestAcceptTenantInvitation_ExpiredTokenDeniedAndMarkedExpired(t *testing.T) {
 	f := newMembershipFixtureNoMail()
 	rawToken := f.seedInvite(t)
-	f.users.put(mInviteeID, mInvitee)
+	f.users.put(mTestProject, mInviteeID, mInvitee)
 
 	// Fast-forward time past the invitation expiry.
 	f.svc.nowFunc = func() time.Time { return time.Now().Add(defaultInvitationTTL + time.Hour) }
@@ -472,7 +622,7 @@ func TestAcceptTenantInvitation_ExpiredTokenDeniedAndMarkedExpired(t *testing.T)
 func TestAcceptTenantInvitation_DoubleAcceptDenied(t *testing.T) {
 	f := newMembershipFixtureNoMail()
 	rawToken := f.seedInvite(t)
-	f.users.put(mInviteeID, mInvitee)
+	f.users.put(mTestProject, mInviteeID, mInvitee)
 	ctx := withProject(mTestProject)
 
 	_, err := f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
@@ -503,6 +653,53 @@ func TestAcceptTenantInvitation_UnknownCallerNotFound(t *testing.T) {
 
 	_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), "ghost", rawToken)
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// The accepting caller is looked up in the invitation's project: an account
+// at the invited address in another project is not the invitee.
+func TestAcceptTenantInvitation_CallerOfAnotherProjectNotFound(t *testing.T) {
+	f := newMembershipFixtureNoMail()
+	rawToken := f.seedInvite(t)
+	f.users.put("proj-other", mInviteeID, mInvitee)
+
+	_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, rawToken)
+	require.ErrorIs(t, err, ErrNotFound)
+
+	f.users.put(mTestProject, mInviteeID, mInvitee)
+	_, err = f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, rawToken)
+	require.NoError(t, err)
+}
+
+// RepositoryUserDirectory binds the repository to the named project for each
+// lookup.
+func TestRepositoryUserDirectory_BindsTheProject(t *testing.T) {
+	repo := &projectBindingRepo{users: map[string]*User{"proj-2/u-1": {ID: "u-1"}}}
+	dir := RepositoryUserDirectory(repo)
+
+	u, err := dir.GetUserInProject(context.Background(), "proj-2", "u-1")
+	require.NoError(t, err)
+	require.NotNil(t, u)
+	require.Equal(t, "u-1", u.ID)
+
+	u, err = dir.GetUserInProject(context.Background(), "proj-1", "u-1")
+	require.NoError(t, err)
+	require.Nil(t, u)
+}
+
+// projectBindingRepo is a Repository whose GetUser reads only the users of
+// the project WithProject bound it to.
+type projectBindingRepo struct {
+	Repository
+	project string
+	users   map[string]*User
+}
+
+func (r *projectBindingRepo) WithProject(projectID string) Repository {
+	return &projectBindingRepo{project: projectID, users: r.users}
+}
+
+func (r *projectBindingRepo) GetUser(_ context.Context, userID string) (*User, error) {
+	return r.users[r.project+"/"+userID], nil
 }
 
 // ── ListTenantInvitations / ListTenantMembers ────────────────────────────

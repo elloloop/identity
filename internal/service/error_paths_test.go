@@ -183,7 +183,7 @@ func TestRefreshToken_FindErrors(t *testing.T) {
 	r.failFindRefreshTokenByHash = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, _, err := svc.RefreshToken(context.Background(), "rawtok", "", "")
+	_, _, _, err := svc.RefreshToken(context.Background(), "rawtok", "", "", "")
 	require.Error(t, err)
 }
 
@@ -195,7 +195,7 @@ func TestRefreshToken_GetUserErrors(t *testing.T) {
 	require.NoError(t, err)
 
 	r.failGetUser = true
-	_, _, _, err = svc.RefreshToken(context.Background(), res.RefreshToken, "", "")
+	_, _, _, err = svc.RefreshToken(context.Background(), res.RefreshToken, "", "", "")
 	require.Error(t, err)
 }
 

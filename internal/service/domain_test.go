@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +36,12 @@ func (f *fakeDomainStore) CreateDomain(_ context.Context, d *Domain) (string, er
 	if f.createErr != nil {
 		return "", f.createErr
 	}
+	for _, other := range f.byID {
+		if other.ProjectID == d.ProjectID && strings.EqualFold(other.Domain, d.Domain) &&
+			(other.TenantID == d.TenantID || other.Status == DomainStatusVerified) {
+			return "", ErrAlreadyExists
+		}
+	}
 	f.nextID++
 	id := d.ID
 	if id == "" {
@@ -59,13 +66,17 @@ func (f *fakeDomainStore) GetDomain(_ context.Context, projectID, domainID strin
 }
 
 func (f *fakeDomainStore) GetDomainByName(_ context.Context, projectID, domain string) (*Domain, error) {
+	var found *Domain
 	for _, d := range f.byID {
-		if d.ProjectID == projectID && d.Domain == domain {
-			out := *d
-			return &out, nil
+		if d.ProjectID == projectID && d.Domain == domain && (found == nil || d.Status == DomainStatusVerified) {
+			found = d
 		}
 	}
-	return nil, nil
+	if found == nil {
+		return nil, nil
+	}
+	out := *found
+	return &out, nil
 }
 
 func (f *fakeDomainStore) SetDomainStatus(_ context.Context, projectID, domainID, status string, verifiedAtMs int64) error {
@@ -75,6 +86,13 @@ func (f *fakeDomainStore) SetDomainStatus(_ context.Context, projectID, domainID
 	d, ok := f.byID[f.key(projectID, domainID)]
 	if !ok {
 		return nil
+	}
+	if status == DomainStatusVerified {
+		for _, other := range f.byID {
+			if other != d && other.ProjectID == projectID && strings.EqualFold(other.Domain, d.Domain) && other.Status == DomainStatusVerified {
+				return ErrAlreadyExists
+			}
+		}
 	}
 	d.Status = status
 	if status == DomainStatusVerified {
@@ -133,6 +151,14 @@ func (f *fakeTenantStore) put(t *Tenant) {
 func (f *fakeTenantStore) CreateTenant(_ context.Context, t *Tenant) (string, error) {
 	f.put(t)
 	return t.ID, nil
+}
+
+func (f *fakeTenantStore) GetTenantStatus(ctx context.Context, projectID, tenantID string) (string, error) {
+	t, err := f.GetTenant(ctx, projectID, tenantID)
+	if err != nil || t == nil {
+		return "", err
+	}
+	return t.Status, nil
 }
 
 func (f *fakeTenantStore) GetTenant(_ context.Context, projectID, tenantID string) (*Tenant, error) {
@@ -407,14 +433,18 @@ func TestCreateDomain_ReturnsDeterministicChallenge(t *testing.T) {
 	require.Equal(t, DomainStatusPending, out.Domain.Status)
 	require.Equal(t, testDomain, out.TXTName)
 
-	_, wantValue := dnsTXTChallenge(testProject, testDomain)
+	_, wantValue := dnsTXTChallenge(testProject, testTenant, testDomain)
 	require.Equal(t, wantValue, out.TXTValue)
 	require.Contains(t, out.TXTValue, domainVerifyTXTPrefix)
 
 	// The challenge must be stable across calls and independent of the
 	// caller's input casing.
-	_, again := dnsTXTChallenge(testProject, "ACME.COM")
+	_, again := dnsTXTChallenge(testProject, testTenant, "ACME.COM")
 	require.Equal(t, wantValue, again)
+
+	// It names the tenant: another tenant's claim on the domain has its own.
+	_, other := dnsTXTChallenge(testProject, "tenant-2", testDomain)
+	require.NotEqual(t, wantValue, other)
 }
 
 func TestCreateDomain_EmailMethodHasNoTXTChallenge(t *testing.T) {
@@ -501,7 +531,7 @@ func TestVerifyDomain_SuccessClaimsTenantAndMakesCallerOwner(t *testing.T) {
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{"some-unrelated-record", want}
 
 	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
@@ -556,7 +586,7 @@ func TestVerifyDomain_FirstVerifierOnLatentTenantBecomesOwner(t *testing.T) {
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 
 	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
@@ -575,7 +605,7 @@ func TestVerifyDomain_NonMemberRejectedOnClaimedTenant(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, "someone-else")
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 
 	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
@@ -590,11 +620,70 @@ func TestVerifyDomain_NonMemberRejectedOnLatentTenantWithMembers(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, "founder")
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 
 	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
 	require.ErrorIs(t, err, ErrPermissionDenied)
+}
+
+// Two tenants claim one domain. The record the domain's owner publishes is
+// the owner's challenge, so it verifies the owner's claim and not the other
+// tenant's; once verified, the other claim cannot verify at all.
+func TestVerifyDomain_ContestedDomainVerifiesOnlyTheOwnersClaim(t *testing.T) {
+	f := newDomainFixture()
+	const squatter, squatterTenant = "user-squatter", "tenant-squatter"
+	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
+	f.tenants.put(&Tenant{ID: squatterTenant, ProjectID: testProject, Status: TenantStatusClaimed})
+	f.seedAdmin(testProject, testTenant, testCaller)
+	f.seedAdmin(testProject, squatterTenant, squatter)
+	squatID := f.seedPendingDomain(t, testProject, squatterTenant, testDomain)
+	ownerID := f.seedPendingDomain(t, testProject, testTenant, testDomain)
+
+	_, owners := dnsTXTChallenge(testProject, testTenant, testDomain)
+	f.resolver.records[testDomain] = []string{owners}
+
+	_, err := f.svc.VerifyDomain(withProject(testProject), squatter, squatID)
+	require.ErrorIs(t, err, ErrPermissionDenied, "the owner's record is not the squatter's challenge")
+
+	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, ownerID)
+	require.NoError(t, err)
+	require.Equal(t, DomainStatusVerified, got.Status)
+
+	_, squatters := dnsTXTChallenge(testProject, squatterTenant, testDomain)
+	f.resolver.records[testDomain] = []string{owners, squatters}
+	_, err = f.svc.VerifyDomain(withProject(testProject), squatter, squatID)
+	require.ErrorIs(t, err, ErrAlreadyExists, "a verified domain admits no second verification")
+}
+
+// A registration made before the challenge named the tenant still verifies
+// with the project-wide value it was given; a registration made since does
+// not.
+func TestVerifyDomain_LegacyChallengeOnlyForLegacyRegistrations(t *testing.T) {
+	_, legacy := legacyDNSTXTChallenge(testProject, testDomain)
+	for name, tc := range map[string]struct {
+		legacy bool
+		want   error
+	}{
+		"legacy registration": {legacy: true},
+		"new registration":    {legacy: false, want: ErrPermissionDenied},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newDomainFixture()
+			f.seedAdmin(testProject, testTenant, testCaller)
+			f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
+			id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
+			f.domains.byID[f.domains.key(testProject, id)].LegacyTXTChallenge = tc.legacy
+			f.resolver.records[testDomain] = []string{legacy}
+
+			_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+			if tc.want == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, tc.want)
+		})
+	}
 }
 
 func TestVerifyDomain_EmailMethodUnimplemented(t *testing.T) {
@@ -693,7 +782,7 @@ func TestVerifyDomain_PropagatesSetDomainStatusError(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 	f.domains.setErr = errBoom
 
@@ -706,7 +795,7 @@ func TestVerifyDomain_PropagatesSetTenantStatusError(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 	f.tenants.setErr = errBoom
 
@@ -719,7 +808,7 @@ func TestVerifyDomain_PropagatesUpsertMembershipError(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusClaimed})
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
-	_, want := dnsTXTChallenge(testProject, testDomain)
+	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 	f.members.upsertErr = errBoom
 

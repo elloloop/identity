@@ -68,8 +68,9 @@ New data-plane tables:
 - **`tenants`** — logical company entity, auto-forms `latent` from the first
   user of a non-public email domain; becomes `claimed` once a domain is
   verified.
-- **`domains`** — a tenant's email domain (`acme.com`); UNIQUE per
-  `(project_id, domain)` — one tenant per domain.
+- **`domains`** — a tenant's claim on an email domain (`acme.com`). Tenants
+  may contest a domain; the VERIFIED row is unique per `(project_id, domain)`
+  — one tenant per verified domain (0045).
 - **`login_policies`** — 1:1 with a Tenant; controls HOW domain users
   authenticate, never WHETHER.
 - **`tenant_memberships`** — materialized membership for explicit members and
@@ -309,7 +310,11 @@ email domain; `claimed` once a domain is verified.
 
 #### `domains` (Domain — tenant email domain) — NEW
 
-A tenant's verified email domain. One tenant per domain. PUBLIC providers
+A tenant's claim on an email domain. Any tenant may register a domain, once
+per tenant; proving it (verification) makes it the tenant's, and only one
+tenant per project may hold it verified (migration 0045 — before it, one row
+per domain existed at all, so the first registrant reserved the domain while
+it was still pending). PUBLIC providers
 (`gmail.com`, `outlook.com`, `yahoo.com`, …) are blocklisted at THREE gates
 (signup tenant-formation, domain verify, derived-membership) on the canonical
 punycode domain (H3) — enforced in application code on `lower(domain)`.
@@ -319,15 +324,18 @@ punycode domain (H3) — enforced in application code on `lower(domain)`.
 | `id` | TEXT | N | **PK**. |
 | `project_id` | TEXT | N | **FK** → `projects(id)` ON DELETE CASCADE. Leading column. |
 | `tenant_id` | TEXT | N | **FK** → `tenants(id)` ON DELETE CASCADE. Indexed. |
-| `domain` | TEXT | N | Canonical punycode form. **U** per `(project_id, lower(domain))` — one tenant per domain. |
+| `domain` | TEXT | N | Canonical punycode form. **U** per `(project_id, lower(domain))` among verified rows, and per `(project_id, tenant_id, lower(domain))`. |
 | `verification_method` | TEXT | N | `CHECK IN ('dns_txt','email')`. |
 | `status` | TEXT | N | `CHECK IN ('pending','verified','failed')`. Default `pending`. |
 | `verified_at_ms` | BIGINT | N | Default `0` (= unverified). |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
+| `legacy_txt_challenge` | BOOLEAN | N | Default `false`. `true` on a `dns_txt` row registered before 0045, which still accepts the project-wide challenge it was issued; every later row's challenge also names its tenant. |
 
-- **PK:** `id`. **Unique:** `domains_project_domain_uidx (project_id, lower(domain))`.
-- **Indexes:** `domains_project_tenant_idx (project_id, tenant_id)`,
+- **PK:** `id`. **Unique:** `domains_project_verified_domain_uidx (project_id, lower(domain)) WHERE status = 'verified'`,
+  `domains_project_tenant_domain_uidx (project_id, tenant_id, lower(domain))`.
+- **Indexes:** `domains_project_domain_idx (project_id, lower(domain))`,
+  `domains_project_tenant_idx (project_id, tenant_id)`,
   `domains_project_status_idx (project_id, status)`.
 - **FKs:** `project_id` → `projects(id)` ON DELETE CASCADE;
   `tenant_id` → `tenants(id)` ON DELETE CASCADE.

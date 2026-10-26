@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -34,15 +35,42 @@ const defaultInvitationTTL = 7 * 24 * time.Hour
 // (256 bits) matches the password-reset / email-verification tokens.
 const invitationTokenBytes = 32
 
+var (
+	// ErrInvitationLimited is returned when the tenant has already sent the
+	// configured number of invitations in the current window
+	// (GATEWAY_TENANT_INVITATION_MAX_PER_TENANT per
+	// GATEWAY_TENANT_INVITATION_WINDOW_SECONDS). Mapped to
+	// CodeResourceExhausted.
+	ErrInvitationLimited = errors.New("too many invitations sent from this tenant recently; try again later")
+	// ErrInvitationResendTooSoon is returned when the tenant invited the same
+	// address within GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS.
+	// Mapped to CodeResourceExhausted.
+	ErrInvitationResendTooSoon = errors.New("this address was invited moments ago; try again later")
+)
+
 // UserDirectory is the narrow user-lookup boundary MembershipService needs:
-// resolving the accepting caller so its account email can be matched against
-// the invitation. service.Repository satisfies it; injecting only this method
+// resolving the caller (to match an accepting caller's email against the
+// invitation, and to judge who may create a tenant). Accounts are partitioned
+// by project, so every lookup names the request's project: a caller signed
+// in to one project is found there, never in the deployment's default.
+// RepositoryUserDirectory adapts a Repository; injecting only this method
 // keeps the service decoupled from the full repository surface and trivially
-// fakeable. The redesign's governance plane is a single postgres control
-// database, so the boot-time repository is the correct (and only) handle —
-// there is no per-tenant repo sharding in redesign mode.
+// fakeable.
 type UserDirectory interface {
-	GetUser(ctx context.Context, userID string) (*User, error)
+	GetUserInProject(ctx context.Context, projectID, userID string) (*User, error)
+}
+
+// RepositoryUserDirectory is the UserDirectory over repo, rebinding it to the
+// named project on every lookup, as scopedRepository does for the request's
+// project.
+func RepositoryUserDirectory(repo Repository) UserDirectory {
+	return repositoryUserDirectory{repo: repo}
+}
+
+type repositoryUserDirectory struct{ repo Repository }
+
+func (d repositoryUserDirectory) GetUserInProject(ctx context.Context, projectID, userID string) (*User, error) {
+	return d.repo.WithProject(projectID).GetUser(ctx, userID)
 }
 
 // MembershipService manages tenant invitations and memberships within a
@@ -110,6 +138,10 @@ type CreatedInvitation struct {
 // token, stores its hash via InvitationStore.CreateInvitation (which
 // atomically revokes any prior open invite for the same recipient), and
 // best-effort dispatches a branded invitation email carrying the raw token.
+//
+// Every invitation sends an email, so the store refuses one past the tenant's
+// limits (see invitationLimits): ErrInvitationLimited past the per-tenant cap,
+// ErrInvitationResendTooSoon inside the per-recipient cooldown.
 func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID, tenantID, emailAddr, role string) (*CreatedInvitation, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -149,7 +181,7 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 		ExpiresAtMs: expiresAtMs,
 		CreatedAtMs: now.UnixMilli(),
 	}
-	id, err := s.invitations.CreateInvitation(ctx, inv)
+	id, err := s.invitations.CreateInvitation(ctx, inv, s.invitationLimits(now))
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +250,7 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 
 	// Email-match: the caller's account email must equal the invitation
 	// email, so a leaked token cannot grant access to a different account.
-	caller, err := s.users.GetUser(ctx, callerID)
+	caller, err := s.users.GetUserInProject(ctx, projectID, callerID)
 	if err != nil {
 		return nil, err
 	}
@@ -400,22 +432,21 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	}
 }
 
-// tenantDisplayName resolves a human-friendly tenant name for the email,
-// falling back to its primary domain or a generic label. Lookup failures are
-// non-fatal — they just yield the generic label.
+// tenantDisplayName is the tenant name an invitation email shows: the name
+// of an operator-made or auto-formed tenant, else its primary domain, or ""
+// (the email then invites to "a team"). A self-service tenant's name is
+// whatever its creator typed, unvetted, so it never appears: otherwise
+// anyone could create a tenant named after a company and have the service
+// send its invitations. Lookup failures are non-fatal and yield "".
 func (s *MembershipService) tenantDisplayName(ctx context.Context, projectID, tenantID string) string {
-	const generic = "the team"
 	t, err := s.tenants.GetTenant(ctx, projectID, tenantID)
-	if err != nil || t == nil {
-		return generic
+	if err != nil || t == nil || t.CreatedBy != "" {
+		return ""
 	}
 	if n := strings.TrimSpace(t.Name); n != "" {
 		return n
 	}
-	if d := strings.TrimSpace(t.PrimaryDomain); d != "" {
-		return d
-	}
-	return generic
+	return strings.TrimSpace(t.PrimaryDomain)
 }
 
 // invitationTTL returns the configured invitation validity window, defaulting
@@ -425,6 +456,21 @@ func (s *MembershipService) invitationTTL() time.Duration {
 		return time.Duration(s.cfg.TenantInvitationExpirySeconds) * time.Second
 	}
 	return defaultInvitationTTL
+}
+
+// invitationLimits is the per-tenant cap and per-recipient cooldown a create
+// at now is held to, from the deployment's configuration (the defaults when
+// none is wired).
+func (s *MembershipService) invitationLimits(now time.Time) InvitationLimits {
+	cfg := s.cfg
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	return InvitationLimits{
+		MaxPerTenant:          cfg.TenantInvitationLimit(),
+		WindowStartMs:         now.Add(-cfg.TenantInvitationWindow()).UnixMilli(),
+		ResendCooldownStartMs: now.Add(-cfg.TenantInvitationResendCooldown()).UnixMilli(),
+	}
 }
 
 // requireProject resolves the caller's project, rejecting when none is in the

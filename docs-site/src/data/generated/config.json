@@ -1557,6 +1557,15 @@
     "anchor": "rate-limiting"
   },
   {
+    "name": "GATEWAY_RATE_LIMIT_INVITATION_PER_IP",
+    "type": "integer",
+    "default": "20",
+    "required": false,
+    "description": "is the per-IP cap per window on CreateTenantInvitation, where every admitted call sends an email.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
     "name": "GATEWAY_RATE_LIMIT_LOGIN_PER_IP",
     "type": "integer",
     "default": "30",
@@ -2021,6 +2030,33 @@
     "default": "604800",
     "required": false,
     "description": "How long a tenant-membership invitation is valid for before it must be reissued.",
+    "category": "Email \u0026 branding",
+    "anchor": "email-and-branding"
+  },
+  {
+    "name": "GATEWAY_TENANT_INVITATION_MAX_PER_TENANT",
+    "type": "integer",
+    "default": "100",
+    "required": false,
+    "description": "caps how many invitations one tenant may send in each window, from 0 to 100000 (0 selects the default, 100); an invitation past it is RESOURCE_EXHAUSTED.",
+    "category": "Email \u0026 branding",
+    "anchor": "email-and-branding"
+  },
+  {
+    "name": "GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "is how long a tenant must wait before inviting the same address again, from 0 to 86400 (0 selects the default, 300); an invitation inside it is RESOURCE_EXHAUSTED.",
+    "category": "Email \u0026 branding",
+    "anchor": "email-and-branding"
+  },
+  {
+    "name": "GATEWAY_TENANT_INVITATION_WINDOW_SECONDS",
+    "type": "integer",
+    "default": "86400",
+    "required": false,
+    "description": "is the window the per-tenant invitation limit counts over, from 0 to 2592000 (0 selects the default, 86400).",
     "category": "Email \u0026 branding",
     "anchor": "email-and-branding"
   },

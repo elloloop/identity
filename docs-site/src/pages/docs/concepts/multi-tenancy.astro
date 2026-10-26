@@ -105,7 +105,7 @@ docker run ... \\
   <h2>Self-service tenants</h2>
   <p>
     A Project can let its signed-in users create tenants of their own, for a
-    team or a workspace that has no company domain behind it. It is off by
+    team that has no company domain behind it. It is off by
     default; the Project turns it on in its <code>config_json</code> (the
     default Project takes it from
     <code>GATEWAY_SELF_SERVICE_TENANTS_ENABLED</code>):
@@ -137,11 +137,34 @@ docker run ... \\
   <p>
     A refused selection consumes nothing, so the client can refresh again
     without <code>tenant_id</code>. Each refresh chooses again; one without
-    <code>tenant_id</code> returns to the default. Identity checks the tenant
-    on every request it serves, so suspending a tenant refuses its tokens at
-    once; ending a membership takes effect at the next refresh, within the
-    access-token lifetime. A service that verifies tokens itself must accept a
-    non-default <code>tenant</code> before its clients select one.
+    <code>tenant_id</code> returns to the default. Identity's HTTP surface
+    checks the tenant on every request, so suspending a tenant refuses its
+    tokens there at once; ending a membership takes effect at the next
+    refresh, within the access-token lifetime. A service that verifies tokens
+    itself, as a host serving identity over native gRPC does, must accept a
+    non-default <code>tenant</code> before its clients select one, and sees a
+    suspension only when the token expires unless it checks the tenant too.
+  </p>
+  <p>
+    The claim asserts membership only. <code>role</code> stays the account's
+    role and is never a role in the chosen tenant (read that from
+    <code>ListMyTenants</code>), and choosing a tenant does not apply its login
+    policy, which applies at sign-in through a verified domain.
+  </p>
+
+  <h2>Invitations</h2>
+  <p>
+    A tenant owner or admin invites by email with
+    <code>CreateTenantInvitation</code>. Every invitation sends an email, so
+    each is bounded: per client IP
+    (<code>GATEWAY_RATE_LIMIT_INVITATION_PER_IP</code>, default 20 per window),
+    per tenant (<code>GATEWAY_TENANT_INVITATION_MAX_PER_TENANT</code>, default
+    100, in <code>GATEWAY_TENANT_INVITATION_WINDOW_SECONDS</code>, default one
+    day) and per recipient
+    (<code>GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS</code>, default
+    300). Past the per-tenant or per-recipient limit the call is
+    <code>RESOURCE_EXHAUSTED</code>. The email names an operator's or a domain
+    tenant, but never a self-service tenant, whose name its creator typed.
   </p>
 
   <p>

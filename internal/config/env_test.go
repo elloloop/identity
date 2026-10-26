@@ -470,6 +470,75 @@ func TestSelfServiceTenantsLimits(t *testing.T) {
 	}
 }
 
+func TestTenantInvitationLimits(t *testing.T) {
+	c := &Config{}
+	if got := c.TenantInvitationLimit(); got != DefaultTenantInvitationMaxPerTenant {
+		t.Fatalf("unset limit: got %d, want the default", got)
+	}
+	if got := c.TenantInvitationWindow(); got != DefaultTenantInvitationWindowSeconds*time.Second {
+		t.Fatalf("unset window: got %v, want the default", got)
+	}
+	if got := c.TenantInvitationResendCooldown(); got != DefaultTenantInvitationResendCooldownSeconds*time.Second {
+		t.Fatalf("unset cooldown: got %v, want the default", got)
+	}
+	c.TenantInvitationMaxPerTenant, c.TenantInvitationWindowSeconds, c.TenantInvitationResendCooldownSeconds = 3, 60, 30
+	if got := c.TenantInvitationLimit(); got != 3 {
+		t.Fatalf("set limit: got %d", got)
+	}
+	if got := c.TenantInvitationWindow(); got != time.Minute {
+		t.Fatalf("set window: got %v", got)
+	}
+	if got := c.TenantInvitationResendCooldown(); got != 30*time.Second {
+		t.Fatalf("set cooldown: got %v", got)
+	}
+	c.TenantInvitationMaxPerTenant = MaxTenantInvitationMaxPerTenant + 1
+	c.TenantInvitationWindowSeconds = MaxTenantInvitationWindowSeconds + 1
+	c.TenantInvitationResendCooldownSeconds = MaxTenantInvitationResendCooldownSeconds + 1
+	if got := c.TenantInvitationLimit(); got != MaxTenantInvitationMaxPerTenant {
+		t.Fatalf("limit over the cap: got %d, want the cap", got)
+	}
+	if got := c.TenantInvitationWindow(); got != MaxTenantInvitationWindowSeconds*time.Second {
+		t.Fatalf("window over the cap: got %v, want the cap", got)
+	}
+	if got := c.TenantInvitationResendCooldown(); got != MaxTenantInvitationResendCooldownSeconds*time.Second {
+		t.Fatalf("cooldown over the cap: got %v, want the cap", got)
+	}
+
+	for _, tc := range []struct {
+		env string
+		set func(*Config, int)
+		max int
+	}{
+		{"GATEWAY_TENANT_INVITATION_MAX_PER_TENANT", func(c *Config, v int) { c.TenantInvitationMaxPerTenant = v }, MaxTenantInvitationMaxPerTenant},
+		{"GATEWAY_TENANT_INVITATION_WINDOW_SECONDS", func(c *Config, v int) { c.TenantInvitationWindowSeconds = v }, MaxTenantInvitationWindowSeconds},
+		{"GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS", func(c *Config, v int) { c.TenantInvitationResendCooldownSeconds = v }, MaxTenantInvitationResendCooldownSeconds},
+	} {
+		for _, v := range []int{-1, tc.max + 1} {
+			c := Load()
+			tc.set(c, v)
+			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), tc.env) {
+				t.Fatalf("%s=%d must be refused, got %v", tc.env, v, err)
+			}
+		}
+		c := Load()
+		tc.set(c, tc.max)
+		if err := c.Validate(); err != nil {
+			t.Fatalf("%s at its cap is allowed: %v", tc.env, err)
+		}
+	}
+
+	t.Setenv("GATEWAY_TENANT_INVITATION_MAX_PER_TENANT", "7")
+	t.Setenv("GATEWAY_TENANT_INVITATION_WINDOW_SECONDS", "120")
+	t.Setenv("GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS", "45")
+	t.Setenv("GATEWAY_RATE_LIMIT_INVITATION_PER_IP", "9")
+	c = Load()
+	if c.TenantInvitationMaxPerTenant != 7 || c.TenantInvitationWindowSeconds != 120 ||
+		c.TenantInvitationResendCooldownSeconds != 45 || c.RateLimitInvitationPerIP != 9 {
+		t.Fatalf("env not read: %d %d %d %d", c.TenantInvitationMaxPerTenant,
+			c.TenantInvitationWindowSeconds, c.TenantInvitationResendCooldownSeconds, c.RateLimitInvitationPerIP)
+	}
+}
+
 // Self-service tenants are opt-in for the default project.
 func TestSelfServiceTenantsEnabled_DefaultsOff(t *testing.T) {
 	t.Setenv("GATEWAY_SELF_SERVICE_TENANTS_ENABLED", "")
