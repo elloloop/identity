@@ -86,6 +86,7 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 		Anonymous:          cfg.Anonymous,
 		Jurisdictions:      cfg.Jurisdictions,
 		Accounts:           cfg.Accounts,
+		Tenants:            cfg.Tenants,
 	}, nil
 }
 

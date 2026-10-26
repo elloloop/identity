@@ -1,5 +1,86 @@
 # Upgrade guide
 
+## Next — self-service tenants and tenant selection on `RefreshToken` (migration 0044; `RefreshTokenRequest.tenant_id` (additive); `MembershipStore`, `TenantStore` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
+
+A signed-in person can now create a tenant they own, list the tenants they
+belong to, and get an access token for one of them.
+
+- **`CreateTenant(name)`** creates a claimed tenant and the caller's active
+  `owner` membership (source `created`) in one transaction, and records a
+  `tenant_created` audit event. It is off by default. A project turns it on
+  in its `config_json`:
+
+  ```json
+  { "tenants": { "self_service": true } }
+  ```
+
+  The default project takes the same setting from
+  `GATEWAY_SELF_SERVICE_TENANTS_ENABLED` (default `false`). Refusals: no
+  caller → `UNAUTHENTICATED`; the setting off → `FAILED_PRECONDITION`; a name
+  that is blank after trimming, longer than 100 characters, invalid UTF-8 or
+  carrying control or format characters → `INVALID_ARGUMENT`; an anonymous,
+  agent, merged or inactive account → `PERMISSION_DENIED`; over the limit →
+  `RESOURCE_EXHAUSTED`, audited as a failed `tenant_created` with reason
+  `creation_limit`.
+- **The limit** is deployment-wide: at most
+  `GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER` tenants (default 10, at most
+  1000; `0` selects the default) per user per project in
+  `GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS` (default 86400, at most 30
+  days). Concurrent calls by one user are serialised, so the limit holds
+  under a race. The RPC also shares the per-IP signup budget
+  (`GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`, tag `tenant_create`).
+  `CreateTenant` takes no idempotency key: a retried call can create a
+  second tenant, bounded by the limit. Reconcile with `ListMyTenants`.
+- **`ListMyTenants()`** returns `{tenant_id, name, role}` for every claimed
+  tenant in the project where the caller's membership is active, ordered by
+  name. It does not depend on the setting.
+- **`RefreshTokenRequest.tenant_id`** (field 2) asks for an access token
+  whose `tenant` claim is that tenant. It is granted only to an active
+  member of a claimed tenant in the session's project; anything else is
+  `PERMISSION_DENIED`, no token is issued, and the refresh token is **not**
+  consumed, so the client can retry without it. Omitting the field keeps
+  today's behaviour: the claim is the deployment default
+  (`GATEWAY_DEFAULT_TENANT_ID`). The selection is not sticky: each refresh
+  chooses again, and one without `tenant_id` returns to the default.
+- **Revocation.** Identity's own middleware accepts a token whose `tenant`
+  claim is the default or a claimed tenant of the token's project, and reads
+  the tenant on each request, so suspending a tenant refuses its tokens at
+  once (`503` when the tenant cannot be read). Ending a membership takes
+  effect at the next refresh, so a selected token outlives it by at most
+  the access-token lifetime (`GATEWAY_JWT_EXPIRY_SECONDS`).
+
+### Migration
+
+`0044_add_self_service_tenants` adds `tenants.created_by` (`TEXT NOT NULL
+DEFAULT ''`, catalog-only), a partial index on `(project_id, created_by,
+created_at_ms)`, and widens the `tenant_memberships.source` check to admit
+`created` (added `NOT VALID`, so no table scan). It takes a short `ACCESS
+EXCLUSIVE` lock on both tables, bounded by `lock_timeout = 10s`. The down
+migration maps `created` memberships to `added` before restoring the old
+check. Self-service tenants need the Postgres driver; on memory and SQLite
+the RPCs answer `UNIMPLEMENTED`, as the other membership RPCs do.
+
+### Who has to act
+
+- **Services that verify identity's tokens themselves.** If you call
+  `pkg/jwt.VerifyAccessToken` with an expected tenant, or otherwise pin the
+  `tenant` claim to the default, a token with a selected tenant fails there.
+  Nothing changes until a client sends `tenant_id`; before you let clients
+  select, accept a non-default `tenant` and authorise on it.
+- **Embedders with their own stores.** `service.TenantStore` gains
+  `CreateOwnedTenant`, and `service.MembershipStore` gains
+  `ListActiveTenantsForUser` and `GetActiveTenantForUser` (through the new
+  `UserTenantReader`). `UserTenantReader` must only return a tenant that is
+  claimed, in the given project, with the user's membership active.
+- **Callers of the middleware constructors.** `middleware.AuthMiddleware`
+  and `middleware.SessionAuthMiddleware` take a `middleware.TokenTenants`
+  where they took the expected tenant string: `TokenTenants{Default: id}`
+  keeps the old check, and setting `Selectable` (a `TenantLookup`, which
+  `TenantStore` satisfies) also accepts selected tenants.
+- **Callers of `AuthService.RefreshToken`** are unaffected;
+  `RefreshTokenInTenant` adds the tenant argument, and
+  `AuthService.WithTenantSelection` supplies the reader it checks against.
+
 ## Next — built with Go 1.26.10 for the `crypto/x509` advisory (no API or schema change)
 
 The image and every CI job build with Go 1.26.10, which fixes GO-2026-6809:

@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -101,10 +103,22 @@ func (f *fakeDomainStore) ListDomainsByTenant(_ context.Context, projectID, tena
 var _ DomainStore = (*fakeDomainStore)(nil)
 
 // fakeTenantStore is an in-memory TenantStore keyed by (projectID, id).
+// CreateOwnedTenant writes the owner membership into members when the two
+// fakes are linked (linkFakeTenantStores).
 type fakeTenantStore struct {
-	byID   map[string]*Tenant
-	getErr error
-	setErr error
+	byID      map[string]*Tenant
+	getErr    error
+	setErr    error
+	createErr error
+	members   *fakeMembershipStore
+	nextID    int
+}
+
+// linkFakeTenantStores lets CreateOwnedTenant write memberships into m and
+// lets m's active-tenant reads see each tenant's status.
+func linkFakeTenantStores(t *fakeTenantStore, m *fakeMembershipStore) {
+	t.members = m
+	m.tenants = t
 }
 
 func newFakeTenantStore() *fakeTenantStore {
@@ -166,6 +180,43 @@ func (f *fakeTenantStore) ListTenants(_ context.Context, projectID string) ([]*T
 	return out, nil
 }
 
+// CreateOwnedTenant mirrors the postgres store: the limit counts the
+// owner's tenants created at or after WindowStartMs.
+func (f *fakeTenantStore) CreateOwnedTenant(ctx context.Context, req OwnedTenantRequest) (*Tenant, *TenantMembership, error) {
+	if f.createErr != nil {
+		return nil, nil, f.createErr
+	}
+	created := 0
+	for _, t := range f.byID {
+		if t.ProjectID == req.ProjectID && t.CreatedBy == req.OwnerID && t.CreatedAtMs >= req.WindowStartMs {
+			created++
+		}
+	}
+	if created >= req.MaxPerWindow {
+		return nil, nil, ErrTenantCreationLimited
+	}
+	f.nextID++
+	now := time.Now().UnixMilli()
+	t := &Tenant{
+		ID: "tenant-owned-" + strconv.Itoa(f.nextID), ProjectID: req.ProjectID, Name: req.Name,
+		Status: TenantStatusClaimed, CreatedBy: req.OwnerID, CreatedAtMs: now, UpdatedAtMs: now,
+	}
+	f.put(t)
+	m := &TenantMembership{
+		ProjectID: req.ProjectID, TenantID: t.ID, UserID: req.OwnerID,
+		Source: MembershipSourceCreated, Role: RoleOwner, Status: MembershipStatusActive,
+		CreatedAtMs: now, UpdatedAtMs: now,
+	}
+	if f.members != nil {
+		id, err := f.members.UpsertMembership(ctx, m)
+		if err != nil {
+			return nil, nil, err
+		}
+		m.ID = id
+	}
+	return t, m, nil
+}
+
 var _ TenantStore = (*fakeTenantStore)(nil)
 
 // fakeMembershipStore is an in-memory MembershipStore keyed by
@@ -175,6 +226,9 @@ type fakeMembershipStore struct {
 	getErr    error
 	upsertErr error
 	listErr   error
+	// tenants supplies each tenant's name and status to the active-tenant
+	// reads (linkFakeTenantStores); unlinked, those reads find nothing.
+	tenants *fakeTenantStore
 }
 
 func newFakeMembershipStore() *fakeMembershipStore {
@@ -240,6 +294,49 @@ func (f *fakeMembershipStore) ListMembershipsForTenant(_ context.Context, projec
 func (f *fakeMembershipStore) RemoveMembership(_ context.Context, projectID, tenantID, userID string) error {
 	delete(f.byKey, f.key(projectID, tenantID, userID))
 	return nil
+}
+
+// ListActiveTenantsForUser mirrors the postgres join: an active membership
+// in a claimed tenant of the project, ordered by name, then id.
+func (f *fakeMembershipStore) ListActiveTenantsForUser(_ context.Context, projectID, userID string) ([]*UserTenant, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	var out []*UserTenant
+	for _, m := range f.byKey {
+		if ut := f.activeTenant(m, projectID, userID); ut != nil {
+			out = append(out, ut)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].TenantID < out[j].TenantID
+	})
+	return out, nil
+}
+
+func (f *fakeMembershipStore) GetActiveTenantForUser(_ context.Context, projectID, tenantID, userID string) (*UserTenant, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	m, ok := f.byKey[f.key(projectID, tenantID, userID)]
+	if !ok {
+		return nil, nil
+	}
+	return f.activeTenant(m, projectID, userID), nil
+}
+
+func (f *fakeMembershipStore) activeTenant(m *TenantMembership, projectID, userID string) *UserTenant {
+	if f.tenants == nil || m.ProjectID != projectID || m.UserID != userID || m.Status != MembershipStatusActive {
+		return nil
+	}
+	t, ok := f.tenants.byID[projectID+"/"+m.TenantID]
+	if !ok || t.Status != TenantStatusClaimed {
+		return nil
+	}
+	return &UserTenant{TenantID: t.ID, Name: t.Name, Role: m.Role}
 }
 
 var _ MembershipStore = (*fakeMembershipStore)(nil)

@@ -518,6 +518,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_SQLITE_", "Datastore"},
 	{"GATEWAY_DEFAULT_PROJECT", "Projects & tenancy"},
 	{"GATEWAY_DEFAULT_TENANT", "Projects & tenancy"},
+	{"GATEWAY_SELF_SERVICE_TENANTS_", "Projects & tenancy"},
 	{"GATEWAY_ADMIN_API_SECRET", "Projects & tenancy"},
 	{"GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP", "Projects & tenancy"},
 	{"GATEWAY_PROJECT_SECRETS_KEY", "Projects & tenancy"},

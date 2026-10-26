@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/emailaddr"
 )
@@ -59,7 +60,9 @@ type MembershipService struct {
 	mailerConfigured bool
 	cfg              *config.Config
 	logger           *zap.Logger
-	nowFunc          func() time.Time
+	// audit records CreateTenant outcomes (WithAudit); nil records nothing.
+	audit   *audit.Logger
+	nowFunc func() time.Time
 }
 
 // NewMembershipService wires a MembershipService. mailer must be non-nil (the

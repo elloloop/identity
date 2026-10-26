@@ -14,6 +14,7 @@ const (
 	MembershipSourceDomain  = "domain"  // derived from a verified email domain
 	MembershipSourceInvited = "invited" // accepted an invitation
 	MembershipSourceAdded   = "added"   // added by a tenant admin
+	MembershipSourceCreated = "created" // the user created the tenant (CreateTenant)
 )
 
 // Membership / invitation role.
@@ -71,9 +72,31 @@ type TenantInvitation struct {
 	CreatedAtMs  int64
 }
 
+// UserTenant is a tenant a user may act in: an active membership in a
+// claimed tenant, with the role the user holds there.
+type UserTenant struct {
+	TenantID string
+	Name     string
+	Role     string
+}
+
+// UserTenantReader reads the tenants a user may act in. Both methods apply
+// the same rule — an active membership in a claimed tenant of the project —
+// so the tenant a refresh may select is exactly one ListMyTenants shows.
+type UserTenantReader interface {
+	// ListActiveTenantsForUser returns the user's tenants in a project,
+	// ordered by name, then id.
+	ListActiveTenantsForUser(ctx context.Context, projectID, userID string) ([]*UserTenant, error)
+	// GetActiveTenantForUser returns one of them, or (nil, nil) when the
+	// tenant is not one the user may act in.
+	GetActiveTenantForUser(ctx context.Context, projectID, tenantID, userID string) (*UserTenant, error)
+}
+
 // MembershipStore persists TenantMemberships within a Project. Reads that
 // miss return (nil, nil).
 type MembershipStore interface {
+	UserTenantReader
+
 	// UpsertMembership inserts or, on a (project, tenant, user) conflict,
 	// updates source/role/status in place (keeping id + created_at_ms).
 	// Returns the surviving row id.

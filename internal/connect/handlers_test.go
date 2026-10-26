@@ -1835,3 +1835,33 @@ func TestApproveQrLogin_BadSession(t *testing.T) {
 
 // quiet linter on unused string import
 var _ = strings.Contains
+
+// TestRefreshToken_TenantSelectionRefusedKeepsToken drives tenant_id through
+// the handler: the memory driver can select no tenant, so the refresh is
+// PermissionDenied, and the refresh token, unspent, still rotates without one.
+func TestRefreshToken_TenantSelectionRefusedKeepsToken(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	signup, err := h.client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email: "select@example.com", Password: strongPW,
+	}))
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+
+	_, err = h.client.RefreshToken(ctx, withClientHeaders(connect.NewRequest(&identitypb.RefreshTokenRequest{
+		RefreshToken: signup.Msg.RefreshToken, TenantId: "t-acme",
+	})))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	rotated, err := h.client.RefreshToken(ctx, withClientHeaders(connect.NewRequest(&identitypb.RefreshTokenRequest{
+		RefreshToken: signup.Msg.RefreshToken,
+	})))
+	if err != nil {
+		t.Fatalf("refresh after the refusal: %v", err)
+	}
+	if rotated.Msg.AccessToken == "" {
+		t.Fatal("rotated access token missing")
+	}
+}

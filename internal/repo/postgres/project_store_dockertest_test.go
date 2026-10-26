@@ -144,6 +144,16 @@ func TestMembershipStore_Container(t *testing.T) {
 	runMembershipSmoke(t, dsn)
 }
 
+// TestSelfServiceTenants_Container runs the self-service tenant store body
+// against a throwaway Postgres container.
+func TestSelfServiceTenants_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runSelfServiceTenants(t, dsn)
+}
+
 // TestProjectStore_EnsureAuthDomain_Container runs the idempotent
 // auth-domain seed body against a throwaway Postgres container.
 func TestProjectStore_EnsureAuthDomain_Container(t *testing.T) {

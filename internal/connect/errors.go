@@ -87,7 +87,8 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrAccountLocked),
 		errors.Is(err, service.ErrSignupThrottled),
 		errors.Is(err, service.ErrAgentLimitReached),
-		errors.Is(err, service.ErrAgentMachineChallengeLimit):
+		errors.Is(err, service.ErrAgentMachineChallengeLimit),
+		errors.Is(err, service.ErrTenantCreationLimited):
 		// CodeResourceExhausted: lockout is a per-account quota of failed
 		// attempts. ResourceExhausted matches gRPC's documented semantics
 		// for "the resource is exhausted" / rate-limit-style failures and
@@ -116,6 +117,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrMergeRefused),
 		errors.Is(err, service.ErrAccountMergeDisabled),
 		errors.Is(err, service.ErrAgentsDisabled),
+		errors.Is(err, service.ErrSelfServiceTenantsDisabled),
 		errors.Is(err, service.ErrAgentOAuthDisabled),
 		errors.Is(err, service.ErrReauthenticationRequired),
 		errors.Is(err, service.ErrAccountKindOff),

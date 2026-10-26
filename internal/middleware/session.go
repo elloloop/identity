@@ -363,11 +363,11 @@ func (r *RevokingSessionRepository) RevokeSessionsForUser(ctx context.Context, u
 //     out in-flight tokens. The hot path stays the same for these.
 //   - Tokens with a sid claim are rejected when the cached/refreshed
 //     state is anything other than Active.
-func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience string, requireAudience bool, cache *SessionCache) func(http.Handler) http.Handler {
+func SessionAuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expectedAudience string, requireAudience bool, cache *SessionCache) func(http.Handler) http.Handler {
 	if cache == nil {
 		// mode=ttl path: identical to AuthMiddleware. Returning the
 		// same function avoids a wrapper layer on the zero-cost path.
-		return AuthMiddleware(kp, expectedTenant, expectedAudience, requireAudience)
+		return AuthMiddleware(kp, tenants, expectedAudience, requireAudience)
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -383,7 +383,7 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 				// a revoked session would still get the "I'm signed in"
 				// view on endpoints like GetCurrentUser.
 				if token := extractBearerToken(r); token != "" {
-					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil {
+					if claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience); err == nil {
 						if claims.SID != "" {
 							state, lookupErr := cache.Lookup(r.Context(), claims.SID)
 							if lookupErr == nil && state == SessionStateActive {
@@ -409,10 +409,9 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 				http.Error(w, `{"code":"unauthenticated","message":"Missing Authorization header"}`, http.StatusUnauthorized)
 				return
 			}
-			claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience)
+			claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience)
 			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
+				writeTokenRefusal(w, err)
 				return
 			}
 			// A purpose token never authenticates a request:

@@ -68,6 +68,10 @@ func (f *lpTenantStore) SetTenantStatus(context.Context, string, string, string)
 
 func (f *lpTenantStore) ListTenants(context.Context, string) ([]*Tenant, error) { return nil, nil }
 
+func (f *lpTenantStore) CreateOwnedTenant(context.Context, OwnedTenantRequest) (*Tenant, *TenantMembership, error) {
+	return nil, nil, nil
+}
+
 type fakePolicyStore struct {
 	byTenant map[string]*LoginPolicy // key: projectID + "|" + tenantID
 	err      error

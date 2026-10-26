@@ -165,3 +165,52 @@ func membershipToProto(m *service.TenantMembership) *identitypb.TenantMembership
 		UpdatedAt: msToTimestamp(m.UpdatedAtMs),
 	}
 }
+
+// CreateTenant creates a tenant the authenticated caller owns, when the
+// caller's project allows self-service tenants.
+func (h *IdentityHandler) CreateTenant(
+	ctx context.Context,
+	req *connect.Request[identitypb.CreateTenantRequest],
+) (*connect.Response[identitypb.CreateTenantResponse], error) {
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	created, err := h.members.CreateTenant(ctx, userID, req.Msg.GetName(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.CreateTenantResponse{
+		TenantId:   created.Tenant.ID,
+		Name:       created.Tenant.Name,
+		Membership: membershipToProto(created.Membership),
+	}), nil
+}
+
+// ListMyTenants lists the tenants the authenticated caller may act in.
+func (h *IdentityHandler) ListMyTenants(
+	ctx context.Context,
+	req *connect.Request[identitypb.ListMyTenantsRequest],
+) (*connect.Response[identitypb.ListMyTenantsResponse], error) {
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	tenants, err := h.members.ListMyTenants(ctx, userID)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	out := make([]*identitypb.UserTenant, 0, len(tenants))
+	for _, t := range tenants {
+		out = append(out, &identitypb.UserTenant{TenantId: t.TenantID, Name: t.Name, Role: t.Role})
+	}
+	return connect.NewResponse(&identitypb.ListMyTenantsResponse{Tenants: out}), nil
+}

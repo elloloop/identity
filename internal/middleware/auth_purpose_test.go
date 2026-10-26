@@ -44,7 +44,7 @@ func TestAuthMiddleware_PurposeToken_RequiredPath_Returns401(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, TokenTenants{}, "", false)(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -65,7 +65,7 @@ func TestAuthMiddleware_PurposeToken_ExemptPath_NoIdentityInjected(t *testing.T)
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, TokenTenants{}, "", false)(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -86,7 +86,7 @@ func TestAuthMiddleware_SubmitDateOfBirth_Exempt(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, TokenTenants{}, "", false)(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/SubmitDateOfBirth", nil)
 	rec := httptest.NewRecorder()
@@ -110,7 +110,7 @@ func TestSessionAuthMiddleware_PurposeToken_Rejected(t *testing.T) {
 	// Required path: rejected like a bad token.
 	var called bool
 	var userID string
-	handler := SessionAuthMiddleware(kr, "tenant-1", "", false, cache)(echoHandler(&called, &userID))
+	handler := SessionAuthMiddleware(kr, TokenTenants{Default: "tenant-1"}, "", false, cache)(echoHandler(&called, &userID))
 	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -144,7 +144,7 @@ func TestAuthMiddleware_PasskeyEnrolmentTicket_NeverAuthenticates(t *testing.T) 
 	} {
 		var called bool
 		var userID string
-		handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+		handler := AuthMiddleware(kr, TokenTenants{}, "", false)(echoHandler(&called, &userID))
 		req := httptest.NewRequest(http.MethodPost, path, nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		rec := httptest.NewRecorder()
@@ -156,7 +156,7 @@ func TestAuthMiddleware_PasskeyEnrolmentTicket_NeverAuthenticates(t *testing.T) 
 
 	var called bool
 	var userID string
-	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, TokenTenants{}, "", false)(echoHandler(&called, &userID))
 	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -176,7 +176,7 @@ func TestAuthMiddleware_PasskeyRegistrationPaths_Exempt(t *testing.T) {
 	} {
 		var called bool
 		var userID string
-		handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+		handler := AuthMiddleware(kr, TokenTenants{}, "", false)(echoHandler(&called, &userID))
 		req := httptest.NewRequest(http.MethodPost, path, nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -192,7 +192,7 @@ func TestAuthMiddleware_CompleteRequiredPasswordChange_Exempt(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, TokenTenants{}, "", false)(echoHandler(&called, &userID))
 	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/CompleteRequiredPasswordChange", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

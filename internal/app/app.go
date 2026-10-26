@@ -401,6 +401,15 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
+			// Tenant creation by an authenticated person: each admitted call
+			// inserts a tenant and a membership row. The per-user limit
+			// bounds what one account makes; this bounds one address making
+			// accounts to get around it. The signup budget, for the same
+			// reason as agent creation.
+			PathPrefix: "/identity.v1.IdentityService/CreateTenant", Tag: "tenant_create",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
 			// The completion half of a login: unauthenticated (it carries a
 			// purpose ticket, not a session) and it mints a token pair, so it
 			// is bound by the same per-IP budget as the login paths.
@@ -735,6 +744,9 @@ func New(deps Deps) (*Built, error) {
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
+		// A nil membership store (the memory driver) converts to a nil
+		// reader, which refuses every tenant selection.
+		WithTenantSelection(deps.MembershipStore).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
@@ -797,7 +809,7 @@ func New(deps Deps) (*Built, error) {
 	}
 
 	domainSvc := buildDomainService(deps, logger)
-	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
+	membershipSvc := buildMembershipService(deps, repo, mailer, auditLog, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
@@ -833,9 +845,14 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf("rpc metrics: %w", err)
 	}
 
-	// Every token's "tenant" claim must equal the internal storage tenant
-	// key (DefaultTenantID), so the auth middleware pins it.
-	authExpectedTenant := deps.Config.DefaultTenantID
+	// A token's "tenant" claim is the internal storage tenant key
+	// (DefaultTenantID), or a claimed tenant of the token's project that
+	// RefreshToken selected for a member. Without a tenant store (the memory
+	// driver) no tenant can be selected, so only the default is accepted.
+	authTenants := middleware.TokenTenants{Default: deps.Config.DefaultTenantID}
+	if deps.TenantStore != nil {
+		authTenants.Selectable = deps.TenantStore
+	}
 
 	// Order (outermost runs first on request path):
 	//   logging → recover → health → project → CORS → product → client-IP → rate-limit → JWKS → auth → project-guard → metrics → Connect
@@ -863,7 +880,7 @@ func New(deps Deps) (*Built, error) {
 	// project), rejecting an access token replayed across projects.
 	chain = middleware.NewProjectScopeGuard()(chain)
 	chain = middleware.SessionAuthMiddleware(
-		deps.Signer, authExpectedTenant, deps.Config.JWTAudience,
+		deps.Signer, authTenants, deps.Config.JWTAudience,
 		deps.Config.JWTRequireAudience, sessionCache,
 	)(chain)
 	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
@@ -924,6 +941,7 @@ func New(deps Deps) (*Built, error) {
 			// from the access mode: the two gate different things.
 			Anonymous: service.ProjectAnonymousConfig{Enabled: deps.Config.AnonymousEnabled},
 			Accounts:  defaultAccounts,
+			Tenants:   service.ProjectTenantsConfig{SelfService: deps.Config.SelfServiceTenantsEnabled},
 		},
 		service.NewCachingProjectResolver(
 			deps.ProjectResolver,
@@ -1103,7 +1121,8 @@ func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
 // headless deployment can still complete the flow. users is the boot-time
 // repository — the redesign governance plane is a single postgres control
 // database, so there is no per-tenant repo to scope user lookups to.
-func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, logger *zap.Logger) *service.MembershipService {
+// auditLog receives the CreateTenant trail.
+func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
 	if deps.InvitationStore == nil || deps.MembershipStore == nil || deps.TenantStore == nil {
 		return nil
 	}
@@ -1116,7 +1135,7 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 		mailDeliveryConfigured(deps),
 		deps.Config,
 		logger,
-	)
+	).WithAudit(auditLog)
 }
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService

@@ -48,7 +48,7 @@ func TestSec_HeaderInjection_CRLF(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var called bool
-			h := AuthMiddleware(kr, "", "", false)(recordingHandler(&called))
+			h := AuthMiddleware(kr, TokenTenants{}, "", false)(recordingHandler(&called))
 
 			req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 			// Direct map write bypasses Go's CRLF validation in Header.Set.
@@ -86,7 +86,7 @@ func TestSec_BearerSmuggling(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var called bool
-			h := AuthMiddleware(kr, "", "", false)(recordingHandler(&called))
+			h := AuthMiddleware(kr, TokenTenants{}, "", false)(recordingHandler(&called))
 
 			req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 			req.Header.Set("Authorization", tc.header)
@@ -127,7 +127,7 @@ func TestSec_EmptyOrMalformedAuth_NoPanic(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var called bool
-			h := AuthMiddleware(kr, "", "", false)(recordingHandler(&called))
+			h := AuthMiddleware(kr, TokenTenants{}, "", false)(recordingHandler(&called))
 
 			req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 			if tc.header != "" {
@@ -153,7 +153,7 @@ func TestSec_BearerCaseSensitive_Required(t *testing.T) {
 	good := mintToken(t, kr, "user-1")
 
 	var called bool
-	h := AuthMiddleware(kr, "", "", false)(recordingHandler(&called))
+	h := AuthMiddleware(kr, TokenTenants{}, "", false)(recordingHandler(&called))
 	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "bearer "+good)
 	rec := httptest.NewRecorder()
@@ -189,7 +189,7 @@ func mintToken(t *testing.T, s *jwttest.Signer, sub string) string {
 func TestAuthMiddleware_AuthTimeComesOnlyFromTheToken(t *testing.T) {
 	kr := newSecTestKR(t)
 	var seen string
-	handler := AuthMiddleware(kr, "", "", false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(kr, TokenTenants{}, "", false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = r.Header.Get(AuthenticatedAuthTimeHeader)
 	}))
 	serve := func(token string) string {

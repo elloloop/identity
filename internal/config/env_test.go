@@ -426,3 +426,58 @@ func TestAgentsEnabled_DefaultsOff(t *testing.T) {
 		t.Fatal("GATEWAY_AGENTS_ENABLED=true must turn agent accounts on")
 	}
 }
+
+func TestSelfServiceTenantsLimits(t *testing.T) {
+	c := &Config{}
+	if got := c.SelfServiceTenantsLimit(); got != DefaultSelfServiceTenantsMaxPerUser {
+		t.Fatalf("unset limit: got %d, want the default", got)
+	}
+	if got := c.SelfServiceTenantsWindow(); got != DefaultSelfServiceTenantsWindowSeconds*time.Second {
+		t.Fatalf("unset window: got %v, want the default", got)
+	}
+	c.SelfServiceTenantsMaxPerUser, c.SelfServiceTenantsWindowSeconds = 3, 60
+	if got := c.SelfServiceTenantsLimit(); got != 3 {
+		t.Fatalf("set limit: got %d", got)
+	}
+	if got := c.SelfServiceTenantsWindow(); got != time.Minute {
+		t.Fatalf("set window: got %v", got)
+	}
+	c.SelfServiceTenantsMaxPerUser, c.SelfServiceTenantsWindowSeconds = MaxSelfServiceTenantsMaxPerUser+1, MaxSelfServiceTenantsWindowSeconds+1
+	if got := c.SelfServiceTenantsLimit(); got != MaxSelfServiceTenantsMaxPerUser {
+		t.Fatalf("limit over the cap: got %d, want the cap", got)
+	}
+	if got := c.SelfServiceTenantsWindow(); got != MaxSelfServiceTenantsWindowSeconds*time.Second {
+		t.Fatalf("window over the cap: got %v, want the cap", got)
+	}
+
+	c = Load()
+	for _, v := range []int{-1, MaxSelfServiceTenantsMaxPerUser + 1} {
+		c.SelfServiceTenantsMaxPerUser = v
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER") {
+			t.Fatalf("limit %d must be refused, got %v", v, err)
+		}
+	}
+	c.SelfServiceTenantsMaxPerUser = 0
+	for _, v := range []int{-1, MaxSelfServiceTenantsWindowSeconds + 1} {
+		c.SelfServiceTenantsWindowSeconds = v
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS") {
+			t.Fatalf("window %d must be refused, got %v", v, err)
+		}
+	}
+	c.SelfServiceTenantsMaxPerUser, c.SelfServiceTenantsWindowSeconds = MaxSelfServiceTenantsMaxPerUser, MaxSelfServiceTenantsWindowSeconds
+	if err := c.Validate(); err != nil {
+		t.Fatalf("the caps themselves are allowed: %v", err)
+	}
+}
+
+// Self-service tenants are opt-in for the default project.
+func TestSelfServiceTenantsEnabled_DefaultsOff(t *testing.T) {
+	t.Setenv("GATEWAY_SELF_SERVICE_TENANTS_ENABLED", "")
+	if Load().SelfServiceTenantsEnabled {
+		t.Fatal("self-service tenants must default off")
+	}
+	t.Setenv("GATEWAY_SELF_SERVICE_TENANTS_ENABLED", "true")
+	if !Load().SelfServiceTenantsEnabled {
+		t.Fatal("GATEWAY_SELF_SERVICE_TENANTS_ENABLED=true must turn them on")
+	}
+}

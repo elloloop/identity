@@ -703,6 +703,15 @@ message GetCurrentUserResponse {
 
 message RefreshTokenRequest {
   string refresh_token = 1;
+  // tenant_id, when set, asks for an access token whose `tenant` claim is
+  // this tenant instead of the deployment's default. The caller must be an
+  // active member of an active tenant in the session's project; otherwise
+  // the call is PERMISSION_DENIED, no token is issued and the refresh token
+  // is NOT consumed, so the client can retry without it. Empty keeps the
+  // default claim. The selection is not remembered: every refresh names the
+  // tenant it wants. A membership that ends stops the next refresh, so an
+  // access token outlives it by at most its own lifetime.
+  string tenant_id = 2;
 }
 
 message RefreshTokenResponse {
@@ -1939,7 +1948,7 @@ message TenantMembership {
   string id = 1;
   string tenant_id = 2;
   string user_id = 3;
-  string source = 4; // "domain" | "invited" | "added"
+  string source = 4; // "domain" | "invited" | "added" | "created"
   string role = 5; // "member" | "admin" | "owner"
   string status = 6; // "active" | "pending" | "inactive"
   google.protobuf.Timestamp created_at = 7;
@@ -2006,6 +2015,35 @@ message RemoveTenantMemberRequest {
 }
 
 message RemoveTenantMemberResponse {}
+
+message CreateTenantRequest {
+  // name is the tenant's display name: required, trimmed, at most 100
+  // characters.
+  string name = 1;
+}
+
+message CreateTenantResponse {
+  string tenant_id = 1;
+  string name = 2;
+  // membership is the caller's own: an active owner, source "created".
+  TenantMembership membership = 3;
+}
+
+// UserTenant is a tenant the caller is an active member of, with the role
+// the caller holds in it.
+message UserTenant {
+  string tenant_id = 1;
+  string name = 2;
+  string role = 3; // "member" | "admin" | "owner"
+}
+
+message ListMyTenantsRequest {}
+
+message ListMyTenantsResponse {
+  // tenants are ordered by name, then id. Suspended tenants and
+  // memberships that are not active are left out.
+  repeated UserTenant tenants = 1;
+}
 
 // ─── Control-plane admin (redesign) ──────────────────────────────────
 //
@@ -3223,6 +3261,21 @@ service IdentityService {
   rpc ListTenantInvitations(ListTenantInvitationsRequest) returns (ListTenantInvitationsResponse);
   rpc ListTenantMembers(ListTenantMembersRequest) returns (ListTenantMembersResponse);
   rpc RemoveTenantMember(RemoveTenantMemberRequest) returns (RemoveTenantMemberResponse);
+
+  // Self-service tenants. Authenticated and project-scoped. CreateTenant
+  // makes an active tenant with the caller as its owner, in one
+  // transaction; it is FAILED_PRECONDITION unless the project's config
+  // sets tenants.self_service, PERMISSION_DENIED for an anonymous or agent
+  // account, INVALID_ARGUMENT for a blank or over-long name, and
+  // RESOURCE_EXHAUSTED once the caller has created the per-user number of
+  // tenants allowed in the window. It carries no idempotency key: a retry
+  // after a lost response creates a second tenant, so reconcile with
+  // ListMyTenants. ListMyTenants returns the active tenants the caller is
+  // an active member of in this project. RefreshToken's tenant_id selects
+  // one of them for the access token. Available only on the postgres
+  // control-plane driver; memory deployments return Unimplemented.
+  rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse);
+  rpc ListMyTenants(ListMyTenantsRequest) returns (ListMyTenantsResponse);
 
   // Admin user management (caller must have role=admin). Enforced in the
   // servicer via _require_admin(ctx); all admin RPCs audit-log their actions.

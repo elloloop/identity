@@ -57,6 +57,9 @@ func (s *connectDomainStore) ListDomainsByTenant(_ context.Context, _, _ string)
 
 type connectTenantStore struct {
 	tenant *service.Tenant
+	// ownedReq records the last CreateOwnedTenant request; ownedErr fails it.
+	ownedReq *service.OwnedTenantRequest
+	ownedErr error
 }
 
 func (s *connectTenantStore) CreateTenant(context.Context, *service.Tenant) (string, error) {
@@ -82,9 +85,24 @@ func (s *connectTenantStore) ListTenants(context.Context, string) ([]*service.Te
 	return nil, nil
 }
 
+func (s *connectTenantStore) CreateOwnedTenant(_ context.Context, req service.OwnedTenantRequest) (*service.Tenant, *service.TenantMembership, error) {
+	s.ownedReq = &req
+	if s.ownedErr != nil {
+		return nil, nil, s.ownedErr
+	}
+	t := &service.Tenant{ID: "tenant-new", ProjectID: req.ProjectID, Name: req.Name, Status: service.TenantStatusClaimed, CreatedBy: req.OwnerID}
+	m := &service.TenantMembership{
+		ID: "mem-new", ProjectID: req.ProjectID, TenantID: t.ID, UserID: req.OwnerID,
+		Source: service.MembershipSourceCreated, Role: service.RoleOwner, Status: service.MembershipStatusActive,
+	}
+	return t, m, nil
+}
+
 type connectMembershipStore struct {
 	member   *service.TenantMembership
 	upserted *service.TenantMembership
+	// active is what ListActiveTenantsForUser returns.
+	active []*service.UserTenant
 }
 
 func (s *connectMembershipStore) UpsertMembership(_ context.Context, m *service.TenantMembership) (string, error) {
@@ -107,6 +125,19 @@ func (s *connectMembershipStore) ListMembershipsForTenant(context.Context, strin
 
 func (s *connectMembershipStore) RemoveMembership(context.Context, string, string, string) error {
 	return nil
+}
+
+func (s *connectMembershipStore) ListActiveTenantsForUser(context.Context, string, string) ([]*service.UserTenant, error) {
+	return s.active, nil
+}
+
+func (s *connectMembershipStore) GetActiveTenantForUser(_ context.Context, _, tenantID, _ string) (*service.UserTenant, error) {
+	for _, t := range s.active {
+		if t.TenantID == tenantID {
+			return t, nil
+		}
+	}
+	return nil, nil
 }
 
 // connectFakeResolver satisfies the service package's DNSResolver

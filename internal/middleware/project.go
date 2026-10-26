@@ -62,6 +62,8 @@ type DefaultProject struct {
 	Anonymous service.ProjectAnonymousConfig
 	// Accounts is the GATEWAY_DEFAULT_EMAIL_DOMAIN account-domain policy.
 	Accounts service.ProjectAccountsConfig
+	// Tenants is the GATEWAY_SELF_SERVICE_TENANTS_ENABLED policy.
+	Tenants service.ProjectTenantsConfig
 }
 
 // NewProjectResolver builds the middleware. def describes the default
@@ -163,6 +165,7 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 		Access:    pr.def.Access,
 		Anonymous: pr.def.Anonymous,
 		Accounts:  pr.def.Accounts,
+		Tenants:   pr.def.Tenants,
 	}, true
 }
 
@@ -226,6 +229,7 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		Anonymous:          rp.Anonymous,
 		Jurisdictions:      rp.Jurisdictions,
 		Accounts:           rp.Accounts,
+		Tenants:            rp.Tenants,
 	}
 }
 

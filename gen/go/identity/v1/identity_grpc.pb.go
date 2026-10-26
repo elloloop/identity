@@ -140,6 +140,8 @@ const (
 	IdentityService_ListTenantInvitations_FullMethodName           = "/identity.v1.IdentityService/ListTenantInvitations"
 	IdentityService_ListTenantMembers_FullMethodName               = "/identity.v1.IdentityService/ListTenantMembers"
 	IdentityService_RemoveTenantMember_FullMethodName              = "/identity.v1.IdentityService/RemoveTenantMember"
+	IdentityService_CreateTenant_FullMethodName                    = "/identity.v1.IdentityService/CreateTenant"
+	IdentityService_ListMyTenants_FullMethodName                   = "/identity.v1.IdentityService/ListMyTenants"
 	IdentityService_InviteUser_FullMethodName                      = "/identity.v1.IdentityService/InviteUser"
 	IdentityService_MergeUsers_FullMethodName                      = "/identity.v1.IdentityService/MergeUsers"
 	IdentityService_AcceptInvitation_FullMethodName                = "/identity.v1.IdentityService/AcceptInvitation"
@@ -411,6 +413,20 @@ type IdentityServiceClient interface {
 	ListTenantInvitations(ctx context.Context, in *ListTenantInvitationsRequest, opts ...grpc.CallOption) (*ListTenantInvitationsResponse, error)
 	ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error)
 	RemoveTenantMember(ctx context.Context, in *RemoveTenantMemberRequest, opts ...grpc.CallOption) (*RemoveTenantMemberResponse, error)
+	// Self-service tenants. Authenticated and project-scoped. CreateTenant
+	// makes an active tenant with the caller as its owner, in one
+	// transaction; it is FAILED_PRECONDITION unless the project's config
+	// sets tenants.self_service, PERMISSION_DENIED for an anonymous or agent
+	// account, INVALID_ARGUMENT for a blank or over-long name, and
+	// RESOURCE_EXHAUSTED once the caller has created the per-user number of
+	// tenants allowed in the window. It carries no idempotency key: a retry
+	// after a lost response creates a second tenant, so reconcile with
+	// ListMyTenants. ListMyTenants returns the active tenants the caller is
+	// an active member of in this project. RefreshToken's tenant_id selects
+	// one of them for the access token. Available only on the postgres
+	// control-plane driver; memory deployments return Unimplemented.
+	CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error)
+	ListMyTenants(ctx context.Context, in *ListMyTenantsRequest, opts ...grpc.CallOption) (*ListMyTenantsResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*InviteUserResponse, error)
@@ -1738,6 +1754,26 @@ func (c *identityServiceClient) RemoveTenantMember(ctx context.Context, in *Remo
 	return out, nil
 }
 
+func (c *identityServiceClient) CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateTenantResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListMyTenants(ctx context.Context, in *ListMyTenantsRequest, opts ...grpc.CallOption) (*ListMyTenantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMyTenantsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListMyTenants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) InviteUser(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*InviteUserResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InviteUserResponse)
@@ -2313,6 +2349,20 @@ type IdentityServiceServer interface {
 	ListTenantInvitations(context.Context, *ListTenantInvitationsRequest) (*ListTenantInvitationsResponse, error)
 	ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error)
 	RemoveTenantMember(context.Context, *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error)
+	// Self-service tenants. Authenticated and project-scoped. CreateTenant
+	// makes an active tenant with the caller as its owner, in one
+	// transaction; it is FAILED_PRECONDITION unless the project's config
+	// sets tenants.self_service, PERMISSION_DENIED for an anonymous or agent
+	// account, INVALID_ARGUMENT for a blank or over-long name, and
+	// RESOURCE_EXHAUSTED once the caller has created the per-user number of
+	// tenants allowed in the window. It carries no idempotency key: a retry
+	// after a lost response creates a second tenant, so reconcile with
+	// ListMyTenants. ListMyTenants returns the active tenants the caller is
+	// an active member of in this project. RefreshToken's tenant_id selects
+	// one of them for the access token. Available only on the postgres
+	// control-plane driver; memory deployments return Unimplemented.
+	CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error)
+	ListMyTenants(context.Context, *ListMyTenantsRequest) (*ListMyTenantsResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error)
@@ -2792,6 +2842,12 @@ func (UnimplementedIdentityServiceServer) ListTenantMembers(context.Context, *Li
 }
 func (UnimplementedIdentityServiceServer) RemoveTenantMember(context.Context, *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RemoveTenantMember not implemented")
+}
+func (UnimplementedIdentityServiceServer) CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateTenant not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListMyTenants(context.Context, *ListMyTenantsRequest) (*ListMyTenantsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListMyTenants not implemented")
 }
 func (UnimplementedIdentityServiceServer) InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InviteUser not implemented")
@@ -5094,6 +5150,42 @@ func _IdentityService_RemoveTenantMember_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_CreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateTenant(ctx, req.(*CreateTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListMyTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMyTenantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListMyTenants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListMyTenants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListMyTenants(ctx, req.(*ListMyTenantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_InviteUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(InviteUserRequest)
 	if err := dec(in); err != nil {
@@ -6196,6 +6288,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RemoveTenantMember",
 			Handler:    _IdentityService_RemoveTenantMember_Handler,
+		},
+		{
+			MethodName: "CreateTenant",
+			Handler:    _IdentityService_CreateTenant_Handler,
+		},
+		{
+			MethodName: "ListMyTenants",
+			Handler:    _IdentityService_ListMyTenants_Handler,
 		},
 		{
 			MethodName: "InviteUser",

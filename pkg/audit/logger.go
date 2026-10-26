@@ -311,6 +311,12 @@ const (
 	EventAgentTransferRequested EventType = "agent_transfer_requested"
 	EventAgentTransferDeclined  EventType = "agent_transfer_declined"
 	EventAgentTransferCancelled EventType = "agent_transfer_cancelled"
+
+	// EventTenantCreated records a person creating a tenant they own
+	// (CreateTenant): actor and target the creator, with the new tenant's id
+	// in the details. A refused attempt over the creation limit is logged with
+	// success=false and a `reason` detail, so a burst of attempts is visible.
+	EventTenantCreated EventType = "tenant_created"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -395,6 +401,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventAgentTransferRequested:        {},
 	EventAgentTransferDeclined:         {},
 	EventAgentTransferCancelled:        {},
+	EventTenantCreated:                 {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

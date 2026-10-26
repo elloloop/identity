@@ -1,10 +1,14 @@
 package middleware
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/elloloop/identity/internal/service"
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
 )
 
@@ -171,13 +175,82 @@ func isAuthExempt(path string) bool {
 		strings.HasPrefix(path, SCIMPathPrefix)
 }
 
+// TenantLookup reads a tenant of a project; (nil, nil) when there is none.
+// service.TenantStore satisfies it.
+type TenantLookup interface {
+	GetTenant(ctx context.Context, projectID, tenantID string) (*service.Tenant, error)
+}
+
+// TokenTenants is the rule a verified token's "tenant" claim must meet.
+//
+// A token carries Default unless RefreshToken selected a tenant for it, in
+// which case it carries that tenant's id. Such a token is accepted only while
+// the tenant is a claimed tenant of the token's project, so suspending a
+// tenant ends its tokens at their next request; ending a membership ends
+// them at their next refresh, within one access-token lifetime.
+type TokenTenants struct {
+	// Default is the deployment's storage tenant (DefaultTenantID). Empty
+	// disables the check: every tenant claim is accepted.
+	Default string
+	// Selectable resolves a selected tenant. nil accepts only Default.
+	Selectable TenantLookup
+}
+
+var (
+	// errTokenTenantRejected is a token whose tenant claim the rule refuses.
+	errTokenTenantRejected = errors.New("token tenant not accepted")
+	// errTokenTenantLookup is a failed read of a selected tenant: the token
+	// may be good, so the request is answered as unavailable, not refused.
+	errTokenTenantLookup = errors.New("token tenant lookup failed")
+)
+
+// accept applies the rule to verified claims.
+func (t TokenTenants) accept(ctx context.Context, claims *jwtpkg.Claims) error {
+	if t.Default == "" || claims.Tenant == t.Default {
+		return nil
+	}
+	if t.Selectable == nil || claims.Tenant == "" || claims.Project == "" {
+		return errTokenTenantRejected
+	}
+	tenant, err := t.Selectable.GetTenant(ctx, claims.Project, claims.Tenant)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errTokenTenantLookup, err)
+	}
+	if tenant == nil || tenant.Status != service.TenantStatusClaimed {
+		return errTokenTenantRejected
+	}
+	return nil
+}
+
+// verifyRequestToken verifies an access token and applies the tenant rule.
+func verifyRequestToken(ctx context.Context, token string, kp jwtpkg.KeyProvider, tenants TokenTenants, expectedAudience string, requireAudience bool) (*jwtpkg.Claims, error) {
+	claims, err := jwtpkg.VerifyAccessToken(token, kp, "", expectedAudience, requireAudience)
+	if err != nil {
+		return nil, err
+	}
+	if err := tenants.accept(ctx, claims); err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// writeTokenRefusal answers a request whose token verifyRequestToken refused:
+// 503 when a selected tenant could not be read, 401 otherwise.
+func writeTokenRefusal(w http.ResponseWriter, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if errors.Is(err, errTokenTenantLookup) {
+		http.Error(w, `{"code":"unavailable","message":"Token tenant lookup failed"}`, http.StatusServiceUnavailable)
+		return
+	}
+	http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
+}
+
 // AuthMiddleware verifies JWT Bearer tokens on non-exempt paths and injects the
 // authenticated user ID into the X-Authenticated-User-Id request header so
 // downstream Connect handlers can read it.
 //
-// expectedTenant, when non-empty, is enforced on every verified token: tokens
-// whose "tenant" claim does not match are rejected. Pass an empty string to
-// disable the cross-tenant check.
+// tenants is the rule every verified token's "tenant" claim must meet; the
+// zero value disables the check.
 //
 // expectedAudience and requireAudience are passed through to
 // jwtpkg.VerifyAccessToken — see that function for the audience policy.
@@ -185,7 +258,7 @@ func isAuthExempt(path string) bool {
 // For auth-exempt paths the middleware still attempts to parse and verify a
 // token when one is present (e.g. GetCurrentUser may optionally read the
 // caller identity) but never rejects the request.
-func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience string, requireAudience bool) func(http.Handler) http.Handler {
+func AuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expectedAudience string, requireAudience bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
@@ -198,7 +271,7 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience stri
 			if isAuthExempt(path) {
 				// Still try to parse auth if present (for GetCurrentUser).
 				if token := extractBearerToken(r); token != "" {
-					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil {
+					if claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience); err == nil {
 						setAuthHeaders(r, claims)
 					}
 				}
@@ -214,10 +287,9 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience stri
 				return
 			}
 
-			claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience)
+			claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience)
 			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
+				writeTokenRefusal(w, err)
 				return
 			}
 

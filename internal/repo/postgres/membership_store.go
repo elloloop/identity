@@ -130,6 +130,61 @@ func (s *MembershipStore) ListMembershipsForUser(ctx context.Context, projectID,
 	return s.queryMemberships(ctx, "ListMembershipsForUser", q, projectID, userID)
 }
 
+// activeUserTenantsQuery selects the tenants a user may act in: an active
+// membership in a claimed tenant of the project. ListActiveTenantsForUser
+// and GetActiveTenantForUser share it, so a tenant a refresh may select is
+// exactly one the list shows. The schema does not tie a membership's
+// project_id to its tenant's, so the join requires both to be the project.
+const activeUserTenantsQuery = `
+	SELECT t.id, t.name, m.role
+	FROM tenant_memberships m
+	JOIN tenants t ON t.project_id = m.project_id AND t.id = m.tenant_id
+	WHERE m.project_id = $1 AND m.user_id = $2
+	  AND m.status = 'active' AND t.status = 'claimed'`
+
+// ListActiveTenantsForUser returns the tenants a user may act in within a
+// project, ordered by name, then id.
+func (s *MembershipStore) ListActiveTenantsForUser(ctx context.Context, projectID, userID string) ([]*service.UserTenant, error) {
+	if projectID == "" || userID == "" {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, activeUserTenantsQuery+` ORDER BY t.name, t.id`, projectID, userID)
+	if err != nil {
+		return nil, wrapPgErr("ListActiveTenantsForUser", err)
+	}
+	defer rows.Close()
+	var out []*service.UserTenant
+	for rows.Next() {
+		var ut service.UserTenant
+		if err := rows.Scan(&ut.TenantID, &ut.Name, &ut.Role); err != nil {
+			return nil, wrapPgErr("ListActiveTenantsForUser scan", err)
+		}
+		out = append(out, &ut)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapPgErr("ListActiveTenantsForUser rows", err)
+	}
+	return out, nil
+}
+
+// GetActiveTenantForUser returns the tenant when the user may act in it, or
+// (nil, nil).
+func (s *MembershipStore) GetActiveTenantForUser(ctx context.Context, projectID, tenantID, userID string) (*service.UserTenant, error) {
+	if projectID == "" || tenantID == "" || userID == "" {
+		return nil, nil
+	}
+	var ut service.UserTenant
+	err := s.pool.QueryRow(ctx, activeUserTenantsQuery+` AND t.id = $3`, projectID, userID, tenantID).
+		Scan(&ut.TenantID, &ut.Name, &ut.Role)
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapPgErr("GetActiveTenantForUser", err)
+	}
+	return &ut, nil
+}
+
 // ListMembershipsForTenant returns every membership in a tenant, newest
 // first.
 func (s *MembershipStore) ListMembershipsForTenant(ctx context.Context, projectID, tenantID string) ([]*service.TenantMembership, error) {

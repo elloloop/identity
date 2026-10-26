@@ -394,6 +394,12 @@ const (
 	// IdentityServiceRemoveTenantMemberProcedure is the fully-qualified name of the IdentityService's
 	// RemoveTenantMember RPC.
 	IdentityServiceRemoveTenantMemberProcedure = "/identity.v1.IdentityService/RemoveTenantMember"
+	// IdentityServiceCreateTenantProcedure is the fully-qualified name of the IdentityService's
+	// CreateTenant RPC.
+	IdentityServiceCreateTenantProcedure = "/identity.v1.IdentityService/CreateTenant"
+	// IdentityServiceListMyTenantsProcedure is the fully-qualified name of the IdentityService's
+	// ListMyTenants RPC.
+	IdentityServiceListMyTenantsProcedure = "/identity.v1.IdentityService/ListMyTenants"
 	// IdentityServiceInviteUserProcedure is the fully-qualified name of the IdentityService's
 	// InviteUser RPC.
 	IdentityServiceInviteUserProcedure = "/identity.v1.IdentityService/InviteUser"
@@ -731,6 +737,20 @@ type IdentityServiceClient interface {
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
 	ListTenantMembers(context.Context, *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error)
 	RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error)
+	// Self-service tenants. Authenticated and project-scoped. CreateTenant
+	// makes an active tenant with the caller as its owner, in one
+	// transaction; it is FAILED_PRECONDITION unless the project's config
+	// sets tenants.self_service, PERMISSION_DENIED for an anonymous or agent
+	// account, INVALID_ARGUMENT for a blank or over-long name, and
+	// RESOURCE_EXHAUSTED once the caller has created the per-user number of
+	// tenants allowed in the window. It carries no idempotency key: a retry
+	// after a lost response creates a second tenant, so reconcile with
+	// ListMyTenants. ListMyTenants returns the active tenants the caller is
+	// an active member of in this project. RefreshToken's tenant_id selects
+	// one of them for the access token. Available only on the postgres
+	// control-plane driver; memory deployments return Unimplemented.
+	CreateTenant(context.Context, *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error)
+	ListMyTenants(context.Context, *connect.Request[v1.ListMyTenantsRequest]) (*connect.Response[v1.ListMyTenantsResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
@@ -1577,6 +1597,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("RemoveTenantMember")),
 			connect.WithClientOptions(opts...),
 		),
+		createTenant: connect.NewClient[v1.CreateTenantRequest, v1.CreateTenantResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateTenantProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateTenant")),
+			connect.WithClientOptions(opts...),
+		),
+		listMyTenants: connect.NewClient[v1.ListMyTenantsRequest, v1.ListMyTenantsResponse](
+			httpClient,
+			baseURL+IdentityServiceListMyTenantsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListMyTenants")),
+			connect.WithClientOptions(opts...),
+		),
 		inviteUser: connect.NewClient[v1.InviteUserRequest, v1.InviteUserResponse](
 			httpClient,
 			baseURL+IdentityServiceInviteUserProcedure,
@@ -1907,6 +1939,8 @@ type identityServiceClient struct {
 	listTenantInvitations           *connect.Client[v1.ListTenantInvitationsRequest, v1.ListTenantInvitationsResponse]
 	listTenantMembers               *connect.Client[v1.ListTenantMembersRequest, v1.ListTenantMembersResponse]
 	removeTenantMember              *connect.Client[v1.RemoveTenantMemberRequest, v1.RemoveTenantMemberResponse]
+	createTenant                    *connect.Client[v1.CreateTenantRequest, v1.CreateTenantResponse]
+	listMyTenants                   *connect.Client[v1.ListMyTenantsRequest, v1.ListMyTenantsResponse]
 	inviteUser                      *connect.Client[v1.InviteUserRequest, v1.InviteUserResponse]
 	mergeUsers                      *connect.Client[v1.MergeUsersRequest, v1.MergeUsersResponse]
 	acceptInvitation                *connect.Client[v1.AcceptInvitationRequest, v1.AcceptInvitationResponse]
@@ -2548,6 +2582,16 @@ func (c *identityServiceClient) RemoveTenantMember(ctx context.Context, req *con
 	return c.removeTenantMember.CallUnary(ctx, req)
 }
 
+// CreateTenant calls identity.v1.IdentityService.CreateTenant.
+func (c *identityServiceClient) CreateTenant(ctx context.Context, req *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error) {
+	return c.createTenant.CallUnary(ctx, req)
+}
+
+// ListMyTenants calls identity.v1.IdentityService.ListMyTenants.
+func (c *identityServiceClient) ListMyTenants(ctx context.Context, req *connect.Request[v1.ListMyTenantsRequest]) (*connect.Response[v1.ListMyTenantsResponse], error) {
+	return c.listMyTenants.CallUnary(ctx, req)
+}
+
 // InviteUser calls identity.v1.IdentityService.InviteUser.
 func (c *identityServiceClient) InviteUser(ctx context.Context, req *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error) {
 	return c.inviteUser.CallUnary(ctx, req)
@@ -2952,6 +2996,20 @@ type IdentityServiceHandler interface {
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
 	ListTenantMembers(context.Context, *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error)
 	RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error)
+	// Self-service tenants. Authenticated and project-scoped. CreateTenant
+	// makes an active tenant with the caller as its owner, in one
+	// transaction; it is FAILED_PRECONDITION unless the project's config
+	// sets tenants.self_service, PERMISSION_DENIED for an anonymous or agent
+	// account, INVALID_ARGUMENT for a blank or over-long name, and
+	// RESOURCE_EXHAUSTED once the caller has created the per-user number of
+	// tenants allowed in the window. It carries no idempotency key: a retry
+	// after a lost response creates a second tenant, so reconcile with
+	// ListMyTenants. ListMyTenants returns the active tenants the caller is
+	// an active member of in this project. RefreshToken's tenant_id selects
+	// one of them for the access token. Available only on the postgres
+	// control-plane driver; memory deployments return Unimplemented.
+	CreateTenant(context.Context, *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error)
+	ListMyTenants(context.Context, *connect.Request[v1.ListMyTenantsRequest]) (*connect.Response[v1.ListMyTenantsResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
@@ -3794,6 +3852,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("RemoveTenantMember")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceCreateTenantHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateTenantProcedure,
+		svc.CreateTenant,
+		connect.WithSchema(identityServiceMethods.ByName("CreateTenant")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListMyTenantsHandler := connect.NewUnaryHandler(
+		IdentityServiceListMyTenantsProcedure,
+		svc.ListMyTenants,
+		connect.WithSchema(identityServiceMethods.ByName("ListMyTenants")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceInviteUserHandler := connect.NewUnaryHandler(
 		IdentityServiceInviteUserProcedure,
 		svc.InviteUser,
@@ -4242,6 +4312,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceListTenantMembersHandler.ServeHTTP(w, r)
 		case IdentityServiceRemoveTenantMemberProcedure:
 			identityServiceRemoveTenantMemberHandler.ServeHTTP(w, r)
+		case IdentityServiceCreateTenantProcedure:
+			identityServiceCreateTenantHandler.ServeHTTP(w, r)
+		case IdentityServiceListMyTenantsProcedure:
+			identityServiceListMyTenantsHandler.ServeHTTP(w, r)
 		case IdentityServiceInviteUserProcedure:
 			identityServiceInviteUserHandler.ServeHTTP(w, r)
 		case IdentityServiceMergeUsersProcedure:
@@ -4801,6 +4875,14 @@ func (UnimplementedIdentityServiceHandler) ListTenantMembers(context.Context, *c
 
 func (UnimplementedIdentityServiceHandler) RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RemoveTenantMember is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CreateTenant(context.Context, *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateTenant is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListMyTenants(context.Context, *connect.Request[v1.ListMyTenantsRequest]) (*connect.Response[v1.ListMyTenantsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListMyTenants is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error) {

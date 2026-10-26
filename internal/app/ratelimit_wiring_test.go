@@ -494,3 +494,40 @@ func TestBuildRateLimitsAgentMachinePaths(t *testing.T) {
 	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceCreateAgentProcedure, "203.0.113.9", 1)
 	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceIntrospectAgentMachineProcedure, "203.0.113.9", 5)
 }
+
+// TestBuildRateLimits_TenantCreationLimited asserts CreateTenant is metered on
+// its own budget, and that the budget does not reach CreateTenantInvitation,
+// whose name it prefixes.
+func TestBuildRateLimits_TenantCreationLimited(t *testing.T) {
+	cfg := &config.Config{
+		RateLimitWindowSeconds: 60,
+		RateLimitSignupPerIP:   2,
+		RateLimitLoginPerIP:    5,
+		RateLimitResetPerIP:    5,
+		RateLimitVerifyPerIP:   20,
+
+		RateLimitPasswordlessPerIP: 5,
+		RateLimitPhonePerIP:        5,
+		RateLimitBootstrapPerIP:    5,
+	}
+	limits := buildRateLimits(cfg)
+	var tag string
+	for _, l := range limits {
+		if l.PathPrefix == "/identity.v1.IdentityService/CreateTenant" {
+			tag = l.Tag
+		}
+	}
+	require.Equal(t, "tenant_create", tag, "CreateTenant must carry its own rate limit")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, "/identity.v1.IdentityService/CreateTenant", "7.7.7.9", 2)
+
+	// The same address is still admitted to CreateTenantInvitation.
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/CreateTenantInvitation", nil)
+	req.Header.Set(middleware.ClientIPHeader, "7.7.7.9")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code, "CreateTenantInvitation must not share CreateTenant's budget")
+}

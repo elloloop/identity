@@ -102,6 +102,48 @@ docker run ... \\
     lang="bash"
   />
 
+  <h2>Self-service tenants</h2>
+  <p>
+    A Project can let its signed-in users create tenants of their own, for a
+    team or a workspace that has no company domain behind it. It is off by
+    default; the Project turns it on in its <code>config_json</code> (the
+    default Project takes it from
+    <code>GATEWAY_SELF_SERVICE_TENANTS_ENABLED</code>):
+  </p>
+  <Code code={`{ "tenants": { "self_service": true } }`} lang="json" />
+  <p>
+    <code>CreateTenant(name)</code> then creates a claimed tenant and makes the
+    caller its <code>owner</code>, in one transaction. Each user may create at
+    most <code>GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER</code> tenants (default
+    10) per Project in <code>GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS</code>
+    (default one day); past that the call is refused with
+    <code>RESOURCE_EXHAUSTED</code>. With the setting off it is
+    <code>FAILED_PRECONDITION</code>. A retried call can create a second
+    tenant, so reconcile with <code>ListMyTenants</code>, which returns every
+    claimed tenant the caller is an active member of, with their role.
+  </p>
+
+  <h2>Choosing a tenant for a token</h2>
+  <p>
+    An access token's <code>tenant</code> claim is the deployment default
+    unless the client asks for another on refresh:
+  </p>
+  <Code
+    code={`RefreshToken(refresh_token=..., tenant_id="tenant_01HZ...")
+  -> access token with "tenant": "tenant_01HZ..."   # an active member of a claimed tenant
+  -> PERMISSION_DENIED, refresh token still valid   # anything else`}
+    lang="bash"
+  />
+  <p>
+    A refused selection consumes nothing, so the client can refresh again
+    without <code>tenant_id</code>. Each refresh chooses again; one without
+    <code>tenant_id</code> returns to the default. Identity checks the tenant
+    on every request it serves, so suspending a tenant refuses its tokens at
+    once; ending a membership takes effect at the next refresh, within the
+    access-token lifetime. A service that verifies tokens itself must accept a
+    non-default <code>tenant</code> before its clients select one.
+  </p>
+
   <p>
     See <a href="/identity/docs/concepts/auth-model">Auth model</a> for how the Project
     and Tenant appear in JWT claims, and

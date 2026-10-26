@@ -37,13 +37,13 @@ func NewTenantStore(r *pgRepository) *TenantStore {
 }
 
 const tenantColumns = `
-	id, project_id, name, primary_domain, status,
+	id, project_id, name, primary_domain, status, created_by,
 	created_at_ms, updated_at_ms`
 
 func scanTenant(row pgx.Row) (*service.Tenant, error) {
 	var t service.Tenant
 	if err := row.Scan(
-		&t.ID, &t.ProjectID, &t.Name, &t.PrimaryDomain, &t.Status,
+		&t.ID, &t.ProjectID, &t.Name, &t.PrimaryDomain, &t.Status, &t.CreatedBy,
 		&t.CreatedAtMs, &t.UpdatedAtMs,
 	); err != nil {
 		return nil, err
@@ -77,12 +77,12 @@ func (s *TenantStore) CreateTenant(ctx context.Context, t *service.Tenant) (stri
 	}
 	const q = `
 		INSERT INTO tenants (
-			id, project_id, name, primary_domain, status,
+			id, project_id, name, primary_domain, status, created_by,
 			created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 	if _, err := s.pool.Exec(
 		ctx, q,
-		id, t.ProjectID, t.Name, t.PrimaryDomain, status,
+		id, t.ProjectID, t.Name, t.PrimaryDomain, status, t.CreatedBy,
 		t.CreatedAtMs, t.UpdatedAtMs,
 	); err != nil {
 		return "", wrapPgErr("CreateTenant", err)
@@ -168,6 +168,94 @@ func (s *TenantStore) ListTenants(ctx context.Context, projectID string) ([]*ser
 		return nil, wrapPgErr("ListTenants rows", err)
 	}
 	return out, nil
+}
+
+// CreateOwnedTenant creates a claimed tenant and its creator's active owner
+// membership in one transaction. The per-user limit is counted under a
+// transaction-scoped advisory lock keyed on (project, owner), so two
+// concurrent requests from one user are serialized and cannot both pass a
+// limit only one of them fits under. Each key part is length-prefixed, so no
+// two distinct pairs share a key.
+func (s *TenantStore) CreateOwnedTenant(ctx context.Context, req service.OwnedTenantRequest) (*service.Tenant, *service.TenantMembership, error) {
+	if req.ProjectID == "" || req.OwnerID == "" {
+		return nil, nil, fmt.Errorf("%w: project_id and owner_id are required", service.ErrInvalidArgument)
+	}
+	if req.MaxPerWindow <= 0 {
+		return nil, nil, fmt.Errorf("%w: max_per_window must be positive", service.ErrInvalidArgument)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, wrapPgErr("CreateOwnedTenant", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	lockKey := fmt.Sprintf("tenant_create:%d:%s:%d:%s",
+		len(req.ProjectID), req.ProjectID, len(req.OwnerID), req.OwnerID)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		return nil, nil, wrapPgErr("CreateOwnedTenant(lock)", err)
+	}
+
+	var created int
+	if err := tx.QueryRow(
+		ctx, `
+		SELECT count(*) FROM tenants
+		WHERE project_id = $1 AND created_by = $2 AND created_at_ms >= $3`,
+		req.ProjectID, req.OwnerID, req.WindowStartMs,
+	).Scan(&created); err != nil {
+		return nil, nil, wrapPgErr("CreateOwnedTenant(count)", err)
+	}
+	if created >= req.MaxPerWindow {
+		return nil, nil, service.ErrTenantCreationLimited
+	}
+
+	now := nowMs()
+	t := &service.Tenant{
+		ID:          newID(),
+		ProjectID:   req.ProjectID,
+		Name:        req.Name,
+		Status:      service.TenantStatusClaimed,
+		CreatedBy:   req.OwnerID,
+		CreatedAtMs: now,
+		UpdatedAtMs: now,
+	}
+	if _, err := tx.Exec(
+		ctx, `
+		INSERT INTO tenants (
+			id, project_id, name, primary_domain, status, created_by,
+			created_at_ms, updated_at_ms
+		) VALUES ($1, $2, $3, '', $4, $5, $6, $6)`,
+		t.ID, t.ProjectID, t.Name, t.Status, t.CreatedBy, now,
+	); err != nil {
+		return nil, nil, wrapPgErr("CreateOwnedTenant(tenant)", err)
+	}
+
+	m := &service.TenantMembership{
+		ID:          newID(),
+		ProjectID:   req.ProjectID,
+		TenantID:    t.ID,
+		UserID:      req.OwnerID,
+		Source:      service.MembershipSourceCreated,
+		Role:        service.RoleOwner,
+		Status:      service.MembershipStatusActive,
+		CreatedAtMs: now,
+		UpdatedAtMs: now,
+	}
+	if _, err := tx.Exec(
+		ctx, `
+		INSERT INTO tenant_memberships (
+			id, project_id, tenant_id, user_id, source, role, status,
+			created_at_ms, updated_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
+		m.ID, m.ProjectID, m.TenantID, m.UserID, m.Source, m.Role, m.Status, now,
+	); err != nil {
+		return nil, nil, wrapPgErr("CreateOwnedTenant(membership)", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, wrapPgErr("CreateOwnedTenant(commit)", err)
+	}
+	return t, m, nil
 }
 
 // ── domains ─────────────────────────────────────────────────────────────

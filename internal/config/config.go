@@ -156,6 +156,26 @@ const DefaultAgentsMaxPerOwner = 25
 // one listing page, so ListAgents always returns every agent an owner has.
 const MaxAgentsMaxPerOwner = 500
 
+// DefaultSelfServiceTenantsMaxPerUser is how many tenants one user may create
+// through CreateTenant in each window when
+// GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER is unset or 0.
+const DefaultSelfServiceTenantsMaxPerUser = 10
+
+// MaxSelfServiceTenantsMaxPerUser is the largest
+// GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER accepted. Each tenant is a row
+// set an operator may have to clean up, so the cap stays far below anything
+// a person creates by hand.
+const MaxSelfServiceTenantsMaxPerUser = 1000
+
+// DefaultSelfServiceTenantsWindowSeconds is the window the per-user creation
+// limit counts over when GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS is unset
+// or 0 (one day).
+const DefaultSelfServiceTenantsWindowSeconds = 86400
+
+// MaxSelfServiceTenantsWindowSeconds is the longest window accepted (30
+// days).
+const MaxSelfServiceTenantsWindowSeconds = 30 * 86400
+
 // DefaultAuditRetentionDays is the default audit-log retention window in days
 // (730 = 24 months). Audit events record security-relevant actions together
 // with the caller's IP address and user-agent, so retaining them forever holds
@@ -1265,6 +1285,21 @@ type Config struct {
 	// agent past it is refused. Driven by GATEWAY_AGENTS_MAX_PER_OWNER.
 	AgentsMaxPerOwner int
 
+	// SelfServiceTenantsEnabled lets a signed-in user of the DEFAULT project
+	// create a tenant they own (CreateTenant). Other projects turn it on with
+	// tenants.self_service in their own config_json. Default OFF. Driven by
+	// GATEWAY_SELF_SERVICE_TENANTS_ENABLED.
+	SelfServiceTenantsEnabled bool
+	// SelfServiceTenantsMaxPerUser caps how many tenants one user may create
+	// in each window, from 0 to 1000 (0 selects the default, 10); a creation
+	// past it is RESOURCE_EXHAUSTED. Deployment-wide. Driven by
+	// GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER.
+	SelfServiceTenantsMaxPerUser int
+	// SelfServiceTenantsWindowSeconds is the window the per-user creation
+	// limit counts over, from 0 to 2592000 (0 selects the default, 86400).
+	// Driven by GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS.
+	SelfServiceTenantsWindowSeconds int
+
 	// AuditRetentionDays is the audit-log retention window in days: on each tick
 	// the background sweeper deletes audit events whose occurred-at instant is
 	// older than now - AuditRetentionDays, so the service stops holding
@@ -1645,6 +1680,9 @@ func loadFromEnv() *Config {
 		AgentOAuthRefreshIdleSeconds:      envInt("GATEWAY_AGENT_OAUTH_REFRESH_IDLE_SECONDS", DefaultAgentOAuthRefreshIdleSeconds),
 		AgentOAuthResourceCredentialsJSON: envStr("GATEWAY_AGENT_OAUTH_RESOURCE_CREDENTIALS_JSON", ""),
 		AgentsMaxPerOwner:                 envInt("GATEWAY_AGENTS_MAX_PER_OWNER", DefaultAgentsMaxPerOwner),
+		SelfServiceTenantsEnabled:         envBool("GATEWAY_SELF_SERVICE_TENANTS_ENABLED", false),
+		SelfServiceTenantsMaxPerUser:      envInt("GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", DefaultSelfServiceTenantsMaxPerUser),
+		SelfServiceTenantsWindowSeconds:   envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
 		AuditRetentionDays:                envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
 
 		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
@@ -2123,6 +2161,18 @@ func (c *Config) Validate() error {
 		return fmt.Errorf(
 			"config: GATEWAY_AGENTS_MAX_PER_OWNER=%d must be between 0 and %d (0 selects the default, %d)",
 			c.AgentsMaxPerOwner, MaxAgentsMaxPerOwner, DefaultAgentsMaxPerOwner,
+		)
+	}
+	if c.SelfServiceTenantsMaxPerUser < 0 || c.SelfServiceTenantsMaxPerUser > MaxSelfServiceTenantsMaxPerUser {
+		return fmt.Errorf(
+			"config: GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER=%d must be between 0 and %d (0 selects the default, %d; the limit cannot be turned off)",
+			c.SelfServiceTenantsMaxPerUser, MaxSelfServiceTenantsMaxPerUser, DefaultSelfServiceTenantsMaxPerUser,
+		)
+	}
+	if c.SelfServiceTenantsWindowSeconds < 0 || c.SelfServiceTenantsWindowSeconds > MaxSelfServiceTenantsWindowSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS=%d must be between 0 and %d (0 selects the default, %d)",
+			c.SelfServiceTenantsWindowSeconds, MaxSelfServiceTenantsWindowSeconds, DefaultSelfServiceTenantsWindowSeconds,
 		)
 	}
 	if c.AccountMergeReauthMaxAgeSeconds < 0 || c.AccountMergeReauthMaxAgeSeconds > MaxAccountMergeReauthMaxAgeSeconds {
@@ -2774,6 +2824,34 @@ func (c *Config) AgentsPerOwnerLimit() int {
 		return MaxAgentsMaxPerOwner
 	default:
 		return c.AgentsMaxPerOwner
+	}
+}
+
+// SelfServiceTenantsLimit is how many tenants one user may create in each
+// window: the configured value, or the default when unset.
+func (c *Config) SelfServiceTenantsLimit() int {
+	switch {
+	case c.SelfServiceTenantsMaxPerUser <= 0:
+		return DefaultSelfServiceTenantsMaxPerUser
+	case c.SelfServiceTenantsMaxPerUser > MaxSelfServiceTenantsMaxPerUser:
+		// Validate refuses this at boot; a Config built in code without it
+		// still never allows more than the cap.
+		return MaxSelfServiceTenantsMaxPerUser
+	default:
+		return c.SelfServiceTenantsMaxPerUser
+	}
+}
+
+// SelfServiceTenantsWindow is the window the per-user creation limit counts
+// over: the configured value, or the default when unset.
+func (c *Config) SelfServiceTenantsWindow() time.Duration {
+	switch {
+	case c.SelfServiceTenantsWindowSeconds <= 0:
+		return DefaultSelfServiceTenantsWindowSeconds * time.Second
+	case c.SelfServiceTenantsWindowSeconds > MaxSelfServiceTenantsWindowSeconds:
+		return MaxSelfServiceTenantsWindowSeconds * time.Second
+	default:
+		return time.Duration(c.SelfServiceTenantsWindowSeconds) * time.Second
 	}
 }
 

@@ -419,3 +419,25 @@ func TestProjectResolver_NonOAuthRoute_QueryParamIgnored(t *testing.T) {
 	require.NotNil(t, cap.scope)
 	assert.Equal(t, defProjectID, cap.scope.ProjectID)
 }
+
+// Both the default pin and a resolved project carry the self-service tenant
+// policy, so CreateTenant judges every project by its own setting.
+func TestProjectResolver_CarriesTenants(t *testing.T) {
+	tenants := service.ProjectTenantsConfig{SelfService: true}
+	cap := &projectScopeCapture{}
+	h := NewProjectResolver(DefaultProject{ProjectID: defProjectID, StorageScopeID: defScopeID, Tenants: tenants}, nil, nil)(cap.handler())
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/x", nil))
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, tenants, cap.scope.Tenants)
+
+	resolver := &fakeProjectResolver{
+		byHost: map[string]*service.ResolvedProject{
+			"auth.acme.test": {ID: "proj-acme", StorageScopeID: "scope-acme", Tenants: tenants},
+		},
+	}
+	_, resolved := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
+		r.Host = "auth.acme.test"
+	})
+	require.NotNil(t, resolved.scope)
+	assert.Equal(t, tenants, resolved.scope.Tenants)
+}

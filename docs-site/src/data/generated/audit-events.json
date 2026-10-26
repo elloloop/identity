@@ -71,6 +71,7 @@
   "qr_login_rejected",
   "scim_auth_failed",
   "session_revoked",
+  "tenant_created",
   "totp_disabled",
   "totp_enabled",
   "totp_verified",

@@ -50,8 +50,26 @@ type Tenant struct {
 	Name          string
 	PrimaryDomain string
 	Status        string
-	CreatedAtMs   int64
-	UpdatedAtMs   int64
+	// CreatedBy is the user who created the tenant through CreateTenant, and
+	// empty on a tenant made any other way. Provenance only, never a foreign
+	// key: deleting that user leaves it in place.
+	CreatedBy   string
+	CreatedAtMs int64
+	UpdatedAtMs int64
+}
+
+// OwnedTenantRequest asks TenantStore.CreateOwnedTenant for a tenant owned
+// by the user who creates it.
+type OwnedTenantRequest struct {
+	ProjectID string
+	Name      string
+	OwnerID   string
+	// MaxPerWindow and WindowStartMs bound how many tenants OwnerID may
+	// create: the request is refused with ErrTenantCreationLimited when
+	// OwnerID has already created MaxPerWindow tenants at or after
+	// WindowStartMs.
+	MaxPerWindow  int
+	WindowStartMs int64
 }
 
 // Domain is an email domain bound to a Tenant within a Project. Verifying
@@ -86,6 +104,12 @@ type TenantStore interface {
 	SetTenantStatus(ctx context.Context, projectID, tenantID, status string) error
 	// ListTenants returns every tenant in a project, newest first.
 	ListTenants(ctx context.Context, projectID string) ([]*Tenant, error)
+	// CreateOwnedTenant creates a claimed tenant and its creator's active
+	// owner membership (source "created") in one transaction, and returns
+	// both. The per-user limit in req is checked inside that transaction,
+	// serialized per (project, owner), so concurrent requests cannot pass it
+	// together.
+	CreateOwnedTenant(ctx context.Context, req OwnedTenantRequest) (*Tenant, *TenantMembership, error)
 }
 
 // DomainStore persists Domains within a Project. Reads that miss return
