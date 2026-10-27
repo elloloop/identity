@@ -153,10 +153,11 @@ type TenantStore interface {
 	// GetTenantByPrimaryDomain returns the tenant whose primary_domain
 	// equals domain (case-insensitive) within a project, or (nil, nil).
 	GetTenantByPrimaryDomain(ctx context.Context, projectID, domain string) (*Tenant, error)
-	// ClaimLatentTenant moves a latent tenant to claimed, comparing and
-	// setting the status in one step so that a suspension made meanwhile is
-	// kept. Unknown ids, and a tenant in any other status, are a no-op.
-	ClaimLatentTenant(ctx context.Context, projectID, tenantID string) error
+	// SetTenantStatus moves a tenant from status from to status to,
+	// comparing and setting in one step so that a change made meanwhile is
+	// kept, and reports whether it moved: false for an unknown id or a
+	// tenant no longer in from.
+	SetTenantStatus(ctx context.Context, projectID, tenantID, from, to string) (bool, error)
 	// ListTenants returns up to q.Limit tenants of q.ProjectID, whatever
 	// their status, newest first (by creation time, then by id descending),
 	// starting after q.After.

@@ -147,21 +147,23 @@ func (s *TenantStore) GetTenantByPrimaryDomain(ctx context.Context, projectID, d
 	return t, nil
 }
 
-// ClaimLatentTenant moves a latent tenant to claimed. The status is
-// compared and set in one statement, so a suspension that lands between a
-// caller's read and this write is kept. Unknown ids, and a tenant in any
-// other status, are a no-op.
-func (s *TenantStore) ClaimLatentTenant(ctx context.Context, projectID, tenantID string) error {
-	if projectID == "" || tenantID == "" {
-		return fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
+// SetTenantStatus moves a tenant from one status to another and reports
+// whether it moved. The status is compared and set in one statement, so a
+// change that lands between a caller's read and this write is kept: a
+// suspension made while a domain verification claims the tenant stays, and
+// so does a claim made while an operator acts on the tenant.
+func (s *TenantStore) SetTenantStatus(ctx context.Context, projectID, tenantID, from, to string) (bool, error) {
+	if projectID == "" || tenantID == "" || from == "" || to == "" {
+		return false, fmt.Errorf("%w: project_id, tenant_id and both statuses are required", service.ErrInvalidArgument)
 	}
 	const q = `
-		UPDATE tenants SET status = 'claimed', updated_at_ms = $3
-		WHERE project_id = $1 AND id = $2 AND status = 'latent'`
-	if _, err := s.pool.Exec(ctx, q, projectID, tenantID, nowMs()); err != nil {
-		return wrapPgErr("ClaimLatentTenant", err)
+		UPDATE tenants SET status = $4, updated_at_ms = $5
+		WHERE project_id = $1 AND id = $2 AND status = $3`
+	tag, err := s.pool.Exec(ctx, q, projectID, tenantID, from, to, nowMs())
+	if err != nil {
+		return false, wrapPgErr("SetTenantStatus", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 // listTenantsFirstPageQuery and listTenantsAfterQuery read one page of a

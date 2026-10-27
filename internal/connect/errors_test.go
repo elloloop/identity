@@ -235,8 +235,9 @@ func TestToConnectErrorUnavailable(t *testing.T) {
 }
 
 // TestToConnectErrorSelfServiceTenants pins the tenant refusals: a feature
-// the server or project has not turned on is FailedPrecondition, and every
-// creation, invitation and domain-attempt limit is ResourceExhausted.
+// the server or project has not turned on, and a status change the tenant's
+// status does not allow, is FailedPrecondition, and every creation,
+// invitation and domain-attempt limit is ResourceExhausted.
 func TestToConnectErrorSelfServiceTenants(t *testing.T) {
 	for err, want := range map[error]connect.Code{
 		service.ErrSelfServiceTenantsDisabled: connect.CodeFailedPrecondition,
@@ -246,6 +247,7 @@ func TestToConnectErrorSelfServiceTenants(t *testing.T) {
 		service.ErrInviterLimited:             connect.CodeResourceExhausted,
 		service.ErrInvitationRecipientLimited: connect.CodeResourceExhausted,
 		service.ErrDomainAttemptsLimited:      connect.CodeResourceExhausted,
+		service.ErrTenantStatusConflict:       connect.CodeFailedPrecondition,
 	} {
 		if got := connect.CodeOf(toConnectError(err)); got != want {
 			t.Errorf("toConnectError(%v) code = %v, want %v", err, got, want)

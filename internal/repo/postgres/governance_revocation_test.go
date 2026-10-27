@@ -248,11 +248,12 @@ func TestGovernanceRevocation_UnchangedWritesRevokeNothing(t *testing.T) {
 
 	// A re-verify on a claimed tenant: the store skips both writes.
 	require.NoError(t, f.domains.SetDomainStatus(ctx, f.project, d, service.DomainStatusVerified, 0))
-	require.NoError(t, f.tenants.ClaimLatentTenant(ctx, f.project, f.tenant))
+	_, err := f.tenants.SetTenantStatus(ctx, f.project, f.tenant, service.TenantStatusLatent, service.TenantStatusClaimed)
+	require.NoError(t, err)
 	f.requireNothingRevoked(ctx, t, e)
 
 	// Written outright, an unchanged row still fires nothing.
-	_, err := f.repo.pool.Exec(ctx, `UPDATE domains SET status=status, tenant_id=tenant_id, domain=upper(domain) WHERE project_id=$1 AND id=$2`, f.project, d)
+	_, err = f.repo.pool.Exec(ctx, `UPDATE domains SET status=status, tenant_id=tenant_id, domain=upper(domain) WHERE project_id=$1 AND id=$2`, f.project, d)
 	require.NoError(t, err)
 	_, err = f.repo.pool.Exec(ctx, `UPDATE tenants SET status=status, primary_domain=primary_domain WHERE project_id=$1 AND id=$2`, f.project, f.tenant)
 	require.NoError(t, err)

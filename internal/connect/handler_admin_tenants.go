@@ -43,6 +43,36 @@ func (h *IdentityHandler) AdminListTenants(
 	return connect.NewResponse(&identitypb.AdminListTenantsResponse{Tenants: out, NextCursor: page.NextCursor}), nil
 }
 
+// AdminSuspendTenant suspends a claimed tenant. Operator-only.
+func (h *IdentityHandler) AdminSuspendTenant(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminSuspendTenantRequest],
+) (*connect.Response[identitypb.AdminSuspendTenantResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	t, err := h.controlAdmin.AdminSuspendTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminSuspendTenantResponse{Tenant: tenantToProto(t)}), nil
+}
+
+// AdminRestoreTenant moves a suspended tenant back to claimed. Operator-only.
+func (h *IdentityHandler) AdminRestoreTenant(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminRestoreTenantRequest],
+) (*connect.Response[identitypb.AdminRestoreTenantResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	t, err := h.controlAdmin.AdminRestoreTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminRestoreTenantResponse{Tenant: tenantToProto(t)}), nil
+}
+
 // tenantToProto converts a service-layer Tenant to the proto wire message.
 func tenantToProto(t *service.Tenant) *identitypb.Tenant {
 	if t == nil {

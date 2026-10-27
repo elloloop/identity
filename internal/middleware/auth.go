@@ -110,6 +110,8 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/AdminAddTenantAdmin":             true,
 	"/identity.v1.IdentityService/AdminGetTenant":                  true,
 	"/identity.v1.IdentityService/AdminListTenants":                true,
+	"/identity.v1.IdentityService/AdminSuspendTenant":              true,
+	"/identity.v1.IdentityService/AdminRestoreTenant":              true,
 	"/identity.v1.IdentityService/UpsertLoginPolicy":               true,
 	"/identity.v1.IdentityService/GetLoginPolicy":                  true,
 	"/identity.v1.IdentityService/DeleteLoginPolicy":               true,

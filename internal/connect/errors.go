@@ -150,6 +150,7 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrLastOwner),
+		errors.Is(err, service.ErrTenantStatusConflict),
 		errors.Is(err, service.ErrPlatformAdminExists),
 		errors.Is(err, service.ErrFirstAdminBootstrapDisabled),
 		errors.Is(err, service.ErrAuthDomainNotVerified),

@@ -46,6 +46,19 @@ func (s *listedTenantStore) ListTenants(_ context.Context, q service.TenantListQ
 	return out, nil
 }
 
+// SetTenantStatus moves one of the held tenants as the postgres store does:
+// only a tenant in from moves.
+func (s *listedTenantStore) SetTenantStatus(_ context.Context, projectID, tenantID, from, to string) (bool, error) {
+	for _, t := range s.tenants {
+		if t.ProjectID == projectID && t.ID == tenantID && t.Status == from {
+			t.Status = to
+			t.UpdatedAtMs++
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func startTenantReadServer(t *testing.T) identityconnectgen.IdentityServiceClient {
 	t.Helper()
 	store := &listedTenantStore{tenants: []*service.Tenant{
@@ -140,4 +153,63 @@ func protoTenantIDs(ts []*identitypb.Tenant) string {
 		ids = append(ids, t.GetId())
 	}
 	return "[" + strings.Join(ids, " ") + "]"
+}
+
+func TestAdminTenantStatus_NilService_Unimplemented(t *testing.T) {
+	t.Parallel()
+	client := startAdminServer(t, nil)
+	ctx := context.Background()
+
+	_, err := client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
+func TestAdminTenantStatus_BadSecret_Denied(t *testing.T) {
+	t.Parallel()
+	client := startTenantReadServer(t)
+	ctx := context.Background()
+
+	for _, secret := range []string{"", "wrong"} {
+		_, err := client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, secret))
+		requireCode(t, err, connect.CodePermissionDenied)
+		_, err = client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", TenantId: "t-3", Reason: "why"}, secret))
+		requireCode(t, err, connect.CodePermissionDenied)
+	}
+}
+
+func TestAdminTenantStatus_Handler(t *testing.T) {
+	t.Parallel()
+	client := startTenantReadServer(t)
+	ctx := context.Background()
+
+	suspended, err := client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminSuspendTenant: %v", err)
+	}
+	if got := suspended.Msg.GetTenant(); got.GetId() != "t-1" || got.GetStatus() != service.TenantStatusSuspended || got.GetName() != "Alpha" {
+		t.Fatalf("suspended tenant = %+v", got)
+	}
+
+	restored, err := client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminRestoreTenant: %v", err)
+	}
+	if got := restored.Msg.GetTenant(); got.GetStatus() != service.TenantStatusClaimed {
+		t.Fatalf("restored tenant = %+v", got)
+	}
+
+	// t-2 is latent: neither change applies to it.
+	_, err = client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-2", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+	_, err = client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", TenantId: "t-2", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+
+	_, err = client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-9", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeNotFound)
+	_, err = client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-1"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeInvalidArgument)
+	_, err = client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeInvalidArgument)
 }

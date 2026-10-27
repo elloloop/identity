@@ -2293,6 +2293,34 @@ message AdminListTenantsResponse {
   string next_cursor = 2;
 }
 
+// AdminSuspendTenantRequest names a claimed tenant to suspend. reason is
+// required; the audit trail keeps it.
+message AdminSuspendTenantRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+  // reason says why, in at most 500 characters.
+  string reason = 3;
+}
+
+message AdminSuspendTenantResponse {
+  // tenant is the tenant as it now stands.
+  Tenant tenant = 1;
+}
+
+// AdminRestoreTenantRequest names a suspended tenant to restore. reason is
+// required; the audit trail keeps it.
+message AdminRestoreTenantRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+  // reason says why, in at most 500 characters.
+  string reason = 3;
+}
+
+message AdminRestoreTenantResponse {
+  // tenant is the tenant as it now stands.
+  Tenant tenant = 1;
+}
+
 // CreateFirstPlatformAdmin is the trust-on-first-use (TOFU) bootstrap that
 // establishes the FIRST platform admin on a fresh deployment. It is
 // self-securing: it succeeds ONLY while the platform_admins table is empty,
@@ -3466,6 +3494,16 @@ service IdentityService {
   // decode. A project with no tenants, or one that does not exist, is an
   // empty page.
   rpc AdminListTenants(AdminListTenantsRequest) returns (AdminListTenantsResponse);
+  // AdminSuspendTenant suspends a claimed tenant: its members can no longer
+  // choose it for a token, a token that already chose it is refused, and its
+  // admins can no longer administer it. Its domains, members and
+  // invitations are kept. AdminRestoreTenant moves a suspended tenant back
+  // to claimed. Each records the operator's reason in the audit trail. A
+  // tenant already in the status asked for is returned unchanged and
+  // nothing is recorded; any other status is FAILED_PRECONDITION (a latent
+  // tenant governs nothing, so there is nothing to suspend). Operator-only.
+  rpc AdminSuspendTenant(AdminSuspendTenantRequest) returns (AdminSuspendTenantResponse);
+  rpc AdminRestoreTenant(AdminRestoreTenantRequest) returns (AdminRestoreTenantResponse);
 
   // Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
   // while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).

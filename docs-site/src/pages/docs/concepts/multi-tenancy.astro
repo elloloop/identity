@@ -278,6 +278,27 @@ Both:
     and a Project with no tenants, or one that does not exist, is an empty
     page.
   </p>
+  <p>
+    An operator stops a tenant by suspending it, and starts it again by
+    restoring it. Each call needs a reason, which the audit trail keeps as
+    <code>tenant_suspended</code> or <code>tenant_restored</code>:
+  </p>
+  <Code
+    code={`AdminSuspendTenant(project_id, tenant_id, reason="billing dispute")
+  -> { tenant: { status: "suspended", ... } }  # was claimed
+  -> FAILED_PRECONDITION                       # latent: it governs nothing yet
+AdminRestoreTenant(project_id, tenant_id, reason="dispute settled")
+  -> { tenant: { status: "claimed", ... } }    # was suspended`}
+    lang="bash"
+  />
+  <p>
+    A suspended tenant keeps its domains, members and invitations. Its
+    selected tokens are refused, a refresh that chooses it is refused, and its
+    owners and admins can no longer administer it; its members' agent grants
+    are revoked. Restoring it gives back selection and administration, not
+    the revoked grants. Asking for the status a tenant already has returns it
+    unchanged and records nothing, so a retry is safe.
+  </p>
 
   <p>
     See <a href="/identity/docs/concepts/auth-model">Auth model</a> for how the Project

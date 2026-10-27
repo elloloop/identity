@@ -317,6 +317,15 @@ const (
 	// in the details. A refused attempt over the creation limit is logged with
 	// success=false and a `reason` detail, so a burst of attempts is visible.
 	EventTenantCreated EventType = "tenant_created"
+
+	// EventTenantSuspended / EventTenantRestored record an operator
+	// suspending a claimed tenant or restoring a suspended one
+	// (AdminSuspendTenant, AdminRestoreTenant). The details carry the project
+	// id, the tenant id and the reason the operator gave. A call that finds
+	// the tenant already in the status asked for changes nothing and records
+	// nothing.
+	EventTenantSuspended EventType = "tenant_suspended"
+	EventTenantRestored  EventType = "tenant_restored"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -402,6 +411,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventAgentTransferDeclined:         {},
 	EventAgentTransferCancelled:        {},
 	EventTenantCreated:                 {},
+	EventTenantSuspended:               {},
+	EventTenantRestored:                {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

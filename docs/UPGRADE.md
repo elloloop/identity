@@ -1,5 +1,44 @@
 # Upgrade guide
 
+## Next — an operator suspends and restores a tenant: `AdminSuspendTenant` and `AdminRestoreTenant` (additive RPCs; no migration; `TenantStore.SetTenantStatus` replaces `ClaimLatentTenant` (Go API))
+
+A platform operator can now suspend a tenant and restore it over the API,
+with the `X-Admin-Secret` header, where before it took an `UPDATE` on the
+`tenants` table. Each call takes a required `reason` (at most 500
+characters) and records it in the audit trail.
+
+- **`AdminSuspendTenant(project_id, tenant_id, reason)`** moves a `claimed`
+  tenant to `suspended` and records `tenant_suspended`. The suspension does
+  what the SQL did ([Suspending a tenant](#suspending-a-tenant)): the tokens
+  that chose the tenant are refused, a refresh that chooses it is
+  `PERMISSION_DENIED`, its owners and admins can no longer administer it,
+  and its members' agent grants are revoked. Its domains, members and
+  invitations are kept.
+- **`AdminRestoreTenant(project_id, tenant_id, reason)`** moves a
+  `suspended` tenant back to `claimed` and records `tenant_restored`.
+  Selection and administration work again at once; no revoked agent grant
+  comes back.
+
+Both return the tenant as it now stands. A tenant already in the status
+asked for is returned unchanged and nothing is recorded, so a retry after a
+lost response is safe. A tenant in any other status is
+`FAILED_PRECONDITION`: a `latent` tenant governs nothing yet, so it cannot be
+suspended. An unknown tenant is `NOT_FOUND`, and a blank id or reason is
+`INVALID_ARGUMENT`. The change is compare-and-set, so two operators racing
+on one tenant record one change between them.
+
+Stop suspending tenants in SQL: an `UPDATE` is not audited. A tenant already
+suspended that way is restored with `AdminRestoreTenant`.
+
+### Go API
+
+`TenantStore.ClaimLatentTenant(ctx, projectID, tenantID)` is replaced by
+`SetTenantStatus(ctx, projectID, tenantID, from, to) (bool, error)`, which
+moves the tenant only while it is in `from` and reports whether it moved; a
+domain's verification claims a latent tenant with `SetTenantStatus(…,
+"latent", "claimed")`. A custom `TenantStore` must implement it with the
+same compare-and-set.
+
 ## Next — an operator reads a project's tenants: `AdminGetTenant` and `AdminListTenants` (migrations 0048 and 0049; additive RPCs; `TenantStore.ListTenants` takes a `TenantListQuery` (Go API))
 
 A platform operator can now read a project's tenants with the
@@ -282,25 +321,18 @@ agents: a failed `VerifyDomain` on an unproven claim was enough. Migration
 
 ### Suspending a tenant
 
-There is no RPC to suspend a tenant yet. An operator suspends one in SQL
-(the `tenants` table has no row-level security):
+An operator suspends a tenant with `AdminSuspendTenant` and restores it with
+`AdminRestoreTenant` (above); suspending it in SQL leaves no audit record.
 
-```sql
-UPDATE tenants
-   SET status = 'suspended',
-       updated_at_ms = (extract(epoch from clock_timestamp()) * 1000)::bigint
- WHERE project_id = '<project>' AND id = '<tenant>';
-```
-
-The update revokes the agent grants and machines of the tenant's members and
-of the accounts on its verified domains. Its selected tokens are refused by
-identity's HTTP chain within the tenant-status cache TTL, and by a host that
-verifies tokens itself only when they expire. Its members' accounts and
+A suspension revokes the agent grants and machines of the tenant's members
+and of the accounts on its verified domains. Its selected tokens are refused
+by identity's HTTP chain within the tenant-status cache TTL, and by a host
+that verifies tokens itself only when they expire. Its members' accounts and
 default-tenant tokens are not affected. Its owners and admins are refused
 (`PERMISSION_DENIED`) by every domain and membership RPC, and an invitation
 to it can no longer be accepted; its domains, members and pending
-invitations are kept. Setting it back to `claimed` restores selection and
-administration but revives no revoked grant.
+invitations are kept. Restoring it gives back selection and administration
+but revives no revoked grant.
 
 ### Accepting an invitation needs a verified email (behaviour change)
 

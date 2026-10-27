@@ -10,6 +10,12 @@ on with `GATEWAY_TENANT_SELECTION_ENABLED`.
 **Amends** ADR-0001, ADR-0002, ADR-0004 and ADR-0016, as listed under
 [What this amends](#what-this-amends). It supersedes none of them.
 
+**Amended** (2026-10-27): suspension has operator RPCs.
+`AdminSuspendTenant` and `AdminRestoreTenant` move a tenant between
+`claimed` and `suspended` with a required reason that the audit trail
+keeps, so suspending a tenant no longer needs database access and is no
+longer unaudited ([Suspension](#suspension)).
+
 ## Context
 
 Until now a tenant came into being in one of two ways: auto-formed from the
@@ -196,24 +202,20 @@ not assert:
   sees a suspension only when the token expires unless it checks the
   tenant's status too (`docs/embedding.md` says how).
 
-### Suspension has no RPC yet
+### Suspension
 
-Suspension is the lever this design relies on to stop a tenant, and there is
-no RPC for it. An operator suspends a tenant in SQL (the `tenants` table has
-no row-level security):
+Suspension is the lever this design relies on to stop a tenant. An operator
+suspends a claimed tenant with `AdminSuspendTenant` and restores it with
+`AdminRestoreTenant`, each with the operator secret and a reason, recorded
+as `tenant_suspended` or `tenant_restored`. Each is a compare-and-set on the
+tenant's status: a tenant already in the status asked for is left as it is
+and nothing is recorded, and a latent tenant, which governs nothing, cannot
+be suspended.
 
-```sql
-UPDATE tenants
-   SET status = 'suspended',
-       updated_at_ms = (extract(epoch from clock_timestamp()) * 1000)::bigint
- WHERE project_id = '<project>' AND id = '<tenant>';
-```
-
-That revokes its members' agent grants and machines (decision 7) and ends
-its selected tokens within the cache TTL, and stops its admins
-administering it (decision 4). It is not audited and needs
-database access. An operator RPC that suspends and audits is open work; until
-it lands, suspension is a database-operator action.
+A suspension revokes its members' agent grants and machines (decision 7),
+ends its selected tokens within the cache TTL, and stops its admins
+administering it (decision 6). Restoring it gives back selection and
+administration; it revives no revoked grant.
 
 ## What this amends
 
@@ -253,8 +255,6 @@ it lands, suspension is a database-operator action.
 - **Negative.** A verifier outside identity's HTTP chain has to accept a
   non-default `tenant`, and does not see a suspension before the token
   expires unless it checks the tenant itself.
-- **Negative.** Suspending a tenant is SQL only, unaudited, until an operator
-  RPC exists.
 - **Negative.** A suspended tenant's selected tokens stay usable on
   identity's HTTP chain for up to the tenant-status cache TTL.
 - **Negative.** A self-service tenant cannot be renamed or deleted yet, and a
@@ -268,10 +268,9 @@ it lands, suspension is a database-operator action.
 - **Negative, open.** These gaps are known and tracked as follow-ups: a
   session records no sign-in method, which would let a tenant's policy
   admit a cross-domain member it did govern; a refresh that chooses or
-  changes a tenant records no audit event of its own; suspension, done in
-  SQL, leaves no audit record; and the verifications that claim a latent
-  tenant, made by callers who are not yet its members, count against that
-  tenant's attempt budget rather than the caller's.
+  changes a tenant records no audit event of its own; and the verifications
+  that claim a latent tenant, made by callers who are not yet its members,
+  count against that tenant's attempt budget rather than the caller's.
 - **Neutral.** Schema: migration 0044 (`tenants.created_by`, the `created`
   membership source), 0045 (contested domain claims, the per-tenant TXT
   challenge) and 0046 (guarded, scoped agent-governance triggers,

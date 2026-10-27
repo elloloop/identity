@@ -553,6 +553,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.AdminListTenantsResponse'
+  /identity.v1.IdentityService/AdminRestoreTenant:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminRestoreTenant
+      operationId: identity.v1.IdentityService.AdminRestoreTenant
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminRestoreTenantRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminRestoreTenantResponse'
   /identity.v1.IdentityService/AdminRevokeProjectCredential:
     post:
       tags:
@@ -675,6 +710,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.AdminSetProjectOAuthProviderResponse'
+  /identity.v1.IdentityService/AdminSuspendTenant:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminSuspendTenant
+      description: |-
+        AdminSuspendTenant suspends a claimed tenant: its members can no longer
+         choose it for a token, a token that already chose it is refused, and its
+         admins can no longer administer it. Its domains, members and
+         invitations are kept. AdminRestoreTenant moves a suspended tenant back
+         to claimed. Each records the operator's reason in the audit trail. A
+         tenant already in the status asked for is returned unchanged and
+         nothing is recorded; any other status is FAILED_PRECONDITION (a latent
+         tenant governs nothing, so there is nothing to suspend). Operator-only.
+      operationId: identity.v1.IdentityService.AdminSuspendTenant
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminSuspendTenantRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminSuspendTenantResponse'
   /identity.v1.IdentityService/ApproveQrLogin:
     post:
       tags:
@@ -6419,6 +6498,33 @@ components:
           description: next_cursor is empty on the last page.
       title: AdminListTenantsResponse
       additionalProperties: false
+    identity.v1.AdminRestoreTenantRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+        reason:
+          type: string
+          title: reason
+          description: reason says why, in at most 500 characters.
+      title: AdminRestoreTenantRequest
+      additionalProperties: false
+      description: |-
+        AdminRestoreTenantRequest names a suspended tenant to restore. reason is
+         required; the audit trail keeps it.
+    identity.v1.AdminRestoreTenantResponse:
+      type: object
+      properties:
+        tenant:
+          title: tenant
+          description: tenant is the tenant as it now stands.
+          $ref: '#/components/schemas/identity.v1.Tenant'
+      title: AdminRestoreTenantResponse
+      additionalProperties: false
     identity.v1.AdminRevokeProjectCredentialRequest:
       type: object
       properties:
@@ -6501,6 +6607,33 @@ components:
              instead of any secret material).
           $ref: '#/components/schemas/identity.v1.ProjectOAuthProviderConfig'
       title: AdminSetProjectOAuthProviderResponse
+      additionalProperties: false
+    identity.v1.AdminSuspendTenantRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+        reason:
+          type: string
+          title: reason
+          description: reason says why, in at most 500 characters.
+      title: AdminSuspendTenantRequest
+      additionalProperties: false
+      description: |-
+        AdminSuspendTenantRequest names a claimed tenant to suspend. reason is
+         required; the audit trail keeps it.
+    identity.v1.AdminSuspendTenantResponse:
+      type: object
+      properties:
+        tenant:
+          title: tenant
+          description: tenant is the tenant as it now stands.
+          $ref: '#/components/schemas/identity.v1.Tenant'
+      title: AdminSuspendTenantResponse
       additionalProperties: false
     identity.v1.AgeBand:
       type: string

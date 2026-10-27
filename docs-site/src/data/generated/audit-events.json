@@ -72,6 +72,8 @@
   "scim_auth_failed",
   "session_revoked",
   "tenant_created",
+  "tenant_restored",
+  "tenant_suspended",
   "totp_disabled",
   "totp_enabled",
   "totp_verified",

@@ -3,10 +3,13 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/elloloop/identity/pkg/audit"
 )
 
 // Paging bounds for AdminListTenants. A project may hold a tenant for every
@@ -15,6 +18,16 @@ const (
 	defaultTenantPageSize = 50
 	maxTenantPageSize     = 200
 )
+
+// operatorReasonMaxRunes bounds the reason an operator gives for a change to
+// a tenant, which the audit trail keeps.
+const operatorReasonMaxRunes = 500
+
+// ErrTenantStatusConflict is returned when an operator asks for a status
+// change the tenant's current status does not allow: suspending a tenant
+// that is not claimed, or restoring one that is not suspended. Mapped to
+// CodeFailedPrecondition.
+var ErrTenantStatusConflict = errors.New("the tenant's status does not allow this change")
 
 // TenantPage is one page of AdminListTenants: the tenants, newest first, and
 // the cursor for the next page, empty on the last.
@@ -73,6 +86,69 @@ func (s *ControlPlaneAdminService) AdminListTenants(ctx context.Context, secret,
 		Tenants:    tenants,
 		NextCursor: encodeTenantCursor(TenantPosition{CreatedAtMs: last.CreatedAtMs, ID: last.ID}),
 	}, nil
+}
+
+// AdminSuspendTenant suspends a claimed tenant, recording reason in the
+// audit trail. A suspended tenant keeps its domains, members and invitations,
+// but its members can no longer choose it for a token, the tokens that chose
+// it are refused, and its admins can no longer administer it. Suspending a
+// suspended tenant changes nothing and records nothing. A latent tenant
+// governs nothing, so suspending one is ErrTenantStatusConflict.
+func (s *ControlPlaneAdminService) AdminSuspendTenant(ctx context.Context, secret, projectID, tenantID, reason string) (*Tenant, error) {
+	return s.moveTenant(ctx, secret, projectID, tenantID, reason, TenantStatusClaimed, TenantStatusSuspended, audit.EventTenantSuspended)
+}
+
+// AdminRestoreTenant moves a suspended tenant back to claimed, recording
+// reason in the audit trail. Restoring a claimed tenant changes nothing and
+// records nothing; restoring a latent one is ErrTenantStatusConflict.
+func (s *ControlPlaneAdminService) AdminRestoreTenant(ctx context.Context, secret, projectID, tenantID, reason string) (*Tenant, error) {
+	return s.moveTenant(ctx, secret, projectID, tenantID, reason, TenantStatusSuspended, TenantStatusClaimed, audit.EventTenantRestored)
+}
+
+// moveTenant moves a tenant from one status to another for an operator and
+// audits the move as event. A tenant already in to is returned unchanged, so
+// an operator who retries after a lost response gets the same answer.
+func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, secret, projectID, tenantID, reason, from, to string, event audit.EventType) (*Tenant, error) {
+	if err := s.authorize(secret); err != nil {
+		return nil, err
+	}
+	projectID, tenantID, err := requireTenantRef(projectID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	reason, err = normalizeText("reason", reason, operatorReasonMaxRunes)
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.getTenant(ctx, projectID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if t.Status == to {
+		return t, nil
+	}
+	if t.Status != from {
+		return nil, fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
+	}
+	moved, err := s.tenants.SetTenantStatus(ctx, projectID, tenantID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	if moved {
+		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), event, audit.WithSuccess(true), audit.WithDetails(map[string]any{
+			"project_id": projectID,
+			"tenant_id":  tenantID,
+			"reason":     reason,
+		}))
+	}
+	if t, err = s.getTenant(ctx, projectID, tenantID); err != nil {
+		return nil, err
+	}
+	if !moved && t.Status != to {
+		// Another change landed between the read and the write.
+		return nil, fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
+	}
+	return t, nil
 }
 
 // getTenant reads a tenant the operator named, refusing one the project does

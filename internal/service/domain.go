@@ -229,7 +229,7 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID, domainID str
 		return nil, err
 	}
 	if t.Status == TenantStatusLatent {
-		if err := s.tenants.ClaimLatentTenant(ctx, projectID, t.ID); err != nil {
+		if _, err := s.tenants.SetTenantStatus(ctx, projectID, t.ID, TenantStatusLatent, TenantStatusClaimed); err != nil {
 			return nil, err
 		}
 	}

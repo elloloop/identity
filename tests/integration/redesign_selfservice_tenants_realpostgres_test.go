@@ -8,13 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/jackc/pgx/v5"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
@@ -395,22 +393,14 @@ func signupVerifiedUser(t *testing.T, h *RedesignHarness, addr string) membershi
 	return user
 }
 
-// suspendTenant suspends tenantID with the SQL an operator runs
-// (docs/UPGRADE.md, Suspending a tenant): there is no RPC for it.
+// suspendTenant suspends tenantID in the harness's project as an operator
+// does, through AdminSuspendTenant.
 func suspendTenant(t *testing.T, h *RedesignHarness, tenantID string) {
 	t.Helper()
-	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, os.Getenv("GATEWAY_POSTGRES_DSN"))
-	if err != nil {
-		t.Fatalf("connect to suspend %s: %v", tenantID, err)
-	}
-	defer func() { _ = conn.Close(ctx) }()
-	if _, err := conn.Exec(ctx, `
-		UPDATE tenants
-		   SET status = 'suspended',
-		       updated_at_ms = (extract(epoch from clock_timestamp()) * 1000)::bigint
-		 WHERE project_id = $1 AND id = $2`, h.ProjectID, tenantID); err != nil {
-		t.Fatalf("suspend %s: %v", tenantID, err)
+	if _, err := h.adminClient(harnessAdminSecret).AdminSuspendTenant(context.Background(), connect.NewRequest(&identitypb.AdminSuspendTenantRequest{
+		ProjectId: h.ProjectID, TenantId: tenantID, Reason: "suspended by the test",
+	})); err != nil {
+		t.Fatalf("AdminSuspendTenant(%s): %v", tenantID, err)
 	}
 }
 
