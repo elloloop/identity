@@ -248,7 +248,7 @@ func TestRedesign_AdminTenantSuspension(t *testing.T) {
 		audit.EventTenantSuspended: "billing dispute",
 		audit.EventTenantRestored:  "dispute settled",
 	} {
-		details := waitForTenantAuditEvents(t, h.ProjectID, tenantID, event)
+		details := waitForTenantAuditEvents(t, h.ProjectID, tenantID, event, 1)
 		if len(details) != 1 || details[0]["reason"] != reason || details[0]["project_id"] != h.ProjectID {
 			t.Fatalf("%s events = %v, want one with reason %q", event, details, reason)
 		}
@@ -256,10 +256,10 @@ func TestRedesign_AdminTenantSuspension(t *testing.T) {
 }
 
 // waitForTenantAuditEvents returns the details of every audit event of
-// eventType that names tenantID in projectID, waiting for the first to be
-// written. It reads the table: an operator's change has no user to look the
-// events up by.
-func waitForTenantAuditEvents(t *testing.T, projectID, tenantID string, eventType audit.EventType) []map[string]any {
+// eventType that names tenantID in projectID, waiting up to five seconds for
+// at least n to be written. It reads the table: an operator's change has no
+// user to look the events up by.
+func waitForTenantAuditEvents(t *testing.T, projectID, tenantID string, eventType audit.EventType, n int) []map[string]any {
 	t.Helper()
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, os.Getenv("GATEWAY_POSTGRES_DSN"))
@@ -292,7 +292,7 @@ func waitForTenantAuditEvents(t *testing.T, projectID, tenantID string, eventTyp
 		if err := rows.Err(); err != nil {
 			t.Fatalf("read the audit trail: %v", err)
 		}
-		if len(out) > 0 || time.Now().After(deadline) {
+		if len(out) >= n || time.Now().After(deadline) {
 			return out
 		}
 		time.Sleep(50 * time.Millisecond)

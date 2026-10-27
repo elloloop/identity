@@ -145,41 +145,29 @@ func TestSetDomainJoin_PropagatesStoreErrors(t *testing.T) {
 	}
 }
 
-// rereadDomainStore answers the first GetDomain from its fake and the next
-// with err, or with no row when err is nil: the domain deleted, or the read
-// failing, between the change and the read that returns it.
-type rereadDomainStore struct {
+// vanishingDomainStore deletes the domain just before the write, standing
+// in for a removal that lands between SetDomainJoin's read and its change.
+type vanishingDomainStore struct {
 	*fakeDomainStore
-	reads int
-	err   error
 }
 
-func (s *rereadDomainStore) GetDomain(ctx context.Context, projectID, domainID string) (*Domain, error) {
-	s.reads++
-	if s.reads > 1 {
-		return nil, s.err
-	}
-	return s.fakeDomainStore.GetDomain(ctx, projectID, domainID)
+func (s *vanishingDomainStore) SetDomainAllowJoin(ctx context.Context, projectID, domainID string, allowJoin bool) (*Domain, bool, error) {
+	delete(s.byID, s.key(projectID, domainID))
+	return s.fakeDomainStore.SetDomainAllowJoin(ctx, projectID, domainID, allowJoin)
 }
 
-func TestSetDomainJoin_TheReadAfterTheChange(t *testing.T) {
-	boom := errors.New("boom")
-	for name, tc := range map[string]struct {
-		err  error
-		want error
-	}{
-		"fails":      {err: boom, want: boom},
-		"finds none": {want: ErrNotFound},
-	} {
-		f, w := newDomainJoinFixture()
-		store := &rereadDomainStore{fakeDomainStore: f.domains, err: tc.err}
-		svc := NewDomainService(store, f.tenants, f.members, f.resolver, &config.Config{}, nil).
-			WithAudit(audit.NewLogger(w, "test-tenant", nil))
+// A domain removed while the call runs is not found, and nothing is
+// recorded, rather than a stale row reported as changed.
+func TestSetDomainJoin_ADomainRemovedMeanwhile(t *testing.T) {
+	f, w := newDomainJoinFixture()
+	store := &vanishingDomainStore{fakeDomainStore: f.domains}
+	svc := NewDomainService(store, f.tenants, f.members, f.resolver, &config.Config{}, nil).
+		WithAudit(audit.NewLogger(w, "test-tenant", nil))
 
-		_, err := svc.SetDomainJoin(withProject(testProject), testCaller, joinDomainID, true, "", "")
-		require.ErrorIs(t, err, tc.want, name)
-		assert.Equal(t, 1, w.countByEventType(string(audit.EventDomainJoinSet)), "%s: the change was made, so it is recorded", name)
-	}
+	got, err := svc.SetDomainJoin(withProject(testProject), testCaller, joinDomainID, true, "", "")
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.Nil(t, got)
+	assert.Zero(t, w.countByEventType(string(audit.EventDomainJoinSet)))
 }
 
 // ── ListJoinableTenants and JoinTenantByDomain ──────────────────────────
@@ -194,6 +182,8 @@ const (
 // joinFixture is a self-service fixture holding a claimed tenant that
 // ssOwnerID owns and that has verified joinDomainName and lets it join, with
 // joinerID an active, verified person on that domain who is not a member.
+// The membership store knows the domain is verified, so a domain membership
+// counts as ListMyTenants counts it.
 type joinFixture struct {
 	*selfServiceFixture
 	domains *fakeDomainStore
@@ -213,6 +203,7 @@ func newJoinFixture() *joinFixture {
 		ID: joinDomainID, ProjectID: ssProject, TenantID: ownTenant, Domain: joinDomainName,
 		VerificationMethod: DomainVerificationDNSTXT, Status: DomainStatusVerified, AllowJoin: true,
 	})
+	f.members.verifyDomain(ssProject, ownTenant, joinDomainName)
 	f.svc.WithDomains(d)
 	return &joinFixture{selfServiceFixture: f, domains: d}
 }
@@ -336,11 +327,14 @@ func TestJoinTenantByDomain_JoinsAsADomainMemberAndAudits(t *testing.T) {
 	assert.Equal(t, m.ID, again.ID)
 	assert.Equal(t, 1, f.audit.countByEventType(event))
 
-	// Turning join off ends no membership.
+	// Turning join off ends no membership, and a retry still returns it:
+	// whether the caller is a member is asked before whether they may join.
 	f.domain().AllowJoin = false
-	held, err := f.members.GetMembership(ctx, ssProject, ownTenant, joinerID)
+	held, err := f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
 	require.NoError(t, err)
+	assert.Equal(t, m.ID, held.ID)
 	assert.Equal(t, MembershipStatusActive, held.Status)
+	assert.Equal(t, 1, f.audit.countByEventType(event))
 }
 
 // A membership that ended is made active again, as a domain member.
@@ -370,6 +364,36 @@ func TestJoinTenantByDomain_LeavesAnExistingMembershipAsItIs(t *testing.T) {
 	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantJoinedByDomain)))
 }
 
+// racedMembershipStore lets another request's join land between the
+// caller's membership check and its grant.
+type racedMembershipStore struct {
+	*fakeMembershipStore
+}
+
+func (s *racedMembershipStore) GetActiveTenantForUser(ctx context.Context, projectID, tenantID, userID, emailDomain string) (*UserTenant, error) {
+	if _, _, err := s.GrantMembership(ctx, &TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: userID,
+		Source: MembershipSourceDomain, Role: RoleMember, Status: MembershipStatusActive,
+	}); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// Two joins racing for one account make one membership and record one
+// event: the grant that changed nothing records nothing.
+func TestJoinTenantByDomain_ARacingJoinIsRecordedOnce(t *testing.T) {
+	f := newJoinFixture()
+	svc := NewMembershipService(newFakeInvitationStore(), &racedMembershipStore{f.members}, f.tenants, f.users, &recordingMailer{}, true, &config.Config{}, nil).
+		WithAudit(audit.NewLogger(f.audit, "test-tenant", nil)).
+		WithDomains(f.domains)
+
+	m, err := svc.JoinTenantByDomain(withTenantsProject(false), joinerID, ownTenant, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, MembershipStatusActive, m.Status)
+	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantJoinedByDomain)), "the other request's join is the one recorded")
+}
+
 func TestJoinTenantByDomain_WithoutAnAuditTrail(t *testing.T) {
 	f := newJoinFixture()
 	f.svc.WithAudit(nil)
@@ -380,27 +404,27 @@ func TestJoinTenantByDomain_WithoutAnAuditTrail(t *testing.T) {
 }
 
 func TestJoinTenantByDomain_RefusesATenantTheDomainDoesNotLetJoin(t *testing.T) {
-	cases := noJoin()
-	cases["another tenant"] = func(*joinFixture) {}
-	for name, setup := range cases {
+	for name, setup := range noJoin() {
 		f := newJoinFixture()
 		setup(f)
-		tenantID := ownTenant
-		if name == "another tenant" {
-			f.tenants.ensure(ssProject, "t-other")
-			tenantID = "t-other"
-		}
-		_, err := f.svc.JoinTenantByDomain(withTenantsProject(false), joinerID, tenantID, "", "")
+		_, err := f.svc.JoinTenantByDomain(withTenantsProject(false), joinerID, ownTenant, "", "")
 		require.ErrorIs(t, err, ErrPermissionDenied, name)
-		held, _ := f.members.GetMembership(context.Background(), ssProject, tenantID, joinerID)
+		held, _ := f.members.GetMembership(context.Background(), ssProject, ownTenant, joinerID)
 		assert.Nil(t, held, name)
 		assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantJoinedByDomain)), name)
 	}
 
-	// An unknown tenant is refused the same way, so a call reveals nothing.
+	// Another tenant, which the email's domain does not belong to, and an
+	// unknown one are refused the same way, so a call reveals nothing.
 	f := newJoinFixture()
-	_, err := f.svc.JoinTenantByDomain(withTenantsProject(false), joinerID, "t-unknown", "", "")
-	require.ErrorIs(t, err, ErrPermissionDenied)
+	f.tenants.ensure(ssProject, "t-other")
+	for _, tenantID := range []string{"t-other", "t-unknown"} {
+		_, err := f.svc.JoinTenantByDomain(withTenantsProject(false), joinerID, tenantID, "", "")
+		require.ErrorIs(t, err, ErrPermissionDenied, tenantID)
+		held, _ := f.members.GetMembership(context.Background(), ssProject, tenantID, joinerID)
+		assert.Nil(t, held, tenantID)
+	}
+	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantJoinedByDomain)))
 }
 
 func TestJoinTenantByDomain_RefusesAnAccountThatCannotJoin(t *testing.T) {

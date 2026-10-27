@@ -149,18 +149,20 @@ func (f *fakeDomainStore) ListDomainsByTenant(_ context.Context, projectID, tena
 	return out, nil
 }
 
-// SetDomainAllowJoin mirrors the postgres store: it reports whether a row
-// changed, so an unknown id or the value the domain already has is false.
-func (f *fakeDomainStore) SetDomainAllowJoin(_ context.Context, projectID, domainID string, allowJoin bool) (bool, error) {
+// SetDomainAllowJoin mirrors the postgres store: it returns the domain as
+// it then stands and whether the call changed it, and nil for an unknown id.
+func (f *fakeDomainStore) SetDomainAllowJoin(_ context.Context, projectID, domainID string, allowJoin bool) (*Domain, bool, error) {
 	if f.allowJoinErr != nil {
-		return false, f.allowJoinErr
+		return nil, false, f.allowJoinErr
 	}
 	d, ok := f.byID[f.key(projectID, domainID)]
-	if !ok || d.AllowJoin == allowJoin {
-		return false, nil
+	if !ok {
+		return nil, false, nil
 	}
+	changed := d.AllowJoin != allowJoin
 	d.AllowJoin = allowJoin
-	return true, nil
+	cp := *d
+	return &cp, changed, nil
 }
 
 var _ DomainStore = (*fakeDomainStore)(nil)

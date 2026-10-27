@@ -497,17 +497,30 @@ type IdentityServiceClient interface {
 	// Joining by domain. Authenticated and project-scoped; the caller's own
 	// action, needing no invitation. ListJoinableTenants returns the tenant
 	// the caller's verified email's domain lets them join (see
-	// ListJoinableTenantsResponse). JoinTenantByDomain makes the caller an
-	// active member of it with source "domain", which ends if the email leaves
-	// the domain. It is FAILED_PRECONDITION until the caller has verified their
-	// email, and PERMISSION_DENIED for an anonymous, agent, merged or inactive
-	// account and for any tenant the domain does not let them join (one that
-	// has not verified it, has not turned joining on with SetDomainJoin, or is
-	// suspended), an unknown tenant included. Joining a tenant the caller
-	// already belongs to returns that membership unchanged; a join is
-	// audited. Available only on the postgres control-plane driver; the memory
-	// and SQLite drivers return Unimplemented.
+	// ListJoinableTenantsResponse), and is empty for an account that could not
+	// join. Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
 	ListJoinableTenants(ctx context.Context, in *ListJoinableTenantsRequest, opts ...grpc.CallOption) (*ListJoinableTenantsResponse, error)
+	// JoinTenantByDomain makes the caller an active member of tenant_id with
+	// role "member" and source "domain", a membership that ends if the email
+	// leaves the domain, and audits the join. tenant_id must be the claimed
+	// tenant that has verified the caller's verified email's domain and turned
+	// joining on for it with SetDomainJoin.
+	//
+	// A caller who is already a member, as ListMyTenants counts membership,
+	// gets that membership back unchanged, whatever its role or source, and
+	// nothing is recorded. That is checked first, so a retry, even after
+	// joining was turned off, gets the same answer, and two joins racing for
+	// one account make one membership, audited once.
+	//
+	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
+	// account, and for every tenant the domain does not let the caller join
+	// (one that has not verified it, has joining off, or is suspended or
+	// latent), an unknown tenant included, so the call reveals nothing about
+	// other tenants; FAILED_PRECONDITION until the caller has verified their
+	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
 	JoinTenantByDomain(ctx context.Context, in *JoinTenantByDomainRequest, opts ...grpc.CallOption) (*JoinTenantByDomainResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
@@ -2674,17 +2687,30 @@ type IdentityServiceServer interface {
 	// Joining by domain. Authenticated and project-scoped; the caller's own
 	// action, needing no invitation. ListJoinableTenants returns the tenant
 	// the caller's verified email's domain lets them join (see
-	// ListJoinableTenantsResponse). JoinTenantByDomain makes the caller an
-	// active member of it with source "domain", which ends if the email leaves
-	// the domain. It is FAILED_PRECONDITION until the caller has verified their
-	// email, and PERMISSION_DENIED for an anonymous, agent, merged or inactive
-	// account and for any tenant the domain does not let them join (one that
-	// has not verified it, has not turned joining on with SetDomainJoin, or is
-	// suspended), an unknown tenant included. Joining a tenant the caller
-	// already belongs to returns that membership unchanged; a join is
-	// audited. Available only on the postgres control-plane driver; the memory
-	// and SQLite drivers return Unimplemented.
+	// ListJoinableTenantsResponse), and is empty for an account that could not
+	// join. Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
 	ListJoinableTenants(context.Context, *ListJoinableTenantsRequest) (*ListJoinableTenantsResponse, error)
+	// JoinTenantByDomain makes the caller an active member of tenant_id with
+	// role "member" and source "domain", a membership that ends if the email
+	// leaves the domain, and audits the join. tenant_id must be the claimed
+	// tenant that has verified the caller's verified email's domain and turned
+	// joining on for it with SetDomainJoin.
+	//
+	// A caller who is already a member, as ListMyTenants counts membership,
+	// gets that membership back unchanged, whatever its role or source, and
+	// nothing is recorded. That is checked first, so a retry, even after
+	// joining was turned off, gets the same answer, and two joins racing for
+	// one account make one membership, audited once.
+	//
+	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
+	// account, and for every tenant the domain does not let the caller join
+	// (one that has not verified it, has joining off, or is suspended or
+	// latent), an unknown tenant included, so the call reveals nothing about
+	// other tenants; FAILED_PRECONDITION until the caller has verified their
+	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
 	JoinTenantByDomain(context.Context, *JoinTenantByDomainRequest) (*JoinTenantByDomainResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.

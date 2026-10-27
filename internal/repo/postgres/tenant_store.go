@@ -540,23 +540,43 @@ func (s *DomainStore) ListDomainsByTenant(ctx context.Context, projectID, tenant
 	return out, nil
 }
 
-// SetDomainAllowJoin sets a domain's allow_join and reports whether it
-// changed. The update names neither status, tenant_id nor domain, so the
-// agent-governance trigger (0046), which fires on an update of those
+// SetDomainAllowJoin sets a domain's allow_join and returns the row as it
+// then stands, with whether this call changed it. It locks the row, so a
+// concurrent call waits and then sees this one's value; an unknown id is
+// (nil, false, nil). The update names neither status, tenant_id nor domain,
+// so the agent-governance trigger (0046), which fires on an update of those
 // columns, does not fire, and the row is written only when the value
 // differs.
-func (s *DomainStore) SetDomainAllowJoin(ctx context.Context, projectID, domainID string, allowJoin bool) (bool, error) {
+func (s *DomainStore) SetDomainAllowJoin(ctx context.Context, projectID, domainID string, allowJoin bool) (*service.Domain, bool, error) {
 	if projectID == "" || domainID == "" {
-		return false, fmt.Errorf("%w: project_id and domain_id are required", service.ErrInvalidArgument)
+		return nil, false, fmt.Errorf("%w: project_id and domain_id are required", service.ErrInvalidArgument)
 	}
-	const q = `
-		UPDATE domains SET allow_join = $3, updated_at_ms = $4
-		WHERE project_id = $1 AND id = $2 AND allow_join <> $3`
-	tag, err := s.pool.Exec(ctx, q, projectID, domainID, allowJoin, nowMs())
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return false, wrapPgErr("SetDomainAllowJoin", err)
+		return nil, false, wrapPgErr("SetDomainAllowJoin", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	defer func() { _ = tx.Rollback(ctx) }()
+	d, err := scanDomain(tx.QueryRow(ctx, `SELECT `+domainColumns+`
+		FROM domains WHERE project_id = $1 AND id = $2 FOR UPDATE`, projectID, domainID))
+	if noRows(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, wrapPgErr("SetDomainAllowJoin(read)", err)
+	}
+	if d.AllowJoin == allowJoin {
+		return d, false, nil
+	}
+	d, err = scanDomain(tx.QueryRow(ctx, `UPDATE domains SET allow_join = $3, updated_at_ms = $4
+		WHERE project_id = $1 AND id = $2
+		RETURNING `+domainColumns, projectID, domainID, allowJoin, nowMs()))
+	if err != nil {
+		return nil, false, wrapPgErr("SetDomainAllowJoin", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, wrapPgErr("SetDomainAllowJoin(commit)", err)
+	}
+	return d, true, nil
 }
 
 // RecordDomainAttempt counts one CreateDomain or VerifyDomain by a tenant

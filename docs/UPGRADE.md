@@ -2,12 +2,23 @@
 
 ## Next — join a tenant by its domain: `SetDomainJoin`, `ListJoinableTenants` and `JoinTenantByDomain` (migration 0050; additive RPCs; `Domain.allow_join`; `DomainStore.SetDomainAllowJoin` (Go API))
 
-A person whose verified email is on a tenant's verified domain joins that
-tenant at signup, through auto-formation. An account made before the domain
-was verified never did, and until now could join only by an invitation. A
-tenant admin can now let such people join themselves, domain by domain. It
-is off on every domain, existing ones included, until an admin turns it on,
-so no tenant admits anyone it did not before.
+A person who signs up, or promotes an anonymous account, with a verified
+email joins the tenant of that email's domain through auto-formation
+(ADR-0004): the latent tenant formed for the domain, which becomes the
+domain's tenant once it verifies the domain. Some people on a verified
+domain are in no tenant of it all the same, and until now could join only
+by an invitation:
+
+- people auto-formation put in the domain's latent tenant before a
+  *different* tenant verified the domain;
+- people whose email moved onto the domain after they signed up, since
+  auto-formation runs only at signup and promotion;
+- people whose membership ended, for example when their email left the
+  domain and later came back.
+
+A tenant admin can now let such people join themselves, domain by domain.
+It is off on every domain, existing ones included, until an admin turns it
+on, so no tenant admits anyone it did not before.
 
 - **`SetDomainJoin(domain_id, allow_join)`**, called by an owner or admin
   of the domain's tenant with their access token, turns joining by that
@@ -30,9 +41,11 @@ so no tenant admits anyone it did not before.
 - **`JoinTenantByDomain(tenant_id)`** makes the caller an active `member`
   of that tenant with source `domain`, so the membership ends when the
   email leaves the domain, as a membership auto-formation made does. It
-  returns the membership and records `tenant_joined_by_domain`. Joining a
-  tenant the caller already belongs to returns their membership unchanged,
-  whatever its role or source, and records nothing.
+  returns the membership and records `tenant_joined_by_domain`. A caller
+  who is already a member, as `ListMyTenants` counts membership, gets
+  their membership back unchanged, whatever its role or source, and
+  nothing is recorded. That is checked before whether the domain lets them
+  join, so a retry after joining was turned off still returns it.
   - `PERMISSION_DENIED`: the caller is not an active, signed-up person, or
     `tenant_id` is not the tenant their domain lets them join. An unknown,
     suspended or latent tenant gets the same answer, so the call reveals
@@ -43,21 +56,38 @@ so no tenant admits anyone it did not before.
 Turning joining off ends no membership; remove members with
 `RemoveTenantMember`. While joining is on, a member removed that way who is
 still on the domain can join again: turn joining off first to keep them
-out. Two joins racing for one account make one membership and may both be
-recorded.
+out. Two joins racing for one account make one membership and are recorded
+once.
 
 ### Migration 0050
 
 0050 adds `domains.allow_join BOOLEAN NOT NULL DEFAULT false`. A constant
 default rewrites no rows, but the `ALTER TABLE` takes an `ACCESS EXCLUSIVE`
 lock on `domains` while the catalog changes, so reads and writes to it,
-signup's auto-formation included, wait that long. The agent-governance
+signup's auto-formation included, wait that long. While the `ALTER` waits
+for that lock behind a transaction that has `domains` open, new reads and
+writes to `domains` queue behind it too, for up to the migration's 10-second
+`lock_timeout`. The agent-governance
 trigger of 0046 fires on a domain's status, tenant or name only, so writing
 `allow_join` signs no agent out.
 
-This release's replicas read `allow_join`, so run the migration before they
-serve. Replicas of the previous release keep working against the new
-schema, so the migration can run before the rolling deploy starts. On a
+This release reads `allow_join` on every read of `domains`, so until 0050
+has run every such read fails on its replicas. A call that reads a domain
+fails with an error, except the login-policy lookup, which fails open for
+people by design:
+sign-ins on a tenant's domains stop applying its login policy (SSO only,
+allowed methods, 2FA, password length), and the only trace is a
+`login_policy_domain_lookup_failed` WARN line. `GATEWAY_POSTGRES_AUTO_MIGRATE`
+is off by default, so run `identity migrate` as its own job, and let it
+finish, before the deploy starts. Replicas of the previous release keep
+working against the new schema.
+
+During the rolling deploy, replicas of the previous release answer the
+three new RPCs with `UNIMPLEMENTED` and return a `Domain` without
+`allow_join`, which reads as `false`. A client should not offer the toggle
+or the join until every replica runs this release.
+
+On a
 lock timeout the file rolls back and version 50 is recorded dirty: run
 `identity migrate force 49`, then `identity migrate` again. The down
 migration drops the column, and with it every tenant's choice.
@@ -65,10 +95,10 @@ migration drops the column, and with it every tenant's choice.
 ### Go API
 
 `Domain` gains `AllowJoin`. `DomainStore` gains
-`SetDomainAllowJoin(ctx, projectID, domainID, allowJoin) (bool, error)`,
-which reports whether a row changed: `false` for an unknown domain or the
-value it already has. It must not change the domain's status, tenant or
-name. `MembershipService.WithDomains(DomainStore)` enables
+`SetDomainAllowJoin(ctx, projectID, domainID, allowJoin) (*Domain, bool, error)`,
+which returns the domain as it then stands and whether the call changed it:
+`nil` for an unknown domain, and the domain with `false` when it already
+has the value. It must not change the domain's status, tenant or name. `MembershipService.WithDomains(DomainStore)` enables
 `ListJoinableTenants` and `JoinTenantByDomain` (without it both return
 `UNIMPLEMENTED`), and `DomainService.WithAudit` records `SetDomainJoin`;
 `internal/app` wires both.

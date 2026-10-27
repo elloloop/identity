@@ -63,13 +63,15 @@ func (s *connectDomainStore) ListDomainsByTenant(_ context.Context, _, _ string)
 	return s.listResp, nil
 }
 
-func (s *connectDomainStore) SetDomainAllowJoin(_ context.Context, _, domainID string, allowJoin bool) (bool, error) {
+func (s *connectDomainStore) SetDomainAllowJoin(_ context.Context, _, domainID string, allowJoin bool) (*service.Domain, bool, error) {
 	d, ok := s.byID[domainID]
-	if !ok || d.AllowJoin == allowJoin {
-		return false, nil
+	if !ok {
+		return nil, false, nil
 	}
+	changed := d.AllowJoin != allowJoin
 	d.AllowJoin = allowJoin
-	return true, nil
+	cp := *d
+	return &cp, changed, nil
 }
 
 type connectTenantStore struct {

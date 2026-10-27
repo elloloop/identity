@@ -121,10 +121,12 @@ suite (email, productivity tools).
   2. **Invitation** — a tenant admin invites someone by email
      (`InviteUser` / `AcceptInvitation`, backed by `tenant_invitations`).
   3. **Joining by domain** — once a tenant admin turns it on for a verified
-     domain (`SetDomainJoin`), a person on that domain whose account
-     predates the verification finds the tenant (`ListJoinableTenants`) and
-     joins it as a domain member (`JoinTenantByDomain`) without an
-     invitation (ADR-0018, Joining by domain).
+     domain (`SetDomainJoin`), a person on that domain who is in no tenant
+     of it finds the tenant (`ListJoinableTenants`) and joins it as a
+     domain member (`JoinTenantByDomain`) without an invitation: someone
+     left in the domain's latent tenant when a different tenant verified
+     the domain, someone whose email moved onto the domain after signup, or
+     someone whose membership ended (ADR-0018, Joining by domain).
 - Per-request resolution is **Project first, then Tenant**: the project
   is resolved from an `X-Project-Key` credential or the `Host` header (a
   project auth-domain), and the tenant from the authenticated user's
@@ -740,9 +742,11 @@ operator's `AdminAddTenantAdmin` grant, or by an operator's
 `AdminRecoverTenantOwnership` — each writes a `tenant_memberships` row
 whose materialised `status` is authoritative over derived membership.
 Where a tenant admin has turned joining on for a verified domain
-(`SetDomainJoin`), a person on that domain whose account was made before
-the verification joins with `JoinTenantByDomain`, which writes a `domain`
-membership like the one signup would have.
+(`SetDomainJoin`), a person on that domain who is in no tenant of it (left
+in the domain's latent tenant when a different tenant verified the domain,
+moved onto the domain after signup, or whose membership ended) joins with
+`JoinTenantByDomain`, which writes a `domain` membership like the one
+signup would have.
 
 ## Identity's role model vs tenant-shard-db's role model
 

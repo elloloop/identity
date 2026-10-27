@@ -14,7 +14,9 @@
 -- Locks: ADD COLUMN with a constant default rewrites nothing, but takes an
 -- ACCESS EXCLUSIVE lock on domains, blocking reads and writes to it, signup's
 -- auto-formation included, for as long as the catalog change takes.
--- lock_timeout bounds only the wait to acquire it, as in 0034-0049. On a
+-- lock_timeout bounds only the wait to acquire it, as in 0034-0049. While
+-- the ALTER waits behind a transaction that has domains open, new reads and
+-- writes on domains queue behind the ALTER too, for up to that 10s. On a
 -- timeout the file rolls back and version 50 is left dirty:
 -- `identity migrate force 49`, then `identity migrate` again.
 SET LOCAL lock_timeout = '10s';

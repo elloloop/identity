@@ -28,9 +28,10 @@ same transaction that would remove them.
 **Amended** (2026-10-27): a tenant may let the people on its verified
 domains join it themselves. `SetDomainJoin` turns that on or off for one
 domain, and it is off until an admin turns it on. `ListJoinableTenants` and
-`JoinTenantByDomain` then let an account that auto-formation never joined,
-such as one made before the domain was verified, find the tenant and join it
-as a domain member, audited ([Joining by domain](#joining-by-domain)).
+`JoinTenantByDomain` then let a person on such a domain who is in no tenant
+of it, such as one whose email moved onto the domain after signup, find the
+tenant and join it as a domain member, audited
+([Joining by domain](#joining-by-domain)).
 
 ## Context
 
@@ -332,10 +333,16 @@ can remove an owner who is not the last (issue #657).
 
 ### Joining by domain
 
-Auto-formation joins a signup on a verified domain to the tenant that
-verified it, once, at signup. An account made before the domain was
-verified is never joined, and until now could join only by an invitation.
-A tenant may now let such people join themselves.
+Auto-formation (ADR-0004) joins a signup, or an anonymous account's
+promotion, to the tenant of its email's domain: the latent tenant formed
+for the domain, which becomes the domain's tenant once it verifies the
+domain. It runs only then, so some people on a verified domain are in no
+tenant of it, and until now could join only by an invitation: people
+auto-formation put in the domain's latent tenant before a *different*
+tenant verified the domain, people whose email moved onto the domain after
+they signed up, and people whose membership ended, for example when their
+email left the domain and later came back. A tenant may now let them join
+themselves.
 
 - **It is off until an admin turns it on, domain by domain.** Proving
   control of a domain is not agreeing to admit everyone on it, and a tenant
@@ -357,10 +364,14 @@ A tenant may now let such people join themselves.
 - **A join makes a domain membership.** `JoinTenantByDomain(tenant_id)`
   grants an active `member` membership with source `domain`, which ends when
   the email leaves the domain (migration 0047) as auto-formation's does.
-  An existing membership is returned as it is, never raised or lowered.
-  Every tenant but the one that qualifies is refused alike, an unknown one
-  included, so the call cannot be used to find tenants. Recorded as
-  `tenant_joined_by_domain`.
+  A caller who is already a member, as `ListMyTenants` counts membership,
+  gets that membership back as it is, never raised or lowered, and nothing
+  is recorded; that is asked before whether the domain lets them join, so
+  a retry after joining is turned off gets the same answer. Every tenant
+  but the one that qualifies is refused alike, an unknown one included, so
+  the call cannot be used to find tenants. Recorded as
+  `tenant_joined_by_domain`, once, by the call whose grant changed
+  something, so two joins racing for one account are recorded once.
 - **Turning it off ends no membership.** The setting decides who may join,
   not who belongs; ending a membership is `RemoveTenantMember`'s.
 

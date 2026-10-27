@@ -16,13 +16,16 @@ import (
 )
 
 // TestRedesign_TenantDomainJoin drives joining by domain over the wire
-// against a real Postgres. An account made on a domain before any tenant
-// verified it is in no tenant of the domain's. Once a tenant verifies the
-// domain, the account still may not join until the tenant's owner turns
-// joining on; then it finds the tenant and joins it as a domain member, a
-// retry changes nothing, and turning joining off ends no membership. Only
-// an admin turns it on or off, only a verified email on the domain joins,
-// and every change and join is audited.
+// against a real Postgres. An account made on a domain before a self-service
+// tenant verified it is in no tenant of the domain's. Once the tenant
+// verifies the domain, the account still may not join until the tenant's
+// owner turns joining on; then it finds the tenant and joins it as a domain
+// member, a retry changes nothing, and turning joining off ends no
+// membership and still returns it to a retry. While joining is on, a member
+// removed can join again. An account whose email moves onto the domain
+// after signup joins too, and moving it off again ends the membership. Only
+// an admin turns joining on or off, only a verified email on the domain
+// joins, and every change and join is audited.
 func TestRedesign_TenantDomainJoin(t *testing.T) {
 	h := startSelfServiceHarness(t)
 	ctx := context.Background()
@@ -122,7 +125,7 @@ func TestRedesign_TenantDomainJoin(t *testing.T) {
 		t.Fatalf("joinable after joining = %v, want none", got)
 	}
 
-	// Turning joining off ends no membership.
+	// Turning joining off ends no membership, and a retry still returns it.
 	off, err := setJoin(founder, false)
 	if err != nil {
 		t.Fatalf("SetDomainJoin off: %v", err)
@@ -133,27 +136,82 @@ func TestRedesign_TenantDomainJoin(t *testing.T) {
 	if roles := tenantRoles(t, founder, tenantID); roles[early.userID] != service.RoleMember {
 		t.Fatalf("members after joining is off = %v, want %s still a member", roles, early.userID)
 	}
-
-	sets := waitForTenantAuditCount(t, h.ProjectID, tenantID, audit.EventDomainJoinSet, 2)
-	if len(sets) != 2 || sets[0]["allow_join"] != true || sets[1]["allow_join"] != false || sets[0]["domain"] != domain {
-		t.Fatalf("%s events = %v, want on then off", audit.EventDomainJoinSet, sets)
+	held, err := join(early)
+	if err != nil {
+		t.Fatalf("JoinTenantByDomain retried with joining off: %v", err)
 	}
-	joins := waitForTenantAuditCount(t, h.ProjectID, tenantID, audit.EventTenantJoinedByDomain, 1)
-	if len(joins) != 1 || joins[0]["domain"] != domain {
-		t.Fatalf("%s events = %v, want one", audit.EventTenantJoinedByDomain, joins)
+	if held.Msg.GetMembership().GetId() != m.GetId() {
+		t.Fatalf("a retry with joining off returned %+v, want %+v", held.Msg.GetMembership(), m)
+	}
+
+	// While joining is on, a member removed who is still on the domain can
+	// join again.
+	if _, err := setJoin(founder, true); err != nil {
+		t.Fatalf("SetDomainJoin on again: %v", err)
+	}
+	if _, err := founder.client.RemoveTenantMember(ctx, connect.NewRequest(&identitypb.RemoveTenantMemberRequest{
+		TenantId: tenantID, UserId: early.userID,
+	})); err != nil {
+		t.Fatalf("RemoveTenantMember: %v", err)
+	}
+	if got := joinable(early); len(got) != 1 || got[0].GetTenantId() != tenantID {
+		t.Fatalf("joinable after removal = %v, want %s", got, tenantID)
+	}
+	rejoined, err := join(early)
+	if err != nil {
+		t.Fatalf("JoinTenantByDomain after removal: %v", err)
+	}
+	if r := rejoined.Msg.GetMembership(); r.GetStatus() != service.MembershipStatusActive || r.GetSource() != service.MembershipSourceDomain {
+		t.Fatalf("membership after rejoining = %+v, want an active domain member", r)
+	}
+
+	// An account whose email moves onto the domain after signup joins it,
+	// and moving the email off the domain again ends that membership.
+	mover := signupOnAnotherDomain(t, h)
+	mover = changeEmailAndSignIn(t, h, mover, "mover@"+domain)
+	moverUser := membershipUser{client: h.AuthedClient(mover.access), userID: mover.userID}
+	if got := joinable(moverUser); len(got) != 1 || got[0].GetTenantId() != tenantID {
+		t.Fatalf("joinable after moving onto the domain = %v, want %s", got, tenantID)
+	}
+	if _, err := join(moverUser); err != nil {
+		t.Fatalf("JoinTenantByDomain after moving onto the domain: %v", err)
+	}
+	mine, err := moverUser.client.ListMyTenants(ctx, connect.NewRequest(&identitypb.ListMyTenantsRequest{}))
+	if err != nil {
+		t.Fatalf("ListMyTenants: %v", err)
+	}
+	if !listsTenant(mine.Msg.GetTenants(), tenantID, service.RoleMember) {
+		t.Fatalf("ListMyTenants after joining = %v, want %s as a member", mine.Msg.GetTenants(), tenantID)
+	}
+	mover = changeEmailAndSignIn(t, h, mover, fmt.Sprintf("mover@away-%d.example.com", time.Now().UnixNano()))
+	if got := domainMembership(t, h, mover.userID, tenantID); got.Status != service.MembershipStatusInactive {
+		t.Fatalf("membership after moving off the domain = %+v, want inactive", got)
+	}
+	requireNotInTenant(t, h, "after moving off the domain", mover.access, mover.refresh, tenantID)
+
+	sets := waitForTenantAuditEvents(t, h.ProjectID, tenantID, audit.EventDomainJoinSet, 3)
+	if len(sets) != 3 || sets[0]["allow_join"] != true || sets[1]["allow_join"] != false || sets[2]["allow_join"] != true || sets[0]["domain"] != domain {
+		t.Fatalf("%s events = %v, want on, off, on", audit.EventDomainJoinSet, sets)
+	}
+	joins := waitForTenantAuditEvents(t, h.ProjectID, tenantID, audit.EventTenantJoinedByDomain, 3)
+	if len(joins) != 3 || joins[0]["domain"] != domain {
+		t.Fatalf("%s events = %v, want three: the join, the rejoin and the mover's", audit.EventTenantJoinedByDomain, joins)
 	}
 }
 
-// waitForTenantAuditCount is waitForTenantAuditEvents, waiting for at least
-// n events rather than the first.
-func waitForTenantAuditCount(t *testing.T, projectID, tenantID string, eventType audit.EventType, n int) []map[string]any {
+// signupOnAnotherDomain signs up an account on a fresh domain no tenant
+// holds, so auto-formation joins it to no tenant of the test's domain.
+func signupOnAnotherDomain(t *testing.T, h *RedesignHarness) domainSession {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		got := waitForTenantAuditEvents(t, projectID, tenantID, eventType)
-		if len(got) >= n || time.Now().After(deadline) {
-			return got
-		}
-		time.Sleep(50 * time.Millisecond)
+	addr := fmt.Sprintf("mover@before-%d.example.com", time.Now().UnixNano())
+	signup, err := h.Client.PasswordSignup(context.Background(), connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email: addr, Password: validPassword,
+	}))
+	if err != nil {
+		t.Fatalf("PasswordSignup(%s): %v", addr, err)
+	}
+	return domainSession{
+		userID: signup.Msg.GetUser().GetId(), password: validPassword,
+		access: signup.Msg.GetAccessToken(), refresh: signup.Msg.GetRefreshToken(),
 	}
 }

@@ -54,8 +54,8 @@ func (f *lpDomainStore) ListDomainsByTenant(context.Context, string, string) ([]
 
 func (f *lpDomainStore) RecordDomainAttempt(context.Context, DomainAttempt) error { return nil }
 
-func (f *lpDomainStore) SetDomainAllowJoin(context.Context, string, string, bool) (bool, error) {
-	return false, nil
+func (f *lpDomainStore) SetDomainAllowJoin(context.Context, string, string, bool) (*Domain, bool, error) {
+	return nil, false, nil
 }
 
 type lpTenantStore struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,9 +15,10 @@ import (
 )
 
 // TestDomainStore_SetDomainAllowJoin: a domain does not let its people join
-// until SetDomainAllowJoin turns it on; the store reports whether a row
-// changed, so an unchanged value, an unknown id or another project's domain
-// is false; and every read of the domain carries the setting.
+// until SetDomainAllowJoin turns it on; the store returns the row as it
+// stands and whether this call changed it, so an unchanged value is the row
+// with false and an unknown id or another project's domain is nil; and every
+// read of the domain carries the setting.
 func TestDomainStore_SetDomainAllowJoin(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -42,12 +44,18 @@ func TestDomainStore_SetDomainAllowJoin(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, created.AllowJoin, "a new domain does not let anyone join")
 
-	changed, err := domains.SetDomainAllowJoin(ctx, proj, domainID, true)
+	updated, changed, err := domains.SetDomainAllowJoin(ctx, proj, domainID, true)
 	require.NoError(t, err)
 	require.True(t, changed)
-	changed, err = domains.SetDomainAllowJoin(ctx, proj, domainID, true)
+	require.NotNil(t, updated)
+	require.True(t, updated.AllowJoin, "the returned row carries the new value")
+	require.Equal(t, domainID, updated.ID)
+	again, changed, err := domains.SetDomainAllowJoin(ctx, proj, domainID, true)
 	require.NoError(t, err)
 	require.False(t, changed, "the value the domain already has changes nothing")
+	require.NotNil(t, again)
+	require.True(t, again.AllowJoin)
+	require.Equal(t, updated.UpdatedAtMs, again.UpdatedAtMs, "an unchanged value writes nothing")
 
 	got, err := domains.GetDomain(ctx, proj, domainID)
 	require.NoError(t, err)
@@ -70,22 +78,84 @@ func TestDomainStore_SetDomainAllowJoin(t *testing.T) {
 		"another project": {other, domainID},
 		"unknown project": {"proj-unknown", domainID},
 	} {
-		changed, err := domains.SetDomainAllowJoin(ctx, key[0], key[1], false)
+		gone, changed, err := domains.SetDomainAllowJoin(ctx, key[0], key[1], false)
 		require.NoError(t, err, name)
 		require.False(t, changed, name)
+		require.Nil(t, gone, name)
 	}
 	got, err = domains.GetDomain(ctx, proj, domainID)
 	require.NoError(t, err)
 	require.True(t, got.AllowJoin, "a write elsewhere left the domain alone")
 
-	changed, err = domains.SetDomainAllowJoin(ctx, proj, domainID, false)
+	off, changed, err := domains.SetDomainAllowJoin(ctx, proj, domainID, false)
 	require.NoError(t, err)
 	require.True(t, changed)
+	require.False(t, off.AllowJoin)
 
 	for _, key := range [][2]string{{"", domainID}, {proj, ""}} {
-		_, err := domains.SetDomainAllowJoin(ctx, key[0], key[1], true)
+		_, _, err := domains.SetDomainAllowJoin(ctx, key[0], key[1], true)
 		require.ErrorIs(t, err, service.ErrInvalidArgument, "%v", key)
 	}
+}
+
+// TestDomainStore_SetDomainAllowJoinOneRacerChanges: admins turning joining
+// on at once each lock the row, so exactly one reports the change and the
+// rest find the value already set, which is what lets SetDomainJoin record a
+// change once.
+func TestDomainStore_SetDomainAllowJoinOneRacerChanges(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping domain join race test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	projects, tenants, domains := newTenantDomainStores(ctx, t, dsn)
+	proj, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-join-race", Name: "Join race"})
+	require.NoError(t, err)
+	tenantID, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Name: "Acme", Status: service.TenantStatusClaimed})
+	require.NoError(t, err)
+	domainID, err := domains.CreateDomain(ctx, &service.Domain{
+		ProjectID: proj, TenantID: tenantID, Domain: "race.example",
+		VerificationMethod: service.DomainVerificationDNSTXT, Status: service.DomainStatusVerified,
+	})
+	require.NoError(t, err)
+
+	const racers = 8
+	start := make(chan struct{})
+	changes := make(chan bool, racers)
+	errs := make(chan error, racers)
+	var wg sync.WaitGroup
+	for range racers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			d, changed, err := domains.SetDomainAllowJoin(ctx, proj, domainID, true)
+			if err == nil && (d == nil || !d.AllowJoin) {
+				err = errors.New("the returned domain does not allow joining")
+			}
+			if err != nil {
+				errs <- err
+				return
+			}
+			changes <- changed
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(changes)
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	won := 0
+	for changed := range changes {
+		if changed {
+			won++
+		}
+	}
+	require.Equal(t, 1, won, "exactly one racer changes the domain")
 }
 
 // TestGovernanceRevocation_SettingDomainJoinRevokesNothing: turning joining
@@ -100,7 +170,7 @@ func TestGovernanceRevocation_SettingDomainJoinRevokesNothing(t *testing.T) {
 	e := f.seedEveryone(ctx, t)
 
 	for _, allowJoin := range []bool{true, false} {
-		changed, err := f.domains.SetDomainAllowJoin(ctx, f.project, d, allowJoin)
+		_, changed, err := f.domains.SetDomainAllowJoin(ctx, f.project, d, allowJoin)
 		require.NoError(t, err)
 		require.True(t, changed)
 	}

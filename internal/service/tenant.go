@@ -210,11 +210,12 @@ type DomainStore interface {
 	// ListDomainsByTenant returns every domain bound to a tenant, newest
 	// first.
 	ListDomainsByTenant(ctx context.Context, projectID, tenantID string) ([]*Domain, error)
-	// SetDomainAllowJoin sets a domain's AllowJoin and reports whether it
-	// changed: false for an unknown id or a domain that already has the
+	// SetDomainAllowJoin sets a domain's AllowJoin and returns the domain as
+	// it then stands, with whether the call changed it: (nil, false, nil)
+	// for an unknown id, and the domain with false when it already has the
 	// value. The write must not count as a change of the domain's status,
 	// tenant or name, which withdraws agent authority (migration 0046).
-	SetDomainAllowJoin(ctx context.Context, projectID, domainID string, allowJoin bool) (bool, error)
+	SetDomainAllowJoin(ctx context.Context, projectID, domainID string, allowJoin bool) (*Domain, bool, error)
 	// RecordDomainAttempt counts one domain registration or verification by
 	// a tenant: ErrDomainAttemptsLimited past the cap in a, else the attempt
 	// is recorded. Attempts by one tenant are serialised, so concurrent ones

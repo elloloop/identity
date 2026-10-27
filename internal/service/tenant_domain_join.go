@@ -13,9 +13,12 @@ import (
 // such a person finds the tenant (ListJoinableTenants) and joins it
 // (JoinTenantByDomain) without an invitation. It is off on every domain
 // until an admin turns it on. A signup on a verified domain still joins as
-// auto-formation always did (TenantAutoFormStore); this is for the accounts
-// auto-formation never joined, such as those made before the domain was
-// verified.
+// auto-formation always did (TenantAutoFormStore). Auto-formation runs only
+// at signup, so this is for the people on the domain it left outside the
+// tenant: those who signed up into the latent tenant auto-formation made
+// for the domain before another tenant verified it, those whose email moved
+// onto the domain after signup, and those whose domain membership ended
+// when their email left the domain, since moving back does not rejoin.
 
 // JoinableTenant is a tenant the caller may join by their verified email's
 // domain: only its id and name, which the caller needs to choose it.
@@ -48,7 +51,8 @@ func (s *MembershipService) WithDomains(d DomainStore) *MembershipService {
 //
 // A change is recorded as EventDomainJoinSet, with callerID as actor and the
 // domain as target. Asking for the value the domain already has returns it
-// unchanged and records nothing, so a retry is safe.
+// unchanged and records nothing, so a retry is safe. A domain removed while
+// the call runs is ErrNotFound.
 func (s *DomainService) SetDomainJoin(ctx context.Context, callerID, domainID string, allowJoin bool, ip, userAgent string) (*Domain, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -71,15 +75,14 @@ func (s *DomainService) SetDomainJoin(ctx context.Context, callerID, domainID st
 	if _, err := s.requireTenantAdmin(ctx, projectID, d.TenantID, callerID); err != nil {
 		return nil, err
 	}
-	changed, err := s.domains.SetDomainAllowJoin(ctx, projectID, d.ID, allowJoin)
+	updated, changed, err := s.domains.SetDomainAllowJoin(ctx, projectID, d.ID, allowJoin)
 	if err != nil {
 		return nil, err
 	}
-	if !changed {
-		d.AllowJoin = allowJoin
-		return d, nil
+	if updated == nil {
+		return nil, fmt.Errorf("%w: domain", ErrNotFound)
 	}
-	if s.audit != nil {
+	if changed && s.audit != nil {
 		s.audit.Log(ctx, audit.EventDomainJoinSet,
 			audit.WithActor(callerID), audit.WithTarget(d.ID),
 			audit.WithIP(ip), audit.WithUserAgent(userAgent),
@@ -90,13 +93,6 @@ func (s *DomainService) SetDomainJoin(ctx context.Context, callerID, domainID st
 				"allow_join": allowJoin,
 			}),
 		)
-	}
-	updated, err := s.domains.GetDomain(ctx, projectID, d.ID)
-	if err != nil {
-		return nil, err
-	}
-	if updated == nil {
-		return nil, fmt.Errorf("%w: domain", ErrNotFound)
 	}
 	return updated, nil
 }
@@ -126,7 +122,7 @@ func (s *MembershipService) ListJoinableTenants(ctx context.Context, callerID st
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
-	if !isPermanentPerson(caller) || !isActiveStatus(caller.Status) {
+	if !isActivePerson(caller) {
 		return []*JoinableTenant{}, nil
 	}
 	t, _, err := s.joinableTenant(ctx, projectID, caller)
@@ -156,10 +152,13 @@ func (s *MembershipService) ListJoinableTenants(ctx context.Context, callerID st
 // cannot join. The caller must be an active, signed-up person, and an
 // unverified email is ErrEmailVerificationRequired.
 //
-// A join is recorded as EventTenantJoinedByDomain. Joining a tenant the
-// caller already belongs to returns their membership unchanged, whatever its
-// role or source, and records nothing; two joins racing for one account may
-// both record, and make one membership between them.
+// Joining a tenant the caller already belongs to, as ListMyTenants counts
+// membership, returns their membership unchanged, whatever its role or
+// source, and records nothing. That is checked before whether the domain
+// lets them join, so it holds after joining is turned off too, and a retry
+// gets the same answer. A join is recorded as EventTenantJoinedByDomain,
+// once: of two joins racing for one account, one makes the membership and
+// records it, and the other returns it.
 func (s *MembershipService) JoinTenantByDomain(ctx context.Context, callerID, tenantID, ip, userAgent string) (*TenantMembership, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -182,8 +181,15 @@ func (s *MembershipService) JoinTenantByDomain(ctx context.Context, callerID, te
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
-	if !isPermanentPerson(caller) || !isActiveStatus(caller.Status) {
+	if !isActivePerson(caller) {
 		return nil, fmt.Errorf("%w: only an active, signed-up person may join a tenant", ErrPermissionDenied)
+	}
+	held, err := s.heldMembership(ctx, projectID, tenantID, caller)
+	if err != nil {
+		return nil, err
+	}
+	if held != nil {
+		return held, nil
 	}
 	if !caller.EmailVerified {
 		return nil, fmt.Errorf("%w: verify your email before joining a tenant by its domain", ErrEmailVerificationRequired)
@@ -195,15 +201,8 @@ func (s *MembershipService) JoinTenantByDomain(ctx context.Context, callerID, te
 	if t == nil || t.ID != tenantID {
 		return nil, fmt.Errorf("%w: your email's domain does not let you join this tenant", ErrPermissionDenied)
 	}
-	held, err := s.memberships.GetMembership(ctx, projectID, tenantID, callerID)
-	if err != nil {
-		return nil, err
-	}
-	if held != nil && held.Status == MembershipStatusActive {
-		return held, nil
-	}
 
-	m, _, err := s.memberships.GrantMembership(ctx, &TenantMembership{
+	m, changed, err := s.memberships.GrantMembership(ctx, &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  tenantID,
 		UserID:    callerID,
@@ -213,7 +212,7 @@ func (s *MembershipService) JoinTenantByDomain(ctx context.Context, callerID, te
 	if err != nil {
 		return nil, err
 	}
-	if s.audit != nil {
+	if changed && s.audit != nil {
 		s.audit.Log(ctx, audit.EventTenantJoinedByDomain,
 			audit.WithActor(callerID), audit.WithTarget(callerID),
 			audit.WithIP(ip), audit.WithUserAgent(userAgent),
@@ -225,6 +224,18 @@ func (s *MembershipService) JoinTenantByDomain(ctx context.Context, callerID, te
 		)
 	}
 	return m, nil
+}
+
+// heldMembership returns the membership user holds in tenantID when it is
+// one ListMyTenants counts (an active membership of a claimed tenant, one
+// from the email's domain only while that domain is verified on the
+// tenant), and nil otherwise.
+func (s *MembershipService) heldMembership(ctx context.Context, projectID, tenantID string, user *User) (*TenantMembership, error) {
+	active, err := s.memberships.GetActiveTenantForUser(ctx, projectID, tenantID, user.ID, verifiedEmailDomain(user))
+	if err != nil || active == nil {
+		return nil, err
+	}
+	return s.memberships.GetMembership(ctx, projectID, tenantID, user.ID)
 }
 
 // joinableTenant returns the tenant user's verified email's domain lets
