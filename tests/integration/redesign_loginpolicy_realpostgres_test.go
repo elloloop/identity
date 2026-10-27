@@ -22,7 +22,7 @@ func TestRedesign_LoginPolicy_Enforced(t *testing.T) {
 	h := startRedesignHarness(t)
 	ctx := context.Background()
 
-	policyDomain := claimDomainWithPolicy(t, h, "password")
+	policyDomain, _ := claimDomainWithPolicy(t, h, "password")
 
 	// A user on the claimed, password-only domain.
 	user := fmt.Sprintf("member-%d@%s", time.Now().UnixNano(), policyDomain)
@@ -41,26 +41,48 @@ func TestRedesign_LoginPolicy_Enforced(t *testing.T) {
 		t.Fatalf("PasswordLogin under password-only policy: want success, got %v", err)
 	}
 
-	// Email-OTP login is denied by the policy. Enforcement is at the
-	// complete/verify step (after proof of email control), so request the
-	// code, then assert VerifyEmailLoginCode is PermissionDenied.
-	h.Mailer.Reset()
-	if _, err := h.Client.RequestEmailLoginCode(ctx, connect.NewRequest(&identitypb.RequestEmailLoginCodeRequest{
-		Email: user,
+	// Email-OTP login is denied by the policy.
+	requireConnectCode(t, "an email code under a password-only policy",
+		loginWithEmailCode(t, h, user), connect.CodePermissionDenied)
+}
+
+// TestRedesign_LoginPolicy_GovernsWhileSuspended: suspending a tenant stops
+// selection and administration, never its login policy. The accounts on its
+// verified domain are held to the policy while it is suspended, as before
+// and after.
+func TestRedesign_LoginPolicy_GovernsWhileSuspended(t *testing.T) {
+	h := startRedesignHarness(t)
+	ctx := context.Background()
+	admin := h.adminClient(harnessAdminSecret)
+
+	policyDomain, tenantID := claimDomainWithPolicy(t, h, "password")
+	user := fmt.Sprintf("member-%d@%s", time.Now().UnixNano(), policyDomain)
+	if _, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email: user, Password: validPassword,
 	})); err != nil {
-		t.Fatalf("RequestEmailLoginCode: %v", err)
+		t.Fatalf("PasswordSignup on policy domain: %v", err)
 	}
-	code := extractRedesignLoginCode(t, h)
-	_, err := h.Client.VerifyEmailLoginCode(ctx, connect.NewRequest(&identitypb.VerifyEmailLoginCodeRequest{
-		Email: user,
-		Code:  code,
-	}))
-	if err == nil {
-		t.Fatal("VerifyEmailLoginCode under password-only policy: want PermissionDenied, got nil")
+
+	if _, err := admin.AdminSuspendTenant(ctx, connect.NewRequest(&identitypb.AdminSuspendTenantRequest{
+		ProjectId: h.ProjectID, TenantId: tenantID, Reason: "under review",
+	})); err != nil {
+		t.Fatalf("AdminSuspendTenant: %v", err)
 	}
-	if connect.CodeOf(err) != connect.CodePermissionDenied {
-		t.Fatalf("email_otp denial code = %v, want PermissionDenied", connect.CodeOf(err))
+	if _, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
+		Email: user, Password: validPassword,
+	})); err != nil {
+		t.Fatalf("PasswordLogin while suspended: want success under the password-only policy, got %v", err)
 	}
+	requireConnectCode(t, "an email code while the tenant is suspended",
+		loginWithEmailCode(t, h, user), connect.CodePermissionDenied)
+
+	if _, err := admin.AdminRestoreTenant(ctx, connect.NewRequest(&identitypb.AdminRestoreTenantRequest{
+		ProjectId: h.ProjectID, TenantId: tenantID, Reason: "review closed",
+	})); err != nil {
+		t.Fatalf("AdminRestoreTenant: %v", err)
+	}
+	requireConnectCode(t, "an email code once the tenant is restored",
+		loginWithEmailCode(t, h, user), connect.CodePermissionDenied)
 }
 
 // TestRedesign_LoginPolicy_NoPolicyNoRestriction asserts a claimed tenant with
@@ -70,7 +92,7 @@ func TestRedesign_LoginPolicy_NoPolicyNoRestriction(t *testing.T) {
 	ctx := context.Background()
 
 	// Claim a domain but set NO policy (empty methods → no policy row).
-	domain := claimDomainWithPolicy(t, h, "")
+	domain, _ := claimDomainWithPolicy(t, h, "")
 
 	user := fmt.Sprintf("free-%d@%s", time.Now().UnixNano(), domain)
 	if _, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
@@ -87,16 +109,7 @@ func TestRedesign_LoginPolicy_NoPolicyNoRestriction(t *testing.T) {
 		t.Fatalf("PasswordLogin with no policy: %v", err)
 	}
 
-	if _, err := h.Client.RequestEmailLoginCode(ctx, connect.NewRequest(&identitypb.RequestEmailLoginCodeRequest{
-		Email: user,
-	})); err != nil {
-		t.Fatalf("RequestEmailLoginCode: %v", err)
-	}
-	code := extractRedesignLoginCode(t, h)
-	if _, err := h.Client.VerifyEmailLoginCode(ctx, connect.NewRequest(&identitypb.VerifyEmailLoginCodeRequest{
-		Email: user,
-		Code:  code,
-	})); err != nil {
+	if err := loginWithEmailCode(t, h, user); err != nil {
 		t.Fatalf("VerifyEmailLoginCode with no policy: want success, got %v", err)
 	}
 }
@@ -105,8 +118,9 @@ func TestRedesign_LoginPolicy_NoPolicyNoRestriction(t *testing.T) {
 // verifies via the real CreateDomain→VerifyDomain RPC flow (so the domain is
 // genuinely VERIFIED and the tenant genuinely CLAIMED), then sets a
 // LoginPolicy with allowedMethods. An empty allowedMethods sets NO policy
-// (the "no restriction" case). Returns the verified domain name.
-func claimDomainWithPolicy(t *testing.T, h *RedesignHarness, allowedMethods string) string {
+// (the "no restriction" case). Returns the verified domain name and the
+// tenant that claimed it.
+func claimDomainWithPolicy(t *testing.T, h *RedesignHarness, allowedMethods string) (string, string) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -137,7 +151,26 @@ func claimDomainWithPolicy(t *testing.T, h *RedesignHarness, allowedMethods stri
 			t.Fatalf("claimDomainWithPolicy UpsertLoginPolicy: %v", err)
 		}
 	}
-	return domain
+	return domain, caller.tenantID
+}
+
+// loginWithEmailCode signs email in with a mailed code and returns the
+// error VerifyEmailLoginCode gives, if any. A login policy is enforced at
+// that step, after the code proves control of the address.
+func loginWithEmailCode(t *testing.T, h *RedesignHarness, email string) error {
+	t.Helper()
+	ctx := context.Background()
+	h.Mailer.Reset()
+	if _, err := h.Client.RequestEmailLoginCode(ctx, connect.NewRequest(&identitypb.RequestEmailLoginCodeRequest{
+		Email: email,
+	})); err != nil {
+		t.Fatalf("RequestEmailLoginCode: %v", err)
+	}
+	_, err := h.Client.VerifyEmailLoginCode(ctx, connect.NewRequest(&identitypb.VerifyEmailLoginCodeRequest{
+		Email: email,
+		Code:  extractRedesignLoginCode(t, h),
+	}))
+	return err
 }
 
 // extractRedesignLoginCode pulls the 6-digit OTP from the most recent code

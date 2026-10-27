@@ -411,6 +411,41 @@ func TestEnforceLoginPolicy_LatentTenant_NoRestriction(t *testing.T) {
 	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 }
 
+// A suspended tenant's login policy keeps governing the sign-ins through its
+// verified domain, exactly as a claimed tenant's does: a suspension stops
+// selection and administration and never loosens sign-in controls. Every
+// consumer of the policy sees it — the allowed methods, the password
+// minimum, the session timeouts and an agent grant's expiry.
+func TestLoginPolicy_SuspendedTenantStillGoverns(t *testing.T) {
+	for _, status := range []string{TenantStatusClaimed, TenantStatusSuspended} {
+		t.Run(status, func(t *testing.T) {
+			svc, _, _ := newAuthSvcWithMailer(t)
+			svc.cfg.AgentOAuthConsentSeconds = 86400
+			svc.cfg.RefreshExpirySeconds = 86400
+			g := claimedPasswordOnlyGovernance()
+			g.Tenants.(*lpTenantStore).byID["proj-1|tenant-acme"].Status = status
+			p := g.Policies.(*fakePolicyStore).byTenant["proj-1|tenant-acme"]
+			p.PasswordMinLength = 12
+			p.SessionIdleTimeoutSeconds = 60
+			svc.WithLoginGovernance(g)
+			ctx := withProject("proj-1")
+
+			require.ErrorIs(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodEmailOTP), ErrPermissionDenied)
+			require.NoError(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodPassword))
+			require.ErrorIs(t, svc.validatePasswordStrengthForEmail(ctx, "alice@acme.com", "Aa1!aaaaaaa"), ErrWeakPassword)
+
+			now := svc.nowMs()
+			stale := now - 61*msPerSecond
+			require.ErrorIs(t, svc.enforceSessionTimeout(ctx, "alice@acme.com", now, stale, stale), ErrSessionExpired)
+
+			session := &SessionRecord{CreatedAtMs: now - 10*msPerSecond}
+			expiry, err := (&AgentOAuthService{auth: svc}).grantExpiry(ctx, &User{Email: "alice@acme.com"}, session)
+			require.NoError(t, err)
+			require.Equal(t, session.CreatedAtMs+60*msPerSecond, expiry)
+		})
+	}
+}
+
 // A claimed tenant with no policy row imposes no restriction (fail safe).
 func TestEnforceLoginPolicy_NoPolicy_NoRestriction(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)

@@ -1290,7 +1290,7 @@ var (
 	ErrParentalConsentRequired = errors.New("account is pending parental consent and cannot be activated by this operation")
 	ErrWeakPassword            = errors.New("password does not meet strength requirements")
 	ErrTotpRequired            = errors.New("totp required")
-	// ErrSSORequired is returned when a claimed tenant's LoginPolicy mandates
+	// ErrSSORequired is returned when the governing tenant's LoginPolicy mandates
 	// single sign-on and the caller attempted a non-SSO method. Like
 	// ErrTotpRequired it is a "do something else first" signal rather than a
 	// hard failure, so the Connect handler maps it to CodeFailedPrecondition,
@@ -1498,7 +1498,7 @@ type AuthService struct {
 	autoFormer TenantAutoFormStore
 
 	// governance, when set (postgres driver only), is the read-side bundle
-	// the login path consults to enforce a claimed tenant's LoginPolicy. nil
+	// the login path consults to enforce the governing tenant's LoginPolicy. nil
 	// disables enforcement — the constructor leaves it nil; app.New sets it
 	// via WithLoginGovernance. Like autoFormer it is an optional, set-once
 	// dependency kept off the already-wide constructor. Enforcement fails
@@ -1588,7 +1588,7 @@ func (s *AuthService) WithTenantSelection(r UserTenantReader) *AuthService {
 
 // WithLoginGovernance wires the optional login-governance bundle (the
 // Domain/Tenant/LoginPolicy read stores) the login path consults to enforce
-// a claimed tenant's LoginPolicy, and returns the service for chaining.
+// the governing tenant's LoginPolicy, and returns the service for chaining.
 // app.New calls it once at construction (with the postgres stores, or nil
 // for drivers without a governance plane). A nil bundle disables enforcement.
 func (s *AuthService) WithLoginGovernance(g *LoginGovernance) *AuthService {

@@ -585,9 +585,9 @@ type IdentityServiceClient interface {
 	// it, and the agent grants and machines of its members, in any
 	// membership status, and of the accounts on its verified domains and its
 	// primary domain are revoked. Its domains, members and
-	// invitations are kept. While it is suspended its login policy does not
-	// govern sign-in: the accounts on its verified domains sign in under the
-	// project's default controls.
+	// invitations are kept. Its login policy keeps governing the sign-ins
+	// through its verified domains: a suspension never loosens sign-in
+	// controls.
 	//
 	// A tenant already suspended is returned unchanged and nothing is
 	// recorded, so a retry is safe. Operator-only, like the other Admin*
@@ -601,11 +601,11 @@ type IdentityServiceClient interface {
 	// reason, IP address and user agent in the audit trail as tenant_restored.
 	// Administration and a refresh that chooses the tenant work again at once;
 	// identity's HTTP chain accepts the tokens that chose it within
-	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy governs sign-in
-	// again. Like any change of a tenant's status, a restore revokes again the
-	// agent grants and machines of the same members and accounts, including any
-	// connected while it was suspended, and brings back none the suspension
-	// revoked.
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Sign-in is as it was: its login
+	// policy governed it throughout. Like any change of a tenant's status, a
+	// restore revokes again the agent grants and machines of the same members
+	// and accounts, including any connected while it was suspended, and brings
+	// back none the suspension revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
 	// so a retry is safe. Operator-only, with the same refusals as
@@ -2775,9 +2775,9 @@ type IdentityServiceServer interface {
 	// it, and the agent grants and machines of its members, in any
 	// membership status, and of the accounts on its verified domains and its
 	// primary domain are revoked. Its domains, members and
-	// invitations are kept. While it is suspended its login policy does not
-	// govern sign-in: the accounts on its verified domains sign in under the
-	// project's default controls.
+	// invitations are kept. Its login policy keeps governing the sign-ins
+	// through its verified domains: a suspension never loosens sign-in
+	// controls.
 	//
 	// A tenant already suspended is returned unchanged and nothing is
 	// recorded, so a retry is safe. Operator-only, like the other Admin*
@@ -2791,11 +2791,11 @@ type IdentityServiceServer interface {
 	// reason, IP address and user agent in the audit trail as tenant_restored.
 	// Administration and a refresh that chooses the tenant work again at once;
 	// identity's HTTP chain accepts the tokens that chose it within
-	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy governs sign-in
-	// again. Like any change of a tenant's status, a restore revokes again the
-	// agent grants and machines of the same members and accounts, including any
-	// connected while it was suspended, and brings back none the suspension
-	// revoked.
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Sign-in is as it was: its login
+	// policy governed it throughout. Like any change of a tenant's status, a
+	// restore revokes again the agent grants and machines of the same members
+	// and accounts, including any connected while it was suspended, and brings
+	// back none the suspension revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
 	// so a retry is safe. Operator-only, with the same refusals as

@@ -368,16 +368,15 @@ Both:
     primary domain are revoked.
   </p>
   <p>
-    While it is suspended its login policy does not govern sign-in: the
-    accounts on its verified domains sign in under the Project's default
-    controls, so its allowed methods, SSO and 2FA requirements, password
-    minimum and session timeouts do not apply to them. Where its policy is
-    stricter than the Project's, a suspension loosens the controls on those
-    accounts.
+    A suspension never loosens sign-in controls. While the tenant is
+    suspended its login policy keeps governing the sign-ins through its
+    verified domains: its allowed methods, SSO and 2FA requirements,
+    password minimum and session timeouts apply to those accounts as they
+    did while it was claimed.
   </p>
   <p>
     Restoring it gives back administration at once and selection within the
-    same cache TTL, and brings back its login policy. Like any change of a
+    same cache TTL, and leaves sign-in as it was. Like any change of a
     tenant's status, it revokes again the agent grants and machines of the
     same members and accounts, including any connected during the
     suspension; no grant comes back. Asking for the

@@ -107,10 +107,10 @@ func normalizeAllowedMethods(allowed string) (string, error) {
 }
 
 // UpsertLoginPolicy authors (inserts or replaces) the LoginPolicy the login
-// path enforces for a claimed tenant within a project. project_id and
-// tenant_id are required; AllowedMethods is validated against the known
-// method tokens. The mutation emits an audit event. When this build has no
-// governance plane (nil policies store) it returns ErrUnimplemented.
+// path enforces for a claimed or suspended tenant within a project.
+// project_id and tenant_id are required; AllowedMethods is validated against
+// the known method tokens. The mutation emits an audit event. When this build
+// has no governance plane (nil policies store) it returns ErrUnimplemented.
 func (s *ControlPlaneAdminService) UpsertLoginPolicy(ctx context.Context, secret string, p *LoginPolicy) (*LoginPolicy, error) {
 	if err := s.authorize(secret); err != nil {
 		return nil, err
@@ -187,7 +187,7 @@ func (s *ControlPlaneAdminService) GetLoginPolicy(ctx context.Context, secret, p
 	return s.policies.GetLoginPolicy(ctx, projectID, tenantID)
 }
 
-// DeleteLoginPolicy clears a claimed tenant's LoginPolicy, reverting the login
+// DeleteLoginPolicy clears a tenant's LoginPolicy, reverting the login
 // path to its safe default for that tenant. It is idempotent (deleting an
 // absent policy is a no-op) and emits an audit event.
 func (s *ControlPlaneAdminService) DeleteLoginPolicy(ctx context.Context, secret, projectID, tenantID string) error {

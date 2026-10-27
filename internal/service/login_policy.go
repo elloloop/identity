@@ -2,9 +2,10 @@ package service
 
 import "context"
 
-// LoginPolicy controls HOW the members of a claimed Tenant authenticate —
-// never WHETHER. It is consulted on the login path for a user whose email
-// domain belongs to a claimed tenant; an absent or empty policy fails safe
+// LoginPolicy controls HOW the members of a Tenant authenticate — never
+// WHETHER. It is consulted on the login path for a user whose email domain
+// is verified by a tenant that governs sign-in (claimed or suspended; see
+// governsSignIn); an absent or empty policy fails safe
 // to email-OTP so a misconfiguration never locks anyone out.
 //
 // Like Tenant/Domain it is per-project governance state, postgres-backed,
@@ -21,7 +22,7 @@ const (
 	LoginMethodSSO      = "sso"
 )
 
-// LoginPolicy is a claimed tenant's authentication policy.
+// LoginPolicy is a tenant's authentication policy.
 type LoginPolicy struct {
 	ID        string
 	ProjectID string

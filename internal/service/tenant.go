@@ -26,9 +26,21 @@ const (
 	// authoritative, and its login policy applies to sign-ins through a
 	// domain it has verified.
 	TenantStatusClaimed = "claimed"
-	// TenantStatusSuspended is an administratively disabled tenant.
+	// TenantStatusSuspended is an administratively disabled tenant: it
+	// cannot be selected for a token or administered by its members, and
+	// its login policy still applies to sign-ins through its verified
+	// domains.
 	TenantStatusSuspended = "suspended"
 )
+
+// governsSignIn reports whether a tenant in status holds the sign-ins
+// through its verified domains to its login policy. A claimed tenant does,
+// and a suspended one still does: a suspension stops selection and
+// administration and never loosens sign-in controls. A latent tenant
+// governs nothing.
+func governsSignIn(status string) bool {
+	return status == TenantStatusClaimed || status == TenantStatusSuspended
+}
 
 // IsTenantStatus reports whether status is one a tenant may hold.
 func IsTenantStatus(status string) bool {
