@@ -292,12 +292,28 @@ ways, both audited; neither changes any other member's role.
   owner who can sign in returns its membership and records nothing, so a
   retry is safe. A latent tenant has never had an owner and is refused; a
   suspended one can be recovered, so that it has an owner when it is
-  restored.
+  restored. Recovery takes an owner whose account is deactivated or
+  suspended to be gone, though either can be undone: an owner reactivated
+  after a recovery is an owner again beside the appointed one, so the
+  operator first makes sure the account will not come back.
 
 Recovery does not reuse `AdminAddTenantAdmin`. That RPC provisions: it is
 not audited, checks neither the account nor who governs the tenant, and
 sets the role it is given, so it can lower an owner. Recovery is the lever
 for a tenant whose governance has failed, and it is narrow on purpose.
+
+It stays closed while an admin can act, even one who will not. When every
+owner is gone and the admins left cannot be reached or refuse, the remedy is
+explicit and audited at each step: a project admin deactivates those admins'
+accounts with `DeactivateUser`, reversible with `ReactivateUser`, and the
+operator then recovers the tenant. The cost is that a deactivated account is
+signed out of every tenant, not only this one; that is the price of not
+letting an operator appoint an owner over someone who can still govern.
+
+A transfer is not idempotent. Once it succeeds the caller is an admin, so a
+retry, like the losing call of two racing transfers, is refused as the
+caller not being an owner; a client that lost the response reads the
+tenant's members to see where ownership stands.
 
 That only an owner may transfer does not yet keep the owner role from a
 tenant's admins: an admin can invite an owner, themselves included, and

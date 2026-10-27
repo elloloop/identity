@@ -177,10 +177,14 @@ docker run ... \\
     (<code>FAILED_PRECONDITION</code> otherwise). The last owner cannot be
     removed, even by two removals at once or a removal racing a transfer, so
     a tenant changes hands this way. The transfer is audited as
-    <code>tenant_ownership_transferred</code>. An admin can still invite an
-    owner, themselves included, so being the owner does not yet keep a
-    tenant from its admins
-    (<a href="https://github.com/elloloop/identity/issues/657">#657</a>).
+    <code>tenant_ownership_transferred</code>. A transfer is not idempotent:
+    once it succeeds the caller is an admin, so a retry is
+    <code>PERMISSION_DENIED</code>; a client that lost the response reads
+    <code>ListTenantMembers</code> to see where ownership stands. An admin
+    can still invite an owner, themselves included, so being the owner does
+    not yet keep a tenant from its admins (tracked in
+    <a href="https://github.com/elloloop/identity/issues/657">issue #657,
+    admins can make themselves owners</a>).
   </p>
 
   <h2 id="choosing-a-tenant-for-a-token">Choosing a tenant for a token</h2>
@@ -356,22 +360,34 @@ Both:
   <Code
     code={`AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason="owner left the company")
   -> { membership: { role: "owner", source: "added", ... } }   # an existing invited or created source is kept
-  -> FAILED_PRECONDITION   # an owner or admin can still sign in, the account cannot own a tenant, or latent
+  -> FAILED_PRECONDITION   # an owner or admin who is a person can still sign in,
+                           #   the account cannot own a tenant, or latent
   -> NOT_FOUND             # no such tenant or account`}
     lang="bash"
   />
   <p>
     The account may be any person in the Project who could own a tenant,
     member or not, and a suspended tenant can be recovered. While an owner
-    or an admin can still sign in, recovery is refused: an owner transfers,
-    an admin invites. So recovery never puts an outside account above people
-    who can act. An account pending deletion can still sign in, which cancels
-    the deletion, so an owner or admin in that state still counts. Naming an
-    account that is already an owner who can sign in returns its membership
-    and records nothing, so a retry is safe. A refused recovery is not
-    audited. <code>AdminAddTenantAdmin</code>, which provisions a tenant's
-    first admins, makes none of these checks and records nothing, so the
-    same admin secret can set any role on any tenant.
+    or an admin who is a person can still sign in, recovery is refused: an
+    owner transfers, an admin invites. So recovery never puts an outside
+    account above people who can act. An account pending deletion can still
+    sign in, which cancels the deletion, so an owner or admin in that state
+    still counts. Naming an account that is already an owner who can sign in
+    returns its membership and records nothing, so a retry is safe. A
+    refused recovery is not audited. <code>AdminAddTenantAdmin</code>, which
+    provisions a tenant's first admins, makes none of these checks and
+    records nothing, so the same admin secret can make anyone an owner or
+    admin of any tenant, lowering an owner included.
+  </p>
+  <p>
+    Recovery treats a deactivated or suspended owner as gone, though either
+    can be undone: an owner reactivated after a recovery is an owner again,
+    beside the appointed one, so make sure the account will not come back
+    first. When every owner is gone and the admins left cannot be reached
+    or will not act, a Project admin deactivates their accounts with
+    <code>DeactivateUser</code> (audited, and reversible with
+    <code>ReactivateUser</code>, but it signs each account out of every
+    tenant) and the operator then recovers the tenant.
   </p>
 
   <p>

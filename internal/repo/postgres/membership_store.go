@@ -355,11 +355,14 @@ func (s *MembershipStore) RemoveMembership(ctx context.Context, projectID, tenan
 
 // lockOwnersAnd locks the tenant's active owner memberships and those of
 // userIDs, and returns the memberships of userIDs it found, by user id, as
-// they stand once locked. Every write that can change who owns a tenant
-// takes its locks this way, in one statement and in user_id order, so such
-// writes queue behind one another and never deadlock: two transactions
-// that each take all their locks in one ordered pass cannot each hold a row
-// the other waits for.
+// they stand once locked. RemoveMembership and TransferOwnership take their
+// locks this way, in one statement and in user_id order, so they queue
+// behind one another and never deadlock: two transactions that each take
+// all their locks in one ordered pass cannot each hold a row the other
+// waits for. Two writes that change owners do not come through here and
+// keep no owner: UpsertMembership, by which AdminAddTenantAdmin can lower
+// an owner, and the cascade that drops an account's memberships when the
+// account is deleted.
 func lockOwnersAnd(ctx context.Context, tx pgx.Tx, projectID, tenantID string, userIDs ...string) (map[string]*service.TenantMembership, error) {
 	rows, err := tx.Query(ctx, `SELECT `+membershipColumns+`
 		FROM tenant_memberships

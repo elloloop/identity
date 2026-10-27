@@ -791,8 +791,10 @@ type IdentityServiceClient interface {
 	// email's domain once the tenant no longer verifies it; one whose account
 	// is not an active, signed-up person's with a verified email is
 	// FAILED_PRECONDITION, as an owner sends the tenant's invitations. The
-	// transfer is audited. Available only on the postgres control-plane
-	// driver.
+	// transfer is audited. It is not idempotent: once it succeeds the caller
+	// is an admin, so a retry is PERMISSION_DENIED; read ListTenantMembers to
+	// see where ownership stands. Available only on the postgres
+	// control-plane driver.
 	TransferTenantOwnership(context.Context, *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
@@ -910,19 +912,20 @@ type IdentityServiceClient interface {
 	// changed between the read and the write.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
-	// govern: no owner or admin of it can sign in (each was deleted,
-	// deactivated or merged away). While an owner or an admin can still sign
-	// in it is FAILED_PRECONDITION: an owner transfers, an admin invites a new
-	// owner. An account pending deletion can still sign in, so it counts.
-	// When user_id is already an owner who can sign in, it returns that
-	// membership unchanged and records nothing, before judging the account,
-	// so a retry gets the first answer. Otherwise user_id must be an account
-	// of the project (else NOT_FOUND) that is an active, signed-up person's
-	// with a verified email (else FAILED_PRECONDITION); a membership it holds
-	// becomes an active owner one and keeps a source other than the domain's.
-	// A latent tenant has never had an owner and is FAILED_PRECONDITION.
-	// Records the operator's reason, IP and user agent in the audit trail
-	// when it appoints; a refusal is not recorded. Operator-only.
+	// govern: no owner or admin of it who is a person can sign in (each was
+	// deleted, deactivated or merged away). While an owner or admin who is a
+	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
+	// an admin invites a new owner. An account pending deletion can still sign
+	// in, so it counts. When user_id is already an owner who can sign in, it
+	// returns that membership unchanged and records nothing, before judging the
+	// account, so a retry gets the first answer. Otherwise user_id must be an
+	// account of the project (else NOT_FOUND) that is an active, signed-up
+	// person's with a verified email (else FAILED_PRECONDITION); a membership
+	// it holds becomes an active owner one and keeps a source other than the
+	// domain's. A latent tenant has never had an owner and is
+	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
+	// the audit trail when it appoints; a refusal is not recorded.
+	// Operator-only.
 	AdminRecoverTenantOwnership(context.Context, *connect.Request[v1.AdminRecoverTenantOwnershipRequest]) (*connect.Response[v1.AdminRecoverTenantOwnershipResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
@@ -3242,8 +3245,10 @@ type IdentityServiceHandler interface {
 	// email's domain once the tenant no longer verifies it; one whose account
 	// is not an active, signed-up person's with a verified email is
 	// FAILED_PRECONDITION, as an owner sends the tenant's invitations. The
-	// transfer is audited. Available only on the postgres control-plane
-	// driver.
+	// transfer is audited. It is not idempotent: once it succeeds the caller
+	// is an admin, so a retry is PERMISSION_DENIED; read ListTenantMembers to
+	// see where ownership stands. Available only on the postgres
+	// control-plane driver.
 	TransferTenantOwnership(context.Context, *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
@@ -3361,19 +3366,20 @@ type IdentityServiceHandler interface {
 	// changed between the read and the write.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
-	// govern: no owner or admin of it can sign in (each was deleted,
-	// deactivated or merged away). While an owner or an admin can still sign
-	// in it is FAILED_PRECONDITION: an owner transfers, an admin invites a new
-	// owner. An account pending deletion can still sign in, so it counts.
-	// When user_id is already an owner who can sign in, it returns that
-	// membership unchanged and records nothing, before judging the account,
-	// so a retry gets the first answer. Otherwise user_id must be an account
-	// of the project (else NOT_FOUND) that is an active, signed-up person's
-	// with a verified email (else FAILED_PRECONDITION); a membership it holds
-	// becomes an active owner one and keeps a source other than the domain's.
-	// A latent tenant has never had an owner and is FAILED_PRECONDITION.
-	// Records the operator's reason, IP and user agent in the audit trail
-	// when it appoints; a refusal is not recorded. Operator-only.
+	// govern: no owner or admin of it who is a person can sign in (each was
+	// deleted, deactivated or merged away). While an owner or admin who is a
+	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
+	// an admin invites a new owner. An account pending deletion can still sign
+	// in, so it counts. When user_id is already an owner who can sign in, it
+	// returns that membership unchanged and records nothing, before judging the
+	// account, so a retry gets the first answer. Otherwise user_id must be an
+	// account of the project (else NOT_FOUND) that is an active, signed-up
+	// person's with a verified email (else FAILED_PRECONDITION); a membership
+	// it holds becomes an active owner one and keeps a source other than the
+	// domain's. A latent tenant has never had an owner and is
+	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
+	// the audit trail when it appoints; a refusal is not recorded.
+	// Operator-only.
 	AdminRecoverTenantOwnership(context.Context, *connect.Request[v1.AdminRecoverTenantOwnershipRequest]) (*connect.Response[v1.AdminRecoverTenantOwnershipResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).

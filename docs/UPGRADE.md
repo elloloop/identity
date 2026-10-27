@@ -27,22 +27,27 @@ audited.
   - `NOT_FOUND`: `user_id` is not an active member.
   - `FAILED_PRECONDITION`: `user_id` cannot own a tenant.
   - `INVALID_ARGUMENT`: a blank id, or the caller's own.
+  - A transfer is not idempotent: once it succeeds the caller is an admin,
+    so a retry of it is `PERMISSION_DENIED`, as is the losing call of two
+    racing transfers. A client that lost the response reads
+    `ListTenantMembers` to see where ownership now stands.
 - **`AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason)`**,
   with the `X-Admin-Secret` header, appoints an owner to a tenant nobody can
-  govern: no owner or admin of it can sign in, because each was deleted,
-  deactivated or merged away. The account must be one that could own a
-  tenant (the same rule), and need not be a member; it gets an active
-  `owner` membership, with source `added` unless it already held one with
-  another source (`invited`, `created`), which is kept. It returns that
+  govern: no owner or admin of it who is a person can sign in, because each
+  was deleted, deactivated or merged away. The account must be one that
+  could own a tenant (the same rule), and need not be a member; it gets an
+  active `owner` membership, with source `added` unless it already held one
+  with another source (`invited`, `created`), which is kept. It returns that
   membership and records `tenant_ownership_recovered` with the `reason`
   (required, at most 500 characters) and the operator's IP and user agent.
-  - `FAILED_PRECONDITION`: an owner or an admin can still sign in, the
-    account cannot own a tenant, or the tenant is `latent` (it has never
-    had an owner). A `suspended` tenant can be recovered. An account
-    pending deletion can still sign in (signing in cancels the deletion),
-    so an owner or admin in that state still governs the tenant. While an
-    owner can sign in, they transfer the tenant; while an admin can, they
-    invite a new owner with `CreateTenantInvitation(role = "owner")`.
+  - `FAILED_PRECONDITION`: an owner or an admin who is a person can still
+    sign in, the account cannot own a tenant, or the tenant is `latent` (it
+    has never had an owner). A `suspended` tenant can be recovered. An
+    account pending deletion can still sign in (signing in cancels the
+    deletion), so an owner or admin in that state still governs the tenant.
+    While an owner can sign in, they transfer the tenant; while an admin
+    can, they invite a new owner with `CreateTenantInvitation(role =
+    "owner")`.
   - `NOT_FOUND`: an unknown tenant or account, or an account of another
     project.
   - `INVALID_ARGUMENT`: a blank id or reason.
@@ -50,6 +55,17 @@ audited.
     membership unchanged and records nothing, before the account is judged
     again, so a retry after a lost response gets the first answer.
   - A refused recovery is not audited.
+  - A deactivated or suspended account can be reactivated. An owner whose
+    account comes back after a recovery is still an owner, beside the one
+    the operator appointed, so make sure the account will not come back
+    before recovering.
+
+When every owner is gone and the admins left cannot be reached or will not
+act, recovery stays refused while they can sign in. A project admin who
+decides the tenant must be governed again deactivates those admins' accounts
+with `DeactivateUser`, which is audited and reversible with `ReactivateUser`
+but signs each account out everywhere, not only in this tenant, and the
+operator then recovers the tenant. A reactivated admin is still an admin.
 
 Recovery does not reuse `AdminAddTenantAdmin`, which provisions a tenant: it
 is not audited, checks neither the account nor who governs the tenant, and
