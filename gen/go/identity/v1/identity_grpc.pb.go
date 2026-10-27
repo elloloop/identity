@@ -6907,3 +6907,173 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "identity/v1/identity.proto",
 }
+
+const (
+	TeammateKeyService_RegisterTeammateKey_FullMethodName = "/identity.v1.TeammateKeyService/RegisterTeammateKey"
+	TeammateKeyService_RevokeTeammateKey_FullMethodName   = "/identity.v1.TeammateKeyService/RevokeTeammateKey"
+)
+
+// TeammateKeyServiceClient is the client API for TeammateKeyService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// TeammateKeyService is served only while GATEWAY_TEAMMATE_KEYS_ENABLED is
+// on. Every call presents a teammate_key_manager project credential
+// ("<public id>.<secret>") in the X-Teammate-Key-Manager-Key header; the
+// credential selects the project. PERMISSION_DENIED: no valid credential of
+// that kind.
+type TeammateKeyServiceClient interface {
+	// Registering a claim again with the same teammate, company, workstation,
+	// key and algorithm returns the same key_id. FAILED_PRECONDITION: the
+	// claim already has a different registration or was revoked, or the key is
+	// registered for another claim. INVALID_ARGUMENT: a blank or malformed
+	// field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
+	// a teammate_id that is not an active agent account of the project.
+	RegisterTeammateKey(ctx context.Context, in *RegisterTeammateKeyRequest, opts ...grpc.CallOption) (*RegisterTeammateKeyResponse, error)
+	// The key is refused from the moment this returns. Revoking an unknown or
+	// already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
+	// unspecified reason.
+	RevokeTeammateKey(ctx context.Context, in *RevokeTeammateKeyRequest, opts ...grpc.CallOption) (*RevokeTeammateKeyResponse, error)
+}
+
+type teammateKeyServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewTeammateKeyServiceClient(cc grpc.ClientConnInterface) TeammateKeyServiceClient {
+	return &teammateKeyServiceClient{cc}
+}
+
+func (c *teammateKeyServiceClient) RegisterTeammateKey(ctx context.Context, in *RegisterTeammateKeyRequest, opts ...grpc.CallOption) (*RegisterTeammateKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterTeammateKeyResponse)
+	err := c.cc.Invoke(ctx, TeammateKeyService_RegisterTeammateKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *teammateKeyServiceClient) RevokeTeammateKey(ctx context.Context, in *RevokeTeammateKeyRequest, opts ...grpc.CallOption) (*RevokeTeammateKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeTeammateKeyResponse)
+	err := c.cc.Invoke(ctx, TeammateKeyService_RevokeTeammateKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TeammateKeyServiceServer is the server API for TeammateKeyService service.
+// All implementations must embed UnimplementedTeammateKeyServiceServer
+// for forward compatibility.
+//
+// TeammateKeyService is served only while GATEWAY_TEAMMATE_KEYS_ENABLED is
+// on. Every call presents a teammate_key_manager project credential
+// ("<public id>.<secret>") in the X-Teammate-Key-Manager-Key header; the
+// credential selects the project. PERMISSION_DENIED: no valid credential of
+// that kind.
+type TeammateKeyServiceServer interface {
+	// Registering a claim again with the same teammate, company, workstation,
+	// key and algorithm returns the same key_id. FAILED_PRECONDITION: the
+	// claim already has a different registration or was revoked, or the key is
+	// registered for another claim. INVALID_ARGUMENT: a blank or malformed
+	// field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
+	// a teammate_id that is not an active agent account of the project.
+	RegisterTeammateKey(context.Context, *RegisterTeammateKeyRequest) (*RegisterTeammateKeyResponse, error)
+	// The key is refused from the moment this returns. Revoking an unknown or
+	// already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
+	// unspecified reason.
+	RevokeTeammateKey(context.Context, *RevokeTeammateKeyRequest) (*RevokeTeammateKeyResponse, error)
+	mustEmbedUnimplementedTeammateKeyServiceServer()
+}
+
+// UnimplementedTeammateKeyServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedTeammateKeyServiceServer struct{}
+
+func (UnimplementedTeammateKeyServiceServer) RegisterTeammateKey(context.Context, *RegisterTeammateKeyRequest) (*RegisterTeammateKeyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterTeammateKey not implemented")
+}
+func (UnimplementedTeammateKeyServiceServer) RevokeTeammateKey(context.Context, *RevokeTeammateKeyRequest) (*RevokeTeammateKeyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeTeammateKey not implemented")
+}
+func (UnimplementedTeammateKeyServiceServer) mustEmbedUnimplementedTeammateKeyServiceServer() {}
+func (UnimplementedTeammateKeyServiceServer) testEmbeddedByValue()                            {}
+
+// UnsafeTeammateKeyServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TeammateKeyServiceServer will
+// result in compilation errors.
+type UnsafeTeammateKeyServiceServer interface {
+	mustEmbedUnimplementedTeammateKeyServiceServer()
+}
+
+func RegisterTeammateKeyServiceServer(s grpc.ServiceRegistrar, srv TeammateKeyServiceServer) {
+	// If the following call pancis, it indicates UnimplementedTeammateKeyServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&TeammateKeyService_ServiceDesc, srv)
+}
+
+func _TeammateKeyService_RegisterTeammateKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterTeammateKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeammateKeyServiceServer).RegisterTeammateKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeammateKeyService_RegisterTeammateKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeammateKeyServiceServer).RegisterTeammateKey(ctx, req.(*RegisterTeammateKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TeammateKeyService_RevokeTeammateKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeTeammateKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TeammateKeyServiceServer).RevokeTeammateKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TeammateKeyService_RevokeTeammateKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TeammateKeyServiceServer).RevokeTeammateKey(ctx, req.(*RevokeTeammateKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// TeammateKeyService_ServiceDesc is the grpc.ServiceDesc for TeammateKeyService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var TeammateKeyService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "identity.v1.TeammateKeyService",
+	HandlerType: (*TeammateKeyServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "RegisterTeammateKey",
+			Handler:    _TeammateKeyService_RegisterTeammateKey_Handler,
+		},
+		{
+			MethodName: "RevokeTeammateKey",
+			Handler:    _TeammateKeyService_RevokeTeammateKey_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "identity/v1/identity.proto",
+}
