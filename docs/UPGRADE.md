@@ -1,5 +1,78 @@
 # Upgrade guide
 
+## Next — join a tenant by its domain: `SetDomainJoin`, `ListJoinableTenants` and `JoinTenantByDomain` (migration 0050; additive RPCs; `Domain.allow_join`; `DomainStore.SetDomainAllowJoin` (Go API))
+
+A person whose verified email is on a tenant's verified domain joins that
+tenant at signup, through auto-formation. An account made before the domain
+was verified never did, and until now could join only by an invitation. A
+tenant admin can now let such people join themselves, domain by domain. It
+is off on every domain, existing ones included, until an admin turns it on,
+so no tenant admits anyone it did not before.
+
+- **`SetDomainJoin(domain_id, allow_join)`**, called by an owner or admin
+  of the domain's tenant with their access token, turns joining by that
+  domain on or off and returns the `Domain`, which now carries
+  `allow_join`. It may be set before the domain is verified and takes
+  effect once it is. A change is recorded as `domain_join_set` (the caller
+  as actor, the domain as target, `allow_join` in the details); setting the
+  value the domain already has records nothing.
+  - `PERMISSION_DENIED`: the caller is not an active owner or admin, or the
+    tenant is suspended.
+  - `NOT_FOUND`: an unknown domain.
+  - `INVALID_ARGUMENT`: a blank `domain_id`.
+- **`ListJoinableTenants()`** returns the tenant the caller's verified
+  email's domain lets them join, as `JoinableTenant` (`tenant_id`, `name`):
+  the `claimed` tenant that has verified the domain, while it allows
+  joining and the caller is not an active member. A project holds a
+  verified domain on one tenant at most, so the list has at most one entry.
+  It is empty for an unverified email, a public provider's domain, or an
+  anonymous, agent or inactive account.
+- **`JoinTenantByDomain(tenant_id)`** makes the caller an active `member`
+  of that tenant with source `domain`, so the membership ends when the
+  email leaves the domain, as a membership auto-formation made does. It
+  returns the membership and records `tenant_joined_by_domain`. Joining a
+  tenant the caller already belongs to returns their membership unchanged,
+  whatever its role or source, and records nothing.
+  - `PERMISSION_DENIED`: the caller is not an active, signed-up person, or
+    `tenant_id` is not the tenant their domain lets them join. An unknown,
+    suspended or latent tenant gets the same answer, so the call reveals
+    nothing about tenants the caller cannot join.
+  - `FAILED_PRECONDITION`: the caller's email is not verified.
+  - `INVALID_ARGUMENT`: a blank `tenant_id`.
+
+Turning joining off ends no membership; remove members with
+`RemoveTenantMember`. While joining is on, a member removed that way who is
+still on the domain can join again: turn joining off first to keep them
+out. Two joins racing for one account make one membership and may both be
+recorded.
+
+### Migration 0050
+
+0050 adds `domains.allow_join BOOLEAN NOT NULL DEFAULT false`. A constant
+default rewrites no rows, but the `ALTER TABLE` takes an `ACCESS EXCLUSIVE`
+lock on `domains` while the catalog changes, so reads and writes to it,
+signup's auto-formation included, wait that long. The agent-governance
+trigger of 0046 fires on a domain's status, tenant or name only, so writing
+`allow_join` signs no agent out.
+
+This release's replicas read `allow_join`, so run the migration before they
+serve. Replicas of the previous release keep working against the new
+schema, so the migration can run before the rolling deploy starts. On a
+lock timeout the file rolls back and version 50 is recorded dirty: run
+`identity migrate force 49`, then `identity migrate` again. The down
+migration drops the column, and with it every tenant's choice.
+
+### Go API
+
+`Domain` gains `AllowJoin`. `DomainStore` gains
+`SetDomainAllowJoin(ctx, projectID, domainID, allowJoin) (bool, error)`,
+which reports whether a row changed: `false` for an unknown domain or the
+value it already has. It must not change the domain's status, tenant or
+name. `MembershipService.WithDomains(DomainStore)` enables
+`ListJoinableTenants` and `JoinTenantByDomain` (without it both return
+`UNIMPLEMENTED`), and `DomainService.WithAudit` records `SetDomainJoin`;
+`internal/app` wires both.
+
 ## Next — teammate keys: `TeammateKeyService`, and `teammate_key_id` on the machine challenge and exchange (migration 0050; additive RPCs and fields behind `GATEWAY_TEAMMATE_KEYS_ENABLED`, off by default; the `teammate_key_manager` credential kind; `jwt.TeammateSigner` and `jwt.VerifyTeammateAccessToken` (Go API))
 
 A service that manages workstations can register a key for an agent account,
@@ -35,6 +108,7 @@ and which carries `claim_id`, `workstation_id` and `company_id` from the key.
   `identity_agent_exchanges_total{key_kind="agent_machine"}`.
 - Go API: `jwt.TeammateAccessClaims`, `jwt.TeammateSigner` (implemented by the
   file, AWS KMS and jwttest signers) and `jwt.VerifyTeammateAccessToken`.
+||||||| parent of 1086b53 (feat(tenants): let a tenant's verified domain admit the people on it)
 
 ## Next — tenant ownership moves: `TransferTenantOwnership` and `AdminRecoverTenantOwnership` (additive RPCs; no migration; removing a tenant's last owner refused atomically (behaviour change under concurrency); `MembershipStore.TransferOwnership`, `MembershipStore.RemoveMembership`, `MembershipStore.GrantMembership` and a required `UserDirectory` argument to `NewControlPlaneAdminService` (Go API))
 

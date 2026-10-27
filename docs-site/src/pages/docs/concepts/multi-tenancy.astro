@@ -160,9 +160,11 @@ docker run ... \\
     A tenant is administered only while it is claimed or latent. Once an
     operator suspends it, its owners and admins are refused with
     <code>PERMISSION_DENIED</code> by every domain and membership call
-    (registering, verifying and listing domains; inviting; listing
-    invitations and members; removing a member; transferring ownership), and
-    an invitation to it can no longer be accepted. Nothing they had set up is changed.
+    (registering, verifying and listing domains; letting a domain's people
+    join; inviting; listing invitations and members; removing a member;
+    transferring ownership), and an invitation to it can no longer be
+    accepted, nor can anyone join it by domain. Nothing they had set up is
+    changed.
   </p>
   <p>
     An owner hands the tenant on with
@@ -185,6 +187,33 @@ docker run ... \\
     not yet keep a tenant from its admins (tracked in
     <a href="https://github.com/elloloop/identity/issues/657">issue #657,
     admins can make themselves owners</a>).
+  </p>
+  <p>
+    A signup on a verified domain joins the tenant that verified it, but an
+    account made before the verification is in no tenant of the domain's.
+    An owner or admin can let such people join themselves, domain by domain,
+    with <code>SetDomainJoin(domain_id, allow_join)</code>; it is off until
+    they turn it on, and the <code>Domain</code> it returns carries
+    <code>allow_join</code>. A signed-in person then finds the tenant their
+    verified email's domain lets them join and joins it as a member through
+    the domain, a membership that ends when the email leaves the domain:
+  </p>
+  <Code
+    code={`ListJoinableTenants()
+  -> tenants: [{ tenant_id, name }]   # at most one; empty if none, or already a member
+JoinTenantByDomain(tenant_id)
+  -> membership { role: "member", source: "domain", status: "active" }
+  -> PERMISSION_DENIED     # not the tenant your domain lets you join, whether it exists or not
+  -> FAILED_PRECONDITION   # your email is not verified`}
+    lang="bash"
+  />
+  <p>
+    Joining a tenant you already belong to returns your membership as it is.
+    Turning joining off ends no membership; while it is on, a member removed
+    who is still on the domain can join again, so turn it off first to keep
+    them out. A change of the setting is audited as
+    <code>domain_join_set</code>, and a join as
+    <code>tenant_joined_by_domain</code>.
   </p>
 
   <h2 id="choosing-a-tenant-for-a-token">Choosing a tenant for a token</h2>

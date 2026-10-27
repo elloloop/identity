@@ -1965,6 +1965,10 @@ message Domain {
   google.protobuf.Timestamp verified_at = 6;
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
+  // allow_join lets a person whose verified email is on the domain join the
+  // tenant themselves with JoinTenantByDomain, while the domain is verified.
+  // False on a new domain; a tenant admin sets it with SetDomainJoin.
+  bool allow_join = 9;
 }
 
 message CreateDomainRequest {
@@ -1996,6 +2000,17 @@ message ListTenantDomainsRequest {
 
 message ListTenantDomainsResponse {
   repeated Domain domains = 1;
+}
+
+message SetDomainJoinRequest {
+  string domain_id = 1;
+  // allow_join turns joining by the domain on (true) or off (false).
+  bool allow_join = 2;
+}
+
+message SetDomainJoinResponse {
+  // domain is the domain as it now stands.
+  Domain domain = 1;
 }
 
 // TenantMembership is a user's materialized relationship to a Tenant within
@@ -2086,6 +2101,34 @@ message TransferTenantOwnershipResponse {
   TenantMembership owner = 1;
   // previous_owner is the caller's membership, now an admin one.
   TenantMembership previous_owner = 2;
+}
+
+message ListJoinableTenantsRequest {}
+
+// JoinableTenant is a tenant the caller may join by their verified email's
+// domain: only what the caller needs to choose it.
+message JoinableTenant {
+  string tenant_id = 1;
+  string name = 2;
+}
+
+message ListJoinableTenantsResponse {
+  // tenants holds the claimed tenant that has verified the caller's
+  // verified email's domain and lets it join, unless the caller already
+  // belongs to it; empty otherwise. A project holds a verified domain on
+  // one tenant at most, so there is at most one today.
+  repeated JoinableTenant tenants = 1;
+}
+
+message JoinTenantByDomainRequest {
+  string tenant_id = 1;
+}
+
+message JoinTenantByDomainResponse {
+  // membership is the caller's membership in the tenant: a new, active
+  // one with role "member" and source "domain", or the one they already
+  // held.
+  TenantMembership membership = 1;
 }
 
 message CreateTenantRequest {
@@ -3443,6 +3486,15 @@ service IdentityService {
   rpc CreateDomain(CreateDomainRequest) returns (CreateDomainResponse);
   rpc VerifyDomain(VerifyDomainRequest) returns (VerifyDomainResponse);
   rpc ListTenantDomains(ListTenantDomainsRequest) returns (ListTenantDomainsResponse);
+  // SetDomainJoin turns joining by one of the tenant's domains on or off
+  // (Domain.allow_join): while it is on and the domain is verified, a person
+  // whose verified email is on the domain may join the tenant with
+  // JoinTenantByDomain. An owner or admin of the domain's tenant only, so
+  // PERMISSION_DENIED for anyone else and while the tenant is suspended; an
+  // unknown domain_id is NOT_FOUND. It may be set before the domain is
+  // verified. Turning it off ends no membership. A change is audited; asking
+  // for the value the domain has returns it unchanged and records nothing.
+  rpc SetDomainJoin(SetDomainJoinRequest) returns (SetDomainJoinResponse);
 
   // Tenant membership (redesign). Authenticated, project-scoped, and — except
   // for AcceptTenantInvitation — gated on the caller being an owner/admin
@@ -3508,6 +3560,22 @@ service IdentityService {
   // memory and SQLite drivers return Unimplemented.
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse);
   rpc ListMyTenants(ListMyTenantsRequest) returns (ListMyTenantsResponse);
+
+  // Joining by domain. Authenticated and project-scoped; the caller's own
+  // action, needing no invitation. ListJoinableTenants returns the tenant
+  // the caller's verified email's domain lets them join (see
+  // ListJoinableTenantsResponse). JoinTenantByDomain makes the caller an
+  // active member of it with source "domain", which ends if the email leaves
+  // the domain. It is FAILED_PRECONDITION until the caller has verified their
+  // email, and PERMISSION_DENIED for an anonymous, agent, merged or inactive
+  // account and for any tenant the domain does not let them join (one that
+  // has not verified it, has not turned joining on with SetDomainJoin, or is
+  // suspended), an unknown tenant included. Joining a tenant the caller
+  // already belongs to returns that membership unchanged; a join is
+  // audited. Available only on the postgres control-plane driver; the memory
+  // and SQLite drivers return Unimplemented.
+  rpc ListJoinableTenants(ListJoinableTenantsRequest) returns (ListJoinableTenantsResponse);
+  rpc JoinTenantByDomain(JoinTenantByDomainRequest) returns (JoinTenantByDomainResponse);
 
   // Admin user management (caller must have role=admin). Enforced in the
   // servicer via _require_admin(ctx); all admin RPCs audit-log their actions.

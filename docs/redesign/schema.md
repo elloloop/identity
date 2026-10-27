@@ -349,6 +349,7 @@ punycode domain (H3) — enforced in application code on `lower(domain)`.
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
 | `legacy_txt_challenge` | BOOLEAN | N | Default `false`. `true` on a `dns_txt` row registered before 0045, which still accepts the project-wide challenge it was issued; every later row's challenge also names its tenant. |
+| `allow_join` | BOOLEAN | N | Default `false` (0050). `true` once a tenant admin lets the people whose verified email is on this domain join the tenant themselves (`SetDomainJoin`, `JoinTenantByDomain`); read only while the row is verified. Not a column the 0046 triggers watch. |
 
 - **PK:** `id`. **Unique:** `domains_project_verified_domain_uidx (project_id, lower(domain)) WHERE status = 'verified'`,
   `domains_project_tenant_domain_uidx (project_id, tenant_id, lower(domain))`.

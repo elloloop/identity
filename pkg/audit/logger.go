@@ -349,6 +349,19 @@ const (
 	// membership records it: one that finds the account already an owner, or
 	// whose grant a concurrent recovery made first, records nothing.
 	EventTenantOwnershipRecovered EventType = "tenant_ownership_recovered"
+
+	// EventDomainJoinSet records a tenant admin turning joining by a domain
+	// on or off (SetDomainJoin): actor the admin and target the domain, with
+	// the project and tenant ids, the domain name and the new allow_join in
+	// the details. A call that leaves the setting as it was records nothing.
+	EventDomainJoinSet EventType = "domain_join_set"
+
+	// EventTenantJoinedByDomain records a person joining a tenant through
+	// their verified email's domain (JoinTenantByDomain): actor and target
+	// the person, with the project and tenant ids and the domain in the
+	// details. Joining a tenant the person already belongs to records
+	// nothing.
+	EventTenantJoinedByDomain EventType = "tenant_joined_by_domain"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -442,6 +455,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantRestored:                {},
 	EventTenantOwnershipTransferred:    {},
 	EventTenantOwnershipRecovered:      {},
+	EventDomainJoinSet:                 {},
+	EventTenantJoinedByDomain:          {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

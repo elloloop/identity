@@ -597,6 +597,10 @@ func (b *grpcBridge) ListTenantDomains(ctx context.Context, in *identitypb.ListT
 	return invoke(ctx, b, in, b.h.ListTenantDomains)
 }
 
+func (b *grpcBridge) SetDomainJoin(ctx context.Context, in *identitypb.SetDomainJoinRequest) (*identitypb.SetDomainJoinResponse, error) {
+	return invoke(ctx, b, in, b.h.SetDomainJoin)
+}
+
 // ─── Admin user management ──────────────────────────────────────────
 
 func (b *grpcBridge) InviteUser(ctx context.Context, in *identitypb.InviteUserRequest) (*identitypb.InviteUserResponse, error) {
@@ -789,6 +793,14 @@ func (b *grpcBridge) CreateTenant(ctx context.Context, in *identitypb.CreateTena
 
 func (b *grpcBridge) ListMyTenants(ctx context.Context, in *identitypb.ListMyTenantsRequest) (*identitypb.ListMyTenantsResponse, error) {
 	return invoke(ctx, b, in, b.h.ListMyTenants)
+}
+
+func (b *grpcBridge) ListJoinableTenants(ctx context.Context, in *identitypb.ListJoinableTenantsRequest) (*identitypb.ListJoinableTenantsResponse, error) {
+	return invoke(ctx, b, in, b.h.ListJoinableTenants)
+}
+
+func (b *grpcBridge) JoinTenantByDomain(ctx context.Context, in *identitypb.JoinTenantByDomainRequest) (*identitypb.JoinTenantByDomainResponse, error) {
+	return invoke(ctx, b, in, b.h.JoinTenantByDomain)
 }
 
 func (b *grpcBridge) RequestPhoneVerification(ctx context.Context, in *identitypb.RequestPhoneVerificationRequest) (*identitypb.RequestPhoneVerificationResponse, error) {

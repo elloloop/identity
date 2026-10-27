@@ -24,6 +24,8 @@ type connectDomainStore struct {
 	byID       map[string]*service.Domain
 	listResp   []*service.Domain
 	attemptErr error
+	// verified is what GetVerifiedDomain answers for every domain.
+	verified *service.Domain
 }
 
 func newConnectDomainStore() *connectDomainStore {
@@ -42,7 +44,7 @@ func (s *connectDomainStore) GetDomain(_ context.Context, _, domainID string) (*
 }
 
 func (s *connectDomainStore) GetVerifiedDomain(_ context.Context, _, _ string) (*service.Domain, error) {
-	return nil, nil
+	return s.verified, nil
 }
 
 // RecordDomainAttempt refuses with attemptErr when set, else admits.
@@ -59,6 +61,15 @@ func (s *connectDomainStore) SetDomainStatus(_ context.Context, _, domainID, sta
 
 func (s *connectDomainStore) ListDomainsByTenant(_ context.Context, _, _ string) ([]*service.Domain, error) {
 	return s.listResp, nil
+}
+
+func (s *connectDomainStore) SetDomainAllowJoin(_ context.Context, _, domainID string, allowJoin bool) (bool, error) {
+	d, ok := s.byID[domainID]
+	if !ok || d.AllowJoin == allowJoin {
+		return false, nil
+	}
+	d.AllowJoin = allowJoin
+	return true, nil
 }
 
 type connectTenantStore struct {
@@ -256,6 +267,10 @@ func TestDomainRPCs_NilService_ReturnUnimplemented(t *testing.T) {
 	_, err = srv.client.ListTenantDomains(context.Background(),
 		withAuth(&identitypb.ListTenantDomainsRequest{TenantId: "t"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = srv.client.SetDomainJoin(context.Background(),
+		withAuth(&identitypb.SetDomainJoinRequest{DomainId: "d", AllowJoin: true}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
 }
 
 // ── CreateDomain happy path through the handler ─────────────────────────
@@ -296,6 +311,10 @@ func TestCreateDomain_Handler_MissingAuth_Unauthenticated(t *testing.T) {
 	// No auth header set.
 	_, err := srv.client.CreateDomain(context.Background(),
 		connect.NewRequest(&identitypb.CreateDomainRequest{TenantId: "t", Domain: "acme.com"}))
+	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.SetDomainJoin(context.Background(),
+		connect.NewRequest(&identitypb.SetDomainJoinRequest{DomainId: "d", AllowJoin: true}))
 	requireCode(t, err, connect.CodeUnauthenticated)
 }
 
@@ -364,6 +383,36 @@ func TestListTenantDomains_Handler(t *testing.T) {
 	if len(resp.Msg.GetDomains()) != 2 {
 		t.Fatalf("got %d domains, want 2", len(resp.Msg.GetDomains()))
 	}
+}
+
+// ── SetDomainJoin through the handler ───────────────────────────────────
+
+func TestSetDomainJoin_Handler(t *testing.T) {
+	t.Parallel()
+	domains := newConnectDomainStore()
+	domains.byID["d1"] = &service.Domain{ID: "d1", TenantID: "t-1", Domain: "acme.com", Status: service.DomainStatusVerified}
+	members := &connectMembershipStore{member: &service.TenantMembership{
+		Role: service.RoleAdmin, Status: service.MembershipStatusActive,
+	}}
+	srv := startDomainServer(t, newDomainSvc(domains, claimedTenantStore(), members, &connectFakeResolver{}))
+	ctx := context.Background()
+
+	resp, err := srv.client.SetDomainJoin(ctx, withAuth(&identitypb.SetDomainJoinRequest{DomainId: "d1", AllowJoin: true}, "admin-1"))
+	if err != nil {
+		t.Fatalf("SetDomainJoin: %v", err)
+	}
+	if d := resp.Msg.GetDomain(); d.GetId() != "d1" || !d.GetAllowJoin() || d.GetDomain() != "acme.com" {
+		t.Fatalf("domain = %+v, want d1 allowing join", d)
+	}
+	if !domains.byID["d1"].AllowJoin {
+		t.Fatal("the setting was not stored")
+	}
+
+	_, err = srv.client.SetDomainJoin(ctx, withAuth(&identitypb.SetDomainJoinRequest{DomainId: "d-unknown", AllowJoin: true}, "admin-1"))
+	requireCode(t, err, connect.CodeNotFound)
+	members.member.Role = service.RoleMember
+	_, err = srv.client.SetDomainJoin(ctx, withAuth(&identitypb.SetDomainJoinRequest{DomainId: "d1"}, "admin-1"))
+	requireCode(t, err, connect.CodePermissionDenied)
 }
 
 func requireCode(t *testing.T, err error, want connect.Code) {

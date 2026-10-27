@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/pkg/audit"
 )
 
 // DomainService implements the redesign's tenant domain-verification RPCs:
@@ -54,7 +55,9 @@ type DomainService struct {
 	resolver    DNSResolver
 	cfg         *config.Config
 	logger      *zap.Logger
-	nowFunc     func() time.Time
+	// audit records SetDomainJoin changes (WithAudit); nil records nothing.
+	audit   *audit.Logger
+	nowFunc func() time.Time
 }
 
 // NewDomainService wires a DomainService. resolver may be nil, in which

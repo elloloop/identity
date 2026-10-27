@@ -90,7 +90,11 @@ type MembershipService struct {
 	memberships MembershipStore
 	tenants     TenantStore
 	users       UserDirectory
-	mailer      email.Transport
+	// domains finds the tenant a caller's verified email domain lets them
+	// join (WithDomains); nil leaves ListJoinableTenants and
+	// JoinTenantByDomain unimplemented.
+	domains DomainStore
+	mailer  email.Transport
 	// mailerConfigured reports whether a real outbound mail provider is wired
 	// (not just the log-only fallback). When false, CreateTenantInvitation
 	// returns the raw token in its response so a headless/dev deployment can
@@ -98,8 +102,8 @@ type MembershipService struct {
 	mailerConfigured bool
 	cfg              *config.Config
 	logger           *zap.Logger
-	// audit records CreateTenant outcomes and ownership transfers
-	// (WithAudit); nil records nothing.
+	// audit records CreateTenant outcomes, ownership transfers and joins by
+	// domain (WithAudit); nil records nothing.
 	audit   *audit.Logger
 	nowFunc func() time.Time
 }
