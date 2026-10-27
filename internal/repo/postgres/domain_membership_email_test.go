@@ -128,7 +128,7 @@ func TestDomainMembershipsEndWhenTheEmailLeavesTheDomain(t *testing.T) {
 	// Coming back to the domain does not rejoin; a grant reactivates the row.
 	require.NoError(t, f.repo.UpdateUserEmail(ctx, f.onDomain, "person@"+govDomain, at))
 	require.Equal(t, service.MembershipStatusInactive, f.membershipStatus(ctx, t, f.tenant, f.onDomain))
-	regranted, err := f.members.GrantMembership(ctx, &service.TenantMembership{
+	regranted, _, err := f.members.GrantMembership(ctx, &service.TenantMembership{
 		ProjectID: f.project, TenantID: f.tenant, UserID: f.onDomain, Role: service.RoleMember, Source: service.MembershipSourceInvited,
 	})
 	require.NoError(t, err)

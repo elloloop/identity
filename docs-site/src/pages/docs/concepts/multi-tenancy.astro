@@ -161,8 +161,30 @@ docker run ... \\
     operator suspends it, its owners and admins are refused with
     <code>PERMISSION_DENIED</code> by every domain and membership call
     (registering, verifying and listing domains; inviting; listing
-    invitations and members; removing a member), and an invitation to it can no longer
-    be accepted. Nothing they had set up is changed.
+    invitations and members; removing a member; transferring ownership), and
+    an invitation to it can no longer be accepted. Nothing they had set up is changed.
+  </p>
+  <p>
+    An owner hands the tenant on with
+    <code>TransferTenantOwnership(tenant_id, user_id)</code>: the member
+    named becomes an owner and the caller an admin, in one step, so the
+    tenant is never left without an owner. Naming a co-owner leaves them an
+    owner and the caller an admin, which is how an owner steps down. Only an
+    owner may do it (<code>PERMISSION_DENIED</code> otherwise), to an active
+    member (<code>NOT_FOUND</code> otherwise; a member through their email's
+    domain only while the tenant verifies that domain) who could create a
+    tenant themselves: an active, signed-up person with a verified email
+    (<code>FAILED_PRECONDITION</code> otherwise). The last owner cannot be
+    removed, even by two removals at once or a removal racing a transfer, so
+    a tenant changes hands this way. The transfer is audited as
+    <code>tenant_ownership_transferred</code>. A transfer is not idempotent:
+    once it succeeds the caller is an admin, so a retry is
+    <code>PERMISSION_DENIED</code>; a client that lost the response reads
+    <code>ListTenantMembers</code> to see where ownership stands. An admin
+    can still invite an owner, themselves included, so being the owner does
+    not yet keep a tenant from its admins (tracked in
+    <a href="https://github.com/elloloop/identity/issues/657">issue #657,
+    admins can make themselves owners</a>).
   </p>
 
   <h2 id="choosing-a-tenant-for-a-token">Choosing a tenant for a token</h2>
@@ -290,7 +312,8 @@ Both:
 AdminRestoreTenant(project_id, tenant_id, reason="dispute settled")
   -> { tenant: { status: "claimed", ... } }    # was suspended, or already claimed
   -> FAILED_PRECONDITION                       # latent, or no creator, owner or admin:
-                                               #   add an admin with AdminAddTenantAdmin first
+                                               #   appoint an owner with
+                                               #   AdminRecoverTenantOwnership first
 Both:
   -> ABORTED                                   # its status changed meanwhile; read it again
   -> INVALID_ARGUMENT                          # a blank id, or a reason that is blank, over 500
@@ -306,7 +329,7 @@ Both:
     that chooses it is refused, its selected tokens are refused within the
     tenant-status cache TTL (<code>GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS</code>,
     30 seconds by default), and its owners and admins can no longer
-    administer it. The agent grants and machines of its members, in any
+    administer it or transfer its ownership. The agent grants and machines of its members, in any
     membership status, and of the accounts on its verified domains and its
     primary domain are revoked.
   </p>
@@ -326,6 +349,51 @@ Both:
     suspension; no grant comes back. Asking for the
     status a tenant already has returns it unchanged and records nothing, so a
     retry is safe; only the call that changes the status records its reason.
+  </p>
+  <p>
+    A tenant whose owners have all been deleted, deactivated or merged away
+    has no owner. While one of its admins can sign in, that admin invites a
+    new owner with <code>CreateTenantInvitation</code> and
+    <code>role="owner"</code>. Once no owner or admin can sign in, nobody can
+    govern it, and an operator gives it an owner again, with a reason the
+    audit trail keeps as <code>tenant_ownership_recovered</code>:
+  </p>
+  <Code
+    code={`AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason="owner left the company")
+  -> { membership: { role: "owner", source: "added", ... } }   # an existing invited or created source is kept
+  -> FAILED_PRECONDITION   # an owner or admin who is a person can still sign in,
+                           #   the account cannot own a tenant, or latent
+  -> NOT_FOUND             # no such tenant or account
+  -> INVALID_ARGUMENT      # a blank id, or a reason that is blank, over 500
+                           #   characters, or holds a control character
+  -> UNIMPLEMENTED         # GATEWAY_ADMIN_API_SECRET is unset
+  -> PERMISSION_DENIED     # a wrong X-Admin-Secret`}
+    lang="bash"
+  />
+  <p>
+    The account may be any person in the Project who could own a tenant,
+    member or not, and a suspended tenant can be recovered. While an owner
+    or an admin who is a person can still sign in, recovery is refused: an
+    owner transfers, an admin invites. A suspended tenant refuses both, so
+    the operator restores it first and they act then. So recovery never
+    puts an outside account above people who can act. An account pending deletion can still
+    sign in, which cancels the deletion, so an owner or admin in that state
+    still counts. Naming an account that is already an owner who can sign in
+    returns its membership and records nothing, so a retry is safe. A
+    refused recovery is not audited. <code>AdminAddTenantAdmin</code>, which
+    provisions a tenant's first admins, makes none of these checks and
+    records nothing, so the same admin secret can make anyone an owner or
+    admin of any tenant, lowering an owner included.
+  </p>
+  <p>
+    Recovery treats a deactivated or suspended owner as gone, though either
+    can be undone: an owner reactivated after a recovery is an owner again,
+    beside the appointed one, so make sure the account will not come back
+    first. When every owner is gone and the admins left cannot be reached
+    or will not act, a Project admin deactivates their accounts with
+    <code>DeactivateUser</code> (audited, and reversible with
+    <code>ReactivateUser</code>, but it signs each account out of every
+    tenant) and the operator then recovers the tenant.
   </p>
 
   <p>

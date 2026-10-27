@@ -66,6 +66,7 @@ func TestAuthMiddleware_OperatorRPCs_Exempt(t *testing.T) {
 		"AdminListTenants",
 		"AdminSuspendTenant",
 		"AdminRestoreTenant",
+		"AdminRecoverTenantOwnership",
 		"UpsertLoginPolicy",
 		"GetLoginPolicy",
 		"DeleteLoginPolicy",

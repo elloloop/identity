@@ -125,12 +125,18 @@ func isPermanentPerson(u *User) bool {
 	return u != nil && !u.IsAgent() && !u.IsAnonymous && u.MergedIntoUserID == ""
 }
 
+// isActivePerson reports whether u is a permanent person whose account is
+// active: who may own an agent, and, with a verified email, a tenant.
+func isActivePerson(u *User) bool {
+	return isPermanentPerson(u) && isActiveStatus(u.Status)
+}
+
 // isEligibleAgentOwner reports whether u may own an agent: an active
 // permanent person. The same rule backs creation, transfer and the standing
 // check, so an agent can never be handed to an account it would be unusable
 // under.
 func isEligibleAgentOwner(u *User) bool {
-	return isPermanentPerson(u) && isActiveStatus(u.Status)
+	return isActivePerson(u)
 }
 
 // checkAgentStanding returns nil when the agent may hold a session now. It

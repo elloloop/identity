@@ -140,6 +140,7 @@ const (
 	IdentityService_ListTenantInvitations_FullMethodName           = "/identity.v1.IdentityService/ListTenantInvitations"
 	IdentityService_ListTenantMembers_FullMethodName               = "/identity.v1.IdentityService/ListTenantMembers"
 	IdentityService_RemoveTenantMember_FullMethodName              = "/identity.v1.IdentityService/RemoveTenantMember"
+	IdentityService_TransferTenantOwnership_FullMethodName         = "/identity.v1.IdentityService/TransferTenantOwnership"
 	IdentityService_CreateTenant_FullMethodName                    = "/identity.v1.IdentityService/CreateTenant"
 	IdentityService_ListMyTenants_FullMethodName                   = "/identity.v1.IdentityService/ListMyTenants"
 	IdentityService_InviteUser_FullMethodName                      = "/identity.v1.IdentityService/InviteUser"
@@ -163,6 +164,7 @@ const (
 	IdentityService_AdminListTenants_FullMethodName                = "/identity.v1.IdentityService/AdminListTenants"
 	IdentityService_AdminSuspendTenant_FullMethodName              = "/identity.v1.IdentityService/AdminSuspendTenant"
 	IdentityService_AdminRestoreTenant_FullMethodName              = "/identity.v1.IdentityService/AdminRestoreTenant"
+	IdentityService_AdminRecoverTenantOwnership_FullMethodName     = "/identity.v1.IdentityService/AdminRecoverTenantOwnership"
 	IdentityService_CreateFirstPlatformAdmin_FullMethodName        = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
 	IdentityService_ListLinkedIdentities_FullMethodName            = "/identity.v1.IdentityService/ListLinkedIdentities"
 	IdentityService_LinkIdentity_FullMethodName                    = "/identity.v1.IdentityService/LinkIdentity"
@@ -443,6 +445,21 @@ type IdentityServiceClient interface {
 	ListTenantInvitations(ctx context.Context, in *ListTenantInvitationsRequest, opts ...grpc.CallOption) (*ListTenantInvitationsResponse, error)
 	ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error)
 	RemoveTenantMember(ctx context.Context, in *RemoveTenantMemberRequest, opts ...grpc.CallOption) (*RemoveTenantMemberResponse, error)
+	// TransferTenantOwnership hands the caller's ownership of a tenant to
+	// another active member in one step: the member becomes an owner and the
+	// caller an admin, so the tenant is never left without an owner. Naming a
+	// co-owner leaves the caller an admin, so an owner can step down. Only an
+	// active owner may transfer (an admin is PERMISSION_DENIED, and so is
+	// anyone while the tenant is suspended). A user_id that is not an active
+	// member of the tenant is NOT_FOUND, as is a member only through their
+	// email's domain once the tenant no longer verifies it; one whose account
+	// is not an active, signed-up person's with a verified email is
+	// FAILED_PRECONDITION, as an owner sends the tenant's invitations. The
+	// transfer is audited. It is not idempotent: once it succeeds the caller
+	// is an admin, so a retry is PERMISSION_DENIED; read ListTenantMembers to
+	// see where ownership stands. Available only on the postgres
+	// control-plane driver.
+	TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*TransferTenantOwnershipResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -554,10 +571,30 @@ type IdentityServiceClient interface {
 	// so a retry is safe. Operator-only, with the same refusals as
 	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
 	// tenant with no creator and no owner or admin, since restoring it would
-	// make it selectable with no one answering for its domain (add an admin
-	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
-	// changed between the read and the write.
+	// make it selectable with no one answering for its domain (appoint an
+	// owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
+	// its status changed between the read and the write.
 	AdminRestoreTenant(ctx context.Context, in *AdminRestoreTenantRequest, opts ...grpc.CallOption) (*AdminRestoreTenantResponse, error)
+	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
+	// govern: no owner or admin of it who is a person can sign in (each was
+	// deleted, deactivated or merged away). While an owner or admin who is a
+	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
+	// an admin invites a new owner, after an operator restores the tenant if
+	// it is suspended. An account pending deletion can still sign in, so it
+	// counts. When user_id is already an owner who can sign in, it
+	// returns that membership unchanged and records nothing, before judging the
+	// account, so a retry gets the first answer. Otherwise user_id must be an
+	// account of the project (else NOT_FOUND) that is an active, signed-up
+	// person's with a verified email (else FAILED_PRECONDITION); a membership
+	// it holds becomes an active owner one and keeps a source other than the
+	// domain's. A latent tenant has never had an owner and is
+	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
+	// the audit trail when it appoints; a refusal is not recorded.
+	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
+	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
+	// characters or holds a control or invisible formatting character.
+	AdminRecoverTenantOwnership(ctx context.Context, in *AdminRecoverTenantOwnershipRequest, opts ...grpc.CallOption) (*AdminRecoverTenantOwnershipResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -1850,6 +1887,16 @@ func (c *identityServiceClient) RemoveTenantMember(ctx context.Context, in *Remo
 	return out, nil
 }
 
+func (c *identityServiceClient) TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*TransferTenantOwnershipResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TransferTenantOwnershipResponse)
+	err := c.cc.Invoke(ctx, IdentityService_TransferTenantOwnership_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateTenantResponse)
@@ -2074,6 +2121,16 @@ func (c *identityServiceClient) AdminRestoreTenant(ctx context.Context, in *Admi
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminRestoreTenantResponse)
 	err := c.cc.Invoke(ctx, IdentityService_AdminRestoreTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AdminRecoverTenantOwnership(ctx context.Context, in *AdminRecoverTenantOwnershipRequest, opts ...grpc.CallOption) (*AdminRecoverTenantOwnershipResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminRecoverTenantOwnershipResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminRecoverTenantOwnership_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2511,6 +2568,21 @@ type IdentityServiceServer interface {
 	ListTenantInvitations(context.Context, *ListTenantInvitationsRequest) (*ListTenantInvitationsResponse, error)
 	ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error)
 	RemoveTenantMember(context.Context, *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error)
+	// TransferTenantOwnership hands the caller's ownership of a tenant to
+	// another active member in one step: the member becomes an owner and the
+	// caller an admin, so the tenant is never left without an owner. Naming a
+	// co-owner leaves the caller an admin, so an owner can step down. Only an
+	// active owner may transfer (an admin is PERMISSION_DENIED, and so is
+	// anyone while the tenant is suspended). A user_id that is not an active
+	// member of the tenant is NOT_FOUND, as is a member only through their
+	// email's domain once the tenant no longer verifies it; one whose account
+	// is not an active, signed-up person's with a verified email is
+	// FAILED_PRECONDITION, as an owner sends the tenant's invitations. The
+	// transfer is audited. It is not idempotent: once it succeeds the caller
+	// is an admin, so a retry is PERMISSION_DENIED; read ListTenantMembers to
+	// see where ownership stands. Available only on the postgres
+	// control-plane driver.
+	TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*TransferTenantOwnershipResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -2622,10 +2694,30 @@ type IdentityServiceServer interface {
 	// so a retry is safe. Operator-only, with the same refusals as
 	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
 	// tenant with no creator and no owner or admin, since restoring it would
-	// make it selectable with no one answering for its domain (add an admin
-	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
-	// changed between the read and the write.
+	// make it selectable with no one answering for its domain (appoint an
+	// owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
+	// its status changed between the read and the write.
 	AdminRestoreTenant(context.Context, *AdminRestoreTenantRequest) (*AdminRestoreTenantResponse, error)
+	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
+	// govern: no owner or admin of it who is a person can sign in (each was
+	// deleted, deactivated or merged away). While an owner or admin who is a
+	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
+	// an admin invites a new owner, after an operator restores the tenant if
+	// it is suspended. An account pending deletion can still sign in, so it
+	// counts. When user_id is already an owner who can sign in, it
+	// returns that membership unchanged and records nothing, before judging the
+	// account, so a retry gets the first answer. Otherwise user_id must be an
+	// account of the project (else NOT_FOUND) that is an active, signed-up
+	// person's with a verified email (else FAILED_PRECONDITION); a membership
+	// it holds becomes an active owner one and keeps a source other than the
+	// domain's. A latent tenant has never had an owner and is
+	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
+	// the audit trail when it appoints; a refusal is not recorded.
+	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
+	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
+	// characters or holds a control or invisible formatting character.
+	AdminRecoverTenantOwnership(context.Context, *AdminRecoverTenantOwnershipRequest) (*AdminRecoverTenantOwnershipResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -3071,6 +3163,9 @@ func (UnimplementedIdentityServiceServer) ListTenantMembers(context.Context, *Li
 func (UnimplementedIdentityServiceServer) RemoveTenantMember(context.Context, *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RemoveTenantMember not implemented")
 }
+func (UnimplementedIdentityServiceServer) TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*TransferTenantOwnershipResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransferTenantOwnership not implemented")
+}
 func (UnimplementedIdentityServiceServer) CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTenant not implemented")
 }
@@ -3139,6 +3234,9 @@ func (UnimplementedIdentityServiceServer) AdminSuspendTenant(context.Context, *A
 }
 func (UnimplementedIdentityServiceServer) AdminRestoreTenant(context.Context, *AdminRestoreTenantRequest) (*AdminRestoreTenantResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminRestoreTenant not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminRecoverTenantOwnership(context.Context, *AdminRecoverTenantOwnershipRequest) (*AdminRecoverTenantOwnershipResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminRecoverTenantOwnership not implemented")
 }
 func (UnimplementedIdentityServiceServer) CreateFirstPlatformAdmin(context.Context, *CreateFirstPlatformAdminRequest) (*CreateFirstPlatformAdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateFirstPlatformAdmin not implemented")
@@ -5390,6 +5488,24 @@ func _IdentityService_RemoveTenantMember_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_TransferTenantOwnership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransferTenantOwnershipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).TransferTenantOwnership(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_TransferTenantOwnership_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).TransferTenantOwnership(ctx, req.(*TransferTenantOwnershipRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_CreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateTenantRequest)
 	if err := dec(in); err != nil {
@@ -5800,6 +5916,24 @@ func _IdentityService_AdminRestoreTenant_Handler(srv interface{}, ctx context.Co
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).AdminRestoreTenant(ctx, req.(*AdminRestoreTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AdminRecoverTenantOwnership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRecoverTenantOwnershipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminRecoverTenantOwnership(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminRecoverTenantOwnership_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminRecoverTenantOwnership(ctx, req.(*AdminRecoverTenantOwnershipRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -6602,6 +6736,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _IdentityService_RemoveTenantMember_Handler,
 		},
 		{
+			MethodName: "TransferTenantOwnership",
+			Handler:    _IdentityService_TransferTenantOwnership_Handler,
+		},
+		{
 			MethodName: "CreateTenant",
 			Handler:    _IdentityService_CreateTenant_Handler,
 		},
@@ -6692,6 +6830,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminRestoreTenant",
 			Handler:    _IdentityService_AdminRestoreTenant_Handler,
+		},
+		{
+			MethodName: "AdminRecoverTenantOwnership",
+			Handler:    _IdentityService_AdminRecoverTenantOwnership_Handler,
 		},
 		{
 			MethodName: "CreateFirstPlatformAdmin",

@@ -326,6 +326,21 @@ const (
 	// in the status asked for changes nothing and records nothing.
 	EventTenantSuspended EventType = "tenant_suspended"
 	EventTenantRestored  EventType = "tenant_restored"
+
+	// EventTenantOwnershipTransferred records an owner handing a tenant's
+	// ownership to another member (TransferTenantOwnership): actor the
+	// previous owner, who stays on as an admin, and target the new owner, with
+	// the project and tenant ids in the details.
+	EventTenantOwnershipTransferred EventType = "tenant_ownership_transferred"
+
+	// EventTenantOwnershipRecovered records an operator appointing an owner
+	// to a tenant that has no owner or admin left who can sign in
+	// (AdminRecoverTenantOwnership): target the appointed owner, the
+	// operator's IP and user agent, and the project id, the tenant id and the
+	// reason the operator gave in the details. Only a call that changed the
+	// membership records it: one that finds the account already an owner, or
+	// whose grant a concurrent recovery made first, records nothing.
+	EventTenantOwnershipRecovered EventType = "tenant_ownership_recovered"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -413,6 +428,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantCreated:                 {},
 	EventTenantSuspended:               {},
 	EventTenantRestored:                {},
+	EventTenantOwnershipTransferred:    {},
+	EventTenantOwnershipRecovered:      {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

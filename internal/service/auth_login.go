@@ -1516,7 +1516,7 @@ func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr
 
 	status := strings.ToLower(user.Status)
 	switch {
-	case isActiveStatus(status) || status == StatusPendingDeletion:
+	case statusCanSignIn(status):
 		// PENDING_DELETION is deliberately allowed to authenticate (unlike
 		// DEACTIVATED/SUSPENDED): a successful login is exactly the signal that
 		// cancels the pending deletion, which issueTokens does before minting

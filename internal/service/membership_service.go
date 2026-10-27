@@ -98,7 +98,8 @@ type MembershipService struct {
 	mailerConfigured bool
 	cfg              *config.Config
 	logger           *zap.Logger
-	// audit records CreateTenant outcomes (WithAudit); nil records nothing.
+	// audit records CreateTenant outcomes and ownership transfers
+	// (WithAudit); nil records nothing.
 	audit   *audit.Logger
 	nowFunc func() time.Time
 }
@@ -294,7 +295,7 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 		return nil, err
 	}
 
-	m, err := s.memberships.GrantMembership(ctx, &TenantMembership{
+	m, _, err := s.memberships.GrantMembership(ctx, &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  inv.TenantID,
 		UserID:    callerID,
@@ -354,14 +355,12 @@ func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, ten
 // RemoveTenantMember removes a user's membership from a tenant. callerID must
 // be an active owner/admin member of the tenant.
 //
-// Last-owner guard: a tenant must never be left ownerless. Removing the only
-// remaining active owner is rejected with FailedPrecondition-style
-// ErrInvalidArgument-adjacent semantics — here ErrPermissionDenied is wrong
-// (the caller IS permitted to remove members), so we surface a dedicated
-// guard error. The rule: if the target is an active owner and is the last
-// active owner of the tenant, the removal is refused. Removing a non-owner,
-// or an owner while other active owners remain, is allowed (including an
-// owner removing themselves, as long as another owner survives).
+// A tenant is never left without an owner: removing its last active owner
+// is ErrLastOwner (the caller may remove members, so ErrPermissionDenied
+// would be wrong). Removing a non-owner, or an owner while another active
+// owner remains, is allowed, including an owner removing themselves. The
+// store checks and removes in one step (MembershipStore.RemoveMembership),
+// so a concurrent removal or ownership transfer cannot slip between them.
 func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID, tenantID, targetUserID string) error {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -382,45 +381,8 @@ func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID, te
 		return err
 	}
 
-	target, err := s.memberships.GetMembership(ctx, projectID, tenantID, targetUserID)
-	if err != nil {
-		return err
-	}
-	if target == nil {
-		// Idempotent: nothing to remove.
-		return nil
-	}
-
-	if err := s.guardLastOwner(ctx, projectID, tenantID, target); err != nil {
-		return err
-	}
+	// Removing a membership that does not exist is a no-op.
 	return s.memberships.RemoveMembership(ctx, projectID, tenantID, targetUserID)
-}
-
-// guardLastOwner refuses to remove the last active owner of a tenant, which
-// would strand it ownerless. It is a no-op when the target is not an active
-// owner.
-func (s *MembershipService) guardLastOwner(ctx context.Context, projectID, tenantID string, target *TenantMembership) error {
-	if target.Role != RoleOwner || target.Status != MembershipStatusActive {
-		return nil
-	}
-	members, err := s.memberships.ListMembershipsForTenant(ctx, projectID, tenantID)
-	if err != nil {
-		return err
-	}
-	otherOwners := 0
-	for _, m := range members {
-		if m.UserID == target.UserID {
-			continue
-		}
-		if m.Role == RoleOwner && m.Status == MembershipStatusActive {
-			otherOwners++
-		}
-	}
-	if otherOwners == 0 {
-		return fmt.Errorf("%w: cannot remove the last owner of a tenant", ErrLastOwner)
-	}
-	return nil
 }
 
 // sendInvitationEmail renders and best-effort dispatches the branded tenant

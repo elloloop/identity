@@ -233,7 +233,7 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID, domainID str
 			return nil, err
 		}
 	}
-	if _, err := s.memberships.GrantMembership(ctx, &TenantMembership{
+	if _, _, err := s.memberships.GrantMembership(ctx, &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  t.ID,
 		UserID:    callerID,

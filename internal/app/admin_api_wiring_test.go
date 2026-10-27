@@ -18,6 +18,7 @@ type stubControlPlaneStore struct {
 
 func TestBuildControlPlaneAdminService(t *testing.T) {
 	logger := zap.NewNop()
+	users := &stubUserDirectory{}
 
 	full := Deps{
 		Config:            &config.Config{AdminAPISecret: "operator-secret"},
@@ -27,7 +28,7 @@ func TestBuildControlPlaneAdminService(t *testing.T) {
 	}
 
 	// All stores present AND a secret configured ⇒ non-nil and enabled.
-	svc := buildControlPlaneAdminService(full, nil, logger)
+	svc := buildControlPlaneAdminService(full, users, nil, logger)
 	if svc == nil {
 		t.Fatal("all stores + secret: want non-nil ControlPlaneAdminService, got nil")
 	}
@@ -39,7 +40,7 @@ func TestBuildControlPlaneAdminService(t *testing.T) {
 	// wired) but DISABLED, so the surface returns Unimplemented.
 	noSecret := full
 	noSecret.Config = &config.Config{}
-	svc = buildControlPlaneAdminService(noSecret, nil, logger)
+	svc = buildControlPlaneAdminService(noSecret, users, nil, logger)
 	if svc == nil {
 		t.Fatal("stores present, empty secret: want a constructed-but-disabled service, got nil")
 	}
@@ -50,7 +51,7 @@ func TestBuildControlPlaneAdminService(t *testing.T) {
 	// A nil config is tolerated (empty secret ⇒ disabled).
 	nilCfg := full
 	nilCfg.Config = nil
-	svc = buildControlPlaneAdminService(nilCfg, nil, logger)
+	svc = buildControlPlaneAdminService(nilCfg, users, nil, logger)
 	if svc == nil {
 		t.Fatal("nil config with stores present: want a disabled service, got nil")
 	}
@@ -66,8 +67,13 @@ func TestBuildControlPlaneAdminService(t *testing.T) {
 	} {
 		d := full
 		mutate(&d)
-		if got := buildControlPlaneAdminService(d, nil, logger); got != nil {
+		if got := buildControlPlaneAdminService(d, users, nil, logger); got != nil {
 			t.Errorf("%s: want nil ControlPlaneAdminService, got non-nil", name)
 		}
+	}
+
+	// The service requires a user directory, so without one there is none.
+	if got := buildControlPlaneAdminService(full, nil, nil, logger); got != nil {
+		t.Error("no user directory: want nil ControlPlaneAdminService, got non-nil")
 	}
 }

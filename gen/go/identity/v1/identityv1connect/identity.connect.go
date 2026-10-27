@@ -394,6 +394,9 @@ const (
 	// IdentityServiceRemoveTenantMemberProcedure is the fully-qualified name of the IdentityService's
 	// RemoveTenantMember RPC.
 	IdentityServiceRemoveTenantMemberProcedure = "/identity.v1.IdentityService/RemoveTenantMember"
+	// IdentityServiceTransferTenantOwnershipProcedure is the fully-qualified name of the
+	// IdentityService's TransferTenantOwnership RPC.
+	IdentityServiceTransferTenantOwnershipProcedure = "/identity.v1.IdentityService/TransferTenantOwnership"
 	// IdentityServiceCreateTenantProcedure is the fully-qualified name of the IdentityService's
 	// CreateTenant RPC.
 	IdentityServiceCreateTenantProcedure = "/identity.v1.IdentityService/CreateTenant"
@@ -463,6 +466,9 @@ const (
 	// IdentityServiceAdminRestoreTenantProcedure is the fully-qualified name of the IdentityService's
 	// AdminRestoreTenant RPC.
 	IdentityServiceAdminRestoreTenantProcedure = "/identity.v1.IdentityService/AdminRestoreTenant"
+	// IdentityServiceAdminRecoverTenantOwnershipProcedure is the fully-qualified name of the
+	// IdentityService's AdminRecoverTenantOwnership RPC.
+	IdentityServiceAdminRecoverTenantOwnershipProcedure = "/identity.v1.IdentityService/AdminRecoverTenantOwnership"
 	// IdentityServiceCreateFirstPlatformAdminProcedure is the fully-qualified name of the
 	// IdentityService's CreateFirstPlatformAdmin RPC.
 	IdentityServiceCreateFirstPlatformAdminProcedure = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
@@ -775,6 +781,21 @@ type IdentityServiceClient interface {
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
 	ListTenantMembers(context.Context, *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error)
 	RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error)
+	// TransferTenantOwnership hands the caller's ownership of a tenant to
+	// another active member in one step: the member becomes an owner and the
+	// caller an admin, so the tenant is never left without an owner. Naming a
+	// co-owner leaves the caller an admin, so an owner can step down. Only an
+	// active owner may transfer (an admin is PERMISSION_DENIED, and so is
+	// anyone while the tenant is suspended). A user_id that is not an active
+	// member of the tenant is NOT_FOUND, as is a member only through their
+	// email's domain once the tenant no longer verifies it; one whose account
+	// is not an active, signed-up person's with a verified email is
+	// FAILED_PRECONDITION, as an owner sends the tenant's invitations. The
+	// transfer is audited. It is not idempotent: once it succeeds the caller
+	// is an admin, so a retry is PERMISSION_DENIED; read ListTenantMembers to
+	// see where ownership stands. Available only on the postgres
+	// control-plane driver.
+	TransferTenantOwnership(context.Context, *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -886,10 +907,30 @@ type IdentityServiceClient interface {
 	// so a retry is safe. Operator-only, with the same refusals as
 	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
 	// tenant with no creator and no owner or admin, since restoring it would
-	// make it selectable with no one answering for its domain (add an admin
-	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
-	// changed between the read and the write.
+	// make it selectable with no one answering for its domain (appoint an
+	// owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
+	// its status changed between the read and the write.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
+	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
+	// govern: no owner or admin of it who is a person can sign in (each was
+	// deleted, deactivated or merged away). While an owner or admin who is a
+	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
+	// an admin invites a new owner, after an operator restores the tenant if
+	// it is suspended. An account pending deletion can still sign in, so it
+	// counts. When user_id is already an owner who can sign in, it
+	// returns that membership unchanged and records nothing, before judging the
+	// account, so a retry gets the first answer. Otherwise user_id must be an
+	// account of the project (else NOT_FOUND) that is an active, signed-up
+	// person's with a verified email (else FAILED_PRECONDITION); a membership
+	// it holds becomes an active owner one and keeps a source other than the
+	// domain's. A latent tenant has never had an owner and is
+	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
+	// the audit trail when it appoints; a refusal is not recorded.
+	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
+	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
+	// characters or holds a control or invisible formatting character.
+	AdminRecoverTenantOwnership(context.Context, *connect.Request[v1.AdminRecoverTenantOwnershipRequest]) (*connect.Response[v1.AdminRecoverTenantOwnershipResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -1701,6 +1742,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("RemoveTenantMember")),
 			connect.WithClientOptions(opts...),
 		),
+		transferTenantOwnership: connect.NewClient[v1.TransferTenantOwnershipRequest, v1.TransferTenantOwnershipResponse](
+			httpClient,
+			baseURL+IdentityServiceTransferTenantOwnershipProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("TransferTenantOwnership")),
+			connect.WithClientOptions(opts...),
+		),
 		createTenant: connect.NewClient[v1.CreateTenantRequest, v1.CreateTenantResponse](
 			httpClient,
 			baseURL+IdentityServiceCreateTenantProcedure,
@@ -1837,6 +1884,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceAdminRestoreTenantProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("AdminRestoreTenant")),
+			connect.WithClientOptions(opts...),
+		),
+		adminRecoverTenantOwnership: connect.NewClient[v1.AdminRecoverTenantOwnershipRequest, v1.AdminRecoverTenantOwnershipResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminRecoverTenantOwnershipProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminRecoverTenantOwnership")),
 			connect.WithClientOptions(opts...),
 		),
 		createFirstPlatformAdmin: connect.NewClient[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse](
@@ -2067,6 +2120,7 @@ type identityServiceClient struct {
 	listTenantInvitations           *connect.Client[v1.ListTenantInvitationsRequest, v1.ListTenantInvitationsResponse]
 	listTenantMembers               *connect.Client[v1.ListTenantMembersRequest, v1.ListTenantMembersResponse]
 	removeTenantMember              *connect.Client[v1.RemoveTenantMemberRequest, v1.RemoveTenantMemberResponse]
+	transferTenantOwnership         *connect.Client[v1.TransferTenantOwnershipRequest, v1.TransferTenantOwnershipResponse]
 	createTenant                    *connect.Client[v1.CreateTenantRequest, v1.CreateTenantResponse]
 	listMyTenants                   *connect.Client[v1.ListMyTenantsRequest, v1.ListMyTenantsResponse]
 	inviteUser                      *connect.Client[v1.InviteUserRequest, v1.InviteUserResponse]
@@ -2090,6 +2144,7 @@ type identityServiceClient struct {
 	adminListTenants                *connect.Client[v1.AdminListTenantsRequest, v1.AdminListTenantsResponse]
 	adminSuspendTenant              *connect.Client[v1.AdminSuspendTenantRequest, v1.AdminSuspendTenantResponse]
 	adminRestoreTenant              *connect.Client[v1.AdminRestoreTenantRequest, v1.AdminRestoreTenantResponse]
+	adminRecoverTenantOwnership     *connect.Client[v1.AdminRecoverTenantOwnershipRequest, v1.AdminRecoverTenantOwnershipResponse]
 	createFirstPlatformAdmin        *connect.Client[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse]
 	listLinkedIdentities            *connect.Client[v1.ListLinkedIdentitiesRequest, v1.ListLinkedIdentitiesResponse]
 	linkIdentity                    *connect.Client[v1.LinkIdentityRequest, v1.LinkIdentityResponse]
@@ -2714,6 +2769,11 @@ func (c *identityServiceClient) RemoveTenantMember(ctx context.Context, req *con
 	return c.removeTenantMember.CallUnary(ctx, req)
 }
 
+// TransferTenantOwnership calls identity.v1.IdentityService.TransferTenantOwnership.
+func (c *identityServiceClient) TransferTenantOwnership(ctx context.Context, req *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error) {
+	return c.transferTenantOwnership.CallUnary(ctx, req)
+}
+
 // CreateTenant calls identity.v1.IdentityService.CreateTenant.
 func (c *identityServiceClient) CreateTenant(ctx context.Context, req *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error) {
 	return c.createTenant.CallUnary(ctx, req)
@@ -2827,6 +2887,11 @@ func (c *identityServiceClient) AdminSuspendTenant(ctx context.Context, req *con
 // AdminRestoreTenant calls identity.v1.IdentityService.AdminRestoreTenant.
 func (c *identityServiceClient) AdminRestoreTenant(ctx context.Context, req *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error) {
 	return c.adminRestoreTenant.CallUnary(ctx, req)
+}
+
+// AdminRecoverTenantOwnership calls identity.v1.IdentityService.AdminRecoverTenantOwnership.
+func (c *identityServiceClient) AdminRecoverTenantOwnership(ctx context.Context, req *connect.Request[v1.AdminRecoverTenantOwnershipRequest]) (*connect.Response[v1.AdminRecoverTenantOwnershipResponse], error) {
+	return c.adminRecoverTenantOwnership.CallUnary(ctx, req)
 }
 
 // CreateFirstPlatformAdmin calls identity.v1.IdentityService.CreateFirstPlatformAdmin.
@@ -3174,6 +3239,21 @@ type IdentityServiceHandler interface {
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
 	ListTenantMembers(context.Context, *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error)
 	RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error)
+	// TransferTenantOwnership hands the caller's ownership of a tenant to
+	// another active member in one step: the member becomes an owner and the
+	// caller an admin, so the tenant is never left without an owner. Naming a
+	// co-owner leaves the caller an admin, so an owner can step down. Only an
+	// active owner may transfer (an admin is PERMISSION_DENIED, and so is
+	// anyone while the tenant is suspended). A user_id that is not an active
+	// member of the tenant is NOT_FOUND, as is a member only through their
+	// email's domain once the tenant no longer verifies it; one whose account
+	// is not an active, signed-up person's with a verified email is
+	// FAILED_PRECONDITION, as an owner sends the tenant's invitations. The
+	// transfer is audited. It is not idempotent: once it succeeds the caller
+	// is an admin, so a retry is PERMISSION_DENIED; read ListTenantMembers to
+	// see where ownership stands. Available only on the postgres
+	// control-plane driver.
+	TransferTenantOwnership(context.Context, *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -3285,10 +3365,30 @@ type IdentityServiceHandler interface {
 	// so a retry is safe. Operator-only, with the same refusals as
 	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
 	// tenant with no creator and no owner or admin, since restoring it would
-	// make it selectable with no one answering for its domain (add an admin
-	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
-	// changed between the read and the write.
+	// make it selectable with no one answering for its domain (appoint an
+	// owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
+	// its status changed between the read and the write.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
+	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
+	// govern: no owner or admin of it who is a person can sign in (each was
+	// deleted, deactivated or merged away). While an owner or admin who is a
+	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
+	// an admin invites a new owner, after an operator restores the tenant if
+	// it is suspended. An account pending deletion can still sign in, so it
+	// counts. When user_id is already an owner who can sign in, it
+	// returns that membership unchanged and records nothing, before judging the
+	// account, so a retry gets the first answer. Otherwise user_id must be an
+	// account of the project (else NOT_FOUND) that is an active, signed-up
+	// person's with a verified email (else FAILED_PRECONDITION); a membership
+	// it holds becomes an active owner one and keeps a source other than the
+	// domain's. A latent tenant has never had an owner and is
+	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
+	// the audit trail when it appoints; a refusal is not recorded.
+	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
+	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
+	// characters or holds a control or invisible formatting character.
+	AdminRecoverTenantOwnership(context.Context, *connect.Request[v1.AdminRecoverTenantOwnershipRequest]) (*connect.Response[v1.AdminRecoverTenantOwnershipResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -4096,6 +4196,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("RemoveTenantMember")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceTransferTenantOwnershipHandler := connect.NewUnaryHandler(
+		IdentityServiceTransferTenantOwnershipProcedure,
+		svc.TransferTenantOwnership,
+		connect.WithSchema(identityServiceMethods.ByName("TransferTenantOwnership")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceCreateTenantHandler := connect.NewUnaryHandler(
 		IdentityServiceCreateTenantProcedure,
 		svc.CreateTenant,
@@ -4232,6 +4338,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceAdminRestoreTenantProcedure,
 		svc.AdminRestoreTenant,
 		connect.WithSchema(identityServiceMethods.ByName("AdminRestoreTenant")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminRecoverTenantOwnershipHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminRecoverTenantOwnershipProcedure,
+		svc.AdminRecoverTenantOwnership,
+		connect.WithSchema(identityServiceMethods.ByName("AdminRecoverTenantOwnership")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceCreateFirstPlatformAdminHandler := connect.NewUnaryHandler(
@@ -4580,6 +4692,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceListTenantMembersHandler.ServeHTTP(w, r)
 		case IdentityServiceRemoveTenantMemberProcedure:
 			identityServiceRemoveTenantMemberHandler.ServeHTTP(w, r)
+		case IdentityServiceTransferTenantOwnershipProcedure:
+			identityServiceTransferTenantOwnershipHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateTenantProcedure:
 			identityServiceCreateTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceListMyTenantsProcedure:
@@ -4626,6 +4740,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminSuspendTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminRestoreTenantProcedure:
 			identityServiceAdminRestoreTenantHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminRecoverTenantOwnershipProcedure:
+			identityServiceAdminRecoverTenantOwnershipHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateFirstPlatformAdminProcedure:
 			identityServiceCreateFirstPlatformAdminHandler.ServeHTTP(w, r)
 		case IdentityServiceListLinkedIdentitiesProcedure:
@@ -5153,6 +5269,10 @@ func (UnimplementedIdentityServiceHandler) RemoveTenantMember(context.Context, *
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RemoveTenantMember is not implemented"))
 }
 
+func (UnimplementedIdentityServiceHandler) TransferTenantOwnership(context.Context, *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.TransferTenantOwnership is not implemented"))
+}
+
 func (UnimplementedIdentityServiceHandler) CreateTenant(context.Context, *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateTenant is not implemented"))
 }
@@ -5243,6 +5363,10 @@ func (UnimplementedIdentityServiceHandler) AdminSuspendTenant(context.Context, *
 
 func (UnimplementedIdentityServiceHandler) AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminRestoreTenant is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminRecoverTenantOwnership(context.Context, *connect.Request[v1.AdminRecoverTenantOwnershipRequest]) (*connect.Response[v1.AdminRecoverTenantOwnershipResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminRecoverTenantOwnership is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error) {

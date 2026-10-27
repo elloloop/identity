@@ -134,11 +134,11 @@ func (s *connectMembershipStore) UpsertMembership(_ context.Context, m *service.
 	return "mem-1", nil
 }
 
-func (s *connectMembershipStore) GrantMembership(_ context.Context, m *service.TenantMembership) (*service.TenantMembership, error) {
+func (s *connectMembershipStore) GrantMembership(_ context.Context, m *service.TenantMembership) (*service.TenantMembership, bool, error) {
 	cp := *m
 	cp.ID = "mem-1"
 	s.upserted = &cp
-	return &cp, nil
+	return &cp, true, nil
 }
 
 func (s *connectMembershipStore) GetMembership(_ context.Context, _, _, _ string) (*service.TenantMembership, error) {
@@ -153,8 +153,27 @@ func (s *connectMembershipStore) ListMembershipsForTenant(context.Context, strin
 	return nil, nil
 }
 
+// RemoveMembership mirrors the postgres store's last-owner rule for the one
+// membership this fake holds: an active owner is the tenant's last.
 func (s *connectMembershipStore) RemoveMembership(context.Context, string, string, string) error {
+	if s.member != nil && s.member.Role == service.RoleOwner && s.member.Status == service.MembershipStatusActive {
+		return service.ErrLastOwner
+	}
 	return nil
+}
+
+// TransferOwnership reports the transfer as made: toUserID an added owner,
+// fromUserID an admin.
+func (s *connectMembershipStore) TransferOwnership(_ context.Context, projectID, tenantID, fromUserID, toUserID string) (*service.TenantMembership, *service.TenantMembership, error) {
+	from := &service.TenantMembership{
+		ID: "mem-from", ProjectID: projectID, TenantID: tenantID, UserID: fromUserID,
+		Source: service.MembershipSourceCreated, Role: service.RoleAdmin, Status: service.MembershipStatusActive,
+	}
+	to := &service.TenantMembership{
+		ID: "mem-to", ProjectID: projectID, TenantID: tenantID, UserID: toUserID,
+		Source: service.MembershipSourceAdded, Role: service.RoleOwner, Status: service.MembershipStatusActive,
+	}
+	return from, to, nil
 }
 
 func (s *connectMembershipStore) ListActiveTenantsForUser(context.Context, string, string, string) ([]*service.UserTenant, error) {

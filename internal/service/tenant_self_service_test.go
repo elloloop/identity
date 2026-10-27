@@ -140,16 +140,18 @@ func TestCreateTenant_RejectsBadNames(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Each account that may not own a tenant is refused: one that is not an
+// active person as not permitted, and one whose email is unverified as
+// needing that verification.
 func TestCreateTenant_RefusesAccountsThatCannotOwn(t *testing.T) {
 	f := newSelfServiceFixture(&config.Config{})
-	f.users.set(ssProject, &User{ID: "anon", IsAnonymous: true, Status: StatusActive})
-	f.users.set(ssProject, &User{ID: "agent", Kind: UserKindAgent, OwnerUserID: ssOwnerID, Status: StatusActive})
-	f.users.set(ssProject, &User{ID: "merged", Email: "m@example.test", MergedIntoUserID: ssOwnerID, Status: StatusActive})
-	f.users.set(ssProject, &User{ID: "inactive", Email: "i@example.test", Status: StatusDeactivated})
-
-	for _, id := range []string{"anon", "agent", "merged", "inactive"} {
+	for _, id := range ineligibleOwners(f.users, ssProject) {
+		want := ErrPermissionDenied
+		if id == "unverified" {
+			want = ErrEmailVerificationRequired
+		}
 		_, err := f.svc.CreateTenant(withTenantsProject(true), id, "Acme", "", "")
-		require.ErrorIs(t, err, ErrPermissionDenied, id)
+		require.ErrorIs(t, err, want, id)
 	}
 	_, err := f.svc.CreateTenant(withTenantsProject(true), "user-missing", "Acme", "", "")
 	require.ErrorIs(t, err, ErrNotFound)
