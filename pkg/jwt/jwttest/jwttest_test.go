@@ -106,3 +106,5 @@ func TestSigner_SignClaimsPropagates(t *testing.T) {
 }
 
 func TestDelegatedTestProfile(t *testing.T) { AssertDelegatedProfile(t, NewSigner(t, "delegated")) }
+
+func TestTeammateTestProfile(t *testing.T) { AssertTeammateProfile(t, NewSigner(t, "teammate")) }

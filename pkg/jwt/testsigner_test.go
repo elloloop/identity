@@ -118,6 +118,14 @@ func (m *memSigner) SignClaims(ctx context.Context, claims map[string]any) (stri
 	return m.signClaims(ctx, claims, "JWT")
 }
 
+func (m *memSigner) SignTeammateAccessToken(ctx context.Context, claims TeammateAccessClaims) (string, error) {
+	claimMap, err := claims.ClaimsMap()
+	if err != nil {
+		return "", err
+	}
+	return m.signClaims(ctx, claimMap, DelegatedAccessTokenType)
+}
+
 func (m *memSigner) SignDelegatedAccessToken(ctx context.Context, claims DelegatedAccessClaims) (string, error) {
 	claimMap, err := claims.ClaimsMap()
 	if err != nil {

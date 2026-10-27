@@ -435,4 +435,5 @@ func TestDelegatedKMSProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	jwttest.AssertDelegatedProfile(t, signer)
+	jwttest.AssertTeammateProfile(t, signer)
 }
