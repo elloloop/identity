@@ -15,7 +15,8 @@ characters) and records it in the audit trail.
   `GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS` (default 30, at most 300) and by
   a host that verifies tokens itself only when they expire, its owners and
   admins can no longer administer it, and the agent grants and machines of
-  its members and of the accounts on its verified domains are revoked. Its
+  its members, in any membership status, and of the accounts on its verified
+  domains and its primary domain are revoked. Its
   domains, members and invitations are kept. **Its login policy stops
   governing sign-in** while it is suspended: accounts on its verified
   domains sign in under the project's default controls instead (see
@@ -26,15 +27,14 @@ characters) and records it in the audit trail.
   tenant; identity's HTTP chain accepts the tokens that chose it within the
   same cache TTL, as each replica's cached status expires. Like any change
   of a tenant's status, **a restore revokes again** the agent grants and
-  machines of its members and of the accounts on its verified domains,
-  including any connected while it was suspended; no grant revoked by the
-  suspension comes back. A tenant with no sign it was ever claimed, no
-  creator and no owner or admin, is `FAILED_PRECONDITION`: an auto-formed
-  tenant suspended in SQL while it was still `latent` looks like that, and
-  restoring it would make it selectable without anyone having verified its
-  domain. A tenant you created with `AdminCreateTenant` and never gave an
-  owner or admin is refused the same way. Give the tenant an owner with
-  `AdminAddTenantAdmin` and restore it, or set it back to `latent` in SQL.
+  machines of the same members and accounts, including any connected while
+  it was suspended; no grant revoked by the suspension comes back. A tenant
+  with no creator and no owner or admin is `FAILED_PRECONDITION`: an
+  auto-formed tenant suspended in SQL while it was still `latent` looks like
+  that, and restoring it would make it selectable without anyone having
+  verified its domain. A tenant you created with `AdminCreateTenant` and
+  never gave an owner or admin is refused the same way. Add an admin with
+  `AdminAddTenantAdmin`, then restore it.
 
 Both return the tenant as it now stands, and record the operator's IP
 address and user agent with the reason. A tenant already in the status asked
@@ -42,7 +42,9 @@ for is returned unchanged and nothing is recorded, so a retry after a lost
 response is safe; only the call that changes the status records its reason.
 A tenant in any other status is `FAILED_PRECONDITION`: a `latent` tenant
 governs nothing yet, so it cannot be suspended. An unknown tenant is
-`NOT_FOUND`, and a blank id or reason is `INVALID_ARGUMENT`. The change is
+`NOT_FOUND`. A blank id is `INVALID_ARGUMENT`, and so is a reason that is
+blank, longer than 500 characters, or holds a control or invisible
+formatting character such as a newline; a reason is trimmed. The change is
 compare-and-set, so two operators racing on one tenant record one change
 between them; a call whose tenant changed status between its read and its
 write is `ABORTED`, and reading the tenant again shows where it now stands.
@@ -346,8 +348,9 @@ agents: a failed `VerifyDomain` on an unproven claim was enough. Migration
 An operator suspends a tenant with `AdminSuspendTenant` and restores it with
 `AdminRestoreTenant` (above); suspending it in SQL leaves no audit record.
 
-A suspension revokes the agent grants and machines of the tenant's members
-and of the accounts on its verified domains. Its selected tokens are refused
+A suspension revokes the agent grants and machines of the tenant's members,
+in any membership status, and of the accounts on its verified domains and
+its primary domain. Its selected tokens are refused
 by identity's HTTP chain within the tenant-status cache TTL, and by a host
 that verifies tokens itself only when they expire. Its owners and admins are
 refused (`PERMISSION_DENIED`) by every domain and membership RPC, and an
@@ -371,9 +374,9 @@ tenant's policy is stricter than the project's, it loosens them.
 Restoring it gives back selection, at once for a refresh and within the
 cache TTL on identity's HTTP chain, and administration, at once. It brings
 the tenant's login policy back, and, like every change of a tenant's status,
-revokes again the agent grants and machines of its members and of the
-accounts on its verified domains, including any connected during the
-suspension. It revives no grant the suspension revoked.
+revokes again the agent grants and machines of the same members and
+accounts, including any connected during the suspension. It revives no grant
+the suspension revoked.
 
 ### Accepting an invitation needs a verified email (behaviour change)
 

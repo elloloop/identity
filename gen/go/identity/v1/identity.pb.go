@@ -15504,7 +15504,9 @@ type AdminSuspendTenantRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	TenantId  string                 `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// reason says why, in at most 500 characters.
+	// reason says why, in at most 500 characters. It is trimmed, and refused
+	// with INVALID_ARGUMENT when blank or when it holds a control or invisible
+	// formatting character, such as a newline.
 	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -15613,7 +15615,9 @@ type AdminRestoreTenantRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	TenantId  string                 `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// reason says why, in at most 500 characters.
+	// reason says why, in at most 500 characters. It is trimmed, and refused
+	// with INVALID_ARGUMENT when blank or when it holds a control or invisible
+	// formatting character, such as a newline.
 	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

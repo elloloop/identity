@@ -214,8 +214,9 @@ tenant's status: a tenant already in the status asked for is left as it is
 and nothing is recorded, and a latent tenant, which governs nothing, cannot
 be suspended.
 
-A suspension revokes the agent grants and machines of its members and of
-the accounts on its verified domains (decision 7), ends its selected tokens
+A suspension revokes the agent grants and machines of its members, in any
+membership status, and of the accounts on its verified domains and its
+primary domain (decision 7), ends its selected tokens
 within the cache TTL, and stops its admins administering it (decision 6).
 Its members keep their accounts and their default-tenant tokens.
 
@@ -229,18 +230,19 @@ suspended to contain its accounts ends up with looser controls on them, and
 it is recorded here as the behaviour this amendment found, to be changed so
 that a suspension never loosens sign-in controls.
 
-Restoring a tenant gives back administration and selection at once, though
-a replica that cached the suspended status refuses the tenant's selected
+Restoring a tenant gives back administration and selection at once, though a
+replica that cached the suspended status refuses the tenant's selected
 tokens until the entry expires, within the cache TTL. It brings back the
-login policy. A restore is a status change like any other, so it revokes
-the governed agent grants and machines again, including any connected
-during the suspension, and revives none the suspension revoked: the
-conservative choice for a tenant that may have been suspended for an
-investigation. A tenant that was never claimed (no creator, and no owner or
-admin) cannot be restored, because that would make it selectable without
-anyone having verified its domain. A call that loses a race with another
-status change is refused as aborted rather than as a precondition, so the
-caller reads the tenant again.
+login policy. A restore is a status change like any other, so it revokes the
+governed agent grants and machines again, including any connected during the
+suspension, and revives none the suspension revoked: the conservative choice
+for a tenant that may have been suspended for an investigation. A tenant
+with no creator and no owner or admin cannot be restored until an operator
+adds an admin with `AdminAddTenantAdmin`: a latent tenant suspended in SQL
+looks like that, and restoring it would make it selectable without anyone
+having verified its domain. A call that loses a race with another status
+change is refused as aborted rather than as a precondition, so the caller
+reads the tenant again.
 
 ## What this amends
 

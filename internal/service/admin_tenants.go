@@ -26,9 +26,9 @@ const operatorReasonMaxRunes = 500
 // ErrTenantStatusConflict is returned when an operator asks for a status
 // change the tenant cannot make: it is in neither the status the change
 // starts from nor the one it ends in (today, a latent tenant), or it is a
-// suspended tenant with no sign it was ever claimed, which a restore would
-// claim without a verified domain. A tenant already in the status asked for
-// is not a conflict: it is returned unchanged. Mapped to
+// suspended tenant with no creator and no owner or admin, which a restore
+// would make selectable with no one answering for it. A tenant already in the
+// status asked for is not a conflict: it is returned unchanged. Mapped to
 // CodeFailedPrecondition.
 var ErrTenantStatusConflict = errors.New("the tenant's status does not allow this change")
 
@@ -120,7 +120,7 @@ func (s *ControlPlaneAdminService) AdminRestoreTenant(ctx context.Context, secre
 	return s.moveTenant(ctx, secret, tenantMove{
 		projectID: projectID, tenantID: tenantID, reason: reason, ip: ip, ua: ua,
 		from: TenantStatusSuspended, to: TenantStatusClaimed, event: audit.EventTenantRestored,
-		admit: s.requireOnceClaimed,
+		admit: s.requireAnswerable,
 	})
 }
 
@@ -187,16 +187,15 @@ func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, secret string
 	return t, nil
 }
 
-// requireOnceClaimed refuses to restore a suspended tenant that shows no sign
-// of ever having been claimed: no person created it, and it has no owner or
-// admin. Such a tenant was suspended while latent, in SQL before the
-// operator RPCs, and restoring it would make claimed a tenant whose domain
-// was never verified, closing it to the first verifier. An operator who does
-// mean to stand it up adds its first admin with AdminAddTenantAdmin and
-// restores it then. A tenant claimed by a domain's verification has the
-// owner or admin who verified it, and one an operator created has the admin
-// the operator added.
-func (s *ControlPlaneAdminService) requireOnceClaimed(ctx context.Context, t *Tenant) error {
+// requireAnswerable refuses to restore a suspended tenant that no one answers
+// for: no person created it, and it has no owner or admin. A latent tenant
+// suspended in SQL before the operator RPCs looks like that, and restoring it
+// would make claimed a tenant whose domain no one verified, closing it to
+// the first verifier; so does a tenant an operator made with
+// AdminCreateTenant and never gave an admin. Either way the operator adds an
+// admin with AdminAddTenantAdmin and restores the tenant then. A tenant
+// claimed by a domain's verification has the owner or admin who verified it.
+func (s *ControlPlaneAdminService) requireAnswerable(ctx context.Context, t *Tenant) error {
 	if t.CreatedBy != "" {
 		return nil
 	}
@@ -209,7 +208,7 @@ func (s *ControlPlaneAdminService) requireOnceClaimed(ctx context.Context, t *Te
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: the tenant has no creator, owner or admin, so it was never claimed", ErrTenantStatusConflict)
+	return fmt.Errorf("%w: the tenant has no creator, owner or admin; add an admin with AdminAddTenantAdmin before restoring it", ErrTenantStatusConflict)
 }
 
 // getTenant reads a tenant the operator named, refusing one the project does

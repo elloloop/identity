@@ -285,12 +285,20 @@ Both:
   </p>
   <Code
     code={`AdminSuspendTenant(project_id, tenant_id, reason="billing dispute")
-  -> { tenant: { status: "suspended", ... } }  # was claimed
+  -> { tenant: { status: "suspended", ... } }  # was claimed, or already suspended
   -> FAILED_PRECONDITION                       # latent: it governs nothing yet
 AdminRestoreTenant(project_id, tenant_id, reason="dispute settled")
-  -> { tenant: { status: "claimed", ... } }    # was suspended
-  -> FAILED_PRECONDITION                       # never claimed: no creator, owner or admin
-  -> ABORTED                                   # its status changed meanwhile; read it again`}
+  -> { tenant: { status: "claimed", ... } }    # was suspended, or already claimed
+  -> FAILED_PRECONDITION                       # latent, or no creator, owner or admin:
+                                               #   add an admin with AdminAddTenantAdmin first
+Both:
+  -> ABORTED                                   # its status changed meanwhile; read it again
+  -> INVALID_ARGUMENT                          # a blank id, or a reason that is blank, over 500
+                                               #   characters, or holds a control or formatting
+                                               #   character such as a newline
+  -> NOT_FOUND                                 # the Project holds no such tenant
+  -> UNIMPLEMENTED                             # GATEWAY_ADMIN_API_SECRET is unset
+  -> PERMISSION_DENIED                         # a wrong X-Admin-Secret`}
     lang="bash"
   />
   <p>
@@ -298,8 +306,9 @@ AdminRestoreTenant(project_id, tenant_id, reason="dispute settled")
     that chooses it is refused, its selected tokens are refused within the
     tenant-status cache TTL (<code>GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS</code>,
     30 seconds by default), and its owners and admins can no longer
-    administer it. The agent grants and machines of its members and of the
-    accounts on its verified domains are revoked.
+    administer it. The agent grants and machines of its members, in any
+    membership status, and of the accounts on its verified domains and its
+    primary domain are revoked.
   </p>
   <p>
     While it is suspended its login policy does not govern sign-in: the
@@ -312,9 +321,9 @@ AdminRestoreTenant(project_id, tenant_id, reason="dispute settled")
   <p>
     Restoring it gives back administration at once and selection within the
     same cache TTL, and brings back its login policy. Like any change of a
-    tenant's status, it revokes again the agent grants and machines of its
-    members and of the accounts on its verified domains, including any
-    connected during the suspension; no grant comes back. Asking for the
+    tenant's status, it revokes again the agent grants and machines of the
+    same members and accounts, including any connected during the
+    suspension; no grant comes back. Asking for the
     status a tenant already has returns it unchanged and records nothing, so a
     retry is safe; only the call that changes the status records its reason.
   </p>

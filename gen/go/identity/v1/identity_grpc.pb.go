@@ -525,8 +525,9 @@ type IdentityServiceClient interface {
 	// each replica's cached status expires; a host that verifies tokens
 	// itself sees the suspension only when the token expires, unless it
 	// checks the tenant's status too. Its admins can no longer administer
-	// it, and the agent grants and machines of its members and of the
-	// accounts on its verified domains are revoked. Its domains, members and
+	// it, and the agent grants and machines of its members, in any
+	// membership status, and of the accounts on its verified domains and its
+	// primary domain are revoked. Its domains, members and
 	// invitations are kept. While it is suspended its login policy does not
 	// govern sign-in: the accounts on its verified domains sign in under the
 	// project's default controls.
@@ -540,22 +541,22 @@ type IdentityServiceClient interface {
 	// ABORTED when its status changed between the read and the write.
 	AdminSuspendTenant(ctx context.Context, in *AdminSuspendTenantRequest, opts ...grpc.CallOption) (*AdminSuspendTenantResponse, error)
 	// Moves a suspended tenant back to claimed and records the operator's
-	// reason, IP address and user agent in the audit trail as
-	// tenant_restored. Administration and a refresh that chooses the tenant
-	// work again at once; identity's HTTP chain accepts the tokens that chose
-	// it within GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy
-	// governs sign-in again. Like any change of a tenant's status, a restore
-	// revokes again the agent grants and machines of its members and of the
-	// accounts on its verified domains, including any connected while it was
-	// suspended, and brings back none the suspension revoked.
+	// reason, IP address and user agent in the audit trail as tenant_restored.
+	// Administration and a refresh that chooses the tenant work again at once;
+	// identity's HTTP chain accepts the tokens that chose it within
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy governs sign-in
+	// again. Like any change of a tenant's status, a restore revokes again the
+	// agent grants and machines of the same members and accounts, including any
+	// connected while it was suspended, and brings back none the suspension
+	// revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
 	// so a retry is safe. Operator-only, with the same refusals as
 	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
-	// tenant that was never claimed (no creator, and no owner or admin), since
-	// restoring it would make it selectable without anyone having verified
-	// its domain; ABORTED when its status changed between the read and the
-	// write.
+	// tenant with no creator and no owner or admin, since restoring it would
+	// make it selectable with no one answering for its domain (add an admin
+	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
+	// changed between the read and the write.
 	AdminRestoreTenant(ctx context.Context, in *AdminRestoreTenantRequest, opts ...grpc.CallOption) (*AdminRestoreTenantResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
@@ -2592,8 +2593,9 @@ type IdentityServiceServer interface {
 	// each replica's cached status expires; a host that verifies tokens
 	// itself sees the suspension only when the token expires, unless it
 	// checks the tenant's status too. Its admins can no longer administer
-	// it, and the agent grants and machines of its members and of the
-	// accounts on its verified domains are revoked. Its domains, members and
+	// it, and the agent grants and machines of its members, in any
+	// membership status, and of the accounts on its verified domains and its
+	// primary domain are revoked. Its domains, members and
 	// invitations are kept. While it is suspended its login policy does not
 	// govern sign-in: the accounts on its verified domains sign in under the
 	// project's default controls.
@@ -2607,22 +2609,22 @@ type IdentityServiceServer interface {
 	// ABORTED when its status changed between the read and the write.
 	AdminSuspendTenant(context.Context, *AdminSuspendTenantRequest) (*AdminSuspendTenantResponse, error)
 	// Moves a suspended tenant back to claimed and records the operator's
-	// reason, IP address and user agent in the audit trail as
-	// tenant_restored. Administration and a refresh that chooses the tenant
-	// work again at once; identity's HTTP chain accepts the tokens that chose
-	// it within GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy
-	// governs sign-in again. Like any change of a tenant's status, a restore
-	// revokes again the agent grants and machines of its members and of the
-	// accounts on its verified domains, including any connected while it was
-	// suspended, and brings back none the suspension revoked.
+	// reason, IP address and user agent in the audit trail as tenant_restored.
+	// Administration and a refresh that chooses the tenant work again at once;
+	// identity's HTTP chain accepts the tokens that chose it within
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy governs sign-in
+	// again. Like any change of a tenant's status, a restore revokes again the
+	// agent grants and machines of the same members and accounts, including any
+	// connected while it was suspended, and brings back none the suspension
+	// revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
 	// so a retry is safe. Operator-only, with the same refusals as
 	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
-	// tenant that was never claimed (no creator, and no owner or admin), since
-	// restoring it would make it selectable without anyone having verified
-	// its domain; ABORTED when its status changed between the read and the
-	// write.
+	// tenant with no creator and no owner or admin, since restoring it would
+	// make it selectable with no one answering for its domain (add an admin
+	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
+	// changed between the read and the write.
 	AdminRestoreTenant(context.Context, *AdminRestoreTenantRequest) (*AdminRestoreTenantResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).

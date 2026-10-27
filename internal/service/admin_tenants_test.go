@@ -399,7 +399,7 @@ func TestAdminRestoreTenant_RefusesATenantNeverClaimed(t *testing.T) {
 	}
 	_, err := restore.call(f.svc, ctx, testAdminSecret, "proj", "t-1", "why")
 	if !errors.Is(err, ErrTenantStatusConflict) {
-		t.Fatalf("restore a tenant never claimed: err = %v, want ErrTenantStatusConflict", err)
+		t.Fatalf("restore a tenant with no creator, owner or admin: err = %v, want ErrTenantStatusConflict", err)
 	}
 	if f.tenants.writes != 0 || f.audit.countByEventType(string(restore.event)) != 0 {
 		t.Fatal("a refused restore wrote or audited")
