@@ -272,6 +272,14 @@ func (s *Signer) SignClaims(ctx context.Context, claims map[string]any) (string,
 	return s.signClaims(ctx, claims, "JWT")
 }
 
+func (s *Signer) SignTeammateAccessToken(ctx context.Context, claims jwt.TeammateAccessClaims) (string, error) {
+	m, err := claims.ClaimsMap()
+	if err != nil {
+		return "", err
+	}
+	return s.signClaims(ctx, m, jwt.DelegatedAccessTokenType)
+}
+
 func (s *Signer) SignDelegatedAccessToken(ctx context.Context, claims jwt.DelegatedAccessClaims) (string, error) {
 	m, err := claims.ClaimsMap()
 	if err != nil {
