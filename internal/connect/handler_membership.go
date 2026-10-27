@@ -129,6 +129,30 @@ func (h *IdentityHandler) RemoveTenantMember(
 	return connect.NewResponse(&identitypb.RemoveTenantMemberResponse{}), nil
 }
 
+// TransferTenantOwnership hands the caller's ownership of a tenant to another
+// active member, leaving the caller an admin. Owner only.
+func (h *IdentityHandler) TransferTenantOwnership(
+	ctx context.Context,
+	req *connect.Request[identitypb.TransferTenantOwnershipRequest],
+) (*connect.Response[identitypb.TransferTenantOwnershipResponse], error) {
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	transfer, err := h.members.TransferTenantOwnership(ctx, userID, req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.TransferTenantOwnershipResponse{
+		Owner:         membershipToProto(transfer.Owner),
+		PreviousOwner: membershipToProto(transfer.PreviousOwner),
+	}), nil
+}
+
 // invitationToProto converts a service-layer TenantInvitation to the proto
 // wire message. The token hash is never exposed.
 func invitationToProto(inv *service.TenantInvitation) *identitypb.TenantInvitation {

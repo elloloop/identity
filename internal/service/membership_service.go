@@ -98,7 +98,8 @@ type MembershipService struct {
 	mailerConfigured bool
 	cfg              *config.Config
 	logger           *zap.Logger
-	// audit records CreateTenant outcomes (WithAudit); nil records nothing.
+	// audit records CreateTenant outcomes and ownership transfers
+	// (WithAudit); nil records nothing.
 	audit   *audit.Logger
 	nowFunc func() time.Time
 }

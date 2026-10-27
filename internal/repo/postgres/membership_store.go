@@ -315,6 +315,79 @@ func (s *MembershipStore) RemoveMembership(ctx context.Context, projectID, tenan
 	return nil
 }
 
+// TransferOwnership makes toUserID an owner of the tenant and fromUserID an
+// admin. One transaction locks both memberships, in user_id order so two
+// transfers between the same pair queue rather than deadlock, then checks
+// them, so a transfer that waited sees what the one before it did: an owner
+// who has just handed the tenant on cannot hand it on again. fromUserID must
+// be an active owner (service.ErrPermissionDenied) and toUserID an active
+// member (service.ErrNotFound). A domain-sourced membership of toUserID's
+// becomes an added one, as GrantMembership would make it.
+func (s *MembershipStore) TransferOwnership(ctx context.Context, projectID, tenantID, fromUserID, toUserID string) (*service.TenantMembership, *service.TenantMembership, error) {
+	if projectID == "" || tenantID == "" || fromUserID == "" || toUserID == "" {
+		return nil, nil, fmt.Errorf("%w: project_id, tenant_id and both user ids are required", service.ErrInvalidArgument)
+	}
+	if fromUserID == toUserID {
+		return nil, nil, fmt.Errorf("%w: ownership cannot pass to the same user", service.ErrInvalidArgument)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, wrapPgErr("TransferOwnership", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `SELECT `+membershipColumns+`
+		FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id IN ($3, $4)
+		ORDER BY user_id
+		FOR UPDATE`, projectID, tenantID, fromUserID, toUserID)
+	if err != nil {
+		return nil, nil, wrapPgErr("TransferOwnership(lock)", err)
+	}
+	held := make(map[string]*service.TenantMembership, 2)
+	for rows.Next() {
+		m, err := scanMembership(rows)
+		if err != nil {
+			rows.Close()
+			return nil, nil, wrapPgErr("TransferOwnership(lock) scan", err)
+		}
+		held[m.UserID] = m
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, wrapPgErr("TransferOwnership(lock) rows", err)
+	}
+	if from := held[fromUserID]; from == nil || from.Role != service.RoleOwner || from.Status != service.MembershipStatusActive {
+		return nil, nil, fmt.Errorf("%w: only an active owner may transfer ownership", service.ErrPermissionDenied)
+	}
+	if to := held[toUserID]; to == nil || to.Status != service.MembershipStatusActive {
+		return nil, nil, fmt.Errorf("%w: the new owner is not an active member of the tenant", service.ErrNotFound)
+	}
+
+	now := nowMs()
+	to, err := scanMembership(tx.QueryRow(ctx, `
+		UPDATE tenant_memberships SET
+			role          = 'owner',
+			source        = CASE WHEN source = 'domain' THEN 'added' ELSE source END,
+			updated_at_ms = $4
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3
+		RETURNING `+membershipColumns, projectID, tenantID, toUserID, now))
+	if err != nil {
+		return nil, nil, wrapPgErr("TransferOwnership(owner)", err)
+	}
+	from, err := scanMembership(tx.QueryRow(ctx, `
+		UPDATE tenant_memberships SET role = 'admin', updated_at_ms = $4
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3
+		RETURNING `+membershipColumns, projectID, tenantID, fromUserID, now))
+	if err != nil {
+		return nil, nil, wrapPgErr("TransferOwnership(previous owner)", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, wrapPgErr("TransferOwnership(commit)", err)
+	}
+	return from, to, nil
+}
+
 // ── tenant_invitations ──────────────────────────────────────────────────
 
 // InvitationStore persists TenantInvitations within a Project.

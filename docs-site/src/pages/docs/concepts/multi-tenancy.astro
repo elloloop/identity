@@ -164,6 +164,18 @@ docker run ... \\
     invitations and members; removing a member), and an invitation to it can no longer
     be accepted. Nothing they had set up is changed.
   </p>
+  <p>
+    An owner hands the tenant on with
+    <code>TransferTenantOwnership(tenant_id, user_id)</code>: the member
+    named becomes an owner and the caller an admin, in one step, so the
+    tenant never has fewer owners than it had. Only an owner may do it
+    (<code>PERMISSION_DENIED</code> otherwise), to an active member
+    (<code>NOT_FOUND</code> otherwise) who could create a tenant themselves:
+    an active, signed-up person with a verified email
+    (<code>FAILED_PRECONDITION</code> otherwise). The last owner cannot be
+    removed, so a tenant changes hands this way. The transfer is audited as
+    <code>tenant_ownership_transferred</code>.
+  </p>
 
   <h2 id="choosing-a-tenant-for-a-token">Choosing a tenant for a token</h2>
   <p>
@@ -326,6 +338,26 @@ Both:
     suspension; no grant comes back. Asking for the
     status a tenant already has returns it unchanged and records nothing, so a
     retry is safe; only the call that changes the status records its reason.
+  </p>
+  <p>
+    A tenant whose owners have all been deleted, deactivated or merged away
+    cannot be governed by anyone. An operator gives it an owner again, with
+    a reason the audit trail keeps as <code>tenant_ownership_recovered</code>:
+  </p>
+  <Code
+    code={`AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason="owner left the company")
+  -> { membership: { role: "owner", source: "added", ... } }
+  -> FAILED_PRECONDITION   # an owner can still sign in, the account cannot own a tenant, or latent
+  -> NOT_FOUND             # no such tenant or account`}
+    lang="bash"
+  />
+  <p>
+    The account may be any person in the Project who could own a tenant,
+    member or not, and a suspended tenant can be recovered. While an owner
+    can still sign in, recovery is refused and that owner transfers
+    instead, so an operator cannot take a governed tenant from its owner.
+    Naming an owner who can already sign in returns their membership and
+    records nothing, so a retry is safe.
   </p>
 
   <p>

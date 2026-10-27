@@ -687,6 +687,10 @@ func (b *grpcBridge) AdminRestoreTenant(ctx context.Context, in *identitypb.Admi
 	return invoke(ctx, b, in, b.h.AdminRestoreTenant)
 }
 
+func (b *grpcBridge) AdminRecoverTenantOwnership(ctx context.Context, in *identitypb.AdminRecoverTenantOwnershipRequest) (*identitypb.AdminRecoverTenantOwnershipResponse, error) {
+	return invoke(ctx, b, in, b.h.AdminRecoverTenantOwnership)
+}
+
 func (b *grpcBridge) AdminDeleteProjectOAuthProvider(ctx context.Context, in *identitypb.AdminDeleteProjectOAuthProviderRequest) (*identitypb.AdminDeleteProjectOAuthProviderResponse, error) {
 	return invoke(ctx, b, in, b.h.AdminDeleteProjectOAuthProvider)
 }
@@ -773,6 +777,10 @@ func (b *grpcBridge) NativeOAuthLogin(ctx context.Context, in *identitypb.Native
 
 func (b *grpcBridge) RemoveTenantMember(ctx context.Context, in *identitypb.RemoveTenantMemberRequest) (*identitypb.RemoveTenantMemberResponse, error) {
 	return invoke(ctx, b, in, b.h.RemoveTenantMember)
+}
+
+func (b *grpcBridge) TransferTenantOwnership(ctx context.Context, in *identitypb.TransferTenantOwnershipRequest) (*identitypb.TransferTenantOwnershipResponse, error) {
+	return invoke(ctx, b, in, b.h.TransferTenantOwnership)
 }
 
 func (b *grpcBridge) CreateTenant(ctx context.Context, in *identitypb.CreateTenantRequest) (*identitypb.CreateTenantResponse, error) {

@@ -553,6 +553,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.AdminListTenantsResponse'
+  /identity.v1.IdentityService/AdminRecoverTenantOwnership:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminRecoverTenantOwnership
+      description: |-
+        AdminRecoverTenantOwnership appoints an owner to a tenant left with no
+         owner who can sign in (each was deleted, deactivated or merged away),
+         which TransferTenantOwnership cannot reach. While an owner can still
+         sign in it is FAILED_PRECONDITION, unless user_id is that owner, which
+         returns their membership unchanged. user_id must be an account of the
+         project (else NOT_FOUND) that is an active, signed-up person's with a
+         verified email (else FAILED_PRECONDITION); a membership it holds becomes
+         an active owner one. A latent tenant has never had an owner and is
+         FAILED_PRECONDITION. Records the operator's reason in the audit trail.
+         Operator-only.
+      operationId: identity.v1.IdentityService.AdminRecoverTenantOwnership
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminRecoverTenantOwnershipRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminRecoverTenantOwnershipResponse'
   /identity.v1.IdentityService/AdminRestoreTenant:
     post:
       tags:
@@ -5338,6 +5384,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.TransferAgentResponse'
+  /identity.v1.IdentityService/TransferTenantOwnership:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: TransferTenantOwnership
+      description: |-
+        TransferTenantOwnership hands the caller's ownership of a tenant to
+         another active member in one step: the member becomes an owner and the
+         caller an admin, so the tenant never has fewer owners than it had. Only
+         an active owner may transfer (an admin is PERMISSION_DENIED, and so is
+         anyone while the tenant is suspended). A user_id that is not an active
+         member of the tenant is NOT_FOUND; one whose account is not an active,
+         signed-up person's with a verified email is FAILED_PRECONDITION, as an
+         owner sends the tenant's invitations. Naming a co-owner leaves the caller
+         an admin. The transfer is audited. Available only on the postgres
+         control-plane driver.
+      operationId: identity.v1.IdentityService.TransferTenantOwnership
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.TransferTenantOwnershipRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.TransferTenantOwnershipResponse'
   /identity.v1.IdentityService/UnlinkIdentity:
     post:
       tags:
@@ -6527,6 +6619,40 @@ components:
           title: next_cursor
           description: next_cursor is empty on the last page.
       title: AdminListTenantsResponse
+      additionalProperties: false
+    identity.v1.AdminRecoverTenantOwnershipRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+        userId:
+          type: string
+          title: user_id
+          description: |-
+            user_id is the account to appoint: an active, signed-up person of the
+             project with a verified email, a member of the tenant or not.
+        reason:
+          type: string
+          title: reason
+          description: reason says why, in at most 500 characters.
+      title: AdminRecoverTenantOwnershipRequest
+      additionalProperties: false
+      description: |-
+        AdminRecoverTenantOwnershipRequest names a tenant with no owner left who
+         can sign in and the account to appoint its owner. reason is required; the
+         audit trail keeps it.
+    identity.v1.AdminRecoverTenantOwnershipResponse:
+      type: object
+      properties:
+        membership:
+          title: membership
+          description: membership is the appointed owner's membership.
+          $ref: '#/components/schemas/identity.v1.TenantMembership'
+      title: AdminRecoverTenantOwnershipResponse
       additionalProperties: false
     identity.v1.AdminRestoreTenantRequest:
       type: object
@@ -11343,6 +11469,36 @@ components:
       description: |-
         TransferAgentResponse returns the agent: with pending_owner_user_id set
          for an offer, or with its new owner_user_id for an orphan's reassignment.
+    identity.v1.TransferTenantOwnershipRequest:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          title: tenant_id
+        userId:
+          type: string
+          title: user_id
+          description: |-
+            user_id is the new owner: an active member of the tenant other than the
+             caller.
+      title: TransferTenantOwnershipRequest
+      additionalProperties: false
+      description: |-
+        TransferTenantOwnershipRequest names the member the caller, an owner of
+         the tenant, hands its ownership to.
+    identity.v1.TransferTenantOwnershipResponse:
+      type: object
+      properties:
+        owner:
+          title: owner
+          description: owner is the new owner's membership.
+          $ref: '#/components/schemas/identity.v1.TenantMembership'
+        previousOwner:
+          title: previous_owner
+          description: previous_owner is the caller's membership, now an admin one.
+          $ref: '#/components/schemas/identity.v1.TenantMembership'
+      title: TransferTenantOwnershipResponse
+      additionalProperties: false
     identity.v1.UnlinkIdentityRequest:
       type: object
       properties:

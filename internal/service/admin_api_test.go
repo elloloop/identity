@@ -395,6 +395,7 @@ type adminFixture struct {
 	projects *fakeControlPlaneStore
 	tenants  *fakeTenantStore
 	members  *fakeMembershipStore
+	users    *fakeUserDirectory
 	policies *fakeLoginPolicyStore
 	admins   *fakePlatformAdminStore
 	dns      *fakeDNSResolver
@@ -435,16 +436,18 @@ func newAdminFixtureWithTenants(secret string, disableBootstrap bool, secretsKey
 		tenants = wrap(t)
 	}
 	m := newFakeMembershipStore()
+	u := newFakeUserDirectory()
 	lp := newFakeLoginPolicyStore()
 	a := newFakePlatformAdminStore()
 	dns := &fakeDNSResolver{records: map[string][]string{}}
 	auditWriter := newRecordingAuditWriter()
 	auditLog := audit.NewLogger(auditWriter, "test-project", zap.NewNop())
 	return &adminFixture{
-		svc:      NewControlPlaneAdminService(secret, disableBootstrap, secretsKey, p, tenants, m, lp, a, dns, auditLog, zap.NewNop()),
+		svc:      NewControlPlaneAdminService(secret, disableBootstrap, secretsKey, p, tenants, m, u, lp, a, dns, auditLog, zap.NewNop()),
 		projects: p,
 		tenants:  t,
 		members:  m,
+		users:    u,
 		policies: lp,
 		admins:   a,
 		dns:      dns,
@@ -1314,7 +1317,7 @@ func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 func TestCreateFirstPlatformAdmin_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
 	// Built without a PlatformAdminStore (the memory shape).
-	svc := NewControlPlaneAdminService("", false, nil, newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
+	svc := NewControlPlaneAdminService("", false, nil, newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil, nil)
 	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "", "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("no store: err = %v, want ErrUnimplemented", err)
 	}

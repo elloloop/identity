@@ -130,6 +130,16 @@ type MembershipStore interface {
 	// RemoveMembership deletes the membership for (project, tenant, user).
 	// Unknown rows are a no-op.
 	RemoveMembership(ctx context.Context, projectID, tenantID, userID string) error
+	// TransferOwnership makes toUserID an owner of the tenant and fromUserID,
+	// an owner, an admin, in one transaction holding both memberships, so a
+	// concurrent change to either is seen before anything is written. It
+	// refuses with ErrPermissionDenied when fromUserID is not an active owner
+	// and with ErrNotFound when toUserID is not an active member. A
+	// membership toUserID holds through the email's domain takes source
+	// MembershipSourceAdded, as GrantMembership gives it, so the ownership
+	// does not end when the email leaves the domain. Returns both memberships
+	// as they now stand.
+	TransferOwnership(ctx context.Context, projectID, tenantID, fromUserID, toUserID string) (from, to *TenantMembership, err error)
 }
 
 // InvitationStore persists TenantInvitations within a Project. Reads that

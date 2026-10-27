@@ -311,10 +311,11 @@ var _ TenantStore = (*fakeTenantStore)(nil)
 // fakeMembershipStore is an in-memory MembershipStore keyed by
 // (projectID, tenantID, userID).
 type fakeMembershipStore struct {
-	byKey     map[string]*TenantMembership
-	getErr    error
-	upsertErr error
-	listErr   error
+	byKey       map[string]*TenantMembership
+	getErr      error
+	upsertErr   error
+	listErr     error
+	transferErr error
 	// tenants supplies each tenant's name and status to the active-tenant
 	// reads (linkFakeTenantStores); unlinked, those reads find nothing.
 	tenants *fakeTenantStore
@@ -427,6 +428,27 @@ func (f *fakeMembershipStore) ListMembershipsForTenant(_ context.Context, projec
 func (f *fakeMembershipStore) RemoveMembership(_ context.Context, projectID, tenantID, userID string) error {
 	delete(f.byKey, f.key(projectID, tenantID, userID))
 	return nil
+}
+
+// TransferOwnership mirrors the postgres store's checks and writes.
+func (f *fakeMembershipStore) TransferOwnership(_ context.Context, projectID, tenantID, fromUserID, toUserID string) (*TenantMembership, *TenantMembership, error) {
+	if f.transferErr != nil {
+		return nil, nil, f.transferErr
+	}
+	from, to := f.byKey[f.key(projectID, tenantID, fromUserID)], f.byKey[f.key(projectID, tenantID, toUserID)]
+	if from == nil || from.Role != RoleOwner || from.Status != MembershipStatusActive {
+		return nil, nil, ErrPermissionDenied
+	}
+	if to == nil || to.Status != MembershipStatusActive {
+		return nil, nil, ErrNotFound
+	}
+	to.Role = RoleOwner
+	if to.Source == MembershipSourceDomain {
+		to.Source = MembershipSourceAdded
+	}
+	from.Role = RoleAdmin
+	outFrom, outTo := *from, *to
+	return &outFrom, &outTo, nil
 }
 
 // ListActiveTenantsForUser mirrors the postgres join: an active membership

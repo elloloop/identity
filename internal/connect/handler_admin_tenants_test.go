@@ -67,7 +67,7 @@ func startAdminTenantServer(t *testing.T) identityconnectgen.IdentityServiceClie
 		{ID: "t-2", ProjectID: "proj", Name: "Beta", PrimaryDomain: "beta.example", Status: service.TenantStatusLatent, CreatedAtMs: 2000, UpdatedAtMs: 2000},
 		{ID: "t-1", ProjectID: "proj", Name: "Alpha", Status: service.TenantStatusClaimed, CreatedBy: "u-1", CreatedAtMs: 1000, UpdatedAtMs: 1500},
 	}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), &adminControlStore{}, store, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), &adminControlStore{}, store, &connectMembershipStore{}, nil, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return startAdminServer(t, svc)
 }
 
@@ -213,4 +213,51 @@ func TestAdminTenantStatus_Handler(t *testing.T) {
 	requireCode(t, err, connect.CodeInvalidArgument)
 	_, err = client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", Reason: "why"}, handlerAdminSecret))
 	requireCode(t, err, connect.CodeInvalidArgument)
+}
+
+func TestAdminRecoverTenantOwnership_NilService_Unimplemented(t *testing.T) {
+	t.Parallel()
+	client := startAdminServer(t, nil)
+
+	_, err := client.AdminRecoverTenantOwnership(context.Background(), withAdminSecret(&identitypb.AdminRecoverTenantOwnershipRequest{ProjectId: "proj", TenantId: "t-1", UserId: "heir", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
+func TestAdminRecoverTenantOwnership_Handler(t *testing.T) {
+	t.Parallel()
+	store := &adminTenantStore{tenants: []*service.Tenant{
+		{ID: "t-1", ProjectID: testProjectID, Status: service.TenantStatusClaimed},
+		{ID: "t-2", ProjectID: testProjectID, Status: service.TenantStatusLatent},
+	}}
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"heir":       {ID: "heir", Email: "heir@example.test", Status: service.StatusActive, EmailVerified: true},
+		"unverified": {ID: "unverified", Email: "u@example.test", Status: service.StatusActive},
+	}}
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), &adminControlStore{}, store, &connectMembershipStore{}, users, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+	appoint := func(secret, tenantID, userID, reason string) (*connect.Response[identitypb.AdminRecoverTenantOwnershipResponse], error) {
+		return client.AdminRecoverTenantOwnership(ctx, withAdminSecret(&identitypb.AdminRecoverTenantOwnershipRequest{
+			ProjectId: testProjectID, TenantId: tenantID, UserId: userID, Reason: reason,
+		}, secret))
+	}
+
+	resp, err := appoint(handlerAdminSecret, "t-1", "heir", "the owner left")
+	if err != nil {
+		t.Fatalf("AdminRecoverTenantOwnership: %v", err)
+	}
+	if m := resp.Msg.GetMembership(); m.GetUserId() != "heir" || m.GetTenantId() != "t-1" || m.GetRole() != service.RoleOwner {
+		t.Fatalf("membership = %+v", m)
+	}
+
+	_, err = appoint("wrong", "t-1", "heir", "why")
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = appoint(handlerAdminSecret, "t-1", "heir", "")
+	requireCode(t, err, connect.CodeInvalidArgument)
+	_, err = appoint(handlerAdminSecret, "t-1", "nobody", "why")
+	requireCode(t, err, connect.CodeNotFound)
+	_, err = appoint(handlerAdminSecret, "t-1", "unverified", "why")
+	requireCode(t, err, connect.CodeFailedPrecondition)
+	_, err = appoint(handlerAdminSecret, "t-2", "heir", "why")
+	requireCode(t, err, connect.CodeFailedPrecondition)
 }

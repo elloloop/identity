@@ -117,7 +117,7 @@ func newDirectoryFixtureWith(t *testing.T, requireVerifiedEmail bool) *directory
 		})
 	repos := newProjectFakeRepos()
 	return &directoryFixture{
-		admin: NewControlPlaneAdminService(dirTestSecret, false, nil, store, newFakeTenantStore(), newFakeMembershipStore(),
+		admin: NewControlPlaneAdminService(dirTestSecret, false, nil, store, newFakeTenantStore(), newFakeMembershipStore(), nil,
 			newFakeLoginPolicyStore(), newFakePlatformAdminStore(), &fakeDNSResolver{}, auditLog, zap.NewNop()),
 		store: store,
 		repos: repos,

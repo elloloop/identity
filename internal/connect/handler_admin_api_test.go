@@ -269,7 +269,7 @@ func handlerSecretsKey() []byte {
 func newAdminControlSvc(secret string) (*service.ControlPlaneAdminService, *adminControlStore, *connectMembershipStore) {
 	store := &adminControlStore{}
 	members := &connectMembershipStore{}
-	svc := service.NewControlPlaneAdminService(secret, false, handlerSecretsKey(), store, &connectTenantStore{}, members, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(secret, false, handlerSecretsKey(), store, &connectTenantStore{}, members, nil, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return svc, store, members
 }
 
@@ -370,7 +370,7 @@ func TestAdminRPCs_CustomAuthDomain_Handler(t *testing.T) {
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, nil, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
@@ -428,7 +428,7 @@ func TestAdminRPCs_SetPrimaryAuthDomain_UnverifiedRejected_Handler(t *testing.T)
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, nil, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
@@ -525,7 +525,7 @@ func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
 func startBootstrapServer(t *testing.T) (identityconnectgen.IdentityServiceClient, *connectPlatformAdminStore) {
 	t.Helper()
 	admins := &connectPlatformAdminStore{}
-	svc := service.NewControlPlaneAdminService("", false, handlerSecretsKey(), &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService("", false, handlerSecretsKey(), &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, nil, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return startAdminServer(t, svc), admins
 }
 
@@ -579,7 +579,7 @@ func TestCreateFirstPlatformAdmin_SecondCall_FailedPrecondition(t *testing.T) {
 func startBootstrapServerWithSecret(t *testing.T, secret string, disableBootstrap bool) (identityconnectgen.IdentityServiceClient, *connectPlatformAdminStore) {
 	t.Helper()
 	admins := &connectPlatformAdminStore{}
-	svc := service.NewControlPlaneAdminService(secret, disableBootstrap, handlerSecretsKey(), &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(secret, disableBootstrap, handlerSecretsKey(), &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, nil, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return startAdminServer(t, svc), admins
 }
 

@@ -1,5 +1,67 @@
 # Upgrade guide
 
+## Next — tenant ownership moves: `TransferTenantOwnership` and `AdminRecoverTenantOwnership` (additive RPCs; no migration; `MembershipStore.TransferOwnership` and a `UserDirectory` argument to `NewControlPlaneAdminService` (Go API))
+
+A tenant's ownership could not move before: an owner could not hand the
+tenant on, and a tenant whose owners had all lost their accounts could not
+be governed again without an `UPDATE` on `tenant_memberships`. Two RPCs fix
+that, each audited.
+
+- **`TransferTenantOwnership(tenant_id, user_id)`**, called by an owner with
+  their access token, makes `user_id`, another active member of the tenant,
+  an owner and the caller an admin, in one transaction. It returns both
+  memberships (`owner`, `previous_owner`) and records
+  `tenant_ownership_transferred`, the caller as actor and the new owner as
+  target. The new owner may already be a co-owner. They must be an active,
+  signed-up person with a verified email, as `CreateTenant` requires of its
+  caller, since an owner sends the tenant's invitations. A membership they
+  held through their email's domain becomes an `added` one, so it does not
+  end when the email leaves the domain.
+  - `PERMISSION_DENIED`: the caller is not an active owner, or the tenant
+    is suspended.
+  - `NOT_FOUND`: `user_id` is not an active member.
+  - `FAILED_PRECONDITION`: `user_id` cannot own a tenant.
+  - `INVALID_ARGUMENT`: a blank id, or the caller's own.
+- **`AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason)`**,
+  with the `X-Admin-Secret` header, appoints an owner to a tenant left with
+  no owner who can sign in: each was deleted, deactivated or merged away.
+  The account must be one that could own a tenant (the same rule), and need
+  not be a member; it gets an active `owner` membership with source `added`.
+  It returns that membership and records `tenant_ownership_recovered` with
+  the `reason` (required, at most 500 characters).
+  - `FAILED_PRECONDITION`: an owner can still sign in (that owner transfers
+    instead), the account cannot own a tenant, or the tenant is `latent`
+    (it has never had an owner). A `suspended` tenant can be recovered.
+  - `NOT_FOUND`: an unknown tenant or account.
+  - `INVALID_ARGUMENT`: a blank id or reason.
+  - Naming an owner who can already sign in returns their membership
+    unchanged and records nothing, so a retry after a lost response is
+    safe.
+
+Recovery does not reuse `AdminAddTenantAdmin`, which provisions a tenant: it
+is not audited, checks neither the account nor the tenant's owners, and
+sets the role it is given, so it can lower an owner. Keep using it to seed a
+tenant's first admins, and use recovery for a tenant whose owners are gone.
+
+Two races are known. Recovery reads the owners and then grants, so two
+operators recovering one tenant at once may each appoint an owner; both are
+audited. `RemoveTenantMember`'s last-owner check also reads before it
+deletes, so a removal racing a transfer may remove the new owner; recover
+the tenant if it happens.
+
+### Go API
+
+`MembershipStore` gains `TransferOwnership(ctx, projectID, tenantID,
+fromUserID, toUserID) (from, to *TenantMembership, err error)`. It must
+lock both memberships, refuse with `ErrPermissionDenied` unless `from` is an
+active owner and with `ErrNotFound` unless `to` is an active member, then
+make `to` an owner (a `domain` source becomes `added`) and `from` an admin
+in the same transaction.
+
+`NewControlPlaneAdminService` takes a `users UserDirectory` after
+`memberships`; `service.RepositoryUserDirectory(repo)` builds one. With
+`nil`, `AdminRecoverTenantOwnership` returns `UNIMPLEMENTED`.
+
 ## Next — an operator suspends and restores a tenant: `AdminSuspendTenant` and `AdminRestoreTenant` (additive RPCs; no migration; `TenantStore.SetTenantStatus` replaces `ClaimLatentTenant` (Go API))
 
 A platform operator can now suspend a tenant and restore it over the API,

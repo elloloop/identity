@@ -529,6 +529,139 @@ func TestMembershipStore_GrantKeepsAnyOtherSource(t *testing.T) {
 	require.Equal(t, service.MembershipSourceInvited, raised.Source, "a raise keeps the source too")
 }
 
+// TestMembershipStore_TransferOwnership: a transfer makes the member an owner
+// and the owner an admin together, relabels a domain source as added, and
+// refuses a caller who is not an active owner or a target who is not an
+// active member, writing nothing.
+func TestMembershipStore_TransferOwnership(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping ownership transfer test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	ms, _, projectID, tenantID, user1, user2 := newMembershipFixture(ctx, t, dsn)
+	put := func(userID, role, source, status string) {
+		t.Helper()
+		_, err := ms.UpsertMembership(ctx, &service.TenantMembership{
+			ProjectID: projectID, TenantID: tenantID, UserID: userID, Role: role, Source: source, Status: status,
+		})
+		require.NoError(t, err)
+	}
+	put(user1, service.RoleOwner, service.MembershipSourceCreated, service.MembershipStatusActive)
+	put(user2, service.RoleMember, service.MembershipSourceDomain, service.MembershipStatusActive)
+	before, err := ms.GetMembership(ctx, projectID, tenantID, user2)
+	require.NoError(t, err)
+
+	from, to, err := ms.TransferOwnership(ctx, projectID, tenantID, user1, user2)
+	require.NoError(t, err)
+	require.Equal(t, service.RoleAdmin, from.Role)
+	require.Equal(t, service.MembershipSourceCreated, from.Source, "the previous owner keeps their source")
+	require.Equal(t, service.RoleOwner, to.Role)
+	require.Equal(t, service.MembershipSourceAdded, to.Source, "the owner no longer depends on the email's domain")
+	require.Equal(t, before.ID, to.ID)
+	require.Equal(t, before.CreatedAtMs, to.CreatedAtMs)
+	require.GreaterOrEqual(t, to.UpdatedAtMs, before.UpdatedAtMs)
+	stored, err := ms.GetMembership(ctx, projectID, tenantID, user1)
+	require.NoError(t, err)
+	require.Equal(t, *from, *stored)
+
+	_, _, err = ms.TransferOwnership(ctx, projectID, tenantID, user1, user2)
+	require.ErrorIs(t, err, service.ErrPermissionDenied, "an admin cannot transfer")
+	_, _, err = ms.TransferOwnership(ctx, projectID, tenantID, user2, "user-unknown")
+	require.ErrorIs(t, err, service.ErrNotFound)
+	put(user1, service.RoleAdmin, service.MembershipSourceCreated, service.MembershipStatusInactive)
+	_, _, err = ms.TransferOwnership(ctx, projectID, tenantID, user2, user1)
+	require.ErrorIs(t, err, service.ErrNotFound, "an inactive membership is not an active member")
+	got, err := ms.GetMembership(ctx, projectID, tenantID, user2)
+	require.NoError(t, err)
+	require.Equal(t, service.RoleOwner, got.Role, "a refused transfer writes nothing")
+
+	_, _, err = ms.TransferOwnership(ctx, projectID, tenantID, user2, user2)
+	require.ErrorIs(t, err, service.ErrInvalidArgument)
+	_, _, err = ms.TransferOwnership(ctx, projectID, "", user2, user1)
+	require.ErrorIs(t, err, service.ErrInvalidArgument)
+}
+
+// TestMembershipStore_ConcurrentTransfers: transfers race safely. One owner
+// handing the tenant to the same member many times at once succeeds once;
+// two co-owners handing it to each other at once neither deadlock nor leave
+// the tenant without an owner.
+func TestMembershipStore_ConcurrentTransfers(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping concurrent transfer test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	ms, _, projectID, tenantID, user1, user2 := newMembershipFixture(ctx, t, dsn)
+	put := func(userID, role string) {
+		t.Helper()
+		_, err := ms.UpsertMembership(ctx, &service.TenantMembership{
+			ProjectID: projectID, TenantID: tenantID, UserID: userID, Role: role,
+			Source: service.MembershipSourceAdded, Status: service.MembershipStatusActive,
+		})
+		require.NoError(t, err)
+	}
+	const racers = 8
+	race := func(direction func(i int) (string, string)) []error {
+		errs := make(chan error, racers)
+		for i := range racers {
+			from, to := direction(i)
+			go func() {
+				_, _, err := ms.TransferOwnership(ctx, projectID, tenantID, from, to)
+				errs <- err
+			}()
+		}
+		out := make([]error, 0, racers)
+		for range racers {
+			out = append(out, <-errs)
+		}
+		return out
+	}
+	owners := func() int {
+		t.Helper()
+		members, err := ms.ListMembershipsForTenant(ctx, projectID, tenantID)
+		require.NoError(t, err)
+		n := 0
+		for _, m := range members {
+			if m.Role == service.RoleOwner {
+				n++
+			}
+		}
+		return n
+	}
+
+	put(user1, service.RoleOwner)
+	put(user2, service.RoleMember)
+	succeeded := 0
+	for _, err := range race(func(int) (string, string) { return user1, user2 }) {
+		if err == nil {
+			succeeded++
+			continue
+		}
+		require.ErrorIs(t, err, service.ErrPermissionDenied)
+	}
+	require.Equal(t, 1, succeeded, "an owner hands the tenant on once")
+	require.Equal(t, 1, owners())
+
+	put(user1, service.RoleOwner)
+	put(user2, service.RoleOwner)
+	for _, err := range race(func(i int) (string, string) {
+		if i%2 == 0 {
+			return user1, user2
+		}
+		return user2, user1
+	}) {
+		if err != nil {
+			require.ErrorIs(t, err, service.ErrPermissionDenied)
+		}
+	}
+	require.GreaterOrEqual(t, owners(), 1, "the tenant is never left without an owner")
+}
+
 // TestInvitationStore_InviterAndRecipientLimits: the per-inviter cap counts
 // one person's invitations from every tenant, the per-recipient cap one
 // tenant's invitations to one address, and a zero cap is off.

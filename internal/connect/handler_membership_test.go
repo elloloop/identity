@@ -146,6 +146,10 @@ func TestMembershipRPCs_NilService_ReturnUnimplemented(t *testing.T) {
 		withAuth(&identitypb.RemoveTenantMemberRequest{TenantId: "t", UserId: "u2"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
 
+	_, err = srv.client.TransferTenantOwnership(ctx,
+		withAuth(&identitypb.TransferTenantOwnershipRequest{TenantId: "t", UserId: "u2"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+
 	_, err = srv.client.CreateTenant(ctx,
 		withAuth(&identitypb.CreateTenantRequest{Name: "Acme"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
@@ -185,6 +189,10 @@ func TestMembershipRPCs_MissingAuth_Unauthenticated(t *testing.T) {
 
 	_, err = srv.client.RemoveTenantMember(ctx,
 		connect.NewRequest(&identitypb.RemoveTenantMemberRequest{TenantId: "t", UserId: "u2"}))
+	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.TransferTenantOwnership(ctx,
+		connect.NewRequest(&identitypb.TransferTenantOwnershipRequest{TenantId: "t", UserId: "u2"}))
 	requireCode(t, err, connect.CodeUnauthenticated)
 
 	_, err = srv.client.CreateTenant(ctx,
@@ -260,6 +268,45 @@ func TestListTenantMembers_Handler(t *testing.T) {
 	if len(resp.Msg.GetMembers()) != 0 {
 		t.Fatalf("got %d members, want 0", len(resp.Msg.GetMembers()))
 	}
+}
+
+// ── TransferTenantOwnership through the handler ─────────────────────────
+
+func TestTransferTenantOwnership_Handler(t *testing.T) {
+	t.Parallel()
+	members := &connectMembershipStore{member: &service.TenantMembership{
+		Role: service.RoleOwner, Status: service.MembershipStatusActive,
+	}}
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"heir":       {ID: "heir", Email: "heir@example.test", Status: service.StatusActive, EmailVerified: true},
+		"unverified": {ID: "unverified", Email: "u@example.test", Status: service.StatusActive},
+	}}
+	srv := startMembershipServer(t, newMembershipSvc(newConnectInvitationStore(), members, claimedTenantStore(), users))
+	ctx := context.Background()
+
+	resp, err := srv.client.TransferTenantOwnership(ctx,
+		withAuth(&identitypb.TransferTenantOwnershipRequest{TenantId: "t-1", UserId: "heir"}, "owner-1"))
+	if err != nil {
+		t.Fatalf("TransferTenantOwnership: %v", err)
+	}
+	if o := resp.Msg.GetOwner(); o.GetUserId() != "heir" || o.GetRole() != service.RoleOwner || o.GetTenantId() != "t-1" {
+		t.Fatalf("owner = %+v", o)
+	}
+	if p := resp.Msg.GetPreviousOwner(); p.GetUserId() != "owner-1" || p.GetRole() != service.RoleAdmin {
+		t.Fatalf("previous owner = %+v", p)
+	}
+
+	_, err = srv.client.TransferTenantOwnership(ctx,
+		withAuth(&identitypb.TransferTenantOwnershipRequest{TenantId: "t-1", UserId: "unverified"}, "owner-1"))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+	_, err = srv.client.TransferTenantOwnership(ctx,
+		withAuth(&identitypb.TransferTenantOwnershipRequest{TenantId: "t-1", UserId: "owner-1"}, "owner-1"))
+	requireCode(t, err, connect.CodeInvalidArgument)
+
+	members.member.Role = service.RoleAdmin
+	_, err = srv.client.TransferTenantOwnership(ctx,
+		withAuth(&identitypb.TransferTenantOwnershipRequest{TenantId: "t-1", UserId: "heir"}, "owner-1"))
+	requireCode(t, err, connect.CodePermissionDenied)
 }
 
 // ── CreateTenant / ListMyTenants through the handler ────────────────────

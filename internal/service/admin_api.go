@@ -211,6 +211,10 @@ type ControlPlaneAdminService struct {
 	projects    ControlPlaneProjectStore
 	tenants     TenantStore
 	memberships MembershipStore
+	// users resolves an account in a named project, for the ownership checks
+	// of AdminRecoverTenantOwnership. nil leaves that RPC disabled
+	// (ErrUnimplemented).
+	users UserDirectory
 	// policies authors per-tenant LoginPolicy (Upsert/Get/Delete). nil when
 	// this build has no governance plane (memory), which makes the
 	// LoginPolicy admin RPCs return ErrUnimplemented.
@@ -242,9 +246,10 @@ type ControlPlaneAdminService struct {
 // matching DomainService. A nil auditLog defaults to a no-op audit.Logger so
 // blocked-bootstrap recording stays best-effort. A nil policies store leaves
 // the LoginPolicy-authoring RPCs disabled (ErrUnimplemented), matching the
-// memory shape with no governance plane. nowFunc is injected so the
-// auth-domain verified-at stamp is deterministic in tests; it defaults to
-// wall-clock epoch-millis.
+// memory shape with no governance plane, and a nil users directory leaves
+// AdminRecoverTenantOwnership disabled the same way. nowFunc is injected so
+// the auth-domain verified-at stamp is deterministic in tests; it defaults
+// to wall-clock epoch-millis.
 func NewControlPlaneAdminService(
 	secret string,
 	disableFirstAdminBootstrap bool,
@@ -252,6 +257,7 @@ func NewControlPlaneAdminService(
 	projects ControlPlaneProjectStore,
 	tenants TenantStore,
 	memberships MembershipStore,
+	users UserDirectory,
 	policies LoginPolicyStore,
 	admins PlatformAdminStore,
 	resolver DNSResolver,
@@ -274,6 +280,7 @@ func NewControlPlaneAdminService(
 		projects:                   projects,
 		tenants:                    tenants,
 		memberships:                memberships,
+		users:                      users,
 		policies:                   policies,
 		admins:                     admins,
 		resolver:                   resolver,

@@ -817,8 +817,9 @@ func New(deps Deps) (*Built, error) {
 	}
 
 	domainSvc := buildDomainService(deps, logger)
-	membershipSvc := buildMembershipService(deps, service.RepositoryUserDirectory(repo), mailer, auditLog, logger)
-	controlAdminSvc := buildControlPlaneAdminService(deps, auditLog, logger)
+	users := service.RepositoryUserDirectory(repo)
+	membershipSvc := buildMembershipService(deps, users, mailer, auditLog, logger)
+	controlAdminSvc := buildControlPlaneAdminService(deps, users, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
 
@@ -1265,8 +1266,9 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 // case it is constructed-but-disabled and every admin RPC returns
 // Unimplemented (the secret check short-circuits on an empty secret). This
 // keeps the "off by default" guarantee in one place — the service's
-// constant-time authorize — rather than splitting it across the wiring.
-func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *service.ControlPlaneAdminService {
+// constant-time authorize — rather than splitting it across the wiring. users
+// resolves an account in a named project, as for buildMembershipService.
+func buildControlPlaneAdminService(deps Deps, users service.UserDirectory, auditLog *audit.Logger, logger *zap.Logger) *service.ControlPlaneAdminService {
 	if deps.ControlPlaneStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil {
 		return nil
 	}
@@ -1283,6 +1285,7 @@ func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *za
 		deps.ControlPlaneStore,
 		deps.TenantStore,
 		deps.MembershipStore,
+		users,
 		deps.LoginPolicyStore,
 		deps.PlatformAdminStore,
 		deps.DNSResolver,
