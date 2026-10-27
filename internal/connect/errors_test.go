@@ -52,6 +52,20 @@ func TestToConnectErrorAccessNotAllowed(t *testing.T) {
 	}
 }
 
+// TestToConnectErrorRemovedFromTenant proves a join by domain refused to a
+// person removed from the tenant maps to PermissionDenied, the code every
+// other refused join returns, and keeps its message, which tells the caller
+// an invitation lets them back in.
+func TestToConnectErrorRemovedFromTenant(t *testing.T) {
+	err := toConnectError(fmt.Errorf("join: %w", service.ErrRemovedFromTenant))
+	if got := connect.CodeOf(err); got != connect.CodePermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", got)
+	}
+	if !strings.Contains(err.Error(), "invite you back") {
+		t.Fatalf("message = %q, want the way back in", err.Error())
+	}
+}
+
 // TestToConnectErrorSessionExpired proves a session killed by the tenant's
 // idle/absolute timeout maps to Unauthenticated (like ErrTokenExpired): the
 // presented refresh token is no longer valid, so the client must re-authenticate

@@ -362,6 +362,15 @@ const (
 	// details. Joining a tenant the person already belongs to records
 	// nothing.
 	EventTenantJoinedByDomain EventType = "tenant_joined_by_domain"
+
+	// EventTenantMemberRemoved records a tenant owner or admin removing a
+	// member (RemoveTenantMember), themselves included: actor the caller and
+	// target the person removed, with the project and tenant ids and the
+	// role and source the membership had in the details. The removal also
+	// keeps the person from joining the tenant again by their email's
+	// domain until a membership from another source lets them back in.
+	// Removing a membership that does not exist records nothing.
+	EventTenantMemberRemoved EventType = "tenant_member_removed"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -457,6 +466,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantOwnershipRecovered:      {},
 	EventDomainJoinSet:                 {},
 	EventTenantJoinedByDomain:          {},
+	EventTenantMemberRemoved:           {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

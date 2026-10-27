@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -19,6 +20,17 @@ import (
 // for the domain before another tenant verified it, those whose email moved
 // onto the domain after signup, and those whose domain membership ended
 // when their email left the domain, since moving back does not rejoin.
+//
+// A person an owner or admin removed (RemoveTenantMember) is not one of
+// them: the removal is recorded, and neither joining nor auto-formation
+// brings them back until a membership from another source does, such as
+// an invitation they accept.
+
+// ErrRemovedFromTenant is JoinTenantByDomain's answer to a person an owner
+// or admin removed from the tenant (RemoveTenantMember): their domain no
+// longer lets them in, and an invitation they accept does. Mapped to
+// CodePermissionDenied.
+var ErrRemovedFromTenant = errors.New("you were removed from this tenant; an owner or admin must invite you back")
 
 // JoinableTenant is a tenant the caller may join by their verified email's
 // domain: only its id and name, which the caller needs to choose it.
@@ -103,7 +115,8 @@ func (s *DomainService) SetDomainJoin(ctx context.Context, callerID, domainID st
 // verified domain on one tenant at most, so the list has at most one entry
 // today. An account that could not join (an unverified email, a public
 // provider's domain, an anonymous, agent or inactive account) gets an empty
-// list, as does one already an active member.
+// list, as does one already an active member and one removed from the
+// tenant (ErrRemovedFromTenant).
 func (s *MembershipService) ListJoinableTenants(ctx context.Context, callerID string) ([]*JoinableTenant, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -139,6 +152,13 @@ func (s *MembershipService) ListJoinableTenants(ctx context.Context, callerID st
 	if m != nil && m.Status == MembershipStatusActive {
 		return []*JoinableTenant{}, nil
 	}
+	removed, err := s.memberships.IsRemoved(ctx, projectID, t.ID, callerID)
+	if err != nil {
+		return nil, err
+	}
+	if removed {
+		return []*JoinableTenant{}, nil
+	}
 	return []*JoinableTenant{{TenantID: t.ID, Name: t.Name}}, nil
 }
 
@@ -150,7 +170,12 @@ func (s *MembershipService) ListJoinableTenants(ctx context.Context, callerID st
 // SetDomainJoin); every other tenant, an unknown one included, is
 // ErrPermissionDenied, so the call reveals nothing about tenants the caller
 // cannot join. The caller must be an active, signed-up person, and an
-// unverified email is ErrEmailVerificationRequired.
+// unverified email is ErrEmailVerificationRequired. A person an owner or
+// admin removed from the tenant is ErrRemovedFromTenant until a membership
+// from another source, such as an accepted invitation, lets them back in.
+// The store decides whether the domain still lets them in where it writes
+// (MembershipStore.JoinByDomain), so a domain turned off, unverified or
+// moved, a suspension or a removal that lands meanwhile refuses the join.
 //
 // Joining a tenant the caller already belongs to, as ListMyTenants counts
 // membership, returns their membership unchanged, whatever its role or
@@ -202,15 +227,12 @@ func (s *MembershipService) JoinTenantByDomain(ctx context.Context, callerID, te
 		return nil, fmt.Errorf("%w: your email's domain does not let you join this tenant", ErrPermissionDenied)
 	}
 
-	m, changed, err := s.memberships.GrantMembership(ctx, &TenantMembership{
-		ProjectID: projectID,
-		TenantID:  tenantID,
-		UserID:    callerID,
-		Source:    MembershipSourceDomain,
-		Role:      RoleMember,
-	})
+	m, changed, err := s.memberships.JoinByDomain(ctx, projectID, tenantID, callerID, d.ID)
 	if err != nil {
 		return nil, err
+	}
+	if m == nil {
+		return nil, fmt.Errorf("%w: your email's domain does not let you join this tenant", ErrPermissionDenied)
 	}
 	if changed && s.audit != nil {
 		s.audit.Log(ctx, audit.EventTenantJoinedByDomain,

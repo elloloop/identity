@@ -167,7 +167,11 @@ func (s *AutoFormStore) tenantIDForDomain(ctx context.Context, q querier, projec
 // (project, tenant, user). A held membership keeps its source: one the user
 // created, was invited to or was added to carries more than their email's
 // domain does, and relabelling it "domain" would hold it to the
-// verified-email rule again.
+// verified-email rule again. A user removed from the tenant
+// (tenant_member_removals) is not added, as JoinByDomain would not add
+// them. Auto-formation runs for a new account, which has no removal
+// record, so in practice this matters only for an account upgraded from an
+// anonymous one, and it takes no membership lock.
 func (s *AutoFormStore) upsertDerivedMembership(ctx context.Context, projectID, tenantID, userID string) error {
 	now := nowMs()
 	_, err := s.pool.Exec(
@@ -175,7 +179,11 @@ func (s *AutoFormStore) upsertDerivedMembership(ctx context.Context, projectID, 
 		INSERT INTO tenant_memberships (
 			id, project_id, tenant_id, user_id, source, role, status,
 			created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, 'domain', 'member', 'active', $5, $5)
+		)
+		SELECT $1, $2, $3, $4, 'domain', 'member', 'active', $5, $5
+		WHERE NOT EXISTS (
+			SELECT 1 FROM tenant_member_removals
+			WHERE project_id = $2 AND tenant_id = $3 AND user_id = $4)
 		ON CONFLICT (project_id, tenant_id, user_id) DO UPDATE SET
 			updated_at_ms = EXCLUDED.updated_at_ms`,
 		newID(), projectID, tenantID, userID, now,

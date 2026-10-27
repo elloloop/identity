@@ -37,6 +37,12 @@ of it, such as one whose email moved onto the domain after signup, find the
 tenant and join it as a domain member, audited
 ([Joining by domain](#joining-by-domain)).
 
+**Amended** (2026-10-27): a removal is recorded. A person an owner or
+admin removes with `RemoveTenantMember` cannot join the tenant again by
+domain until a membership from another source, such as an invitation they
+accept, lets them back in, and the removal is audited
+([Joining by domain](#joining-by-domain)).
+
 ## Context
 
 Until now a tenant came into being in one of two ways: auto-formed from the
@@ -368,10 +374,10 @@ themselves.
   setting on by default.
 - **Who may join is who a domain membership counts for** (decision 2): an
   active, signed-up person whose email is verified and on the verified
-  domain, not a public provider's. `ListJoinableTenants` returns the one
-  tenant that qualifies, if the caller is not already an active member: the
-  `claimed` tenant holding the domain's verified row, while that row
-  allows joining. A project holds a domain's verified row on one tenant at
+  domain, not a public provider's, whom the tenant has not removed (below).
+  `ListJoinableTenants` returns the one tenant that qualifies, if the caller
+  is not already an active member: the `claimed` tenant holding the
+  domain's verified row, while that row allows joining. A project holds a domain's verified row on one tenant at
   most (decision 4), so there is at most one.
 - **A join makes a domain membership.** `JoinTenantByDomain(tenant_id)`
   grants an active `member` membership with source `domain`, which ends when
@@ -386,6 +392,34 @@ themselves.
   something, so two joins racing for one account are recorded once.
 - **Turning it off ends no membership.** The setting decides who may join,
   not who belongs; ending a membership is `RemoveTenantMember`'s.
+- **A removal keeps the person out until someone lets them back in.**
+  Letting a domain's people join is a standing offer, and an owner who
+  removes someone has withdrawn it from them; were the person free to join
+  again at once, removing them would mean nothing while joining is on, and
+  the only way to keep them out would be to close the door on everyone.
+  So `RemoveTenantMember` records the removal (`tenant_member_removals`,
+  migration 0051) in the transaction that deletes the membership, and
+  audits it as `tenant_member_removed`. While the record stands, the tenant
+  is not joinable for the person, `JoinTenantByDomain` refuses them with
+  `PERMISSION_DENIED`, and auto-formation does not add them back. A
+  membership from any other source deletes the record: an invitation they
+  accept, or an operator's grant. That is the owner's or admin's decision
+  to let them back, where joining is the person's own. A domain membership
+  that ends because the email left the domain is not a removal: nobody
+  decided anything about the person, and they may join again when they
+  return. Removals made before the record existed have none.
+- **A join decides where it writes.** Whether the domain is still verified
+  on the tenant with joining on, whether the tenant is still claimed, and
+  whether a removal stands are read in the transaction that writes the
+  membership, holding the domain and tenant rows. Joins, grants and
+  removals of one person in one tenant first take a transaction-scoped
+  advisory lock on that membership, because an insert that meets a
+  conflicting row re-reads only that row: without the lock, a join that
+  waited on a membership a removal was deleting would insert it again
+  beside the removal's record. The caller's email domain is read before
+  the transaction, since accounts are under row-level security, so an
+  email change off the domain that lands in between leaves a `domain`
+  membership that the tenant does not count while the email is off it.
 
 ## What this amends
 

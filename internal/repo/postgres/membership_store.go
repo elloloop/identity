@@ -49,7 +49,9 @@ func scanMembership(row pgx.Row) (*service.TenantMembership, error) {
 
 // UpsertMembership inserts or, on a (project, tenant, user) conflict,
 // updates source/role/status in place (keeping id + created_at_ms) and
-// stamps updated_at_ms. Returns the surviving row id.
+// stamps updated_at_ms. A membership from any source but the email's
+// domain is a decision about the person, so it also deletes their removal
+// record (clearRemoval). Returns the surviving row id.
 func (s *MembershipStore) UpsertMembership(ctx context.Context, m *service.TenantMembership) (string, error) {
 	if m == nil {
 		return "", errors.New("postgres: UpsertMembership: nil membership")
@@ -88,12 +90,26 @@ func (s *MembershipStore) UpsertMembership(ctx context.Context, m *service.Tenan
 			status        = EXCLUDED.status,
 			updated_at_ms = EXCLUDED.updated_at_ms
 		RETURNING id`
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", wrapPgErr("UpsertMembership", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockMembership(ctx, tx, "UpsertMembership", m.ProjectID, m.TenantID, m.UserID); err != nil {
+		return "", err
+	}
+	if err := clearRemoval(ctx, tx, "UpsertMembership", m.ProjectID, m.TenantID, m.UserID, source); err != nil {
+		return "", err
+	}
 	var outID string
-	if err := s.pool.QueryRow(
+	if err := tx.QueryRow(
 		ctx, q,
 		id, m.ProjectID, m.TenantID, m.UserID, source, role, status, now,
 	).Scan(&outID); err != nil {
 		return "", wrapPgErr("UpsertMembership", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", wrapPgErr("UpsertMembership(commit)", err)
 	}
 	m.ID = outID
 	m.Source, m.Role, m.Status, m.UpdatedAtMs = source, role, status, now
@@ -135,7 +151,10 @@ var grantMembershipQuery = `
 // email's domain takes the grant's source; any other source is left
 // unchanged, also when the grant raises the role or reactivates it. The
 // decision is the statement's own, so it holds against a concurrent grant.
-// Returns the surviving row, and whether the statement wrote it.
+// A grant from any source but the email's domain also deletes the user's
+// removal record (clearRemoval), in the same transaction and under the
+// membership's lock, so it cannot interleave with a removal. Returns the
+// surviving row, and whether the statement wrote it.
 func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.TenantMembership) (*service.TenantMembership, bool, error) {
 	if m == nil {
 		return nil, false, errors.New("postgres: GrantMembership: nil membership")
@@ -151,24 +170,156 @@ func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.Tenant
 	if role == "" {
 		role = service.RoleMember
 	}
-	now := nowMs()
-	granted, err := scanMembership(s.pool.QueryRow(ctx, grantMembershipQuery, newID(), m.ProjectID, m.TenantID, m.UserID, source, role, now))
-	if noRows(err) {
-		// The user already holds the role or a higher one, from a source the
-		// grant does not replace: nothing changed.
-		kept, getErr := s.GetMembership(ctx, m.ProjectID, m.TenantID, m.UserID)
-		if getErr != nil {
-			return nil, false, getErr
-		}
-		if kept == nil {
-			return nil, false, fmt.Errorf("postgres: GrantMembership: membership vanished: %w", service.ErrUnavailable)
-		}
-		return kept, false, nil
-	}
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, wrapPgErr("GrantMembership", err)
 	}
-	return granted, true, nil
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockMembership(ctx, tx, "GrantMembership", m.ProjectID, m.TenantID, m.UserID); err != nil {
+		return nil, false, err
+	}
+	if err := clearRemoval(ctx, tx, "GrantMembership", m.ProjectID, m.TenantID, m.UserID, source); err != nil {
+		return nil, false, err
+	}
+	granted, changed, err := grantIn(ctx, tx, "GrantMembership", m.ProjectID, m.TenantID, m.UserID, source, role)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, wrapPgErr("GrantMembership(commit)", err)
+	}
+	return granted, changed, nil
+}
+
+// grantIn runs grantMembershipQuery in tx and returns the surviving
+// membership and whether the statement wrote it. op names the caller in
+// errors.
+func grantIn(ctx context.Context, tx pgx.Tx, op, projectID, tenantID, userID, source, role string) (*service.TenantMembership, bool, error) {
+	granted, err := scanMembership(tx.QueryRow(ctx, grantMembershipQuery, newID(), projectID, tenantID, userID, source, role, nowMs()))
+	if err == nil {
+		return granted, true, nil
+	}
+	if !noRows(err) {
+		return nil, false, wrapPgErr(op, err)
+	}
+	// The user already holds the role or a higher one, from a source the
+	// grant does not replace: nothing changed.
+	kept, err := scanMembership(tx.QueryRow(ctx, `SELECT `+membershipColumns+`
+		FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`, projectID, tenantID, userID))
+	if noRows(err) {
+		return nil, false, fmt.Errorf("postgres: %s: membership vanished: %w", op, service.ErrUnavailable)
+	}
+	if err != nil {
+		return nil, false, wrapPgErr(op+"(read)", err)
+	}
+	return kept, false, nil
+}
+
+// membershipLockKey names the advisory lock every write that records,
+// clears or consults a (project, tenant, user) removal takes first:
+// RemoveMembership, JoinByDomain, GrantMembership and UpsertMembership. A
+// statement that waits on a row re-checks only that row, with its old
+// snapshot for everything else, so without it a join could wait on the
+// membership a removal deletes and then insert it again, having read no
+// removal record. Each of those transactions takes it before any row lock
+// and takes no other advisory lock, so it adds no lock-order cycle.
+func membershipLockKey(projectID, tenantID, userID string) string {
+	return advisoryKey("tenant_membership", projectID, tenantID, userID)
+}
+
+// lockMembership takes membershipLockKey, held until tx ends.
+func lockMembership(ctx context.Context, tx pgx.Tx, op, projectID, tenantID, userID string) error {
+	return lockXact(ctx, tx, op, membershipLockKey(projectID, tenantID, userID))
+}
+
+// clearRemoval deletes the user's removal record from the tenant when a
+// membership from source is a decision to let them back in: every source
+// but the email's domain, whose membership the record exists to refuse.
+func clearRemoval(ctx context.Context, tx pgx.Tx, op, projectID, tenantID, userID, source string) error {
+	if source == service.MembershipSourceDomain {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM tenant_member_removals
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`, projectID, tenantID, userID); err != nil {
+		return wrapPgErr(op+"(clear removal)", err)
+	}
+	return nil
+}
+
+// JoinByDomain makes userID an active member of the tenant through their
+// email's domain, the verified domain domainID, as GrantMembership would
+// with source MembershipSourceDomain and role member. It writes only while
+// that domain is verified on the tenant and lets people join, the tenant is
+// claimed, and the user has no removal record there. One transaction takes
+// the membership's lock, then locks the domain and the tenant FOR SHARE and
+// checks them, so a SetDomainAllowJoin, a change to the domain's status or
+// the tenant's, or a removal either waits for the join or is seen by it.
+//
+// Returns (nil, false, nil) when the domain or the tenant no longer lets
+// the user join, service.ErrRemovedFromTenant while a removal stands, the
+// membership unchanged and false when the user already holds an active
+// one, and the membership and true when this call wrote it.
+func (s *MembershipStore) JoinByDomain(ctx context.Context, projectID, tenantID, userID, domainID string) (*service.TenantMembership, bool, error) {
+	if projectID == "" || tenantID == "" || userID == "" || domainID == "" {
+		return nil, false, fmt.Errorf("%w: project_id, tenant_id, user_id and domain_id are required", service.ErrInvalidArgument)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, wrapPgErr("JoinByDomain", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockMembership(ctx, tx, "JoinByDomain", projectID, tenantID, userID); err != nil {
+		return nil, false, err
+	}
+
+	var open bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM domains d
+		JOIN tenants t ON t.project_id = d.project_id AND t.id = d.tenant_id
+		WHERE d.project_id = $1 AND d.id = $2 AND d.tenant_id = $3
+		  AND d.status = 'verified' AND d.allow_join AND t.status = 'claimed'
+		FOR SHARE OF d, t)`, projectID, domainID, tenantID).Scan(&open); err != nil {
+		return nil, false, wrapPgErr("JoinByDomain(door)", err)
+	}
+	if !open {
+		return nil, false, nil
+	}
+	removed, err := isRemoved(ctx, tx, projectID, tenantID, userID)
+	if err != nil {
+		return nil, false, wrapPgErr("JoinByDomain(removal)", err)
+	}
+	if removed {
+		return nil, false, service.ErrRemovedFromTenant
+	}
+	joined, changed, err := grantIn(ctx, tx, "JoinByDomain", projectID, tenantID, userID, service.MembershipSourceDomain, service.RoleMember)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, wrapPgErr("JoinByDomain(commit)", err)
+	}
+	return joined, changed, nil
+}
+
+// IsRemoved reports whether userID has a removal record in the tenant: an
+// owner or admin removed them, and no one has let them back in since.
+func (s *MembershipStore) IsRemoved(ctx context.Context, projectID, tenantID, userID string) (bool, error) {
+	if projectID == "" || tenantID == "" || userID == "" {
+		return false, nil
+	}
+	removed, err := isRemoved(ctx, s.pool, projectID, tenantID, userID)
+	if err != nil {
+		return false, wrapPgErr("IsRemoved", err)
+	}
+	return removed, nil
+}
+
+func isRemoved(ctx context.Context, q querier, projectID, tenantID, userID string) (bool, error) {
+	var removed bool
+	err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tenant_member_removals
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3)`, projectID, tenantID, userID).Scan(&removed)
+	return removed, err
 }
 
 // GetMembership returns the membership for (project, tenant, user), or
@@ -303,9 +454,15 @@ func (s *MembershipStore) queryMemberships(ctx context.Context, op, q string, ar
 }
 
 // RemoveMembership deletes the membership for (project, tenant, user),
-// unless it is the tenant's last active owner, which is service.ErrLastOwner.
-// Unknown rows are a no-op.
+// unless it is the tenant's last active owner, which is service.ErrLastOwner,
+// and records the removal in tenant_member_removals, which keeps the user
+// from joining again through their email's domain (JoinByDomain) until a
+// grant from another source lets them back in. It returns the membership as
+// it stood when removed. Unknown rows are a no-op: (nil, nil), and nothing
+// is recorded.
 //
+// The membership's lock (membershipLockKey) comes first, so a removal and a
+// join or grant of the same membership queue behind one another.
 // One transaction locks the tenant's owners and the membership
 // (lockOwnersAnd), then counts the other active owners in a statement of its
 // own, which sees whatever committed while it waited. So two removals of the
@@ -314,43 +471,53 @@ func (s *MembershipStore) queryMemberships(ctx context.Context, op, q string, ar
 // the first did. Counting inside the DELETE would not do: a statement that
 // waits on a lock re-checks only the row it waited for, with its old
 // snapshot for everything else.
-func (s *MembershipStore) RemoveMembership(ctx context.Context, projectID, tenantID, userID string) error {
+func (s *MembershipStore) RemoveMembership(ctx context.Context, projectID, tenantID, userID string) (*service.TenantMembership, error) {
 	if projectID == "" || tenantID == "" || userID == "" {
-		return fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
+		return nil, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return wrapPgErr("RemoveMembership", err)
+		return nil, wrapPgErr("RemoveMembership", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockMembership(ctx, tx, "RemoveMembership", projectID, tenantID, userID); err != nil {
+		return nil, err
+	}
 	held, err := lockOwnersAnd(ctx, tx, projectID, tenantID, userID)
 	if err != nil {
-		return wrapPgErr("RemoveMembership(lock)", err)
+		return nil, wrapPgErr("RemoveMembership(lock)", err)
 	}
 	target := held[userID]
 	if target == nil {
-		return nil
+		return nil, nil
 	}
 	if target.Role == service.RoleOwner && target.Status == service.MembershipStatusActive {
 		var others int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM tenant_memberships
 			WHERE project_id = $1 AND tenant_id = $2 AND user_id <> $3
 			  AND role = 'owner' AND status = 'active'`, projectID, tenantID, userID).Scan(&others); err != nil {
-			return wrapPgErr("RemoveMembership(count)", err)
+			return nil, wrapPgErr("RemoveMembership(count)", err)
 		}
 		if others == 0 {
-			return fmt.Errorf("%w: cannot remove the last owner of a tenant", service.ErrLastOwner)
+			return nil, fmt.Errorf("%w: cannot remove the last owner of a tenant", service.ErrLastOwner)
 		}
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM tenant_memberships
 		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`, projectID, tenantID, userID); err != nil {
-		return wrapPgErr("RemoveMembership", err)
+		return nil, wrapPgErr("RemoveMembership", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO tenant_member_removals (
+			project_id, tenant_id, user_id, removed_at_ms
+		) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (project_id, tenant_id, user_id) DO UPDATE SET
+			removed_at_ms = EXCLUDED.removed_at_ms`, projectID, tenantID, userID, nowMs()); err != nil {
+		return nil, wrapPgErr("RemoveMembership(record)", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return wrapPgErr("RemoveMembership(commit)", err)
+		return nil, wrapPgErr("RemoveMembership(commit)", err)
 	}
-	return nil
+	return target, nil
 }
 
 // lockOwnersAnd locks the tenant's active owner memberships and those of

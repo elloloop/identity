@@ -63,6 +63,38 @@ func TestAutoFormStore_Smoke(t *testing.T) {
 	runAutoFormKeepsProvenance(t, dsn)
 	runAutoFormSkipsASuspendedLatentTenant(t, dsn)
 	runAutoFormSkipsASuspendedVerifiedTenant(t, dsn)
+	runAutoFormSkipsARemovedMember(t, dsn)
+}
+
+// runAutoFormSkipsARemovedMember: auto-formation does not bring back a
+// person removed from the domain's tenant, as a join by domain would not,
+// and still adds everyone else on the domain.
+func runAutoFormSkipsARemovedMember(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	af, _, _, ms, projectID, newUser := newAutoFormFixture(ctx, t, dsn)
+
+	removed, kept := newUser(t), newUser(t)
+	tenantID, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", removed)
+	require.NoError(t, err)
+	require.NoError(t, removeErr(ctx, ms, projectID, tenantID, removed))
+
+	again, err := af.EnsureTenantForDomain(ctx, projectID, "acme.com", removed)
+	require.NoError(t, err)
+	require.Equal(t, tenantID, again)
+	m, err := ms.GetMembership(ctx, projectID, tenantID, removed)
+	require.NoError(t, err)
+	require.Nil(t, m, "a removed person is not added back")
+
+	_, err = af.EnsureTenantForDomain(ctx, projectID, "acme.com", kept)
+	require.NoError(t, err)
+	m, err = ms.GetMembership(ctx, projectID, tenantID, kept)
+	require.NoError(t, err)
+	require.NotNil(t, m)
+	require.Equal(t, service.MembershipSourceDomain, m.Source)
 }
 
 // runAutoFormKeepsProvenance: signing in on a tenant's domain never relabels

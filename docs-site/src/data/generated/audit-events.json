@@ -78,6 +78,7 @@
   "teammate_key_revoked",
   "tenant_created",
   "tenant_joined_by_domain",
+  "tenant_member_removed",
   "tenant_ownership_recovered",
   "tenant_ownership_transferred",
   "tenant_restored",

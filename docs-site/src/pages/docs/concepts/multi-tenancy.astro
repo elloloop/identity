@@ -204,21 +204,28 @@ docker run ... \\
   </p>
   <Code
     code={`ListJoinableTenants()
-  -> tenants: [{ tenant_id, name }]   # at most one; empty if none, or already a member
+  -> tenants: [{ tenant_id, name }]   # at most one; empty if none, already a member, or removed
 JoinTenantByDomain(tenant_id)
   -> membership { role: "member", source: "domain", status: "active" }
-  -> PERMISSION_DENIED     # not the tenant your domain lets you join, whether it exists or not
+  -> PERMISSION_DENIED     # not the tenant your domain lets you join, whether it exists or not,
+                           # or you were removed from it
   -> FAILED_PRECONDITION   # your email is not verified`}
     lang="bash"
   />
   <p>
     If you are already a member, as <code>ListMyTenants</code> counts it,
     the join returns your membership as it is, even after joining has been
-    turned off, and records nothing. Turning joining off ends no membership; while it is on, a member removed
-    who is still on the domain can join again, so turn it off first to keep
-    them out. A change of the setting is audited as
-    <code>domain_join_set</code>, and a join as
-    <code>tenant_joined_by_domain</code>.
+    turned off, and records nothing. Turning joining off ends no
+    membership. A member an owner or admin removes with
+    <code>RemoveTenantMember</code> cannot join again by domain: the tenant
+    is no longer joinable for them and the join is
+    <code>PERMISSION_DENIED</code>, until an invitation they accept, or an
+    operator's grant, lets them back in. A membership through the domain
+    that ends because the email left it is not a removal, so its holder may
+    join again on returning. A change of the setting is audited as
+    <code>domain_join_set</code>, a join as
+    <code>tenant_joined_by_domain</code>, and a removal as
+    <code>tenant_member_removed</code>.
   </p>
 
   <h2 id="choosing-a-tenant-for-a-token">Choosing a tenant for a token</h2>

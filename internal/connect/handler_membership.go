@@ -123,7 +123,7 @@ func (h *IdentityHandler) RemoveTenantMember(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	if err := h.members.RemoveTenantMember(ctx, userID, req.Msg.TenantId, req.Msg.UserId); err != nil {
+	if err := h.members.RemoveTenantMember(ctx, userID, req.Msg.TenantId, req.Msg.UserId, clientIP(req.Header()), clientUserAgent(req.Header())); err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.RemoveTenantMemberResponse{}), nil

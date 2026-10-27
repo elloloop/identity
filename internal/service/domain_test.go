@@ -345,6 +345,13 @@ type fakeMembershipStore struct {
 	// verified holds each tenant's verified domains, keyed project/tenant,
 	// for the active-tenant reads' domain rule (verifyDomain).
 	verified map[string]map[string]bool
+	// removed holds the memberships RemoveMembership recorded as removed and
+	// no grant from another source has cleared, by key.
+	removed map[string]bool
+	// doorShut makes JoinByDomain find that the domain no longer lets anyone
+	// join, as a SetDomainJoin(false) or a suspension landing between the
+	// service's check and the write would.
+	doorShut bool
 }
 
 // verifyDomain records domain as one tenantID has verified.
@@ -360,7 +367,15 @@ func (f *fakeMembershipStore) verifyDomain(projectID, tenantID, domain string) {
 }
 
 func newFakeMembershipStore() *fakeMembershipStore {
-	return &fakeMembershipStore{byKey: map[string]*TenantMembership{}}
+	return &fakeMembershipStore{byKey: map[string]*TenantMembership{}, removed: map[string]bool{}}
+}
+
+// clearRemoval mirrors the postgres store: a membership from any source but
+// the email's domain lets a removed user back in.
+func (f *fakeMembershipStore) clearRemoval(m *TenantMembership) {
+	if m.Source != MembershipSourceDomain {
+		delete(f.removed, f.key(m.ProjectID, m.TenantID, m.UserID))
+	}
 }
 
 func (f *fakeMembershipStore) key(projectID, tenantID, userID string) string {
@@ -371,6 +386,7 @@ func (f *fakeMembershipStore) UpsertMembership(_ context.Context, m *TenantMembe
 	if f.upsertErr != nil {
 		return "", f.upsertErr
 	}
+	f.clearRemoval(m)
 	k := f.key(m.ProjectID, m.TenantID, m.UserID)
 	id := m.ID
 	if id == "" {
@@ -388,11 +404,12 @@ var fakeRoleRank = map[string]int{RoleOwner: 3, RoleAdmin: 2, RoleMember: 1}
 // GrantMembership mirrors the postgres store: an active membership at the
 // role or a higher one keeps its role; anything else becomes active at
 // m.Role. Either way a membership keeps its source unless that is the
-// domain's.
+// domain's, and a grant from another source clears a removal.
 func (f *fakeMembershipStore) GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, bool, error) {
 	if f.upsertErr != nil {
 		return nil, false, f.upsertErr
 	}
+	f.clearRemoval(m)
 	k := f.key(m.ProjectID, m.TenantID, m.UserID)
 	granted := *m
 	granted.Status = MembershipStatusActive
@@ -453,11 +470,38 @@ func (f *fakeMembershipStore) ListMembershipsForTenant(_ context.Context, projec
 	return out, nil
 }
 
+// JoinByDomain mirrors the postgres store, with the domain's own rule left
+// to the service's check unless doorShut says it has since closed: a removed
+// user is ErrRemovedFromTenant, and otherwise it grants a domain member.
+func (f *fakeMembershipStore) JoinByDomain(ctx context.Context, projectID, tenantID, userID, _ string) (*TenantMembership, bool, error) {
+	if f.doorShut {
+		return nil, false, nil
+	}
+	if f.removed[f.key(projectID, tenantID, userID)] {
+		return nil, false, ErrRemovedFromTenant
+	}
+	return f.GrantMembership(ctx, &TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: userID,
+		Source: MembershipSourceDomain, Role: RoleMember,
+	})
+}
+
+func (f *fakeMembershipStore) IsRemoved(_ context.Context, projectID, tenantID, userID string) (bool, error) {
+	if f.getErr != nil {
+		return false, f.getErr
+	}
+	return f.removed[f.key(projectID, tenantID, userID)], nil
+}
+
 // RemoveMembership mirrors the postgres store: the tenant's last active
-// owner is not removed (ErrLastOwner).
-func (f *fakeMembershipStore) RemoveMembership(_ context.Context, projectID, tenantID, userID string) error {
+// owner is not removed (ErrLastOwner), and a removal is recorded.
+func (f *fakeMembershipStore) RemoveMembership(_ context.Context, projectID, tenantID, userID string) (*TenantMembership, error) {
 	k := f.key(projectID, tenantID, userID)
-	if target, ok := f.byKey[k]; ok && target.Role == RoleOwner && target.Status == MembershipStatusActive {
+	target, ok := f.byKey[k]
+	if !ok {
+		return nil, nil
+	}
+	if target.Role == RoleOwner && target.Status == MembershipStatusActive {
 		others := 0
 		for key, m := range f.byKey {
 			if key != k && m.ProjectID == projectID && m.TenantID == tenantID && m.Role == RoleOwner && m.Status == MembershipStatusActive {
@@ -465,11 +509,12 @@ func (f *fakeMembershipStore) RemoveMembership(_ context.Context, projectID, ten
 			}
 		}
 		if others == 0 {
-			return ErrLastOwner
+			return nil, ErrLastOwner
 		}
 	}
 	delete(f.byKey, k)
-	return nil
+	f.removed[k] = true
+	return target, nil
 }
 
 // TransferOwnership mirrors the postgres store's checks and writes.

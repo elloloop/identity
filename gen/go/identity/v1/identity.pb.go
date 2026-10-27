@@ -14248,7 +14248,7 @@ type ListJoinableTenantsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// tenants holds the claimed tenant that has verified the caller's
 	// verified email's domain and lets it join, unless the caller already
-	// belongs to it; empty otherwise. A project holds a verified domain on
+	// belongs to it or was removed from it; empty otherwise. A project holds a verified domain on
 	// one tenant at most, so there is at most one today.
 	Tenants       []*JoinableTenant `protobuf:"bytes,1,rep,name=tenants,proto3" json:"tenants,omitempty"`
 	unknownFields protoimpl.UnknownFields
