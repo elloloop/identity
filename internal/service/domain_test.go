@@ -156,7 +156,7 @@ type fakeTenantStore struct {
 	createErr error
 	members   *fakeMembershipStore
 	nextID    int
-	// writes counts ClaimLatentTenant calls that changed a row.
+	// writes counts SetTenantStatus calls that changed a row.
 	writes int
 }
 
@@ -218,18 +218,22 @@ func (f *fakeTenantStore) GetTenantByPrimaryDomain(_ context.Context, projectID,
 	return nil, nil
 }
 
-// ClaimLatentTenant mirrors the postgres store: only a latent tenant moves.
-func (f *fakeTenantStore) ClaimLatentTenant(_ context.Context, projectID, tenantID string) error {
+// SetTenantStatus mirrors the postgres store: only a tenant in from moves.
+func (f *fakeTenantStore) SetTenantStatus(_ context.Context, projectID, tenantID, from, to string) (bool, error) {
 	if f.setErr != nil {
-		return f.setErr
+		return false, f.setErr
+	}
+	if !IsTenantStatus(from) || !IsTenantStatus(to) || from == to {
+		return false, fmt.Errorf("%w: %q to %q", ErrInvalidArgument, from, to)
 	}
 	t, ok := f.byID[projectID+"/"+tenantID]
-	if !ok || t.Status != TenantStatusLatent {
-		return nil
+	if !ok || t.Status != from {
+		return false, nil
 	}
-	t.Status = TenantStatusClaimed
+	t.Status = to
+	t.UpdatedAtMs++
 	f.writes++
-	return nil
+	return true, nil
 }
 
 // ListTenants mirrors the postgres store: it refuses a blank project or a
@@ -905,7 +909,7 @@ func TestVerifyDomain_PropagatesSetDomainStatusError(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 }
 
-func TestVerifyDomain_PropagatesClaimLatentTenantError(t *testing.T) {
+func TestVerifyDomain_PropagatesSetTenantStatusError(t *testing.T) {
 	f := newDomainFixture()
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.tenants.put(&Tenant{ID: testTenant, ProjectID: testProject, Status: TenantStatusLatent})

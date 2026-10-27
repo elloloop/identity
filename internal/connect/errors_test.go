@@ -253,6 +253,20 @@ func TestToConnectErrorSelfServiceTenants(t *testing.T) {
 	}
 }
 
+// TestToConnectErrorTenantStatus pins an operator's status changes: one the
+// tenant cannot make is FailedPrecondition, and one that lost a race with
+// another change is Aborted, which a retry resolves.
+func TestToConnectErrorTenantStatus(t *testing.T) {
+	for err, want := range map[error]connect.Code{
+		service.ErrTenantStatusConflict: connect.CodeFailedPrecondition,
+		service.ErrTenantStatusChanged:  connect.CodeAborted,
+	} {
+		if got := connect.CodeOf(toConnectError(fmt.Errorf("%w: detail", err))); got != want {
+			t.Errorf("toConnectError(%v) code = %v, want %v", err, got, want)
+		}
+	}
+}
+
 // TestToConnectErrorTenantSelectionRefused pins the selection refusals: each
 // keeps the code its cause maps to and carries a TenantSelectionRefusedDetails
 // naming the reason, the one signal that the refresh token was not consumed.

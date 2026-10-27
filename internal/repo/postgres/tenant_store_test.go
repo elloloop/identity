@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -85,7 +86,9 @@ func runTenantDomainSmoke(t *testing.T, dsn string) {
 	require.Equal(t, tenID, byDom.ID)
 
 	// Claim it.
-	require.NoError(t, tenants.ClaimLatentTenant(ctx, projA, tenID))
+	claimed, err := tenants.SetTenantStatus(ctx, projA, tenID, service.TenantStatusLatent, service.TenantStatusClaimed)
+	require.NoError(t, err)
+	require.True(t, claimed)
 	ten, err = tenants.GetTenant(ctx, projA, tenID)
 	require.NoError(t, err)
 	require.Equal(t, service.TenantStatusClaimed, ten.Status)
@@ -333,23 +336,24 @@ func TestDomainStore_RecordDomainAttempt(t *testing.T) {
 	require.Equal(t, limit, rows(fresh))
 }
 
-// suspendTenant suspends a tenant the way an operator does, in SQL
-// (docs/UPGRADE.md, Suspending a tenant): no store method moves a tenant out
-// of claimed.
+// suspendTenant moves a tenant, in whatever status it is, to suspended.
 func suspendTenant(ctx context.Context, t *testing.T, ts *TenantStore, projectID, tenantID string) {
 	t.Helper()
-	_, err := ts.pool.Exec(ctx, `UPDATE tenants SET status = 'suspended', updated_at_ms = $3 WHERE project_id = $1 AND id = $2`,
-		projectID, tenantID, nowMs())
+	status, err := ts.GetTenantStatus(ctx, projectID, tenantID)
 	require.NoError(t, err)
+	moved, err := ts.SetTenantStatus(ctx, projectID, tenantID, status, service.TenantStatusSuspended)
+	require.NoError(t, err)
+	require.True(t, moved, "suspend %s from %q", tenantID, status)
 }
 
-// TestTenantStore_ClaimLatentTenantMovesOnlyALatentTenant: claiming compares
-// and sets the status in one statement, so a tenant suspended between a
-// caller's read and the claim stays suspended.
-func TestTenantStore_ClaimLatentTenantMovesOnlyALatentTenant(t *testing.T) {
+// TestTenantStore_SetTenantStatusComparesAndSets: a status change compares
+// and sets in one statement, so a tenant suspended between a caller's read
+// and a claim stays suspended, and a tenant claimed or restored meanwhile is
+// not moved by a change made from the status it left.
+func TestTenantStore_SetTenantStatusComparesAndSets(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {
-		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping tenant claim test")
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping tenant status test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -363,20 +367,112 @@ func TestTenantStore_ClaimLatentTenantMovesOnlyALatentTenant(t *testing.T) {
 		require.NoError(t, err)
 		return got
 	}
+	move := func(id, from, to string) bool {
+		t.Helper()
+		moved, err := tenants.SetTenantStatus(ctx, proj, id, from, to)
+		require.NoError(t, err)
+		return moved
+	}
 
-	latent, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Status: service.TenantStatusLatent})
+	latent, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Status: service.TenantStatusLatent, UpdatedAtMs: 1})
 	require.NoError(t, err)
-	require.NoError(t, tenants.ClaimLatentTenant(ctx, proj, latent))
+	require.True(t, move(latent, service.TenantStatusLatent, service.TenantStatusClaimed))
 	require.Equal(t, service.TenantStatusClaimed, status(latent))
+	moved, err := tenants.GetTenant(ctx, proj, latent)
+	require.NoError(t, err)
+	require.Greater(t, moved.UpdatedAtMs, int64(1), "a move stamps updated_at_ms")
 
 	suspended, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Status: service.TenantStatusSuspended})
 	require.NoError(t, err)
-	require.NoError(t, tenants.ClaimLatentTenant(ctx, proj, suspended))
+	require.False(t, move(suspended, service.TenantStatusLatent, service.TenantStatusClaimed))
 	require.Equal(t, service.TenantStatusSuspended, status(suspended), "a suspension is never undone by a claim")
 
-	require.NoError(t, tenants.ClaimLatentTenant(ctx, proj, "no-such"))
-	require.ErrorIs(t, tenants.ClaimLatentTenant(ctx, "", latent), service.ErrInvalidArgument)
-	require.ErrorIs(t, tenants.ClaimLatentTenant(ctx, proj, ""), service.ErrInvalidArgument)
+	require.True(t, move(latent, service.TenantStatusClaimed, service.TenantStatusSuspended))
+	require.False(t, move(latent, service.TenantStatusClaimed, service.TenantStatusSuspended), "a second suspension finds nothing to move")
+	require.True(t, move(latent, service.TenantStatusSuspended, service.TenantStatusClaimed))
+	require.Equal(t, service.TenantStatusClaimed, status(latent))
+
+	require.False(t, move("no-such", service.TenantStatusClaimed, service.TenantStatusSuspended))
+	other, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-claim-other", Name: "Other"})
+	require.NoError(t, err)
+	movedElsewhere, err := tenants.SetTenantStatus(ctx, other, latent, service.TenantStatusClaimed, service.TenantStatusSuspended)
+	require.NoError(t, err)
+	require.False(t, movedElsewhere, "another project cannot move the tenant")
+	require.Equal(t, service.TenantStatusClaimed, status(latent))
+
+	for _, args := range [][4]string{
+		{"", latent, service.TenantStatusClaimed, service.TenantStatusSuspended},
+		{proj, "", service.TenantStatusClaimed, service.TenantStatusSuspended},
+		{proj, latent, "", service.TenantStatusSuspended},
+		{proj, latent, service.TenantStatusClaimed, ""},
+		{proj, latent, service.TenantStatusClaimed, "deleted"},
+		{proj, latent, "Claimed", service.TenantStatusSuspended},
+		{proj, latent, service.TenantStatusClaimed, service.TenantStatusClaimed},
+	} {
+		_, err := tenants.SetTenantStatus(ctx, args[0], args[1], args[2], args[3])
+		require.ErrorIs(t, err, service.ErrInvalidArgument, "%v", args)
+	}
+	require.Equal(t, service.TenantStatusClaimed, status(latent), "a refused move leaves the tenant alone")
+}
+
+// TestTenantStore_SetTenantStatusOneRacerWins: operators suspending and
+// restoring the same tenant at once each compare against the status they
+// read, so exactly one move from each status lands and the others report
+// that nothing moved.
+func TestTenantStore_SetTenantStatusOneRacerWins(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping tenant status race test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	projects, tenants, _ := newTenantDomainStores(ctx, t, dsn)
+	proj, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-race", Name: "Race"})
+	require.NoError(t, err)
+	id, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Status: service.TenantStatusClaimed})
+	require.NoError(t, err)
+
+	const racers = 8
+	for _, step := range []struct{ from, to string }{
+		{service.TenantStatusClaimed, service.TenantStatusSuspended},
+		{service.TenantStatusSuspended, service.TenantStatusClaimed},
+	} {
+		start := make(chan struct{})
+		results := make(chan bool, racers)
+		errs := make(chan error, racers)
+		var wg sync.WaitGroup
+		for range racers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				moved, err := tenants.SetTenantStatus(ctx, proj, id, step.from, step.to)
+				if err != nil {
+					errs <- err
+					return
+				}
+				results <- moved
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(results)
+		close(errs)
+		for err := range errs {
+			require.NoError(t, err)
+		}
+		won := 0
+		for moved := range results {
+			if moved {
+				won++
+			}
+		}
+		require.Equal(t, 1, won, "exactly one %s -> %s lands", step.from, step.to)
+		got, err := tenants.GetTenantStatus(ctx, proj, id)
+		require.NoError(t, err)
+		require.Equal(t, step.to, got)
+	}
 }
 
 // TestDomainStore_SetDomainStatusNeverUnverifies: a failed check that races a

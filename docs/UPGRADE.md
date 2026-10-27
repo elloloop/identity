@@ -1,5 +1,68 @@
 # Upgrade guide
 
+## Next — an operator suspends and restores a tenant: `AdminSuspendTenant` and `AdminRestoreTenant` (additive RPCs; no migration; `TenantStore.SetTenantStatus` replaces `ClaimLatentTenant` (Go API))
+
+A platform operator can now suspend a tenant and restore it over the API,
+with the `X-Admin-Secret` header, where before it took an `UPDATE` on the
+`tenants` table. Each call takes a required `reason` (at most 500
+characters) and records it in the audit trail.
+
+- **`AdminSuspendTenant(project_id, tenant_id, reason)`** moves a `claimed`
+  tenant to `suspended` and records `tenant_suspended`. The suspension does
+  what the SQL did ([Suspending a tenant](#suspending-a-tenant)): a refresh
+  that chooses the tenant is `PERMISSION_DENIED`, the tokens that already
+  chose it are refused by identity's HTTP chain within
+  `GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS` (default 30, at most 300) and by
+  a host that verifies tokens itself only when they expire, its owners and
+  admins can no longer administer it, and the agent grants and machines of
+  its members, in any membership status, and of the accounts on its verified
+  domains and its primary domain are revoked. Its
+  domains, members and invitations are kept. **Its login policy stops
+  governing sign-in** while it is suspended: accounts on its verified
+  domains sign in under the project's default controls instead (see
+  [Suspending a tenant](#suspending-a-tenant)).
+- **`AdminRestoreTenant(project_id, tenant_id, reason)`** moves a
+  `suspended` tenant back to `claimed` and records `tenant_restored`.
+  Administration works again at once, and so does a refresh that chooses the
+  tenant; identity's HTTP chain accepts the tokens that chose it within the
+  same cache TTL, as each replica's cached status expires. Like any change
+  of a tenant's status, **a restore revokes again** the agent grants and
+  machines of the same members and accounts, including any connected while
+  it was suspended; no grant revoked by the suspension comes back. A tenant
+  with no creator and no owner or admin is `FAILED_PRECONDITION`: an
+  auto-formed tenant suspended in SQL while it was still `latent` looks like
+  that, and restoring it would make it selectable without anyone having
+  verified its domain. A tenant you created with `AdminCreateTenant` and
+  never gave an owner or admin is refused the same way. Add an admin with
+  `AdminAddTenantAdmin`, then restore it.
+
+Both return the tenant as it now stands, and record the operator's IP
+address and user agent with the reason. A tenant already in the status asked
+for is returned unchanged and nothing is recorded, so a retry after a lost
+response is safe; only the call that changes the status records its reason.
+A tenant in any other status is `FAILED_PRECONDITION`: a `latent` tenant
+governs nothing yet, so it cannot be suspended. An unknown tenant is
+`NOT_FOUND`. A blank id is `INVALID_ARGUMENT`, and so is a reason that is
+blank, longer than 500 characters, or holds a control or invisible
+formatting character such as a newline; a reason is trimmed. The change is
+compare-and-set, so two operators racing on one tenant record one change
+between them; a call whose tenant changed status between its read and its
+write is `ABORTED`, and reading the tenant again shows where it now stands.
+
+Stop suspending tenants in SQL: an `UPDATE` is not audited. A tenant already
+suspended that way is restored with `AdminRestoreTenant`.
+
+### Go API
+
+`TenantStore.ClaimLatentTenant(ctx, projectID, tenantID)` is replaced by
+`SetTenantStatus(ctx, projectID, tenantID, from, to) (bool, error)`, which
+moves the tenant only while it is in `from` and reports whether it moved; a
+domain's verification claims a latent tenant with `SetTenantStatus(…,
+"latent", "claimed")`. A custom `TenantStore` must implement it with the
+same compare-and-set, and refuse with `service.ErrInvalidArgument` a status
+that `service.IsTenantStatus` does not accept or a `from` equal to `to`. The
+new `service.ErrTenantStatusChanged` is the lost race, mapped to `ABORTED`.
+
 ## Next — an operator reads a project's tenants: `AdminGetTenant` and `AdminListTenants` (migrations 0048 and 0049; additive RPCs; `TenantStore.ListTenants` takes a `TenantListQuery` (Go API))
 
 A platform operator can now read a project's tenants with the
@@ -282,25 +345,38 @@ agents: a failed `VerifyDomain` on an unproven claim was enough. Migration
 
 ### Suspending a tenant
 
-There is no RPC to suspend a tenant yet. An operator suspends one in SQL
-(the `tenants` table has no row-level security):
+An operator suspends a tenant with `AdminSuspendTenant` and restores it with
+`AdminRestoreTenant` (above); suspending it in SQL leaves no audit record.
 
-```sql
-UPDATE tenants
-   SET status = 'suspended',
-       updated_at_ms = (extract(epoch from clock_timestamp()) * 1000)::bigint
- WHERE project_id = '<project>' AND id = '<tenant>';
-```
+A suspension revokes the agent grants and machines of the tenant's members,
+in any membership status, and of the accounts on its verified domains and
+its primary domain. Its selected tokens are refused
+by identity's HTTP chain within the tenant-status cache TTL, and by a host
+that verifies tokens itself only when they expire. Its owners and admins are
+refused (`PERMISSION_DENIED`) by every domain and membership RPC, and an
+invitation to it can no longer be accepted; its domains, members and pending
+invitations are kept. Its members keep their accounts and their
+default-tenant tokens, but **the tenant's login policy stops governing
+sign-in** for the accounts on its verified domains, which fall back to the
+project's defaults while it is suspended:
 
-The update revokes the agent grants and machines of the tenant's members and
-of the accounts on its verified domains. Its selected tokens are refused by
-identity's HTTP chain within the tenant-status cache TTL, and by a host that
-verifies tokens itself only when they expire. Its members' accounts and
-default-tenant tokens are not affected. Its owners and admins are refused
-(`PERMISSION_DENIED`) by every domain and membership RPC, and an invitation
-to it can no longer be accepted; its domains, members and pending
-invitations are kept. Setting it back to `claimed` restores selection and
-administration but revives no revoked grant.
+- the allowed sign-in methods, the SSO requirement and the 2FA requirement
+  are the project's, not the tenant's;
+- a new password is held to the server's length rules, not the tenant's
+  minimum;
+- the tenant's idle and absolute session timeouts no longer end their
+  sessions, and no longer bound how long an agent they connect keeps its
+  grant.
+
+So a suspension does not hold those accounts to tighter controls: where the
+tenant's policy is stricter than the project's, it loosens them.
+
+Restoring it gives back selection, at once for a refresh and within the
+cache TTL on identity's HTTP chain, and administration, at once. It brings
+the tenant's login policy back, and, like every change of a tenant's status,
+revokes again the agent grants and machines of the same members and
+accounts, including any connected during the suspension. It revives no grant
+the suspension revoked.
 
 ### Accepting an invitation needs a verified email (behaviour change)
 
@@ -625,9 +701,9 @@ replica. In this order:
   refresh token, so do not retry it.
 - **Embedders with their own stores** (these are `internal/` packages, so
   this matters only to forks). `service.TenantStore` gains
-  `CreateOwnedTenant`, `GetTenantStatus` and `ClaimLatentTenant`, which
-  moves a tenant to claimed only while it is still latent, comparing and
-  setting the status in one step, so a suspension made during a
+  `CreateOwnedTenant` and `GetTenantStatus`, and its `SetTenantStatus`
+  compares and sets (below), so a domain's verification moves a tenant to
+  claimed only while it is still latent and a suspension made during a
   verification stands; `service.MembershipStore` gains
   `ListActiveTenantsForUser` and `GetActiveTenantForUser` (through the new
   `UserTenantReader`), which must only return a tenant that is claimed, in
@@ -646,9 +722,12 @@ replica. In this order:
   `service.DomainAttempt`'s cap under a per-tenant lock.
   `service.MembershipStore` gains `GrantMembership`, which must never lower
   a role, and gives a kept membership whose source is `domain` the granted
-  source while leaving any other source as it is. `SetTenantStatus` is
-  removed in favour of `ClaimLatentTenant`: no store method moves a tenant to any
-  other status, and an operator suspends one in SQL (Suspending a tenant).
+  source while leaving any other source as it is. `SetTenantStatus` becomes
+  a compare-and-set, `SetTenantStatus(ctx, projectID, tenantID, from, to)
+  (bool, error)`, which moves a tenant only while it is in `from`; a domain's
+  verification claims a latent tenant with it, and an operator suspends or
+  restores one with `AdminSuspendTenant` or `AdminRestoreTenant` (see the
+  entry for those RPCs above, and Suspending a tenant).
   `SetDomainStatus` should write nothing when the status is unchanged, and
   must never move a verified domain to another status: a domain stops being
   verified only by being removed. A store you supply

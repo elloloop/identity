@@ -93,15 +93,17 @@ func (s *connectTenantStore) GetTenantByPrimaryDomain(context.Context, string, s
 	return nil, nil
 }
 
-func (s *connectTenantStore) ClaimLatentTenant(context.Context, string, string) error {
-	if s.tenant != nil && s.tenant.Status == service.TenantStatusLatent {
-		s.tenant.Status = service.TenantStatusClaimed
+// SetTenantStatus moves the store's one tenant, which every id reads as.
+func (s *connectTenantStore) SetTenantStatus(_ context.Context, _, _, from, to string) (bool, error) {
+	if s.tenant == nil || s.tenant.Status != from {
+		return false, nil
 	}
-	return nil
+	s.tenant.Status = to
+	return true, nil
 }
 
 // ListTenants is not reached by the domain handler tests; the listing is
-// covered against listedTenantStore.
+// covered against adminTenantStore.
 func (s *connectTenantStore) ListTenants(context.Context, service.TenantListQuery) ([]*service.Tenant, error) {
 	return nil, nil
 }

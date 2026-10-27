@@ -457,6 +457,12 @@ const (
 	// IdentityServiceAdminListTenantsProcedure is the fully-qualified name of the IdentityService's
 	// AdminListTenants RPC.
 	IdentityServiceAdminListTenantsProcedure = "/identity.v1.IdentityService/AdminListTenants"
+	// IdentityServiceAdminSuspendTenantProcedure is the fully-qualified name of the IdentityService's
+	// AdminSuspendTenant RPC.
+	IdentityServiceAdminSuspendTenantProcedure = "/identity.v1.IdentityService/AdminSuspendTenant"
+	// IdentityServiceAdminRestoreTenantProcedure is the fully-qualified name of the IdentityService's
+	// AdminRestoreTenant RPC.
+	IdentityServiceAdminRestoreTenantProcedure = "/identity.v1.IdentityService/AdminRestoreTenant"
 	// IdentityServiceCreateFirstPlatformAdminProcedure is the fully-qualified name of the
 	// IdentityService's CreateFirstPlatformAdmin RPC.
 	IdentityServiceCreateFirstPlatformAdminProcedure = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
@@ -843,6 +849,47 @@ type IdentityServiceClient interface {
 	// decode. A project with no tenants, or one that does not exist, is an
 	// empty page.
 	AdminListTenants(context.Context, *connect.Request[v1.AdminListTenantsRequest]) (*connect.Response[v1.AdminListTenantsResponse], error)
+	// Suspends a claimed tenant and records the operator's reason, IP address
+	// and user agent in the audit trail as tenant_suspended. Its members can
+	// no longer choose it for a token. A token that already chose it is
+	// refused by identity's HTTP chain within
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS (default 30, at most 300) as
+	// each replica's cached status expires; a host that verifies tokens
+	// itself sees the suspension only when the token expires, unless it
+	// checks the tenant's status too. Its admins can no longer administer
+	// it, and the agent grants and machines of its members, in any
+	// membership status, and of the accounts on its verified domains and its
+	// primary domain are revoked. Its domains, members and
+	// invitations are kept. While it is suspended its login policy does not
+	// govern sign-in: the accounts on its verified domains sign in under the
+	// project's default controls.
+	//
+	// A tenant already suspended is returned unchanged and nothing is
+	// recorded, so a retry is safe. Operator-only, like the other Admin*
+	// RPCs: UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset,
+	// PERMISSION_DENIED for a wrong secret. INVALID_ARGUMENT for a blank id or
+	// reason, NOT_FOUND when the project holds no such tenant,
+	// FAILED_PRECONDITION for a latent tenant, which governs nothing yet, and
+	// ABORTED when its status changed between the read and the write.
+	AdminSuspendTenant(context.Context, *connect.Request[v1.AdminSuspendTenantRequest]) (*connect.Response[v1.AdminSuspendTenantResponse], error)
+	// Moves a suspended tenant back to claimed and records the operator's
+	// reason, IP address and user agent in the audit trail as tenant_restored.
+	// Administration and a refresh that chooses the tenant work again at once;
+	// identity's HTTP chain accepts the tokens that chose it within
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy governs sign-in
+	// again. Like any change of a tenant's status, a restore revokes again the
+	// agent grants and machines of the same members and accounts, including any
+	// connected while it was suspended, and brings back none the suspension
+	// revoked.
+	//
+	// A tenant already claimed is returned unchanged and nothing is recorded,
+	// so a retry is safe. Operator-only, with the same refusals as
+	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
+	// tenant with no creator and no owner or admin, since restoring it would
+	// make it selectable with no one answering for its domain (add an admin
+	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
+	// changed between the read and the write.
+	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -1780,6 +1827,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminListTenants")),
 			connect.WithClientOptions(opts...),
 		),
+		adminSuspendTenant: connect.NewClient[v1.AdminSuspendTenantRequest, v1.AdminSuspendTenantResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminSuspendTenantProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminSuspendTenant")),
+			connect.WithClientOptions(opts...),
+		),
+		adminRestoreTenant: connect.NewClient[v1.AdminRestoreTenantRequest, v1.AdminRestoreTenantResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminRestoreTenantProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminRestoreTenant")),
+			connect.WithClientOptions(opts...),
+		),
 		createFirstPlatformAdmin: connect.NewClient[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse](
 			httpClient,
 			baseURL+IdentityServiceCreateFirstPlatformAdminProcedure,
@@ -2029,6 +2088,8 @@ type identityServiceClient struct {
 	adminAddTenantAdmin             *connect.Client[v1.AdminAddTenantAdminRequest, v1.AdminAddTenantAdminResponse]
 	adminGetTenant                  *connect.Client[v1.AdminGetTenantRequest, v1.AdminGetTenantResponse]
 	adminListTenants                *connect.Client[v1.AdminListTenantsRequest, v1.AdminListTenantsResponse]
+	adminSuspendTenant              *connect.Client[v1.AdminSuspendTenantRequest, v1.AdminSuspendTenantResponse]
+	adminRestoreTenant              *connect.Client[v1.AdminRestoreTenantRequest, v1.AdminRestoreTenantResponse]
 	createFirstPlatformAdmin        *connect.Client[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse]
 	listLinkedIdentities            *connect.Client[v1.ListLinkedIdentitiesRequest, v1.ListLinkedIdentitiesResponse]
 	linkIdentity                    *connect.Client[v1.LinkIdentityRequest, v1.LinkIdentityResponse]
@@ -2758,6 +2819,16 @@ func (c *identityServiceClient) AdminListTenants(ctx context.Context, req *conne
 	return c.adminListTenants.CallUnary(ctx, req)
 }
 
+// AdminSuspendTenant calls identity.v1.IdentityService.AdminSuspendTenant.
+func (c *identityServiceClient) AdminSuspendTenant(ctx context.Context, req *connect.Request[v1.AdminSuspendTenantRequest]) (*connect.Response[v1.AdminSuspendTenantResponse], error) {
+	return c.adminSuspendTenant.CallUnary(ctx, req)
+}
+
+// AdminRestoreTenant calls identity.v1.IdentityService.AdminRestoreTenant.
+func (c *identityServiceClient) AdminRestoreTenant(ctx context.Context, req *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error) {
+	return c.adminRestoreTenant.CallUnary(ctx, req)
+}
+
 // CreateFirstPlatformAdmin calls identity.v1.IdentityService.CreateFirstPlatformAdmin.
 func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, req *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error) {
 	return c.createFirstPlatformAdmin.CallUnary(ctx, req)
@@ -3177,6 +3248,47 @@ type IdentityServiceHandler interface {
 	// decode. A project with no tenants, or one that does not exist, is an
 	// empty page.
 	AdminListTenants(context.Context, *connect.Request[v1.AdminListTenantsRequest]) (*connect.Response[v1.AdminListTenantsResponse], error)
+	// Suspends a claimed tenant and records the operator's reason, IP address
+	// and user agent in the audit trail as tenant_suspended. Its members can
+	// no longer choose it for a token. A token that already chose it is
+	// refused by identity's HTTP chain within
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS (default 30, at most 300) as
+	// each replica's cached status expires; a host that verifies tokens
+	// itself sees the suspension only when the token expires, unless it
+	// checks the tenant's status too. Its admins can no longer administer
+	// it, and the agent grants and machines of its members, in any
+	// membership status, and of the accounts on its verified domains and its
+	// primary domain are revoked. Its domains, members and
+	// invitations are kept. While it is suspended its login policy does not
+	// govern sign-in: the accounts on its verified domains sign in under the
+	// project's default controls.
+	//
+	// A tenant already suspended is returned unchanged and nothing is
+	// recorded, so a retry is safe. Operator-only, like the other Admin*
+	// RPCs: UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset,
+	// PERMISSION_DENIED for a wrong secret. INVALID_ARGUMENT for a blank id or
+	// reason, NOT_FOUND when the project holds no such tenant,
+	// FAILED_PRECONDITION for a latent tenant, which governs nothing yet, and
+	// ABORTED when its status changed between the read and the write.
+	AdminSuspendTenant(context.Context, *connect.Request[v1.AdminSuspendTenantRequest]) (*connect.Response[v1.AdminSuspendTenantResponse], error)
+	// Moves a suspended tenant back to claimed and records the operator's
+	// reason, IP address and user agent in the audit trail as tenant_restored.
+	// Administration and a refresh that chooses the tenant work again at once;
+	// identity's HTTP chain accepts the tokens that chose it within
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy governs sign-in
+	// again. Like any change of a tenant's status, a restore revokes again the
+	// agent grants and machines of the same members and accounts, including any
+	// connected while it was suspended, and brings back none the suspension
+	// revoked.
+	//
+	// A tenant already claimed is returned unchanged and nothing is recorded,
+	// so a retry is safe. Operator-only, with the same refusals as
+	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
+	// tenant with no creator and no owner or admin, since restoring it would
+	// make it selectable with no one answering for its domain (add an admin
+	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
+	// changed between the read and the write.
+	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -4110,6 +4222,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminListTenants")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceAdminSuspendTenantHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminSuspendTenantProcedure,
+		svc.AdminSuspendTenant,
+		connect.WithSchema(identityServiceMethods.ByName("AdminSuspendTenant")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminRestoreTenantHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminRestoreTenantProcedure,
+		svc.AdminRestoreTenant,
+		connect.WithSchema(identityServiceMethods.ByName("AdminRestoreTenant")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceCreateFirstPlatformAdminHandler := connect.NewUnaryHandler(
 		IdentityServiceCreateFirstPlatformAdminProcedure,
 		svc.CreateFirstPlatformAdmin,
@@ -4498,6 +4622,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminGetTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminListTenantsProcedure:
 			identityServiceAdminListTenantsHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminSuspendTenantProcedure:
+			identityServiceAdminSuspendTenantHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminRestoreTenantProcedure:
+			identityServiceAdminRestoreTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateFirstPlatformAdminProcedure:
 			identityServiceCreateFirstPlatformAdminHandler.ServeHTTP(w, r)
 		case IdentityServiceListLinkedIdentitiesProcedure:
@@ -5107,6 +5235,14 @@ func (UnimplementedIdentityServiceHandler) AdminGetTenant(context.Context, *conn
 
 func (UnimplementedIdentityServiceHandler) AdminListTenants(context.Context, *connect.Request[v1.AdminListTenantsRequest]) (*connect.Response[v1.AdminListTenantsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminListTenants is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminSuspendTenant(context.Context, *connect.Request[v1.AdminSuspendTenantRequest]) (*connect.Response[v1.AdminSuspendTenantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminSuspendTenant is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminRestoreTenant is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error) {

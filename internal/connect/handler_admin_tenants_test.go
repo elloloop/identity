@@ -13,14 +13,15 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// listedTenantStore holds a project's tenants newest first and pages them as
-// the postgres store does; every other read is connectTenantStore's.
-type listedTenantStore struct {
+// adminTenantStore holds a project's tenants newest first, and reads, pages
+// and moves them as the postgres store does; every other call is
+// connectTenantStore's.
+type adminTenantStore struct {
 	connectTenantStore
 	tenants []*service.Tenant
 }
 
-func (s *listedTenantStore) GetTenant(_ context.Context, projectID, tenantID string) (*service.Tenant, error) {
+func (s *adminTenantStore) GetTenant(_ context.Context, projectID, tenantID string) (*service.Tenant, error) {
 	for _, t := range s.tenants {
 		if t.ProjectID == projectID && t.ID == tenantID {
 			return t, nil
@@ -29,7 +30,7 @@ func (s *listedTenantStore) GetTenant(_ context.Context, projectID, tenantID str
 	return nil, nil
 }
 
-func (s *listedTenantStore) ListTenants(_ context.Context, q service.TenantListQuery) ([]*service.Tenant, error) {
+func (s *adminTenantStore) ListTenants(_ context.Context, q service.TenantListQuery) ([]*service.Tenant, error) {
 	var out []*service.Tenant
 	for _, t := range s.tenants {
 		if t.ProjectID != q.ProjectID {
@@ -46,9 +47,22 @@ func (s *listedTenantStore) ListTenants(_ context.Context, q service.TenantListQ
 	return out, nil
 }
 
-func startTenantReadServer(t *testing.T) identityconnectgen.IdentityServiceClient {
+// SetTenantStatus moves one of the held tenants as the postgres store does:
+// only a tenant in from moves.
+func (s *adminTenantStore) SetTenantStatus(_ context.Context, projectID, tenantID, from, to string) (bool, error) {
+	for _, t := range s.tenants {
+		if t.ProjectID == projectID && t.ID == tenantID && t.Status == from {
+			t.Status = to
+			t.UpdatedAtMs++
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func startAdminTenantServer(t *testing.T) identityconnectgen.IdentityServiceClient {
 	t.Helper()
-	store := &listedTenantStore{tenants: []*service.Tenant{
+	store := &adminTenantStore{tenants: []*service.Tenant{
 		{ID: "t-3", ProjectID: "proj", Name: "Gamma", Status: service.TenantStatusSuspended, CreatedAtMs: 3000, UpdatedAtMs: 3500},
 		{ID: "t-2", ProjectID: "proj", Name: "Beta", PrimaryDomain: "beta.example", Status: service.TenantStatusLatent, CreatedAtMs: 2000, UpdatedAtMs: 2000},
 		{ID: "t-1", ProjectID: "proj", Name: "Alpha", Status: service.TenantStatusClaimed, CreatedBy: "u-1", CreatedAtMs: 1000, UpdatedAtMs: 1500},
@@ -70,7 +84,7 @@ func TestAdminTenantReads_NilService_Unimplemented(t *testing.T) {
 
 func TestAdminTenantReads_BadSecret_Denied(t *testing.T) {
 	t.Parallel()
-	client := startTenantReadServer(t)
+	client := startAdminTenantServer(t)
 	ctx := context.Background()
 
 	for _, secret := range []string{"", "wrong"} {
@@ -83,7 +97,7 @@ func TestAdminTenantReads_BadSecret_Denied(t *testing.T) {
 
 func TestAdminGetTenant_Handler(t *testing.T) {
 	t.Parallel()
-	client := startTenantReadServer(t)
+	client := startAdminTenantServer(t)
 	ctx := context.Background()
 
 	resp, err := client.AdminGetTenant(ctx, withAdminSecret(&identitypb.AdminGetTenantRequest{ProjectId: "proj", TenantId: "t-1"}, handlerAdminSecret))
@@ -106,7 +120,7 @@ func TestAdminGetTenant_Handler(t *testing.T) {
 
 func TestAdminListTenants_Handler(t *testing.T) {
 	t.Parallel()
-	client := startTenantReadServer(t)
+	client := startAdminTenantServer(t)
 	ctx := context.Background()
 
 	first, err := client.AdminListTenants(ctx, withAdminSecret(&identitypb.AdminListTenantsRequest{ProjectId: "proj", Limit: 2}, handlerAdminSecret))
@@ -140,4 +154,63 @@ func protoTenantIDs(ts []*identitypb.Tenant) string {
 		ids = append(ids, t.GetId())
 	}
 	return "[" + strings.Join(ids, " ") + "]"
+}
+
+func TestAdminTenantStatus_NilService_Unimplemented(t *testing.T) {
+	t.Parallel()
+	client := startAdminServer(t, nil)
+	ctx := context.Background()
+
+	_, err := client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
+func TestAdminTenantStatus_BadSecret_Denied(t *testing.T) {
+	t.Parallel()
+	client := startAdminTenantServer(t)
+	ctx := context.Background()
+
+	for _, secret := range []string{"", "wrong"} {
+		_, err := client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, secret))
+		requireCode(t, err, connect.CodePermissionDenied)
+		_, err = client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", TenantId: "t-3", Reason: "why"}, secret))
+		requireCode(t, err, connect.CodePermissionDenied)
+	}
+}
+
+func TestAdminTenantStatus_Handler(t *testing.T) {
+	t.Parallel()
+	client := startAdminTenantServer(t)
+	ctx := context.Background()
+
+	suspended, err := client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminSuspendTenant: %v", err)
+	}
+	if got := suspended.Msg.GetTenant(); got.GetId() != "t-1" || got.GetStatus() != service.TenantStatusSuspended || got.GetName() != "Alpha" {
+		t.Fatalf("suspended tenant = %+v", got)
+	}
+
+	restored, err := client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", TenantId: "t-1", Reason: "why"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminRestoreTenant: %v", err)
+	}
+	if got := restored.Msg.GetTenant(); got.GetStatus() != service.TenantStatusClaimed {
+		t.Fatalf("restored tenant = %+v", got)
+	}
+
+	// t-2 is latent: neither change applies to it.
+	_, err = client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-2", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+	_, err = client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", TenantId: "t-2", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+
+	_, err = client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-9", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeNotFound)
+	_, err = client.AdminSuspendTenant(ctx, withAdminSecret(&identitypb.AdminSuspendTenantRequest{ProjectId: "proj", TenantId: "t-1"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeInvalidArgument)
+	_, err = client.AdminRestoreTenant(ctx, withAdminSecret(&identitypb.AdminRestoreTenantRequest{ProjectId: "proj", Reason: "why"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeInvalidArgument)
 }

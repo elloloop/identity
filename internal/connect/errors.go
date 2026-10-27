@@ -150,6 +150,7 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrLastOwner),
+		errors.Is(err, service.ErrTenantStatusConflict),
 		errors.Is(err, service.ErrPlatformAdminExists),
 		errors.Is(err, service.ErrFirstAdminBootstrapDisabled),
 		errors.Is(err, service.ErrAuthDomainNotVerified),
@@ -175,6 +176,11 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrMergeConflict):
 		// One of the two accounts changed between the merge's checks and its
 		// transaction (a concurrent merge or deactivation): retryable.
+		return connect.NewError(connect.CodeAborted, err)
+
+	case errors.Is(err, service.ErrTenantStatusChanged):
+		// Another operator call changed the tenant's status between this
+		// call's read and its compare-and-set: retryable.
 		return connect.NewError(connect.CodeAborted, err)
 
 	case errors.Is(err, service.ErrProjectConfigConflict):

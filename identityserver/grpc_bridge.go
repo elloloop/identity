@@ -679,6 +679,14 @@ func (b *grpcBridge) AdminListTenants(ctx context.Context, in *identitypb.AdminL
 	return invoke(ctx, b, in, b.h.AdminListTenants)
 }
 
+func (b *grpcBridge) AdminSuspendTenant(ctx context.Context, in *identitypb.AdminSuspendTenantRequest) (*identitypb.AdminSuspendTenantResponse, error) {
+	return invoke(ctx, b, in, b.h.AdminSuspendTenant)
+}
+
+func (b *grpcBridge) AdminRestoreTenant(ctx context.Context, in *identitypb.AdminRestoreTenantRequest) (*identitypb.AdminRestoreTenantResponse, error) {
+	return invoke(ctx, b, in, b.h.AdminRestoreTenant)
+}
+
 func (b *grpcBridge) AdminDeleteProjectOAuthProvider(ctx context.Context, in *identitypb.AdminDeleteProjectOAuthProviderRequest) (*identitypb.AdminDeleteProjectOAuthProviderResponse, error) {
 	return invoke(ctx, b, in, b.h.AdminDeleteProjectOAuthProvider)
 }

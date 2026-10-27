@@ -248,11 +248,12 @@ func TestGovernanceRevocation_UnchangedWritesRevokeNothing(t *testing.T) {
 
 	// A re-verify on a claimed tenant: the store skips both writes.
 	require.NoError(t, f.domains.SetDomainStatus(ctx, f.project, d, service.DomainStatusVerified, 0))
-	require.NoError(t, f.tenants.ClaimLatentTenant(ctx, f.project, f.tenant))
+	_, err := f.tenants.SetTenantStatus(ctx, f.project, f.tenant, service.TenantStatusLatent, service.TenantStatusClaimed)
+	require.NoError(t, err)
 	f.requireNothingRevoked(ctx, t, e)
 
 	// Written outright, an unchanged row still fires nothing.
-	_, err := f.repo.pool.Exec(ctx, `UPDATE domains SET status=status, tenant_id=tenant_id, domain=upper(domain) WHERE project_id=$1 AND id=$2`, f.project, d)
+	_, err = f.repo.pool.Exec(ctx, `UPDATE domains SET status=status, tenant_id=tenant_id, domain=upper(domain) WHERE project_id=$1 AND id=$2`, f.project, d)
 	require.NoError(t, err)
 	_, err = f.repo.pool.Exec(ctx, `UPDATE tenants SET status=status, primary_domain=primary_domain WHERE project_id=$1 AND id=$2`, f.project, f.tenant)
 	require.NoError(t, err)
@@ -295,6 +296,18 @@ func TestGovernanceRevocation_VerifiedTransitionsRevokeTheGoverned(t *testing.T)
 			f.verifyQuietly(ctx, t, d)
 			suspendTenant(ctx, t, f.tenants, f.project, f.tenant)
 		},
+		// A restore is a status change like any other, so it revokes again:
+		// agents connected while the tenant was suspended are signed out.
+		"tenant restored": func(t *testing.T, f *governanceFixture, d string) {
+			t.Helper()
+			f.verifyQuietly(ctx, t, d)
+			suspendTenant(ctx, t, f.tenants, f.project, f.tenant)
+			f.unrevokeAgents(ctx, t)
+			moved, err := f.tenants.SetTenantStatus(ctx, f.project, f.tenant,
+				service.TenantStatusSuspended, service.TenantStatusClaimed)
+			require.NoError(t, err)
+			require.True(t, moved)
+		},
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -312,6 +325,13 @@ func TestGovernanceRevocation_VerifiedTransitionsRevokeTheGoverned(t *testing.T)
 func (f *governanceFixture) verifyQuietly(ctx context.Context, t *testing.T, d string) {
 	t.Helper()
 	require.NoError(t, f.domains.SetDomainStatus(ctx, f.project, d, service.DomainStatusVerified, 0))
+	f.unrevokeAgents(ctx, t)
+}
+
+// unrevokeAgents restores every agent row of the project, as if each had
+// connected again after the changes so far.
+func (f *governanceFixture) unrevokeAgents(ctx context.Context, t *testing.T) {
+	t.Helper()
 	_, err := f.raw.Exec(ctx, `UPDATE agent_authorizations SET revoked_at_ms=0 WHERE project_id=$1`, f.project)
 	require.NoError(t, err)
 	_, err = f.raw.Exec(ctx, `UPDATE agent_machines SET revoked_at_ms=0 WHERE project_id=$1`, f.project)
