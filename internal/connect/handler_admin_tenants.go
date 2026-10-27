@@ -75,8 +75,8 @@ func (h *IdentityHandler) AdminRestoreTenant(
 	return connect.NewResponse(&identitypb.AdminRestoreTenantResponse{Tenant: tenantToProto(t)}), nil
 }
 
-// AdminRecoverTenantOwnership appoints an owner to a tenant with no owner
-// left who can sign in. Operator-only.
+// AdminRecoverTenantOwnership appoints an owner to a tenant with no owner or
+// admin left who can sign in. Operator-only.
 func (h *IdentityHandler) AdminRecoverTenantOwnership(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminRecoverTenantOwnershipRequest],
@@ -84,7 +84,8 @@ func (h *IdentityHandler) AdminRecoverTenantOwnership(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	m, err := h.controlAdmin.AdminRecoverTenantOwnership(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.UserId, req.Msg.Reason)
+	m, err := h.controlAdmin.AdminRecoverTenantOwnership(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.UserId, req.Msg.Reason,
+		clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}

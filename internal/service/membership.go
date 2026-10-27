@@ -117,8 +117,11 @@ type MembershipStore interface {
 	// membership whose source is MembershipSourceDomain takes m.Source, so a
 	// grant, an accepted invitation say, lifts the verified-email rule that
 	// source carries; any other source is left unchanged. Returns the
-	// surviving membership.
-	GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, error)
+	// surviving membership, and whether this call changed it: false when the
+	// membership already held the role, or a higher one, from a source the
+	// grant keeps. The decision is made where the write is, so of two
+	// concurrent grants of the same membership one at most reports a change.
+	GrantMembership(ctx context.Context, m *TenantMembership) (granted *TenantMembership, changed bool, err error)
 	// GetMembership returns the membership for (project, tenant, user), or
 	// (nil, nil).
 	GetMembership(ctx context.Context, projectID, tenantID, userID string) (*TenantMembership, error)
@@ -127,8 +130,10 @@ type MembershipStore interface {
 	ListMembershipsForUser(ctx context.Context, projectID, userID string) ([]*TenantMembership, error)
 	// ListMembershipsForTenant returns every membership in a tenant.
 	ListMembershipsForTenant(ctx context.Context, projectID, tenantID string) ([]*TenantMembership, error)
-	// RemoveMembership deletes the membership for (project, tenant, user).
-	// Unknown rows are a no-op.
+	// RemoveMembership deletes the membership for (project, tenant, user),
+	// unless it is the tenant's last active owner (ErrLastOwner): the check
+	// and the delete are one step, so no concurrent removal or transfer
+	// leaves the tenant without an owner. Unknown rows are a no-op.
 	RemoveMembership(ctx context.Context, projectID, tenantID, userID string) error
 	// TransferOwnership makes toUserID an owner of the tenant and fromUserID,
 	// an owner, an admin, in one transaction holding both memberships, so a

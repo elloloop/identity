@@ -21,8 +21,9 @@ login policy governing sign-in ([Suspension](#suspension)).
 **Amended** (2026-10-27): ownership can move. `TransferTenantOwnership`
 lets an owner hand a tenant to another member, and
 `AdminRecoverTenantOwnership` lets an operator appoint an owner to a tenant
-none of whose owners can sign in any more, each audited
-([Ownership](#ownership)).
+none of whose owners or admins can sign in any more, each audited
+([Ownership](#ownership)). Removing a tenant's last owner is refused in the
+same transaction that would remove them.
 
 ## Context
 
@@ -252,40 +253,55 @@ reads the tenant again.
 
 ### Ownership
 
-An owner is the one role that can always govern a tenant, and the last
-owner cannot be removed (`RemoveTenantMember` refuses). Ownership moves in
-two ways, both audited; neither changes any other member's role.
+A tenant is never left without an owner by its members' own calls: the
+last active owner cannot be removed (`RemoveTenantMember` refuses), and a
+transfer always leaves one. The removal decides under locks on the tenant's
+owners, which a transfer takes too, so neither two removals at once nor a
+removal racing a transfer can together leave none. Ownership moves in two
+ways, both audited; neither changes any other member's role.
 
 - **An owner hands the tenant on.** `TransferTenantOwnership(tenant_id,
   user_id)` makes another active member an owner and the caller an admin,
-  in one transaction that locks both memberships. The tenant never has
-  fewer owners than it had, and of two racing transfers by one owner only
-  one succeeds. Only an owner may transfer, and not while the tenant is
-  suspended (decision 6). The new owner must be someone allowed to create
-  a tenant: an active, signed-up person with a verified email, because an
-  owner sends the tenant's invitations. A member through the email's domain
-  becomes an `added` member, so the ownership does not end when that email
-  leaves the domain (migration 0047). Recorded as
+  in one transaction that locks the tenant's owners and both memberships.
+  Of two racing transfers by one owner only one succeeds. Naming a co-owner
+  leaves them an owner and the caller an admin, so an owner can step down.
+  Only an owner may transfer, and not while the tenant is suspended
+  (decision 6); the status is read before the transaction, so a suspension
+  that lands in between does not stop it. The new owner must be someone
+  allowed to create a tenant: an active, signed-up person with a verified
+  email, because an owner sends the tenant's invitations. A member through
+  the email's domain must still be one, on a domain the tenant verifies,
+  and becomes an `added` member, so the ownership does not end when that
+  email leaves the domain (migration 0047). Recorded as
   `tenant_ownership_transferred`, the previous owner as actor and the new
   one as target.
-- **An operator appoints an owner when none is left.** The last-owner guard
-  stops a removal, not an owner's account being deleted, deactivated or
-  merged away. Once no owner can sign in, nobody can invite, register a
-  domain or transfer. `AdminRecoverTenantOwnership(project_id, tenant_id,
-  user_id, reason)`, with the operator secret, makes an account that could
-  own a tenant (the same rule as a transfer) an active `added` owner, member
-  or not, recorded as `tenant_ownership_recovered` with the reason. It is
-  refused while any owner can still sign in, so an operator cannot take a
-  governed tenant from its owner; that owner transfers instead. Naming an
-  owner who can already sign in returns their membership and records
-  nothing, so a retry is safe. A latent tenant has never had an owner and
-  is refused; a suspended one can be recovered, so that it has an owner
-  when it is restored.
+- **An operator appoints an owner when nobody can govern.** The last-owner
+  guard stops a removal, not an account being deleted, deactivated or
+  merged away. A tenant whose owners cannot sign in has no owner, but it is
+  still governed while an admin can sign in: that admin can invite a new
+  owner (`CreateTenantInvitation` with `role = "owner"`). Once no owner or
+  admin can sign in, nobody can invite, register a domain or transfer.
+  `AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason)`,
+  with the operator secret, makes an account that could own a tenant (the
+  same rule as a transfer) an active owner, member or not, recorded as
+  `tenant_ownership_recovered` with the reason and the operator's client.
+  It is refused while any owner or admin can still sign in, so an operator
+  never appoints an outside account above people who can act. "Can sign
+  in" is sign-in's own rule: an account pending deletion still can, since
+  signing in cancels the deletion. Naming an account that is already an
+  owner who can sign in returns its membership and records nothing, so a
+  retry is safe. A latent tenant has never had an owner and is refused; a
+  suspended one can be recovered, so that it has an owner when it is
+  restored.
 
 Recovery does not reuse `AdminAddTenantAdmin`. That RPC provisions: it is
-not audited, checks neither the account nor the tenant's owners, and sets
-the role it is given, so it can lower an owner. Recovery is the lever for a
-tenant whose governance has failed, and it is narrow on purpose.
+not audited, checks neither the account nor who governs the tenant, and
+sets the role it is given, so it can lower an owner. Recovery is the lever
+for a tenant whose governance has failed, and it is narrow on purpose.
+
+That only an owner may transfer does not yet keep the owner role from a
+tenant's admins: an admin can invite an owner, themselves included, and
+can remove an owner who is not the last (issue #657).
 
 ## What this amends
 
@@ -335,12 +351,10 @@ tenant whose governance has failed, and it is narrow on purpose.
 - **Negative.** Removing a member ends none of their sessions, so a token
   carrying the tenant outlives the membership by one access-token lifetime,
   in `mode=session` as in `mode=ttl`.
-- **Negative.** A tenant left with no owner who can sign in stays
-  ungoverned until an operator recovers it. Recovery and the last-owner
-  guard each read the owners before they write, so two operators
-  recovering one tenant at once may each appoint an owner (both are
-  audited), and a removal racing a transfer may remove the new owner, which
-  recovery then repairs.
+- **Negative.** A tenant left with no owner or admin who can sign in stays
+  ungoverned until an operator recovers it. Recovery reads who governs the
+  tenant before it grants, so two operators recovering one tenant at once,
+  naming different accounts, may each appoint an owner (both are audited).
 - **Negative, open.** These gaps are known and tracked as follow-ups: a
   session records no sign-in method, which would let a tenant's policy
   admit a cross-domain member it did govern; a refresh that chooses or

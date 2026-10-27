@@ -151,7 +151,7 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrLastOwner),
 		errors.Is(err, service.ErrTenantStatusConflict),
-		errors.Is(err, service.ErrTenantHasOwner),
+		errors.Is(err, service.ErrTenantStillGoverned),
 		errors.Is(err, service.ErrIneligibleTenantOwner),
 		errors.Is(err, service.ErrPlatformAdminExists),
 		errors.Is(err, service.ErrFirstAdminBootstrapDisabled),

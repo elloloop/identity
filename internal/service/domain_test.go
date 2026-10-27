@@ -363,11 +363,12 @@ func (f *fakeMembershipStore) UpsertMembership(_ context.Context, m *TenantMembe
 var fakeRoleRank = map[string]int{RoleOwner: 3, RoleAdmin: 2, RoleMember: 1}
 
 // GrantMembership mirrors the postgres store: an active membership at the
-// role or a higher one keeps its role, and its source too unless that is
-// the domain's; anything else becomes active at m.Role.
-func (f *fakeMembershipStore) GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, error) {
+// role or a higher one keeps its role; anything else becomes active at
+// m.Role. Either way a membership keeps its source unless that is the
+// domain's.
+func (f *fakeMembershipStore) GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, bool, error) {
 	if f.upsertErr != nil {
-		return nil, f.upsertErr
+		return nil, false, f.upsertErr
 	}
 	k := f.key(m.ProjectID, m.TenantID, m.UserID)
 	granted := *m
@@ -377,15 +378,19 @@ func (f *fakeMembershipStore) GrantMembership(ctx context.Context, m *TenantMemb
 		if prior.Status == MembershipStatusActive && fakeRoleRank[prior.Role] >= fakeRoleRank[m.Role] {
 			if prior.Source != MembershipSourceDomain || m.Source == MembershipSourceDomain {
 				out := *prior
-				return &out, nil
+				return &out, false, nil
 			}
 			granted.Role = prior.Role
 		}
+		if prior.Source != MembershipSourceDomain {
+			granted.Source = prior.Source
+		}
 	}
 	if _, err := f.UpsertMembership(ctx, &granted); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return f.GetMembership(ctx, m.ProjectID, m.TenantID, m.UserID)
+	out, err := f.GetMembership(ctx, m.ProjectID, m.TenantID, m.UserID)
+	return out, err == nil, err
 }
 
 func (f *fakeMembershipStore) GetMembership(_ context.Context, projectID, tenantID, userID string) (*TenantMembership, error) {
@@ -425,8 +430,22 @@ func (f *fakeMembershipStore) ListMembershipsForTenant(_ context.Context, projec
 	return out, nil
 }
 
+// RemoveMembership mirrors the postgres store: the tenant's last active
+// owner is not removed (ErrLastOwner).
 func (f *fakeMembershipStore) RemoveMembership(_ context.Context, projectID, tenantID, userID string) error {
-	delete(f.byKey, f.key(projectID, tenantID, userID))
+	k := f.key(projectID, tenantID, userID)
+	if target, ok := f.byKey[k]; ok && target.Role == RoleOwner && target.Status == MembershipStatusActive {
+		others := 0
+		for key, m := range f.byKey {
+			if key != k && m.ProjectID == projectID && m.TenantID == tenantID && m.Role == RoleOwner && m.Status == MembershipStatusActive {
+				others++
+			}
+		}
+		if others == 0 {
+			return ErrLastOwner
+		}
+	}
+	delete(f.byKey, k)
 	return nil
 }
 

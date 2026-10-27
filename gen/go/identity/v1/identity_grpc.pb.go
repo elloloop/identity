@@ -447,14 +447,16 @@ type IdentityServiceClient interface {
 	RemoveTenantMember(ctx context.Context, in *RemoveTenantMemberRequest, opts ...grpc.CallOption) (*RemoveTenantMemberResponse, error)
 	// TransferTenantOwnership hands the caller's ownership of a tenant to
 	// another active member in one step: the member becomes an owner and the
-	// caller an admin, so the tenant never has fewer owners than it had. Only
-	// an active owner may transfer (an admin is PERMISSION_DENIED, and so is
+	// caller an admin, so the tenant is never left without an owner. Naming a
+	// co-owner leaves the caller an admin, so an owner can step down. Only an
+	// active owner may transfer (an admin is PERMISSION_DENIED, and so is
 	// anyone while the tenant is suspended). A user_id that is not an active
-	// member of the tenant is NOT_FOUND; one whose account is not an active,
-	// signed-up person's with a verified email is FAILED_PRECONDITION, as an
-	// owner sends the tenant's invitations. Naming a co-owner leaves the caller
-	// an admin. The transfer is audited. Available only on the postgres
-	// control-plane driver.
+	// member of the tenant is NOT_FOUND, as is a member only through their
+	// email's domain once the tenant no longer verifies it; one whose account
+	// is not an active, signed-up person's with a verified email is
+	// FAILED_PRECONDITION, as an owner sends the tenant's invitations. The
+	// transfer is audited. Available only on the postgres control-plane
+	// driver.
 	TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*TransferTenantOwnershipResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
@@ -571,16 +573,20 @@ type IdentityServiceClient interface {
 	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
 	// changed between the read and the write.
 	AdminRestoreTenant(ctx context.Context, in *AdminRestoreTenantRequest, opts ...grpc.CallOption) (*AdminRestoreTenantResponse, error)
-	// AdminRecoverTenantOwnership appoints an owner to a tenant left with no
-	// owner who can sign in (each was deleted, deactivated or merged away),
-	// which TransferTenantOwnership cannot reach. While an owner can still
-	// sign in it is FAILED_PRECONDITION, unless user_id is that owner, which
-	// returns their membership unchanged. user_id must be an account of the
-	// project (else NOT_FOUND) that is an active, signed-up person's with a
-	// verified email (else FAILED_PRECONDITION); a membership it holds becomes
-	// an active owner one. A latent tenant has never had an owner and is
-	// FAILED_PRECONDITION. Records the operator's reason in the audit trail.
-	// Operator-only.
+	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
+	// govern: no owner or admin of it can sign in (each was deleted,
+	// deactivated or merged away). While an owner or an admin can still sign
+	// in it is FAILED_PRECONDITION: an owner transfers, an admin invites a new
+	// owner. An account pending deletion can still sign in, so it counts.
+	// When user_id is already an owner who can sign in, it returns that
+	// membership unchanged and records nothing, before judging the account,
+	// so a retry gets the first answer. Otherwise user_id must be an account
+	// of the project (else NOT_FOUND) that is an active, signed-up person's
+	// with a verified email (else FAILED_PRECONDITION); a membership it holds
+	// becomes an active owner one and keeps a source other than the domain's.
+	// A latent tenant has never had an owner and is FAILED_PRECONDITION.
+	// Records the operator's reason, IP and user agent in the audit trail
+	// when it appoints; a refusal is not recorded. Operator-only.
 	AdminRecoverTenantOwnership(ctx context.Context, in *AdminRecoverTenantOwnershipRequest, opts ...grpc.CallOption) (*AdminRecoverTenantOwnershipResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
@@ -2557,14 +2563,16 @@ type IdentityServiceServer interface {
 	RemoveTenantMember(context.Context, *RemoveTenantMemberRequest) (*RemoveTenantMemberResponse, error)
 	// TransferTenantOwnership hands the caller's ownership of a tenant to
 	// another active member in one step: the member becomes an owner and the
-	// caller an admin, so the tenant never has fewer owners than it had. Only
-	// an active owner may transfer (an admin is PERMISSION_DENIED, and so is
+	// caller an admin, so the tenant is never left without an owner. Naming a
+	// co-owner leaves the caller an admin, so an owner can step down. Only an
+	// active owner may transfer (an admin is PERMISSION_DENIED, and so is
 	// anyone while the tenant is suspended). A user_id that is not an active
-	// member of the tenant is NOT_FOUND; one whose account is not an active,
-	// signed-up person's with a verified email is FAILED_PRECONDITION, as an
-	// owner sends the tenant's invitations. Naming a co-owner leaves the caller
-	// an admin. The transfer is audited. Available only on the postgres
-	// control-plane driver.
+	// member of the tenant is NOT_FOUND, as is a member only through their
+	// email's domain once the tenant no longer verifies it; one whose account
+	// is not an active, signed-up person's with a verified email is
+	// FAILED_PRECONDITION, as an owner sends the tenant's invitations. The
+	// transfer is audited. Available only on the postgres control-plane
+	// driver.
 	TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*TransferTenantOwnershipResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
@@ -2681,16 +2689,20 @@ type IdentityServiceServer interface {
 	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
 	// changed between the read and the write.
 	AdminRestoreTenant(context.Context, *AdminRestoreTenantRequest) (*AdminRestoreTenantResponse, error)
-	// AdminRecoverTenantOwnership appoints an owner to a tenant left with no
-	// owner who can sign in (each was deleted, deactivated or merged away),
-	// which TransferTenantOwnership cannot reach. While an owner can still
-	// sign in it is FAILED_PRECONDITION, unless user_id is that owner, which
-	// returns their membership unchanged. user_id must be an account of the
-	// project (else NOT_FOUND) that is an active, signed-up person's with a
-	// verified email (else FAILED_PRECONDITION); a membership it holds becomes
-	// an active owner one. A latent tenant has never had an owner and is
-	// FAILED_PRECONDITION. Records the operator's reason in the audit trail.
-	// Operator-only.
+	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
+	// govern: no owner or admin of it can sign in (each was deleted,
+	// deactivated or merged away). While an owner or an admin can still sign
+	// in it is FAILED_PRECONDITION: an owner transfers, an admin invites a new
+	// owner. An account pending deletion can still sign in, so it counts.
+	// When user_id is already an owner who can sign in, it returns that
+	// membership unchanged and records nothing, before judging the account,
+	// so a retry gets the first answer. Otherwise user_id must be an account
+	// of the project (else NOT_FOUND) that is an active, signed-up person's
+	// with a verified email (else FAILED_PRECONDITION); a membership it holds
+	// becomes an active owner one and keeps a source other than the domain's.
+	// A latent tenant has never had an owner and is FAILED_PRECONDITION.
+	// Records the operator's reason, IP and user agent in the audit trail
+	// when it appoints; a refusal is not recorded. Operator-only.
 	AdminRecoverTenantOwnership(context.Context, *AdminRecoverTenantOwnershipRequest) (*AdminRecoverTenantOwnershipResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).

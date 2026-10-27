@@ -118,12 +118,13 @@ func (s *MembershipService) CreateTenant(ctx context.Context, callerID, name, ip
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
-	if !isPermanentPerson(caller) || !isActiveStatus(caller.Status) {
+	// The caller becomes the owner, so they are held to the owner's rule. A
+	// tenant's owner sends its invitations, so an address nobody has proven
+	// may not make one: throwaway accounts would multiply that mail.
+	switch judgeTenantOwner(caller) {
+	case notAnActivePerson:
 		return nil, fmt.Errorf("%w: only an active, signed-up person may create a tenant", ErrPermissionDenied)
-	}
-	// A tenant's owner sends its invitations, so an address nobody has
-	// proven may not make one: throwaway accounts would multiply that mail.
-	if !caller.EmailVerified {
+	case ownerEmailUnverified:
 		return nil, fmt.Errorf("%w: verify your email before creating a tenant", ErrEmailVerificationRequired)
 	}
 

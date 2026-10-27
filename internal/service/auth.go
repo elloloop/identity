@@ -86,6 +86,15 @@ func isActiveStatus(status string) bool {
 	}
 }
 
+// statusCanSignIn reports whether an account in this status may sign in:
+// an active one, or one pending deletion, whose sign-in is exactly what
+// cancels the deletion. checkAccountStatus admits sign-ins by it, and
+// anything that asks whether an account's holder can still act through it
+// asks the same, so the two cannot disagree.
+func statusCanSignIn(status string) bool {
+	return isActiveStatus(status) || strings.EqualFold(status, StatusPendingDeletion)
+}
+
 // User represents a user in the identity system.
 type User struct {
 	ID               string
@@ -1348,8 +1357,9 @@ var (
 	// Domain/Tenant RPCs are postgres-only; memory returns this).
 	// The Connect handler layer maps it to CodeUnimplemented.
 	ErrUnimplemented = errors.New("operation unimplemented for this repository driver")
-	// ErrLastOwner is returned by RemoveTenantMember when removing the target
-	// would strand the tenant with no active owner. The caller is permitted
+	// ErrLastOwner is returned by RemoveTenantMember (and
+	// MembershipStore.RemoveMembership) when removing the target would leave
+	// the tenant with no active owner. The caller is permitted
 	// to remove members (so PermissionDenied is wrong); this is a state
 	// precondition, mapped to CodeFailedPrecondition.
 	ErrLastOwner = errors.New("cannot remove the last owner of a tenant")

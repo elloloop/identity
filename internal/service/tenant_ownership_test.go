@@ -31,10 +31,11 @@ func ineligibleOwners(users *fakeUserDirectory, project string) []string {
 
 // newOwnershipFixture is a self-service fixture holding a claimed tenant
 // that ssOwnerID owns, which they created, and that ssOtherID belongs to
-// through their email's domain.
+// through their email's domain, which the tenant verified.
 func newOwnershipFixture() *selfServiceFixture {
 	f := newSelfServiceFixture(&config.Config{})
 	f.tenants.ensure(ssProject, ownTenant)
+	f.members.verifyDomain(ssProject, ownTenant, "example.test")
 	f.seed(ssOwnerID, MembershipSourceCreated, RoleOwner, MembershipStatusActive)
 	f.seed(ssOtherID, MembershipSourceDomain, RoleMember, MembershipStatusActive)
 	return f
@@ -105,7 +106,7 @@ func TestTransferTenantOwnership_OnlyAnActiveOwnerOfAGovernableTenant(t *testing
 			f.seed(ssOwnerID, MembershipSourceAdded, RoleOwner, MembershipStatusInactive)
 		},
 		"not a member": func(f *selfServiceFixture) {
-			_ = f.members.RemoveMembership(context.Background(), ssProject, ownTenant, ssOwnerID)
+			delete(f.members.byKey, f.members.key(ssProject, ownTenant, ssOwnerID))
 		},
 		"suspended":      func(f *selfServiceFixture) { f.tenants.byID[ssProject+"/"+ownTenant].Status = TenantStatusSuspended },
 		"unknown tenant": func(f *selfServiceFixture) { delete(f.tenants.byID, ssProject+"/"+ownTenant) },
@@ -146,6 +147,35 @@ func TestTransferTenantOwnership_RefusesBadRequests(t *testing.T) {
 
 	assert.Equal(t, RoleOwner, f.role(t, ssOwnerID))
 	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantOwnershipTransferred)))
+}
+
+// A member through their email's domain is one only while the tenant
+// verifies that domain, so ownership cannot pass to someone the domain no
+// longer makes a member.
+func TestTransferTenantOwnership_DomainMemberMustStillBelong(t *testing.T) {
+	for name, leave := range map[string]func(f *selfServiceFixture){
+		"domain no longer verified": func(f *selfServiceFixture) {
+			delete(f.members.verified[ssProject+"/"+ownTenant], "example.test")
+		},
+		"email on another domain": func(f *selfServiceFixture) {
+			f.users.byID[ssProject+"/"+ssOtherID].Email = "other@elsewhere.test"
+		},
+	} {
+		f := newOwnershipFixture()
+		leave(f)
+		_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, ssOtherID, "", "")
+		require.ErrorIs(t, err, ErrNotFound, name)
+		assert.Equal(t, RoleMember, f.role(t, ssOtherID), name)
+		assert.Equal(t, RoleOwner, f.role(t, ssOwnerID), name)
+		assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantOwnershipTransferred)), name)
+	}
+
+	// An invited member's membership does not depend on the domain.
+	f := newOwnershipFixture()
+	f.seed(ssOtherID, MembershipSourceInvited, RoleMember, MembershipStatusActive)
+	delete(f.members.verified[ssProject+"/"+ownTenant], "example.test")
+	_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, ssOtherID, "", "")
+	require.NoError(t, err)
 }
 
 // An owner sends the tenant's invitations and must be able to sign in, so the
@@ -209,26 +239,21 @@ func (f *adminFixture) seedMembership(userID, source, role, status string) {
 }
 
 func (f *adminFixture) recover(userID, reason string) (*TenantMembership, error) {
-	return f.svc.AdminRecoverTenantOwnership(context.Background(), testAdminSecret, "proj", "t-1", userID, reason)
+	return f.svc.AdminRecoverTenantOwnership(context.Background(), testAdminSecret, "proj", "t-1", userID, reason, testOperatorIP, testOperatorUA)
 }
 
 func TestAdminRecoverTenantOwnership_Gated(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	disabled := newAdminFixture("")
-	_, err := disabled.svc.AdminRecoverTenantOwnership(ctx, "anything", "proj", "t-1", "heir", "why")
+	_, err := disabled.svc.AdminRecoverTenantOwnership(ctx, "anything", "proj", "t-1", "heir", "why", "", "")
 	require.ErrorIs(t, err, ErrUnimplemented)
 
 	f := newRecoveryFixture()
 	for _, presented := range []string{"", "wrong", testAdminSecret + "x"} {
-		_, err := f.svc.AdminRecoverTenantOwnership(ctx, presented, "proj", "t-1", "heir", "why")
+		_, err := f.svc.AdminRecoverTenantOwnership(ctx, presented, "proj", "t-1", "heir", "why", "", "")
 		require.ErrorIs(t, err, ErrPermissionDenied, presented)
 	}
-
-	// A build with no user directory cannot check the owners.
-	noUsers := NewControlPlaneAdminService(testAdminSecret, false, testAdminSecretsKey(), f.projects, f.tenants, f.members, nil, f.policies, f.admins, f.dns, nil, zap.NewNop())
-	_, err = noUsers.AdminRecoverTenantOwnership(ctx, testAdminSecret, "proj", "t-1", "heir", "why")
-	require.ErrorIs(t, err, ErrUnimplemented)
 
 	m, _ := f.members.GetMembership(ctx, "proj", "t-1", "heir")
 	assert.Equal(t, RoleMember, m.Role)
@@ -240,7 +265,7 @@ func TestAdminRecoverTenantOwnership_AppointsAndAudits(t *testing.T) {
 	ctx := context.Background()
 	f := newRecoveryFixture()
 
-	got, err := f.svc.AdminRecoverTenantOwnership(ctx, testAdminSecret, " proj ", " t-1 ", " heir ", "  owner left the company\n")
+	got, err := f.svc.AdminRecoverTenantOwnership(ctx, testAdminSecret, " proj ", " t-1 ", " heir ", "  owner left the company\n", testOperatorIP, testOperatorUA)
 	require.NoError(t, err)
 	assert.Equal(t, "heir", got.UserID)
 	assert.Equal(t, RoleOwner, got.Role)
@@ -253,6 +278,7 @@ func TestAdminRecoverTenantOwnership_AppointsAndAudits(t *testing.T) {
 	details := f.audit.detailsOf(string(audit.EventTenantOwnershipRecovered))
 	require.Len(t, details, 1)
 	assert.Equal(t, map[string]any{"project_id": "proj", "tenant_id": "t-1", "reason": "owner left the company"}, details[0])
+	assert.Equal(t, [][2]string{{testOperatorIP, testOperatorUA}}, f.audit.clientsOf(string(audit.EventTenantOwnershipRecovered)))
 
 	// Asking again finds heir the owner: the same answer, recorded once.
 	again, err := f.recover("heir", "retry")
@@ -263,26 +289,39 @@ func TestAdminRecoverTenantOwnership_AppointsAndAudits(t *testing.T) {
 	// heir can sign in, so nobody else may be appointed now.
 	f.users.set("proj", &User{ID: "late", Email: "l@example.test", Status: StatusActive, EmailVerified: true})
 	_, err = f.recover("late", "why")
-	require.ErrorIs(t, err, ErrTenantHasOwner)
+	require.ErrorIs(t, err, ErrTenantStillGoverned)
 }
 
-// Each way an owner stops being one who can sign in leaves the tenant
-// recoverable, and an account outside the tenant may be appointed.
-func TestAdminRecoverTenantOwnership_WhenNoOwnerCanSignIn(t *testing.T) {
+// Each way an owner or admin stops being one who can sign in leaves the
+// tenant recoverable, and an account outside the tenant may be appointed.
+func TestAdminRecoverTenantOwnership_WhenNobodyCanGovern(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
 	for name, gone := range map[string]func(f *adminFixture){
 		"owner deleted": func(f *adminFixture) {
-			_ = f.members.RemoveMembership(ctx, "proj", "t-1", "gone")
+			// Deleting an account deletes its memberships with it.
+			delete(f.members.byKey, f.members.key("proj", "t-1", "gone"))
 			delete(f.users.byID, "proj/gone")
 		},
-		"account missing":   func(f *adminFixture) { delete(f.users.byID, "proj/gone") },
-		"owner merged away": func(f *adminFixture) { f.users.byID["proj/gone"].MergedIntoUserID = "someone" },
+		"account missing":       func(f *adminFixture) { delete(f.users.byID, "proj/gone") },
+		"owner merged away":     func(f *adminFixture) { f.users.byID["proj/gone"].MergedIntoUserID = "someone" },
+		"owner never signed up": func(f *adminFixture) { f.users.byID["proj/gone"].Status = StatusInvited },
 		"membership inactive": func(f *adminFixture) {
 			f.seedMembership("gone", MembershipSourceCreated, RoleOwner, MembershipStatusInactive)
 		},
 		"tenant suspended": func(f *adminFixture) {
 			f.tenants.byID["proj/t-1"].Status = TenantStatusSuspended
+		},
+		"admin deactivated": func(f *adminFixture) {
+			f.users.set("proj", &User{ID: "old-admin", Email: "a@example.test", Status: StatusDeactivated, EmailVerified: true})
+			f.seedMembership("old-admin", MembershipSourceInvited, RoleAdmin, MembershipStatusActive)
+		},
+		"admin membership inactive": func(f *adminFixture) {
+			f.users.set("proj", &User{ID: "old-admin", Email: "a@example.test", Status: StatusActive, EmailVerified: true})
+			f.seedMembership("old-admin", MembershipSourceInvited, RoleAdmin, MembershipStatusInactive)
+		},
+		"admin an agent": func(f *adminFixture) {
+			f.users.set("proj", &User{ID: "bot", Kind: UserKindAgent, OwnerUserID: "gone", Status: StatusActive})
+			f.seedMembership("bot", MembershipSourceAdded, RoleAdmin, MembershipStatusActive)
 		},
 	} {
 		f := newRecoveryFixture()
@@ -297,28 +336,121 @@ func TestAdminRecoverTenantOwnership_WhenNoOwnerCanSignIn(t *testing.T) {
 	}
 }
 
-// While an owner can still sign in, they transfer the ownership themselves.
-func TestAdminRecoverTenantOwnership_RefusesWhileAnOwnerCanSignIn(t *testing.T) {
+// While an owner or an admin can still sign in, they govern the tenant: an
+// owner transfers it, an admin invites a new owner. An account pending
+// deletion can sign in, which cancels the deletion, so it counts; so does
+// an owner whose email is unverified.
+func TestAdminRecoverTenantOwnership_RefusesWhileGoverned(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for name, govern := range map[string]struct {
+		role string
+		user User
+	}{
+		"active owner":           {role: RoleOwner, user: User{Status: StatusActive, EmailVerified: true}},
+		"unverified owner":       {role: RoleOwner, user: User{Status: StatusActive}},
+		"owner pending deletion": {role: RoleOwner, user: User{Status: StatusPendingDeletion, EmailVerified: true}},
+		"active admin":           {role: RoleAdmin, user: User{Status: StatusActive, EmailVerified: true}},
+		"admin pending deletion": {role: RoleAdmin, user: User{Status: StatusPendingDeletion}},
+	} {
+		f := newRecoveryFixture()
+		here := govern.user
+		here.ID, here.Email = "here", "here@example.test"
+		f.users.set("proj", &here)
+		f.seedMembership("here", MembershipSourceInvited, govern.role, MembershipStatusActive)
+
+		_, err := f.recover("heir", "why")
+		require.ErrorIs(t, err, ErrTenantStillGoverned, name)
+		m, _ := f.members.GetMembership(ctx, "proj", "t-1", "heir")
+		assert.Equal(t, RoleMember, m.Role, name)
+		assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantOwnershipRecovered)), name)
+	}
+}
+
+// Naming an owner who can sign in returns their membership unchanged, even
+// one recovery would not appoint now (here, an unverified email), so an
+// operator's retry gets the answer the first call gave; nothing is recorded.
+func TestAdminRecoverTenantOwnership_NamingAnOwnerChangesNothing(t *testing.T) {
 	t.Parallel()
 	f := newRecoveryFixture()
-	f.users.set("proj", &User{ID: "here", Email: "here@example.test", Status: StatusActive})
-	f.seedMembership("here", MembershipSourceAdded, RoleOwner, MembershipStatusActive)
+	f.users.set("proj", &User{ID: "here", Email: "here@example.test", Status: StatusPendingDeletion})
+	f.seedMembership("here", MembershipSourceInvited, RoleOwner, MembershipStatusActive)
 
-	_, err := f.recover("heir", "why")
-	require.ErrorIs(t, err, ErrTenantHasOwner)
-	m, _ := f.members.GetMembership(context.Background(), "proj", "t-1", "heir")
-	assert.Equal(t, RoleMember, m.Role)
+	got, err := f.recover("here", "why")
+	require.NoError(t, err)
+	assert.Equal(t, RoleOwner, got.Role)
+	assert.Equal(t, MembershipSourceInvited, got.Source)
 	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantOwnershipRecovered)))
 
-	// That owner is appointed again by name: nothing changes.
-	got, err := f.recover("here", "why")
-	require.ErrorIs(t, err, ErrIneligibleTenantOwner, "an unverified email may not be appointed")
-	assert.Nil(t, got)
-	f.users.byID["proj/here"].EmailVerified = true
-	got, err = f.recover("here", "why")
+	// An admin named is not an owner: the tenant is governed, so refused.
+	f.users.set("proj", &User{ID: "admin", Email: "a@example.test", Status: StatusActive, EmailVerified: true})
+	f.seedMembership("admin", MembershipSourceInvited, RoleAdmin, MembershipStatusActive)
+	_, err = f.recover("admin", "why")
+	require.ErrorIs(t, err, ErrTenantStillGoverned)
+}
+
+// The appointee's membership, whatever its state, becomes an active owner
+// one, and keeps a source other than the domain's.
+func TestAdminRecoverTenantOwnership_RaisesTheAppointeesMembership(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for name, seed := range map[string]struct{ source, role, status string }{
+		"inactive member":   {MembershipSourceInvited, RoleMember, MembershipStatusInactive},
+		"inactive owner":    {MembershipSourceCreated, RoleOwner, MembershipStatusInactive},
+		"pending member":    {MembershipSourceInvited, RoleMember, MembershipStatusPending},
+		"active member":     {MembershipSourceInvited, RoleMember, MembershipStatusActive},
+		"deactivated admin": {MembershipSourceAdded, RoleAdmin, MembershipStatusInactive},
+	} {
+		f := newRecoveryFixture()
+		f.seedMembership("heir", seed.source, seed.role, seed.status)
+
+		got, err := f.recover("heir", "why")
+		require.NoError(t, err, name)
+		assert.Equal(t, RoleOwner, got.Role, name)
+		assert.Equal(t, MembershipStatusActive, got.Status, name)
+		assert.Equal(t, seed.source, got.Source, name)
+		stored, _ := f.members.GetMembership(ctx, "proj", "t-1", "heir")
+		assert.Equal(t, got, stored, name)
+		assert.Equal(t, 1, f.audit.countByEventType(string(audit.EventTenantOwnershipRecovered)), name)
+	}
+}
+
+// Two recoveries naming the same account can both pass the check; the one
+// whose grant changes nothing records nothing, so the trail holds one entry
+// per appointment.
+func TestAdminRecoverTenantOwnership_RecordsOnlyAChange(t *testing.T) {
+	t.Parallel()
+	f := newRecoveryFixture()
+	racing := &grantBetweenStore{fakeMembershipStore: f.members, grant: &TenantMembership{
+		ProjectID: "proj", TenantID: "t-1", UserID: "heir", Source: MembershipSourceAdded, Role: RoleOwner,
+	}}
+	f.svc = NewControlPlaneAdminService(testAdminSecret, false, testAdminSecretsKey(), f.projects, f.tenants, racing, f.users, f.policies, f.admins, f.dns,
+		audit.NewLogger(f.audit, "test-project", zap.NewNop()), zap.NewNop())
+
+	got, err := f.recover("heir", "why")
 	require.NoError(t, err)
 	assert.Equal(t, RoleOwner, got.Role)
 	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantOwnershipRecovered)))
+}
+
+// grantBetweenStore grants its membership right after the first tenant
+// listing, standing in for a recovery that commits while another is between
+// its check and its grant.
+type grantBetweenStore struct {
+	*fakeMembershipStore
+	grant *TenantMembership
+}
+
+func (s *grantBetweenStore) ListMembershipsForTenant(ctx context.Context, projectID, tenantID string) ([]*TenantMembership, error) {
+	out, err := s.fakeMembershipStore.ListMembershipsForTenant(ctx, projectID, tenantID)
+	if s.grant != nil {
+		grant := s.grant
+		s.grant = nil
+		if _, _, err := s.GrantMembership(ctx, grant); err != nil {
+			return nil, err
+		}
+	}
+	return out, err
 }
 
 func TestAdminRecoverTenantOwnership_RefusesBadArguments(t *testing.T) {
@@ -327,7 +459,7 @@ func TestAdminRecoverTenantOwnership_RefusesBadArguments(t *testing.T) {
 	f := newRecoveryFixture()
 	f.tenants.put(&Tenant{ID: "t-latent", ProjectID: "proj", Status: TenantStatusLatent})
 	call := func(projectID, tenantID, userID, reason string) error {
-		_, err := f.svc.AdminRecoverTenantOwnership(ctx, testAdminSecret, projectID, tenantID, userID, reason)
+		_, err := f.svc.AdminRecoverTenantOwnership(ctx, testAdminSecret, projectID, tenantID, userID, reason, "", "")
 		return err
 	}
 
@@ -345,6 +477,8 @@ func TestAdminRecoverTenantOwnership_RefusesBadArguments(t *testing.T) {
 	require.ErrorIs(t, call("proj-2", "t-1", "heir", "why"), ErrNotFound, "another project's tenant")
 	require.ErrorIs(t, call("proj", "t-latent", "heir", "why"), ErrTenantStatusConflict)
 	require.ErrorIs(t, call("proj", "t-1", "user-missing", "why"), ErrNotFound)
+	f.users.set("proj-2", &User{ID: "elsewhere", Email: "e@example.test", Status: StatusActive, EmailVerified: true})
+	require.ErrorIs(t, call("proj", "t-1", "elsewhere", "why"), ErrNotFound, "an account of another project")
 	for _, id := range ineligibleOwners(f.users, "proj") {
 		require.ErrorIs(t, call("proj", "t-1", id, "why"), ErrIneligibleTenantOwner, id)
 	}

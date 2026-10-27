@@ -18,8 +18,9 @@ import (
 // TestRedesign_TenantOwnership drives a tenant's ownership over the wire
 // against a real Postgres: its owner hands it to a member, who becomes the
 // owner while the previous owner stays on as an admin; only an owner may do
-// so; and once no owner can sign in, an operator appoints one, which an
-// operator cannot do while an owner still can. Each change is audited once.
+// so; and once no owner or admin can sign in, an operator appoints one,
+// which an operator cannot do while an owner or an admin still can, even
+// one whose account is pending deletion. Each change is audited once.
 func TestRedesign_TenantOwnership(t *testing.T) {
 	h := startSelfServiceHarness(t)
 	ctx := context.Background()
@@ -78,14 +79,28 @@ func TestRedesign_TenantOwnership(t *testing.T) {
 			ProjectId: h.ProjectID, TenantId: tenant, UserId: userID, Reason: "the owner left",
 		}))
 	}
-	_, err = recoverOwner(harnessAdminSecret, tenantID, founder.userID)
+	setStatus := func(who, userID, status string) {
+		t.Helper()
+		if err := h.Stores.users.UpdateUser(ctx, userID, map[string]any{"status": status}); err != nil {
+			t.Fatalf("set the %s's account %s: %v", who, status, err)
+		}
+	}
+	_, err = recoverOwner(harnessAdminSecret, tenantID, stranger.userID)
 	requireConnectCode(t, "recovering while the owner can sign in", err, connect.CodeFailedPrecondition)
 
-	// The owner's account is deactivated: nobody can govern the tenant.
-	if err := h.Stores.users.UpdateUser(ctx, heir.userID, map[string]any{"status": service.StatusDeactivated}); err != nil {
-		t.Fatalf("deactivate the owner: %v", err)
-	}
-	_, err = recoverOwner("wrong-secret", tenantID, founder.userID)
+	// The owner's account is deactivated, but the previous owner, an admin
+	// now, can still invite a new owner, also while their account is pending
+	// deletion.
+	setStatus("owner", heir.userID, service.StatusDeactivated)
+	_, err = recoverOwner(harnessAdminSecret, tenantID, stranger.userID)
+	requireConnectCode(t, "recovering while an admin can sign in", err, connect.CodeFailedPrecondition)
+	setStatus("admin", founder.userID, service.StatusPendingDeletion)
+	_, err = recoverOwner(harnessAdminSecret, tenantID, stranger.userID)
+	requireConnectCode(t, "recovering while an admin pending deletion can sign in", err, connect.CodeFailedPrecondition)
+
+	// The admin's account is deactivated too: nobody can govern the tenant.
+	setStatus("admin", founder.userID, service.StatusDeactivated)
+	_, err = recoverOwner("wrong-secret", tenantID, stranger.userID)
 	requireConnectCode(t, "recovering with a wrong secret", err, connect.CodePermissionDenied)
 	_, err = recoverOwner(harnessAdminSecret, tenantID, "user-unknown")
 	requireConnectCode(t, "recovering to an unknown account", err, connect.CodeNotFound)
@@ -98,24 +113,26 @@ func TestRedesign_TenantOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTenant latent: %v", err)
 	}
-	_, err = recoverOwner(harnessAdminSecret, latentID, founder.userID)
+	_, err = recoverOwner(harnessAdminSecret, latentID, stranger.userID)
 	requireConnectCode(t, "recovering a latent tenant", err, connect.CodeFailedPrecondition)
 
-	recovered, err := recoverOwner(harnessAdminSecret, tenantID, founder.userID)
+	// An account outside the tenant is appointed its owner.
+	recovered, err := recoverOwner(harnessAdminSecret, tenantID, stranger.userID)
 	if err != nil {
 		t.Fatalf("AdminRecoverTenantOwnership: %v", err)
 	}
-	if m := recovered.Msg.GetMembership(); m.GetUserId() != founder.userID || m.GetRole() != service.RoleOwner || m.GetStatus() != service.MembershipStatusActive {
-		t.Fatalf("recovered membership = %+v, want %s the active owner", m, founder.userID)
+	if m := recovered.Msg.GetMembership(); m.GetUserId() != stranger.userID || m.GetRole() != service.RoleOwner ||
+		m.GetStatus() != service.MembershipStatusActive || m.GetSource() != service.MembershipSourceAdded {
+		t.Fatalf("recovered membership = %+v, want %s the active added owner", m, stranger.userID)
 	}
-	again, err := recoverOwner(harnessAdminSecret, tenantID, founder.userID)
+	again, err := recoverOwner(harnessAdminSecret, tenantID, stranger.userID)
 	if err != nil {
 		t.Fatalf("AdminRecoverTenantOwnership again: %v", err)
 	}
 	if again.Msg.GetMembership().GetId() != recovered.Msg.GetMembership().GetId() {
 		t.Fatalf("a retried recovery returned %+v, want %+v", again.Msg.GetMembership(), recovered.Msg.GetMembership())
 	}
-	if roles := tenantRoles(t, founder, tenantID); roles[founder.userID] != service.RoleOwner {
+	if roles := tenantRoles(t, stranger, tenantID); roles[stranger.userID] != service.RoleOwner {
 		t.Fatalf("members after the recovery = %v", roles)
 	}
 

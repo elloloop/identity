@@ -134,11 +134,11 @@ func (s *connectMembershipStore) UpsertMembership(_ context.Context, m *service.
 	return "mem-1", nil
 }
 
-func (s *connectMembershipStore) GrantMembership(_ context.Context, m *service.TenantMembership) (*service.TenantMembership, error) {
+func (s *connectMembershipStore) GrantMembership(_ context.Context, m *service.TenantMembership) (*service.TenantMembership, bool, error) {
 	cp := *m
 	cp.ID = "mem-1"
 	s.upserted = &cp
-	return &cp, nil
+	return &cp, true, nil
 }
 
 func (s *connectMembershipStore) GetMembership(_ context.Context, _, _, _ string) (*service.TenantMembership, error) {
@@ -153,7 +153,12 @@ func (s *connectMembershipStore) ListMembershipsForTenant(context.Context, strin
 	return nil, nil
 }
 
+// RemoveMembership mirrors the postgres store's last-owner rule for the one
+// membership this fake holds: an active owner is the tenant's last.
 func (s *connectMembershipStore) RemoveMembership(context.Context, string, string, string) error {
+	if s.member != nil && s.member.Role == service.RoleOwner && s.member.Status == service.MembershipStatusActive {
+		return service.ErrLastOwner
+	}
 	return nil
 }
 

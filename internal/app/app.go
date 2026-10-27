@@ -1267,9 +1267,10 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 // Unimplemented (the secret check short-circuits on an empty secret). This
 // keeps the "off by default" guarantee in one place — the service's
 // constant-time authorize — rather than splitting it across the wiring. users
-// resolves an account in a named project, as for buildMembershipService.
+// resolves an account in a named project, as for buildMembershipService; the
+// service requires it, so without one there is no service.
 func buildControlPlaneAdminService(deps Deps, users service.UserDirectory, auditLog *audit.Logger, logger *zap.Logger) *service.ControlPlaneAdminService {
-	if deps.ControlPlaneStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil {
+	if deps.ControlPlaneStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil || users == nil {
 		return nil
 	}
 	secret := ""

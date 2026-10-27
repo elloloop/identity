@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -134,13 +135,13 @@ var grantMembershipQuery = `
 // email's domain takes the grant's source; any other source is left
 // unchanged, also when the grant raises the role or reactivates it. The
 // decision is the statement's own, so it holds against a concurrent grant.
-// Returns the surviving row.
-func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.TenantMembership) (*service.TenantMembership, error) {
+// Returns the surviving row, and whether the statement wrote it.
+func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.TenantMembership) (*service.TenantMembership, bool, error) {
 	if m == nil {
-		return nil, errors.New("postgres: GrantMembership: nil membership")
+		return nil, false, errors.New("postgres: GrantMembership: nil membership")
 	}
 	if m.ProjectID == "" || m.TenantID == "" || m.UserID == "" {
-		return nil, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
+		return nil, false, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
 	}
 	source := m.Source
 	if source == "" {
@@ -157,17 +158,17 @@ func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.Tenant
 		// grant does not replace: nothing changed.
 		kept, getErr := s.GetMembership(ctx, m.ProjectID, m.TenantID, m.UserID)
 		if getErr != nil {
-			return nil, getErr
+			return nil, false, getErr
 		}
 		if kept == nil {
-			return nil, fmt.Errorf("postgres: GrantMembership: membership vanished: %w", service.ErrUnavailable)
+			return nil, false, fmt.Errorf("postgres: GrantMembership: membership vanished: %w", service.ErrUnavailable)
 		}
-		return kept, nil
+		return kept, false, nil
 	}
 	if err != nil {
-		return nil, wrapPgErr("GrantMembership", err)
+		return nil, false, wrapPgErr("GrantMembership", err)
 	}
-	return granted, nil
+	return granted, true, nil
 }
 
 // GetMembership returns the membership for (project, tenant, user), or
@@ -301,25 +302,94 @@ func (s *MembershipStore) queryMemberships(ctx context.Context, op, q string, ar
 	return out, nil
 }
 
-// RemoveMembership deletes the membership for (project, tenant, user).
+// RemoveMembership deletes the membership for (project, tenant, user),
+// unless it is the tenant's last active owner, which is service.ErrLastOwner.
 // Unknown rows are a no-op.
+//
+// One transaction locks the tenant's owners and the membership
+// (lockOwnersAnd), then counts the other active owners in a statement of its
+// own, which sees whatever committed while it waited. So two removals of the
+// last two owners, or a removal of the member a transfer is making the
+// owner, cannot together leave the tenant without one: the second sees what
+// the first did. Counting inside the DELETE would not do: a statement that
+// waits on a lock re-checks only the row it waited for, with its old
+// snapshot for everything else.
 func (s *MembershipStore) RemoveMembership(ctx context.Context, projectID, tenantID, userID string) error {
 	if projectID == "" || tenantID == "" || userID == "" {
 		return fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
 	}
-	const q = `DELETE FROM tenant_memberships
-		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`
-	if _, err := s.pool.Exec(ctx, q, projectID, tenantID, userID); err != nil {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
 		return wrapPgErr("RemoveMembership", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	held, err := lockOwnersAnd(ctx, tx, projectID, tenantID, userID)
+	if err != nil {
+		return wrapPgErr("RemoveMembership(lock)", err)
+	}
+	target := held[userID]
+	if target == nil {
+		return nil
+	}
+	if target.Role == service.RoleOwner && target.Status == service.MembershipStatusActive {
+		var others int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM tenant_memberships
+			WHERE project_id = $1 AND tenant_id = $2 AND user_id <> $3
+			  AND role = 'owner' AND status = 'active'`, projectID, tenantID, userID).Scan(&others); err != nil {
+			return wrapPgErr("RemoveMembership(count)", err)
+		}
+		if others == 0 {
+			return fmt.Errorf("%w: cannot remove the last owner of a tenant", service.ErrLastOwner)
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`, projectID, tenantID, userID); err != nil {
+		return wrapPgErr("RemoveMembership", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return wrapPgErr("RemoveMembership(commit)", err)
 	}
 	return nil
 }
 
+// lockOwnersAnd locks the tenant's active owner memberships and those of
+// userIDs, and returns the memberships of userIDs it found, by user id, as
+// they stand once locked. Every write that can change who owns a tenant
+// takes its locks this way, in one statement and in user_id order, so such
+// writes queue behind one another and never deadlock: two transactions
+// that each take all their locks in one ordered pass cannot each hold a row
+// the other waits for.
+func lockOwnersAnd(ctx context.Context, tx pgx.Tx, projectID, tenantID string, userIDs ...string) (map[string]*service.TenantMembership, error) {
+	rows, err := tx.Query(ctx, `SELECT `+membershipColumns+`
+		FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2
+		  AND ((role = 'owner' AND status = 'active') OR user_id = ANY($3))
+		ORDER BY user_id
+		FOR UPDATE`, projectID, tenantID, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	held := make(map[string]*service.TenantMembership, len(userIDs))
+	for rows.Next() {
+		m, err := scanMembership(rows)
+		if err != nil {
+			return nil, err
+		}
+		if slices.Contains(userIDs, m.UserID) {
+			held[m.UserID] = m
+		}
+	}
+	return held, rows.Err()
+}
+
 // TransferOwnership makes toUserID an owner of the tenant and fromUserID an
-// admin. One transaction locks both memberships, in user_id order so two
-// transfers between the same pair queue rather than deadlock, then checks
-// them, so a transfer that waited sees what the one before it did: an owner
-// who has just handed the tenant on cannot hand it on again. fromUserID must
+// admin. One transaction locks the tenant's owners and both memberships
+// (lockOwnersAnd), as a removal does, then checks them, so a transfer that
+// waited sees what the write before it did: an owner who has just handed
+// the tenant on cannot hand it on again, and a member just removed cannot
+// be made the owner. fromUserID must
 // be an active owner (service.ErrPermissionDenied) and toUserID an active
 // member (service.ErrNotFound). A domain-sourced membership of toUserID's
 // becomes an added one, as GrantMembership would make it.
@@ -336,26 +406,9 @@ func (s *MembershipStore) TransferOwnership(ctx context.Context, projectID, tena
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	rows, err := tx.Query(ctx, `SELECT `+membershipColumns+`
-		FROM tenant_memberships
-		WHERE project_id = $1 AND tenant_id = $2 AND user_id IN ($3, $4)
-		ORDER BY user_id
-		FOR UPDATE`, projectID, tenantID, fromUserID, toUserID)
+	held, err := lockOwnersAnd(ctx, tx, projectID, tenantID, fromUserID, toUserID)
 	if err != nil {
 		return nil, nil, wrapPgErr("TransferOwnership(lock)", err)
-	}
-	held := make(map[string]*service.TenantMembership, 2)
-	for rows.Next() {
-		m, err := scanMembership(rows)
-		if err != nil {
-			rows.Close()
-			return nil, nil, wrapPgErr("TransferOwnership(lock) scan", err)
-		}
-		held[m.UserID] = m
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, nil, wrapPgErr("TransferOwnership(lock) rows", err)
 	}
 	if from := held[fromUserID]; from == nil || from.Role != service.RoleOwner || from.Status != service.MembershipStatusActive {
 		return nil, nil, fmt.Errorf("%w: only an active owner may transfer ownership", service.ErrPermissionDenied)
