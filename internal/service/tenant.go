@@ -81,6 +81,24 @@ type OwnedTenantRequest struct {
 	NowMs int64
 }
 
+// TenantPosition is a tenant's place in the newest-first order
+// TenantStore.ListTenants pages through: by creation time, then by id.
+type TenantPosition struct {
+	CreatedAtMs int64
+	ID          string
+}
+
+// TenantListQuery asks TenantStore.ListTenants for one page of a project's
+// tenants.
+type TenantListQuery struct {
+	ProjectID string
+	// After starts the page just after that position; nil starts at the
+	// newest tenant.
+	After *TenantPosition
+	// Limit caps the page and must be positive.
+	Limit int
+}
+
 // DomainAttempt asks DomainStore.RecordDomainAttempt to count one
 // CreateDomain or VerifyDomain by a tenant. Each verify makes the server look
 // up a DNS name the tenant chose, so a tenant admin is held to a cap.
@@ -139,8 +157,10 @@ type TenantStore interface {
 	// setting the status in one step so that a suspension made meanwhile is
 	// kept. Unknown ids, and a tenant in any other status, are a no-op.
 	ClaimLatentTenant(ctx context.Context, projectID, tenantID string) error
-	// ListTenants returns every tenant in a project, newest first.
-	ListTenants(ctx context.Context, projectID string) ([]*Tenant, error)
+	// ListTenants returns up to q.Limit tenants of q.ProjectID, whatever
+	// their status, newest first (by creation time, then by id descending),
+	// starting after q.After.
+	ListTenants(ctx context.Context, q TenantListQuery) ([]*Tenant, error)
 	// CreateOwnedTenant creates a claimed tenant and its creator's active
 	// owner membership (source "created") in one transaction, and returns
 	// both. The per-user limit in req is checked inside that transaction,

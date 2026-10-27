@@ -317,7 +317,9 @@ signed-in user creates it `claimed`, as its owner (`CreateTenant`, 0044).
 
 - **PK:** `id`.
 - **Unique:** none beyond PK (no domain uniqueness on tenant).
-- **Indexes:** `tenants_project_idx (project_id)`,
+- **Indexes:** `tenants_project_created_idx (project_id, created_at_ms, id)`
+  (AdminListTenants' order, 0048; it replaced `tenants_project_idx (project_id)`,
+  which 0049 drops),
   `tenants_project_primary_domain_idx (project_id, lower(primary_domain))`,
   `tenants_project_status_idx (project_id, status)`,
   `tenants_project_created_by_idx (project_id, created_by, created_at_ms) WHERE created_by <> ''`

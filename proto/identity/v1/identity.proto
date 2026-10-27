@@ -2248,6 +2248,51 @@ message AdminAddTenantAdminResponse {
   TenantMembership membership = 1;
 }
 
+// Tenant is a tenant's own record, as an operator reads it: what it is
+// called, how far it has formed, and who made it. It carries nothing the
+// tenant holds (its domains, members, invitations or login policy).
+message Tenant {
+  string id = 1;
+  string name = 2;
+  // primary_domain is the domain an operator gave AdminCreateTenant, or the
+  // domain an auto-formed tenant formed from; empty on a tenant a user
+  // created.
+  string primary_domain = 3;
+  string status = 4; // "latent" | "claimed" | "suspended"
+  // created_by is the user who created the tenant through CreateTenant, and
+  // empty on a tenant made any other way.
+  string created_by = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message AdminGetTenantRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+}
+
+message AdminGetTenantResponse {
+  Tenant tenant = 1;
+}
+
+message AdminListTenantsRequest {
+  string project_id = 1;
+  // limit caps the page. Default 50, maximum 200.
+  int32 limit = 2;
+  // cursor is the opaque next_cursor of a previous page. A cursor that
+  // does not decode is INVALID_ARGUMENT. It holds a position, not a grant:
+  // it is not bound to the project it came from, and the page is always of
+  // project_id's tenants alone.
+  string cursor = 3;
+}
+
+message AdminListTenantsResponse {
+  // tenants are the project's tenants of every status, newest first.
+  repeated Tenant tenants = 1;
+  // next_cursor is empty on the last page.
+  string next_cursor = 2;
+}
+
 // CreateFirstPlatformAdmin is the trust-on-first-use (TOFU) bootstrap that
 // establishes the FIRST platform admin on a fresh deployment. It is
 // self-securing: it succeeds ONLY while the platform_admins table is empty,
@@ -3404,6 +3449,23 @@ service IdentityService {
   rpc SetPrimaryAuthDomain(SetPrimaryAuthDomainRequest) returns (SetPrimaryAuthDomainResponse);
   rpc AdminCreateTenant(AdminCreateTenantRequest) returns (AdminCreateTenantResponse);
   rpc AdminAddTenantAdmin(AdminAddTenantAdminRequest) returns (AdminAddTenantAdminResponse);
+  // Returns one tenant's own record, in any status: never its members,
+  // domains or login policy. Operator-only, like the other Admin* RPCs:
+  // UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED
+  // for a wrong secret. INVALID_ARGUMENT for a blank project_id or
+  // tenant_id, and NOT_FOUND when the project holds no such tenant.
+  rpc AdminGetTenant(AdminGetTenantRequest) returns (AdminGetTenantResponse);
+  // Returns one page of a project's tenants, latent, claimed and suspended
+  // alike, newest first by creation time, then id: their own records only,
+  // never their members, domains or login policy. Pass next_cursor back as
+  // cursor for the next page. Paging never repeats or skips a tenant that
+  // existed when it began; one created meanwhile may or may not appear.
+  // Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
+  // GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+  // INVALID_ARGUMENT for a blank project_id or a cursor that does not
+  // decode. A project with no tenants, or one that does not exist, is an
+  // empty page.
+  rpc AdminListTenants(AdminListTenantsRequest) returns (AdminListTenantsResponse);
 
   // Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
   // while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).

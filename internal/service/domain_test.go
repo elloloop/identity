@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -147,7 +148,9 @@ var _ DomainStore = (*fakeDomainStore)(nil)
 // CreateOwnedTenant writes the owner membership into members when the two
 // fakes are linked (linkFakeTenantStores).
 type fakeTenantStore struct {
-	byID      map[string]*Tenant
+	byID map[string]*Tenant
+	// getErr fails every read: GetTenant, GetTenantByPrimaryDomain and
+	// ListTenants.
 	getErr    error
 	setErr    error
 	createErr error
@@ -229,13 +232,35 @@ func (f *fakeTenantStore) ClaimLatentTenant(_ context.Context, projectID, tenant
 	return nil
 }
 
-func (f *fakeTenantStore) ListTenants(_ context.Context, projectID string) ([]*Tenant, error) {
+// ListTenants mirrors the postgres store: it refuses a blank project or a
+// limit below one, and returns newest first by (created, id), after
+// q.After, at most q.Limit.
+func (f *fakeTenantStore) ListTenants(_ context.Context, q TenantListQuery) ([]*Tenant, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	if q.ProjectID == "" || q.Limit <= 0 {
+		return nil, fmt.Errorf("%w: project_id and a positive limit are required", ErrInvalidArgument)
+	}
 	var out []*Tenant
 	for _, t := range f.byID {
-		if t.ProjectID == projectID {
-			cp := *t
-			out = append(out, &cp)
+		if t.ProjectID != q.ProjectID {
+			continue
 		}
+		if a := q.After; a != nil && (t.CreatedAtMs > a.CreatedAtMs || (t.CreatedAtMs == a.CreatedAtMs && t.ID >= a.ID)) {
+			continue
+		}
+		cp := *t
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAtMs != out[j].CreatedAtMs {
+			return out[i].CreatedAtMs > out[j].CreatedAtMs
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > q.Limit {
+		out = out[:q.Limit]
 	}
 	return out, nil
 }

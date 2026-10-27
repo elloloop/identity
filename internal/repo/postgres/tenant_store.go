@@ -164,15 +164,42 @@ func (s *TenantStore) ClaimLatentTenant(ctx context.Context, projectID, tenantID
 	return nil
 }
 
-// ListTenants returns every tenant in a project, newest first.
-func (s *TenantStore) ListTenants(ctx context.Context, projectID string) ([]*service.Tenant, error) {
-	if projectID == "" {
-		return nil, nil
+// listTenantsFirstPageQuery and listTenantsAfterQuery read one page of a
+// project's tenants, newest first. The order is keyed on (created_at_ms, id),
+// which tenants_project_created_idx (0048) serves in index order, so a page
+// reads its own rows and no sort runs, however many tenants the project
+// holds.
+const (
+	listTenantsFirstPageQuery = `SELECT ` + tenantColumns + ` FROM tenants
+		WHERE project_id = $1
+		ORDER BY created_at_ms DESC, id DESC LIMIT $2`
+	listTenantsAfterQuery = `SELECT ` + tenantColumns + ` FROM tenants
+		WHERE project_id = $1 AND (created_at_ms, id) < ($2, $3)
+		ORDER BY created_at_ms DESC, id DESC LIMIT $4`
+)
+
+// ListTenants returns up to q.Limit tenants of a project, newest first,
+// starting after q.After. Each page starts strictly after the last row of
+// the one before, so paging never repeats or skips a tenant that existed
+// when it began; a tenant created while a caller pages may or may not
+// appear, since created_at_ms comes from the creating replica's clock.
+func (s *TenantStore) ListTenants(ctx context.Context, q service.TenantListQuery) ([]*service.Tenant, error) {
+	if q.ProjectID == "" {
+		return nil, fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
 	}
-	const q = `SELECT ` + tenantColumns + `
-		FROM tenants WHERE project_id = $1
-		ORDER BY created_at_ms DESC, id DESC`
-	rows, err := s.pool.Query(ctx, q, projectID)
+	if q.Limit <= 0 {
+		return nil, fmt.Errorf("%w: limit must be positive", service.ErrInvalidArgument)
+	}
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if q.After == nil {
+		rows, err = s.pool.Query(ctx, listTenantsFirstPageQuery, q.ProjectID, q.Limit)
+	} else {
+		rows, err = s.pool.Query(ctx, listTenantsAfterQuery,
+			q.ProjectID, q.After.CreatedAtMs, q.After.ID, q.Limit)
+	}
 	if err != nil {
 		return nil, wrapPgErr("ListTenants", err)
 	}

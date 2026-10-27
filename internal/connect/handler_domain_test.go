@@ -100,7 +100,9 @@ func (s *connectTenantStore) ClaimLatentTenant(context.Context, string, string) 
 	return nil
 }
 
-func (s *connectTenantStore) ListTenants(context.Context, string) ([]*service.Tenant, error) {
+// ListTenants is not reached by the domain handler tests; the listing is
+// covered against listedTenantStore.
+func (s *connectTenantStore) ListTenants(context.Context, service.TenantListQuery) ([]*service.Tenant, error) {
 	return nil, nil
 }
 

@@ -210,7 +210,7 @@ func runAutoFormSmoke(t *testing.T, dsn string) {
 	require.NoError(t, err)
 	require.Equal(t, tenantID, tenantID2, "same email domain → same tenant")
 
-	tenants, err := ts.ListTenants(ctx, projectID)
+	tenants, err := ts.ListTenants(ctx, service.TenantListQuery{ProjectID: projectID, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, tenants, 1, "no duplicate tenant for the same domain")
 	forTenant, err := ms.ListMembershipsForTenant(ctx, projectID, tenantID)
@@ -272,7 +272,7 @@ func runAutoFormSmoke(t *testing.T, dsn string) {
 	require.Len(t, raceMembers, racers, "every concurrent signer is a member of the one tenant")
 
 	// Two tenants total now (acme.com + race.example.test) — losers left no orphan.
-	tenants, err = ts.ListTenants(ctx, projectID)
+	tenants, err = ts.ListTenants(ctx, service.TenantListQuery{ProjectID: projectID, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, tenants, 2, "a lost race must not leave an orphan tenant")
 }

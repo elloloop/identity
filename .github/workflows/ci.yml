@@ -364,7 +364,11 @@ jobs:
             echo "no fuzz targets — skipping"
             exit 0
           fi
-          go test -race -timeout=120s "${pkgs[@]}"
+          # -run '^Fuzz' replays the fuzz targets alone. Without it every unit
+          # test in a package holding a fuzz target ran here as well, which the
+          # unit shards already cover, and a package with a large suite pushed
+          # the job past its timeout.
+          go test -race -run '^Fuzz' -timeout=120s "${pkgs[@]}"
 
   # ---------------------------------------------------------------------------
   # 6b. Docs drift — prose may not reference a code identifier that does not

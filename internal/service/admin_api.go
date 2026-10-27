@@ -629,19 +629,15 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, secr
 	if err := s.authorize(secret); err != nil {
 		return nil, err
 	}
-	projectID = strings.TrimSpace(projectID)
-	tenantID = strings.TrimSpace(tenantID)
+	projectID, tenantID, err := requireTenantRef(projectID, tenantID)
+	if err != nil {
+		return nil, err
+	}
 	userID = strings.TrimSpace(userID)
-	if projectID == "" {
-		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
-	}
-	if tenantID == "" {
-		return nil, fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
-	}
 	if userID == "" {
 		return nil, fmt.Errorf("%w: missing user_id", ErrInvalidArgument)
 	}
-	role, err := normalizeAdminRole(role)
+	role, err = normalizeAdminRole(role)
 	if err != nil {
 		return nil, err
 	}

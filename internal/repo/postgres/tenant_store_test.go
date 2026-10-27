@@ -108,12 +108,12 @@ func runTenantDomainSmoke(t *testing.T, dsn string) {
 	require.NoError(t, err)
 	require.Nil(t, crossDom)
 
-	list, err := tenants.ListTenants(ctx, projA)
+	list, err := tenants.ListTenants(ctx, service.TenantListQuery{ProjectID: projA, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	require.Equal(t, tenID, list[0].ID)
 
-	listB, err := tenants.ListTenants(ctx, projB)
+	listB, err := tenants.ListTenants(ctx, service.TenantListQuery{ProjectID: projB, Limit: 100})
 	require.NoError(t, err)
 	require.Empty(t, listB, "project B has no tenants yet")
 

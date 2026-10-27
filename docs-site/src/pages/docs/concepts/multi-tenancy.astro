@@ -247,6 +247,38 @@ docker run ... \\
     and never lowers a role, so it cannot demote an owner.
   </p>
 
+  <h2 id="operating-tenants">Operating tenants</h2>
+  <p>
+    A platform operator reads a Project's tenants with the control-plane
+    admin calls, which authenticate with the <code>X-Admin-Secret</code>
+    header (<code>GATEWAY_ADMIN_API_SECRET</code>) rather than a user token.
+    They return the tenant's own record, never its members, domains or
+    policy:
+  </p>
+  <Code
+    code={`AdminGetTenant(project_id, tenant_id)
+  -> { id, name, primary_domain, status, created_by, created_at, updated_at }
+  -> INVALID_ARGUMENT              # a blank project_id or tenant_id
+  -> NOT_FOUND                     # the Project holds no such tenant
+AdminListTenants(project_id, limit=50, cursor="")
+  -> { tenants: [...], next_cursor }   # every status, newest first
+  -> INVALID_ARGUMENT              # a blank project_id, or a cursor that does not decode
+Both:
+  -> UNIMPLEMENTED                 # GATEWAY_ADMIN_API_SECRET is unset
+  -> PERMISSION_DENIED             # a wrong X-Admin-Secret`}
+    lang="bash"
+  />
+  <p>
+    <code>limit</code> defaults to 50 and is capped at 200. Pass each page's
+    <code>next_cursor</code> to read the next; it is empty on the last page.
+    A cursor holds the last tenant's position, not an offset, so paging never
+    repeats or skips a tenant that existed when it began; a tenant created
+    meanwhile may or may not appear. A cursor is not bound to the Project it
+    came from: the page is always of <code>project_id</code>'s tenants alone,
+    and a Project with no tenants, or one that does not exist, is an empty
+    page.
+  </p>
+
   <p>
     See <a href="/identity/docs/concepts/auth-model">Auth model</a> for how the Project
     and Tenant appear in JWT claims, and
