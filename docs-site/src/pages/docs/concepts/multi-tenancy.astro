@@ -247,6 +247,31 @@ docker run ... \\
     and never lowers a role, so it cannot demote an owner.
   </p>
 
+  <h2 id="operating-tenants">Operating tenants</h2>
+  <p>
+    A platform operator reads a Project's tenants with the control-plane
+    admin calls, which authenticate with the <code>X-Admin-Secret</code>
+    header (<code>GATEWAY_ADMIN_API_SECRET</code>) rather than a user token.
+    They return the tenant's own record, never its members, domains or
+    policy:
+  </p>
+  <Code
+    code={`AdminGetTenant(project_id, tenant_id)
+  -> { id, name, primary_domain, status, created_by, created_at, updated_at }
+  -> NOT_FOUND                     # the Project holds no such tenant
+AdminListTenants(project_id, limit=50, cursor="")
+  -> { tenants: [...], next_cursor }   # every status, newest first
+  -> INVALID_ARGUMENT              # a cursor that does not decode`}
+    lang="bash"
+  />
+  <p>
+    <code>limit</code> defaults to 50 and is capped at 200. Pass each page's
+    <code>next_cursor</code> to read the next; it is empty on the last page.
+    The order is fixed by creation time, so a tenant formed while an operator
+    pages lands before the first page and moves no other tenant between
+    pages.
+  </p>
+
   <p>
     See <a href="/identity/docs/concepts/auth-model">Auth model</a> for how the Project
     and Tenant appear in JWT claims, and

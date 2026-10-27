@@ -164,15 +164,30 @@ func (s *TenantStore) ClaimLatentTenant(ctx context.Context, projectID, tenantID
 	return nil
 }
 
-// ListTenants returns every tenant in a project, newest first.
-func (s *TenantStore) ListTenants(ctx context.Context, projectID string) ([]*service.Tenant, error) {
-	if projectID == "" {
-		return nil, nil
+// ListTenants returns up to q.Limit tenants of a project, newest first,
+// starting after q.After. The order is keyed on (created_at_ms, id), which
+// tenants_project_created_idx (0048) serves, so a page costs its own size
+// however many tenants the project holds, and a tenant created while a
+// caller pages lands before the first page instead of shifting the rest.
+func (s *TenantStore) ListTenants(ctx context.Context, q service.TenantListQuery) ([]*service.Tenant, error) {
+	if q.ProjectID == "" {
+		return nil, fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
 	}
-	const q = `SELECT ` + tenantColumns + `
-		FROM tenants WHERE project_id = $1
-		ORDER BY created_at_ms DESC, id DESC`
-	rows, err := s.pool.Query(ctx, q, projectID)
+	if q.Limit <= 0 {
+		return nil, fmt.Errorf("%w: limit must be positive", service.ErrInvalidArgument)
+	}
+	const cols = `SELECT ` + tenantColumns + ` FROM tenants WHERE project_id = $1`
+	const order = ` ORDER BY created_at_ms DESC, id DESC LIMIT `
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if q.After == nil {
+		rows, err = s.pool.Query(ctx, cols+order+`$2`, q.ProjectID, q.Limit)
+	} else {
+		rows, err = s.pool.Query(ctx, cols+` AND (created_at_ms, id) < ($2, $3)`+order+`$4`,
+			q.ProjectID, q.After.CreatedAtMs, q.After.ID, q.Limit)
+	}
 	if err != nil {
 		return nil, wrapPgErr("ListTenants", err)
 	}

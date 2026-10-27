@@ -54,6 +54,7 @@ func TestAuthMiddleware_OperatorRPCs_Exempt(t *testing.T) {
 	operatorRPCs := []string{
 		"AdminCreateProject",
 		"AdminCreateProjectCredential",
+		"AdminRevokeProjectCredential",
 		"AdminAddProjectAuthDomain",
 		"AddProjectAuthDomain",
 		"VerifyProjectAuthDomain",
@@ -61,6 +62,8 @@ func TestAuthMiddleware_OperatorRPCs_Exempt(t *testing.T) {
 		"SetPrimaryAuthDomain",
 		"AdminCreateTenant",
 		"AdminAddTenantAdmin",
+		"AdminGetTenant",
+		"AdminListTenants",
 		"UpsertLoginPolicy",
 		"GetLoginPolicy",
 		"DeleteLoginPolicy",
@@ -69,6 +72,8 @@ func TestAuthMiddleware_OperatorRPCs_Exempt(t *testing.T) {
 		"AdminSetProjectOAuthProvider",
 		"AdminDeleteProjectOAuthProvider",
 		"AdminListProjectOAuthProviders",
+		"AdminSetProjectAssurance",
+		"AdminGetProjectAssurance",
 		"CreateFirstPlatformAdmin",
 	}
 	for _, rpc := range operatorRPCs {

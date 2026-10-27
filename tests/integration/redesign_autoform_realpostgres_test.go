@@ -105,7 +105,7 @@ func TestRedesign_AutoFormation_PublicEmail(t *testing.T) {
 	if tenant != nil {
 		t.Fatalf("public email auto-formed a tenant for gmail.com: %+v", tenant)
 	}
-	all, err := h.Stores.tenants.ListTenants(ctx, h.ProjectID)
+	all, err := h.Stores.tenants.ListTenants(ctx, service.TenantListQuery{ProjectID: h.ProjectID, Limit: 100})
 	if err != nil {
 		t.Fatalf("ListTenants: %v", err)
 	}

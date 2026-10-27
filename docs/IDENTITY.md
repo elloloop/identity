@@ -218,8 +218,10 @@ On boot, the postgres driver seeds the default `Project` (mapped onto the
 credentials, and tenants are provisioned out-of-band by a platform
 operator through the control-plane admin RPCs (`AdminCreateProject`,
 `AdminCreateProjectCredential`, `AdminCreateTenant`, `AdminAddTenantAdmin`),
-which authenticate via the `GATEWAY_ADMIN_API_SECRET` shared secret rather
-than a user token. With the secret empty (the default) those RPCs return
+and read back with `AdminGetTenant` and `AdminListTenants` (a tenant's own
+record, never its members or domains; every status, newest first, paged by
+an opaque cursor, 50 by default and at most 200). They authenticate via the
+`GATEWAY_ADMIN_API_SECRET` shared secret rather than a user token. With the secret empty (the default) those RPCs return
 `CodeUnimplemented`, so a deployer who never sets it cannot reach them.
 
 #### Zero-config first-admin bootstrap

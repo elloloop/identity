@@ -1,0 +1,60 @@
+package connect
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	"github.com/elloloop/identity/internal/service"
+)
+
+// AdminGetTenant returns a tenant's own record. Operator-only.
+func (h *IdentityHandler) AdminGetTenant(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminGetTenantRequest],
+) (*connect.Response[identitypb.AdminGetTenantResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	t, err := h.controlAdmin.AdminGetTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminGetTenantResponse{Tenant: tenantToProto(t)}), nil
+}
+
+// AdminListTenants pages through a project's tenants. Operator-only.
+func (h *IdentityHandler) AdminListTenants(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminListTenantsRequest],
+) (*connect.Response[identitypb.AdminListTenantsResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	page, err := h.controlAdmin.AdminListTenants(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Limit, req.Msg.Cursor)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	out := make([]*identitypb.Tenant, 0, len(page.Tenants))
+	for _, t := range page.Tenants {
+		out = append(out, tenantToProto(t))
+	}
+	return connect.NewResponse(&identitypb.AdminListTenantsResponse{Tenants: out, NextCursor: page.NextCursor}), nil
+}
+
+// tenantToProto converts a service-layer Tenant to the proto wire message.
+func tenantToProto(t *service.Tenant) *identitypb.Tenant {
+	if t == nil {
+		return nil
+	}
+	return &identitypb.Tenant{
+		Id:            t.ID,
+		Name:          t.Name,
+		PrimaryDomain: t.PrimaryDomain,
+		Status:        t.Status,
+		CreatedBy:     t.CreatedBy,
+		CreatedAt:     msToTimestamp(t.CreatedAtMs),
+		UpdatedAt:     msToTimestamp(t.UpdatedAtMs),
+	}
+}

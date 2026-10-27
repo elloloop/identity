@@ -130,7 +130,7 @@ func runCreateOwnedTenant(t *testing.T, dsn string) {
 	require.NoError(t, err)
 
 	// A refused creation wrote nothing.
-	all, err := f.tenants.ListTenants(ctx, f.projA)
+	all, err := f.tenants.ListTenants(ctx, service.TenantListQuery{ProjectID: f.projA, Limit: 100})
 	require.NoError(t, err)
 	var mine int
 	for _, tn := range all {
@@ -153,7 +153,7 @@ func runCreateOwnedTenant(t *testing.T, dsn string) {
 		}
 	}
 	// The unknown owner's tenant was rolled back with its membership.
-	after, err := f.tenants.ListTenants(ctx, f.projA)
+	after, err := f.tenants.ListTenants(ctx, service.TenantListQuery{ProjectID: f.projA, Limit: 100})
 	require.NoError(t, err)
 	assert.Len(t, after, len(all))
 }

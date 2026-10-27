@@ -451,6 +451,12 @@ const (
 	// IdentityServiceAdminAddTenantAdminProcedure is the fully-qualified name of the IdentityService's
 	// AdminAddTenantAdmin RPC.
 	IdentityServiceAdminAddTenantAdminProcedure = "/identity.v1.IdentityService/AdminAddTenantAdmin"
+	// IdentityServiceAdminGetTenantProcedure is the fully-qualified name of the IdentityService's
+	// AdminGetTenant RPC.
+	IdentityServiceAdminGetTenantProcedure = "/identity.v1.IdentityService/AdminGetTenant"
+	// IdentityServiceAdminListTenantsProcedure is the fully-qualified name of the IdentityService's
+	// AdminListTenants RPC.
+	IdentityServiceAdminListTenantsProcedure = "/identity.v1.IdentityService/AdminListTenants"
 	// IdentityServiceCreateFirstPlatformAdminProcedure is the fully-qualified name of the
 	// IdentityService's CreateFirstPlatformAdmin RPC.
 	IdentityServiceCreateFirstPlatformAdminProcedure = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
@@ -820,6 +826,15 @@ type IdentityServiceClient interface {
 	SetPrimaryAuthDomain(context.Context, *connect.Request[v1.SetPrimaryAuthDomainRequest]) (*connect.Response[v1.SetPrimaryAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[v1.AdminCreateTenantRequest]) (*connect.Response[v1.AdminCreateTenantResponse], error)
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
+	// Operator reads of a project's tenants: their own records only, never
+	// their members or domains. AdminGetTenant is NOT_FOUND when the project
+	// has no such tenant. AdminListTenants pages through every tenant of the
+	// project, newest first, whatever its status; a page started from a
+	// cursor stays in order however many tenants are created meanwhile.
+	// Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
+	// with no control plane.
+	AdminGetTenant(context.Context, *connect.Request[v1.AdminGetTenantRequest]) (*connect.Response[v1.AdminGetTenantResponse], error)
+	AdminListTenants(context.Context, *connect.Request[v1.AdminListTenantsRequest]) (*connect.Response[v1.AdminListTenantsResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -1745,6 +1760,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantAdmin")),
 			connect.WithClientOptions(opts...),
 		),
+		adminGetTenant: connect.NewClient[v1.AdminGetTenantRequest, v1.AdminGetTenantResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminGetTenantProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminGetTenant")),
+			connect.WithClientOptions(opts...),
+		),
+		adminListTenants: connect.NewClient[v1.AdminListTenantsRequest, v1.AdminListTenantsResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminListTenantsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminListTenants")),
+			connect.WithClientOptions(opts...),
+		),
 		createFirstPlatformAdmin: connect.NewClient[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse](
 			httpClient,
 			baseURL+IdentityServiceCreateFirstPlatformAdminProcedure,
@@ -1992,6 +2019,8 @@ type identityServiceClient struct {
 	setPrimaryAuthDomain            *connect.Client[v1.SetPrimaryAuthDomainRequest, v1.SetPrimaryAuthDomainResponse]
 	adminCreateTenant               *connect.Client[v1.AdminCreateTenantRequest, v1.AdminCreateTenantResponse]
 	adminAddTenantAdmin             *connect.Client[v1.AdminAddTenantAdminRequest, v1.AdminAddTenantAdminResponse]
+	adminGetTenant                  *connect.Client[v1.AdminGetTenantRequest, v1.AdminGetTenantResponse]
+	adminListTenants                *connect.Client[v1.AdminListTenantsRequest, v1.AdminListTenantsResponse]
 	createFirstPlatformAdmin        *connect.Client[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse]
 	listLinkedIdentities            *connect.Client[v1.ListLinkedIdentitiesRequest, v1.ListLinkedIdentitiesResponse]
 	linkIdentity                    *connect.Client[v1.LinkIdentityRequest, v1.LinkIdentityResponse]
@@ -2711,6 +2740,16 @@ func (c *identityServiceClient) AdminAddTenantAdmin(ctx context.Context, req *co
 	return c.adminAddTenantAdmin.CallUnary(ctx, req)
 }
 
+// AdminGetTenant calls identity.v1.IdentityService.AdminGetTenant.
+func (c *identityServiceClient) AdminGetTenant(ctx context.Context, req *connect.Request[v1.AdminGetTenantRequest]) (*connect.Response[v1.AdminGetTenantResponse], error) {
+	return c.adminGetTenant.CallUnary(ctx, req)
+}
+
+// AdminListTenants calls identity.v1.IdentityService.AdminListTenants.
+func (c *identityServiceClient) AdminListTenants(ctx context.Context, req *connect.Request[v1.AdminListTenantsRequest]) (*connect.Response[v1.AdminListTenantsResponse], error) {
+	return c.adminListTenants.CallUnary(ctx, req)
+}
+
 // CreateFirstPlatformAdmin calls identity.v1.IdentityService.CreateFirstPlatformAdmin.
 func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, req *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error) {
 	return c.createFirstPlatformAdmin.CallUnary(ctx, req)
@@ -3113,6 +3152,15 @@ type IdentityServiceHandler interface {
 	SetPrimaryAuthDomain(context.Context, *connect.Request[v1.SetPrimaryAuthDomainRequest]) (*connect.Response[v1.SetPrimaryAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[v1.AdminCreateTenantRequest]) (*connect.Response[v1.AdminCreateTenantResponse], error)
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
+	// Operator reads of a project's tenants: their own records only, never
+	// their members or domains. AdminGetTenant is NOT_FOUND when the project
+	// has no such tenant. AdminListTenants pages through every tenant of the
+	// project, newest first, whatever its status; a page started from a
+	// cursor stays in order however many tenants are created meanwhile.
+	// Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
+	// with no control plane.
+	AdminGetTenant(context.Context, *connect.Request[v1.AdminGetTenantRequest]) (*connect.Response[v1.AdminGetTenantResponse], error)
+	AdminListTenants(context.Context, *connect.Request[v1.AdminListTenantsRequest]) (*connect.Response[v1.AdminListTenantsResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -4034,6 +4082,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantAdmin")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceAdminGetTenantHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminGetTenantProcedure,
+		svc.AdminGetTenant,
+		connect.WithSchema(identityServiceMethods.ByName("AdminGetTenant")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminListTenantsHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminListTenantsProcedure,
+		svc.AdminListTenants,
+		connect.WithSchema(identityServiceMethods.ByName("AdminListTenants")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceCreateFirstPlatformAdminHandler := connect.NewUnaryHandler(
 		IdentityServiceCreateFirstPlatformAdminProcedure,
 		svc.CreateFirstPlatformAdmin,
@@ -4418,6 +4478,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminCreateTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminAddTenantAdminProcedure:
 			identityServiceAdminAddTenantAdminHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminGetTenantProcedure:
+			identityServiceAdminGetTenantHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminListTenantsProcedure:
+			identityServiceAdminListTenantsHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateFirstPlatformAdminProcedure:
 			identityServiceCreateFirstPlatformAdminHandler.ServeHTTP(w, r)
 		case IdentityServiceListLinkedIdentitiesProcedure:
@@ -5019,6 +5083,14 @@ func (UnimplementedIdentityServiceHandler) AdminCreateTenant(context.Context, *c
 
 func (UnimplementedIdentityServiceHandler) AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminAddTenantAdmin is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminGetTenant(context.Context, *connect.Request[v1.AdminGetTenantRequest]) (*connect.Response[v1.AdminGetTenantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminGetTenant is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminListTenants(context.Context, *connect.Request[v1.AdminListTenantsRequest]) (*connect.Response[v1.AdminListTenantsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminListTenants is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error) {

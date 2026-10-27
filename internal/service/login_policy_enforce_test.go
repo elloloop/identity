@@ -77,7 +77,9 @@ func (f *lpTenantStore) GetTenantByPrimaryDomain(context.Context, string, string
 
 func (f *lpTenantStore) ClaimLatentTenant(context.Context, string, string) error { return nil }
 
-func (f *lpTenantStore) ListTenants(context.Context, string) ([]*Tenant, error) { return nil, nil }
+func (f *lpTenantStore) ListTenants(context.Context, TenantListQuery) ([]*Tenant, error) {
+	return nil, nil
+}
 
 func (f *lpTenantStore) CreateOwnedTenant(context.Context, OwnedTenantRequest) (*Tenant, *TenantMembership, error) {
 	return nil, nil, nil

@@ -1,5 +1,54 @@
 # Upgrade guide
 
+## Next — an operator reads a project's tenants: `AdminGetTenant` and `AdminListTenants` (migration 0048; additive RPCs; `TenantStore.ListTenants` takes a `TenantListQuery` (Go API))
+
+A platform operator can now read a project's tenants with the
+`X-Admin-Secret` header, as for the other control-plane admin RPCs. Both
+return a tenant's own record (`Tenant`: id, name, primary domain, status,
+creator and timestamps), never its members, domains or login policy. With
+`GATEWAY_ADMIN_API_SECRET` unset they return `UNIMPLEMENTED`, as the other
+admin RPCs do.
+
+- **`AdminGetTenant(project_id, tenant_id)`** returns the tenant in any
+  status. A tenant the project does not hold is `NOT_FOUND`; a blank id is
+  `INVALID_ARGUMENT`.
+- **`AdminListTenants(project_id, limit, cursor)`** returns one page of the
+  project's tenants, latent, claimed and suspended alike, newest first by
+  creation time, then id. `limit` defaults to 50 and is capped at 200. Pass
+  each page's `next_cursor` back as `cursor` to read the next; it is empty on
+  the last page. A cursor that does not decode is `INVALID_ARGUMENT`. The
+  cursor holds the last tenant's position, not an offset, so a tenant formed
+  while an operator pages lands before the first page and shifts no other
+  tenant between pages.
+
+### Migration 0048
+
+0048 builds `tenants_project_created_idx` on `tenants (project_id,
+created_at_ms, id)`, which serves the listing's order, and drops
+`tenants_project_idx`, which the new index makes redundant. The build holds a
+`SHARE` lock on `tenants` for its duration: reads continue, and writes to
+`tenants` (auto-formation at signup, `CreateTenant`, `AdminCreateTenant`, a
+domain's verification) wait for it. On a large `tenants` table, build the
+index first without blocking writes, and the migration then skips the build:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS tenants_project_created_idx
+    ON tenants (project_id, created_at_ms, id);
+```
+
+Replicas of the previous release keep working against the new schema, so the
+migration can run before or during a rolling deploy. On a lock timeout the
+file rolls back and version 48 is recorded dirty: run `identity migrate force
+47`, then `identity migrate` again. The down migration restores
+`tenants_project_idx` and drops the new index; nothing else changes.
+
+### Go API
+
+`TenantStore.ListTenants(ctx, projectID)` is now
+`ListTenants(ctx, service.TenantListQuery{ProjectID, After, Limit})`: it
+returns at most `Limit` tenants, newest first, after the position `After`. A
+custom `TenantStore` must implement the new signature.
+
 ## Next — self-service tenants and tenant selection on `RefreshToken` (migrations 0044, 0045, 0046, which rewrites `users`, and 0047; stop every earlier replica before migrating; `RefreshTokenRequest.tenant_id` behind `GATEWAY_TENANT_SELECTION_ENABLED`, off by default (additive); contested domain claims, a per-tenant TXT challenge, domain and invitation limits, agent sign-outs scoped to the users a change governs, domain memberships that need a verified email on a verified domain and end when the email leaves it, the product age gate checked before a refresh token is spent, a suspended tenant's admin calls refused, accepting an invitation only with a verified email (behaviour changes); `MembershipStore`, `TenantStore`, `DomainStore`, `InvitationStore`, `UserDirectory`, `AuthService.RefreshToken` and the auth middleware (Go API); verifiers that pin the `tenant` claim (behaviour change when used))
 
 A signed-in person can now create a tenant they own, list the tenants they

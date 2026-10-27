@@ -159,6 +159,8 @@ const (
 	IdentityService_SetPrimaryAuthDomain_FullMethodName            = "/identity.v1.IdentityService/SetPrimaryAuthDomain"
 	IdentityService_AdminCreateTenant_FullMethodName               = "/identity.v1.IdentityService/AdminCreateTenant"
 	IdentityService_AdminAddTenantAdmin_FullMethodName             = "/identity.v1.IdentityService/AdminAddTenantAdmin"
+	IdentityService_AdminGetTenant_FullMethodName                  = "/identity.v1.IdentityService/AdminGetTenant"
+	IdentityService_AdminListTenants_FullMethodName                = "/identity.v1.IdentityService/AdminListTenants"
 	IdentityService_CreateFirstPlatformAdmin_FullMethodName        = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
 	IdentityService_ListLinkedIdentities_FullMethodName            = "/identity.v1.IdentityService/ListLinkedIdentities"
 	IdentityService_LinkIdentity_FullMethodName                    = "/identity.v1.IdentityService/LinkIdentity"
@@ -496,6 +498,15 @@ type IdentityServiceClient interface {
 	SetPrimaryAuthDomain(ctx context.Context, in *SetPrimaryAuthDomainRequest, opts ...grpc.CallOption) (*SetPrimaryAuthDomainResponse, error)
 	AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
+	// Operator reads of a project's tenants: their own records only, never
+	// their members or domains. AdminGetTenant is NOT_FOUND when the project
+	// has no such tenant. AdminListTenants pages through every tenant of the
+	// project, newest first, whatever its status; a page started from a
+	// cursor stays in order however many tenants are created meanwhile.
+	// Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
+	// with no control plane.
+	AdminGetTenant(ctx context.Context, in *AdminGetTenantRequest, opts ...grpc.CallOption) (*AdminGetTenantResponse, error)
+	AdminListTenants(ctx context.Context, in *AdminListTenantsRequest, opts ...grpc.CallOption) (*AdminListTenantsResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -1978,6 +1989,26 @@ func (c *identityServiceClient) AdminAddTenantAdmin(ctx context.Context, in *Adm
 	return out, nil
 }
 
+func (c *identityServiceClient) AdminGetTenant(ctx context.Context, in *AdminGetTenantRequest, opts ...grpc.CallOption) (*AdminGetTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminGetTenantResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminGetTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AdminListTenants(ctx context.Context, in *AdminListTenantsRequest, opts ...grpc.CallOption) (*AdminListTenantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminListTenantsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminListTenants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, in *CreateFirstPlatformAdminRequest, opts ...grpc.CallOption) (*CreateFirstPlatformAdminResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateFirstPlatformAdminResponse)
@@ -2466,6 +2497,15 @@ type IdentityServiceServer interface {
 	SetPrimaryAuthDomain(context.Context, *SetPrimaryAuthDomainRequest) (*SetPrimaryAuthDomainResponse, error)
 	AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
+	// Operator reads of a project's tenants: their own records only, never
+	// their members or domains. AdminGetTenant is NOT_FOUND when the project
+	// has no such tenant. AdminListTenants pages through every tenant of the
+	// project, newest first, whatever its status; a page started from a
+	// cursor stays in order however many tenants are created meanwhile.
+	// Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
+	// with no control plane.
+	AdminGetTenant(context.Context, *AdminGetTenantRequest) (*AdminGetTenantResponse, error)
+	AdminListTenants(context.Context, *AdminListTenantsRequest) (*AdminListTenantsResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
 	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
@@ -2967,6 +3007,12 @@ func (UnimplementedIdentityServiceServer) AdminCreateTenant(context.Context, *Ad
 }
 func (UnimplementedIdentityServiceServer) AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminAddTenantAdmin not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminGetTenant(context.Context, *AdminGetTenantRequest) (*AdminGetTenantResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminGetTenant not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminListTenants(context.Context, *AdminListTenantsRequest) (*AdminListTenantsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminListTenants not implemented")
 }
 func (UnimplementedIdentityServiceServer) CreateFirstPlatformAdmin(context.Context, *CreateFirstPlatformAdminRequest) (*CreateFirstPlatformAdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateFirstPlatformAdmin not implemented")
@@ -5560,6 +5606,42 @@ func _IdentityService_AdminAddTenantAdmin_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_AdminGetTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminGetTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminGetTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminGetTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminGetTenant(ctx, req.(*AdminGetTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AdminListTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminListTenantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminListTenants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminListTenants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminListTenants(ctx, req.(*AdminListTenantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_CreateFirstPlatformAdmin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateFirstPlatformAdminRequest)
 	if err := dec(in); err != nil {
@@ -6432,6 +6514,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminAddTenantAdmin",
 			Handler:    _IdentityService_AdminAddTenantAdmin_Handler,
+		},
+		{
+			MethodName: "AdminGetTenant",
+			Handler:    _IdentityService_AdminGetTenant_Handler,
+		},
+		{
+			MethodName: "AdminListTenants",
+			Handler:    _IdentityService_AdminListTenants_Handler,
 		},
 		{
 			MethodName: "CreateFirstPlatformAdmin",

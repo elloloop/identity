@@ -100,8 +100,12 @@ func (s *connectTenantStore) ClaimLatentTenant(context.Context, string, string) 
 	return nil
 }
 
-func (s *connectTenantStore) ListTenants(context.Context, string) ([]*service.Tenant, error) {
-	return nil, nil
+// ListTenants pages the store's one tenant: it is the whole first page.
+func (s *connectTenantStore) ListTenants(_ context.Context, q service.TenantListQuery) ([]*service.Tenant, error) {
+	if s.tenant == nil || q.After != nil {
+		return nil, nil
+	}
+	return []*service.Tenant{s.tenant}, nil
 }
 
 func (s *connectTenantStore) CreateOwnedTenant(_ context.Context, req service.OwnedTenantRequest) (*service.Tenant, *service.TenantMembership, error) {
