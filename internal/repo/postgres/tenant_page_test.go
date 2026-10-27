@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,8 +77,9 @@ func TestTenantStore_ListTenantsPagesNewestFirst(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrInvalidArgument)
 }
 
-// TestPageTenantsMigrationRoundTrip asserts 0048 swaps the project-only
-// tenants index for the paging one, and its down swaps them back.
+// TestPageTenantsMigrationRoundTrip asserts 0048 adds the paging index and
+// 0049 then drops the project-only one, each in its own file, and that both
+// downs put them back.
 func TestPageTenantsMigrationRoundTrip(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -100,15 +102,83 @@ func TestPageTenantsMigrationRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 		return def
 	}
-	for _, version := range []uint{48, 47, 48} {
-		migrateToVersion(t, scratch, version)
+	for _, step := range []struct {
+		version              uint
+		paging, projectIndex bool
+	}{
+		{version: 49, paging: true},
+		{version: 48, paging: true, projectIndex: true},
+		{version: 47, projectIndex: true},
+		{version: 48, paging: true, projectIndex: true},
+		{version: 49, paging: true},
+	} {
+		migrateToVersion(t, scratch, step.version)
 		paging, projectOnly := indexDef("tenants_project_created_idx"), indexDef("tenants_project_idx")
-		if version == 48 {
-			require.Contains(t, paging, "(project_id, created_at_ms, id)")
-			require.Empty(t, projectOnly)
+		if step.paging {
+			require.Contains(t, paging, "(project_id, created_at_ms, id)", "version %d", step.version)
 		} else {
-			require.Empty(t, paging)
-			require.Contains(t, projectOnly, "(project_id)")
+			require.Empty(t, paging, "version %d", step.version)
 		}
+		if step.projectIndex {
+			require.Contains(t, projectOnly, "(project_id)", "version %d", step.version)
+		} else {
+			require.Empty(t, projectOnly, "version %d", step.version)
+		}
+	}
+}
+
+// tenantPagePlanTenants is how many tenants the plan probe seeds per
+// project: enough that reading a project's tenants and sorting them costs
+// more than walking the index, so the planner picks the index whenever it
+// may.
+const tenantPagePlanTenants = 2000
+
+// TestTenantStore_ListTenantsPlanWalksThePagingIndex proves both ListTenants
+// queries read a page through tenants_project_created_idx in its own order,
+// with no Sort node, so a page costs its own size and not the project's.
+// The generic plan is the one a prepared statement settles on, which sees
+// neither the project nor the limit.
+func TestTenantStore_ListTenantsPlanWalksThePagingIndex(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	scratch := createScratchDatabase(ctx, t, dsn)
+	migrateToVersion(t, scratch, 49)
+	raw, err := pgx.Connect(ctx, scratch)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close(ctx) }()
+
+	_, err = raw.Exec(ctx, `
+		INSERT INTO projects (id, storage_scope_id, created_at_ms, updated_at_ms)
+		SELECT 'p' || g, 'scope-p' || g, 0, 0 FROM generate_series(1, 5) AS g`)
+	require.NoError(t, err)
+	_, err = raw.Exec(ctx, `
+		INSERT INTO tenants (id, project_id, name, status, created_at_ms, updated_at_ms)
+		SELECT 'p' || p || '-t' || g, 'p' || p, 'Tenant ' || g, 'claimed', g, g
+		FROM generate_series(1, 5) AS p, generate_series(1, $1::int) AS g`, tenantPagePlanTenants)
+	require.NoError(t, err)
+	_, err = raw.Exec(ctx, `ANALYZE tenants`)
+	require.NoError(t, err)
+
+	for name, query := range map[string]string{
+		"first page": listTenantsFirstPageQuery,
+		"next page":  listTenantsAfterQuery,
+	} {
+		// The statement goes unparsed by the driver, which would otherwise
+		// ask for values for its parameters.
+		results, err := raw.PgConn().Exec(ctx, `EXPLAIN (COSTS OFF, GENERIC_PLAN) `+query).ReadAll()
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		var plan []string
+		for _, row := range results[0].Rows {
+			plan = append(plan, string(row[0]))
+		}
+		text := strings.Join(plan, "\n")
+		require.Contains(t, text, "Index Scan Backward using tenants_project_created_idx", "%s:\n%s", name, text)
+		require.NotContains(t, text, "Sort", "%s: a page must not sort the project's tenants:\n%s", name, text)
+		require.NotContains(t, text, "Seq Scan", "%s:\n%s", name, text)
 	}
 }

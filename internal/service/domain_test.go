@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -147,7 +148,9 @@ var _ DomainStore = (*fakeDomainStore)(nil)
 // CreateOwnedTenant writes the owner membership into members when the two
 // fakes are linked (linkFakeTenantStores).
 type fakeTenantStore struct {
-	byID      map[string]*Tenant
+	byID map[string]*Tenant
+	// getErr fails every read: GetTenant, GetTenantByPrimaryDomain and
+	// ListTenants.
 	getErr    error
 	setErr    error
 	createErr error
@@ -229,11 +232,15 @@ func (f *fakeTenantStore) ClaimLatentTenant(_ context.Context, projectID, tenant
 	return nil
 }
 
-// ListTenants mirrors the postgres store: newest first by (created, id),
-// after q.After, at most q.Limit.
+// ListTenants mirrors the postgres store: it refuses a blank project or a
+// limit below one, and returns newest first by (created, id), after
+// q.After, at most q.Limit.
 func (f *fakeTenantStore) ListTenants(_ context.Context, q TenantListQuery) ([]*Tenant, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
+	}
+	if q.ProjectID == "" || q.Limit <= 0 {
+		return nil, fmt.Errorf("%w: project_id and a positive limit are required", ErrInvalidArgument)
 	}
 	var out []*Tenant
 	for _, t := range f.byID {

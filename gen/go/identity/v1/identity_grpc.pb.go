@@ -498,14 +498,22 @@ type IdentityServiceClient interface {
 	SetPrimaryAuthDomain(ctx context.Context, in *SetPrimaryAuthDomainRequest, opts ...grpc.CallOption) (*SetPrimaryAuthDomainResponse, error)
 	AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
-	// Operator reads of a project's tenants: their own records only, never
-	// their members or domains. AdminGetTenant is NOT_FOUND when the project
-	// has no such tenant. AdminListTenants pages through every tenant of the
-	// project, newest first, whatever its status; a page started from a
-	// cursor stays in order however many tenants are created meanwhile.
-	// Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
-	// with no control plane.
+	// Returns one tenant's own record, in any status: never its members,
+	// domains or login policy. Operator-only, like the other Admin* RPCs:
+	// UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED
+	// for a wrong secret. INVALID_ARGUMENT for a blank project_id or
+	// tenant_id, and NOT_FOUND when the project holds no such tenant.
 	AdminGetTenant(ctx context.Context, in *AdminGetTenantRequest, opts ...grpc.CallOption) (*AdminGetTenantResponse, error)
+	// Returns one page of a project's tenants, latent, claimed and suspended
+	// alike, newest first by creation time, then id: their own records only,
+	// never their members, domains or login policy. Pass next_cursor back as
+	// cursor for the next page. Paging never repeats or skips a tenant that
+	// existed when it began; one created meanwhile may or may not appear.
+	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
+	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// INVALID_ARGUMENT for a blank project_id or a cursor that does not
+	// decode. A project with no tenants, or one that does not exist, is an
+	// empty page.
 	AdminListTenants(ctx context.Context, in *AdminListTenantsRequest, opts ...grpc.CallOption) (*AdminListTenantsResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
@@ -2497,14 +2505,22 @@ type IdentityServiceServer interface {
 	SetPrimaryAuthDomain(context.Context, *SetPrimaryAuthDomainRequest) (*SetPrimaryAuthDomainResponse, error)
 	AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
-	// Operator reads of a project's tenants: their own records only, never
-	// their members or domains. AdminGetTenant is NOT_FOUND when the project
-	// has no such tenant. AdminListTenants pages through every tenant of the
-	// project, newest first, whatever its status; a page started from a
-	// cursor stays in order however many tenants are created meanwhile.
-	// Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
-	// with no control plane.
+	// Returns one tenant's own record, in any status: never its members,
+	// domains or login policy. Operator-only, like the other Admin* RPCs:
+	// UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED
+	// for a wrong secret. INVALID_ARGUMENT for a blank project_id or
+	// tenant_id, and NOT_FOUND when the project holds no such tenant.
 	AdminGetTenant(context.Context, *AdminGetTenantRequest) (*AdminGetTenantResponse, error)
+	// Returns one page of a project's tenants, latent, claimed and suspended
+	// alike, newest first by creation time, then id: their own records only,
+	// never their members, domains or login policy. Pass next_cursor back as
+	// cursor for the next page. Paging never repeats or skips a tenant that
+	// existed when it began; one created meanwhile may or may not appear.
+	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
+	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// INVALID_ARGUMENT for a blank project_id or a cursor that does not
+	// decode. A project with no tenants, or one that does not exist, is an
+	// empty page.
 	AdminListTenants(context.Context, *AdminListTenantsRequest) (*AdminListTenantsResponse, error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).

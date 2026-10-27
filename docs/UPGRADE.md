@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — an operator reads a project's tenants: `AdminGetTenant` and `AdminListTenants` (migration 0048; additive RPCs; `TenantStore.ListTenants` takes a `TenantListQuery` (Go API))
+## Next — an operator reads a project's tenants: `AdminGetTenant` and `AdminListTenants` (migrations 0048 and 0049; additive RPCs; `TenantStore.ListTenants` takes a `TenantListQuery` (Go API))
 
 A platform operator can now read a project's tenants with the
 `X-Admin-Secret` header, as for the other control-plane admin RPCs. Both
@@ -16,31 +16,56 @@ admin RPCs do.
   project's tenants, latent, claimed and suspended alike, newest first by
   creation time, then id. `limit` defaults to 50 and is capped at 200. Pass
   each page's `next_cursor` back as `cursor` to read the next; it is empty on
-  the last page. A cursor that does not decode is `INVALID_ARGUMENT`. The
-  cursor holds the last tenant's position, not an offset, so a tenant formed
-  while an operator pages lands before the first page and shifts no other
-  tenant between pages.
+  the last page. A blank `project_id`, or a cursor that does not decode, is
+  `INVALID_ARGUMENT`. The cursor holds the last tenant's position, not an
+  offset, so paging never repeats or skips a tenant that existed when it
+  began; a tenant created meanwhile may or may not appear, since its
+  creation time comes from the creating replica's clock. A cursor is not
+  bound to the project it came from: the page is always of `project_id`'s
+  tenants alone, and a project with no tenants, or one that does not exist,
+  is an empty page.
 
-### Migration 0048
+### Migrations 0048 and 0049
 
 0048 builds `tenants_project_created_idx` on `tenants (project_id,
-created_at_ms, id)`, which serves the listing's order, and drops
-`tenants_project_idx`, which the new index makes redundant. The build holds a
+created_at_ms, id)`, which serves the listing's order. The build holds a
 `SHARE` lock on `tenants` for its duration: reads continue, and writes to
 `tenants` (auto-formation at signup, `CreateTenant`, `AdminCreateTenant`, a
-domain's verification) wait for it. On a large `tenants` table, build the
-index first without blocking writes, and the migration then skips the build:
+domain's verification) wait for it. 0049 then drops `tenants_project_idx`,
+which the new index makes redundant, in its own transaction: its `ACCESS
+EXCLUSIVE` lock is held for a moment, but while it waits for transactions
+already using `tenants`, new reads and writes of `tenants` queue behind it,
+for at most the 10s `lock_timeout`.
+
+On a large `tenants` table, build the index first without blocking writes,
+and 0048 then skips the build:
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS tenants_project_created_idx
     ON tenants (project_id, created_at_ms, id);
 ```
 
+Use exactly this name and definition: the migration skips what exists
+without comparing it. A `CONCURRENTLY` build that fails leaves an invalid
+index under that name, which `IF NOT EXISTS` skips too; 0049 would still
+drop `tenants_project_idx`, and every listing would then read and sort the
+project's tenants with nothing reporting an error. Check the index before
+migrating, and drop and rebuild it if it is not valid:
+
+```sql
+SELECT indisvalid FROM pg_index
+ WHERE indexrelid = 'tenants_project_created_idx'::regclass;
+-- false: DROP INDEX CONCURRENTLY tenants_project_created_idx; then build it again.
+```
+
 Replicas of the previous release keep working against the new schema, so the
-migration can run before or during a rolling deploy. On a lock timeout the
-file rolls back and version 48 is recorded dirty: run `identity migrate force
-47`, then `identity migrate` again. The down migration restores
-`tenants_project_idx` and drops the new index; nothing else changes.
+migrations can run before or during a rolling deploy. Each file rolls back on
+its own failure. If 0048 fails (a lock timeout, or a build that fails),
+version 48 is recorded dirty: run `identity migrate force 47`, then
+`identity migrate` again. If 0049 times out, version 49 is recorded dirty:
+run `identity migrate force 48`, then `identity migrate` again. The down
+migrations restore `tenants_project_idx` and drop the new index; nothing else
+changes.
 
 ### Go API
 

@@ -219,6 +219,9 @@ func TestAdminListTenants_RefusesBadArguments(t *testing.T) {
 		base64.RawURLEncoding.EncodeToString([]byte("abc.t-1")),
 		base64.RawURLEncoding.EncodeToString([]byte("-1.t-1")),
 		base64.RawURLEncoding.EncodeToString([]byte("12.")),
+		// Postgres refuses either as a query argument (SQLSTATE 22021).
+		base64.RawURLEncoding.EncodeToString([]byte("12.t-\x00-1")),
+		base64.RawURLEncoding.EncodeToString([]byte("12.t-\xff\xfe")),
 	} {
 		if _, err := f.svc.AdminListTenants(ctx, testAdminSecret, "proj", 0, cursor); !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("cursor %q: err = %v, want ErrInvalidArgument", cursor, err)

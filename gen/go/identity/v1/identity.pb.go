@@ -15384,7 +15384,9 @@ type AdminListTenantsRequest struct {
 	// limit caps the page. Default 50, maximum 200.
 	Limit int32 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
 	// cursor is the opaque next_cursor of a previous page. A cursor that
-	// does not decode is INVALID_ARGUMENT.
+	// does not decode is INVALID_ARGUMENT. It holds a position, not a grant:
+	// it is not bound to the project it came from, and the page is always of
+	// project_id's tenants alone.
 	Cursor        string `protobuf:"bytes,3,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

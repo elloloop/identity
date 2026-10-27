@@ -121,13 +121,9 @@ func (s *ControlPlaneAdminService) UpsertLoginPolicy(ctx context.Context, secret
 	if p == nil {
 		return nil, fmt.Errorf("%w: missing policy", ErrInvalidArgument)
 	}
-	projectID := strings.TrimSpace(p.ProjectID)
-	tenantID := strings.TrimSpace(p.TenantID)
-	if projectID == "" {
-		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
-	}
-	if tenantID == "" {
-		return nil, fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
+	projectID, tenantID, err := requireTenantRef(p.ProjectID, p.TenantID)
+	if err != nil {
+		return nil, err
 	}
 	allowed, err := normalizeAllowedMethods(p.AllowedMethods)
 	if err != nil {
@@ -184,13 +180,9 @@ func (s *ControlPlaneAdminService) GetLoginPolicy(ctx context.Context, secret, p
 	if s.policies == nil {
 		return nil, ErrUnimplemented
 	}
-	projectID = strings.TrimSpace(projectID)
-	tenantID = strings.TrimSpace(tenantID)
-	if projectID == "" {
-		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
-	}
-	if tenantID == "" {
-		return nil, fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
+	projectID, tenantID, err := requireTenantRef(projectID, tenantID)
+	if err != nil {
+		return nil, err
 	}
 	return s.policies.GetLoginPolicy(ctx, projectID, tenantID)
 }
@@ -205,13 +197,9 @@ func (s *ControlPlaneAdminService) DeleteLoginPolicy(ctx context.Context, secret
 	if s.policies == nil {
 		return ErrUnimplemented
 	}
-	projectID = strings.TrimSpace(projectID)
-	tenantID = strings.TrimSpace(tenantID)
-	if projectID == "" {
-		return fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
-	}
-	if tenantID == "" {
-		return fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
+	projectID, tenantID, err := requireTenantRef(projectID, tenantID)
+	if err != nil {
+		return err
 	}
 	if err := s.policies.DeleteLoginPolicy(ctx, projectID, tenantID); err != nil {
 		return err

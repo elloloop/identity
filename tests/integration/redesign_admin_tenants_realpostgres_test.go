@@ -102,7 +102,7 @@ func TestRedesign_AdminTenantReads(t *testing.T) {
 	_, err = admin.AdminListTenants(ctx, connect.NewRequest(&identitypb.AdminListTenantsRequest{
 		ProjectId: projectID, Cursor: "not-a-cursor!",
 	}))
-	requireConnectCode(t, "AdminListTenants with a foreign cursor", err, connect.CodeInvalidArgument)
+	requireConnectCode(t, "AdminListTenants with a malformed cursor", err, connect.CodeInvalidArgument)
 	_, err = h.adminClient("wrong-secret").AdminListTenants(ctx, connect.NewRequest(&identitypb.AdminListTenantsRequest{
 		ProjectId: projectID,
 	}))

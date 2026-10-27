@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Paging bounds for AdminListTenants. A project may hold a tenant for every
@@ -38,7 +39,9 @@ func (s *ControlPlaneAdminService) AdminGetTenant(ctx context.Context, secret, p
 // AdminListTenants returns one page of a project's tenants, newest first,
 // whatever their status. limit defaults to 50 and is capped at 200; cursor is
 // the NextCursor of the previous page, and one that does not decode is
-// ErrInvalidArgument. A project with no tenants, or none at all, is an empty
+// ErrInvalidArgument. A cursor is a position, not a grant: it is not bound to
+// the project it came from, and the listing is always of projectID's tenants
+// alone. A project with no tenants, or one that does not exist, is an empty
 // page.
 func (s *ControlPlaneAdminService) AdminListTenants(ctx context.Context, secret, projectID string, limit int32, cursor string) (*TenantPage, error) {
 	if err := s.authorize(secret); err != nil {
@@ -119,7 +122,9 @@ func encodeTenantCursor(p TenantPosition) string {
 
 // decodeTenantCursor reads a cursor encodeTenantCursor made, and refuses one
 // it could not have made with ErrInvalidArgument: a listing that silently
-// restarted on a bad cursor would page forever.
+// restarted on a bad cursor would page forever. A tenant id is valid UTF-8
+// with no NUL, which Postgres would refuse as a query argument, so an id
+// that is not is refused here rather than failing as an internal error.
 func decodeTenantCursor(cursor string) (TenantPosition, error) {
 	malformed := fmt.Errorf("%w: malformed cursor", ErrInvalidArgument)
 	raw, err := base64.RawURLEncoding.DecodeString(cursor)
@@ -128,7 +133,8 @@ func decodeTenantCursor(cursor string) (TenantPosition, error) {
 	}
 	ms, id, ok := strings.Cut(string(raw), ".")
 	createdAtMs, err := strconv.ParseInt(ms, 10, 64)
-	if !ok || err != nil || createdAtMs < 0 || id == "" {
+	if !ok || err != nil || createdAtMs < 0 || id == "" ||
+		!utf8.ValidString(id) || strings.ContainsRune(id, 0) {
 		return TenantPosition{}, malformed
 	}
 	return TenantPosition{CreatedAtMs: createdAtMs, ID: id}, nil
