@@ -245,11 +245,11 @@ governed agent grants and machines again, including any connected during the
 suspension, and revives none the suspension revoked: the conservative choice
 for a tenant that may have been suspended for an investigation. A tenant
 with no creator and no owner or admin cannot be restored until an operator
-adds an admin with `AdminAddTenantAdmin`: a latent tenant suspended in SQL
-looks like that, and restoring it would make it selectable without anyone
-having verified its domain. A call that loses a race with another status
-change is refused as aborted rather than as a precondition, so the caller
-reads the tenant again.
+appoints an owner with `AdminRecoverTenantOwnership` (or adds an admin with
+`AdminAddTenantAdmin`): a latent tenant suspended in SQL looks like that,
+and restoring it would make it selectable without anyone having verified its
+domain. A call that loses a race with another status change is refused as
+aborted rather than as a precondition, so the caller reads the tenant again.
 
 ### Ownership
 
@@ -276,26 +276,30 @@ ways, both audited; neither changes any other member's role.
   `tenant_ownership_transferred`, the previous owner as actor and the new
   one as target.
 - **An operator appoints an owner when nobody can govern.** The last-owner
-  guard stops a removal, not an account being deleted, deactivated or
-  merged away. A tenant whose owners cannot sign in has no owner, but it is
-  still governed while an admin can sign in: that admin can invite a new
-  owner (`CreateTenantInvitation` with `role = "owner"`). Once no owner or
-  admin can sign in, nobody can invite, register a domain or transfer.
+  guard stops a removal, not an account being deleted, deactivated or merged
+  away. A tenant whose owners cannot sign in has no owner, but it is still
+  governed while an admin can sign in: that admin can invite a new owner
+  (`CreateTenantInvitation` with `role = "owner"`). Once no owner or admin
+  can sign in, nobody can invite, register a domain or transfer.
   `AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason)`,
   with the operator secret, makes an account that could own a tenant (the
   same rule as a transfer) an active owner, member or not, recorded as
-  `tenant_ownership_recovered` with the reason and the operator's client.
-  It is refused while any owner or admin can still sign in, so an operator
-  never appoints an outside account above people who can act. "Can sign
-  in" is sign-in's own rule: an account pending deletion still can, since
-  signing in cancels the deletion. Naming an account that is already an
-  owner who can sign in returns its membership and records nothing, so a
-  retry is safe. A latent tenant has never had an owner and is refused; a
-  suspended one can be recovered, so that it has an owner when it is
-  restored. Recovery takes an owner whose account is deactivated or
-  suspended to be gone, though either can be undone: an owner reactivated
-  after a recovery is an owner again beside the appointed one, so the
-  operator first makes sure the account will not come back.
+  `tenant_ownership_recovered` with the reason and the operator's client. It
+  is refused while any owner or admin who is a person can still sign in, so
+  an operator never appoints an outside account above people who can act. An
+  agent or anonymous admin does not count: it may not own a tenant itself,
+  so it is no one the tenant can be left to. "Can sign in" is sign-in's own
+  rule: an account pending deletion still can, since signing in cancels the
+  deletion. Naming an account that is already an owner who can sign in
+  returns its membership and records nothing, so a retry is safe. A latent
+  tenant has never had an owner and is refused; a suspended one can be
+  recovered, so that it has an owner when it is restored. A suspended tenant
+  whose owner or admin can still sign in is refused like any other, and
+  since suspension stops their transfer and invitations too, the operator
+  restores it first and they act then. Recovery takes an owner whose account
+  is deactivated or suspended to be gone, though either can be undone: an
+  owner reactivated after a recovery is an owner again beside the appointed
+  one, so the operator first makes sure the account will not come back.
 
 Recovery does not reuse `AdminAddTenantAdmin`. That RPC provisions: it is
 not audited, checks neither the account nor who governs the tenant, and

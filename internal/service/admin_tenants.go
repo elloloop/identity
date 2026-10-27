@@ -192,9 +192,11 @@ func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, secret string
 // suspended in SQL before the operator RPCs looks like that, and restoring it
 // would make claimed a tenant whose domain no one verified, closing it to
 // the first verifier; so does a tenant an operator made with
-// AdminCreateTenant and never gave an admin. Either way the operator adds an
-// admin with AdminAddTenantAdmin and restores the tenant then. A tenant
-// claimed by a domain's verification has the owner or admin who verified it.
+// AdminCreateTenant and never gave an admin, and a tenant whose owners and
+// admins were all deleted. The operator appoints an owner with
+// AdminRecoverTenantOwnership, which is audited, or adds an admin with
+// AdminAddTenantAdmin, and restores the tenant then. A tenant claimed by a
+// domain's verification has the owner or admin who verified it.
 func (s *ControlPlaneAdminService) requireAnswerable(ctx context.Context, t *Tenant) error {
 	if t.CreatedBy != "" {
 		return nil
@@ -208,7 +210,7 @@ func (s *ControlPlaneAdminService) requireAnswerable(ctx context.Context, t *Ten
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: the tenant has no creator, owner or admin; add an admin with AdminAddTenantAdmin before restoring it", ErrTenantStatusConflict)
+	return fmt.Errorf("%w: the tenant has no creator, owner or admin; appoint an owner with AdminRecoverTenantOwnership before restoring it", ErrTenantStatusConflict)
 }
 
 // getTenant reads a tenant the operator named, refusing one the project does

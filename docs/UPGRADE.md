@@ -47,10 +47,15 @@ audited.
     deletion), so an owner or admin in that state still governs the tenant.
     While an owner can sign in, they transfer the tenant; while an admin
     can, they invite a new owner with `CreateTenantInvitation(role =
-    "owner")`.
+    "owner")`. A suspended tenant refuses both, so restore it first;
+    recovering it before a restore helps only when nobody can sign in.
   - `NOT_FOUND`: an unknown tenant or account, or an account of another
     project.
-  - `INVALID_ARGUMENT`: a blank id or reason.
+  - `INVALID_ARGUMENT`: a blank id, or a reason that is blank, longer than
+    500 characters, or holds a control or invisible formatting character.
+  - `UNIMPLEMENTED` while `GATEWAY_ADMIN_API_SECRET` is unset, and
+    `PERMISSION_DENIED` for a wrong `X-Admin-Secret`, like the other
+    operator RPCs.
   - Naming an account that is already an owner who can sign in returns its
     membership unchanged and records nothing, before the account is judged
     again, so a retry after a lost response gets the first answer.
@@ -140,8 +145,10 @@ characters) and records it in the audit trail.
   auto-formed tenant suspended in SQL while it was still `latent` looks like
   that, and restoring it would make it selectable without anyone having
   verified its domain. A tenant you created with `AdminCreateTenant` and
-  never gave an owner or admin is refused the same way. Add an admin with
-  `AdminAddTenantAdmin`, then restore it.
+  never gave an owner or admin is refused the same way, and so is one whose
+  owners and admins were all deleted. Appoint an owner with
+  `AdminRecoverTenantOwnership`, which is audited (or add an admin with
+  `AdminAddTenantAdmin`), then restore it.
 
 Both return the tenant as it now stands, and record the operator's IP
 address and user agent with the reason. A tenant already in the status asked

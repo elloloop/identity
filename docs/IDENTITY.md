@@ -110,10 +110,10 @@ suite (email, productivity tools).
   owner, and invite others to it. It is the same entity as a domain tenant,
   claimed from creation (ADR-0018).
 - An owner hands a tenant on to another member with
-  `TransferTenantOwnership`, becoming an admin. While an admin can sign in,
-  the admin invites a new owner; once no owner or admin can sign in any
-  more, an operator appoints one with `AdminRecoverTenantOwnership`
-  (ADR-0018, Ownership).
+  `TransferTenantOwnership`, becoming an admin. When no owner can sign in
+  but an admin can, the admin invites a new owner; once no owner or admin
+  who is a person can sign in any more, an operator appoints one with
+  `AdminRecoverTenantOwnership` (ADR-0018, Ownership).
 - Onboarding:
   1. **Domain self-service** — a user with a company email signs up; the
      tenant auto-forms; once a domain owner verifies the domain, other
@@ -228,8 +228,8 @@ record, never its members or domains; every status, newest first, paged by
 an opaque cursor, 50 by default and at most 200), and suspended and restored
 with `AdminSuspendTenant` and `AdminRestoreTenant` (each with a reason the
 audit trail keeps), and given an owner again with
-`AdminRecoverTenantOwnership` once none of its owners or admins can sign
-in (also with a reason). They authenticate via the `GATEWAY_ADMIN_API_SECRET`
+`AdminRecoverTenantOwnership` once none of its owners or admins who is a
+person can sign in (also with a reason). They authenticate via the `GATEWAY_ADMIN_API_SECRET`
 shared secret rather than a user token. With the secret empty (the default) those RPCs return
 `CodeUnimplemented`, so a deployer who never sets it cannot reach them.
 
@@ -730,9 +730,10 @@ A **Tenant** forms as a side effect, not via a dedicated signup RPC:
    and other users of that domain are members by derivation.
 
 Explicit membership is added by **invitation** (`InviteUser` /
-`AcceptInvitation`, backed by `tenant_invitations`) or by a platform
-operator's `AdminAddTenantAdmin` grant — both write a `tenant_memberships`
-row whose materialised `status` is authoritative over derived membership.
+`AcceptInvitation`, backed by `tenant_invitations`), by a platform
+operator's `AdminAddTenantAdmin` grant, or by an operator's
+`AdminRecoverTenantOwnership` — each writes a `tenant_memberships` row
+whose materialised `status` is authoritative over derived membership.
 
 ## Identity's role model vs tenant-shard-db's role model
 

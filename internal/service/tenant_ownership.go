@@ -16,9 +16,10 @@ var (
 	// CodeFailedPrecondition.
 	ErrIneligibleTenantOwner = errors.New("this account cannot own a tenant")
 	// ErrTenantStillGoverned is returned by AdminRecoverTenantOwnership
-	// while the tenant still has an owner or admin who can sign in: an owner
-	// transfers the ownership, and an admin invites a new owner, instead.
-	// Mapped to CodeFailedPrecondition.
+	// while the tenant still has an owner or admin who is a person and can
+	// sign in: an owner transfers the ownership, and an admin invites a new
+	// owner, instead. A suspended tenant refuses both, so the operator
+	// restores it first. Mapped to CodeFailedPrecondition.
 	ErrTenantStillGoverned = errors.New("the tenant still has an owner or admin who can sign in")
 )
 

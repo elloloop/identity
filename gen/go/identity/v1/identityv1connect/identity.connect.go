@@ -907,16 +907,17 @@ type IdentityServiceClient interface {
 	// so a retry is safe. Operator-only, with the same refusals as
 	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
 	// tenant with no creator and no owner or admin, since restoring it would
-	// make it selectable with no one answering for its domain (add an admin
-	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
-	// changed between the read and the write.
+	// make it selectable with no one answering for its domain (appoint an
+	// owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
+	// its status changed between the read and the write.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it who is a person can sign in (each was
 	// deleted, deactivated or merged away). While an owner or admin who is a
 	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
-	// an admin invites a new owner. An account pending deletion can still sign
-	// in, so it counts. When user_id is already an owner who can sign in, it
+	// an admin invites a new owner, after an operator restores the tenant if
+	// it is suspended. An account pending deletion can still sign in, so it
+	// counts. When user_id is already an owner who can sign in, it
 	// returns that membership unchanged and records nothing, before judging the
 	// account, so a retry gets the first answer. Otherwise user_id must be an
 	// account of the project (else NOT_FOUND) that is an active, signed-up
@@ -925,7 +926,10 @@ type IdentityServiceClient interface {
 	// domain's. A latent tenant has never had an owner and is
 	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
 	// the audit trail when it appoints; a refusal is not recorded.
-	// Operator-only.
+	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
+	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
+	// characters or holds a control or invisible formatting character.
 	AdminRecoverTenantOwnership(context.Context, *connect.Request[v1.AdminRecoverTenantOwnershipRequest]) (*connect.Response[v1.AdminRecoverTenantOwnershipResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
@@ -3361,16 +3365,17 @@ type IdentityServiceHandler interface {
 	// so a retry is safe. Operator-only, with the same refusals as
 	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
 	// tenant with no creator and no owner or admin, since restoring it would
-	// make it selectable with no one answering for its domain (add an admin
-	// with AdminAddTenantAdmin, then restore it); ABORTED when its status
-	// changed between the read and the write.
+	// make it selectable with no one answering for its domain (appoint an
+	// owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
+	// its status changed between the read and the write.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it who is a person can sign in (each was
 	// deleted, deactivated or merged away). While an owner or admin who is a
 	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
-	// an admin invites a new owner. An account pending deletion can still sign
-	// in, so it counts. When user_id is already an owner who can sign in, it
+	// an admin invites a new owner, after an operator restores the tenant if
+	// it is suspended. An account pending deletion can still sign in, so it
+	// counts. When user_id is already an owner who can sign in, it
 	// returns that membership unchanged and records nothing, before judging the
 	// account, so a retry gets the first answer. Otherwise user_id must be an
 	// account of the project (else NOT_FOUND) that is an active, signed-up
@@ -3379,7 +3384,10 @@ type IdentityServiceHandler interface {
 	// domain's. A latent tenant has never had an owner and is
 	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
 	// the audit trail when it appoints; a refusal is not recorded.
-	// Operator-only.
+	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
+	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
+	// characters or holds a control or invisible formatting character.
 	AdminRecoverTenantOwnership(context.Context, *connect.Request[v1.AdminRecoverTenantOwnershipRequest]) (*connect.Response[v1.AdminRecoverTenantOwnershipResponse], error)
 	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
 	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).

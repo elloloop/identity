@@ -312,7 +312,8 @@ Both:
 AdminRestoreTenant(project_id, tenant_id, reason="dispute settled")
   -> { tenant: { status: "claimed", ... } }    # was suspended, or already claimed
   -> FAILED_PRECONDITION                       # latent, or no creator, owner or admin:
-                                               #   add an admin with AdminAddTenantAdmin first
+                                               #   appoint an owner with
+                                               #   AdminRecoverTenantOwnership first
 Both:
   -> ABORTED                                   # its status changed meanwhile; read it again
   -> INVALID_ARGUMENT                          # a blank id, or a reason that is blank, over 500
@@ -362,15 +363,20 @@ Both:
   -> { membership: { role: "owner", source: "added", ... } }   # an existing invited or created source is kept
   -> FAILED_PRECONDITION   # an owner or admin who is a person can still sign in,
                            #   the account cannot own a tenant, or latent
-  -> NOT_FOUND             # no such tenant or account`}
+  -> NOT_FOUND             # no such tenant or account
+  -> INVALID_ARGUMENT      # a blank id, or a reason that is blank, over 500
+                           #   characters, or holds a control character
+  -> UNIMPLEMENTED         # GATEWAY_ADMIN_API_SECRET is unset
+  -> PERMISSION_DENIED     # a wrong X-Admin-Secret`}
     lang="bash"
   />
   <p>
     The account may be any person in the Project who could own a tenant,
     member or not, and a suspended tenant can be recovered. While an owner
     or an admin who is a person can still sign in, recovery is refused: an
-    owner transfers, an admin invites. So recovery never puts an outside
-    account above people who can act. An account pending deletion can still
+    owner transfers, an admin invites. A suspended tenant refuses both, so
+    the operator restores it first and they act then. So recovery never
+    puts an outside account above people who can act. An account pending deletion can still
     sign in, which cancels the deletion, so an owner or admin in that state
     still counts. Naming an account that is already an owner who can sign in
     returns its membership and records nothing, so a retry is safe. A
