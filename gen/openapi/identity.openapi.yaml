@@ -6059,6 +6059,87 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.VerifyTotpSetupResponse'
+  /identity.v1.TeammateKeyService/RegisterTeammateKey:
+    post:
+      tags:
+        - identity.v1.TeammateKeyService
+      summary: RegisterTeammateKey
+      description: |-
+        Registering a claim again with the same teammate, company, workstation,
+         key and algorithm returns the same key_id. FAILED_PRECONDITION: the
+         claim already has a different registration or was revoked, or the key is
+         registered for another claim. INVALID_ARGUMENT: a blank or malformed
+         field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
+         a teammate_id that is not an active agent account of the project.
+      operationId: identity.v1.TeammateKeyService.RegisterTeammateKey
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RegisterTeammateKeyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RegisterTeammateKeyResponse'
+  /identity.v1.TeammateKeyService/RevokeTeammateKey:
+    post:
+      tags:
+        - identity.v1.TeammateKeyService
+      summary: RevokeTeammateKey
+      description: |-
+        The key is refused from the moment this returns. Revoking an unknown or
+         already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
+         unspecified reason.
+      operationId: identity.v1.TeammateKeyService.RevokeTeammateKey
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RevokeTeammateKeyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RevokeTeammateKeyResponse'
 components:
   schemas:
     connect-protocol-version:
@@ -6417,7 +6498,10 @@ components:
              no secret), "secret" (a key whose secret half is shown ONCE), or
              "directory_reader" (a machine credential whose secret half is shown ONCE
              and which authorizes exactly one thing: LookupUsers against this
-             project's directory, presented in the X-Directory-Key header).
+             project's directory, presented in the X-Directory-Key header), or
+             "teammate_key_manager" (a machine credential whose secret half is shown
+             ONCE and which authorizes only TeammateKeyService in this project,
+             presented in the X-Teammate-Key-Manager-Key header).
       title: AdminCreateProjectCredentialRequest
       additionalProperties: false
     identity.v1.AdminCreateProjectCredentialResponse:
@@ -6950,7 +7034,9 @@ components:
           type: string
           title: signature
           format: byte
-          description: Ed25519 signature over the exact challenge message.
+          description: |-
+            Ed25519 signature over the exact challenge message, or for an ECDSA P-256
+             teammate key an ASN.1 DER ECDSA signature over its SHA-256 digest.
       title: AgentMachineProof
       additionalProperties: false
     identity.v1.AgentMachineSelection:
@@ -7535,6 +7621,12 @@ components:
           title: offset
           format: int32
           description: 'Roster only: binds the proof to this page.'
+        teammateKeyId:
+          type: string
+          title: teammate_key_id
+          description: |-
+            Exchange only, set alone with AGENT_MACHINE_OPERATION_EXCHANGE_AGENT: the
+             challenge is for this teammate key instead of a machine's agent.
       title: CreateAgentMachineChallengeRequest
       additionalProperties: false
     identity.v1.CreateAgentMachineChallengeResponse:
@@ -8288,11 +8380,20 @@ components:
           title: machine_id
         proof:
           title: proof
-          description: Signed by this agent's registered key, never the engine key.
+          description: |-
+            Signed by this agent's registered key, never the engine key. With
+             teammate_key_id, signed by that teammate key.
           $ref: '#/components/schemas/identity.v1.AgentMachineProof'
         agentUserId:
           type: string
           title: agent_user_id
+        teammateKeyId:
+          type: string
+          title: teammate_key_id
+          description: |-
+            A key RegisterTeammateKey returned. Set it alone, without machine_id or
+             agent_user_id; the token then names the key's teammate, claim, workstation
+             and company, all read from the key, never from this request.
       title: ExchangeAgentMachineCredentialRequest
       additionalProperties: false
     identity.v1.ExchangeAgentMachineCredentialResponse:
@@ -8928,6 +9029,19 @@ components:
           format: int64
       title: IssueAssuranceTokenResponse
       additionalProperties: false
+    identity.v1.KeyAlgorithm:
+      type: string
+      title: KeyAlgorithm
+      enum:
+        - KEY_ALGORITHM_UNSPECIFIED
+        - KEY_ALGORITHM_ED25519
+        - KEY_ALGORITHM_ECDSA_P256
+      description: |-
+        A teammate is an agent account that runs on a workstation for one claim.
+         A service that manages workstations registers the public half of a key the
+         workstation made for that claim; the workstation then proves possession of
+         it through CreateAgentMachineChallenge and ExchangeAgentMachineCredential
+         (teammate_key_id) and receives a short access token for the teammate.
     identity.v1.LinkIdentityRequest:
       type: object
       properties:
@@ -10696,6 +10810,43 @@ components:
           $ref: '#/components/schemas/identity.v1.AgentMachine'
       title: RegisterAgentMachineResponse
       additionalProperties: false
+    identity.v1.RegisterTeammateKeyRequest:
+      type: object
+      properties:
+        claimId:
+          type: string
+          title: claim_id
+          description: 'claim_id is the idempotency key: one key per claim, for life.'
+        teammateId:
+          type: string
+          title: teammate_id
+          description: |-
+            teammate_id is an active agent account of the credential's project; it
+             becomes the token's sub.
+        companyId:
+          type: string
+          title: company_id
+        workstationId:
+          type: string
+          title: workstation_id
+        publicKey:
+          type: string
+          title: public_key
+          format: byte
+          description: public_key is a DER SubjectPublicKeyInfo of the algorithm's key type.
+        algorithm:
+          title: algorithm
+          $ref: '#/components/schemas/identity.v1.KeyAlgorithm'
+      title: RegisterTeammateKeyRequest
+      additionalProperties: false
+    identity.v1.RegisterTeammateKeyResponse:
+      type: object
+      properties:
+        keyId:
+          type: string
+          title: key_id
+      title: RegisterTeammateKeyResponse
+      additionalProperties: false
     identity.v1.RemoveGroupMemberRequest:
       type: object
       properties:
@@ -11008,6 +11159,21 @@ components:
       type: object
       title: RevokeSessionResponse
       additionalProperties: false
+    identity.v1.RevokeTeammateKeyRequest:
+      type: object
+      properties:
+        claimId:
+          type: string
+          title: claim_id
+        reason:
+          title: reason
+          $ref: '#/components/schemas/identity.v1.TeammateKeyRevocationReason'
+      title: RevokeTeammateKeyRequest
+      additionalProperties: false
+    identity.v1.RevokeTeammateKeyResponse:
+      type: object
+      title: RevokeTeammateKeyResponse
+      additionalProperties: false
     identity.v1.SelectAgentMachineAgentsRequest:
       type: object
       properties:
@@ -11312,6 +11478,15 @@ components:
           description: Access token lifetime in seconds
       title: SubmitDateOfBirthResponse
       additionalProperties: false
+    identity.v1.TeammateKeyRevocationReason:
+      type: string
+      title: TeammateKeyRevocationReason
+      enum:
+        - TEAMMATE_KEY_REVOCATION_REASON_UNSPECIFIED
+        - TEAMMATE_KEY_REVOCATION_REASON_RELEASED
+        - TEAMMATE_KEY_REVOCATION_REASON_RECLAIMED
+        - TEAMMATE_KEY_REVOCATION_REASON_REMOVED
+        - TEAMMATE_KEY_REVOCATION_REASON_DRIFTED
     identity.v1.Tenant:
       type: object
       properties:
@@ -12252,3 +12427,10 @@ components:
 security: []
 tags:
   - name: identity.v1.IdentityService
+  - name: identity.v1.TeammateKeyService
+    description: |-
+      TeammateKeyService is served only while GATEWAY_TEAMMATE_KEYS_ENABLED is
+       on. Every call presents a teammate_key_manager project credential
+       ("<public id>.<secret>") in the X-Teammate-Key-Manager-Key header; the
+       credential selects the project. PERMISSION_DENIED: no valid credential of
+       that kind.

@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// IdentityServiceName is the fully-qualified name of the IdentityService service.
 	IdentityServiceName = "identity.v1.IdentityService"
+	// TeammateKeyServiceName is the fully-qualified name of the TeammateKeyService service.
+	TeammateKeyServiceName = "identity.v1.TeammateKeyService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -520,6 +522,12 @@ const (
 	// IdentityServiceLookupUsersProcedure is the fully-qualified name of the IdentityService's
 	// LookupUsers RPC.
 	IdentityServiceLookupUsersProcedure = "/identity.v1.IdentityService/LookupUsers"
+	// TeammateKeyServiceRegisterTeammateKeyProcedure is the fully-qualified name of the
+	// TeammateKeyService's RegisterTeammateKey RPC.
+	TeammateKeyServiceRegisterTeammateKeyProcedure = "/identity.v1.TeammateKeyService/RegisterTeammateKey"
+	// TeammateKeyServiceRevokeTeammateKeyProcedure is the fully-qualified name of the
+	// TeammateKeyService's RevokeTeammateKey RPC.
+	TeammateKeyServiceRevokeTeammateKeyProcedure = "/identity.v1.TeammateKeyService/RevokeTeammateKey"
 )
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
@@ -5435,4 +5443,118 @@ func (UnimplementedIdentityServiceHandler) AdminListProjectOAuthProviders(contex
 
 func (UnimplementedIdentityServiceHandler) LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.LookupUsers is not implemented"))
+}
+
+// TeammateKeyServiceClient is a client for the identity.v1.TeammateKeyService service.
+type TeammateKeyServiceClient interface {
+	// Registering a claim again with the same teammate, company, workstation,
+	// key and algorithm returns the same key_id. FAILED_PRECONDITION: the
+	// claim already has a different registration or was revoked, or the key is
+	// registered for another claim. INVALID_ARGUMENT: a blank or malformed
+	// field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
+	// a teammate_id that is not an active agent account of the project.
+	RegisterTeammateKey(context.Context, *connect.Request[v1.RegisterTeammateKeyRequest]) (*connect.Response[v1.RegisterTeammateKeyResponse], error)
+	// The key is refused from the moment this returns. Revoking an unknown or
+	// already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
+	// unspecified reason.
+	RevokeTeammateKey(context.Context, *connect.Request[v1.RevokeTeammateKeyRequest]) (*connect.Response[v1.RevokeTeammateKeyResponse], error)
+}
+
+// NewTeammateKeyServiceClient constructs a client for the identity.v1.TeammateKeyService service.
+// By default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped
+// responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewTeammateKeyServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) TeammateKeyServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	teammateKeyServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("TeammateKeyService").Methods()
+	return &teammateKeyServiceClient{
+		registerTeammateKey: connect.NewClient[v1.RegisterTeammateKeyRequest, v1.RegisterTeammateKeyResponse](
+			httpClient,
+			baseURL+TeammateKeyServiceRegisterTeammateKeyProcedure,
+			connect.WithSchema(teammateKeyServiceMethods.ByName("RegisterTeammateKey")),
+			connect.WithClientOptions(opts...),
+		),
+		revokeTeammateKey: connect.NewClient[v1.RevokeTeammateKeyRequest, v1.RevokeTeammateKeyResponse](
+			httpClient,
+			baseURL+TeammateKeyServiceRevokeTeammateKeyProcedure,
+			connect.WithSchema(teammateKeyServiceMethods.ByName("RevokeTeammateKey")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// teammateKeyServiceClient implements TeammateKeyServiceClient.
+type teammateKeyServiceClient struct {
+	registerTeammateKey *connect.Client[v1.RegisterTeammateKeyRequest, v1.RegisterTeammateKeyResponse]
+	revokeTeammateKey   *connect.Client[v1.RevokeTeammateKeyRequest, v1.RevokeTeammateKeyResponse]
+}
+
+// RegisterTeammateKey calls identity.v1.TeammateKeyService.RegisterTeammateKey.
+func (c *teammateKeyServiceClient) RegisterTeammateKey(ctx context.Context, req *connect.Request[v1.RegisterTeammateKeyRequest]) (*connect.Response[v1.RegisterTeammateKeyResponse], error) {
+	return c.registerTeammateKey.CallUnary(ctx, req)
+}
+
+// RevokeTeammateKey calls identity.v1.TeammateKeyService.RevokeTeammateKey.
+func (c *teammateKeyServiceClient) RevokeTeammateKey(ctx context.Context, req *connect.Request[v1.RevokeTeammateKeyRequest]) (*connect.Response[v1.RevokeTeammateKeyResponse], error) {
+	return c.revokeTeammateKey.CallUnary(ctx, req)
+}
+
+// TeammateKeyServiceHandler is an implementation of the identity.v1.TeammateKeyService service.
+type TeammateKeyServiceHandler interface {
+	// Registering a claim again with the same teammate, company, workstation,
+	// key and algorithm returns the same key_id. FAILED_PRECONDITION: the
+	// claim already has a different registration or was revoked, or the key is
+	// registered for another claim. INVALID_ARGUMENT: a blank or malformed
+	// field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
+	// a teammate_id that is not an active agent account of the project.
+	RegisterTeammateKey(context.Context, *connect.Request[v1.RegisterTeammateKeyRequest]) (*connect.Response[v1.RegisterTeammateKeyResponse], error)
+	// The key is refused from the moment this returns. Revoking an unknown or
+	// already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
+	// unspecified reason.
+	RevokeTeammateKey(context.Context, *connect.Request[v1.RevokeTeammateKeyRequest]) (*connect.Response[v1.RevokeTeammateKeyResponse], error)
+}
+
+// NewTeammateKeyServiceHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewTeammateKeyServiceHandler(svc TeammateKeyServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	teammateKeyServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("TeammateKeyService").Methods()
+	teammateKeyServiceRegisterTeammateKeyHandler := connect.NewUnaryHandler(
+		TeammateKeyServiceRegisterTeammateKeyProcedure,
+		svc.RegisterTeammateKey,
+		connect.WithSchema(teammateKeyServiceMethods.ByName("RegisterTeammateKey")),
+		connect.WithHandlerOptions(opts...),
+	)
+	teammateKeyServiceRevokeTeammateKeyHandler := connect.NewUnaryHandler(
+		TeammateKeyServiceRevokeTeammateKeyProcedure,
+		svc.RevokeTeammateKey,
+		connect.WithSchema(teammateKeyServiceMethods.ByName("RevokeTeammateKey")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/identity.v1.TeammateKeyService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case TeammateKeyServiceRegisterTeammateKeyProcedure:
+			teammateKeyServiceRegisterTeammateKeyHandler.ServeHTTP(w, r)
+		case TeammateKeyServiceRevokeTeammateKeyProcedure:
+			teammateKeyServiceRevokeTeammateKeyHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedTeammateKeyServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedTeammateKeyServiceHandler struct{}
+
+func (UnimplementedTeammateKeyServiceHandler) RegisterTeammateKey(context.Context, *connect.Request[v1.RegisterTeammateKeyRequest]) (*connect.Response[v1.RegisterTeammateKeyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.TeammateKeyService.RegisterTeammateKey is not implemented"))
+}
+
+func (UnimplementedTeammateKeyServiceHandler) RevokeTeammateKey(context.Context, *connect.Request[v1.RevokeTeammateKeyRequest]) (*connect.Response[v1.RevokeTeammateKeyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.TeammateKeyService.RevokeTeammateKey is not implemented"))
 }
