@@ -648,8 +648,9 @@ type IdentityServiceClient interface {
 	LinkIdentity(ctx context.Context, in *LinkIdentityRequest, opts ...grpc.CallOption) (*LinkIdentityResponse, error)
 	UnlinkIdentity(ctx context.Context, in *UnlinkIdentityRequest, opts ...grpc.CallOption) (*UnlinkIdentityResponse, error)
 	// Per-tenant LoginPolicy authoring. These write the policy the login path
-	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
-	// tenant within a project — at most one policy per (project, tenant).
+	// enforces (allowed methods, SSO-required, require-2FA) for a tenant
+	// within a project — at most one policy per (project, tenant). The login
+	// path applies it while the tenant is claimed or suspended.
 	// Operator-only: authenticated by the shared admin secret, like the other
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertLoginPolicy(ctx context.Context, in *UpsertLoginPolicyRequest, opts ...grpc.CallOption) (*UpsertLoginPolicyResponse, error)
@@ -2838,8 +2839,9 @@ type IdentityServiceServer interface {
 	LinkIdentity(context.Context, *LinkIdentityRequest) (*LinkIdentityResponse, error)
 	UnlinkIdentity(context.Context, *UnlinkIdentityRequest) (*UnlinkIdentityResponse, error)
 	// Per-tenant LoginPolicy authoring. These write the policy the login path
-	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
-	// tenant within a project — at most one policy per (project, tenant).
+	// enforces (allowed methods, SSO-required, require-2FA) for a tenant
+	// within a project — at most one policy per (project, tenant). The login
+	// path applies it while the tenant is claimed or suspended.
 	// Operator-only: authenticated by the shared admin secret, like the other
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertLoginPolicy(context.Context, *UpsertLoginPolicyRequest) (*UpsertLoginPolicyResponse, error)

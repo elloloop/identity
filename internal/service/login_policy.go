@@ -4,9 +4,9 @@ import "context"
 
 // LoginPolicy controls HOW the members of a Tenant authenticate — never
 // WHETHER. It is consulted on the login path for a user whose email domain
-// is verified by a tenant that governs sign-in (claimed or suspended; see
-// governsSignIn); an absent or empty policy fails safe
-// to email-OTP so a misconfiguration never locks anyone out.
+// is verified by a tenant that governs sign-in (governsSignIn); an absent
+// or empty policy fails safe to email-OTP so a misconfiguration never locks
+// anyone out.
 //
 // Like Tenant/Domain it is per-project governance state, postgres-backed,
 // and addressed by (projectID, tenantID) — at most one policy per tenant.

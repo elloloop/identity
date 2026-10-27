@@ -51,7 +51,7 @@ type ProjectScope struct {
 	Passkey ProjectPasskeyConfig
 
 	// LoginDefaults is the project-wide login-method policy applied to users
-	// with NO claimed tenant, parsed from config_json. It is layered UNDER
+	// whose sign-in no tenant governs (governsSignIn), parsed from config_json. It is layered UNDER
 	// any tenant LoginPolicy (tenant overrides project overrides global) by
 	// the login-path enforcement. The zero value imposes no restriction, so
 	// a project that configures none behaves exactly as before.

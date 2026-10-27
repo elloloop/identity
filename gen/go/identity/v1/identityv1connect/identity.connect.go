@@ -998,8 +998,9 @@ type IdentityServiceClient interface {
 	LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error)
 	UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error)
 	// Per-tenant LoginPolicy authoring. These write the policy the login path
-	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
-	// tenant within a project — at most one policy per (project, tenant).
+	// enforces (allowed methods, SSO-required, require-2FA) for a tenant
+	// within a project — at most one policy per (project, tenant). The login
+	// path applies it while the tenant is claimed or suspended.
 	// Operator-only: authenticated by the shared admin secret, like the other
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)
@@ -3529,8 +3530,9 @@ type IdentityServiceHandler interface {
 	LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error)
 	UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error)
 	// Per-tenant LoginPolicy authoring. These write the policy the login path
-	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
-	// tenant within a project — at most one policy per (project, tenant).
+	// enforces (allowed methods, SSO-required, require-2FA) for a tenant
+	// within a project — at most one policy per (project, tenant). The login
+	// path applies it while the tenant is claimed or suspended.
 	// Operator-only: authenticated by the shared admin secret, like the other
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)

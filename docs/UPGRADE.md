@@ -12,13 +12,27 @@ them. A suspension stops a tenant being chosen for a token and administered
 by its members; it never loosens sign-in controls
 ([ADR-0018, Suspension](adr/0018-self-service-tenants-and-tenant-selection.md#suspension)).
 
-While a tenant is suspended, the accounts on its verified domains:
+While a tenant is suspended, the accounts on its verified domains get the
+same answers from its policy as while it is claimed:
 
-- sign in only with the methods its policy allows, under its SSO and 2FA
-  requirements, and are refused (`PERMISSION_DENIED`) otherwise;
-- must choose a new password of at least its minimum length;
-- have their sessions ended by its idle and absolute timeouts, which also
-  bound how long an agent they connect keeps its grant.
+- a method the policy does not allow is `PERMISSION_DENIED`;
+- any method but SSO, when the policy requires SSO, is
+  `FAILED_PRECONDITION` (`ErrSSORequired`);
+- a single-factor sign-in, when the policy requires 2FA, goes on to the
+  second-factor step, and is `FAILED_PRECONDITION` (`ErrTotpRequired`)
+  for an account with no second factor enrolled;
+- a new password must be at least the policy's minimum length;
+- sessions end at the policy's idle and absolute timeouts, which also
+  bound how long an agent the account connects keeps its grant.
+
+This works in both directions. A tenant's policy replaces the project's
+defaults rather than adding to them, so where a suspended tenant's policy
+is looser than the project's, its accounts now sign in under the looser
+policy, as they did before the suspension, where the previous release put
+them under the project's stricter defaults. Before upgrading, check the
+policies of the tenants you have suspended (`GetLoginPolicy`), and tighten
+any that should be stricter while the tenant is investigated with
+`UpsertLoginPolicy`.
 
 Restoring the tenant leaves sign-in as it was. A latent tenant still
 governs nothing. An operator who wants a suspended tenant's accounts to

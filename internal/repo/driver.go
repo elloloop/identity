@@ -235,9 +235,9 @@ func (b *Built) LoginPolicyStoreIface() service.LoginPolicyStore {
 }
 
 // LoginGovernance returns the read-side governance bundle the login path
-// consults to enforce a claimed tenant's LoginPolicy, or a true nil when
-// this build has no governance plane (memory). Returning nil — rather
-// than a bundle of typed-nil stores — keeps AuthService's nil check honest.
+// consults to enforce the LoginPolicy of the tenant that governs sign-in,
+// or a true nil when this build has no governance plane (memory). Returning nil — rather than a bundle of typed-nil stores —
+// keeps AuthService's nil check honest.
 func (b *Built) LoginGovernance() *service.LoginGovernance {
 	if b.TenantStore == nil || b.DomainStore == nil || b.LoginPolicyStore == nil {
 		return nil

@@ -20,16 +20,17 @@ const (
 	// that has not yet had that domain verified. It governs nothing until
 	// claimed.
 	TenantStatusLatent = "latent"
-	// TenantStatusClaimed is a tenant that governs: one whose domain has
-	// been verified, one an operator created, or one a signed-in user
-	// created through CreateTenant (ADR-0018). Its membership is
-	// authoritative, and its login policy applies to sign-ins through a
-	// domain it has verified.
+	// TenantStatusClaimed is an active tenant: one whose domain has been
+	// verified, one an operator created, or one a signed-in user created
+	// through CreateTenant (ADR-0018). Its membership is authoritative, it
+	// may be selected for a token and administered by its members, and its
+	// login policy applies to sign-ins through a domain it has verified
+	// (governsSignIn).
 	TenantStatusClaimed = "claimed"
 	// TenantStatusSuspended is an administratively disabled tenant: it
 	// cannot be selected for a token or administered by its members, and
 	// its login policy still applies to sign-ins through its verified
-	// domains.
+	// domains (governsSignIn).
 	TenantStatusSuspended = "suspended"
 )
 

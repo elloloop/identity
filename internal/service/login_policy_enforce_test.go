@@ -230,13 +230,13 @@ func TestEmailDomain_SplitsOnLastAt(t *testing.T) {
 
 // ── Project-wide login default (tenant-less users) ───────────────────────
 
-// A project-wide allow-list blocks a disallowed method for a user with NO
-// claimed tenant — the consumer-pool case the tenant-scoped policy never
+// A project-wide allow-list blocks a disallowed method for a user whose
+// sign-in no tenant governs — the consumer-pool case the tenant-scoped policy never
 // reached. This is the core kids-platform requirement (issue #252).
 func TestEnforceLoginPolicy_ProjectDefault_BlocksTenantlessUser(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
-	// bob@gmail.com maps to no claimed tenant; only the project default applies.
+	// No tenant governs bob@gmail.com; only the project default applies.
 	ctx := withProjectLoginDefaults("proj-1", LoginMethodEmailOTP, false)
 
 	require.NoError(t, enforceErr(ctx, t, svc, "bob@gmail.com", LoginMethodEmailOTP),
@@ -412,10 +412,11 @@ func TestEnforceLoginPolicy_LatentTenant_NoRestriction(t *testing.T) {
 }
 
 // A suspended tenant's login policy keeps governing the sign-ins through its
-// verified domain, exactly as a claimed tenant's does: a suspension stops
-// selection and administration and never loosens sign-in controls. Every
-// consumer of the policy sees it — the allowed methods, the password
-// minimum, the session timeouts and an agent grant's expiry.
+// verified domain, exactly as a claimed tenant's does (governsSignIn): a
+// suspension stops selection and administration and never loosens sign-in
+// controls. Each control the policy sets gives the same answer for both
+// statuses — the allowed methods, SSO, 2FA, the password minimum, the idle
+// and absolute session timeouts, and an agent grant's expiry.
 func TestLoginPolicy_SuspendedTenantStillGoverns(t *testing.T) {
 	for _, status := range []string{TenantStatusClaimed, TenantStatusSuspended} {
 		t.Run(status, func(t *testing.T) {
@@ -427,6 +428,7 @@ func TestLoginPolicy_SuspendedTenantStillGoverns(t *testing.T) {
 			p := g.Policies.(*fakePolicyStore).byTenant["proj-1|tenant-acme"]
 			p.PasswordMinLength = 12
 			p.SessionIdleTimeoutSeconds = 60
+			p.SessionAbsoluteTimeoutSeconds = 3600
 			svc.WithLoginGovernance(g)
 			ctx := withProject("proj-1")
 
@@ -436,12 +438,28 @@ func TestLoginPolicy_SuspendedTenantStillGoverns(t *testing.T) {
 
 			now := svc.nowMs()
 			stale := now - 61*msPerSecond
-			require.ErrorIs(t, svc.enforceSessionTimeout(ctx, "alice@acme.com", now, stale, stale), ErrSessionExpired)
+			require.ErrorIs(t, svc.enforceSessionTimeout(ctx, "alice@acme.com", now, stale, stale), ErrSessionExpired, "idle")
+			old := now - 3601*msPerSecond
+			require.ErrorIs(t, svc.enforceSessionTimeout(ctx, "alice@acme.com", now, old, now), ErrSessionExpired, "absolute")
+			require.NoError(t, svc.enforceSessionTimeout(ctx, "alice@acme.com", now, now-10*msPerSecond, now))
 
 			session := &SessionRecord{CreatedAtMs: now - 10*msPerSecond}
 			expiry, err := (&AgentOAuthService{auth: svc}).grantExpiry(ctx, &User{Email: "alice@acme.com"}, session)
 			require.NoError(t, err)
 			require.Equal(t, session.CreatedAtMs+60*msPerSecond, expiry)
+
+			// 2FA: a permitted single-factor sign-in goes on to a second factor.
+			p.Require2FA = true
+			decision, err := svc.enforceLoginPolicy(ctx, "alice@acme.com", LoginMethodPassword)
+			require.NoError(t, err)
+			require.True(t, decision.RequireSecondFactor)
+
+			// SSO: every other method is refused, and SSO is let through.
+			p.Require2FA = false
+			p.AllowedMethods = ""
+			p.SSORequired = true
+			require.ErrorIs(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodPassword), ErrSSORequired)
+			require.NoError(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodSSO))
 		})
 	}
 }

@@ -210,7 +210,7 @@ func (h *IdentityHandler) AdminAddTenantAdmin(
 	}), nil
 }
 
-// UpsertLoginPolicy authors a claimed tenant's LoginPolicy (the policy the
+// UpsertLoginPolicy authors a tenant's LoginPolicy (the policy the
 // login path enforces). Operator-only.
 func (h *IdentityHandler) UpsertLoginPolicy(
 	ctx context.Context,
@@ -238,7 +238,7 @@ func (h *IdentityHandler) UpsertLoginPolicy(
 	}), nil
 }
 
-// GetLoginPolicy reads a claimed tenant's LoginPolicy. The policy field is
+// GetLoginPolicy reads a tenant's LoginPolicy. The policy field is
 // unset when none exists. Operator-only.
 func (h *IdentityHandler) GetLoginPolicy(
 	ctx context.Context,
@@ -256,7 +256,7 @@ func (h *IdentityHandler) GetLoginPolicy(
 	}), nil
 }
 
-// DeleteLoginPolicy clears a claimed tenant's LoginPolicy (idempotent).
+// DeleteLoginPolicy clears a tenant's LoginPolicy (idempotent).
 // Operator-only.
 func (h *IdentityHandler) DeleteLoginPolicy(
 	ctx context.Context,

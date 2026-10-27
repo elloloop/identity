@@ -63,7 +63,7 @@ const maxSessionTimeoutSeconds = 100 * 365 * 24 * 60 * 60
 
 // This file adds the operator-authored write/read surface for the two pieces
 // of governance state the login path already ENFORCES but nothing could
-// author: a claimed tenant's LoginPolicy (allowed methods / SSO-required /
+// author: a tenant's LoginPolicy (allowed methods / SSO-required /
 // require-2FA) and a project's config_json blob. Both are secret-gated
 // platform-operator operations, like the rest of ControlPlaneAdminService,
 // and emit an audit event on every mutation so a policy change is visible in
@@ -107,10 +107,11 @@ func normalizeAllowedMethods(allowed string) (string, error) {
 }
 
 // UpsertLoginPolicy authors (inserts or replaces) the LoginPolicy the login
-// path enforces for a claimed or suspended tenant within a project.
-// project_id and tenant_id are required; AllowedMethods is validated against
-// the known method tokens. The mutation emits an audit event. When this build
-// has no governance plane (nil policies store) it returns ErrUnimplemented.
+// path enforces for a tenant within a project while it governs sign-in
+// (governsSignIn). project_id and tenant_id are required; AllowedMethods is
+// validated against the known method tokens. The mutation emits an audit
+// event. When this build has no governance plane (nil policies store) it
+// returns ErrUnimplemented.
 func (s *ControlPlaneAdminService) UpsertLoginPolicy(ctx context.Context, secret string, p *LoginPolicy) (*LoginPolicy, error) {
 	if err := s.authorize(secret); err != nil {
 		return nil, err
