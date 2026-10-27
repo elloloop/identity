@@ -320,10 +320,10 @@ const (
 
 	// EventTenantSuspended / EventTenantRestored record an operator
 	// suspending a claimed tenant or restoring a suspended one
-	// (AdminSuspendTenant, AdminRestoreTenant). The details carry the project
-	// id, the tenant id and the reason the operator gave. A call that finds
-	// the tenant already in the status asked for changes nothing and records
-	// nothing.
+	// (AdminSuspendTenant, AdminRestoreTenant), with the operator's IP
+	// address and user agent. The details carry the project id, the tenant id
+	// and the reason the operator gave. A call that finds the tenant already
+	// in the status asked for changes nothing and records nothing.
 	EventTenantSuspended EventType = "tenant_suspended"
 	EventTenantRestored  EventType = "tenant_restored"
 )

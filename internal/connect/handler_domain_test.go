@@ -103,7 +103,7 @@ func (s *connectTenantStore) SetTenantStatus(_ context.Context, _, _, from, to s
 }
 
 // ListTenants is not reached by the domain handler tests; the listing is
-// covered against listedTenantStore.
+// covered against adminTenantStore.
 func (s *connectTenantStore) ListTenants(context.Context, service.TenantListQuery) ([]*service.Tenant, error) {
 	return nil, nil
 }

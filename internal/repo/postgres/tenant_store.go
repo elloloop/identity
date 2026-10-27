@@ -153,8 +153,12 @@ func (s *TenantStore) GetTenantByPrimaryDomain(ctx context.Context, projectID, d
 // suspension made while a domain verification claims the tenant stays, and
 // so does a claim made while an operator acts on the tenant.
 func (s *TenantStore) SetTenantStatus(ctx context.Context, projectID, tenantID, from, to string) (bool, error) {
-	if projectID == "" || tenantID == "" || from == "" || to == "" {
-		return false, fmt.Errorf("%w: project_id, tenant_id and both statuses are required", service.ErrInvalidArgument)
+	if projectID == "" || tenantID == "" {
+		return false, fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
+	}
+	if !service.IsTenantStatus(from) || !service.IsTenantStatus(to) || from == to {
+		return false, fmt.Errorf("%w: a move between two different tenant statuses, not %q to %q",
+			service.ErrInvalidArgument, from, to)
 	}
 	const q = `
 		UPDATE tenants SET status = $4, updated_at_ms = $5

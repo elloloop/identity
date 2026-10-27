@@ -223,6 +223,9 @@ func (f *fakeTenantStore) SetTenantStatus(_ context.Context, projectID, tenantID
 	if f.setErr != nil {
 		return false, f.setErr
 	}
+	if !IsTenantStatus(from) || !IsTenantStatus(to) || from == to {
+		return false, fmt.Errorf("%w: %q to %q", ErrInvalidArgument, from, to)
+	}
 	t, ok := f.byID[projectID+"/"+tenantID]
 	if !ok || t.Status != from {
 		return false, nil

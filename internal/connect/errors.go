@@ -178,6 +178,11 @@ func toConnectError(err error) *connect.Error {
 		// transaction (a concurrent merge or deactivation): retryable.
 		return connect.NewError(connect.CodeAborted, err)
 
+	case errors.Is(err, service.ErrTenantStatusChanged):
+		// Another operator call changed the tenant's status between this
+		// call's read and its compare-and-set: retryable.
+		return connect.NewError(connect.CodeAborted, err)
+
 	case errors.Is(err, service.ErrProjectConfigConflict):
 		// A per-project config_json write lost its optimistic-concurrency
 		// compare-and-swap after exhausting retries. CodeAborted is gRPC's

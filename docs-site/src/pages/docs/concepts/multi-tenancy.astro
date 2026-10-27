@@ -288,16 +288,35 @@ Both:
   -> { tenant: { status: "suspended", ... } }  # was claimed
   -> FAILED_PRECONDITION                       # latent: it governs nothing yet
 AdminRestoreTenant(project_id, tenant_id, reason="dispute settled")
-  -> { tenant: { status: "claimed", ... } }    # was suspended`}
+  -> { tenant: { status: "claimed", ... } }    # was suspended
+  -> FAILED_PRECONDITION                       # never claimed: no creator, owner or admin
+  -> ABORTED                                   # its status changed meanwhile; read it again`}
     lang="bash"
   />
   <p>
-    A suspended tenant keeps its domains, members and invitations. Its
-    selected tokens are refused, a refresh that chooses it is refused, and its
-    owners and admins can no longer administer it; its members' agent grants
-    are revoked. Restoring it gives back selection and administration, not
-    the revoked grants. Asking for the status a tenant already has returns it
-    unchanged and records nothing, so a retry is safe.
+    A suspended tenant keeps its domains, members and invitations. A refresh
+    that chooses it is refused, its selected tokens are refused within the
+    tenant-status cache TTL (<code>GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS</code>,
+    30 seconds by default), and its owners and admins can no longer
+    administer it. The agent grants and machines of its members and of the
+    accounts on its verified domains are revoked.
+  </p>
+  <p>
+    While it is suspended its login policy does not govern sign-in: the
+    accounts on its verified domains sign in under the Project's default
+    controls, so its allowed methods, SSO and 2FA requirements, password
+    minimum and session timeouts do not apply to them. Where its policy is
+    stricter than the Project's, a suspension loosens the controls on those
+    accounts.
+  </p>
+  <p>
+    Restoring it gives back administration at once and selection within the
+    same cache TTL, and brings back its login policy. Like any change of a
+    tenant's status, it revokes again the agent grants and machines of its
+    members and of the accounts on its verified domains, including any
+    connected during the suspension; no grant comes back. Asking for the
+    status a tenant already has returns it unchanged and records nothing, so a
+    retry is safe; only the call that changes the status records its reason.
   </p>
 
   <p>

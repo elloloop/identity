@@ -24,10 +24,19 @@ const (
 const operatorReasonMaxRunes = 500
 
 // ErrTenantStatusConflict is returned when an operator asks for a status
-// change the tenant's current status does not allow: suspending a tenant
-// that is not claimed, or restoring one that is not suspended. Mapped to
+// change the tenant cannot make: it is in neither the status the change
+// starts from nor the one it ends in (today, a latent tenant), or it is a
+// suspended tenant with no sign it was ever claimed, which a restore would
+// claim without a verified domain. A tenant already in the status asked for
+// is not a conflict: it is returned unchanged. Mapped to
 // CodeFailedPrecondition.
 var ErrTenantStatusConflict = errors.New("the tenant's status does not allow this change")
+
+// ErrTenantStatusChanged is returned when another change to the tenant's
+// status landed between an operator call's read and its compare-and-set,
+// leaving the tenant in neither status. Retrying reads the new status.
+// Mapped to CodeAborted.
+var ErrTenantStatusChanged = errors.New("the tenant's status changed during the call; retry")
 
 // TenantPage is one page of AdminListTenants: the tenants, newest first, and
 // the cursor for the next page, empty on the last.
@@ -88,35 +97,56 @@ func (s *ControlPlaneAdminService) AdminListTenants(ctx context.Context, secret,
 	}, nil
 }
 
-// AdminSuspendTenant suspends a claimed tenant, recording reason in the
-// audit trail. A suspended tenant keeps its domains, members and invitations,
-// but its members can no longer choose it for a token, the tokens that chose
-// it are refused, and its admins can no longer administer it. Suspending a
+// AdminSuspendTenant suspends a claimed tenant, recording reason, and the
+// operator's ip and ua, in the audit trail. A suspended tenant keeps its
+// domains, members and invitations, but its members can no longer choose it
+// for a token, the tokens that chose it are refused within the tenant-status
+// cache TTL, and its admins can no longer administer it. Suspending a
 // suspended tenant changes nothing and records nothing. A latent tenant
 // governs nothing, so suspending one is ErrTenantStatusConflict.
-func (s *ControlPlaneAdminService) AdminSuspendTenant(ctx context.Context, secret, projectID, tenantID, reason string) (*Tenant, error) {
-	return s.moveTenant(ctx, secret, projectID, tenantID, reason, TenantStatusClaimed, TenantStatusSuspended, audit.EventTenantSuspended)
+func (s *ControlPlaneAdminService) AdminSuspendTenant(ctx context.Context, secret, projectID, tenantID, reason, ip, ua string) (*Tenant, error) {
+	return s.moveTenant(ctx, secret, tenantMove{
+		projectID: projectID, tenantID: tenantID, reason: reason, ip: ip, ua: ua,
+		from: TenantStatusClaimed, to: TenantStatusSuspended, event: audit.EventTenantSuspended,
+	})
 }
 
 // AdminRestoreTenant moves a suspended tenant back to claimed, recording
-// reason in the audit trail. Restoring a claimed tenant changes nothing and
-// records nothing; restoring a latent one is ErrTenantStatusConflict.
-func (s *ControlPlaneAdminService) AdminRestoreTenant(ctx context.Context, secret, projectID, tenantID, reason string) (*Tenant, error) {
-	return s.moveTenant(ctx, secret, projectID, tenantID, reason, TenantStatusSuspended, TenantStatusClaimed, audit.EventTenantRestored)
+// reason, and the operator's ip and ua, in the audit trail. Restoring a
+// claimed tenant changes nothing and records nothing; restoring a latent one
+// is ErrTenantStatusConflict, and so is restoring a suspended tenant that
+// shows no sign of ever having been claimed (wasClaimed).
+func (s *ControlPlaneAdminService) AdminRestoreTenant(ctx context.Context, secret, projectID, tenantID, reason, ip, ua string) (*Tenant, error) {
+	return s.moveTenant(ctx, secret, tenantMove{
+		projectID: projectID, tenantID: tenantID, reason: reason, ip: ip, ua: ua,
+		from: TenantStatusSuspended, to: TenantStatusClaimed, event: audit.EventTenantRestored,
+		admit: s.requireOnceClaimed,
+	})
+}
+
+// tenantMove is one operator change of a tenant's status: the tenant, why,
+// who asked from where, the move, and the event that records it. admit, when
+// set, may refuse a tenant in from before it is moved.
+type tenantMove struct {
+	projectID, tenantID, reason, ip, ua string
+	from, to                            string
+	event                               audit.EventType
+	admit                               func(context.Context, *Tenant) error
 }
 
 // moveTenant moves a tenant from one status to another for an operator and
-// audits the move as event. A tenant already in to is returned unchanged, so
-// an operator who retries after a lost response gets the same answer.
-func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, secret, projectID, tenantID, reason, from, to string, event audit.EventType) (*Tenant, error) {
+// audits the move. A tenant already in m.to is returned unchanged, so an
+// operator who retries after a lost response gets the same answer; only the
+// call that changes the status records its reason.
+func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, secret string, m tenantMove) (*Tenant, error) {
 	if err := s.authorize(secret); err != nil {
 		return nil, err
 	}
-	projectID, tenantID, err := requireTenantRef(projectID, tenantID)
+	projectID, tenantID, err := requireTenantRef(m.projectID, m.tenantID)
 	if err != nil {
 		return nil, err
 	}
-	reason, err = normalizeText("reason", reason, operatorReasonMaxRunes)
+	reason, err := normalizeText("reason", m.reason, operatorReasonMaxRunes)
 	if err != nil {
 		return nil, err
 	}
@@ -124,31 +154,62 @@ func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, secret, proje
 	if err != nil {
 		return nil, err
 	}
-	if t.Status == to {
+	if t.Status == m.to {
 		return t, nil
 	}
-	if t.Status != from {
+	if t.Status != m.from {
 		return nil, fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
 	}
-	moved, err := s.tenants.SetTenantStatus(ctx, projectID, tenantID, from, to)
+	if m.admit != nil {
+		if err := m.admit(ctx, t); err != nil {
+			return nil, err
+		}
+	}
+	moved, err := s.tenants.SetTenantStatus(ctx, projectID, tenantID, m.from, m.to)
 	if err != nil {
 		return nil, err
 	}
 	if moved {
-		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), event, audit.WithSuccess(true), audit.WithDetails(map[string]any{
-			"project_id": projectID,
-			"tenant_id":  tenantID,
-			"reason":     reason,
-		}))
+		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), m.event,
+			audit.WithSuccess(true), audit.WithIP(m.ip), audit.WithUserAgent(m.ua),
+			audit.WithDetails(map[string]any{
+				"project_id": projectID,
+				"tenant_id":  tenantID,
+				"reason":     reason,
+			}))
 	}
 	if t, err = s.getTenant(ctx, projectID, tenantID); err != nil {
 		return nil, err
 	}
-	if !moved && t.Status != to {
-		// Another change landed between the read and the write.
-		return nil, fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
+	if !moved && t.Status != m.to {
+		return nil, fmt.Errorf("%w: the tenant is now %s", ErrTenantStatusChanged, t.Status)
 	}
 	return t, nil
+}
+
+// requireOnceClaimed refuses to restore a suspended tenant that shows no sign
+// of ever having been claimed: no person created it, and it has no owner or
+// admin. Such a tenant was suspended while latent, in SQL before the
+// operator RPCs, and restoring it would make claimed a tenant whose domain
+// was never verified, closing it to the first verifier. An operator who does
+// mean to stand it up adds its first admin with AdminAddTenantAdmin and
+// restores it then. A tenant claimed by a domain's verification has the
+// owner or admin who verified it, and one an operator created has the admin
+// the operator added.
+func (s *ControlPlaneAdminService) requireOnceClaimed(ctx context.Context, t *Tenant) error {
+	if t.CreatedBy != "" {
+		return nil
+	}
+	members, err := s.memberships.ListMembershipsForTenant(ctx, t.ProjectID, t.ID)
+	if err != nil {
+		return err
+	}
+	for _, m := range members {
+		if m.Role == RoleOwner || m.Role == RoleAdmin {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: the tenant has no creator, owner or admin, so it was never claimed", ErrTenantStatusConflict)
 }
 
 // getTenant reads a tenant the operator named, refusing one the project does

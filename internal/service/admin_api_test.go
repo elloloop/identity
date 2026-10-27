@@ -421,8 +421,19 @@ func newAdminFixtureWithKey(secret string, secretsKey []byte) *adminFixture {
 }
 
 func newAdminFixtureFull(secret string, disableBootstrap bool, secretsKey []byte) *adminFixture {
+	return newAdminFixtureWithTenants(secret, disableBootstrap, secretsKey, nil)
+}
+
+// newAdminFixtureWithTenants builds the fixture with the service reading
+// tenants through wrap(fake) when wrap is set, so a test can put a store
+// between the service and the fake tenants it still seeds.
+func newAdminFixtureWithTenants(secret string, disableBootstrap bool, secretsKey []byte, wrap func(*fakeTenantStore) TenantStore) *adminFixture {
 	p := newFakeControlPlaneStore()
 	t := newFakeTenantStore()
+	var tenants TenantStore = t
+	if wrap != nil {
+		tenants = wrap(t)
+	}
 	m := newFakeMembershipStore()
 	lp := newFakeLoginPolicyStore()
 	a := newFakePlatformAdminStore()
@@ -430,7 +441,7 @@ func newAdminFixtureFull(secret string, disableBootstrap bool, secretsKey []byte
 	auditWriter := newRecordingAuditWriter()
 	auditLog := audit.NewLogger(auditWriter, "test-project", zap.NewNop())
 	return &adminFixture{
-		svc:      NewControlPlaneAdminService(secret, disableBootstrap, secretsKey, p, t, m, lp, a, dns, auditLog, zap.NewNop()),
+		svc:      NewControlPlaneAdminService(secret, disableBootstrap, secretsKey, p, tenants, m, lp, a, dns, auditLog, zap.NewNop()),
 		projects: p,
 		tenants:  t,
 		members:  m,

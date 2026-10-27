@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -404,9 +405,73 @@ func TestTenantStore_SetTenantStatusComparesAndSets(t *testing.T) {
 		{proj, "", service.TenantStatusClaimed, service.TenantStatusSuspended},
 		{proj, latent, "", service.TenantStatusSuspended},
 		{proj, latent, service.TenantStatusClaimed, ""},
+		{proj, latent, service.TenantStatusClaimed, "deleted"},
+		{proj, latent, "Claimed", service.TenantStatusSuspended},
+		{proj, latent, service.TenantStatusClaimed, service.TenantStatusClaimed},
 	} {
 		_, err := tenants.SetTenantStatus(ctx, args[0], args[1], args[2], args[3])
 		require.ErrorIs(t, err, service.ErrInvalidArgument, "%v", args)
+	}
+	require.Equal(t, service.TenantStatusClaimed, status(latent), "a refused move leaves the tenant alone")
+}
+
+// TestTenantStore_SetTenantStatusOneRacerWins: operators suspending and
+// restoring the same tenant at once each compare against the status they
+// read, so exactly one move from each status lands and the others report
+// that nothing moved.
+func TestTenantStore_SetTenantStatusOneRacerWins(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping tenant status race test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	projects, tenants, _ := newTenantDomainStores(ctx, t, dsn)
+	proj, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-race", Name: "Race"})
+	require.NoError(t, err)
+	id, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: proj, Status: service.TenantStatusClaimed})
+	require.NoError(t, err)
+
+	const racers = 8
+	for _, step := range []struct{ from, to string }{
+		{service.TenantStatusClaimed, service.TenantStatusSuspended},
+		{service.TenantStatusSuspended, service.TenantStatusClaimed},
+	} {
+		start := make(chan struct{})
+		results := make(chan bool, racers)
+		errs := make(chan error, racers)
+		var wg sync.WaitGroup
+		for range racers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				moved, err := tenants.SetTenantStatus(ctx, proj, id, step.from, step.to)
+				if err != nil {
+					errs <- err
+					return
+				}
+				results <- moved
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(results)
+		close(errs)
+		for err := range errs {
+			require.NoError(t, err)
+		}
+		won := 0
+		for moved := range results {
+			if moved {
+				won++
+			}
+		}
+		require.Equal(t, 1, won, "exactly one %s -> %s lands", step.from, step.to)
+		got, err := tenants.GetTenantStatus(ctx, proj, id)
+		require.NoError(t, err)
+		require.Equal(t, step.to, got)
 	}
 }
 

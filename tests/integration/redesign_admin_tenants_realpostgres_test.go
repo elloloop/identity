@@ -118,8 +118,8 @@ func TestRedesign_AdminTenantReads(t *testing.T) {
 // a token that chose the tenant at its next request, refuses a new
 // selection and stops the tenant's owner administering it; restoring gives
 // all three back; asking for the status a tenant already has changes
-// nothing; a latent tenant cannot be suspended; and each change is audited
-// once with the operator's reason.
+// nothing; a latent tenant cannot be suspended, nor one never claimed
+// restored; and each change is audited once with the operator's reason.
 func TestRedesign_AdminTenantSuspension(t *testing.T) {
 	h := startSelfServiceHarness(t)
 	ctx := context.Background()
@@ -231,6 +231,18 @@ func TestRedesign_AdminTenantSuspension(t *testing.T) {
 		ProjectId: h.ProjectID, TenantId: latentID, Reason: "billing dispute",
 	}))
 	requireConnectCode(t, "suspending a latent tenant", err, connect.CodeFailedPrecondition)
+
+	// A latent tenant suspended in SQL, as the old upgrade notes allowed,
+	// was never claimed: restoring it would make it selectable with nobody
+	// having verified its domain.
+	if moved, err := h.Stores.tenants.SetTenantStatus(ctx, h.ProjectID, latentID,
+		service.TenantStatusLatent, service.TenantStatusSuspended); err != nil || !moved {
+		t.Fatalf("suspending the latent tenant in the store: moved=%v err=%v", moved, err)
+	}
+	_, err = admin.AdminRestoreTenant(ctx, connect.NewRequest(&identitypb.AdminRestoreTenantRequest{
+		ProjectId: h.ProjectID, TenantId: latentID, Reason: "dispute settled",
+	}))
+	requireConnectCode(t, "restoring a tenant never claimed", err, connect.CodeFailedPrecondition)
 
 	for event, reason := range map[audit.EventType]string{
 		audit.EventTenantSuspended: "billing dispute",

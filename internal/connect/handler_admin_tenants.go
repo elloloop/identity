@@ -51,7 +51,8 @@ func (h *IdentityHandler) AdminSuspendTenant(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	t, err := h.controlAdmin.AdminSuspendTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason)
+	t, err := h.controlAdmin.AdminSuspendTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason,
+		clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -66,7 +67,8 @@ func (h *IdentityHandler) AdminRestoreTenant(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	t, err := h.controlAdmin.AdminRestoreTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason)
+	t, err := h.controlAdmin.AdminRestoreTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason,
+		clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}

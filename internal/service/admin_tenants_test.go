@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"github.com/elloloop/identity/pkg/audit"
 )
 
@@ -260,8 +258,15 @@ func TestTenantCursorRoundTrip(t *testing.T) {
 	}
 }
 
+// The operator's client, as the handler passes it, which the status changes
+// record in the audit trail.
+const (
+	testOperatorIP = "203.0.113.7"
+	testOperatorUA = "operator-cli/1.0"
+)
+
 // statusMove names one of the two operator status changes so a table can
-// drive both.
+// drive both, from the operator's client.
 type statusMove struct {
 	name  string
 	call  func(svc *ControlPlaneAdminService, ctx context.Context, secret, projectID, tenantID, reason string) (*Tenant, error)
@@ -271,8 +276,23 @@ type statusMove struct {
 }
 
 var statusMoves = []statusMove{
-	{name: "suspend", call: (*ControlPlaneAdminService).AdminSuspendTenant, from: TenantStatusClaimed, to: TenantStatusSuspended, event: audit.EventTenantSuspended},
-	{name: "restore", call: (*ControlPlaneAdminService).AdminRestoreTenant, from: TenantStatusSuspended, to: TenantStatusClaimed, event: audit.EventTenantRestored},
+	{
+		name: "suspend", from: TenantStatusClaimed, to: TenantStatusSuspended, event: audit.EventTenantSuspended,
+		call: func(svc *ControlPlaneAdminService, ctx context.Context, secret, projectID, tenantID, reason string) (*Tenant, error) {
+			return svc.AdminSuspendTenant(ctx, secret, projectID, tenantID, reason, testOperatorIP, testOperatorUA)
+		},
+	},
+	{
+		name: "restore", from: TenantStatusSuspended, to: TenantStatusClaimed, event: audit.EventTenantRestored,
+		call: func(svc *ControlPlaneAdminService, ctx context.Context, secret, projectID, tenantID, reason string) (*Tenant, error) {
+			return svc.AdminRestoreTenant(ctx, secret, projectID, tenantID, reason, testOperatorIP, testOperatorUA)
+		},
+	},
+}
+
+// putOnceClaimed seeds a tenant a person created, so a restore admits it.
+func putOnceClaimed(f *adminFixture, id, status string) {
+	f.tenants.put(&Tenant{ID: id, ProjectID: "proj", Name: "Acme", Status: status, CreatedBy: "u-creator", UpdatedAtMs: 7})
 }
 
 func TestAdminTenantStatus_Gated(t *testing.T) {
@@ -302,7 +322,7 @@ func TestAdminTenantStatus_MovesAndAudits(t *testing.T) {
 	ctx := context.Background()
 	for _, m := range statusMoves {
 		f := newAdminFixture(testAdminSecret)
-		f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Name: "Acme", Status: m.from, UpdatedAtMs: 7})
+		putOnceClaimed(f, "t-1", m.from)
 
 		got, err := m.call(f.svc, ctx, testAdminSecret, " proj ", " t-1 ", "  billing dispute\n")
 		if err != nil {
@@ -323,6 +343,9 @@ func TestAdminTenantStatus_MovesAndAudits(t *testing.T) {
 			if details[0][k] != v {
 				t.Fatalf("%s: audit detail %s = %v, want %v (all: %v)", m.name, k, details[0][k], v, details[0])
 			}
+		}
+		if clients := f.audit.clientsOf(string(m.event)); clients[0] != [2]string{testOperatorIP, testOperatorUA} {
+			t.Fatalf("%s: audited client = %v, want the operator's", m.name, clients[0])
 		}
 
 		// Asking again finds the tenant already moved: the same answer, no
@@ -359,12 +382,58 @@ func TestAdminTenantStatus_RefusesWrongStatus(t *testing.T) {
 	}
 }
 
+// TestAdminRestoreTenant_RefusesATenantNeverClaimed: a suspended tenant with
+// no creator, owner or admin was suspended while latent, so restoring it
+// would claim it without a verified domain. It is refused until an operator
+// adds its first admin; a creator, or an owner or admin in any status, shows
+// it was claimed.
+func TestAdminRestoreTenant_RefusesATenantNeverClaimed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	restore := statusMoves[1]
+
+	f := newAdminFixture(testAdminSecret)
+	f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Status: TenantStatusSuspended})
+	if _, err := f.members.UpsertMembership(ctx, &TenantMembership{ProjectID: "proj", TenantID: "t-1", UserID: "u-member", Role: RoleMember, Source: MembershipSourceDomain, Status: MembershipStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := restore.call(f.svc, ctx, testAdminSecret, "proj", "t-1", "why")
+	if !errors.Is(err, ErrTenantStatusConflict) {
+		t.Fatalf("restore a tenant never claimed: err = %v, want ErrTenantStatusConflict", err)
+	}
+	if f.tenants.writes != 0 || f.audit.countByEventType(string(restore.event)) != 0 {
+		t.Fatal("a refused restore wrote or audited")
+	}
+
+	for _, role := range []string{RoleOwner, RoleAdmin} {
+		for _, status := range []string{MembershipStatusActive, MembershipStatusInactive} {
+			f := newAdminFixture(testAdminSecret)
+			f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Status: TenantStatusSuspended})
+			if _, err := f.members.UpsertMembership(ctx, &TenantMembership{ProjectID: "proj", TenantID: "t-1", UserID: "u-gov", Role: role, Source: MembershipSourceAdded, Status: status}); err != nil {
+				t.Fatal(err)
+			}
+			got, err := restore.call(f.svc, ctx, testAdminSecret, "proj", "t-1", "why")
+			if err != nil || got.Status != TenantStatusClaimed {
+				t.Fatalf("restore a tenant with an %s %s: %+v, %v", status, role, got, err)
+			}
+		}
+	}
+
+	boom := errors.New("boom")
+	f = newAdminFixture(testAdminSecret)
+	f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Status: TenantStatusSuspended})
+	f.members.listErr = boom
+	if _, err := restore.call(f.svc, ctx, testAdminSecret, "proj", "t-1", "why"); !errors.Is(err, boom) {
+		t.Fatalf("membership read error: err = %v, want %v", err, boom)
+	}
+}
+
 func TestAdminTenantStatus_RefusesBadArguments(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	for _, m := range statusMoves {
 		f := newAdminFixture(testAdminSecret)
-		f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Status: m.from})
+		putOnceClaimed(f, "t-1", m.from)
 
 		for _, tc := range []struct {
 			name, project, tenant, reason string
@@ -399,7 +468,7 @@ func TestAdminTenantStatus_StoreErrors(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Status: TenantStatusClaimed})
 	f.tenants.setErr = boom
-	if _, err := f.svc.AdminSuspendTenant(ctx, testAdminSecret, "proj", "t-1", "why"); !errors.Is(err, boom) {
+	if _, err := f.svc.AdminSuspendTenant(ctx, testAdminSecret, "proj", "t-1", "why", "", ""); !errors.Is(err, boom) {
 		t.Fatalf("write error: err = %v, want %v", err, boom)
 	}
 	if f.audit.countByEventType(string(audit.EventTenantSuspended)) != 0 {
@@ -408,7 +477,7 @@ func TestAdminTenantStatus_StoreErrors(t *testing.T) {
 
 	f.tenants.setErr = nil
 	f.tenants.getErr = boom
-	if _, err := f.svc.AdminSuspendTenant(ctx, testAdminSecret, "proj", "t-1", "why"); !errors.Is(err, boom) {
+	if _, err := f.svc.AdminSuspendTenant(ctx, testAdminSecret, "proj", "t-1", "why", "", ""); !errors.Is(err, boom) {
 		t.Fatalf("read error: err = %v, want %v", err, boom)
 	}
 }
@@ -437,15 +506,16 @@ func TestAdminTenantStatus_ConcurrentChange(t *testing.T) {
 		// Another operator suspended it first: the same end, reported as
 		// done, and recorded once, by them.
 		{name: "already suspended", then: TenantStatusSuspended},
-		// It changed to something suspension does not apply to.
-		{name: "now latent", then: TenantStatusLatent, wantErr: ErrTenantStatusConflict},
+		// It changed to something suspension does not apply to: a lost
+		// race, which a retry resolves, not a status the call cannot move.
+		{name: "now latent", then: TenantStatusLatent, wantErr: ErrTenantStatusChanged},
 	} {
-		f := newAdminFixture(testAdminSecret)
+		f := newAdminFixtureWithTenants(testAdminSecret, false, testAdminSecretsKey(), func(fake *fakeTenantStore) TenantStore {
+			return &racingTenantStore{fakeTenantStore: fake, then: tc.then}
+		})
 		f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Status: TenantStatusClaimed})
-		store := &racingTenantStore{fakeTenantStore: f.tenants, then: tc.then}
-		svc := NewControlPlaneAdminService(testAdminSecret, false, testAdminSecretsKey(), f.projects, store, f.members, f.policies, f.admins, f.dns, audit.NewLogger(f.audit, "test-project", zap.NewNop()), zap.NewNop())
 
-		got, err := svc.AdminSuspendTenant(ctx, testAdminSecret, "proj", "t-1", "why")
+		got, err := f.svc.AdminSuspendTenant(ctx, testAdminSecret, "proj", "t-1", "why", "", "")
 		if !errors.Is(err, tc.wantErr) {
 			t.Fatalf("%s: err = %v, want %v", tc.name, err, tc.wantErr)
 		}

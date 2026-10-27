@@ -15498,7 +15498,8 @@ func (x *AdminListTenantsResponse) GetNextCursor() string {
 }
 
 // AdminSuspendTenantRequest names a claimed tenant to suspend. reason is
-// required; the audit trail keeps it.
+// required; the audit trail keeps it with the call that suspends the
+// tenant, and a retry of a call that already did records nothing.
 type AdminSuspendTenantRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
@@ -15606,7 +15607,8 @@ func (x *AdminSuspendTenantResponse) GetTenant() *Tenant {
 }
 
 // AdminRestoreTenantRequest names a suspended tenant to restore. reason is
-// required; the audit trail keeps it.
+// required; the audit trail keeps it with the call that restores the
+// tenant, and a retry of a call that already did records nothing.
 type AdminRestoreTenantRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`

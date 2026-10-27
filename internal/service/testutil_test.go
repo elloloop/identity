@@ -34,6 +34,8 @@ type recordingAuditWriter struct {
 	events  []string
 	actors  []string // actor user id ("2"), index-aligned with events
 	targets []string // target user id ("3"), index-aligned with events
+	ips     []string // client IP ("4"), index-aligned with events
+	uas     []string // user agent ("5"), index-aligned with events
 	details []string // JSON details ("7"), index-aligned with events
 }
 
@@ -53,6 +55,10 @@ func (w *recordingAuditWriter) ExecuteAtomic(
 			w.actors = append(w.actors, actor)
 			target, _ := op.Data["3"].(string)
 			w.targets = append(w.targets, target)
+			ip, _ := op.Data["4"].(string)
+			w.ips = append(w.ips, ip)
+			ua, _ := op.Data["5"].(string)
+			w.uas = append(w.uas, ua)
 			detail, _ := op.Data["7"].(string)
 			w.details = append(w.details, detail)
 		}
@@ -72,6 +78,20 @@ func (w *recordingAuditWriter) countByEventTypeActorTarget(eventType, actor, tar
 		}
 	}
 	return n
+}
+
+// clientsOf returns the client IP and user agent of each recorded event of
+// eventType, in order.
+func (w *recordingAuditWriter) clientsOf(eventType string) [][2]string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out [][2]string
+	for i, et := range w.events {
+		if et == eventType {
+			out = append(out, [2]string{w.ips[i], w.uas[i]})
+		}
+	}
+	return out
 }
 
 func (w *recordingAuditWriter) countByEventType(eventType string) int {
