@@ -58,6 +58,13 @@ SELECT indisvalid FROM pg_index
 -- false: DROP INDEX CONCURRENTLY tenants_project_created_idx; then build it again.
 ```
 
+Once it is valid, drop the old index the same way, and 0049 has nothing
+left to wait for (it drops `IF EXISTS`):
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS tenants_project_idx;
+```
+
 Replicas of the previous release keep working against the new schema, so the
 migrations can run before or during a rolling deploy. Each file rolls back on
 its own failure. If 0048 fails (a lock timeout, or a build that fails),

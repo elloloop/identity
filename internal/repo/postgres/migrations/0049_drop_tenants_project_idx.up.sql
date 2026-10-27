@@ -15,7 +15,9 @@
 -- for transactions already using tenants to finish, and while it waits, new
 -- reads and writes of tenants queue behind it. lock_timeout bounds that wait
 -- to 10s. On a timeout the file rolls back and version 49 is left dirty:
--- `identity migrate force 48`, then `identity migrate` again.
+-- `identity migrate force 48`, then `identity migrate` again. An operator
+-- who dropped the index CONCURRENTLY beforehand (docs/UPGRADE.md) makes this
+-- a no-op.
 SET LOCAL lock_timeout = '10s';
 
 DROP INDEX IF EXISTS tenants_project_idx;
