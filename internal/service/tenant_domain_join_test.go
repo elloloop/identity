@@ -295,6 +295,7 @@ func TestListJoinableTenants_PropagatesStoreErrors(t *testing.T) {
 		"get verified domain": func(f *joinFixture) { f.domains.verifiedErr = boom },
 		"get tenant":          func(f *joinFixture) { f.tenants.getErr = boom },
 		"get membership":      func(f *joinFixture) { f.members.getErr = boom },
+		"is removed":          func(f *joinFixture) { f.members.removedErr = boom },
 	} {
 		f := newJoinFixture()
 		setup(f)
@@ -528,26 +529,6 @@ func TestJoinTenantByDomain_ADoorClosedMeanwhile(t *testing.T) {
 	held, _ := f.members.GetMembership(context.Background(), ssProject, ownTenant, joinerID)
 	assert.Nil(t, held)
 	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantJoinedByDomain)))
-}
-
-func TestListJoinableTenants_PropagatesTheRemovalLookupsError(t *testing.T) {
-	f := newJoinFixture()
-	boom := errors.New("boom")
-	svc := NewMembershipService(newFakeInvitationStore(), &removalLookupFails{f.members, boom}, f.tenants, f.users, &recordingMailer{}, true, &config.Config{}, nil).
-		WithDomains(f.domains)
-
-	_, err := svc.ListJoinableTenants(withTenantsProject(false), joinerID)
-	require.ErrorIs(t, err, boom)
-}
-
-// removalLookupFails is a membership store whose IsRemoved fails.
-type removalLookupFails struct {
-	*fakeMembershipStore
-	err error
-}
-
-func (s *removalLookupFails) IsRemoved(context.Context, string, string, string) (bool, error) {
-	return false, s.err
 }
 
 // ── RemoveTenantMember's record ─────────────────────────────────────────

@@ -339,6 +339,7 @@ type fakeMembershipStore struct {
 	upsertErr   error
 	listErr     error
 	transferErr error
+	removedErr  error
 	// tenants supplies each tenant's name and status to the active-tenant
 	// reads (linkFakeTenantStores); unlinked, those reads find nothing.
 	tenants *fakeTenantStore
@@ -487,8 +488,8 @@ func (f *fakeMembershipStore) JoinByDomain(ctx context.Context, projectID, tenan
 }
 
 func (f *fakeMembershipStore) IsRemoved(_ context.Context, projectID, tenantID, userID string) (bool, error) {
-	if f.getErr != nil {
-		return false, f.getErr
+	if f.removedErr != nil {
+		return false, f.removedErr
 	}
 	return f.removed[f.key(projectID, tenantID, userID)], nil
 }

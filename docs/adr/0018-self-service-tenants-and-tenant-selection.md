@@ -473,10 +473,9 @@ themselves.
   ungoverned until an operator recovers it. Recovery reads who governs the
   tenant before it grants, so two operators recovering one tenant at once,
   naming different accounts, may each appoint an owner (both are audited).
-- **Negative.** While joining by domain is on, a member removed with
-  `RemoveTenantMember` who is still on the domain can join again. An admin
-  turns joining off to keep them out; keeping out one person while others
-  join needs a block list, which does not exist yet.
+- **Negative.** A removal made before migration 0051 left no record, so a
+  member removed on an earlier release who is still on the domain can join
+  once until an owner or admin removes them again.
 - **Negative, open.** These gaps are known and tracked as follow-ups: a
   session records no sign-in method, which would let a tenant's policy
   admit a cross-domain member it did govern; a refresh that chooses or
@@ -489,4 +488,4 @@ themselves.
   `users.email_domain` and its index, the `domain_attempts` table, the
   invitation-limit indexes) and 0047 (a trigger on `users` that ends a domain
   membership when the email leaves the tenant's verified domains); joining
-  by domain adds 0051 (`domains.allow_join`).
+  by domain adds 0051 (`domains.allow_join`) and 0052 (`tenant_member_removals`).
