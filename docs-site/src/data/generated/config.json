@@ -2034,6 +2034,15 @@
     "anchor": "sweeper-gc"
   },
   {
+    "name": "GATEWAY_TEAMMATE_KEYS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "serves TeammateKeyService and lets CreateAgentMachineChallenge and ExchangeAgentMachineCredential accept a teammate_key_id.",
+    "category": "Agent accounts",
+    "anchor": "agent-accounts"
+  },
+  {
     "name": "GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT",
     "type": "integer",
     "default": "100",

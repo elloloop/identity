@@ -54,6 +54,9 @@ const (
 	CredentialKindPublishable     = "publishable"
 	CredentialKindSecret          = "secret"
 	CredentialKindDirectoryReader = "directory_reader"
+	// CredentialKindTeammateKeyManager authorizes TeammateKeyService in its
+	// project, presented in X-Teammate-Key-Manager-Key.
+	CredentialKindTeammateKeyManager = "teammate_key_manager"
 )
 
 // Credential public-id prefixes, so a key is self-describing at a glance
@@ -62,6 +65,7 @@ const (
 	publishableKeyPrefix     = "pk_"
 	secretKeyPrefix          = "sk_"
 	directoryReaderKeyPrefix = "dk_"
+	teammateKeyManagerPrefix = "tk_"
 )
 
 // rawKeySeparator joins a credential's public id and secret half in the raw
@@ -826,9 +830,11 @@ func normalizeCredentialKind(kind string) (canonical, prefix string, err error) 
 		return CredentialKindSecret, secretKeyPrefix, nil
 	case CredentialKindDirectoryReader:
 		return CredentialKindDirectoryReader, directoryReaderKeyPrefix, nil
+	case CredentialKindTeammateKeyManager:
+		return CredentialKindTeammateKeyManager, teammateKeyManagerPrefix, nil
 	default:
-		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q or %q)",
-			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret, CredentialKindDirectoryReader)
+		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q, %q or %q)",
+			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret, CredentialKindDirectoryReader, CredentialKindTeammateKeyManager)
 	}
 }
 

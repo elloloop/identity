@@ -283,6 +283,14 @@ const (
 	EventAgentOAuthConsent         EventType = "agent_oauth_consent"
 	EventAgentOAuthIssued          EventType = "agent_oauth_issued"
 	EventAgentOAuthRevoked         EventType = "agent_oauth_revoked"
+	// Teammate keys: a teammate_key_manager credential registers and revokes a
+	// claim's key (actor the credential), a refused credential is recorded
+	// under its project, and every token a key exchanges for is recorded with
+	// the teammate as actor.
+	EventTeammateKeyRegistered     EventType = "teammate_key_registered"
+	EventTeammateKeyRevoked        EventType = "teammate_key_revoked"
+	EventTeammateKeyManagerRefused EventType = "teammate_key_manager_refused"
+	EventTeammateAccessIssued      EventType = "teammate_access_issued"
 	EventOAuthClientCreated        EventType = "oauth_client_created"
 	EventOAuthClientUpdated        EventType = "oauth_client_updated"
 
@@ -412,6 +420,10 @@ var validEventTypes = map[EventType]struct{}{
 	EventAgentOAuthConsent:             {},
 	EventAgentOAuthIssued:              {},
 	EventAgentOAuthRevoked:             {},
+	EventTeammateKeyRegistered:         {},
+	EventTeammateKeyRevoked:            {},
+	EventTeammateKeyManagerRefused:     {},
+	EventTeammateAccessIssued:          {},
 	EventOAuthClientCreated:            {},
 	EventOAuthClientUpdated:            {},
 	EventAgentCreated:                  {},
