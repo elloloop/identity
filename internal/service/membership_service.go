@@ -359,13 +359,20 @@ func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, ten
 // RemoveTenantMember removes a user's membership from a tenant. callerID must
 // be an active owner/admin member of the tenant.
 //
+// The removal is recorded, so the user cannot join again through their
+// email's domain (JoinTenantByDomain) until a membership from another
+// source, such as an invitation they accept, lets them back in; an owner
+// or admin removing themselves is recorded too. A removal is audited as
+// EventTenantMemberRemoved; removing a membership that does not exist
+// records nothing.
+//
 // A tenant is never left without an owner: removing its last active owner
 // is ErrLastOwner (the caller may remove members, so ErrPermissionDenied
 // would be wrong). Removing a non-owner, or an owner while another active
 // owner remains, is allowed, including an owner removing themselves. The
 // store checks and removes in one step (MembershipStore.RemoveMembership),
 // so a concurrent removal or ownership transfer cannot slip between them.
-func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID, tenantID, targetUserID string) error {
+func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID, tenantID, targetUserID, ip, userAgent string) error {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return err
@@ -385,8 +392,24 @@ func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID, te
 		return err
 	}
 
-	// Removing a membership that does not exist is a no-op.
-	return s.memberships.RemoveMembership(ctx, projectID, tenantID, targetUserID)
+	removed, err := s.memberships.RemoveMembership(ctx, projectID, tenantID, targetUserID)
+	if err != nil || removed == nil {
+		// Removing a membership that does not exist is a no-op.
+		return err
+	}
+	if s.audit != nil {
+		s.audit.Log(ctx, audit.EventTenantMemberRemoved,
+			audit.WithActor(callerID), audit.WithTarget(targetUserID),
+			audit.WithIP(ip), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(true), audit.WithDetails(map[string]any{
+				"project_id": projectID,
+				"tenant_id":  tenantID,
+				"role":       removed.Role,
+				"source":     removed.Source,
+			}),
+		)
+	}
+	return nil
 }
 
 // sendInvitationEmail renders and best-effort dispatches the branded tenant

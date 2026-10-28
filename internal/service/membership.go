@@ -107,8 +107,9 @@ type MembershipStore interface {
 	UserTenantReader
 
 	// UpsertMembership inserts or, on a (project, tenant, user) conflict,
-	// updates source/role/status in place (keeping id + created_at_ms).
-	// Returns the surviving row id.
+	// updates source/role/status in place (keeping id + created_at_ms). A
+	// source other than MembershipSourceDomain also deletes the user's
+	// removal record (see RemoveMembership). Returns the surviving row id.
 	UpsertMembership(ctx context.Context, m *TenantMembership) (string, error)
 	// GrantMembership makes m.UserID an active member of m.TenantID at
 	// m.Role, unless they already hold an active membership there at m.Role
@@ -121,6 +122,8 @@ type MembershipStore interface {
 	// membership already held the role, or a higher one, from a source the
 	// grant keeps. The decision is made where the write is, so of two
 	// concurrent grants of the same membership one at most reports a change.
+	// A source other than MembershipSourceDomain also deletes the user's
+	// removal record (see RemoveMembership), ordered against a removal.
 	GrantMembership(ctx context.Context, m *TenantMembership) (granted *TenantMembership, changed bool, err error)
 	// GetMembership returns the membership for (project, tenant, user), or
 	// (nil, nil).
@@ -133,8 +136,28 @@ type MembershipStore interface {
 	// RemoveMembership deletes the membership for (project, tenant, user),
 	// unless it is the tenant's last active owner (ErrLastOwner): the check
 	// and the delete are one step, so no concurrent removal or transfer
-	// leaves the tenant without an owner. Unknown rows are a no-op.
-	RemoveMembership(ctx context.Context, projectID, tenantID, userID string) error
+	// leaves the tenant without an owner. In the same step it records the
+	// removal, which keeps the user from joining the tenant through their
+	// email's domain (JoinByDomain) until a membership from another source
+	// lets them back in. Returns the membership as it stood when removed;
+	// an unknown row is a no-op that returns (nil, nil) and records nothing.
+	RemoveMembership(ctx context.Context, projectID, tenantID, userID string) (*TenantMembership, error)
+	// JoinByDomain makes userID an active member of the tenant through
+	// their email's domain, the verified domain domainID: role member,
+	// source MembershipSourceDomain, never lowering a role held. It writes
+	// only while that domain is verified on the tenant and allows joining,
+	// the tenant is claimed, and the user has no removal record there, all
+	// decided where the write is, so a concurrent SetDomainAllowJoin, status
+	// change or removal is ordered against it. Returns (nil, false, nil)
+	// when the domain or the tenant does not let the user join,
+	// ErrRemovedFromTenant while a removal stands, the membership and
+	// false when the user already holds an active one, and the membership
+	// and true when this call wrote it.
+	JoinByDomain(ctx context.Context, projectID, tenantID, userID, domainID string) (joined *TenantMembership, changed bool, err error)
+	// IsRemoved reports whether userID has a removal record in the tenant:
+	// an owner or admin removed them, and no membership from another source
+	// has let them back in since.
+	IsRemoved(ctx context.Context, projectID, tenantID, userID string) (bool, error)
 	// TransferOwnership makes toUserID an owner of the tenant and fromUserID,
 	// an owner, an admin, in one transaction holding both memberships, so a
 	// concurrent change to either is seen before anything is written. It

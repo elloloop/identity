@@ -40,7 +40,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrProductAgeRestricted),
 		errors.Is(err, service.ErrAssuranceRequired),
 		errors.Is(err, service.ErrAssuranceFailed),
-		errors.Is(err, service.ErrAgentSignIn):
+		errors.Is(err, service.ErrAgentSignIn),
+		errors.Is(err, service.ErrRemovedFromTenant):
 		return connect.NewError(connect.CodePermissionDenied, err)
 
 	// Unimplemented: the capability is absent from this deployment, not

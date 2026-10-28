@@ -478,7 +478,8 @@ func TestRefreshToken_EndedMembershipStopsNextRefresh(t *testing.T) {
 	_, _, refresh, err := f.svc.RefreshToken(ctx, f.refresh, "t-acme", "", "")
 	require.NoError(t, err)
 
-	require.NoError(t, f.members.RemoveMembership(ctx, f.project(), "t-acme", f.user.ID))
+	_, err = f.members.RemoveMembership(ctx, f.project(), "t-acme", f.user.ID)
+	require.NoError(t, err)
 	_, _, _, err = f.svc.RefreshToken(ctx, refresh, "t-acme", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }

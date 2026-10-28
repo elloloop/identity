@@ -295,6 +295,7 @@ func TestListJoinableTenants_PropagatesStoreErrors(t *testing.T) {
 		"get verified domain": func(f *joinFixture) { f.domains.verifiedErr = boom },
 		"get tenant":          func(f *joinFixture) { f.tenants.getErr = boom },
 		"get membership":      func(f *joinFixture) { f.members.getErr = boom },
+		"is removed":          func(f *joinFixture) { f.members.removedErr = boom },
 	} {
 		f := newJoinFixture()
 		setup(f)
@@ -475,4 +476,115 @@ func TestJoinTenantByDomain_PropagatesStoreErrors(t *testing.T) {
 		require.ErrorIs(t, err, boom, name)
 		assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantJoinedByDomain)), name)
 	}
+}
+
+// ── A person an owner or admin removed ──────────────────────────────────
+
+// A person removed from the tenant cannot join it again by domain, and does
+// not see it as joinable, until a membership from another source, such as
+// an invitation they accept, lets them back in.
+func TestJoinTenantByDomain_RefusesAPersonRemovedFromTheTenant(t *testing.T) {
+	f := newJoinFixture()
+	ctx := withTenantsProject(false)
+	joined := string(audit.EventTenantJoinedByDomain)
+
+	_, err := f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
+	require.NoError(t, err)
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "203.0.113.7", "test-agent"))
+
+	assert.Empty(t, f.joinable(t, joinerID), "a removed person has nothing to join")
+	_, err = f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
+	require.ErrorIs(t, err, ErrRemovedFromTenant)
+	held, _ := f.members.GetMembership(context.Background(), ssProject, ownTenant, joinerID)
+	assert.Nil(t, held, "a refused join writes nothing")
+	assert.Equal(t, 1, f.audit.countByEventType(joined), "only the first join is recorded")
+
+	// An accepted invitation grants an invited membership, which lets them
+	// back in; the domain then has nothing more to give them.
+	_, _, err = f.members.GrantMembership(context.Background(), &TenantMembership{
+		ProjectID: ssProject, TenantID: ownTenant, UserID: joinerID,
+		Source: MembershipSourceInvited, Role: RoleMember,
+	})
+	require.NoError(t, err)
+	m, err := f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, MembershipSourceInvited, m.Source)
+	assert.Equal(t, 1, f.audit.countByEventType(joined))
+
+	// Removed again, they are recorded again, and the join is refused.
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", ""))
+	_, err = f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
+	require.ErrorIs(t, err, ErrRemovedFromTenant)
+}
+
+// The store decides at the write whether the domain still lets the caller
+// in: one closed between the service's check and the write is
+// PERMISSION_DENIED, and nothing is recorded.
+func TestJoinTenantByDomain_ADoorClosedMeanwhile(t *testing.T) {
+	f := newJoinFixture()
+	f.members.doorShut = true
+
+	_, err := f.svc.JoinTenantByDomain(withTenantsProject(false), joinerID, ownTenant, "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	held, _ := f.members.GetMembership(context.Background(), ssProject, ownTenant, joinerID)
+	assert.Nil(t, held)
+	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantJoinedByDomain)))
+}
+
+// ── RemoveTenantMember's record ─────────────────────────────────────────
+
+// A removal is recorded in the audit trail with who removed whom, the
+// membership's role and source, and the request's IP and user agent; one
+// that removes nothing, and one refused, records nothing.
+func TestRemoveTenantMember_IsAudited(t *testing.T) {
+	f := newJoinFixture()
+	ctx := withTenantsProject(false)
+	event := string(audit.EventTenantMemberRemoved)
+	_, err := f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
+	require.NoError(t, err)
+
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "203.0.113.7", "test-agent"))
+	assert.Equal(t, 1, f.audit.countByEventTypeActorTarget(event, ssOwnerID, joinerID))
+	details := f.audit.detailsOf(event)
+	require.Len(t, details, 1)
+	assert.Equal(t, map[string]any{
+		"project_id": ssProject, "tenant_id": ownTenant,
+		"role": RoleMember, "source": MembershipSourceDomain,
+	}, details[0])
+
+	// Nothing left to remove: no record.
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", ""))
+	assert.Equal(t, 1, f.audit.countByEventType(event))
+
+	// The last owner is refused: no record.
+	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, ssOwnerID, "", ""), ErrLastOwner)
+	assert.Equal(t, 1, f.audit.countByEventType(event))
+
+	// Without an audit trail a removal still happens.
+	f.svc.WithAudit(nil)
+	_, _, err = f.members.GrantMembership(context.Background(), &TenantMembership{
+		ProjectID: ssProject, TenantID: ownTenant, UserID: ssOtherID,
+		Source: MembershipSourceInvited, Role: RoleMember,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, ssOtherID, "", ""))
+	held, _ := f.members.GetMembership(context.Background(), ssProject, ownTenant, ssOtherID)
+	assert.Nil(t, held)
+}
+
+// An admin leaving on their own is a removal too: it is recorded with them
+// as both actor and target, and their domain does not let them back in.
+func TestRemoveTenantMember_LeavingIsARemoval(t *testing.T) {
+	f := newJoinFixture()
+	ctx := withTenantsProject(false)
+	_, _, err := f.members.GrantMembership(context.Background(), &TenantMembership{
+		ProjectID: ssProject, TenantID: ownTenant, UserID: joinerID,
+		Source: MembershipSourceInvited, Role: RoleAdmin,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, joinerID, ownTenant, joinerID, "", ""))
+	assert.Equal(t, 1, f.audit.countByEventTypeActorTarget(string(audit.EventTenantMemberRemoved), joinerID, joinerID))
+	_, err = f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
+	require.ErrorIs(t, err, ErrRemovedFromTenant)
 }

@@ -38,8 +38,8 @@
 // bound to a single project_id and writes/reads only that project's rows;
 // per-request scopes are derived via WithProject. The logical-tenant
 // tenant_id columns on the governance tables (domains, login_policies,
-// tenant_memberships, tenant_invitations) reference tenants(id) and are a
-// separate concept from this storage shard.
+// tenant_memberships, tenant_member_removals, tenant_invitations) reference
+// tenants(id) and are a separate concept from this storage shard.
 //
 // # Error mapping
 //

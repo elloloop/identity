@@ -242,6 +242,7 @@ func truncateAll(ctx context.Context, dsn string) error {
 			sessions,
 			refresh_tokens,
 			tenant_invitations,
+			tenant_member_removals,
 			tenant_memberships,
 			login_policies,
 			domains,

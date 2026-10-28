@@ -66,7 +66,8 @@ suspenders; the runtime role is already subject to the policy.
 Control-plane tables are platform-global by design and intentionally have
 **no `project_id` and no RLS**: `projects`, `tenants`, `domains`,
 `project_credentials`, `project_auth_domains`, `platform_admins`,
-`login_policies`, `tenant_memberships`, `tenant_invitations`. A request
+`login_policies`, `tenant_memberships`, `tenant_member_removals`,
+`tenant_invitations`. A request
 resolves its project from these tables *before* any data-plane query runs.
 
 `TRUNCATE` is governed by table privileges, not row policies, so RLS never

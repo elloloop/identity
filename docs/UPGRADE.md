@@ -1,5 +1,99 @@
 # Upgrade guide
 
+## Next — a member removed from a tenant cannot rejoin it by domain (migration 0052; behaviour change; `RemoveTenantMember` audited; `MembershipStore.RemoveMembership`, `JoinByDomain`, `IsRemoved` and `MembershipService.RemoveTenantMember` (Go API))
+
+Until now `RemoveTenantMember` deleted the membership and kept no trace of
+it. While the tenant let its domain's people join (`SetDomainJoin`), a
+member removed who was still on the domain could join again at once with
+`JoinTenantByDomain`, and nothing recorded the removal.
+
+A removal is now recorded, and while it stands the person removed:
+
+- does not see the tenant in `ListJoinableTenants`;
+- is refused by `JoinTenantByDomain` with `PERMISSION_DENIED` and the
+  message "you were removed from this tenant; an owner or admin must invite
+  you back";
+- is not added back by auto-formation, which matters only for an account
+  promoted from an anonymous one, as auto-formation runs for new accounts.
+
+A membership from any other source lets them back in and deletes the
+record: an invitation they accept, or an operator's `AdminAddTenantAdmin` or
+`AdminRecoverTenantOwnership`. An admin who removes themselves is recorded
+the same way. A domain membership that ends because the email left the
+domain is not a removal, and records nothing.
+
+`RemoveTenantMember` is now audited as `tenant_member_removed`: the caller
+as actor, the person removed as target, the request's IP and user agent,
+and `project_id`, `tenant_id` and the membership's `role` and `source` in
+the details. A call that removes nothing, and a refused one, record
+nothing.
+
+A join now decides, in the transaction that writes the membership, whether
+the domain is still verified on the tenant with joining on, the tenant is
+still claimed, and no removal stands. Joins, grants and removals of one
+person in one tenant take a transaction-scoped advisory lock first, so a
+removal racing a join leaves the person outside the tenant with the record
+standing, whichever lands first. One window remains, as before: the
+caller's email domain is read before that transaction, because accounts
+are under row-level security. A confirmed email change off the domain that
+lands in between leaves a `domain` membership the tenant does not count
+while the email is off the domain.
+
+Removals made before this release left no trace, so they have no record. A
+person removed earlier who is still on the domain can join again while
+joining is on. Removing them after they rejoin records it.
+
+### Migration 0052
+
+0052 creates `tenant_member_removals`, keyed by `(project_id, tenant_id,
+user_id)` with `removed_at_ms`, and an index on `user_id`. Each id is a
+foreign key that cascades, so deleting the project, the tenant or the
+account deletes the record. Like `tenant_memberships`, it is a governance
+table without row-level security (0016).
+
+Creating a table with foreign keys takes `SHARE ROW EXCLUSIVE` locks on
+`projects`, `tenants` and `users`. Those block writes to the three tables,
+signups and account changes included, while the catalog changes. While the
+migration waits for the locks behind a transaction that has one of the
+tables open, new writes to it queue behind the migration too, for up to its
+10-second `lock_timeout`. On a lock timeout the file rolls back and version
+52 is recorded dirty: run `identity migrate force 51`, then `identity
+migrate` again.
+
+This release reads or writes `tenant_member_removals` on every membership
+write, auto-formation at signup included, and on every join, so until 0052
+has run those calls fail on its replicas. `GATEWAY_POSTGRES_AUTO_MIGRATE`
+is off by default, so run `identity migrate` as its own job, and let it
+finish, before the deploy starts.
+
+Replicas of the previous release keep working against the new schema, but
+they neither record removals nor check them. During the rolling deploy a
+removal one of them serves records nothing, and a join one of them serves
+admits a removed person. The down migration drops the table, and with it
+every record, so everyone removed can join by domain again.
+
+### Go API
+
+- `MembershipStore.RemoveMembership(ctx, projectID, tenantID, userID)` now
+  returns `(*TenantMembership, error)`: the membership as it stood when
+  removed, or `nil` when there was none. It must record the removal in the
+  same step, and record nothing when it removes nothing.
+- `MembershipStore.JoinByDomain(ctx, projectID, tenantID, userID,
+  domainID) (*TenantMembership, bool, error)` is new. It makes an active
+  `member` with source `domain` only while the domain is verified on the
+  tenant with joining on, the tenant is claimed and no removal stands, all
+  decided where it writes. It returns `nil` when the domain or the tenant
+  does not let the user join, `service.ErrRemovedFromTenant` while a
+  removal stands, and otherwise the membership and whether it wrote it.
+- `MembershipStore.IsRemoved(ctx, projectID, tenantID, userID) (bool,
+  error)` is new.
+- `MembershipStore.UpsertMembership` and `GrantMembership` must delete the
+  removal record when they write a source other than `domain`.
+- `MembershipService.RemoveTenantMember` takes the request's `ip` and
+  `userAgent` after `targetUserID`, for the audit entry.
+- New: `service.ErrRemovedFromTenant`, mapped to `PERMISSION_DENIED`, and
+  `audit.EventTenantMemberRemoved`.
+
 ## Next — a suspended tenant's login policy keeps governing sign-in (behaviour change; no migration)
 
 A tenant's login policy now governs the sign-ins through its verified
@@ -81,8 +175,9 @@ on, so no tenant admits anyone it did not before.
   the `claimed` tenant that has verified the domain, while it allows
   joining and the caller is not an active member. A project holds a
   verified domain on one tenant at most, so the list has at most one entry.
-  It is empty for an unverified email, a public provider's domain, or an
-  anonymous, agent or inactive account.
+  It is empty for an unverified email, a public provider's domain, an
+  anonymous, agent or inactive account, or a person removed from the
+  tenant.
 - **`JoinTenantByDomain(tenant_id)`** makes the caller an active `member`
   of that tenant with source `domain`, so the membership ends when the
   email leaves the domain, as a membership auto-formation made does. It
@@ -91,18 +186,18 @@ on, so no tenant admits anyone it did not before.
   their membership back unchanged, whatever its role or source, and
   nothing is recorded. That is checked before whether the domain lets them
   join, so a retry after joining was turned off still returns it.
-  - `PERMISSION_DENIED`: the caller is not an active, signed-up person, or
-    `tenant_id` is not the tenant their domain lets them join. An unknown,
+  - `PERMISSION_DENIED`: the caller is not an active, signed-up person, was
+    removed from the tenant, or `tenant_id` is not the tenant their domain
+    lets them join. An unknown,
     suspended or latent tenant gets the same answer, so the call reveals
     nothing about tenants the caller cannot join.
   - `FAILED_PRECONDITION`: the caller's email is not verified.
   - `INVALID_ARGUMENT`: a blank `tenant_id`.
 
 Turning joining off ends no membership; remove members with
-`RemoveTenantMember`. While joining is on, a member removed that way who is
-still on the domain can join again: turn joining off first to keep them
-out. Two joins racing for one account make one membership and are recorded
-once.
+`RemoveTenantMember`, which keeps them from joining again by domain until an
+invitation they accept lets them back in. Two joins racing for one account
+make one membership and are recorded once.
 
 ### Migration 0051
 

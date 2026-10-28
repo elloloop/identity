@@ -434,6 +434,28 @@ when no row exists, and only against a VERIFIED domain of a CLAIMED tenant.
 - **FKs:** `project_id` → `projects(id)` CASCADE; `tenant_id` → `tenants(id)`
   CASCADE; `user_id` → `users(id)` CASCADE.
 
+#### `tenant_member_removals` — NEW (0052)
+
+One row per person a tenant owner or admin removed (`RemoveTenantMember`),
+written in the transaction that deletes the membership. While it stands,
+neither `JoinTenantByDomain` nor auto-formation makes the person a member of
+the tenant. A membership written from any source but `domain` (an accepted
+invitation, an operator's grant or recovery) deletes it. Joins, grants and
+removals of one `(project, tenant, user)` serialise on a transaction-scoped
+advisory lock before touching either table. No row-level security, like
+`tenant_memberships`.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `project_id` | TEXT | N | **FK** → `projects(id)` ON DELETE CASCADE. |
+| `tenant_id` | TEXT | N | **FK** → `tenants(id)` ON DELETE CASCADE. |
+| `user_id` | TEXT | N | **FK** → `users(id)` ON DELETE CASCADE. |
+| `removed_at_ms` | BIGINT | N | When the latest removal happened. |
+
+- **PK:** `(project_id, tenant_id, user_id)`.
+- **Indexes:** `tenant_member_removals_user_idx (user_id)`, for the cascade
+  when an account is deleted.
+
 #### `tenant_invitations` (TenantInvitation) — NEW (replaces UserInvitation, M8)
 
 One open invite per `(project, tenant, email)`, enforced via an atomic

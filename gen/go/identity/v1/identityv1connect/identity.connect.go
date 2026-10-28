@@ -806,6 +806,15 @@ type IdentityServiceClient interface {
 	AcceptTenantInvitation(context.Context, *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error)
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
 	ListTenantMembers(context.Context, *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error)
+	// RemoveTenantMember removes user_id's membership of tenant_id. The caller
+	// must be an active owner or admin of a tenant that is not suspended
+	// (PERMISSION_DENIED otherwise), and may name themselves to leave. The
+	// tenant's last active owner is FAILED_PRECONDITION, and a user_id that is
+	// not a member is a no-op. A removal is audited and recorded: the person
+	// cannot join the tenant again by their email's domain (JoinTenantByDomain
+	// is PERMISSION_DENIED and ListJoinableTenants leaves it out) until a
+	// membership from another source lets them back in, such as an invitation
+	// they accept.
 	RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error)
 	// TransferTenantOwnership hands the caller's ownership of a tenant to
 	// another active member in one step: the member becomes an owner and the
@@ -848,7 +857,7 @@ type IdentityServiceClient interface {
 	// action, needing no invitation. ListJoinableTenants returns the tenant
 	// the caller's verified email's domain lets them join (see
 	// ListJoinableTenantsResponse), and is empty for an account that could not
-	// join. Available only on the postgres control-plane driver; the memory and
+	// join, including one removed from the tenant. Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	ListJoinableTenants(context.Context, *connect.Request[v1.ListJoinableTenantsRequest]) (*connect.Response[v1.ListJoinableTenantsResponse], error)
 	// JoinTenantByDomain makes the caller an active member of tenant_id with
@@ -863,11 +872,15 @@ type IdentityServiceClient interface {
 	// joining was turned off, gets the same answer, and two joins racing for
 	// one account make one membership, audited once.
 	//
+	// A caller an owner or admin removed from the tenant (RemoveTenantMember)
+	// is PERMISSION_DENIED, with a message saying so, until a membership from
+	// another source, such as an invitation they accept, lets them back in.
+	//
 	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
-	// account, and for every tenant the domain does not let the caller join
-	// (one that has not verified it, has joining off, or is suspended or
-	// latent), an unknown tenant included, so the call reveals nothing about
-	// other tenants; FAILED_PRECONDITION until the caller has verified their
+	// account, for a caller removed from the tenant, and for every tenant the
+	// domain does not let the caller join (one that has not verified it, has
+	// joining off, or is suspended or latent), an unknown tenant included, so
+	// the call reveals nothing about other tenants; FAILED_PRECONDITION until the caller has verified their
 	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
 	// postgres control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.
@@ -3338,6 +3351,15 @@ type IdentityServiceHandler interface {
 	AcceptTenantInvitation(context.Context, *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error)
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
 	ListTenantMembers(context.Context, *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error)
+	// RemoveTenantMember removes user_id's membership of tenant_id. The caller
+	// must be an active owner or admin of a tenant that is not suspended
+	// (PERMISSION_DENIED otherwise), and may name themselves to leave. The
+	// tenant's last active owner is FAILED_PRECONDITION, and a user_id that is
+	// not a member is a no-op. A removal is audited and recorded: the person
+	// cannot join the tenant again by their email's domain (JoinTenantByDomain
+	// is PERMISSION_DENIED and ListJoinableTenants leaves it out) until a
+	// membership from another source lets them back in, such as an invitation
+	// they accept.
 	RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error)
 	// TransferTenantOwnership hands the caller's ownership of a tenant to
 	// another active member in one step: the member becomes an owner and the
@@ -3380,7 +3402,7 @@ type IdentityServiceHandler interface {
 	// action, needing no invitation. ListJoinableTenants returns the tenant
 	// the caller's verified email's domain lets them join (see
 	// ListJoinableTenantsResponse), and is empty for an account that could not
-	// join. Available only on the postgres control-plane driver; the memory and
+	// join, including one removed from the tenant. Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	ListJoinableTenants(context.Context, *connect.Request[v1.ListJoinableTenantsRequest]) (*connect.Response[v1.ListJoinableTenantsResponse], error)
 	// JoinTenantByDomain makes the caller an active member of tenant_id with
@@ -3395,11 +3417,15 @@ type IdentityServiceHandler interface {
 	// joining was turned off, gets the same answer, and two joins racing for
 	// one account make one membership, audited once.
 	//
+	// A caller an owner or admin removed from the tenant (RemoveTenantMember)
+	// is PERMISSION_DENIED, with a message saying so, until a membership from
+	// another source, such as an invitation they accept, lets them back in.
+	//
 	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
-	// account, and for every tenant the domain does not let the caller join
-	// (one that has not verified it, has joining off, or is suspended or
-	// latent), an unknown tenant included, so the call reveals nothing about
-	// other tenants; FAILED_PRECONDITION until the caller has verified their
+	// account, for a caller removed from the tenant, and for every tenant the
+	// domain does not let the caller join (one that has not verified it, has
+	// joining off, or is suspended or latent), an unknown tenant included, so
+	// the call reveals nothing about other tenants; FAILED_PRECONDITION until the caller has verified their
 	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
 	// postgres control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.

@@ -753,7 +753,7 @@ func TestRemoveTenantMember_RemovesNonOwner(t *testing.T) {
 	f.seedMember(mTestProject, mTestTenant, "user-bob", RoleMember)
 	ctx := withProject(mTestProject)
 
-	err := f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "user-bob")
+	err := f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "user-bob", "", "")
 	require.NoError(t, err)
 
 	stored, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, "user-bob")
@@ -766,7 +766,7 @@ func TestRemoveTenantMember_LastOwnerGuard(t *testing.T) {
 	ctx := withProject(mTestProject)
 
 	// Removing the sole owner (even self-removal) is refused.
-	err := f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, mAdminID)
+	err := f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, mAdminID, "", "")
 	require.ErrorIs(t, err, ErrLastOwner)
 
 	// The owner is still present.
@@ -781,7 +781,7 @@ func TestRemoveTenantMember_OwnerRemovableWhenAnotherOwnerRemains(t *testing.T) 
 	ctx := withProject(mTestProject)
 
 	// Self-removal is fine because another active owner remains.
-	err := f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, mAdminID)
+	err := f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, mAdminID, "", "")
 	require.NoError(t, err)
 
 	stored, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mAdminID)
@@ -795,7 +795,7 @@ func TestRemoveTenantMember_RejectsNonAdmin(t *testing.T) {
 	f := newMembershipFixture()
 	f.seedMember(mTestProject, mTestTenant, "user-bob", RoleMember)
 
-	err := f.svc.RemoveTenantMember(withProject(mTestProject), "user-bob", mTestTenant, "user-bob")
+	err := f.svc.RemoveTenantMember(withProject(mTestProject), "user-bob", mTestTenant, "user-bob", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -803,7 +803,7 @@ func TestRemoveTenantMember_UnknownTargetIsNoOp(t *testing.T) {
 	f := newMembershipFixture()
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-	err := f.svc.RemoveTenantMember(withProject(mTestProject), mAdminID, mTestTenant, "nobody")
+	err := f.svc.RemoveTenantMember(withProject(mTestProject), mAdminID, mTestTenant, "nobody", "", "")
 	require.NoError(t, err)
 }
 
@@ -812,16 +812,16 @@ func TestRemoveTenantMember_RejectsBadInput(t *testing.T) {
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	ctx := withProject(mTestProject)
 
-	err := f.svc.RemoveTenantMember(ctx, mAdminID, "", "user-bob")
+	err := f.svc.RemoveTenantMember(ctx, mAdminID, "", "user-bob", "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument, "blank tenant")
 
-	err = f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "")
+	err = f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "", "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument, "blank user")
 
-	err = f.svc.RemoveTenantMember(context.Background(), mAdminID, mTestTenant, "user-bob")
+	err = f.svc.RemoveTenantMember(context.Background(), mAdminID, mTestTenant, "user-bob", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "no project")
 
-	err = f.svc.RemoveTenantMember(withProject(mTestProject), "", mTestTenant, "user-bob")
+	err = f.svc.RemoveTenantMember(withProject(mTestProject), "", mTestTenant, "user-bob", "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated, "no caller")
 }
 
@@ -947,7 +947,7 @@ func TestTenantAdmin_SuspendedTenantRefusesEveryAdminAction(t *testing.T) {
 	require.ErrorIs(t, err, ErrPermissionDenied, "list invitations")
 	_, err = f.svc.ListTenantMembers(ctx, mAdminID, mTestTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied, "list members")
-	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "user-bob"), ErrPermissionDenied, "remove")
+	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "user-bob", "", ""), ErrPermissionDenied, "remove")
 	_, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
 	require.ErrorIs(t, err, ErrPermissionDenied, "accept")
 

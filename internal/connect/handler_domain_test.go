@@ -168,11 +168,23 @@ func (s *connectMembershipStore) ListMembershipsForTenant(context.Context, strin
 
 // RemoveMembership mirrors the postgres store's last-owner rule for the one
 // membership this fake holds: an active owner is the tenant's last.
-func (s *connectMembershipStore) RemoveMembership(context.Context, string, string, string) error {
+func (s *connectMembershipStore) RemoveMembership(context.Context, string, string, string) (*service.TenantMembership, error) {
 	if s.member != nil && s.member.Role == service.RoleOwner && s.member.Status == service.MembershipStatusActive {
-		return service.ErrLastOwner
+		return nil, service.ErrLastOwner
 	}
-	return nil
+	return s.member, nil
+}
+
+// JoinByDomain grants a domain member, as GrantMembership records it.
+func (s *connectMembershipStore) JoinByDomain(ctx context.Context, projectID, tenantID, userID, _ string) (*service.TenantMembership, bool, error) {
+	return s.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: userID,
+		Source: service.MembershipSourceDomain, Role: service.RoleMember, Status: service.MembershipStatusActive,
+	})
+}
+
+func (s *connectMembershipStore) IsRemoved(context.Context, string, string, string) (bool, error) {
+	return false, nil
 }
 
 // TransferOwnership reports the transfer as made: toUserID an added owner,

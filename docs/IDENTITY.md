@@ -126,7 +126,10 @@ suite (email, productivity tools).
      domain member (`JoinTenantByDomain`) without an invitation: someone
      left in the domain's latent tenant when a different tenant verified
      the domain, someone whose email moved onto the domain after signup, or
-     someone whose membership ended (ADR-0018, Joining by domain).
+     someone whose membership ended (ADR-0018, Joining by domain). A
+     person an owner or admin removed (`RemoveTenantMember`) cannot join
+     this way until an invitation or an operator's grant lets them back
+     in (`tenant_member_removals`).
 - Per-request resolution is **Project first, then Tenant**: the project
   is resolved from an `X-Project-Key` credential or the `Host` header (a
   project auth-domain), and the tenant from the authenticated user's
@@ -746,7 +749,10 @@ Where a tenant admin has turned joining on for a verified domain
 in the domain's latent tenant when a different tenant verified the domain,
 moved onto the domain after signup, or whose membership ended) joins with
 `JoinTenantByDomain`, which writes a `domain` membership like the one
-signup would have.
+signup would have. `RemoveTenantMember` records the removal in
+`tenant_member_removals`, and while that record stands neither a join nor
+auto-formation makes the person a member again; any of the explicit grants
+above deletes it.
 
 ## Identity's role model vs tenant-shard-db's role model
 

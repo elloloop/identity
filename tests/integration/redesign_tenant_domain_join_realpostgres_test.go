@@ -21,8 +21,9 @@ import (
 // verifies the domain, the account still may not join until the tenant's
 // owner turns joining on; then it finds the tenant and joins it as a domain
 // member, a retry changes nothing, and turning joining off ends no
-// membership and still returns it to a retry. While joining is on, a member
-// removed can join again. An account whose email moves onto the domain
+// membership and still returns it to a retry. A member an owner removes
+// cannot join again, even while joining is on, until an invitation they
+// accept lets them back in. An account whose email moves onto the domain
 // after signup joins too, and moving it off again ends the membership. Only
 // an admin turns joining on or off, only a verified email on the domain
 // joins, and every change and join is audited.
@@ -144,8 +145,8 @@ func TestRedesign_TenantDomainJoin(t *testing.T) {
 		t.Fatalf("a retry with joining off returned %+v, want %+v", held.Msg.GetMembership(), m)
 	}
 
-	// While joining is on, a member removed who is still on the domain can
-	// join again.
+	// A member an owner removes cannot join again by domain, even while
+	// joining is on; an invitation they accept lets them back in.
 	if _, err := setJoin(founder, true); err != nil {
 		t.Fatalf("SetDomainJoin on again: %v", err)
 	}
@@ -154,15 +155,35 @@ func TestRedesign_TenantDomainJoin(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("RemoveTenantMember: %v", err)
 	}
-	if got := joinable(early); len(got) != 1 || got[0].GetTenantId() != tenantID {
-		t.Fatalf("joinable after removal = %v, want %s", got, tenantID)
+	if got := joinable(early); len(got) != 0 {
+		t.Fatalf("joinable after removal = %v, want none", got)
+	}
+	_, err = join(early)
+	requireConnectCode(t, "joining after a removal", err, connect.CodePermissionDenied)
+	if roles := tenantRoles(t, founder, tenantID); roles[early.userID] != "" {
+		t.Fatalf("members after a refused join = %v, want %s outside the tenant", roles, early.userID)
+	}
+	earlyEmail := "early@" + domain
+	if _, err := founder.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+		TenantId: tenantID, Email: earlyEmail, Role: service.RoleMember,
+	})); err != nil {
+		t.Fatalf("CreateTenantInvitation: %v", err)
+	}
+	accepted, err := early.client.AcceptTenantInvitation(ctx, connect.NewRequest(&identitypb.AcceptTenantInvitationRequest{
+		Token: extractMailedToken(t, h, earlyEmail),
+	}))
+	if err != nil {
+		t.Fatalf("AcceptTenantInvitation after removal: %v", err)
+	}
+	if r := accepted.Msg.GetMembership(); r.GetStatus() != service.MembershipStatusActive || r.GetSource() != service.MembershipSourceInvited {
+		t.Fatalf("membership after the invitation = %+v, want an active invited member", r)
 	}
 	rejoined, err := join(early)
 	if err != nil {
-		t.Fatalf("JoinTenantByDomain after removal: %v", err)
+		t.Fatalf("JoinTenantByDomain after the invitation: %v", err)
 	}
-	if r := rejoined.Msg.GetMembership(); r.GetStatus() != service.MembershipStatusActive || r.GetSource() != service.MembershipSourceDomain {
-		t.Fatalf("membership after rejoining = %+v, want an active domain member", r)
+	if rejoined.Msg.GetMembership().GetSource() != service.MembershipSourceInvited {
+		t.Fatalf("a join after the invitation returned %+v, want the invited membership", rejoined.Msg.GetMembership())
 	}
 
 	// An account whose email moves onto the domain after signup joins it,
@@ -193,9 +214,13 @@ func TestRedesign_TenantDomainJoin(t *testing.T) {
 	if len(sets) != 3 || sets[0]["allow_join"] != true || sets[1]["allow_join"] != false || sets[2]["allow_join"] != true || sets[0]["domain"] != domain {
 		t.Fatalf("%s events = %v, want on, off, on", audit.EventDomainJoinSet, sets)
 	}
-	joins := waitForTenantAuditEvents(t, h.ProjectID, tenantID, audit.EventTenantJoinedByDomain, 3)
-	if len(joins) != 3 || joins[0]["domain"] != domain {
-		t.Fatalf("%s events = %v, want three: the join, the rejoin and the mover's", audit.EventTenantJoinedByDomain, joins)
+	joins := waitForTenantAuditEvents(t, h.ProjectID, tenantID, audit.EventTenantJoinedByDomain, 2)
+	if len(joins) != 2 || joins[0]["domain"] != domain {
+		t.Fatalf("%s events = %v, want two: the join and the mover's", audit.EventTenantJoinedByDomain, joins)
+	}
+	removals := waitForTenantAuditEvents(t, h.ProjectID, tenantID, audit.EventTenantMemberRemoved, 1)
+	if len(removals) != 1 || removals[0]["role"] != service.RoleMember || removals[0]["source"] != service.MembershipSourceDomain {
+		t.Fatalf("%s events = %v, want the removal of a domain member", audit.EventTenantMemberRemoved, removals)
 	}
 }
 

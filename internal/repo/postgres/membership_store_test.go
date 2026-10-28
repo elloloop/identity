@@ -110,14 +110,14 @@ func runMembershipSmoke(t *testing.T, dsn string) {
 	require.Len(t, forTenant, 2)
 
 	// Remove + miss + validation.
-	require.NoError(t, ms.RemoveMembership(ctx, projectID, tenantID, user2))
+	require.NoError(t, removeErr(ctx, ms, projectID, tenantID, user2))
 	gone, err := ms.GetMembership(ctx, projectID, tenantID, user2)
 	require.NoError(t, err)
 	require.Nil(t, gone)
-	require.NoError(t, ms.RemoveMembership(ctx, projectID, tenantID, "no-such-user"), "removing an absent membership is a no-op")
+	require.NoError(t, removeErr(ctx, ms, projectID, tenantID, "no-such-user"), "removing an absent membership is a no-op")
 	_, err = ms.UpsertMembership(ctx, &service.TenantMembership{ProjectID: projectID})
 	require.ErrorIs(t, err, service.ErrInvalidArgument)
-	require.ErrorIs(t, ms.RemoveMembership(ctx, "", tenantID, user1), service.ErrInvalidArgument)
+	require.ErrorIs(t, removeErr(ctx, ms, "", tenantID, user1), service.ErrInvalidArgument)
 
 	// ── invitations: one-open-invite via atomic revoke-then-insert ──
 	_, err = is.CreateInvitation(ctx, &service.TenantInvitation{
@@ -421,7 +421,7 @@ func TestMembershipStore_GrantNeverLowersARole(t *testing.T) {
 	require.Error(t, err)
 
 	// However an owner grant and member grants interleave, the owner stays.
-	require.NoError(t, ms.RemoveMembership(ctx, projectID, tenantID, user2))
+	require.NoError(t, removeErr(ctx, ms, projectID, tenantID, user2))
 	const racers = 8
 	errs := make(chan error, racers)
 	for i := range racers {
@@ -697,18 +697,18 @@ func TestMembershipStore_RemoveKeepsAnOwner(t *testing.T) {
 
 	put(user1, service.RoleOwner, service.MembershipStatusActive)
 	put(user2, service.RoleMember, service.MembershipStatusActive)
-	require.ErrorIs(t, ms.RemoveMembership(ctx, projectID, tenantID, user1), service.ErrLastOwner)
+	require.ErrorIs(t, removeErr(ctx, ms, projectID, tenantID, user1), service.ErrLastOwner)
 	require.True(t, held(user1), "a refused removal deletes nothing")
 
 	put(user2, service.RoleOwner, service.MembershipStatusActive)
-	require.NoError(t, ms.RemoveMembership(ctx, projectID, tenantID, user1), "another owner remains")
+	require.NoError(t, removeErr(ctx, ms, projectID, tenantID, user1), "another owner remains")
 	require.False(t, held(user1))
-	require.ErrorIs(t, ms.RemoveMembership(ctx, projectID, tenantID, user2), service.ErrLastOwner)
+	require.ErrorIs(t, removeErr(ctx, ms, projectID, tenantID, user2), service.ErrLastOwner)
 
 	put(user1, service.RoleOwner, service.MembershipStatusInactive)
-	require.NoError(t, ms.RemoveMembership(ctx, projectID, tenantID, user1), "an inactive owner is not one the tenant relies on")
+	require.NoError(t, removeErr(ctx, ms, projectID, tenantID, user1), "an inactive owner is not one the tenant relies on")
 	require.False(t, held(user1))
-	require.NoError(t, ms.RemoveMembership(ctx, projectID, tenantID, user1), "removing an absent membership is a no-op")
+	require.NoError(t, removeErr(ctx, ms, projectID, tenantID, user1), "removing an absent membership is a no-op")
 }
 
 // TestMembershipStore_ConcurrentRemovalsKeepAnOwner: removals that race
@@ -758,7 +758,7 @@ func TestMembershipStore_ConcurrentRemovalsKeepAnOwner(t *testing.T) {
 		return errA, errB
 	}
 	remove := func(userID string) func() error {
-		return func() error { return ms.RemoveMembership(ctx, projectID, tenantID, userID) }
+		return func() error { return removeErr(ctx, ms, projectID, tenantID, userID) }
 	}
 
 	const rounds = 20
