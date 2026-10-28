@@ -181,7 +181,7 @@ const (
 	EventPlatformAdminBootstrapBlocked EventType = "platform_admin_bootstrap_blocked"
 
 	// EventLoginPolicyUpserted / EventLoginPolicyDeleted record an operator
-	// authoring or clearing a claimed tenant's LoginPolicy (the policy the
+	// authoring or clearing a tenant's LoginPolicy (the policy the
 	// login path enforces). EventProjectConfigUpdated records an operator
 	// replacing a project's config_json blob. They make control-plane policy
 	// changes — which alter how every member of a tenant/project authenticates

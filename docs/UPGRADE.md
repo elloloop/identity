@@ -1,5 +1,50 @@
 # Upgrade guide
 
+## Next — a suspended tenant's login policy keeps governing sign-in (behaviour change; no migration)
+
+A tenant's login policy now governs the sign-ins through its verified
+domains while the tenant is suspended, as it does while it is claimed.
+Until now the policy was looked up only for a claimed tenant, so suspending
+a tenant, through `AdminSuspendTenant` or in SQL, put the accounts on its
+verified domains under the project's default controls, and where the
+tenant's policy was stricter than the project's, the suspension loosened
+them. A suspension stops a tenant being chosen for a token and administered
+by its members; it never loosens sign-in controls
+([ADR-0018, Suspension](adr/0018-self-service-tenants-and-tenant-selection.md#suspension)).
+
+While a tenant is suspended, the accounts on its verified domains get the
+same answers from its policy as while it is claimed:
+
+- a method the policy does not allow is `PERMISSION_DENIED`;
+- any method but SSO, when the policy requires SSO, is
+  `FAILED_PRECONDITION` (`ErrSSORequired`);
+- a single-factor sign-in, when the policy requires 2FA, goes on to the
+  second-factor step, and is `FAILED_PRECONDITION` (`ErrTotpRequired`)
+  for an account with no second factor enrolled;
+- a new password must be at least the policy's minimum length;
+- sessions end at the policy's idle and absolute timeouts, which also
+  bound how long an agent the account connects keeps its grant.
+
+This works in both directions. A tenant's policy replaces the project's
+defaults rather than adding to them, so where a suspended tenant's policy
+is looser than the project's, its accounts now sign in under the looser
+policy, as they did before the suspension, where the previous release put
+them under the project's stricter defaults. Before upgrading, check the
+policies of the tenants you have suspended (`GetLoginPolicy`), and tighten
+any that should be stricter while the tenant is investigated with
+`UpsertLoginPolicy`.
+
+Restoring the tenant leaves sign-in as it was. A latent tenant still
+governs nothing. An operator who wants a suspended tenant's accounts to
+sign in under other controls changes or deletes its policy with
+`UpsertLoginPolicy` or `DeleteLoginPolicy`, which work on a suspended
+tenant as on a claimed one and are audited.
+
+There is no new setting and no schema change, and a rolling deploy needs
+no care beyond the usual: until every replica runs this release, a replica
+of the previous one still applies the project's defaults to a suspended
+tenant's accounts.
+
 ## Next — join a tenant by its domain: `SetDomainJoin`, `ListJoinableTenants` and `JoinTenantByDomain` (migration 0051; additive RPCs; `Domain.allow_join`; `DomainStore.SetDomainAllowJoin` (Go API))
 
 A person who signs up, or promotes an anonymous account, with a verified
@@ -268,9 +313,8 @@ characters) and records it in the audit trail.
   admins can no longer administer it, and the agent grants and machines of
   its members, in any membership status, and of the accounts on its verified
   domains and its primary domain are revoked. Its
-  domains, members and invitations are kept. **Its login policy stops
-  governing sign-in** while it is suspended: accounts on its verified
-  domains sign in under the project's default controls instead (see
+  domains, members and invitations are kept, and its login policy keeps
+  governing the sign-ins through its verified domains (see
   [Suspending a tenant](#suspending-a-tenant)).
 - **`AdminRestoreTenant(project_id, tenant_id, reason)`** moves a
   `suspended` tenant back to `claimed` and records `tenant_restored`.
@@ -603,33 +647,24 @@ An operator suspends a tenant with `AdminSuspendTenant` and restores it with
 
 A suspension revokes the agent grants and machines of the tenant's members,
 in any membership status, and of the accounts on its verified domains and
-its primary domain. Its selected tokens are refused
-by identity's HTTP chain within the tenant-status cache TTL, and by a host
-that verifies tokens itself only when they expire. Its owners and admins are
-refused (`PERMISSION_DENIED`) by every domain and membership RPC, and an
-invitation to it can no longer be accepted; its domains, members and pending
+its primary domain. Its selected tokens are refused by identity's HTTP chain
+within the tenant-status cache TTL, and by a host that verifies tokens
+itself only when they expire. Its owners and admins are refused
+(`PERMISSION_DENIED`) by every domain and membership RPC, and an invitation
+to it can no longer be accepted; its domains, members and pending
 invitations are kept. Its members keep their accounts and their
-default-tenant tokens, but **the tenant's login policy stops governing
-sign-in** for the accounts on its verified domains, which fall back to the
-project's defaults while it is suspended:
-
-- the allowed sign-in methods, the SSO requirement and the 2FA requirement
-  are the project's, not the tenant's;
-- a new password is held to the server's length rules, not the tenant's
-  minimum;
-- the tenant's idle and absolute session timeouts no longer end their
-  sessions, and no longer bound how long an agent they connect keeps its
-  grant.
-
-So a suspension does not hold those accounts to tighter controls: where the
-tenant's policy is stricter than the project's, it loosens them.
+default-tenant tokens, and the tenant's login policy keeps governing the
+sign-ins through its verified domains: its allowed methods, SSO and 2FA
+requirements, password minimum and session timeouts apply to those accounts
+while it is suspended as they did while it was claimed. A suspension never
+loosens sign-in controls.
 
 Restoring it gives back selection, at once for a refresh and within the
-cache TTL on identity's HTTP chain, and administration, at once. It brings
-the tenant's login policy back, and, like every change of a tenant's status,
-revokes again the agent grants and machines of the same members and
-accounts, including any connected during the suspension. It revives no grant
-the suspension revoked.
+cache TTL on identity's HTTP chain, and administration, at once. It leaves
+sign-in as it was, and, like every change of a tenant's status, revokes
+again the agent grants and machines of the same members and accounts,
+including any connected during the suspension. It revives no grant the
+suspension revoked.
 
 ### Accepting an invitation needs a verified email (behaviour change)
 

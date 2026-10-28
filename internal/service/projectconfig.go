@@ -39,7 +39,7 @@ type ProjectConfig struct {
 	Passkey ProjectPasskeyConfig `json:"passkey"`
 
 	// Login holds the project-wide login-method defaults applied to users
-	// who have NO claimed tenant (the common case for a consumer pool). A
+	// whose sign-in no tenant governs (the common case for a consumer pool). A
 	// tenant's LoginPolicy, when one applies, fully overrides these.
 	Login ProjectLoginConfig `json:"login"`
 
@@ -539,8 +539,9 @@ func validateHTTPURL(raw, field string) error {
 // ProjectLoginConfig is the project-wide login-method default, layered UNDER
 // any tenant LoginPolicy (tenant overrides project overrides global). It lets
 // an operator constrain authentication for an ENTIRE project — e.g. a kids
-// pool that disables passkeys/OAuth/SSO — for users whose email domain maps
-// to no claimed tenant, who would otherwise get no restriction at all.
+// pool that disables passkeys/OAuth/SSO — for users whose email domain no
+// tenant that governs sign-in (governsSignIn) has verified, who would
+// otherwise get no restriction at all.
 //
 // The zero value is "no project-wide restriction", so an existing project
 // with empty config_json behaves exactly as before.

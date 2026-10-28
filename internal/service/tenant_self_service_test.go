@@ -678,6 +678,35 @@ func TestRefreshToken_SelectionHeldToTheTenantsLoginPolicy(t *testing.T) {
 	}
 }
 
+// A session whose sign-in a suspended tenant governed, through the
+// account's domain, is not admitted to another tenant whose policy
+// restricts sign-in: that policy governed nothing about how it signed in.
+func TestRefreshToken_SelectionOfAnotherTenantWhileASuspendedOneGoverns(t *testing.T) {
+	f := newSelectionFixture(t)
+	f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
+	project := f.project()
+	f.svc.WithLoginGovernance(&LoginGovernance{
+		Domains: &lpDomainStore{byName: map[string]*Domain{
+			project + "|example.com":       {ProjectID: project, TenantID: "t-held", Domain: "example.com", Status: DomainStatusVerified},
+			project + "|acme.example.test": {ProjectID: project, TenantID: "t-acme", Domain: "acme.example.test", Status: DomainStatusVerified},
+		}},
+		Tenants: &lpTenantStore{byID: map[string]*Tenant{
+			project + "|t-held": {ID: "t-held", ProjectID: project, Status: TenantStatusSuspended},
+			project + "|t-acme": {ID: "t-acme", ProjectID: project, Status: TenantStatusClaimed},
+		}},
+		Policies: &fakePolicyStore{byTenant: map[string]*LoginPolicy{
+			project + "|t-held": {ProjectID: project, TenantID: "t-held", AllowedMethods: LoginMethodPassword},
+			project + "|t-acme": {ProjectID: project, TenantID: "t-acme", SSORequired: true},
+		}},
+	})
+
+	_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	requireSelectionRefusal(t, err, TenantSelectionLoginPolicy)
+	_, _, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
+	require.NoError(t, err, "the refused selection left the refresh token unspent")
+}
+
 // A policy that cannot be read refuses the selection as unavailable, with a
 // message that does not carry the store's error, and spends nothing.
 func TestRefreshToken_SelectionPolicyLookupFailureIsUnavailable(t *testing.T) {

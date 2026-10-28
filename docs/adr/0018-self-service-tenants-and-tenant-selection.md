@@ -15,8 +15,12 @@ on with `GATEWAY_TENANT_SELECTION_ENABLED`.
 `claimed` and `suspended` with a required reason that the audit trail
 keeps, so suspending a tenant no longer needs database access and is no
 longer unaudited. A restore, like every status change, revokes the
-governed agents again, and today a suspension also stops the tenant's
-login policy governing sign-in ([Suspension](#suspension)).
+governed agents again.
+
+**Amended** (2026-10-27): a suspended tenant's login policy keeps governing
+the sign-ins through its verified domains. A suspension stops selection and
+administration and never loosens sign-in controls
+([Suspension](#suspension)).
 
 **Amended** (2026-10-27): ownership can move. `TransferTenantOwnership`
 lets an owner hand a tenant to another member, and
@@ -231,33 +235,41 @@ be suspended.
 
 A suspension revokes the agent grants and machines of its members, in any
 membership status, and of the accounts on its verified domains and its
-primary domain (decision 7), ends its selected tokens
-within the cache TTL, and stops its admins administering it (decision 6).
-Its members keep their accounts and their default-tenant tokens.
+primary domain (decision 7), ends its selected tokens within the cache TTL,
+and stops its admins administering it (decision 6). Its members keep their
+accounts and their default-tenant tokens.
 
-It also stops the tenant's login policy governing sign-in. The policy is
-looked up only for a claimed tenant, so while the tenant is suspended the
-accounts on its verified domains sign in under the project's default
-controls: its allowed methods, SSO and 2FA requirements, password minimum
-and session timeouts no longer apply to them, nor bound their agents'
-grants. That is not what stopping a tenant should mean, since a tenant
-suspended to contain its accounts ends up with looser controls on them, and
-it is recorded here as the behaviour this amendment found, to be changed so
-that a suspension never loosens sign-in controls.
+**Decision: a suspension stops selection and administration and never
+loosens sign-in controls.** The tenant's login policy keeps governing the
+sign-ins through its verified domains while it is suspended: its allowed
+methods, SSO and 2FA requirements, password minimum and session timeouts
+apply to those accounts, and bound their agents' grants, exactly as while
+it was claimed. A tenant is suspended to contain it, often while someone
+investigates it, and that is the moment its accounts should be held to the
+controls its admins set, not released to the project's defaults. The
+policy was first looked up only for a claimed tenant, so a suspension,
+whether through `AdminSuspendTenant` or in SQL, put those accounts under
+the project's defaults and, where the tenant's policy was stricter,
+loosened them; that is corrected. A latent tenant, which no one has shown
+to own its domain, still governs nothing. An operator who wants other
+controls on a suspended tenant's accounts changes its policy with the
+login-policy operator RPCs, which are audited, rather than relying on the
+status.
 
-Restoring a tenant gives back administration and selection at once, though a
-replica that cached the suspended status refuses the tenant's selected
-tokens until the entry expires, within the cache TTL. It brings back the
-login policy. A restore is a status change like any other, so it revokes the
-governed agent grants and machines again, including any connected during the
-suspension, and revives none the suspension revoked: the conservative choice
-for a tenant that may have been suspended for an investigation. A tenant
-with no creator and no owner or admin cannot be restored until an operator
-appoints an owner with `AdminRecoverTenantOwnership` (or adds an admin with
-`AdminAddTenantAdmin`): a latent tenant suspended in SQL looks like that,
-and restoring it would make it selectable without anyone having verified its
-domain. A call that loses a race with another status change is refused as
-aborted rather than as a precondition, so the caller reads the tenant again.
+Restoring a tenant gives back administration and selection at once, though
+a replica that cached the suspended status refuses the tenant's selected
+tokens until the entry expires, within the cache TTL. It leaves sign-in as
+it was. A restore is a status change like any other, so it revokes the
+governed agent grants and machines again, including any connected during
+the suspension, and revives none the suspension revoked: the conservative
+choice for a tenant that may have been suspended for an investigation. A
+tenant with no creator and no owner or admin cannot be restored until an
+operator appoints an owner with `AdminRecoverTenantOwnership` (or adds an
+admin with `AdminAddTenantAdmin`): a latent tenant suspended in SQL looks
+like that, and restoring it would make it selectable without anyone having
+verified its domain. A call that loses a race with another status change is
+refused as aborted rather than as a precondition, so the caller reads the
+tenant again.
 
 ### Ownership
 

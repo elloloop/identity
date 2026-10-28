@@ -16539,8 +16539,10 @@ func (x *CreateFirstPlatformAdminResponse) GetGeneratedPassword() string {
 	return ""
 }
 
-// LoginPolicy is a claimed tenant's authentication policy, as authored and
-// read back by the operator RPCs. It mirrors service.LoginPolicy.
+// LoginPolicy is a tenant's authentication policy, as authored and read back
+// by the operator RPCs. It governs the sign-ins through the tenant's verified
+// domains while the tenant is claimed or suspended. It mirrors
+// service.LoginPolicy.
 type LoginPolicy struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`

@@ -935,9 +935,9 @@ type IdentityServiceClient interface {
 	// it, and the agent grants and machines of its members, in any
 	// membership status, and of the accounts on its verified domains and its
 	// primary domain are revoked. Its domains, members and
-	// invitations are kept. While it is suspended its login policy does not
-	// govern sign-in: the accounts on its verified domains sign in under the
-	// project's default controls.
+	// invitations are kept. Its login policy keeps governing the sign-ins
+	// through its verified domains: a suspension never loosens sign-in
+	// controls.
 	//
 	// A tenant already suspended is returned unchanged and nothing is
 	// recorded, so a retry is safe. Operator-only, like the other Admin*
@@ -951,11 +951,11 @@ type IdentityServiceClient interface {
 	// reason, IP address and user agent in the audit trail as tenant_restored.
 	// Administration and a refresh that chooses the tenant work again at once;
 	// identity's HTTP chain accepts the tokens that chose it within
-	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy governs sign-in
-	// again. Like any change of a tenant's status, a restore revokes again the
-	// agent grants and machines of the same members and accounts, including any
-	// connected while it was suspended, and brings back none the suspension
-	// revoked.
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Sign-in is as it was: its login
+	// policy governed it throughout. Like any change of a tenant's status, a
+	// restore revokes again the agent grants and machines of the same members
+	// and accounts, including any connected while it was suspended, and brings
+	// back none the suspension revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
 	// so a retry is safe. Operator-only, with the same refusals as
@@ -998,8 +998,9 @@ type IdentityServiceClient interface {
 	LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error)
 	UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error)
 	// Per-tenant LoginPolicy authoring. These write the policy the login path
-	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
-	// tenant within a project — at most one policy per (project, tenant).
+	// enforces (allowed methods, SSO-required, require-2FA) for a tenant
+	// within a project — at most one policy per (project, tenant). The login
+	// path applies it while the tenant is claimed or suspended.
 	// Operator-only: authenticated by the shared admin secret, like the other
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)
@@ -3466,9 +3467,9 @@ type IdentityServiceHandler interface {
 	// it, and the agent grants and machines of its members, in any
 	// membership status, and of the accounts on its verified domains and its
 	// primary domain are revoked. Its domains, members and
-	// invitations are kept. While it is suspended its login policy does not
-	// govern sign-in: the accounts on its verified domains sign in under the
-	// project's default controls.
+	// invitations are kept. Its login policy keeps governing the sign-ins
+	// through its verified domains: a suspension never loosens sign-in
+	// controls.
 	//
 	// A tenant already suspended is returned unchanged and nothing is
 	// recorded, so a retry is safe. Operator-only, like the other Admin*
@@ -3482,11 +3483,11 @@ type IdentityServiceHandler interface {
 	// reason, IP address and user agent in the audit trail as tenant_restored.
 	// Administration and a refresh that chooses the tenant work again at once;
 	// identity's HTTP chain accepts the tokens that chose it within
-	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Its login policy governs sign-in
-	// again. Like any change of a tenant's status, a restore revokes again the
-	// agent grants and machines of the same members and accounts, including any
-	// connected while it was suspended, and brings back none the suspension
-	// revoked.
+	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Sign-in is as it was: its login
+	// policy governed it throughout. Like any change of a tenant's status, a
+	// restore revokes again the agent grants and machines of the same members
+	// and accounts, including any connected while it was suspended, and brings
+	// back none the suspension revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
 	// so a retry is safe. Operator-only, with the same refusals as
@@ -3529,8 +3530,9 @@ type IdentityServiceHandler interface {
 	LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error)
 	UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error)
 	// Per-tenant LoginPolicy authoring. These write the policy the login path
-	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
-	// tenant within a project — at most one policy per (project, tenant).
+	// enforces (allowed methods, SSO-required, require-2FA) for a tenant
+	// within a project — at most one policy per (project, tenant). The login
+	// path applies it while the tenant is claimed or suspended.
 	// Operator-only: authenticated by the shared admin secret, like the other
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)

@@ -131,9 +131,10 @@ type Deps struct {
 	LoginPolicyStore service.LoginPolicyStore
 
 	// LoginGovernance is the read-side bundle the login path consults to
-	// enforce a claimed tenant's LoginPolicy. Non-nil only for the postgres
-	// driver (the only one with a governance plane); when nil, login imposes
-	// no policy restriction.
+	// enforce the LoginPolicy of the tenant that governs sign-in
+	// (service.governsSignIn). Non-nil only for the postgres driver (the only
+	// one with a governance plane); when nil, login imposes no policy
+	// restriction.
 	LoginGovernance *service.LoginGovernance
 
 	// DNSResolver is the TXT-lookup boundary VerifyDomain uses to confirm a

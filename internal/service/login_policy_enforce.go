@@ -135,7 +135,7 @@ func emailDomain(email string) string {
 const msPerSecond = 1000
 
 // LoginGovernance is the read-side bundle the login path consults to enforce
-// a claimed tenant's LoginPolicy. It is postgres-only governance state, set
+// the governing tenant's LoginPolicy. It is postgres-only governance state, set
 // once via AuthService.WithLoginGovernance; drivers without a governance
 // plane (memory) leave it nil and impose no restriction.
 //
@@ -148,7 +148,7 @@ type LoginGovernance struct {
 	Policies LoginPolicyStore
 }
 
-// loginPolicyDecision is the outcome of consulting a claimed tenant's
+// loginPolicyDecision is the outcome of consulting the governing tenant's
 // LoginPolicy after a primary method has been verified. The zero value is
 // "no governed restriction" — every fail-safe exit returns it — so a caller
 // can always act on the decision without a nil check.
@@ -186,7 +186,7 @@ func isSecondFactorSatisfyingMethod(method string) bool {
 // account existence.
 //
 // It fails SAFE at every step: no governance bundle, no resolved project, an
-// unverified or unknown domain, an unclaimed tenant, an absent policy, or any
+// unverified or unknown domain, a latent tenant, an absent policy, or any
 // lookup error all impose NO restriction (returning the zero decision), so a
 // misconfiguration or an infrastructure blip can never lock a tenant out of
 // its own login.
@@ -259,15 +259,16 @@ func (s *AuthService) enforceLoginPolicy(ctx context.Context, email, method stri
 }
 
 // resolveLoginPolicy binds the request's project scope to the shared
-// governance lookup for the claimed tenant that owns email's domain.
+// governance lookup for the tenant that governs email's domain.
 func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Tenant, *LoginPolicy) {
 	tenant, policy, _ := s.governance.resolvePolicy(ctx, s.projectID(ctx), s.logger, email)
 	return tenant, policy
 }
 
 // resolvePolicy walks the governance plane (domain → tenant → policy) for the
-// claimed tenant that owns email's domain and returns its LoginPolicy, or
-// (nil, nil) when there is no governed policy to apply.
+// tenant that owns email's verified domain and governs sign-in (see
+// governsSignIn) and returns it with its LoginPolicy, or (nil, nil) when
+// there is no governed policy to apply.
 //
 // Lookup errors remain distinguishable from an absent policy. Ordinary human
 // login retains its documented project-default behavior; delegated admission
@@ -303,7 +304,7 @@ func (g *LoginGovernance) resolvePolicy(ctx context.Context, projectID string, l
 			zap.String("project_id", projectID), zap.String("tenant_id", domain.TenantID), zap.Error(err))
 		return nil, nil, err
 	}
-	if tenant == nil || tenant.Status != TenantStatusClaimed {
+	if tenant == nil || !governsSignIn(tenant.Status) {
 		return nil, nil, nil
 	}
 
@@ -348,7 +349,7 @@ func (g *LoginGovernance) validatePasswordStrength(ctx context.Context, projectI
 // the project default applies).
 //
 // It fails SAFE: when resolveLoginPolicy finds no governed tenant policy
-// (unverified/unknown domain, unclaimed tenant, absent policy, or any lookup
+// (unverified/unknown domain, latent tenant, absent policy, or any lookup
 // error) it falls back to the project default rather than locking a user out
 // — so a misconfiguration or an infrastructure blip can never become a login
 // lockout. A tenant policy, once found, fully replaces the project default (it
