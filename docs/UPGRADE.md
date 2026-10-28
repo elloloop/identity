@@ -1,21 +1,36 @@
 # Upgrade guide
 
-## Next — built with go-jose v4.1.6 for CVE-2026-116587 (no API or schema change)
+## Next — built with go-jose v4.1.6 for CVE-2026-116587; v4.26.0 withdrawn (no API or schema change)
 
 The binary now links `github.com/go-jose/go-jose/v4` v4.1.6, which fixes
 CVE-2026-116587, a denial of service when parsing a JSON Web Key that holds an
-RSA key. Identity does not import go-jose itself; it arrives through the OpenID
-provider library behind the agent OAuth endpoints (`internal/app/agent_oauth.go`).
-govulncheck has no entry for the advisory yet, so it gives no reachability
-answer, and the release image scan gates on any fixable HIGH finding, so the fix
-is the upgrade rather than a suppression. `pkg/` does not depend on go-jose, so
-code embedding those libraries is unaffected.
+RSA key. Every release from v4.19.0 to v4.26.0 links the vulnerable v4.1.4:
+v4.19.0 brought go-jose in with the OpenID provider library behind the agent
+OAuth endpoints (`internal/app/agent_oauth.go`), its only user. Those endpoints
+are mounted only with `GATEWAY_AGENT_OAUTH_ENABLED=true` (off by default), so a
+deployment with the flag off does not serve them; upgrade either way, since an
+image scanner flags the library regardless. govulncheck has no entry for the
+advisory yet, so it gives no reachability answer, and the release image scan
+gates on any fixable HIGH finding, so the fix is the upgrade rather than a
+suppression.
 
-v4.26.0's image was built, signed and published before its scan found the
-advisory, so that release failed its gate: do not deploy v4.26.0, take the next
-release instead. It adds nothing else, so the entries below that v4.26.0
-introduced (migrations 0051 and 0052 and their rollout notes) apply to it
-unchanged.
+Code that imports only `pkg/...` does not link go-jose. A program embedding
+`identityserver` links it through the same provider library: require the commit
+of `github.com/elloloop/identity` that carries this entry, or a later one, or
+run `go get github.com/go-jose/go-jose/v4@v4.1.6` in the host module. A host
+module that also uses go-jose v4 itself should know that v4.1.6 no longer
+exports `RandReader` and refuses RSA keys over 4096 bits in a JSON Web Key by
+default (`MaxRSAModulusBits`).
+
+v4.26.0 is singled out only because its release scan ran after the advisory was
+published: its image was built, signed and published before the scan failed.
+Do not deploy it, and move any deployment on v4.19.0 to v4.25.0 to the next
+release. Until that release is published, the `4.26`, `4` and `latest` image
+tags resolve to v4.26.0's image, so pin the next release's version rather than a
+floating tag. This entry is the only change the next release adds, so the three
+entries below that v4.26.0 introduced (joining a tenant by domain with migration
+0051, a suspended tenant's login policy, and the removal record with migration
+0052, with their rollout notes) apply to it unchanged.
 
 ## Next — a member removed from a tenant cannot rejoin it by domain (migration 0052; behaviour change; `RemoveTenantMember` audited; `MembershipStore.RemoveMembership`, `JoinByDomain`, `IsRemoved` and `MembershipService.RemoveTenantMember` (Go API))
 
