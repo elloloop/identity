@@ -177,7 +177,7 @@ func TestGovernanceRevocation_SettingDomainJoinRevokesNothing(t *testing.T) {
 	f.requireNothingRevoked(ctx, t, e)
 }
 
-// TestDomainJoinMigrationRoundTrip asserts 0050 adds domains.allow_join,
+// TestDomainJoinMigrationRoundTrip asserts 0051 adds domains.allow_join,
 // false on every existing row, and its down drops it.
 func TestDomainJoinMigrationRoundTrip(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
@@ -206,7 +206,7 @@ func TestDomainJoinMigrationRoundTrip(t *testing.T) {
 		return def, true
 	}
 
-	migrateToVersion(t, scratch, 49)
+	migrateToVersion(t, scratch, 50)
 	_, exists := column()
 	require.False(t, exists)
 	for _, q := range []string{
@@ -219,10 +219,10 @@ func TestDomainJoinMigrationRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	for _, version := range []uint{50, 49, 50} {
+	for _, version := range []uint{51, 50, 51} {
 		migrateToVersion(t, scratch, version)
 		def, exists := column()
-		require.Equal(t, version == 50, exists, "version %d", version)
+		require.Equal(t, version == 51, exists, "version %d", version)
 		if exists {
 			require.Equal(t, "false", def)
 			var allowJoin bool

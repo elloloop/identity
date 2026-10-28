@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — join a tenant by its domain: `SetDomainJoin`, `ListJoinableTenants` and `JoinTenantByDomain` (migration 0050; additive RPCs; `Domain.allow_join`; `DomainStore.SetDomainAllowJoin` (Go API))
+## Next — join a tenant by its domain: `SetDomainJoin`, `ListJoinableTenants` and `JoinTenantByDomain` (migration 0051; additive RPCs; `Domain.allow_join`; `DomainStore.SetDomainAllowJoin` (Go API))
 
 A person who signs up, or promotes an anonymous account, with a verified
 email joins the tenant of that email's domain through auto-formation
@@ -59,9 +59,9 @@ still on the domain can join again: turn joining off first to keep them
 out. Two joins racing for one account make one membership and are recorded
 once.
 
-### Migration 0050
+### Migration 0051
 
-0050 adds `domains.allow_join BOOLEAN NOT NULL DEFAULT false`. A constant
+0051 adds `domains.allow_join BOOLEAN NOT NULL DEFAULT false`. A constant
 default rewrites no rows, but the `ALTER TABLE` takes an `ACCESS EXCLUSIVE`
 lock on `domains` while the catalog changes, so reads and writes to it,
 signup's auto-formation included, wait that long. While the `ALTER` waits
@@ -71,7 +71,7 @@ writes to `domains` queue behind it too, for up to the migration's 10-second
 trigger of 0046 fires on a domain's status, tenant or name only, so writing
 `allow_join` signs no agent out.
 
-This release reads `allow_join` on every read of `domains`, so until 0050
+This release reads `allow_join` on every read of `domains`, so until 0051
 has run every such read fails on its replicas. A call that reads a domain
 fails with an error, except the login-policy lookup, which fails open for
 people by design:
@@ -88,8 +88,8 @@ three new RPCs with `UNIMPLEMENTED` and return a `Domain` without
 or the join until every replica runs this release.
 
 On a
-lock timeout the file rolls back and version 50 is recorded dirty: run
-`identity migrate force 49`, then `identity migrate` again. The down
+lock timeout the file rolls back and version 51 is recorded dirty: run
+`identity migrate force 50`, then `identity migrate` again. The down
 migration drops the column, and with it every tenant's choice.
 
 ### Go API

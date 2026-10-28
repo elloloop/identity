@@ -1,4 +1,4 @@
--- 0050_domain_join.down.sql
+-- 0051_domain_join.down.sql
 --
 -- Drops the join setting. Every domain then admits nobody by request, which
 -- is what a release without JoinTenantByDomain does; the memberships made

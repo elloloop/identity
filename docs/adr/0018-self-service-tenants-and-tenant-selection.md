@@ -347,7 +347,7 @@ themselves.
 - **It is off until an admin turns it on, domain by domain.** Proving
   control of a domain is not agreeing to admit everyone on it, and a tenant
   that verified a domain before this change must not start admitting people
-  it did not. `domains.allow_join` (migration 0050) records the choice,
+  it did not. `domains.allow_join` (migration 0051) records the choice,
   `false` on every row. `SetDomainJoin(domain_id, allow_join)`, by an owner
   or admin and not while the tenant is suspended (decision 6), sets it,
   recorded as `domain_join_set`. It governs only joining by request:
@@ -443,4 +443,4 @@ themselves.
   `users.email_domain` and its index, the `domain_attempts` table, the
   invitation-limit indexes) and 0047 (a trigger on `users` that ends a domain
   membership when the email leaves the tenant's verified domains); joining
-  by domain adds 0050 (`domains.allow_join`).
+  by domain adds 0051 (`domains.allow_join`).
