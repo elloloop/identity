@@ -723,7 +723,10 @@ func TestAdminService_ResetUserPassword_RefusesAnonymous(t *testing.T) {
 func TestAdminService_InviteUser_LinkAndEmailFollowTheProject(t *testing.T) {
 	for _, tc := range []struct {
 		name, appBase, wantLink, wantSubject string
-		scope                                *ProjectScope
+		// tenantPage is GATEWAY_TENANT_INVITATION_PAGE_URL, which moves only
+		// a tenant invitation's link, never this one.
+		tenantPage string
+		scope      *ProjectScope
 	}{
 		{
 			name:        "project with a primary auth domain and a product name",
@@ -743,12 +746,20 @@ func TestAdminService_InviteUser_LinkAndEmailFollowTheProject(t *testing.T) {
 			wantLink:    "http://localhost:9002/auth/accept-invitation?token=",
 			wantSubject: "You're invited to Identity",
 		},
+		{
+			name:        "a tenant invitation page does not move it",
+			appBase:     "https://app.example.test",
+			tenantPage:  "https://members.example.test/invitations/accept/",
+			wantLink:    "https://app.example.test/auth/accept-invitation?token=",
+			wantSubject: "You're invited to Identity",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := newFakeDB()
 			db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
 			cfg := config.Load()
 			cfg.AppBaseURL = tc.appBase
+			cfg.TenantInvitationPageURL = tc.tenantPage
 			cfg.TOTPIssuer = "Identity"
 			cfg.EmailBrandProductName = ""
 			rec := &recordingTransport{}

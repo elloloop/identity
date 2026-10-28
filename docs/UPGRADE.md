@@ -1,5 +1,37 @@
 # Upgrade guide
 
+## Next — `GATEWAY_TENANT_INVITATION_PAGE_URL`: the page a tenant invitation email links to (additive; one stricter start-up check; no migration)
+
+No schema change and no migration. A deployment that sets nothing new sends
+exactly the same emails as before, unless its `GATEWAY_EMAIL_LINK_BASE_URL`
+holds a character the start-up check now refuses (see the last point).
+
+- **`GATEWAY_TENANT_INVITATION_PAGE_URL`** (default empty) is where the page
+  that accepts a tenant invitation lives. Identity does not serve that page:
+  by default a `CreateTenantInvitation` email links to
+  `/auth/accept-invitation?token=…` on the project's primary auth domain,
+  else on `GATEWAY_APP_BASE_URL`, and a deployment whose app has no page
+  there sends a link that does not resolve. **If your app accepts
+  invitations somewhere else, set the variable to that page** — for example
+  `https://app.example.com/invitations/accept/`. The link then becomes
+  `<page>?token=…` for every project, and takes precedence over any
+  project's primary auth domain. The path is kept exactly, trailing slash
+  included. The page signs the invitee in and redeems the token with
+  `AcceptTenantInvitation`. The value has the same rules as
+  `GATEWAY_EMAIL_LINK_BASE_URL`: an absolute `https` URL (`http` only for a
+  loopback host) with no userinfo, query, fragment, space or other
+  character a URL must percent-encode. Any other value stops the server
+  from starting (`config: GATEWAY_TENANT_INVITATION_PAGE_URL …`). The link
+  does not name the project, so on a server hosting several projects set it
+  only when that one page accepts every project's invitations.
+  `GATEWAY_EMAIL_LINK_BASE_URL` still does not move the invitation link, and
+  the account-setup link `InviteUser` sends still goes to
+  `/auth/accept-invitation` on the app base URL.
+- **`GATEWAY_EMAIL_LINK_BASE_URL` is checked the same way**, so it now also
+  refuses a space, a `"`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|` or `}`. Such a
+  value already sent reset and verification links that broke at that
+  character; percent-encode it (a space is `%20`) and the server starts.
+
 ## Next — built with go-jose v4.1.6 for CVE-2026-116587; v4.26.0 withdrawn (no API or schema change)
 
 The binary now links `github.com/go-jose/go-jose/v4` v4.1.6, which fixes

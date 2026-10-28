@@ -2097,6 +2097,15 @@
     "anchor": "email-and-branding"
   },
   {
+    "name": "GATEWAY_TENANT_INVITATION_PAGE_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the page a tenant-invitation email links to, for deployments whose app accepts invitations somewhere other than /auth/accept-invitation.",
+    "category": "Email \u0026 branding",
+    "anchor": "email-and-branding"
+  },
+  {
     "name": "GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS",
     "type": "integer",
     "default": "300",

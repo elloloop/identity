@@ -6,18 +6,29 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/elloloop/identity/internal/config"
 )
 
-// The pages that redeem an emailed password-reset or email-verification token,
-// and the query parameters of the link to them. Together they are the contract
-// with whatever serves those pages: the app at the app base URL (under
-// appAuthPathPrefix), or the sign-in hub at GATEWAY_EMAIL_LINK_BASE_URL.
+// The pages that redeem an emailed token, and the query parameters of the link
+// to them. Together they are the contract with whatever serves those pages: the
+// app at the app base URL (under appAuthPathPrefix); for a password reset or an
+// email verification, the sign-in hub at GATEWAY_EMAIL_LINK_BASE_URL when set;
+// for a tenant invitation, the page at GATEWAY_TENANT_INVITATION_PAGE_URL when
+// set.
 const (
 	emailLinkPageResetPassword = "reset-password"
 	emailLinkPageVerifyEmail   = "verify-email"
 
+	// emailLinkPageAcceptInvitation is the page, under appAuthPathPrefix on
+	// the app base URL, that both kinds of invitation land on by default: an
+	// InviteUser account-setup link always, and a tenant invitation's link
+	// when no GATEWAY_TENANT_INVITATION_PAGE_URL is configured. The two tokens
+	// look alike, so a page there that serves both must try both redemptions.
+	emailLinkPageAcceptInvitation = "accept-invitation"
+
 	// appAuthPathPrefix is where the pages sit below the app base URL when no
-	// email-link base is configured.
+	// other place is configured for them.
 	appAuthPathPrefix = "/auth/"
 
 	emailLinkParamToken    = "token"
@@ -85,6 +96,19 @@ func (s *AuthService) emailLinkPageURL(ctx context.Context, page string) string 
 		return base + "/" + page
 	}
 	return appBaseURL(ctx, s.cfg) + appAuthPathPrefix + page
+}
+
+// tenantInvitationLink is the link a tenant-invitation email carries. The page
+// at GATEWAY_TENANT_INVITATION_PAGE_URL, when set, wins over everything,
+// including a project's primary auth domain, because the deployment accepts
+// every project's tenant invitations in that one place; otherwise the page is
+// /auth/accept-invitation on the request's app base URL.
+func tenantInvitationLink(ctx context.Context, cfg *config.Config, token string) string {
+	page := appBaseURL(ctx, cfg) + appAuthPathPrefix + emailLinkPageAcceptInvitation
+	if cfg != nil && cfg.TenantInvitationPageURL != "" {
+		page = cfg.TenantInvitationPageURL
+	}
+	return buildEmailLink(page, token, emailLink{})
 }
 
 // buildEmailLink appends the token, then the product and the return_to (as

@@ -81,6 +81,7 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"SMTPProviders", cfg.SMTPProviders, ""},
 		{"AppBaseURL", cfg.AppBaseURL, "http://localhost:9002"},
 		{"EmailLinkBaseURL", cfg.EmailLinkBaseURL, ""},
+		{"TenantInvitationPageURL", cfg.TenantInvitationPageURL, ""},
 		{"EmailTokenExpirySeconds", cfg.EmailTokenExpirySeconds, 86400},
 		{"RevocationMode", cfg.RevocationMode, RevocationModeTTL},
 		{"SessionCacheTTLSeconds", cfg.SessionCacheTTLSeconds, 60},
@@ -243,6 +244,18 @@ func TestEnvTest_OverrideEmailLinkBaseURL(t *testing.T) {
 	}
 	if err := cfg.validateEmailLinkBaseURL(); err != nil {
 		t.Errorf("a loaded https base must validate: %v", err)
+	}
+}
+
+func TestEnvTest_OverrideTenantInvitationPageURL(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_TENANT_INVITATION_PAGE_URL", "https://app.example.com/invitations/accept/")
+	cfg := Load()
+	if cfg.TenantInvitationPageURL != "https://app.example.com/invitations/accept/" {
+		t.Errorf("TenantInvitationPageURL: got %q, want https://app.example.com/invitations/accept/", cfg.TenantInvitationPageURL)
+	}
+	if err := cfg.validateTenantInvitationPageURL(); err != nil {
+		t.Errorf("a loaded https page must validate: %v", err)
 	}
 }
 

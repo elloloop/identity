@@ -369,7 +369,26 @@ func TestValidate_GenericOIDC_Invariants(t *testing.T) {
 	})
 }
 
-func TestValidate_EmailLinkBaseURL(t *testing.T) {
+// The two URLs emailed links are built on, the email-link base and the tenant
+// invitation page, are validated alike: absolute https (http only for a
+// loopback host), with no userinfo, query, fragment or character a URL must
+// percent-encode, never echoing a password.
+func TestValidate_EmailedLinkURLs(t *testing.T) {
+	for _, v := range []struct {
+		name string
+		set  func(*Config, string)
+	}{
+		{"GATEWAY_EMAIL_LINK_BASE_URL", func(c *Config, s string) { c.EmailLinkBaseURL = s }},
+		{"GATEWAY_TENANT_INVITATION_PAGE_URL", func(c *Config, s string) { c.TenantInvitationPageURL = s }},
+	} {
+		t.Run(v.name, func(t *testing.T) { validateEmailedLinkURLCases(t, v.name, v.set) })
+	}
+}
+
+// validateEmailedLinkURLCases is the accept and refuse table every variable
+// holding the page an emailed link opens on shares.
+func validateEmailedLinkURLCases(t *testing.T, name string, set func(*Config, string)) {
+	t.Helper()
 	for _, base := range []string{
 		"",
 		"https://signin.example.com",
@@ -381,10 +400,14 @@ func TestValidate_EmailLinkBaseURL(t *testing.T) {
 		"http://localhost:3000",
 		"http://127.0.0.1:3000/hub",
 		"http://[::1]:3000",
+		"https://example.com/team%20invitations/",
+		"https://example.com/invitations/accept/~new",
+		"https://b\u00fccher.example/invitations/",
 	} {
-		c := &Config{EmailLinkBaseURL: base}
+		c := &Config{}
+		set(c, base)
 		if err := c.Validate(); err != nil {
-			t.Errorf("Validate with GATEWAY_EMAIL_LINK_BASE_URL=%q: %v", base, err)
+			t.Errorf("Validate with %s=%q: %v", name, base, err)
 		}
 	}
 
@@ -405,19 +428,31 @@ func TestValidate_EmailLinkBaseURL(t *testing.T) {
 		{"https://admin:hunter2@signin.example.com", "must not carry"},
 		{"http://admin:hunter2@signin.example.com", "must use https"},
 		{"https://signin.example.com/%zz", "not a valid URL"},
+		{"https://signin.example.com/team invitations/", "must percent-encode"},
+		{"https://signin.example.com/accept ", "must percent-encode"},
+		{"https://signin.example.com/a|b", "must percent-encode"},
+		{"https://signin.example.com/\"accept\"", "must percent-encode"},
+		{"https://signin.example.com/{page}", "must percent-encode"},
+		{"https://signin.example.com/a<b", "must percent-encode"},
+		{"https://signin.example.com/a>b", "must percent-encode"},
+		{"https://signin.example.com/a\\b", "must percent-encode"},
+		{"https://signin.example.com/a^b", "must percent-encode"},
+		{"https://signin.example.com/a`b", "must percent-encode"},
+		{"https://signin.example.com/a}b", "must percent-encode"},
 	} {
-		c := &Config{EmailLinkBaseURL: tc.base}
+		c := &Config{}
+		set(c, tc.base)
 		err := c.Validate()
 		if err == nil {
-			t.Errorf("Validate with GATEWAY_EMAIL_LINK_BASE_URL=%q: want error", tc.base)
+			t.Errorf("Validate with %s=%q: want error", name, tc.base)
 			continue
 		}
 		msg := err.Error()
-		if !strings.Contains(msg, "GATEWAY_EMAIL_LINK_BASE_URL") || !strings.Contains(msg, tc.want) {
-			t.Errorf("Validate(%q) = %q, want it to name the variable and contain %q", tc.base, msg, tc.want)
+		if !strings.Contains(msg, name) || !strings.Contains(msg, tc.want) {
+			t.Errorf("Validate with %s=%q: %q, want it to name the variable and contain %q", name, tc.base, msg, tc.want)
 		}
 		if strings.Contains(msg, "hunter2") {
-			t.Errorf("Validate(%q) leaked the password: %q", tc.base, msg)
+			t.Errorf("Validate with %s=%q leaked the password: %q", name, tc.base, msg)
 		}
 	}
 }

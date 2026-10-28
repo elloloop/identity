@@ -1145,10 +1145,26 @@ type Config struct {
 	// <base>/reset-password?token=… and <base>/verify-email?token=… for every
 	// project, ahead of a project's primary auth domain. When empty they stay
 	// on <primary auth domain or GATEWAY_APP_BASE_URL>/auth/…. Magic-link,
-	// email-change and invitation links are unaffected. Must be an absolute
-	// https URL (http only for a loopback host) without userinfo, query or
-	// fragment; a path prefix is kept. Driven by GATEWAY_EMAIL_LINK_BASE_URL.
+	// email-change and invitation links are unaffected (a tenant invitation's
+	// page is TenantInvitationPageURL). Must be an absolute https URL (http
+	// only for a loopback host) without userinfo, query, fragment, space or
+	// other character a URL must percent-encode; a path prefix is kept.
+	// Driven by GATEWAY_EMAIL_LINK_BASE_URL.
 	EmailLinkBaseURL string
+
+	// TenantInvitationPageURL is the page a tenant-invitation email links to,
+	// for deployments whose app accepts invitations somewhere other than
+	// /auth/accept-invitation. When set, the link is <page>?token=… for every
+	// project, ahead of a project's primary auth domain; when empty it stays
+	// <primary auth domain or GATEWAY_APP_BASE_URL>/auth/accept-invitation?token=….
+	// The page redeems the token with AcceptTenantInvitation; the link does
+	// not name the project, so one page takes every project's invitations.
+	// InviteUser's account-setup link is not moved. Must be an absolute https
+	// URL (http only for a loopback host) without userinfo, query, fragment,
+	// space or other character a URL must percent-encode; the path is kept
+	// exactly, trailing slash included. Driven by
+	// GATEWAY_TENANT_INVITATION_PAGE_URL.
+	TenantInvitationPageURL string
 
 	// How long an email-verification or password-reset token is valid for.
 	EmailTokenExpirySeconds int // GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS (default 86400)
@@ -1758,6 +1774,7 @@ func loadFromEnv() *Config {
 
 		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
 		EmailLinkBaseURL:        envStr("GATEWAY_EMAIL_LINK_BASE_URL", ""),
+		TenantInvitationPageURL: envStr("GATEWAY_TENANT_INVITATION_PAGE_URL", ""),
 		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
 		// 604800 = 7 days; team invitations are less time-sensitive than
 		// password resets.
@@ -2378,29 +2395,66 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateTenantInvitationPageURL(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 // validateEmailLinkBaseURL fails boot on a GATEWAY_EMAIL_LINK_BASE_URL that
 // would put a broken or downgradeable link into every reset and verification
-// email: it must be an absolute https URL (http only for a loopback host), and
-// carry no userinfo, query or fragment, since the link appends its own
-// "/<page>?token=…" to it. Empty is valid and keeps the links on the app base.
+// email (validateEmailedLinkURL). Empty is valid and keeps the links on the
+// app base.
 func (c *Config) validateEmailLinkBaseURL() error {
-	if c.EmailLinkBaseURL == "" {
+	return validateEmailedLinkURL("GATEWAY_EMAIL_LINK_BASE_URL", c.EmailLinkBaseURL)
+}
+
+// validateTenantInvitationPageURL fails boot on a
+// GATEWAY_TENANT_INVITATION_PAGE_URL that would put a broken or downgradeable
+// link into every tenant-invitation email (validateEmailedLinkURL). Empty is
+// valid and keeps the link on the app base.
+func (c *Config) validateTenantInvitationPageURL() error {
+	return validateEmailedLinkURL("GATEWAY_TENANT_INVITATION_PAGE_URL", c.TenantInvitationPageURL)
+}
+
+// validateEmailedLinkURL checks the value of the variable name, a URL that
+// emailed links are built on: it must be an absolute https URL (http only for
+// a loopback host), and carry no userinfo, query or fragment, since the link
+// appends its own path or "?token=…" to it, nor any character
+// mustBePercentEncoded names. Empty is valid.
+func validateEmailedLinkURL(name, raw string) error {
+	if raw == "" {
 		return nil
 	}
-	u, err := parseHTTPSOrLoopbackURL(c.EmailLinkBaseURL)
+	u, err := parseHTTPSOrLoopbackURL(raw)
 	if err != nil {
-		return fmt.Errorf("config: GATEWAY_EMAIL_LINK_BASE_URL: %w", err)
+		return fmt.Errorf("config: %s: %w", name, err)
 	}
 	// url.Parse records a bare trailing "?" (ForceQuery) but drops a bare
 	// trailing "#", which would still put the page and token in the fragment.
-	if u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(c.EmailLinkBaseURL, "#") {
-		return fmt.Errorf("config: GATEWAY_EMAIL_LINK_BASE_URL %q must not carry userinfo, a query or a fragment",
-			origin.Redact(c.EmailLinkBaseURL))
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") {
+		return fmt.Errorf("config: %s %q must not carry userinfo, a query or a fragment",
+			name, origin.Redact(raw))
+	}
+	// The link is the value as written plus "?token=…", so a space, a quote
+	// or another character a URL must percent-encode would break it or end it
+	// early in a mail client.
+	if strings.ContainsFunc(raw, mustBePercentEncoded) {
+		return fmt.Errorf("config: %s %q must percent-encode spaces, quotes and other characters a URL cannot carry as they are",
+			name, origin.Redact(raw))
 	}
 	return nil
+}
+
+// mustBePercentEncoded reports whether r is an ASCII character a URL may
+// carry only percent-encoded (RFC 3986 §2): a control character, a space, or
+// one of " < > \ ^ ` { | }. url.Parse already refuses the control
+// characters; they are kept so the predicate states the whole rule. Non-ASCII
+// is left alone, since an internationalized host name is written that way
+// and mail clients link it.
+func mustBePercentEncoded(r rune) bool {
+	return r <= ' ' || r == 0x7f || strings.ContainsRune("\"<>\\^`{|}", r)
 }
 
 // projectSecretsKeyBytes is the required decoded length of
