@@ -138,7 +138,6 @@ and which carries `claim_id`, `workstation_id` and `company_id` from the key.
   `identity_agent_exchanges_total{key_kind="agent_machine"}`.
 - Go API: `jwt.TeammateAccessClaims`, `jwt.TeammateSigner` (implemented by the
   file, AWS KMS and jwttest signers) and `jwt.VerifyTeammateAccessToken`.
-||||||| parent of 1086b53 (feat(tenants): let a tenant's verified domain admit the people on it)
 
 ## Next — tenant ownership moves: `TransferTenantOwnership` and `AdminRecoverTenantOwnership` (additive RPCs; no migration; removing a tenant's last owner refused atomically (behaviour change under concurrency); `MembershipStore.TransferOwnership`, `MembershipStore.RemoveMembership`, `MembershipStore.GrantMembership` and a required `UserDirectory` argument to `NewControlPlaneAdminService` (Go API))
 
