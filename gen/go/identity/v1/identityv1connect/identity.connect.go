@@ -828,8 +828,9 @@ type IdentityServiceClient interface {
 	// SuspendTenantMember stops user_id acting in tenant_id without removing
 	// them: the membership keeps its role and source, and ListTenantMembers
 	// shows it with status "suspended". While it is suspended the member
-	// cannot choose the tenant for a token (RefreshToken refuses it, so an
-	// access token that already names the tenant works until it expires),
+	// cannot choose the tenant for a token (RefreshToken refuses it,
+	// PERMISSION_DENIED with reason NOT_A_MEMBER, so an access token that
+	// already names the tenant works until it expires),
 	// ListMyTenants leaves it out, they cannot administer it, and they cannot
 	// come back on their own: accepting an invitation to the tenant and
 	// JoinTenantByDomain are PERMISSION_DENIED, and their email leaving the
@@ -844,17 +845,19 @@ type IdentityServiceClient interface {
 	SuspendTenantMember(context.Context, *connect.Request[v1.SuspendTenantMemberRequest]) (*connect.Response[v1.SuspendTenantMemberResponse], error)
 	// RestoreTenantMember lets a suspended member act in the tenant again,
 	// with the role they had. The caller must be an active owner or admin of
-	// a tenant that is not suspended (PERMISSION_DENIED otherwise), and a
-	// user_id that is not an active or suspended member is NOT_FOUND. A
-	// membership through the email's domain whose email is not on a domain
-	// the tenant has verified when it is restored ends instead (status
-	// "inactive"), as an active one does when the email leaves the domain;
-	// the member needs an invitation to come back. Restoring an
-	// active member returns the membership unchanged and records nothing; a
-	// restore is audited. An operator's AdminAddTenantAdmin or
-	// AdminRecoverTenantOwnership also lifts a suspension. Available only on
-	// the postgres control-plane driver; the memory and SQLite drivers return
-	// Unimplemented.
+	// a tenant that is not suspended, and still be one when the restore is
+	// written (PERMISSION_DENIED otherwise, and nothing changes). Naming the
+	// caller is INVALID_ARGUMENT, and a user_id that is not an active or
+	// suspended member is NOT_FOUND. A membership through the email's domain
+	// whose email is not on a domain the tenant has verified when it is
+	// restored ends instead (status "inactive"); the person comes back as any
+	// former member does, through an invitation or, once their email is on a
+	// domain that lets people join, JoinTenantByDomain. Restoring an active
+	// member returns the membership unchanged and records nothing; a restore
+	// is audited. An operator's AdminAddTenantAdmin or
+	// AdminRecoverTenantOwnership also lifts a suspension, and audits the
+	// lift. Available only on the postgres control-plane driver; the memory
+	// and SQLite drivers return Unimplemented.
 	RestoreTenantMember(context.Context, *connect.Request[v1.RestoreTenantMemberRequest]) (*connect.Response[v1.RestoreTenantMemberResponse], error)
 	// TransferTenantOwnership hands the caller's ownership of a tenant to
 	// another active member in one step: the member becomes an owner and the
@@ -964,6 +967,10 @@ type IdentityServiceClient interface {
 	// the same transaction. Only a verified domain may be promoted.
 	SetPrimaryAuthDomain(context.Context, *connect.Request[v1.SetPrimaryAuthDomainRequest]) (*connect.Response[v1.SetPrimaryAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[v1.AdminCreateTenantRequest]) (*connect.Response[v1.AdminCreateTenantResponse], error)
+	// AdminAddTenantAdmin makes user_id an owner or admin of the tenant (role
+	// "owner", the default, or "admin"), with an active membership: one that
+	// is suspended is restored first, and the lift is audited as a restore.
+	// Operator-only, like the other Admin* RPCs.
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy. Operator-only, like the other Admin* RPCs:
@@ -1025,8 +1032,10 @@ type IdentityServiceClient interface {
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it who is a person can sign in (each was
-	// deleted, deactivated or merged away). While an owner or admin who is a
-	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
+	// deleted, deactivated or merged away) or holds an active membership (an
+	// owner or admin whose membership is suspended does not count). While an
+	// owner or admin who is a person can still sign in it is
+	// FAILED_PRECONDITION: an owner transfers,
 	// an admin invites a new owner, after an operator restores the tenant if
 	// it is suspended. An account pending deletion can still sign in, so it
 	// counts. When user_id is already an owner who can sign in, it
@@ -1035,8 +1044,9 @@ type IdentityServiceClient interface {
 	// account of the project (else NOT_FOUND) that is an active, signed-up
 	// person's with a verified email (else FAILED_PRECONDITION); a membership
 	// it holds, a suspended one included, becomes an active owner one and
-	// keeps a source other than the domain's. A latent tenant has never had an owner and is
-	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
+	// keeps a source other than the domain's, and lifting a suspension is
+	// audited as a restore when it lands. A latent tenant has never had an
+	// owner and is FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
 	// the audit trail when it appoints; a refusal is not recorded.
 	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
 	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
@@ -3436,8 +3446,9 @@ type IdentityServiceHandler interface {
 	// SuspendTenantMember stops user_id acting in tenant_id without removing
 	// them: the membership keeps its role and source, and ListTenantMembers
 	// shows it with status "suspended". While it is suspended the member
-	// cannot choose the tenant for a token (RefreshToken refuses it, so an
-	// access token that already names the tenant works until it expires),
+	// cannot choose the tenant for a token (RefreshToken refuses it,
+	// PERMISSION_DENIED with reason NOT_A_MEMBER, so an access token that
+	// already names the tenant works until it expires),
 	// ListMyTenants leaves it out, they cannot administer it, and they cannot
 	// come back on their own: accepting an invitation to the tenant and
 	// JoinTenantByDomain are PERMISSION_DENIED, and their email leaving the
@@ -3452,17 +3463,19 @@ type IdentityServiceHandler interface {
 	SuspendTenantMember(context.Context, *connect.Request[v1.SuspendTenantMemberRequest]) (*connect.Response[v1.SuspendTenantMemberResponse], error)
 	// RestoreTenantMember lets a suspended member act in the tenant again,
 	// with the role they had. The caller must be an active owner or admin of
-	// a tenant that is not suspended (PERMISSION_DENIED otherwise), and a
-	// user_id that is not an active or suspended member is NOT_FOUND. A
-	// membership through the email's domain whose email is not on a domain
-	// the tenant has verified when it is restored ends instead (status
-	// "inactive"), as an active one does when the email leaves the domain;
-	// the member needs an invitation to come back. Restoring an
-	// active member returns the membership unchanged and records nothing; a
-	// restore is audited. An operator's AdminAddTenantAdmin or
-	// AdminRecoverTenantOwnership also lifts a suspension. Available only on
-	// the postgres control-plane driver; the memory and SQLite drivers return
-	// Unimplemented.
+	// a tenant that is not suspended, and still be one when the restore is
+	// written (PERMISSION_DENIED otherwise, and nothing changes). Naming the
+	// caller is INVALID_ARGUMENT, and a user_id that is not an active or
+	// suspended member is NOT_FOUND. A membership through the email's domain
+	// whose email is not on a domain the tenant has verified when it is
+	// restored ends instead (status "inactive"); the person comes back as any
+	// former member does, through an invitation or, once their email is on a
+	// domain that lets people join, JoinTenantByDomain. Restoring an active
+	// member returns the membership unchanged and records nothing; a restore
+	// is audited. An operator's AdminAddTenantAdmin or
+	// AdminRecoverTenantOwnership also lifts a suspension, and audits the
+	// lift. Available only on the postgres control-plane driver; the memory
+	// and SQLite drivers return Unimplemented.
 	RestoreTenantMember(context.Context, *connect.Request[v1.RestoreTenantMemberRequest]) (*connect.Response[v1.RestoreTenantMemberResponse], error)
 	// TransferTenantOwnership hands the caller's ownership of a tenant to
 	// another active member in one step: the member becomes an owner and the
@@ -3572,6 +3585,10 @@ type IdentityServiceHandler interface {
 	// the same transaction. Only a verified domain may be promoted.
 	SetPrimaryAuthDomain(context.Context, *connect.Request[v1.SetPrimaryAuthDomainRequest]) (*connect.Response[v1.SetPrimaryAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[v1.AdminCreateTenantRequest]) (*connect.Response[v1.AdminCreateTenantResponse], error)
+	// AdminAddTenantAdmin makes user_id an owner or admin of the tenant (role
+	// "owner", the default, or "admin"), with an active membership: one that
+	// is suspended is restored first, and the lift is audited as a restore.
+	// Operator-only, like the other Admin* RPCs.
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy. Operator-only, like the other Admin* RPCs:
@@ -3633,8 +3650,10 @@ type IdentityServiceHandler interface {
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it who is a person can sign in (each was
-	// deleted, deactivated or merged away). While an owner or admin who is a
-	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
+	// deleted, deactivated or merged away) or holds an active membership (an
+	// owner or admin whose membership is suspended does not count). While an
+	// owner or admin who is a person can still sign in it is
+	// FAILED_PRECONDITION: an owner transfers,
 	// an admin invites a new owner, after an operator restores the tenant if
 	// it is suspended. An account pending deletion can still sign in, so it
 	// counts. When user_id is already an owner who can sign in, it
@@ -3643,8 +3662,9 @@ type IdentityServiceHandler interface {
 	// account of the project (else NOT_FOUND) that is an active, signed-up
 	// person's with a verified email (else FAILED_PRECONDITION); a membership
 	// it holds, a suspended one included, becomes an active owner one and
-	// keeps a source other than the domain's. A latent tenant has never had an owner and is
-	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
+	// keeps a source other than the domain's, and lifting a suspension is
+	// audited as a restore when it lands. A latent tenant has never had an
+	// owner and is FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
 	// the audit trail when it appoints; a refusal is not recorded.
 	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
 	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.

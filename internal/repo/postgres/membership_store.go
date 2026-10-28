@@ -130,7 +130,8 @@ var grantHoldsRole = `tenant_memberships.status = 'active' AND ` +
 // and on the tenant's domain, and a grant is a decision about this person;
 // any other source is left alone, whether the grant raises the role,
 // reactivates the membership or changes nothing. A suspended membership is
-// not written: only RestoreMembership lifts a suspension.
+// not written: only RestoreMembership, or an operator's UpsertMembership,
+// lifts a suspension.
 var grantMembershipQuery = `
 		INSERT INTO tenant_memberships (
 			id, project_id, tenant_id, user_id, source, role, status,
@@ -225,9 +226,8 @@ func grantIn(ctx context.Context, tx pgx.Tx, op, projectID, tenantID, userID, so
 
 // membershipLockKey names the advisory lock every write that records,
 // clears or consults a (project, tenant, user) removal or suspension takes
-// first: RemoveMembership, JoinByDomain, GrantMembership, UpsertMembership,
-// SuspendMembership and RestoreMembership. A statement that waits on a row re-checks only that row, with its old
-// snapshot for everything else, so without it a join could wait on the
+// first. A statement that waits on a row re-checks only that row, with its
+// old snapshot for everything else, so without it a join could wait on the
 // membership a removal deletes and then insert it again, having read no
 // removal record. Each of those transactions takes it before any row lock
 // and takes no other advisory lock, so it adds no lock-order cycle.
@@ -371,19 +371,25 @@ func (s *MembershipStore) ListMembershipsForUser(ctx context.Context, projectID,
 //
 // The service passes the domain rather than the query reading
 // users.email_domain: users is under row-level security bound to the pool's
-// project, which a governance read for another project cannot see. The
-// domain test is an index condition on 0045's (project_id, tenant_id,
-// lower(domain)) unique index.
-const activeUserTenantsQuery = `
+// project, which a governance read for another project cannot see.
+var activeUserTenantsQuery = `
 	SELECT t.id, t.name, m.role, m.source
 	FROM tenant_memberships m
 	JOIN tenants t ON t.project_id = m.project_id AND t.id = m.tenant_id
 	WHERE m.project_id = $1 AND m.user_id = $2
 	  AND m.status = 'active' AND t.status = 'claimed'
-	  AND (m.source <> 'domain' OR EXISTS (
+	  AND (m.source <> 'domain' OR ` + onVerifiedDomain("m", "$3") + `)`
+
+// onVerifiedDomain is true when the email domain domainExpr is a domain
+// that the tenant of membership alias m has verified: the rule a membership
+// through the email's domain counts by. It is an index condition on 0045's
+// (project_id, tenant_id, lower(domain)) unique index.
+func onVerifiedDomain(m, domainExpr string) string {
+	return `EXISTS (
 	        SELECT 1 FROM domains d
-	        WHERE d.project_id = m.project_id AND d.tenant_id = m.tenant_id
-	          AND lower(d.domain) = $3 AND d.status = 'verified'))`
+	        WHERE d.project_id = ` + m + `.project_id AND d.tenant_id = ` + m + `.tenant_id
+	          AND lower(d.domain) = ` + domainExpr + ` AND d.status = 'verified')`
+}
 
 // ListActiveTenantsForUser returns the tenants a user may act in within a
 // project, ordered by name, then id.
@@ -593,14 +599,28 @@ func (s *MembershipStore) SuspendMembership(ctx context.Context, projectID, tena
 
 // RestoreMembership lifts the suspension of the membership for (project,
 // tenant, user). It becomes active again, with the role and source it had,
-// except one from the email's domain whose email is no longer on a domain
-// the tenant has verified: that one becomes inactive, as migration 0047's
-// trigger would have made it had it not been suspended. emailDomain is the
-// domain of the account's email under FoldEmail, as users.email_domain
-// holds it. Returns the membership as it now stands, and whether this call
-// lifted a suspension: an active membership is returned unchanged. Any
-// other status, or no membership, is service.ErrNotFound.
-func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tenantID, userID, emailDomain string) (*service.TenantMembership, bool, error) {
+// except one from the email's domain whose account's email is not, at that
+// moment, on a domain the tenant has verified: that one becomes inactive.
+// The rule is stricter than migration 0047's, which ends an active domain
+// membership only when the email moves: a restore lets the membership count
+// again, so it counts only on a domain the tenant verifies now. Returns the
+// membership as it now stands, and whether this call lifted a suspension:
+// an active membership is returned unchanged. Any other status, or no
+// membership, is service.ErrNotFound.
+//
+// restoredBy is the owner or admin restoring it, or "" for an operator. One
+// transaction takes the membership's lock, then locks restoredBy's
+// membership with the tenant's owners and the target's (lockOwnersAnd), and
+// restores only while restoredBy's is an active owner or admin one, else
+// service.ErrPermissionDenied. So a suspension or removal of restoredBy
+// that commits first is seen: an admin cannot lift a suspension, their own
+// included, through a call authorized before they were suspended.
+//
+// The account's email domain is read in the same transaction and its row
+// held (lockedEmailDomain), so an email change either commits first and is
+// judged here, or waits for the restore and then meets an active
+// membership, which 0047's trigger ends.
+func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tenantID, userID, restoredBy string) (*service.TenantMembership, bool, error) {
 	if projectID == "" || tenantID == "" || userID == "" {
 		return nil, false, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
 	}
@@ -613,26 +633,32 @@ func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tena
 	if err := lockMembership(ctx, tx, "RestoreMembership", projectID, tenantID, userID); err != nil {
 		return nil, false, err
 	}
-	target, err := scanMembership(tx.QueryRow(ctx, `SELECT `+membershipColumns+`
-		FROM tenant_memberships
-		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3
-		FOR UPDATE`, projectID, tenantID, userID))
-	switch {
-	case noRows(err):
-		return nil, false, fmt.Errorf("%w: the user is not a member of the tenant", service.ErrNotFound)
-	case err != nil:
+	held, err := lockOwnersAnd(ctx, tx, projectID, tenantID, userID, restoredBy)
+	if err != nil {
 		return nil, false, wrapPgErr("RestoreMembership(lock)", err)
+	}
+	if restoredBy != "" {
+		by := held[restoredBy]
+		if by == nil || by.Status != service.MembershipStatusActive || (by.Role != service.RoleOwner && by.Role != service.RoleAdmin) {
+			return nil, false, fmt.Errorf("%w: only an active owner or admin of the tenant may restore a member", service.ErrPermissionDenied)
+		}
+	}
+	target := held[userID]
+	switch {
+	case target == nil:
+		return nil, false, fmt.Errorf("%w: the user is not a member of the tenant", service.ErrNotFound)
 	case target.Status == service.MembershipStatusActive:
 		return target, false, nil
 	case target.Status != service.MembershipStatusSuspended:
 		return nil, false, fmt.Errorf("%w: the user is not a suspended member of the tenant", service.ErrNotFound)
 	}
+	emailDomain, err := lockedEmailDomain(ctx, tx, projectID, userID)
+	if err != nil {
+		return nil, false, wrapPgErr("RestoreMembership(email domain)", err)
+	}
 	restored, err := scanMembership(tx.QueryRow(ctx, `
 		UPDATE tenant_memberships m SET
-			status = CASE WHEN m.source = 'domain' AND NOT EXISTS (
-			              SELECT 1 FROM domains d
-			              WHERE d.project_id = m.project_id AND d.tenant_id = m.tenant_id
-			                AND lower(d.domain) = $4 AND d.status = 'verified')
+			status = CASE WHEN m.source = 'domain' AND NOT `+onVerifiedDomain("m", "$4")+`
 			         THEN 'inactive' ELSE 'active' END,
 			updated_at_ms = $5
 		WHERE m.project_id = $1 AND m.tenant_id = $2 AND m.user_id = $3
@@ -646,16 +672,37 @@ func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tena
 	return restored, true, nil
 }
 
+// lockedEmailDomain returns the domain of the email of userID's account in
+// projectID, as users.email_domain holds it, or "" for no account, and
+// holds the account's row (FOR SHARE) until tx ends, so the email cannot
+// change before tx commits. users is under row-level security (migration
+// 0016) and this store's pool is bound to the server's own project, so tx
+// is first bound to projectID, as 0046's functions bind themselves; the
+// binding ends with tx.
+func lockedEmailDomain(ctx context.Context, tx pgx.Tx, projectID, userID string) (string, error) {
+	if _, err := tx.Exec(ctx, `SELECT set_config($1, $2, true)`, rlsGUC, projectID); err != nil {
+		return "", err
+	}
+	var domain string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(email_domain, '') FROM users
+		WHERE project_id = $1 AND id = $2
+		FOR SHARE`, projectID, userID).Scan(&domain)
+	if noRows(err) {
+		return "", nil
+	}
+	return domain, err
+}
+
 // lockOwnersAnd locks the tenant's active owner memberships and those of
 // userIDs, and returns the memberships of userIDs it found, by user id, as
-// they stand once locked. RemoveMembership, SuspendMembership and
-// TransferOwnership take their locks this way, in one statement and in user_id order, so they queue
-// behind one another and never deadlock: two transactions that each take
-// all their locks in one ordered pass cannot each hold a row the other
-// waits for. Two writes that change owners do not come through here and
-// keep no owner: UpsertMembership, by which AdminAddTenantAdmin can lower
-// an owner, and the cascade that drops an account's memberships when the
-// account is deleted.
+// they stand once locked; an empty id is ignored. The writes that change an
+// owner or check who may act take their locks this way, in one statement
+// and in user_id order, so they queue behind one another and never
+// deadlock: two transactions that each take all their locks in one ordered
+// pass cannot each hold a row the other waits for. Two writes that change
+// owners do not come through here and keep no owner: UpsertMembership, by
+// which AdminAddTenantAdmin can lower an owner, and the cascade that drops
+// an account's memberships when the account is deleted.
 func lockOwnersAnd(ctx context.Context, tx pgx.Tx, projectID, tenantID string, userIDs ...string) (map[string]*service.TenantMembership, error) {
 	rows, err := tx.Query(ctx, `SELECT `+membershipColumns+`
 		FROM tenant_memberships

@@ -453,7 +453,18 @@ not listed at all. Suspending the tenant (above) stops everyone.
   `PERMISSION_DENIED`, and the invitation stays open. Any grant that would
   reactivate the row refuses it in the same way. An operator's
   `AdminAddTenantAdmin` or `AdminRecoverTenantOwnership` lifts it, because
-  that is a decision about the person, as a restore is.
+  that is a decision about the person, as a restore is; each lifts it
+  through the restore and audits the lift when it lands, so a write that
+  then fails cannot leave it unrecorded.
+- **The one restoring is checked where the restore is written.** The
+  service checks the caller first, but a suspension of that caller can
+  commit before the restore does. So the restore's transaction locks the
+  caller's membership with the tenant's owners and the target's, in the
+  order every owner-changing write uses, and restores only while the
+  caller's is an active owner or admin one. Otherwise an admin suspended
+  while their call was in flight could still lift a suspension, their own
+  or a fellow suspended admin's. Nobody restores themselves: one who may
+  restore is not suspended.
 - **Leaving the domain does not shed it.** Migration 0047's trigger ends
   an active domain membership when the email leaves the tenant's verified
   domains, and the person may join again on returning. Applied to a
@@ -463,7 +474,15 @@ not listed at all. Suspending the tenant (above) stops everyone.
   email is not on a domain the tenant has verified when it is restored ends
   (status `inactive`), and the response says so. The rule is applied at the
   moment of the restore, so an email that is off the domain only
-  temporarily at that moment also ends it.
+  temporarily at that moment also ends it. The restore reads the email in
+  its own transaction and holds the account's row, so an email change
+  either commits first and is judged, or waits and then meets an active
+  membership, which the trigger ends.
+- **Rolling back refuses while anyone is suspended.** The schema before
+  0053 cannot hold a suspension, and every status it has lets the person
+  back on their own. Its down migration therefore refuses to run while a
+  membership is suspended, and an operator restores or removes each one
+  first, rather than the rollback deciding for them.
 - **A tenant keeps an owner.** Suspending an owner counts as removing one.
   The suspension takes the locks a removal takes, so the last active owner
   cannot be suspended, even by two suspensions at once or a suspension

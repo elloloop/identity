@@ -437,6 +437,7 @@ func newAdminFixtureWithTenants(secret string, disableBootstrap bool, secretsKey
 	}
 	m := newFakeMembershipStore()
 	u := newFakeUserDirectory()
+	m.accounts = u
 	lp := newFakeLoginPolicyStore()
 	a := newFakePlatformAdminStore()
 	dns := &fakeDNSResolver{records: map[string][]string{}}

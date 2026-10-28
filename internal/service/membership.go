@@ -115,7 +115,9 @@ type MembershipStore interface {
 	// updates source/role/status in place (keeping id + created_at_ms). A
 	// source other than MembershipSourceDomain also deletes the user's
 	// removal record (see RemoveMembership). It writes m.Status whatever the
-	// row held, so it lifts a suspension. Returns the surviving row id.
+	// row held, so it lifts a suspension; the operator's call that uses it
+	// restores a suspended membership first, through RestoreMembership, so
+	// the lift is audited. Returns the surviving row id.
 	UpsertMembership(ctx context.Context, m *TenantMembership) (string, error)
 	// GrantMembership makes m.UserID an active member of m.TenantID at
 	// m.Role, unless they already hold an active membership there at m.Role
@@ -131,7 +133,8 @@ type MembershipStore interface {
 	// A source other than MembershipSourceDomain also deletes the user's
 	// removal record (see RemoveMembership), ordered against a removal. A
 	// suspended membership is ErrMemberSuspended and is left as it is: only
-	// RestoreMembership lifts a suspension.
+	// RestoreMembership, or an operator's UpsertMembership, lifts a
+	// suspension.
 	GrantMembership(ctx context.Context, m *TenantMembership) (granted *TenantMembership, changed bool, err error)
 	// GetMembership returns the membership for (project, tenant, user), or
 	// (nil, nil).
@@ -187,14 +190,17 @@ type MembershipStore interface {
 	SuspendMembership(ctx context.Context, projectID, tenantID, userID string) (m *TenantMembership, changed bool, err error)
 	// RestoreMembership lifts the suspension of the membership for (project,
 	// tenant, user), keeping its role and source. It becomes active, except
-	// one with source MembershipSourceDomain whose holder's email domain,
-	// emailDomain (the domain of FoldEmail of the email), is not a domain
-	// the tenant has verified: that one becomes inactive, as it would have
-	// when the email left the domain. Returns the membership as it now
-	// stands, and whether this call lifted a suspension; an active membership
-	// is returned unchanged. Any other status, or no membership, is
-	// ErrNotFound.
-	RestoreMembership(ctx context.Context, projectID, tenantID, userID, emailDomain string) (m *TenantMembership, changed bool, err error)
+	// one with source MembershipSourceDomain whose holder's email is not, at
+	// that moment, on a domain the tenant has verified: that one becomes
+	// inactive. The email is read where the write is, so a change of email
+	// cannot slip between them. restoredBy is the owner or admin restoring
+	// it, or "" for an operator: their membership is checked where the write
+	// is, so unless it is an active owner or admin one when the restore
+	// lands, it is ErrPermissionDenied and nothing changes. Returns the
+	// membership as it now stands, and whether this call lifted a
+	// suspension; an active membership is returned unchanged. Any other
+	// status, or no membership, is ErrNotFound.
+	RestoreMembership(ctx context.Context, projectID, tenantID, userID, restoredBy string) (m *TenantMembership, changed bool, err error)
 }
 
 // InvitationStore persists TenantInvitations within a Project. Reads that

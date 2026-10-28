@@ -30,12 +30,26 @@ type joinFixture struct {
 	projectID, tenantID, domainID, user string
 	// other is a second user, the tenant's owner.
 	other string
+	// accounts is a repository bound to projectID, where user's and other's
+	// accounts are, so a test can change their email.
+	accounts *pgRepository
 }
 
+// newJoinFixture is a tenant in its own project with a verified domain,
+// acme.com, that lets people join, and two accounts of that project on it:
+// user, not yet a member, and other, the tenant's owner.
 func newJoinFixture(ctx context.Context, t *testing.T, dsn string) *joinFixture {
 	t.Helper()
 	require.NoError(t, truncateAll(ctx, dsn))
-	ms, _, projectID, tenantID, user1, user2 := newMembershipFixture(ctx, t, dsn)
+	ms, _, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+	accounts, err := New(ctx, Config{DSN: dsn, MaxConns: 2, ConnTimeout: 5 * time.Second, ProjectID: projectID})
+	require.NoError(t, err)
+	t.Cleanup(accounts.Close)
+	now := time.Now()
+	user1, err := accounts.CreateUser(ctx, &service.User{Email: "u1@acme.com", Status: "active", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	user2, err := accounts.CreateUser(ctx, &service.User{Email: "u2@acme.com", Status: "active", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
 	_, tenants, domains := newTenantDomainStores(ctx, t, dsn)
 	domainID, err := domains.CreateDomain(ctx, &service.Domain{
 		ProjectID: projectID, TenantID: tenantID, Domain: "acme.com",
@@ -50,7 +64,7 @@ func newJoinFixture(ctx context.Context, t *testing.T, dsn string) *joinFixture 
 		Source: service.MembershipSourceCreated, Role: service.RoleOwner,
 	})
 	require.NoError(t, err)
-	return &joinFixture{ms: ms, tenants: tenants, domains: domains, projectID: projectID, tenantID: tenantID, domainID: domainID, user: user1, other: user2}
+	return &joinFixture{ms: ms, tenants: tenants, domains: domains, projectID: projectID, tenantID: tenantID, domainID: domainID, user: user1, other: user2, accounts: accounts}
 }
 
 func (f *joinFixture) join(ctx context.Context) (*service.TenantMembership, bool, error) {

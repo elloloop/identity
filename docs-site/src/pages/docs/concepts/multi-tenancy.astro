@@ -243,13 +243,16 @@ JoinTenantByDomain(tenant_id)
 RestoreTenantMember(tenant_id, user_id)
   -> membership { status: "active", role, source }      # also if already active
   -> membership { status: "inactive", ... }             # a domain member now off the tenant's verified domains
+  -> INVALID_ARGUMENT      # user_id is you
   -> NOT_FOUND             # not an active or suspended member`}
     lang="bash"
   />
   <p>
     Both need an active owner or admin of a tenant that is not suspended
-    (<code>PERMISSION_DENIED</code> otherwise). An admin may suspend an owner
-    while another active owner remains. While suspended, the member is listed
+    (<code>PERMISSION_DENIED</code> otherwise). A restore checks that again
+    where it writes, so an owner or admin suspended while their call is in
+    flight lifts nothing. An admin may suspend an owner while another active
+    owner remains. While suspended, the member is listed
     by <code>ListTenantMembers</code> with status <code>suspended</code>, is
     left out of <code>ListMyTenants</code> and
     <code>ListJoinableTenants</code>, is refused the tenant at a refresh
@@ -260,9 +263,11 @@ RestoreTenantMember(tenant_id, user_id)
     email's domain does not end when the email leaves the domain, so leaving
     and returning cannot shed it; if the email is off the tenant's verified
     domains when the member is restored, the membership ends then instead,
-    and they need an invitation to come back. An operator's
-    <code>AdminAddTenantAdmin</code> or
-    <code>AdminRecoverTenantOwnership</code> also lifts a suspension.
+    and they come back as any former member does: through an invitation, or
+    by joining once their email is on a domain that lets people join. An
+    operator's <code>AdminAddTenantAdmin</code> or
+    <code>AdminRecoverTenantOwnership</code> also lifts a suspension, and
+    audits the lift as a restore with no actor.
   </p>
   <p>
     A suspension takes effect at the member's next refresh. It ends none of
@@ -271,7 +276,9 @@ RestoreTenantMember(tenant_id, user_id)
     suspension is audited as <code>tenant_member_suspended</code> and a
     restore as <code>tenant_member_restored</code>, each with the
     membership's role, source and resulting status; a call that changes
-    nothing records nothing.
+    nothing records nothing. A removal's <code>tenant_member_removed</code>
+    records the status the membership had, so removing a suspended member
+    shows as one.
   </p>
 
   <h2 id="choosing-a-tenant-for-a-token">Choosing a tenant for a token</h2>
@@ -479,11 +486,12 @@ Both:
     returns its membership and records nothing, so a retry is safe. A
     refused recovery is not audited. <code>AdminAddTenantAdmin</code>, which
     provisions a tenant's first admins, makes none of these checks and
-    records nothing, so the same admin secret can make anyone an owner or
-    admin of any tenant, lowering an owner included.
+    records nothing but a suspension it lifts, so the same admin secret can
+    make anyone an owner or admin of any tenant, lowering an owner included.
   </p>
   <p>
-    Recovery treats a deactivated or suspended owner as gone, though either
+    Recovery treats a deactivated or suspended account, and an owner or
+    admin whose membership of the tenant is suspended, as gone, though each
     can be undone: an owner reactivated after a recovery is an owner again,
     beside the appointed one, so make sure the account will not come back
     first. When every owner is gone and the admins left cannot be reached

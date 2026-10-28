@@ -173,9 +173,10 @@ func requireEligibleTenantOwner(u *User) error {
 // userID may be any account of the project an owner may be (see
 // judgeTenantOwner), a member of the tenant or not; a membership it already
 // holds becomes an active owner one and keeps its source. A suspended one is
-// restored first (MembershipStore.RestoreMembership), so the appointment
-// lifts the suspension. The tenant must be
-// claimed or suspended: a latent tenant has never had an owner
+// restored first (liftSuspension), so the appointment lifts the suspension,
+// and the lift is audited when it lands. An owner or admin whose membership
+// is suspended does not govern, and does not stop a recovery. The tenant
+// must be claimed or suspended: a latent tenant has never had an owner
 // (ErrTenantStatusConflict). Only a grant that changed something is audited.
 // A refused recovery is not. Recovery reads the governors, then grants, so
 // two operators recovering one tenant at once with different accounts may
@@ -226,7 +227,7 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 		return nil, ErrTenantStillGoverned
 	}
 
-	restored, err := s.liftSuspension(ctx, projectID, tenantID, user)
+	restored, err := s.liftSuspension(ctx, projectID, tenantID, userID, reason, ip, ua)
 	if err != nil {
 		return nil, err
 	}
@@ -252,20 +253,28 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 	return m, nil
 }
 
-// liftSuspension restores user's membership of the tenant when it is
-// suspended, so a grant can make it an owner one, and reports whether it
-// lifted one. Any other membership, or none, is left to the grant.
-func (s *ControlPlaneAdminService) liftSuspension(ctx context.Context, projectID, tenantID string, user *User) (bool, error) {
-	held, err := s.memberships.GetMembership(ctx, projectID, tenantID, user.ID)
-	if err != nil || held == nil || held.Status != MembershipStatusSuspended {
-		return false, err
-	}
-	_, restored, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, user.ID, accountEmailDomain(user))
+// liftSuspension is an operator's restore of userID's membership of the
+// tenant, made so that a grant can then write it: the grant refuses a
+// suspended one. It reports whether it lifted a suspension, and audits the
+// lift at once as EventTenantMemberRestored, with no actor and the
+// operator's reason, if any, so a grant that then fails cannot leave it
+// unrecorded. Any other membership, or none, is left to the grant.
+func (s *ControlPlaneAdminService) liftSuspension(ctx context.Context, projectID, tenantID, userID, reason, ip, ua string) (bool, error) {
+	m, restored, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, userID, "")
 	if errors.Is(err, ErrNotFound) {
-		// Removed or restored since the read: the grant decides.
 		return false, nil
 	}
-	return restored, err
+	if err != nil || !restored {
+		return false, err
+	}
+	details := memberChangeDetails(m)
+	if reason != "" {
+		details["reason"] = reason
+	}
+	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantMemberRestored,
+		audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
+		audit.WithSuccess(true), audit.WithDetails(details))
+	return true, nil
 }
 
 // governorsWhoCanSignIn returns the tenant's active owner and admin

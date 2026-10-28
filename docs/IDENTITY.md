@@ -761,8 +761,9 @@ signup would have. `RemoveTenantMember` records the removal in
 auto-formation makes the person a member again; any of the explicit grants
 above deletes it. `SuspendTenantMember` keeps the row at status `suspended`:
 neither a join nor an accepted invitation lifts that, and an email leaving
-the domain does not end it. `RestoreTenantMember` or an operator's grant
-does.
+the domain does not end it. `RestoreTenantMember`, checked against the
+restorer in the same transaction, or an operator's grant or recovery does,
+and each lift is audited.
 
 ## Identity's role model vs tenant-shard-db's role model
 

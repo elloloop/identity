@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -248,6 +249,35 @@ func TestSuspendAndRestoreTenantMember_Refusals(t *testing.T) {
 	assert.Equal(t, MembershipStatusActive, f.membership(t, ssOwnerID).Status)
 }
 
+// An admin suspended after their call was authorized lifts nothing: the
+// restore checks them again where it writes, so two suspended admins cannot
+// restore each other, nor one themselves, through calls already in flight.
+func TestRestoreTenantMember_ACallerSuspendedMeanwhileLiftsNothing(t *testing.T) {
+	f := suspensionFixture(t)
+	ctx := withTenantsProject(false)
+	f.seed(ssOtherID, MembershipSourceInvited, RoleAdmin, MembershipStatusActive)
+	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	require.NoError(t, err)
+	f.members.onRestore = func() {
+		f.members.byKey[f.members.key(ssProject, ownTenant, ssOtherID)].Status = MembershipStatusSuspended
+	}
+
+	_, err = f.svc.RestoreTenantMember(ctx, ssOtherID, ownTenant, joinerID, "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied)
+	assert.Equal(t, MembershipStatusSuspended, f.membership(t, joinerID).Status)
+	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantMemberRestored)))
+}
+
+// An owner or admin naming themselves is refused as a request that cannot
+// be meant: one who may restore is not suspended.
+func TestRestoreTenantMember_RefusesYourself(t *testing.T) {
+	f := suspensionFixture(t)
+	ctx := withTenantsProject(false)
+	_, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, ownTenant, " "+ssOwnerID, "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Equal(t, MembershipStatusActive, f.membership(t, ssOwnerID).Status)
+}
+
 // ── who else lifts a suspension ─────────────────────────────────────────
 
 // An operator's appointment lifts a suspension: the appointee becomes an
@@ -270,10 +300,44 @@ func TestAdminRecoverTenantOwnership_LiftsASuspension(t *testing.T) {
 		stored, _ := f.members.GetMembership(ctx, "proj", "t-1", "heir")
 		assert.Equal(t, got, stored, name)
 		assert.Equal(t, 1, f.audit.countByEventType(string(audit.EventTenantOwnershipRecovered)), name)
+		requireOperatorRestore(t, f, seed.role, seed.source, "why")
 	}
 }
 
-// An operator's grant of administration lifts a suspension too.
+// requireOperatorRestore checks that the fixture's audit trail holds one
+// lift of heir's suspension in t-1, with no actor, the role and source the
+// membership had, and reason, when one is given.
+func requireOperatorRestore(t *testing.T, f *adminFixture, role, source, reason string) {
+	t.Helper()
+	event := string(audit.EventTenantMemberRestored)
+	require.Equal(t, 1, f.audit.countByEventTypeActorTarget(event, "", "heir"))
+	want := map[string]any{"project_id": "proj", "tenant_id": "t-1", "role": role, "source": source}
+	if reason != "" {
+		want["reason"] = reason
+	}
+	details := f.audit.detailsOf(event)[0]
+	delete(details, "status")
+	assert.Equal(t, want, details)
+}
+
+// The lift is recorded when it lands: a grant that then fails leaves the
+// member restored, and the trail says so.
+func TestAdminRecoverTenantOwnership_AFailedGrantKeepsTheLiftRecorded(t *testing.T) {
+	t.Parallel()
+	f := newRecoveryFixture()
+	f.seedMembership("heir", MembershipSourceInvited, RoleMember, MembershipStatusSuspended)
+	f.members.upsertErr = errors.New("write failed")
+
+	_, err := f.recover("heir", "why")
+	require.Error(t, err)
+	stored, _ := f.members.GetMembership(context.Background(), "proj", "t-1", "heir")
+	assert.Equal(t, MembershipStatusActive, stored.Status)
+	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantOwnershipRecovered)))
+	requireOperatorRestore(t, f, RoleMember, MembershipSourceInvited, "why")
+}
+
+// An operator's grant of administration lifts a suspension too, and the
+// lift is recorded.
 func TestAdminAddTenantAdmin_LiftsASuspension(t *testing.T) {
 	t.Parallel()
 	f := newRecoveryFixture()
@@ -285,6 +349,12 @@ func TestAdminAddTenantAdmin_LiftsASuspension(t *testing.T) {
 	stored, _ := f.members.GetMembership(context.Background(), "proj", "t-1", "heir")
 	assert.Equal(t, MembershipStatusActive, stored.Status)
 	assert.Equal(t, RoleAdmin, stored.Role)
+	requireOperatorRestore(t, f, RoleMember, MembershipSourceInvited, "")
+
+	// A grant to an active member lifts nothing and records no lift.
+	_, err = f.svc.AdminAddTenantAdmin(context.Background(), testAdminSecret, "proj", "t-1", "heir", RoleOwner)
+	require.NoError(t, err)
+	assert.Equal(t, 1, f.audit.countByEventType(string(audit.EventTenantMemberRestored)))
 }
 
 // A caller suspended while their domain's check is in flight gains no

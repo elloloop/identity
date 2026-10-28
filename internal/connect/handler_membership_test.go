@@ -376,18 +376,27 @@ func TestSuspendAndRestoreTenantMember_Handler(t *testing.T) {
 		withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t-1"}, "admin-1"))
 	requireCode(t, err, connect.CodeInvalidArgument)
 
+	_, err = srv.client.RestoreTenantMember(ctx,
+		withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t-1", UserId: "admin-1"}, "admin-1"))
+	requireCode(t, err, connect.CodeInvalidArgument)
+
+	members.changeErr = service.ErrLastOwner
+	_, err = srv.client.SuspendTenantMember(ctx,
+		withAuth(&identitypb.SuspendTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
+	requireCode(t, err, connect.CodeFailedPrecondition)
 	for err, code := range map[error]connect.Code{
-		service.ErrLastOwner: connect.CodeFailedPrecondition,
-		service.ErrNotFound:  connect.CodeNotFound,
+		service.ErrNotFound:         connect.CodeNotFound,
+		service.ErrPermissionDenied: connect.CodePermissionDenied,
 	} {
 		members.changeErr = err
-		_, got := srv.client.SuspendTenantMember(ctx,
-			withAuth(&identitypb.SuspendTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
-		requireCode(t, got, code)
-		_, got = srv.client.RestoreTenantMember(ctx,
+		_, got := srv.client.RestoreTenantMember(ctx,
 			withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
 		requireCode(t, got, code)
 	}
+	members.changeErr = service.ErrNotFound
+	_, err = srv.client.SuspendTenantMember(ctx,
+		withAuth(&identitypb.SuspendTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
+	requireCode(t, err, connect.CodeNotFound)
 
 	members.changeErr = nil
 	members.member.Status = service.MembershipStatusSuspended

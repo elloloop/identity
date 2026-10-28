@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,8 +42,36 @@ func (f *joinFixture) suspend(ctx context.Context, userID string) (*service.Tena
 	return f.ms.SuspendMembership(ctx, f.projectID, f.tenantID, userID)
 }
 
-func (f *joinFixture) restore(ctx context.Context, userID, emailDomain string) (*service.TenantMembership, bool, error) {
-	return f.ms.RestoreMembership(ctx, f.projectID, f.tenantID, userID, emailDomain)
+// restore lifts userID's suspension as restoredBy, or as an operator when
+// restoredBy is "".
+func (f *joinFixture) restore(ctx context.Context, userID, restoredBy string) (*service.TenantMembership, bool, error) {
+	return f.ms.RestoreMembership(ctx, f.projectID, f.tenantID, userID, restoredBy)
+}
+
+// moveEmail changes userID's email, as an account change would.
+func (f *joinFixture) moveEmail(ctx context.Context, t *testing.T, userID, email string) {
+	t.Helper()
+	require.NoError(t, f.accounts.UpdateUserEmail(ctx, userID, email, time.Now().UnixMilli()))
+}
+
+// account creates an account of the fixture's project with email, and
+// returns its id.
+func (f *joinFixture) account(ctx context.Context, t *testing.T, email string) string {
+	t.Helper()
+	now := time.Now()
+	id, err := f.accounts.CreateUser(ctx, &service.User{Email: email, Status: "active", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	return id
+}
+
+// grant gives userID an invited membership with role.
+func (f *joinFixture) grant(ctx context.Context, t *testing.T, userID, role string) {
+	t.Helper()
+	_, _, err := f.ms.GrantMembership(ctx, &service.TenantMembership{
+		ProjectID: f.projectID, TenantID: f.tenantID, UserID: userID,
+		Source: service.MembershipSourceInvited, Role: role,
+	})
+	require.NoError(t, err)
 }
 
 // TestMembershipStore_SuspendAndRestore: a suspension keeps the membership,
@@ -87,7 +116,7 @@ func TestMembershipStore_SuspendAndRestore(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrMemberSuspended)
 	assert.Equal(t, suspended, f.held(ctx, t), "neither a join nor a grant wrote")
 
-	restored, changed, err := f.restore(ctx, f.user, "acme.com")
+	restored, changed, err := f.restore(ctx, f.user, f.other)
 	require.NoError(t, err)
 	require.True(t, changed)
 	assert.Equal(t, service.MembershipStatusActive, restored.Status)
@@ -96,16 +125,18 @@ func TestMembershipStore_SuspendAndRestore(t *testing.T) {
 	active, err = f.ms.GetActiveTenantForUser(ctx, f.projectID, f.tenantID, f.user, "acme.com")
 	require.NoError(t, err)
 	assert.NotNil(t, active)
-	again, changed, err = f.restore(ctx, f.user, "acme.com")
+	again, changed, err = f.restore(ctx, f.user, f.other)
 	require.NoError(t, err)
 	assert.False(t, changed)
 	assert.Equal(t, restored, again)
 
-	// A domain membership whose email is off the tenant's verified domains
-	// comes back ended; one from another source comes back active.
+	// A domain membership whose email left the tenant's verified domains
+	// while it was suspended comes back ended; one from another source
+	// comes back active.
 	_, _, err = f.suspend(ctx, f.user)
 	require.NoError(t, err)
-	ended, changed, err := f.restore(ctx, f.user, "elsewhere.example")
+	f.moveEmail(ctx, t, f.user, "u1@elsewhere.example")
+	ended, changed, err := f.restore(ctx, f.user, f.other)
 	require.NoError(t, err)
 	require.True(t, changed)
 	assert.Equal(t, service.MembershipStatusInactive, ended.Status)
@@ -116,9 +147,9 @@ func TestMembershipStore_SuspendAndRestore(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = f.suspend(ctx, f.user)
 	require.NoError(t, err)
-	back, _, err := f.restore(ctx, f.user, "elsewhere.example")
+	back, _, err := f.restore(ctx, f.user, "")
 	require.NoError(t, err)
-	assert.Equal(t, service.MembershipStatusActive, back.Status)
+	assert.Equal(t, service.MembershipStatusActive, back.Status, "an operator's restore")
 
 	// An operator's upsert lifts a suspension.
 	_, _, err = f.suspend(ctx, f.user)
@@ -142,7 +173,7 @@ func TestMembershipStore_SuspendAndRestoreRefusals(t *testing.T) {
 
 	_, _, err := f.suspend(ctx, f.user)
 	require.ErrorIs(t, err, service.ErrNotFound, "no membership")
-	_, _, err = f.restore(ctx, f.user, "acme.com")
+	_, _, err = f.restore(ctx, f.user, f.other)
 	require.ErrorIs(t, err, service.ErrNotFound, "no membership")
 
 	_, err = f.ms.UpsertMembership(ctx, &service.TenantMembership{
@@ -152,16 +183,139 @@ func TestMembershipStore_SuspendAndRestoreRefusals(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = f.suspend(ctx, f.user)
 	require.ErrorIs(t, err, service.ErrNotFound, "an ended membership")
-	_, _, err = f.restore(ctx, f.user, "acme.com")
+	_, _, err = f.restore(ctx, f.user, f.other)
 	require.ErrorIs(t, err, service.ErrNotFound, "an ended membership")
 	assert.Equal(t, service.MembershipStatusInactive, f.held(ctx, t).Status)
 
 	for _, args := range [][3]string{{"", f.tenantID, f.user}, {f.projectID, "", f.user}, {f.projectID, f.tenantID, ""}} {
 		_, _, err = f.ms.SuspendMembership(ctx, args[0], args[1], args[2])
 		require.ErrorIs(t, err, service.ErrInvalidArgument, "%v", args)
-		_, _, err = f.ms.RestoreMembership(ctx, args[0], args[1], args[2], "acme.com")
+		_, _, err = f.ms.RestoreMembership(ctx, args[0], args[1], args[2], f.other)
 		require.ErrorIs(t, err, service.ErrInvalidArgument, "%v", args)
 	}
+}
+
+// TestMembershipStore_RestoreChecksTheRestorer: a restore is written only
+// while the one restoring holds an active owner or admin membership, read
+// where the restore is: a suspended admin, a plain member, someone with no
+// membership and the suspended member themselves are refused, and the
+// suspension stands.
+func TestMembershipStore_RestoreChecksTheRestorer(t *testing.T) {
+	dsn := suspensionDSN(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f := newJoinFixture(ctx, t, dsn)
+	_, _, err := f.join(ctx)
+	require.NoError(t, err)
+	admin := f.account(ctx, t, "admin@acme.com")
+	member := f.account(ctx, t, "member@acme.com")
+	f.grant(ctx, t, admin, service.RoleAdmin)
+	f.grant(ctx, t, member, service.RoleMember)
+	_, _, err = f.suspend(ctx, f.user)
+	require.NoError(t, err)
+	_, _, err = f.suspend(ctx, admin)
+	require.NoError(t, err)
+
+	for name, by := range map[string]string{
+		"a suspended admin":     admin,
+		"a plain member":        member,
+		"no member":             f.account(ctx, t, "stranger@acme.com"),
+		"the suspended member":  f.user,
+		"an id with no account": "no-such-user",
+	} {
+		_, _, err := f.restore(ctx, f.user, by)
+		require.ErrorIs(t, err, service.ErrPermissionDenied, name)
+		assert.Equal(t, service.MembershipStatusSuspended, f.held(ctx, t).Status, name)
+	}
+	_, _, err = f.restore(ctx, admin, admin)
+	require.ErrorIs(t, err, service.ErrPermissionDenied, "a suspended admin restoring themselves")
+
+	restored, changed, err := f.restore(ctx, admin, f.other)
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Equal(t, service.MembershipStatusActive, restored.Status)
+	restored, changed, err = f.restore(ctx, f.user, admin)
+	require.NoError(t, err, "a restored admin restores")
+	require.True(t, changed)
+	assert.Equal(t, service.MembershipStatusActive, restored.Status)
+}
+
+// TestMembershipStore_RestoreJudgesTheEmailWhereItWrites: a restore reads
+// the account's email in its own transaction and holds the account's row,
+// so an email change it waits for is the one it judges: a domain member
+// whose email left the domain before the restore committed comes back
+// ended, not active.
+func TestMembershipStore_RestoreJudgesTheEmailWhereItWrites(t *testing.T) {
+	dsn := suspensionDSN(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f := newJoinFixture(ctx, t, dsn)
+	_, _, err := f.join(ctx)
+	require.NoError(t, err)
+	_, _, err = f.suspend(ctx, f.user)
+	require.NoError(t, err)
+
+	raw, err := pgx.Connect(ctx, dsn)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close(ctx) }()
+	move, err := raw.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = move.Rollback(ctx) }()
+	_, err = move.Exec(ctx, `SELECT set_config($1, $2, true)`, rlsGUC, f.projectID)
+	require.NoError(t, err)
+	_, err = move.Exec(ctx, `UPDATE users SET email = 'u1@elsewhere.example' WHERE project_id = $1 AND id = $2`, f.projectID, f.user)
+	require.NoError(t, err)
+
+	type result struct {
+		m   *service.TenantMembership
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		m, _, err := f.restore(ctx, f.user, f.other)
+		done <- result{m, err}
+	}()
+	watch, err := pgx.Connect(ctx, dsn)
+	require.NoError(t, err)
+	defer func() { _ = watch.Close(ctx) }()
+	require.Eventually(t, func() bool {
+		var waiting int
+		err := watch.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'
+			  AND query LIKE '%FROM users%FOR SHARE%'`).Scan(&waiting)
+		return err == nil && waiting == 1
+	}, 10*time.Second, 20*time.Millisecond, "the restore waits on the account's row")
+
+	require.NoError(t, move.Commit(ctx))
+
+	got := <-done
+	require.NoError(t, got.err)
+	assert.Equal(t, service.MembershipStatusInactive, got.m.Status, "the email the restore waited for is the one it judged")
+}
+
+// TestMembershipStore_TransferAndSuspension: ownership passes only from an
+// active owner to an active member, so a suspended member can neither
+// receive it nor, as a suspended owner, hand it on.
+func TestMembershipStore_TransferAndSuspension(t *testing.T) {
+	dsn := suspensionDSN(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f := newJoinFixture(ctx, t, dsn)
+	f.grant(ctx, t, f.user, service.RoleMember)
+	_, _, err := f.suspend(ctx, f.user)
+	require.NoError(t, err)
+	_, _, err = f.ms.TransferOwnership(ctx, f.projectID, f.tenantID, f.other, f.user)
+	require.ErrorIs(t, err, service.ErrNotFound, "to a suspended member")
+
+	co := f.account(ctx, t, "co@acme.com")
+	f.grant(ctx, t, co, service.RoleOwner)
+	_, _, err = f.suspend(ctx, f.other)
+	require.NoError(t, err)
+	_, _, err = f.restore(ctx, f.user, co)
+	require.NoError(t, err)
+	_, _, err = f.ms.TransferOwnership(ctx, f.projectID, f.tenantID, f.other, f.user)
+	require.ErrorIs(t, err, service.ErrPermissionDenied, "by a suspended owner")
+	assert.Equal(t, service.RoleMember, f.held(ctx, t).Role)
 }
 
 // TestMembershipStore_SuspensionKeepsAnOwner: the last active owner cannot
@@ -188,7 +342,7 @@ func TestMembershipStore_SuspensionKeepsAnOwner(t *testing.T) {
 	_, _, err = f.suspend(ctx, f.user)
 	require.ErrorIs(t, err, service.ErrLastOwner)
 	require.ErrorIs(t, removeErr(ctx, f.ms, f.projectID, f.tenantID, f.user), service.ErrLastOwner)
-	_, _, err = f.restore(ctx, f.other, "")
+	_, _, err = f.restore(ctx, f.other, f.user)
 	require.NoError(t, err)
 	require.NoError(t, removeErr(ctx, f.ms, f.projectID, f.tenantID, f.user))
 }
@@ -252,6 +406,32 @@ func TestMembershipStore_ConcurrentSuspensionsKeepAnOwner(t *testing.T) {
 		}
 		require.Len(t, owners(), 1, "round %d", round)
 	}
+	// A suspension of the member a transfer makes the owner: whichever lands
+	// first, the other is refused, and one active owner is left.
+	transfer := func() error {
+		_, _, err := f.ms.TransferOwnership(ctx, f.projectID, f.tenantID, f.other, f.user)
+		return err
+	}
+	for round := range rounds {
+		_, err := f.ms.UpsertMembership(ctx, &service.TenantMembership{
+			ProjectID: f.projectID, TenantID: f.tenantID, UserID: f.user,
+			Source: service.MembershipSourceAdded, Role: service.RoleMember, Status: service.MembershipStatusActive,
+		})
+		require.NoError(t, err)
+		_, err = f.ms.UpsertMembership(ctx, &service.TenantMembership{
+			ProjectID: f.projectID, TenantID: f.tenantID, UserID: f.other,
+			Source: service.MembershipSourceAdded, Role: service.RoleOwner, Status: service.MembershipStatusActive,
+		})
+		require.NoError(t, err)
+		suspendErr, transferErr := runTogether(suspend(f.user), transfer)
+		require.True(t, (suspendErr == nil) != (transferErr == nil), "round %d: exactly one change lands (%v, %v)", round, suspendErr, transferErr)
+		if suspendErr != nil {
+			require.ErrorIs(t, suspendErr, service.ErrLastOwner, "round %d: the new owner is the last one", round)
+		} else {
+			require.ErrorIs(t, transferErr, service.ErrNotFound, "round %d: a suspended member takes nothing", round)
+		}
+		require.Len(t, owners(), 1, "round %d", round)
+	}
 }
 
 // TestDomainMembershipSuspensionSurvivesTheEmailLeaving: migration 0053's
@@ -277,15 +457,24 @@ func TestDomainMembershipSuspensionSurvivesTheEmailLeaving(t *testing.T) {
 
 	require.NoError(t, f.repo.UpdateUserEmail(ctx, f.onDomain, "person@"+govDomain, at))
 	assert.Equal(t, service.MembershipStatusSuspended, f.membershipStatus(ctx, t, f.tenant, f.onDomain))
-	restored, _, err := f.members.RestoreMembership(ctx, f.project, f.tenant, f.onDomain, govDomain)
+
+	// The restore reads the email under row-level security, through a
+	// store bound to another project, as the control plane's is: it binds
+	// its transaction to the membership's project, so it finds the email
+	// back on the domain.
+	elsewhere, err := New(ctx, Config{DSN: roleDSN, MaxConns: 2, ConnTimeout: 5 * time.Second, ProjectID: "control-plane"})
+	require.NoError(t, err)
+	t.Cleanup(elsewhere.Close)
+	restored, _, err := NewMembershipStore(elsewhere).RestoreMembership(ctx, f.project, f.tenant, f.onDomain, "")
 	require.NoError(t, err)
 	assert.Equal(t, service.MembershipStatusActive, restored.Status)
 }
 
 // TestSuspendTenantMembersMigrationRoundTrip: 0053 admits 'suspended' and
-// keeps the trigger off suspended rows; its down migration ends every
-// suspended membership, so the narrower check holds again, and the trigger
-// is 0047's once more. 52 → 53 → 52 → 53.
+// keeps the trigger off suspended rows. Its down migration refuses to run
+// while a membership is suspended, changing nothing; once none is, it
+// narrows the check again and the trigger is 0047's once more.
+// 52 → 53 → 52 → 53 → 52.
 func TestSuspendTenantMembersMigrationRoundTrip(t *testing.T) {
 	dsn := suspensionDSN(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -339,10 +528,20 @@ func TestSuspendTenantMembersMigrationRoundTrip(t *testing.T) {
 	require.Error(t, err, "52 refuses a suspended membership")
 
 	for _, version := range []uint{53, 52, 53} {
+		if version == 52 {
+			err := withMigrator(t, scratch, func(m *migrate.Migrate) error { return m.Migrate(52) })
+			require.ErrorContains(t, err, "1 tenant memberships are suspended")
+			require.NoError(t, withMigrator(t, scratch, func(m *migrate.Migrate) error { return m.Force(53) }))
+			assert.True(t, strings.Contains(statusCheck(), "suspended"), "the refused down migration changed nothing")
+			assert.Equal(t, service.MembershipStatusSuspended, status("held"))
+			// The operator decides the suspension: here, a restore.
+			_, err = raw.Exec(ctx, `UPDATE tenant_memberships SET status = 'active' WHERE user_id = 'held'`)
+			require.NoError(t, err)
+		}
 		migrateToVersion(t, scratch, version)
 		assert.Equal(t, version == 53, strings.Contains(statusCheck(), "suspended"), "version %d", version)
 		if version == 52 {
-			assert.Equal(t, service.MembershipStatusInactive, status("held"), "the down migration ends a suspension")
+			assert.Contains(t, statusCheck(), "NOT VALID", "the narrower check skips the scan the down migration's own check made")
 			require.Error(t, insertSuspended())
 			continue
 		}
@@ -359,11 +558,11 @@ func TestSuspendTenantMembersMigrationRoundTrip(t *testing.T) {
 		moveEmail("free", "free@acme.example")
 	}
 
-	// Back at 52 the trigger is 0047's: it ends the domain membership the
-	// down migration ended, and an active one, whatever.
-	migrateToVersion(t, scratch, 52)
+	// Back at 52, once no one is suspended, the trigger is 0047's: it ends
+	// every active domain membership whose email leaves the domain.
 	_, err = raw.Exec(ctx, `UPDATE tenant_memberships SET status = 'active'`)
 	require.NoError(t, err)
+	migrateToVersion(t, scratch, 52)
 	moveEmail("held", "held@elsewhere.example")
 	assert.Equal(t, service.MembershipStatusInactive, status("held"))
 }

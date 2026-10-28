@@ -366,7 +366,8 @@ const (
 	// EventTenantMemberRemoved records a tenant owner or admin removing a
 	// member (RemoveTenantMember), themselves included: actor the caller and
 	// target the person removed, with the project and tenant ids and the
-	// role and source the membership had in the details. The removal also
+	// role, source and status the membership had in the details, so the
+	// removal of a suspended member shows as one. The removal also
 	// keeps the person from joining the tenant again by their email's
 	// domain until a membership from another source lets them back in.
 	// Removing a membership that does not exist records nothing.
@@ -374,18 +375,21 @@ const (
 
 	// EventTenantMemberSuspended records a tenant owner or admin suspending
 	// a member (SuspendTenantMember): actor the caller and target the
-	// person suspended, with the project and tenant ids and the role and
-	// source the membership keeps in the details. Suspending a suspended
-	// member records nothing.
+	// person suspended, with the project and tenant ids, the role and source
+	// the membership keeps, and its status, "suspended", in the details.
+	// Suspending a suspended member records nothing.
 	EventTenantMemberSuspended EventType = "tenant_member_suspended"
 
-	// EventTenantMemberRestored records a tenant owner or admin lifting a
-	// member's suspension (RestoreTenantMember): actor the caller and target
-	// the person, with the project and tenant ids, the role and source, and
-	// the status the membership now has in the details: "active", or
-	// "inactive" for a membership through the email's domain whose email is
-	// no longer on a domain the tenant has verified. Restoring an active
-	// member records nothing.
+	// EventTenantMemberRestored records a member's suspension being lifted:
+	// by a tenant owner or admin (RestoreTenantMember), with the caller as
+	// actor, or by an operator's AdminRecoverTenantOwnership or
+	// AdminAddTenantAdmin, which lift it before they write the membership,
+	// with no actor and, for a recovery, the operator's reason in the
+	// details. The target is the person, and the details hold the project
+	// and tenant ids, the role and source, and the status the membership now
+	// has: "active", or "inactive" for a membership through the email's
+	// domain whose email is not on a domain the tenant has verified.
+	// Restoring an active member records nothing.
 	EventTenantMemberRestored EventType = "tenant_member_restored"
 )
 

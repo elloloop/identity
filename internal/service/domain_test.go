@@ -343,6 +343,13 @@ type fakeMembershipStore struct {
 	// tenants supplies each tenant's name and status to the active-tenant
 	// reads (linkFakeTenantStores); unlinked, those reads find nothing.
 	tenants *fakeTenantStore
+	// accounts supplies the email RestoreMembership judges a domain
+	// membership by, as the postgres store reads users.email_domain;
+	// unlinked, or without the account, the email is "".
+	accounts *fakeUserDirectory
+	// onRestore runs as RestoreMembership starts, standing for a write that
+	// lands between the service's checks and the restore's transaction.
+	onRestore func()
 	// verified holds each tenant's verified domains, keyed project/tenant,
 	// for the active-tenant reads' domain rule (verifyDomain).
 	verified map[string]map[string]bool
@@ -551,11 +558,21 @@ func (f *fakeMembershipStore) SuspendMembership(_ context.Context, projectID, te
 	return &out, true, nil
 }
 
-// RestoreMembership mirrors the postgres store: a suspended membership
-// becomes active, or inactive when it is a domain one and emailDomain is
-// not a domain the tenant verified; an active one is returned unchanged,
-// and anything else is ErrNotFound.
-func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID, emailDomain string) (*TenantMembership, bool, error) {
+// RestoreMembership mirrors the postgres store: restoredBy, unless "",
+// must hold an active owner or admin membership, else ErrPermissionDenied;
+// a suspended membership becomes active, or inactive when it is a domain
+// one and the account's email is not on a domain the tenant verified; an
+// active one is returned unchanged, and anything else is ErrNotFound.
+func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID, restoredBy string) (*TenantMembership, bool, error) {
+	if f.onRestore != nil {
+		f.onRestore()
+	}
+	if restoredBy != "" {
+		by := f.byKey[f.key(projectID, tenantID, restoredBy)]
+		if by == nil || by.Status != MembershipStatusActive || (by.Role != RoleOwner && by.Role != RoleAdmin) {
+			return nil, false, ErrPermissionDenied
+		}
+	}
 	target, ok := f.byKey[f.key(projectID, tenantID, userID)]
 	switch {
 	case !ok:
@@ -567,11 +584,23 @@ func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, te
 		return nil, false, ErrNotFound
 	}
 	target.Status = MembershipStatusActive
-	if target.Source == MembershipSourceDomain && !f.verified[projectID+"/"+tenantID][emailDomain] {
+	if target.Source == MembershipSourceDomain && !f.verified[projectID+"/"+tenantID][f.accountEmailDomain(projectID, userID)] {
 		target.Status = MembershipStatusInactive
 	}
 	out := *target
 	return &out, true, nil
+}
+
+// accountEmailDomain is the domain of the email of userID's account in
+// accounts, as users.email_domain holds it, or "" for none.
+func (f *fakeMembershipStore) accountEmailDomain(projectID, userID string) string {
+	if f.accounts == nil {
+		return ""
+	}
+	if u := f.accounts.byID[f.accounts.key(projectID, userID)]; u != nil {
+		return emailDomain(FoldEmail(u.Email))
+	}
+	return ""
 }
 
 // TransferOwnership mirrors the postgres store's checks and writes.
