@@ -1147,8 +1147,9 @@ type Config struct {
 	// on <primary auth domain or GATEWAY_APP_BASE_URL>/auth/…. Magic-link,
 	// email-change and invitation links are unaffected (a tenant invitation's
 	// page is TenantInvitationPageURL). Must be an absolute https URL (http
-	// only for a loopback host) without userinfo, query or fragment; a path
-	// prefix is kept. Driven by GATEWAY_EMAIL_LINK_BASE_URL.
+	// only for a loopback host) without userinfo, query, fragment, space or
+	// other character a URL must percent-encode; a path prefix is kept.
+	// Driven by GATEWAY_EMAIL_LINK_BASE_URL.
 	EmailLinkBaseURL string
 
 	// TenantInvitationPageURL is the page a tenant-invitation email links to,
@@ -1156,10 +1157,13 @@ type Config struct {
 	// /auth/accept-invitation. When set, the link is <page>?token=… for every
 	// project, ahead of a project's primary auth domain; when empty it stays
 	// <primary auth domain or GATEWAY_APP_BASE_URL>/auth/accept-invitation?token=….
-	// The page redeems the token with AcceptTenantInvitation. Must be an
-	// absolute https URL (http only for a loopback host) without userinfo,
-	// query or fragment; the path is kept exactly, trailing slash included.
-	// Driven by GATEWAY_TENANT_INVITATION_PAGE_URL.
+	// The page redeems the token with AcceptTenantInvitation; the link does
+	// not name the project, so one page takes every project's invitations.
+	// InviteUser's account-setup link is not moved. Must be an absolute https
+	// URL (http only for a loopback host) without userinfo, query, fragment,
+	// space or other character a URL must percent-encode; the path is kept
+	// exactly, trailing slash included. Driven by
+	// GATEWAY_TENANT_INVITATION_PAGE_URL.
 	TenantInvitationPageURL string
 
 	// How long an email-verification or password-reset token is valid for.
@@ -2432,7 +2436,22 @@ func validateEmailedLinkURL(name, raw string) error {
 		return fmt.Errorf("config: %s %q must not carry userinfo, a query or a fragment",
 			name, origin.Redact(raw))
 	}
+	// The link is the value as written plus "?token=…", so a space, a quote
+	// or another character a URL must percent-encode would break it or end it
+	// early in a mail client.
+	if strings.ContainsFunc(raw, mustBePercentEncoded) {
+		return fmt.Errorf("config: %s %q must percent-encode spaces, quotes and other characters a URL cannot carry as they are",
+			name, origin.Redact(raw))
+	}
 	return nil
+}
+
+// mustBePercentEncoded reports whether r is an ASCII character a URL may
+// carry only percent-encoded (RFC 3986 §2): a control character, a space, or
+// one of " < > \ ^ ` { | }. Non-ASCII is left alone, since an
+// internationalized host name is written that way and mail clients link it.
+func mustBePercentEncoded(r rune) bool {
+	return r <= ' ' || r == 0x7f || strings.ContainsRune("\"<>\\^`{|}", r)
 }
 
 // projectSecretsKeyBytes is the required decoded length of

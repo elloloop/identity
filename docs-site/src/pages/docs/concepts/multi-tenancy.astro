@@ -310,11 +310,13 @@ JoinTenantByDomain(tenant_id)
     and never lowers a role, so it cannot demote an owner.
   </p>
   <p>
-    The email links to <code>/auth/accept-invitation?token=…</code> on the
-    project's primary auth domain, else on <code>GATEWAY_APP_BASE_URL</code>,
-    or to the page set in <code>GATEWAY_TENANT_INVITATION_PAGE_URL</code>.
-    That page, which your app serves, signs the invitee in and calls
-    <code>AcceptTenantInvitation</code> with the token.
+    The email links to the page set in
+    <code>GATEWAY_TENANT_INVITATION_PAGE_URL</code> when one is set, otherwise
+    to <code>/auth/accept-invitation?token=…</code> on the project's primary
+    auth domain, else on <code>GATEWAY_APP_BASE_URL</code> (see
+    <a href="/identity/docs/installation/configuration#tenant-invitation-links">tenant
+    invitation links</a>). That page, which your app serves, signs the invitee
+    in and calls <code>AcceptTenantInvitation</code> with the token.
   </p>
 
   <h2 id="operating-tenants">Operating tenants</h2>

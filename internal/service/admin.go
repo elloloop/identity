@@ -229,7 +229,7 @@ func (s *AdminService) InviteUser(
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
 
-	setupURL := fmt.Sprintf("%s/auth/accept-invitation?token=%s", appBaseURL(ctx, s.cfg), rawToken)
+	setupURL := buildEmailLink(appBaseURL(ctx, s.cfg)+appAuthPathPrefix+emailLinkPageAcceptInvitation, rawToken, emailLink{})
 
 	// Best-effort: render and send the invitation email. Failures here
 	// never fail the RPC — the admin still gets the token in the

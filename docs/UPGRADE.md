@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — `GATEWAY_TENANT_INVITATION_PAGE_URL`: the page a tenant invitation email links to (additive; no migration)
+## Next — `GATEWAY_TENANT_INVITATION_PAGE_URL`: the page a tenant invitation email links to (additive; one stricter start-up check; no migration)
 
 No schema change and no migration. A deployment that sets nothing new sends
 exactly the same emails as before.
@@ -18,10 +18,18 @@ exactly the same emails as before.
   included. The page signs the invitee in and redeems the token with
   `AcceptTenantInvitation`. The value has the same rules as
   `GATEWAY_EMAIL_LINK_BASE_URL`: an absolute `https` URL (`http` only for a
-  loopback host) with no userinfo, query or fragment. Any other value stops
-  the server from starting (`config: GATEWAY_TENANT_INVITATION_PAGE_URL …`).
+  loopback host) with no userinfo, query, fragment, space or other
+  character a URL must percent-encode. Any other value stops the server
+  from starting (`config: GATEWAY_TENANT_INVITATION_PAGE_URL …`). The link
+  does not name the project, so on a server hosting several projects set it
+  only when that one page accepts every project's invitations.
   `GATEWAY_EMAIL_LINK_BASE_URL` still does not move the invitation link, and
-  the account-setup link `InviteUser` sends is not affected.
+  the account-setup link `InviteUser` sends still goes to
+  `/auth/accept-invitation` on the app base URL.
+- **`GATEWAY_EMAIL_LINK_BASE_URL` is checked the same way**, so it now also
+  refuses a space, a `"`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|` or `}`. Such a
+  value already sent reset and verification links that broke at that
+  character; percent-encode it (a space is `%20`) and the server starts.
 
 ## Next — built with go-jose v4.1.6 for CVE-2026-116587; v4.26.0 withdrawn (no API or schema change)
 

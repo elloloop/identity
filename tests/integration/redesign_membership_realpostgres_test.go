@@ -171,6 +171,41 @@ func TestRedesign_Membership_LastOwnerGuard(t *testing.T) {
 	}
 }
 
+// TestRedesign_Membership_InvitationLinkOnConfiguredPage drives a deployment
+// that accepts invitations on its own page (GATEWAY_TENANT_INVITATION_PAGE_URL)
+// over the wire: the invitation email links to exactly <page>?token=…, and the
+// token on that link is the one AcceptTenantInvitation redeems.
+func TestRedesign_Membership_InvitationLinkOnConfiguredPage(t *testing.T) {
+	const page = "https://app.example.test/invitations/accept/"
+	h := startRedesignHarnessWith(t, func(cfg *config.Config) { cfg.TenantInvitationPageURL = page })
+	ctx := context.Background()
+
+	owner := signupOwner(t, h, "mem-page-owner")
+	inviteeEmail := fmt.Sprintf("mem-page-invitee-%d@example-corp.com", time.Now().UnixNano())
+	invitee := signupVerifiedUser(t, h, inviteeEmail)
+
+	if _, err := owner.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+		TenantId: owner.tenantID,
+		Email:    inviteeEmail,
+		Role:     service.RoleMember,
+	})); err != nil {
+		t.Fatalf("CreateTenantInvitation: %v", err)
+	}
+	body := mailedText(t, h, inviteeEmail)
+	tok := extractToken(t, body)
+	if got, want := linkIn(t, body, page), page+"?token="+tok; got != want {
+		t.Fatalf("invitation link:\n got  %s\n want %s", got, want)
+	}
+
+	accepted, err := invitee.client.AcceptTenantInvitation(ctx, connect.NewRequest(&identitypb.AcceptTenantInvitationRequest{Token: tok}))
+	if err != nil {
+		t.Fatalf("AcceptTenantInvitation with the link's token: %v", err)
+	}
+	if m := accepted.Msg.GetMembership(); m.GetUserId() != invitee.userID || m.GetRole() != service.RoleMember {
+		t.Fatalf("accepted membership = %+v", m)
+	}
+}
+
 // membershipUser is a signed-up user with an authed Connect client.
 type membershipUser struct {
 	client identityconnectgen.IdentityServiceClient
@@ -200,52 +235,18 @@ func signupMembershipUser(t *testing.T, h *RedesignHarness, emailAddr string) me
 // the ?token= query parameter in the link the template embeds — how a real
 // recipient obtains it, proving the token travels by email, not in the RPC
 // response.
-// TestRedesign_Membership_InvitationLinkOnConfiguredPage drives a deployment
-// that accepts invitations on its own page (GATEWAY_TENANT_INVITATION_PAGE_URL)
-// over the wire: the invitation email links to exactly <page>?token=…, and the
-// token on that link is the one AcceptTenantInvitation redeems.
-func TestRedesign_Membership_InvitationLinkOnConfiguredPage(t *testing.T) {
-	const page = "https://app.example.test/invitations/accept/"
-	h := startRedesignHarnessWith(t, func(cfg *config.Config) { cfg.TenantInvitationPageURL = page })
-	ctx := context.Background()
-
-	owner := signupOwner(t, h, "mem-page-owner")
-	inviteeEmail := fmt.Sprintf("mem-page-invitee-%d@example-corp.com", time.Now().UnixNano())
-	invitee := signupVerifiedUser(t, h, inviteeEmail)
-
-	if _, err := owner.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
-		TenantId: owner.tenantID,
-		Email:    inviteeEmail,
-		Role:     service.RoleMember,
-	})); err != nil {
-		t.Fatalf("CreateTenantInvitation: %v", err)
-	}
-	var body string
-	for _, msg := range reversedMessages(h.Mailer.Sent()) {
-		if msg.To == inviteeEmail {
-			body = msg.Text
-			break
-		}
-	}
-	tok := extractToken(t, body)
-	if got, want := linkIn(t, body, page), page+"?token="+tok; got != want {
-		t.Fatalf("invitation link:\n got  %s\n want %s", got, want)
-	}
-
-	accepted, err := invitee.client.AcceptTenantInvitation(ctx, connect.NewRequest(&identitypb.AcceptTenantInvitationRequest{Token: tok}))
-	if err != nil {
-		t.Fatalf("AcceptTenantInvitation with the link's token: %v", err)
-	}
-	if m := accepted.Msg.GetMembership(); m.GetUserId() != invitee.userID || m.GetRole() != service.RoleMember {
-		t.Fatalf("accepted membership = %+v", m)
-	}
+func extractMailedToken(t *testing.T, h *RedesignHarness, addr string) string {
+	t.Helper()
+	return extractToken(t, mailedText(t, h, addr))
 }
 
-func extractMailedToken(t *testing.T, h *RedesignHarness, addr string) string {
+// mailedText returns the text body of the most recent recorded email sent to
+// addr, failing the test when there is none.
+func mailedText(t *testing.T, h *RedesignHarness, addr string) string {
 	t.Helper()
 	for _, msg := range reversedMessages(h.Mailer.Sent()) {
 		if msg.To == addr {
-			return extractToken(t, msg.Text)
+			return msg.Text
 		}
 	}
 	t.Fatalf("no email recorded for %s", addr)

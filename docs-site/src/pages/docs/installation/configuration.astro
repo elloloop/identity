@@ -540,20 +540,32 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://kids.example.com
 # RequestPasswordReset {"email": "…", "product": "kids", "returnTo": "https://kids.example.com/home"}
 https://signin.example.com/reset-password?token=…&product=kids&redirect=https%3A%2F%2Fkids.example.com%2Fhome`}</code></pre>
 
+  <h3 id="tenant-invitation-links">Tenant invitation links</h3>
   <p>
     A tenant invitation email (<code>CreateTenantInvitation</code>) links to
     <code>/auth/accept-invitation?token=…</code> on the project's primary auth
     domain, else on <code>GATEWAY_APP_BASE_URL</code>, never on
     <code>GATEWAY_EMAIL_LINK_BASE_URL</code>. That page is your app's: it
     signs the invitee in and redeems the token with
-    <code>AcceptTenantInvitation</code>. When your app accepts invitations
-    elsewhere, set <code>GATEWAY_TENANT_INVITATION_PAGE_URL</code> to that
-    page. The link becomes <code>&lt;page&gt;?token=…</code> for every
-    project, ahead of a project's primary auth domain, with the path kept
-    exactly, trailing slash included. The value has the same rules as
+    <code>AcceptTenantInvitation</code>, in the same project the invitation
+    was made in. When your app accepts invitations elsewhere, set
+    <code>GATEWAY_TENANT_INVITATION_PAGE_URL</code> to that page. The link
+    becomes <code>&lt;page&gt;?token=…</code> for every project, ahead of a
+    project's primary auth domain, with the path kept exactly, trailing slash
+    included. The link does not name the project, so on a server that hosts
+    several projects, set it only when that one page can accept every
+    project's invitations. The value has the same rules as
     <code>GATEWAY_EMAIL_LINK_BASE_URL</code>: an absolute <code>https</code>
-    URL (<code>http</code> only for a loopback host) with no userinfo, query
-    or fragment, or identity refuses to start.
+    URL (<code>http</code> only for a loopback host) with no userinfo, query,
+    fragment, space or other character a URL must percent-encode, or identity
+    refuses to start.
+  </p>
+  <p>
+    The account-setup link an <code>InviteUser</code> email carries also goes
+    to <code>/auth/accept-invitation?token=…</code> on the app base URL, and
+    this variable does not move it. Both tokens look alike, so a page at the
+    default path that serves both flows has to try both redemptions; setting
+    the variable gives tenant invitations a page of their own.
   </p>
   <pre><code>{`GATEWAY_TENANT_INVITATION_PAGE_URL=https://app.example.com/invitations/accept/
 
