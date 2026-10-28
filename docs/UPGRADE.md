@@ -94,14 +94,24 @@ The down migration refuses to run while that count is not zero, because
 the schema before 0053 cannot hold a suspension and would let each person
 back on their own. Each suspension is decided first. The tenant's owners
 and admins can do it: `RestoreTenantMember`, or `RemoveTenantMember`, whose
-removal record keeps a domain member from joining again. An operator who
-cannot wait for them removes every suspended member in SQL instead, which
-keeps each one out as the suspension did, until they are invited back:
+removal record keeps a domain member from joining again. An invitation the
+person already holds stays redeemable after a removal, as it was while they
+were suspended. An operator who cannot wait for them removes every
+suspended member in SQL instead. The statement also revokes each one's
+pending invitations to the tenant, which the suspension refused and a
+removal would let them accept, so each stays out until someone invites
+them again:
 
 ```sql
 WITH removed AS (
   DELETE FROM tenant_memberships WHERE status = 'suspended'
   RETURNING project_id, tenant_id, user_id
+), revoked AS (
+  UPDATE tenant_invitations i SET status = 'revoked'
+    FROM removed r
+    JOIN users u ON u.project_id = r.project_id AND u.id = r.user_id
+   WHERE i.project_id = r.project_id AND i.tenant_id = r.tenant_id
+     AND i.status = 'pending' AND lower(i.email COLLATE "C") = u.email_fold
 )
 INSERT INTO tenant_member_removals (project_id, tenant_id, user_id, removed_at_ms)
 SELECT project_id, tenant_id, user_id,
@@ -111,10 +121,14 @@ ON CONFLICT (project_id, tenant_id, user_id)
   DO UPDATE SET removed_at_ms = EXCLUDED.removed_at_ms;
 ```
 
-Nothing records that in the audit trail. Run it, then the down migration,
-with this release's replicas stopped, so that no suspension or join lands
-in between. A tenant whose only owner left was suspended has no owner
-afterwards; give it one with `AdminRecoverTenantOwnership`.
+Nothing records it in the audit trail. Use a role with `BYPASSRLS`
+(`docs/postgres-rls.md`): `users` is under row-level security, so under
+any other role the statement matches no account and revokes no
+invitation. Run it, then the down migration, with this release's replicas stopped, so
+that no suspension, invitation or join lands in between. A tenant whose
+only remaining owner was suspended has no owner afterwards: an admin who
+can still act invites one, and otherwise an operator appoints one with
+`AdminRecoverTenantOwnership`.
 
 A refused down migration rolls back and records version 52 dirty: run this
 release's `identity migrate force 53`, decide the suspensions, then migrate
@@ -128,21 +142,24 @@ just read every row), and restores 0047's trigger body.
 
 - `MembershipStore` gains `SuspendMembership(ctx, projectID, tenantID,
   userID) (*TenantMembership, bool, error)` and `RestoreMembership(ctx,
-  projectID, tenantID, userID, restoredBy string) (*TenantMembership, bool,
-  error)`. Each returns the membership as it now stands and whether the call
-  changed it. A suspension refuses the last active owner with
-  `ErrLastOwner`, taking the same locks as a removal. A restore checks, in
-  its own transaction, that `restoredBy` holds an active owner or admin
-  membership (`ErrPermissionDenied` otherwise; `service.RestoredByOperator`
-  is an operator, and is not checked), and makes a `domain` membership
-  `inactive` when the account's email, read in that transaction, is not on
-  a domain the tenant has verified.
+  projectID, tenantID, userID string, by service.Restorer)
+  (*TenantMembership, bool, error)`. Each returns the membership as it now
+  stands and whether the call changed it. A suspension refuses the last
+  active owner with `ErrLastOwner`, taking the same locks as a removal. A
+  restore by `service.RestoredByMember(userID)` checks, in its own
+  transaction, that userID holds an active owner or admin membership
+  (`ErrPermissionDenied` otherwise); `service.RestoredByOperator()` is an
+  operator, and is not checked; the zero `Restorer` is refused. A restore
+  makes a `domain` membership `inactive` when the account's email, read in
+  that transaction, is not on a domain the tenant has verified, and takes
+  the account's row only for a suspended membership.
 - `MembershipStore.GrantMembership` and `JoinByDomain` must refuse a
   suspended membership with `service.ErrMemberSuspended` and write nothing.
   `UpsertMembership`, an operator's write, lifts it; `AdminAddTenantAdmin`
   restores a suspended membership first, so the lift is audited.
 - New: `MembershipService.SuspendTenantMember` and `RestoreTenantMember`;
-  `service.MembershipStatusSuspended`; `service.RestoredByOperator`;
+  `service.MembershipStatusSuspended`; `service.Restorer`,
+  `service.RestoredByMember` and `service.RestoredByOperator`;
   `service.ErrMemberSuspended`, mapped to `PERMISSION_DENIED`;
   `audit.EventTenantMemberSuspended` and `audit.EventTenantMemberRestored`.
 - `service.ErrLastOwner`'s text is now "a tenant must keep an active owner".

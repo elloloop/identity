@@ -608,15 +608,14 @@ func (s *MembershipStore) SuspendMembership(ctx context.Context, projectID, tena
 // an active membership is returned unchanged. Any other status, or no
 // membership, is service.ErrNotFound.
 //
-// restoredBy is the owner or admin restoring it, or
-// service.RestoredByOperator for an operator, whom nothing checks. One
-// transaction takes the membership's lock, then the target's account row
-// (lockedEmailDomain), then restoredBy's membership with the tenant's
-// owners and the target's (lockOwnersAnd), and restores only while
-// restoredBy's is an active owner or admin one, else
-// service.ErrPermissionDenied. So a suspension or removal of restoredBy
-// that commits first is seen: an admin cannot lift a suspension, their own
-// included, through a call authorized before they were suspended.
+// by is who restores it (service.Restorer). One transaction takes the
+// membership's lock, then, for a suspended membership, the target's
+// account row (lockedEmailDomain), then by's membership with the tenant's
+// owners and the target's (lockOwnersAnd), and restores only while by's is
+// an active owner or admin one, else service.ErrPermissionDenied; an
+// operator is not checked. So a suspension or removal of by that commits
+// first is seen: an admin cannot lift a suspension, their own included,
+// through a call authorized before they were suspended.
 //
 // The account's email domain is read in that transaction and its row held,
 // so an email change either commits first and is judged here, or waits for
@@ -624,7 +623,10 @@ func (s *MembershipStore) SuspendMembership(ctx context.Context, projectID, tena
 // ends. The account row is taken before any membership row, the order in
 // which deleting the account (its row, then by cascade its memberships)
 // and 0047's trigger take them, so neither can deadlock with a restore.
-func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tenantID, userID, restoredBy string) (*service.TenantMembership, bool, error) {
+// It is taken only when the membership is suspended: a restore naming
+// anyone else writes nothing, and must not hold up writes to an account
+// the caller merely named.
+func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tenantID, userID string, by service.Restorer) (*service.TenantMembership, bool, error) {
 	if projectID == "" || tenantID == "" || userID == "" {
 		return nil, false, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
 	}
@@ -637,17 +639,29 @@ func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tena
 	if err := lockMembership(ctx, tx, "RestoreMembership", projectID, tenantID, userID); err != nil {
 		return nil, false, err
 	}
-	emailDomain, err := lockedEmailDomain(ctx, tx, projectID, userID)
-	if err != nil {
-		return nil, false, wrapPgErr("RestoreMembership(email domain)", err)
+	// Every write that makes a membership suspended takes the lock just
+	// taken, so one not suspended now is not suspended below, and its
+	// restore writes nothing.
+	var status string
+	err = tx.QueryRow(ctx, `SELECT status FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`,
+		projectID, tenantID, userID).Scan(&status)
+	if err != nil && !noRows(err) {
+		return nil, false, wrapPgErr("RestoreMembership(status)", err)
 	}
-	held, err := lockOwnersAnd(ctx, tx, projectID, tenantID, userID, restoredBy)
+	var emailDomain string
+	if status == service.MembershipStatusSuspended {
+		if emailDomain, err = lockedEmailDomain(ctx, tx, projectID, userID); err != nil {
+			return nil, false, wrapPgErr("RestoreMembership(email domain)", err)
+		}
+	}
+	held, err := lockOwnersAnd(ctx, tx, projectID, tenantID, userID, by.UserID())
 	if err != nil {
 		return nil, false, wrapPgErr("RestoreMembership(lock)", err)
 	}
-	if restoredBy != service.RestoredByOperator {
-		by := held[restoredBy]
-		if by == nil || by.Status != service.MembershipStatusActive || (by.Role != service.RoleOwner && by.Role != service.RoleAdmin) {
+	if !by.IsOperator() {
+		restorer := held[by.UserID()]
+		if restorer == nil || restorer.Status != service.MembershipStatusActive || (restorer.Role != service.RoleOwner && restorer.Role != service.RoleAdmin) {
 			return nil, false, fmt.Errorf("%w: only an active owner or admin of the tenant may restore a member", service.ErrPermissionDenied)
 		}
 	}
@@ -703,9 +717,9 @@ func lockedEmailDomain(ctx context.Context, tx pgx.Tx, projectID, userID string)
 // owner or check who may act take their membership locks this way, in one
 // statement and in user_id order, so they queue behind one another and
 // never deadlock: two transactions that each take all their locks in one
-// ordered pass cannot each hold a row the other waits for. A restore also
-// locks its target's account row, and takes it before this pass, as an
-// account's deletion does. Two writes that change owners do not come
+// ordered pass cannot each hold a row the other waits for. A write that
+// also locks an account row takes it before this pass, as an account's
+// deletion does. Two writes that change owners do not come
 // through here and keep no owner: UpsertMembership, by which
 // AdminAddTenantAdmin can lower an owner, and the cascade that drops an
 // account's memberships when the account is deleted.

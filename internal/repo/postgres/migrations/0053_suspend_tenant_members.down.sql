@@ -7,16 +7,18 @@
 -- is decided first: the tenant's owners and admins restore it
 -- (RestoreTenantMember) or remove it (RemoveTenantMember, whose removal
 -- record keeps a domain member from joining again), or an operator removes
--- it in SQL as docs/UPGRADE.md shows. The refusal rolls the file back and
--- records version 52 dirty: run this release's `identity migrate force 53`,
--- decide the suspensions, then migrate down again.
+-- it in SQL, revoking the invitations the person holds, as docs/UPGRADE.md
+-- shows. The refusal rolls the file back and records version 52 dirty: run
+-- this release's `identity migrate force 53`, decide the suspensions, then
+-- migrate down again.
 --
 -- The table lock comes first, so no suspension lands between the check and
--- the constraint; membership reads wait while the check reads the table. The narrower CHECK is re-added NOT VALID: the check has
--- just read every row under that lock, so the scan a valid one runs would
--- find nothing, and every later write is checked. The trigger again ends
--- every domain membership whose email leaves the domain, as 0047 wrote it.
--- lock_timeout bounds the wait for the locks, as the up migration does.
+-- the constraint; membership reads wait while the check reads the table.
+-- The narrower CHECK is re-added NOT VALID: the check has just read every
+-- row under that lock, so the scan a valid one runs would find nothing,
+-- and every later write is checked. The trigger again ends every domain
+-- membership whose email leaves the domain, as 0047 wrote it. lock_timeout
+-- bounds the wait for the locks, as the up migration does.
 SET LOCAL lock_timeout = '10s';
 
 LOCK TABLE tenant_memberships IN ACCESS EXCLUSIVE MODE;

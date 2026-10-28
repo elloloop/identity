@@ -342,8 +342,8 @@ const (
 	EventTenantOwnershipTransferred EventType = "tenant_ownership_transferred"
 
 	// EventTenantOwnershipRecovered records an operator appointing an owner
-	// to a tenant that has no owner or admin left who can sign in
-	// (AdminRecoverTenantOwnership): target the appointed owner, the
+	// to a tenant that has no owner or admin left who both can sign in and
+	// holds an active membership (AdminRecoverTenantOwnership): target the appointed owner, the
 	// operator's IP and user agent, and the project id, the tenant id and the
 	// reason the operator gave in the details. Only a call that changed the
 	// membership records it: one that finds the account already an owner, or
@@ -389,9 +389,9 @@ const (
 	// and tenant ids, the role and source, and the status the restore gave
 	// the membership: "active", or "inactive" for a membership through the
 	// email's domain whose email is not on a domain the tenant has verified.
-	// An operator's call then writes the membership it was asked for, so
-	// after one the membership is an active owner or admin one whatever
-	// these details say. Restoring an active member records nothing.
+	// When it succeeds, an operator's call then writes the membership it was
+	// asked for, an active owner or admin one. Restoring an active member
+	// records nothing.
 	EventTenantMemberRestored EventType = "tenant_member_restored"
 )
 

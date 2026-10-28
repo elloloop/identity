@@ -198,7 +198,7 @@ func (s *connectMembershipStore) SuspendMembership(_ context.Context, projectID,
 
 // RestoreMembership reports userID's invited membership as active again, or
 // changeErr.
-func (s *connectMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID, _ string) (*service.TenantMembership, bool, error) {
+func (s *connectMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID string, _ service.Restorer) (*service.TenantMembership, bool, error) {
 	return s.changed(projectID, tenantID, userID, service.MembershipStatusActive)
 }
 

@@ -112,8 +112,9 @@ suite (email, productivity tools).
 - An owner hands a tenant on to another member with
   `TransferTenantOwnership`, becoming an admin. When no owner can sign in
   but an admin can, the admin invites a new owner; once no owner or admin
-  who is a person can sign in any more, an operator appoints one with
-  `AdminRecoverTenantOwnership` (ADR-0018, Ownership).
+  who is a person both can sign in and holds an active membership, an
+  operator appoints one with `AdminRecoverTenantOwnership` (ADR-0018,
+  Ownership).
 - An owner or admin stops a member acting in a tenant for a while with
   `SuspendTenantMember`, which keeps the membership's role and source at
   status `suspended`, and lets them back with `RestoreTenantMember`. A
@@ -246,7 +247,8 @@ an opaque cursor, 50 by default and at most 200), and suspended and restored
 with `AdminSuspendTenant` and `AdminRestoreTenant` (each with a reason the
 audit trail keeps), and given an owner again with
 `AdminRecoverTenantOwnership` once none of its owners or admins who is a
-person can sign in (also with a reason). They authenticate via the `GATEWAY_ADMIN_API_SECRET`
+person both can sign in and holds an active membership (also with a
+reason). They authenticate via the `GATEWAY_ADMIN_API_SECRET`
 shared secret rather than a user token. With the secret empty (the default) those RPCs return
 `CodeUnimplemented`, so a deployer who never sets it cannot reach them.
 

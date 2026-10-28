@@ -106,10 +106,31 @@ type UserTenantReader interface {
 	GetActiveTenantForUser(ctx context.Context, projectID, tenantID, userID, emailDomain string) (*UserTenant, error)
 }
 
-// RestoredByOperator is the restoredBy of an operator's
-// MembershipStore.RestoreMembership: no owner or admin, so nobody's
-// membership is checked.
-const RestoredByOperator = ""
+// Restorer is who lifts a suspension through
+// MembershipStore.RestoreMembership: an owner or admin of the tenant
+// (RestoredByMember), whose membership the store checks where it writes, or
+// an operator (RestoredByOperator), whom nothing checks. The zero Restorer
+// is neither, and the store refuses it like a member who may not restore, so
+// a caller that does not say who restores fails closed.
+type Restorer struct {
+	userID   string
+	operator bool
+}
+
+// RestoredByMember is a restore by userID, who must hold an active owner or
+// admin membership of the tenant when the restore is written.
+func RestoredByMember(userID string) Restorer { return Restorer{userID: userID} }
+
+// RestoredByOperator is an operator's restore: no owner or admin, so
+// nobody's membership is checked.
+func RestoredByOperator() Restorer { return Restorer{operator: true} }
+
+// UserID is the owner or admin restoring, or "" for an operator or the zero
+// Restorer.
+func (r Restorer) UserID() string { return r.userID }
+
+// IsOperator reports whether an operator restores, whom nothing checks.
+func (r Restorer) IsOperator() bool { return r.operator }
 
 // MembershipStore persists TenantMemberships within a Project. Reads that
 // miss return (nil, nil).
@@ -196,15 +217,14 @@ type MembershipStore interface {
 	// one with source MembershipSourceDomain whose holder's email is not, at
 	// that moment, on a domain the tenant has verified: that one becomes
 	// inactive. The email is read where the write is, so a change of email
-	// cannot slip between them. restoredBy is the owner or admin restoring
-	// it, or RestoredByOperator, whom nothing checks: an owner's or admin's
-	// membership is checked where the write is, so unless it is an active
-	// owner or admin one when the restore lands, it is ErrPermissionDenied
-	// and nothing changes. Returns the
-	// membership as it now stands, and whether this call lifted a
-	// suspension; an active membership is returned unchanged. Any other
-	// status, or no membership, is ErrNotFound.
-	RestoreMembership(ctx context.Context, projectID, tenantID, userID, restoredBy string) (m *TenantMembership, changed bool, err error)
+	// cannot slip between them. by is who restores it (Restorer): an owner's
+	// or admin's membership is checked where the write is, so unless it is
+	// an active owner or admin one when the restore lands, it is
+	// ErrPermissionDenied and nothing changes. Returns the membership as it
+	// now stands, and whether this call lifted a suspension; an active
+	// membership is returned unchanged. Any other status, or no membership,
+	// is ErrNotFound.
+	RestoreMembership(ctx context.Context, projectID, tenantID, userID string, by Restorer) (m *TenantMembership, changed bool, err error)
 }
 
 // InvitationStore persists TenantInvitations within a Project. Reads that

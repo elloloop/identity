@@ -155,8 +155,8 @@ func requireEligibleTenantOwner(u *User) error {
 }
 
 // AdminRecoverTenantOwnership appoints userID an owner of a tenant that
-// nobody can govern any more: no owner or admin of it can sign in, because
-// each was deleted, deactivated or merged away. reason, with the operator's
+// nobody can govern any more: no owner or admin of it who is a person both
+// can sign in and holds an active membership. reason, with the operator's
 // ip and ua, is kept in the audit trail.
 //
 // While any owner or admin both can still sign in and holds an active
@@ -260,7 +260,7 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 // operator's reason, if any, so a grant that then fails cannot leave it
 // unrecorded. Any other membership, or none, is left to the grant.
 func (s *ControlPlaneAdminService) liftSuspension(ctx context.Context, projectID, tenantID, userID, reason, ip, ua string) (bool, error) {
-	m, restored, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, userID, RestoredByOperator)
+	m, restored, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, userID, RestoredByOperator())
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}

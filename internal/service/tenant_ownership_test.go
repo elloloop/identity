@@ -292,8 +292,9 @@ func TestAdminRecoverTenantOwnership_AppointsAndAudits(t *testing.T) {
 	require.ErrorIs(t, err, ErrTenantStillGoverned)
 }
 
-// Each way an owner or admin stops being one who can sign in leaves the
-// tenant recoverable, and an account outside the tenant may be appointed.
+// Each way an owner or admin stops governing, by no longer being able to
+// sign in or by no longer holding an active membership, leaves the tenant
+// recoverable, and an account outside the tenant may be appointed.
 func TestAdminRecoverTenantOwnership_WhenNobodyCanGovern(t *testing.T) {
 	t.Parallel()
 	for name, gone := range map[string]func(f *adminFixture){

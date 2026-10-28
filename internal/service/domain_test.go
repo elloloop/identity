@@ -558,18 +558,18 @@ func (f *fakeMembershipStore) SuspendMembership(_ context.Context, projectID, te
 	return &out, true, nil
 }
 
-// RestoreMembership mirrors the postgres store: restoredBy, unless
-// RestoredByOperator, must hold an active owner or admin membership, else
+// RestoreMembership mirrors the postgres store: by, unless an operator,
+// must hold an active owner or admin membership, else
 // ErrPermissionDenied; a suspended membership becomes active, or inactive
 // when it is a domain one and the account's email is not on a domain the
 // tenant verified; an active one is returned unchanged, and anything else
 // is ErrNotFound.
-func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID, restoredBy string) (*TenantMembership, bool, error) {
+func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID string, restorer Restorer) (*TenantMembership, bool, error) {
 	if f.onRestore != nil {
 		f.onRestore()
 	}
-	if restoredBy != RestoredByOperator {
-		by := f.byKey[f.key(projectID, tenantID, restoredBy)]
+	if !restorer.IsOperator() {
+		by := f.byKey[f.key(projectID, tenantID, restorer.UserID())]
 		if by == nil || by.Status != MembershipStatusActive || !isAdminRole(by.Role) {
 			return nil, false, ErrPermissionDenied
 		}

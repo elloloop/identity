@@ -25,7 +25,8 @@ administration and never loosens sign-in controls
 **Amended** (2026-10-27): ownership can move. `TransferTenantOwnership`
 lets an owner hand a tenant to another member, and
 `AdminRecoverTenantOwnership` lets an operator appoint an owner to a tenant
-none of whose owners or admins can sign in any more, each audited
+none of whose owners or admins both can sign in and holds an active
+membership any more, each audited
 ([Ownership](#ownership)). Removing a tenant's last owner is refused in the
 same transaction that would remove them.
 
@@ -318,8 +319,9 @@ ways, both audited; neither changes any other member's role.
   with the operator secret, makes an account that could own a tenant (the
   same rule as a transfer) an active owner, member or not, recorded as
   `tenant_ownership_recovered` with the reason and the operator's client. It
-  is refused while any owner or admin who is a person can still sign in, so
-  an operator never appoints an outside account above people who can act. An
+  is refused while any owner or admin who is a person can still sign in and
+  holds an active membership (a suspended one does not govern), so an
+  operator never appoints an outside account above people who can act. An
   agent or anonymous admin does not count: it may not own a tenant itself,
   so it is no one the tenant can be left to. "Can sign in" is sign-in's own
   rule: an account pending deletion still can, since signing in cancels the
@@ -483,8 +485,9 @@ not listed at all. Suspending the tenant (above) stops everyone.
   back on their own. Its down migration therefore refuses to run while a
   membership is suspended, rather than deciding for anyone: the tenant's
   owners and admins restore or remove each one first, or an operator
-  removes them in SQL, which keeps each person out, as the suspension did,
-  until invited back.
+  removes them in SQL. A removal leaves an invitation the person already
+  holds redeemable, so the operator's statement also revokes their pending
+  invitations to the tenant, and each stays out until invited again.
 - **A tenant keeps an owner.** Suspending an owner counts as removing one.
   The suspension takes the locks a removal takes, so the last active owner
   cannot be suspended, even by two suspensions at once or a suspension

@@ -460,7 +460,7 @@ func (s *MembershipService) RestoreTenantMember(ctx context.Context, callerID, t
 	if targetUserID == callerID {
 		return nil, fmt.Errorf("%w: you cannot restore yourself", ErrInvalidArgument)
 	}
-	m, changed, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, targetUserID, callerID)
+	m, changed, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, targetUserID, RestoredByMember(callerID))
 	if err != nil {
 		return nil, err
 	}
