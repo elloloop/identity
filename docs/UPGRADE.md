@@ -3,7 +3,8 @@
 ## Next — `GATEWAY_TENANT_INVITATION_PAGE_URL`: the page a tenant invitation email links to (additive; one stricter start-up check; no migration)
 
 No schema change and no migration. A deployment that sets nothing new sends
-exactly the same emails as before.
+exactly the same emails as before, unless its `GATEWAY_EMAIL_LINK_BASE_URL`
+holds a character the start-up check now refuses (see the last point).
 
 - **`GATEWAY_TENANT_INVITATION_PAGE_URL`** (default empty) is where the page
   that accepts a tenant invitation lives. Identity does not serve that page:
@@ -65,7 +66,6 @@ floating tag. v4.26.1 adds no other upgrade entry, so the three entries below
 that v4.26.0 introduced (joining a tenant by domain with migration 0051, a
 suspended tenant's login policy, and the removal record with migration 0052,
 with their rollout notes) apply to it unchanged.
-||||||| parent of 3492fdb (feat(tenants): GATEWAY_TENANT_INVITATION_PAGE_URL sets the invitation email's page)
 
 ## Next — a member removed from a tenant cannot rejoin it by domain (migration 0052; behaviour change; `RemoveTenantMember` audited; `MembershipStore.RemoveMembership`, `JoinByDomain`, `IsRemoved` and `MembershipService.RemoveTenantMember` (Go API))
 

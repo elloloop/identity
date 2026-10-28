@@ -402,6 +402,7 @@ func validateEmailedLinkURLCases(t *testing.T, name string, set func(*Config, st
 		"http://[::1]:3000",
 		"https://example.com/team%20invitations/",
 		"https://example.com/invitations/accept/~new",
+		"https://b\u00fccher.example/invitations/",
 	} {
 		c := &Config{}
 		set(c, base)
@@ -432,6 +433,12 @@ func validateEmailedLinkURLCases(t *testing.T, name string, set func(*Config, st
 		{"https://signin.example.com/a|b", "must percent-encode"},
 		{"https://signin.example.com/\"accept\"", "must percent-encode"},
 		{"https://signin.example.com/{page}", "must percent-encode"},
+		{"https://signin.example.com/a<b", "must percent-encode"},
+		{"https://signin.example.com/a>b", "must percent-encode"},
+		{"https://signin.example.com/a\\b", "must percent-encode"},
+		{"https://signin.example.com/a^b", "must percent-encode"},
+		{"https://signin.example.com/a`b", "must percent-encode"},
+		{"https://signin.example.com/a}b", "must percent-encode"},
 	} {
 		c := &Config{}
 		set(c, tc.base)

@@ -2421,7 +2421,8 @@ func (c *Config) validateTenantInvitationPageURL() error {
 // validateEmailedLinkURL checks the value of the variable name, a URL that
 // emailed links are built on: it must be an absolute https URL (http only for
 // a loopback host), and carry no userinfo, query or fragment, since the link
-// appends its own path or "?token=…" to it. Empty is valid.
+// appends its own path or "?token=…" to it, nor any character
+// mustBePercentEncoded names. Empty is valid.
 func validateEmailedLinkURL(name, raw string) error {
 	if raw == "" {
 		return nil
@@ -2448,8 +2449,10 @@ func validateEmailedLinkURL(name, raw string) error {
 
 // mustBePercentEncoded reports whether r is an ASCII character a URL may
 // carry only percent-encoded (RFC 3986 §2): a control character, a space, or
-// one of " < > \ ^ ` { | }. Non-ASCII is left alone, since an
-// internationalized host name is written that way and mail clients link it.
+// one of " < > \ ^ ` { | }. url.Parse already refuses the control
+// characters; they are kept so the predicate states the whole rule. Non-ASCII
+// is left alone, since an internationalized host name is written that way
+// and mail clients link it.
 func mustBePercentEncoded(r rune) bool {
 	return r <= ' ' || r == 0x7f || strings.ContainsRune("\"<>\\^`{|}", r)
 }
