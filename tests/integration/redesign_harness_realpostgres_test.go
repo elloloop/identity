@@ -127,9 +127,10 @@ type RedesignHarness struct {
 	// the globally-unique hostname index doesn't collide across runs.
 	BrandedAuthDomain string
 
-	DNS    *fakeDNSResolver
-	Mailer *RecordingMailer
-	Stores governanceStores
+	DNS     *fakeDNSResolver
+	Mailer  *RecordingMailer
+	Stores  governanceStores
+	Metrics *prometheus.Registry
 }
 
 // startRedesignHarness boots identityserver.New against the GATEWAY_POSTGRES_DSN
@@ -166,10 +167,11 @@ func startRedesignHarnessWith(t *testing.T, mutate func(*config.Config)) *Redesi
 	dns := newFakeDNSResolver()
 	mailer := NewRecordingMailer()
 
+	metrics := prometheus.NewRegistry()
 	srv, err := identityserver.New(context.Background(), identityserver.Options{
 		Config:          cfg,
 		Logger:          logger,
-		MetricsRegistry: prometheus.NewRegistry(), // isolated: avoid cross-harness collisions
+		MetricsRegistry: metrics, // isolated: avoid cross-harness collisions
 		EmailTransport:  mailer,
 		DNSResolver:     dns,
 		// Send synchronously so the recording mailer is readable right after a
@@ -219,6 +221,7 @@ func startRedesignHarnessWith(t *testing.T, mutate func(*config.Config)) *Redesi
 		BrandedAuthDomain: brandedAuthDomain,
 		DNS:               dns,
 		Mailer:            mailer,
+		Metrics:           metrics,
 		Stores: governanceStores{
 			tenants:      built.TenantStoreIface(),
 			domains:      built.DomainStoreIface(),

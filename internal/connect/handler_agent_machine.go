@@ -90,10 +90,21 @@ func (h *IdentityHandler) RevokeAgentMachine(ctx context.Context, req *connect.R
 }
 
 func (h *IdentityHandler) ExchangeAgentMachineCredential(ctx context.Context, req *connect.Request[identitypb.ExchangeAgentMachineCredentialRequest]) (*connect.Response[identitypb.ExchangeAgentMachineCredentialResponse], error) {
+	if req.Msg.TeammateKeyId != "" {
+		response, err := h.exchangeTeammateKey(ctx, req.Msg)
+		h.countExchange(exchangeKindTeammate, err)
+		return response, err
+	}
+	response, err := h.exchangeAgentMachine(ctx, req.Msg)
+	h.countExchange(exchangeKindAgentMachine, err)
+	return response, err
+}
+
+func (h *IdentityHandler) exchangeAgentMachine(ctx context.Context, msg *identitypb.ExchangeAgentMachineCredentialRequest) (*connect.Response[identitypb.ExchangeAgentMachineCredentialResponse], error) {
 	if err := h.machineEnabled(); err != nil {
 		return nil, err
 	}
-	tokens, err := h.agentOAuth.ExchangeMachine(ctx, req.Msg.MachineId, req.Msg.AgentUserId, machineProof(req.Msg.Proof))
+	tokens, err := h.agentOAuth.ExchangeMachine(ctx, msg.MachineId, msg.AgentUserId, machineProof(msg.Proof))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -143,6 +154,9 @@ func machineProof(proof *identitypb.AgentMachineProof) service.AgentMachineProof
 }
 
 func (h *IdentityHandler) CreateAgentMachineChallenge(ctx context.Context, req *connect.Request[identitypb.CreateAgentMachineChallengeRequest]) (*connect.Response[identitypb.CreateAgentMachineChallengeResponse], error) {
+	if req.Msg.TeammateKeyId != "" {
+		return h.createTeammateKeyChallenge(ctx, req.Msg)
+	}
 	if err := h.machineEnabled(); err != nil {
 		return nil, err
 	}

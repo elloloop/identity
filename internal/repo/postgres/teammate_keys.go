@@ -28,7 +28,10 @@ func (r *pgRepository) RegisterTeammateKey(ctx context.Context, key *service.Tea
 	if noRows(readErr) && err != nil {
 		return nil, wrapPgErr("RegisterTeammateKey", err)
 	}
-	return stored, readErr
+	if readErr != nil {
+		return nil, wrapPgErr("RegisterTeammateKey", readErr)
+	}
+	return stored, nil
 }
 
 func (r *pgRepository) GetTeammateKey(ctx context.Context, id string) (*service.TeammateKey, error) {

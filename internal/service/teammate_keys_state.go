@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 const (
@@ -47,8 +48,9 @@ var ErrTeammateKeyChallengeLimit = errors.New("too many pending teammate key cha
 // project. RegisterTeammateKey inserts the key unless its claim already has
 // one, and returns the claim's stored key either way. A public key already
 // stored for another claim is ErrAlreadyExists. RevokeTeammateKey reports
-// whether this call revoked the claim's key; it deletes the key's pending
-// challenges. CreateTeammateKeyChallenge refuses a revoked or unknown key with
+// whether this call revoked the claim's key and deletes the key's pending
+// challenges; a challenge that commits alongside the revocation stays until
+// the sweeper removes it, and can never be consumed. CreateTeammateKeyChallenge refuses a revoked or unknown key with
 // ErrUnauthenticated, and ConsumeTeammateKeyChallenge consumes a challenge
 // only while it is unexpired and its key unrevoked.
 type TeammateKeyRepository interface {
@@ -61,3 +63,7 @@ type TeammateKeyRepository interface {
 	DeleteExpiredTeammateKeyChallenges(context.Context, int64, int) error
 	DeleteTeammateKeysRevokedBefore(context.Context, int64, int) error
 }
+
+// TeammateKeyRetention is how long a revoked key is kept before the sweeper
+// deletes it.
+const TeammateKeyRetention = 365 * 24 * time.Hour

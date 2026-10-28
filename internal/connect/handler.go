@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
@@ -49,9 +51,11 @@ type IdentityHandler struct {
 	// project credential rather than a user JWT. nil when the build has no
 	// control plane (memory, sqlite), which disables the RPC
 	// (CodeUnimplemented).
-	agentOAuth *service.AgentOAuthService
-	directory  *service.DirectoryService
-	cfg        *config.Config
+	agentOAuth   *service.AgentOAuthService
+	teammateKeys *service.TeammateKeyService
+	exchanges    *prometheus.CounterVec
+	directory    *service.DirectoryService
+	cfg          *config.Config
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service

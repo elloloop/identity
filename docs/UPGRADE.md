@@ -1,5 +1,41 @@
 # Upgrade guide
 
+## Next — teammate keys: `TeammateKeyService`, and `teammate_key_id` on the machine challenge and exchange (migration 0050; additive RPCs and fields behind `GATEWAY_TEAMMATE_KEYS_ENABLED`, off by default; the `teammate_key_manager` credential kind; `jwt.TeammateSigner` and `jwt.VerifyTeammateAccessToken` (Go API))
+
+A service that manages workstations can register a key for an agent account,
+bound to one claim on one workstation, and revoke it when the claim ends. The
+workstation exchanges a single-use challenge signed with that key, Ed25519 or
+ECDSA P-256, for a 300-second `at+jwt` access token whose `sub` is the agent
+and which carries `claim_id`, `workstation_id` and `company_id` from the key.
+
+- Migration 0050 adds `teammate_keys` and `teammate_key_challenges` and widens
+  `project_credentials_kind_check` with `teammate_key_manager`. It holds
+  ACCESS EXCLUSIVE on `project_credentials` while it validates the new check.
+  Rolling it back deletes teammate keys and their credentials.
+- `GATEWAY_TEAMMATE_KEYS_ENABLED` (default `false`) mounts
+  `identity.v1.TeammateKeyService` and lets `CreateAgentMachineChallenge` and
+  `ExchangeAgentMachineCredential` take `teammate_key_id`. Turning it on needs
+  the postgres driver, `GATEWAY_JWT_ISSUER` and `GATEWAY_JWT_AUDIENCE`; boot
+  fails without them. Off, a request naming a teammate key answers
+  `FAILED_PRECONDITION` and the service is not served. The challenge and
+  exchange share the `GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP` budget.
+  `TeammateKeyService` is served over Connect and HTTP; an embedding host's
+  native gRPC registration (`Server.RegisterGRPC`) does not carry it,
+  while the teammate challenge and exchange work there as on HTTP.
+- `RevokeTeammateKey` refuses the key for every challenge and exchange that
+  starts after it returns. A token issued by an exchange that consumed its
+  challenge just before the revocation committed stays valid until it expires,
+  at most 300 seconds.
+- The two `TeammateKeyService` RPCs share the `GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`
+  budget, applied to them separately from `LookupUsers`.
+- Mint the managing service's credential with
+  `AdminCreateProjectCredential(kind = "teammate_key_manager")` and present it
+  in `X-Teammate-Key-Manager-Key`.
+- Machine-agent exchanges are unchanged. They are now counted in
+  `identity_agent_exchanges_total{key_kind="agent_machine"}`.
+- Go API: `jwt.TeammateAccessClaims`, `jwt.TeammateSigner` (implemented by the
+  file, AWS KMS and jwttest signers) and `jwt.VerifyTeammateAccessToken`.
+
 ## Next — tenant ownership moves: `TransferTenantOwnership` and `AdminRecoverTenantOwnership` (additive RPCs; no migration; removing a tenant's last owner refused atomically (behaviour change under concurrency); `MembershipStore.TransferOwnership`, `MembershipStore.RemoveMembership`, `MembershipStore.GrantMembership` and a required `UserDirectory` argument to `NewControlPlaneAdminService` (Go API))
 
 A tenant's ownership could not move before: an owner could not hand the

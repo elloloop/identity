@@ -25,7 +25,7 @@ func configureAgentOAuthSweep(sweep *sweeper, deps Deps) {
 }
 
 func mountIdentityService(
-	mux *http.ServeMux, deps Deps, authSvc *service.AuthService, handler *identityconnect.IdentityHandler, returnAllow service.ReturnAllowlist,
+	mux *http.ServeMux, deps Deps, authSvc *service.AuthService, handler *identityconnect.IdentityHandler, teammateKeys *service.TeammateKeyService, returnAllow service.ReturnAllowlist,
 ) error {
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
@@ -54,6 +54,10 @@ func mountIdentityService(
 	}))
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)
+	if teammateKeys != nil {
+		keyPath, keyHandler := identityconnectgen.NewTeammateKeyServiceHandler(identityconnect.NewTeammateKeyHandler(teammateKeys), append(connectOpts, connect.WithReadMaxBytes(config.AgentMachineRequestMaxBytes))...)
+		mux.Handle(keyPath, keyHandler)
+	}
 
 	return nil
 }

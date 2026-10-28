@@ -104,13 +104,14 @@ const auditRetentionDay = 24 * time.Hour
 // One instance per app.New; started immediately and stopped via the
 // returned cancel func.
 type sweeper struct {
-	repo            service.Repository
-	agentOAuthSweep func(context.Context, int64, int) error
-	purger          accountPurger
-	logger          *zap.Logger
-	interval        time.Duration
-	batch           int
-	grace           time.Duration
+	repo             service.Repository
+	agentOAuthSweep  func(context.Context, int64, int) error
+	teammateKeySweep func(context.Context, int64, int) error
+	purger           accountPurger
+	logger           *zap.Logger
+	interval         time.Duration
+	batch            int
+	grace            time.Duration
 
 	// auditRetentionDays bounds how long audit events are kept; each tick
 	// deletes events older than now - auditRetentionDays. 0 (or negative)
@@ -363,6 +364,9 @@ func (s *sweeper) targets() []nodeTypeSweeper {
 	}
 	if s.agentOAuthSweep != nil {
 		targets = append(targets, nodeTypeSweeper{"agent_authorizations", s.agentOAuthSweep})
+	}
+	if s.teammateKeySweep != nil {
+		targets = append(targets, nodeTypeSweeper{"teammate_keys", s.teammateKeySweep})
 	}
 	return targets
 }

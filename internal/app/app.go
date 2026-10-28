@@ -536,6 +536,15 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		limits = append(limits, middleware.PathLimit{PathPrefix: identityconnectgen.IdentityServiceIntrospectAgentMachineProcedure, Tag: "agent_machine_introspection", Limiter: middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthIntrospectionPerIP, 0)})
 		limits = append(limits, middleware.PathLimit{PathPrefix: agentOAuthIntrospectPath, Tag: "agent_oauth_introspection", Limiter: middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthIntrospectionPerIP, 0)})
 	}
+	if cfg.TeammateKeysEnabled && !cfg.AgentOAuthEnabled {
+		protocol := middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthProtocolPerIP, 0)
+		for _, path := range []string{identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure} {
+			limits = append(limits, middleware.PathLimit{PathPrefix: path, Tag: "agent_oauth_protocol", Limiter: protocol})
+		}
+	}
+	if cfg.TeammateKeysEnabled {
+		limits = append(limits, middleware.PathLimit{PathPrefix: "/" + identityconnectgen.TeammateKeyServiceName + "/", Tag: "teammate_key_manager", Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0)})
+	}
 	for _, path := range guardianManagementPaths {
 		limits = append(limits, middleware.PathLimit{
 			PathPrefix: path, Tag: "guardian_manage", Limiter: guardianLimiter,
@@ -822,9 +831,21 @@ func New(deps Deps) (*Built, error) {
 	controlAdminSvc := buildControlPlaneAdminService(deps, users, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
+	var teammateKeys *service.TeammateKeyService
+	if deps.Config.TeammateKeysEnabled {
+		if teammateKeys, err = buildTeammateKeys(deps, auditLog, logger); err != nil {
+			return nil, err
+		}
+	}
+	configureTeammateKeySweep(sweep, deps, teammateKeys)
+	exchanges, err := identityconnect.NewAgentExchangeMetrics(deps.MetricsRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("agent exchange metrics: %w", err)
+	}
+	handler.WithTeammateKeys(teammateKeys).WithAgentExchangeMetrics(exchanges)
 
 	mux := http.NewServeMux()
-	if err := mountIdentityService(mux, deps, authSvc, handler, returnAllow); err != nil {
+	if err := mountIdentityService(mux, deps, authSvc, handler, teammateKeys, returnAllow); err != nil {
 		return nil, err
 	}
 

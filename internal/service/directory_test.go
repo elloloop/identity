@@ -264,12 +264,12 @@ func TestDirectoryLookup_RefusesEveryOtherPresentation(t *testing.T) {
 		{"empty secret", publicID + rawKeySeparator, ""},
 		{"empty public id", rawKeySeparator + "secret", ""},
 		{"unknown public id", "dk_unknown" + rawKeySeparator + "secret", ""},
-		{"wrong secret", publicID + rawKeySeparator + "not-the-secret", directoryRefusedSecretMismatch},
+		{"wrong secret", publicID + rawKeySeparator + "not-the-secret", credentialRefusedSecretMismatch},
 		// Other kinds' public ids are public by design; presenting one must
 		// not let anyone write audit rows.
 		{"secret-kind credential", secretKind.RawKey, ""},
 		{"publishable credential", publishable.PublicID + rawKeySeparator + "anything", ""},
-		{"revoked credential", revoked.RawKey, directoryRefusedRevoked},
+		{"revoked credential", revoked.RawKey, credentialRefusedRevoked},
 		{"suspended project", suspended.RawKey, ""},
 		{"a user JWT", "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1In0.sig", ""},
 	}

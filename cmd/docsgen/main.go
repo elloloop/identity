@@ -496,6 +496,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_ANONYMOUS_", "Anonymous identity"},
 	{"GATEWAY_AGENTS_", "Agent accounts"},
 	{"GATEWAY_AGENT_MACHINE_", "Agent accounts"},
+	{"GATEWAY_TEAMMATE_KEYS_", "Agent accounts"},
 	{"GATEWAY_AGEGATE_", "Age gating (COPPA)"},
 	{"GATEWAY_MINOR_", "Age gating (COPPA)"},
 	{"GATEWAY_GUARDIAN_", "Age gating (COPPA)"},

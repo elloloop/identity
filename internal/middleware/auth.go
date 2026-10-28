@@ -136,9 +136,14 @@ var AuthExemptPaths = map[string]bool{
 	// directory service verifies (hash compare, kind, revocation) and which
 	// scopes the lookup to that credential's project.
 	"/identity.v1.IdentityService/LookupUsers": true,
-	"/.well-known/jwks.json":                   true,
-	"/health":                                  true,
-	"/healthz":                                 true,
+	// TeammateKeyService is called by a service holding a teammate_key_manager
+	// project credential in X-Teammate-Key-Manager-Key, which the service
+	// verifies and which selects the project.
+	"/identity.v1.TeammateKeyService/RegisterTeammateKey": true,
+	"/identity.v1.TeammateKeyService/RevokeTeammateKey":   true,
+	"/.well-known/jwks.json":                              true,
+	"/health":                                             true,
+	"/healthz":                                            true,
 	// The SAML IdP metadata is a public document an SP fetches to import the
 	// IdP's signing certificate; no caller of it holds a JWT.
 	SAMLMetadataPath: true,

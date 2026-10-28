@@ -1379,6 +1379,13 @@ type Config struct {
 	// AgentMachineEnabled enables durable owner-managed machine public-key authentication.
 	// GATEWAY_AGENT_MACHINE_ENABLED; disabled by default, requires delegated OAuth.
 	AgentMachineEnabled bool
+	// TeammateKeysEnabled serves TeammateKeyService and lets
+	// CreateAgentMachineChallenge and ExchangeAgentMachineCredential accept a
+	// teammate_key_id. Off, the service is not mounted and a teammate key
+	// exchange is refused. Requires the postgres driver, GATEWAY_JWT_ISSUER
+	// and GATEWAY_JWT_AUDIENCE, the audience every teammate token carries.
+	// GATEWAY_TEAMMATE_KEYS_ENABLED defaults to false.
+	TeammateKeysEnabled bool
 	// AgentOAuthAccessSeconds bounds delegated access JWTs to 1–900 seconds.
 	// GATEWAY_AGENT_OAUTH_ACCESS_SECONDS defaults to 300.
 	AgentOAuthAccessSeconds int
@@ -1819,6 +1826,7 @@ func loadFromEnv() *Config {
 		AgentOAuthIntrospectionPerIP:      envInt("GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP", DefaultAgentOAuthIntrospectionPerIP),
 		AgentOAuthEnabled:                 envBool("GATEWAY_AGENT_OAUTH_ENABLED", false),
 		AgentMachineEnabled:               envBool("GATEWAY_AGENT_MACHINE_ENABLED", false),
+		TeammateKeysEnabled:               envBool("GATEWAY_TEAMMATE_KEYS_ENABLED", false),
 		AgentOAuthAccessSeconds:           envInt("GATEWAY_AGENT_OAUTH_ACCESS_SECONDS", DefaultAgentOAuthAccessSeconds),
 		AgentOAuthConsentSeconds:          envInt("GATEWAY_AGENT_OAUTH_CONSENT_SECONDS", DefaultAgentOAuthConsentSeconds),
 		AgentOAuthRefreshIdleSeconds:      envInt("GATEWAY_AGENT_OAUTH_REFRESH_IDLE_SECONDS", DefaultAgentOAuthRefreshIdleSeconds),
@@ -2253,6 +2261,9 @@ func detectRemovedEnvVars() error {
 
 func (c *Config) Validate() error {
 	if err := c.ValidateAgentOAuth(); err != nil {
+		return err
+	}
+	if err := c.ValidateTeammateKeys(); err != nil {
 		return err
 	}
 	if err := c.ValidateLogExport(); err != nil {

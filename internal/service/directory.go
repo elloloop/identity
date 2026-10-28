@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"slices"
 	"strings"
@@ -25,12 +24,6 @@ const MaxDirectoryLookupEmailLength = 320
 // directoryAuditActorPrefix prefixes the credential id recorded as the actor
 // of a directory lookup: the caller is a machine credential, not a user.
 const directoryAuditActorPrefix = "credential:"
-
-// Reasons recorded on a refused directory-credential presentation.
-const (
-	directoryRefusedSecretMismatch = "secret_mismatch"
-	directoryRefusedRevoked        = "revoked"
-)
 
 // DirectoryCredentialStore is the read side of the control-plane credential
 // registry the directory lookup authenticates against. The postgres
@@ -171,24 +164,12 @@ func splitDirectoryKey(presentedKey string) (publicID, secret string, err error)
 // design (a publishable key ships in clients), so presenting one records
 // nothing.
 func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret string) (*AdminProjectCredential, error) {
-	// Hashed before the read, so a public id that names no credential costs
-	// the same hash as one that does and the refusal's timing does not tell
-	// them apart.
-	presentedHash := sha256Hex(secret)
-	cred, err := s.credentials.CredentialByPublicIDInActiveProject(ctx, publicID)
+	cred, reason, err := checkProjectCredential(ctx, s.credentials, CredentialKindDirectoryReader, publicID, secret)
 	if err != nil {
 		return nil, err
 	}
-	if cred == nil || cred.Kind != CredentialKindDirectoryReader {
+	if cred == nil {
 		return nil, errInvalidDirectoryKey
-	}
-
-	reason := ""
-	switch {
-	case subtle.ConstantTimeCompare([]byte(presentedHash), []byte(cred.SecretHash)) != 1:
-		reason = directoryRefusedSecretMismatch
-	case cred.Revoked:
-		reason = directoryRefusedRevoked
 	}
 	if reason == "" {
 		return cred, nil
