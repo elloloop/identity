@@ -124,11 +124,11 @@ ON CONFLICT (project_id, tenant_id, user_id)
 Nothing records it in the audit trail. Use a role with `BYPASSRLS`
 (`docs/postgres-rls.md`): `users` is under row-level security, so under
 any other role the statement matches no account and revokes no
-invitation. Run it, then the down migration, with this release's replicas stopped, so
-that no suspension, invitation or join lands in between. A tenant whose
-only remaining owner was suspended has no owner afterwards: an admin who
-can still act invites one, and otherwise an operator appoints one with
-`AdminRecoverTenantOwnership`.
+invitation. Run it, then the down migration, with this release's replicas
+stopped, so that no suspension, invitation or join lands in between. A
+tenant whose only remaining owner was suspended has no owner afterwards: an
+admin who can still act invites one, and otherwise an operator appoints one
+with `AdminRecoverTenantOwnership`.
 
 A refused down migration rolls back and records version 52 dirty: run this
 release's `identity migrate force 53`, decide the suspensions, then migrate
