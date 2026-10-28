@@ -1,5 +1,22 @@
 # Upgrade guide
 
+## Next — built with go-jose v4.1.6 for CVE-2026-116587 (no API or schema change)
+
+The binary now links `github.com/go-jose/go-jose/v4` v4.1.6, which fixes
+CVE-2026-116587, a denial of service when parsing a JSON Web Key that holds an
+RSA key. Identity does not import go-jose itself; it arrives through the OpenID
+provider library behind the agent OAuth endpoints (`internal/app/agent_oauth.go`).
+govulncheck has no entry for the advisory yet, so it gives no reachability
+answer, and the release image scan gates on any fixable HIGH finding, so the fix
+is the upgrade rather than a suppression. `pkg/` does not depend on go-jose, so
+code embedding those libraries is unaffected.
+
+v4.26.0's image was built, signed and published before its scan found the
+advisory, so that release failed its gate: do not deploy v4.26.0, take the next
+release instead. It adds nothing else, so the entries below that v4.26.0
+introduced (migrations 0051 and 0052 and their rollout notes) apply to it
+unchanged.
+
 ## Next — a member removed from a tenant cannot rejoin it by domain (migration 0052; behaviour change; `RemoveTenantMember` audited; `MembershipStore.RemoveMembership`, `JoinByDomain`, `IsRemoved` and `MembershipService.RemoveTenantMember` (Go API))
 
 Until now `RemoveTenantMember` deleted the membership and kept no trace of
