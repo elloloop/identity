@@ -420,7 +420,7 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	if s.mailer == nil {
 		return
 	}
-	link := fmt.Sprintf("%s/auth/accept-invitation?token=%s", appBaseURL(ctx, s.cfg), rawToken)
+	link := tenantInvitationLink(ctx, s.cfg, rawToken)
 	var brand resolvedBranding
 	if s.cfg != nil {
 		brand = resolveBranding(ctx, s.cfg, "")

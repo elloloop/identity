@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -223,20 +224,20 @@ type membershipFixture struct {
 // (so the raw token is NOT returned and emails are recorded). Tests needing
 // the no-mailer path use newMembershipFixtureNoMail.
 func newMembershipFixture() *membershipFixture {
-	return newMembershipFixtureWith(true)
+	return newMembershipFixtureWith(true, &config.Config{})
 }
 
 func newMembershipFixtureNoMail() *membershipFixture {
-	return newMembershipFixtureWith(false)
+	return newMembershipFixtureWith(false, &config.Config{})
 }
 
-func newMembershipFixtureWith(mailerConfigured bool) *membershipFixture {
+func newMembershipFixtureWith(mailerConfigured bool, cfg *config.Config) *membershipFixture {
 	inv := newFakeInvitationStore()
 	mem := newFakeMembershipStore()
 	tnt := newFakeTenantStore()
 	usr := newFakeUserDirectory()
 	mailer := &recordingMailer{}
-	svc := NewMembershipService(inv, mem, tnt, usr, mailer, mailerConfigured, &config.Config{}, nil)
+	svc := NewMembershipService(inv, mem, tnt, usr, mailer, mailerConfigured, cfg, nil)
 	return &membershipFixture{
 		svc: svc, invitations: inv, memberships: mem, tenants: tnt, users: usr, mailer: mailer,
 	}
@@ -291,6 +292,62 @@ func TestCreateTenantInvitation_AdminInvitesAndEmails(t *testing.T) {
 
 	// The stored token hash must not equal any raw token in the response.
 	require.NotEmpty(t, out.Invitation.TokenHash)
+}
+
+// The invitation email links to GATEWAY_TENANT_INVITATION_PAGE_URL when one is
+// set, ahead of the project's primary auth domain, with the path kept exactly
+// and the token as the only query parameter; otherwise to
+// /auth/accept-invitation on the project's primary auth domain, else on
+// GATEWAY_APP_BASE_URL. The token on the link is the invitation's.
+func TestCreateTenantInvitation_EmailLinkLandsOnTheConfiguredPage(t *testing.T) {
+	for _, tc := range []struct {
+		name, appBase, page, primaryAuthDomain, wantPage string
+	}{
+		{
+			name:              "configured page wins over the primary auth domain",
+			appBase:           "https://app.example.test",
+			page:              "https://members.example.test/invitations/accept/",
+			primaryAuthDomain: "auth.acme.example",
+			wantPage:          "https://members.example.test/invitations/accept/",
+		},
+		{
+			name:     "configured page on a loopback host",
+			page:     "http://localhost:3000/invitation",
+			wantPage: "http://localhost:3000/invitation",
+		},
+		{
+			name:              "primary auth domain when no page is configured",
+			appBase:           "https://app.example.test",
+			primaryAuthDomain: "auth.acme.example",
+			wantPage:          "https://auth.acme.example/auth/accept-invitation",
+		},
+		{
+			name:     "app base when no page is configured",
+			appBase:  "https://app.example.test/",
+			wantPage: "https://app.example.test/auth/accept-invitation",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newMembershipFixtureWith(true, &config.Config{AppBaseURL: tc.appBase, TenantInvitationPageURL: tc.page})
+			f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+			ctx := WithProjectScope(context.Background(), &ProjectScope{
+				ProjectID:         mTestProject,
+				PrimaryAuthDomain: tc.primaryAuthDomain,
+				Access:            ProjectAccessConfig{Mode: AccessModeOpen},
+			})
+
+			out, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+			require.NoError(t, err)
+			require.Equal(t, 1, f.mailer.count())
+			link := regexp.MustCompile(regexp.QuoteMeta(tc.wantPage) + `\?token=([0-9a-f]+)(\S*)`)
+			for part, body := range map[string]string{"text": f.mailer.last().Text, "html": f.mailer.last().HTML} {
+				m := link.FindStringSubmatch(body)
+				require.NotNil(t, m, "the %s body links to %s?token=…: %s", part, tc.wantPage, body)
+				require.Equal(t, out.Invitation.TokenHash, sha256Hex(m[1]), "the %s link carries the invitation's token", part)
+				require.False(t, strings.HasPrefix(m[2], "&"), "the %s link carries no parameter but the token", part)
+			}
+		})
+	}
 }
 
 func TestCreateTenantInvitation_NoMailerReturnsRawToken(t *testing.T) {

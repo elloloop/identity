@@ -1,5 +1,28 @@
 # Upgrade guide
 
+## Next — `GATEWAY_TENANT_INVITATION_PAGE_URL`: the page a tenant invitation email links to (additive; no migration)
+
+No schema change and no migration. A deployment that sets nothing new sends
+exactly the same emails as before.
+
+- **`GATEWAY_TENANT_INVITATION_PAGE_URL`** (default empty) is where the page
+  that accepts a tenant invitation lives. Identity does not serve that page:
+  by default a `CreateTenantInvitation` email links to
+  `/auth/accept-invitation?token=…` on the project's primary auth domain,
+  else on `GATEWAY_APP_BASE_URL`, and a deployment whose app has no page
+  there sends a link that does not resolve. **If your app accepts
+  invitations somewhere else, set the variable to that page** — for example
+  `https://app.example.com/invitations/accept/`. The link then becomes
+  `<page>?token=…` for every project, and takes precedence over any
+  project's primary auth domain. The path is kept exactly, trailing slash
+  included. The page signs the invitee in and redeems the token with
+  `AcceptTenantInvitation`. The value has the same rules as
+  `GATEWAY_EMAIL_LINK_BASE_URL`: an absolute `https` URL (`http` only for a
+  loopback host) with no userinfo, query or fragment. Any other value stops
+  the server from starting (`config: GATEWAY_TENANT_INVITATION_PAGE_URL …`).
+  `GATEWAY_EMAIL_LINK_BASE_URL` still does not move the invitation link, and
+  the account-setup link `InviteUser` sends is not affected.
+
 ## Next — built with go-jose v4.1.6 for CVE-2026-116587; v4.26.0 withdrawn (no API or schema change)
 
 The binary now links `github.com/go-jose/go-jose/v4` v4.1.6, which fixes
@@ -34,6 +57,7 @@ floating tag. v4.26.1 adds no other upgrade entry, so the three entries below
 that v4.26.0 introduced (joining a tenant by domain with migration 0051, a
 suspended tenant's login policy, and the removal record with migration 0052,
 with their rollout notes) apply to it unchanged.
+||||||| parent of 3492fdb (feat(tenants): GATEWAY_TENANT_INVITATION_PAGE_URL sets the invitation email's page)
 
 ## Next — a member removed from a tenant cannot rejoin it by domain (migration 0052; behaviour change; `RemoveTenantMember` audited; `MembershipStore.RemoveMembership`, `JoinByDomain`, `IsRemoved` and `MembershipService.RemoveTenantMember` (Go API))
 

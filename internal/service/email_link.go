@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/elloloop/identity/internal/config"
 )
 
 // The pages that redeem an emailed password-reset or email-verification token,
@@ -15,6 +17,11 @@ import (
 const (
 	emailLinkPageResetPassword = "reset-password"
 	emailLinkPageVerifyEmail   = "verify-email"
+
+	// emailLinkPageAcceptTenantInvitation is the page, under appAuthPathPrefix
+	// on the app base URL, that a tenant-invitation link lands on when no
+	// GATEWAY_TENANT_INVITATION_PAGE_URL is configured.
+	emailLinkPageAcceptTenantInvitation = "accept-invitation"
 
 	// appAuthPathPrefix is where the pages sit below the app base URL when no
 	// email-link base is configured.
@@ -85,6 +92,19 @@ func (s *AuthService) emailLinkPageURL(ctx context.Context, page string) string 
 		return base + "/" + page
 	}
 	return appBaseURL(ctx, s.cfg) + appAuthPathPrefix + page
+}
+
+// tenantInvitationLink is the link a tenant-invitation email carries. The page
+// at GATEWAY_TENANT_INVITATION_PAGE_URL, when set, wins over everything,
+// including a project's primary auth domain, because the deployment accepts
+// invitations in that one place; otherwise the page is /auth/accept-invitation
+// on the request's app base URL.
+func tenantInvitationLink(ctx context.Context, cfg *config.Config, token string) string {
+	page := appBaseURL(ctx, cfg) + appAuthPathPrefix + emailLinkPageAcceptTenantInvitation
+	if cfg != nil && cfg.TenantInvitationPageURL != "" {
+		page = cfg.TenantInvitationPageURL
+	}
+	return buildEmailLink(page, token, emailLink{})
 }
 
 // buildEmailLink appends the token, then the product and the return_to (as

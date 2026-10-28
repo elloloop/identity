@@ -369,55 +369,68 @@ func TestValidate_GenericOIDC_Invariants(t *testing.T) {
 	})
 }
 
-func TestValidate_EmailLinkBaseURL(t *testing.T) {
-	for _, base := range []string{
-		"",
-		"https://signin.example.com",
-		"https://signin.example.com/",
-		"https://example.com/account",
-		"https://signin.example.com:8443",
-		"https://signin.example.com:1",
-		"https://signin.example.com:65535",
-		"http://localhost:3000",
-		"http://127.0.0.1:3000/hub",
-		"http://[::1]:3000",
+// The two URLs emailed links are built on, the email-link base and the tenant
+// invitation page, are validated alike: absolute https (http only for a
+// loopback host), with no userinfo, query or fragment, never echoing a password.
+func TestValidate_EmailedLinkURLs(t *testing.T) {
+	for _, v := range []struct {
+		name string
+		set  func(*Config, string)
+	}{
+		{"GATEWAY_EMAIL_LINK_BASE_URL", func(c *Config, s string) { c.EmailLinkBaseURL = s }},
+		{"GATEWAY_TENANT_INVITATION_PAGE_URL", func(c *Config, s string) { c.TenantInvitationPageURL = s }},
 	} {
-		c := &Config{EmailLinkBaseURL: base}
-		if err := c.Validate(); err != nil {
-			t.Errorf("Validate with GATEWAY_EMAIL_LINK_BASE_URL=%q: %v", base, err)
+		for _, base := range []string{
+			"",
+			"https://signin.example.com",
+			"https://signin.example.com/",
+			"https://example.com/account",
+			"https://signin.example.com:8443",
+			"https://signin.example.com:1",
+			"https://signin.example.com:65535",
+			"http://localhost:3000",
+			"http://127.0.0.1:3000/hub",
+			"http://[::1]:3000",
+		} {
+			c := &Config{}
+			v.set(c, base)
+			if err := c.Validate(); err != nil {
+				t.Errorf("Validate with %s=%q: %v", v.name, base, err)
+			}
 		}
-	}
 
-	for _, tc := range []struct{ base, want string }{
-		{"http://signin.example.com", "must use https"},
-		{"ftp://signin.example.com", "must use https"},
-		{"signin.example.com", "must be absolute"},
-		{"/reset", "must be absolute"},
-		{"https://signin.example.com?product=x", "must not carry"},
-		{"https://signin.example.com?", "must not carry"},
-		{"https://signin.example.com#top", "must not carry"},
-		{"https://signin.example.com#", "must not carry"},
-		{"https://signin.example.com/#", "must not carry"},
-		{"https://:443", "has no host name"},
-		{"https://signin.example.com:0", "port must be a number from 1 to 65535"},
-		{"https://signin.example.com:65536", "port must be a number from 1 to 65535"},
-		{"https://admin:hunter2@signin.example.com:99999", "port must be a number from 1 to 65535"},
-		{"https://admin:hunter2@signin.example.com", "must not carry"},
-		{"http://admin:hunter2@signin.example.com", "must use https"},
-		{"https://signin.example.com/%zz", "not a valid URL"},
-	} {
-		c := &Config{EmailLinkBaseURL: tc.base}
-		err := c.Validate()
-		if err == nil {
-			t.Errorf("Validate with GATEWAY_EMAIL_LINK_BASE_URL=%q: want error", tc.base)
-			continue
-		}
-		msg := err.Error()
-		if !strings.Contains(msg, "GATEWAY_EMAIL_LINK_BASE_URL") || !strings.Contains(msg, tc.want) {
-			t.Errorf("Validate(%q) = %q, want it to name the variable and contain %q", tc.base, msg, tc.want)
-		}
-		if strings.Contains(msg, "hunter2") {
-			t.Errorf("Validate(%q) leaked the password: %q", tc.base, msg)
+		for _, tc := range []struct{ base, want string }{
+			{"http://signin.example.com", "must use https"},
+			{"ftp://signin.example.com", "must use https"},
+			{"signin.example.com", "must be absolute"},
+			{"/reset", "must be absolute"},
+			{"https://signin.example.com?product=x", "must not carry"},
+			{"https://signin.example.com?", "must not carry"},
+			{"https://signin.example.com#top", "must not carry"},
+			{"https://signin.example.com#", "must not carry"},
+			{"https://signin.example.com/#", "must not carry"},
+			{"https://:443", "has no host name"},
+			{"https://signin.example.com:0", "port must be a number from 1 to 65535"},
+			{"https://signin.example.com:65536", "port must be a number from 1 to 65535"},
+			{"https://admin:hunter2@signin.example.com:99999", "port must be a number from 1 to 65535"},
+			{"https://admin:hunter2@signin.example.com", "must not carry"},
+			{"http://admin:hunter2@signin.example.com", "must use https"},
+			{"https://signin.example.com/%zz", "not a valid URL"},
+		} {
+			c := &Config{}
+			v.set(c, tc.base)
+			err := c.Validate()
+			if err == nil {
+				t.Errorf("Validate with %s=%q: want error", v.name, tc.base)
+				continue
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, v.name) || !strings.Contains(msg, tc.want) {
+				t.Errorf("Validate(%q) = %q, want it to name the variable and contain %q", tc.base, msg, tc.want)
+			}
+			if strings.Contains(msg, "hunter2") {
+				t.Errorf("Validate(%q) leaked the password: %q", tc.base, msg)
+			}
 		}
 	}
 }
