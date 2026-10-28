@@ -72,8 +72,9 @@ func (e *TenantSelectionRefusedError) Unwrap() error { return e.Err }
 // the per-user limit.
 const auditReasonCreationLimit = "creation_limit"
 
-// WithAudit wires the audit trail CreateTenant and TransferTenantOwnership
-// record into. A nil logger (the default) records nothing.
+// WithAudit wires the audit trail CreateTenant, TransferTenantOwnership and
+// JoinTenantByDomain record into. A nil logger (the default) records
+// nothing.
 func (s *MembershipService) WithAudit(l *audit.Logger) *MembershipService {
 	s.audit = l
 	return s

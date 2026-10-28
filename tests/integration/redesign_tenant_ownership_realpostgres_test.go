@@ -136,11 +136,11 @@ func TestRedesign_TenantOwnership(t *testing.T) {
 		t.Fatalf("members after the recovery = %v", roles)
 	}
 
-	transferred := waitForTenantAuditEvents(t, h.ProjectID, tenantID, audit.EventTenantOwnershipTransferred)
+	transferred := waitForTenantAuditEvents(t, h.ProjectID, tenantID, audit.EventTenantOwnershipTransferred, 1)
 	if len(transferred) != 1 || transferred[0]["project_id"] != h.ProjectID {
 		t.Fatalf("%s events = %v, want one", audit.EventTenantOwnershipTransferred, transferred)
 	}
-	recoveries := waitForTenantAuditEvents(t, h.ProjectID, tenantID, audit.EventTenantOwnershipRecovered)
+	recoveries := waitForTenantAuditEvents(t, h.ProjectID, tenantID, audit.EventTenantOwnershipRecovered, 1)
 	if len(recoveries) != 1 || recoveries[0]["reason"] != "the owner left" {
 		t.Fatalf("%s events = %v, want one with the reason", audit.EventTenantOwnershipRecovered, recoveries)
 	}

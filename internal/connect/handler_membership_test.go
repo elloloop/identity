@@ -157,6 +157,14 @@ func TestMembershipRPCs_NilService_ReturnUnimplemented(t *testing.T) {
 	_, err = srv.client.ListMyTenants(ctx,
 		withAuth(&identitypb.ListMyTenantsRequest{}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = srv.client.ListJoinableTenants(ctx,
+		withAuth(&identitypb.ListJoinableTenantsRequest{}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = srv.client.JoinTenantByDomain(ctx,
+		withAuth(&identitypb.JoinTenantByDomainRequest{TenantId: "t"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
 }
 
 // ── missing auth → Unauthenticated ──────────────────────────────────────
@@ -201,6 +209,14 @@ func TestMembershipRPCs_MissingAuth_Unauthenticated(t *testing.T) {
 
 	_, err = srv.client.ListMyTenants(ctx,
 		connect.NewRequest(&identitypb.ListMyTenantsRequest{}))
+	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.ListJoinableTenants(ctx,
+		connect.NewRequest(&identitypb.ListJoinableTenantsRequest{}))
+	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.JoinTenantByDomain(ctx,
+		connect.NewRequest(&identitypb.JoinTenantByDomainRequest{TenantId: "t"}))
 	requireCode(t, err, connect.CodeUnauthenticated)
 }
 
@@ -307,6 +323,47 @@ func TestTransferTenantOwnership_Handler(t *testing.T) {
 	_, err = srv.client.TransferTenantOwnership(ctx,
 		withAuth(&identitypb.TransferTenantOwnershipRequest{TenantId: "t-1", UserId: "heir"}, "owner-1"))
 	requireCode(t, err, connect.CodePermissionDenied)
+}
+
+// ── ListJoinableTenants / JoinTenantByDomain through the handler ────────
+
+func TestJoinTenantByDomain_Handler(t *testing.T) {
+	t.Parallel()
+	domains := newConnectDomainStore()
+	domains.verified = &service.Domain{ID: "d1", TenantID: "t-1", Domain: "acme.com", Status: service.DomainStatusVerified, AllowJoin: true}
+	tenants := &connectTenantStore{tenant: &service.Tenant{ID: "t-1", Name: "Acme", Status: service.TenantStatusClaimed}}
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"joiner":     {ID: "joiner", Email: "joiner@acme.com", Status: service.StatusActive, EmailVerified: true},
+		"unverified": {ID: "unverified", Email: "u@acme.com", Status: service.StatusActive},
+	}}
+	members := &connectMembershipStore{}
+	svc := newMembershipSvc(newConnectInvitationStore(), members, tenants, users).WithDomains(domains)
+	srv := startMembershipServer(t, svc)
+	ctx := context.Background()
+
+	list, err := srv.client.ListJoinableTenants(ctx, withAuth(&identitypb.ListJoinableTenantsRequest{}, "joiner"))
+	if err != nil {
+		t.Fatalf("ListJoinableTenants: %v", err)
+	}
+	if got := list.Msg.GetTenants(); len(got) != 1 || got[0].GetTenantId() != "t-1" || got[0].GetName() != "Acme" {
+		t.Fatalf("joinable tenants = %+v, want t-1 Acme", got)
+	}
+
+	joined, err := srv.client.JoinTenantByDomain(ctx, withAuth(&identitypb.JoinTenantByDomainRequest{TenantId: "t-1"}, "joiner"))
+	if err != nil {
+		t.Fatalf("JoinTenantByDomain: %v", err)
+	}
+	if m := joined.Msg.GetMembership(); m.GetTenantId() != "t-1" || m.GetUserId() != "joiner" ||
+		m.GetRole() != service.RoleMember || m.GetSource() != service.MembershipSourceDomain {
+		t.Fatalf("membership = %+v, want joiner a domain member of t-1", m)
+	}
+
+	_, err = srv.client.JoinTenantByDomain(ctx, withAuth(&identitypb.JoinTenantByDomainRequest{TenantId: "t-other"}, "joiner"))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = srv.client.JoinTenantByDomain(ctx, withAuth(&identitypb.JoinTenantByDomainRequest{TenantId: "t-1"}, "unverified"))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+	_, err = srv.client.ListJoinableTenants(ctx, withAuth(&identitypb.ListJoinableTenantsRequest{}, "user-unknown"))
+	requireCode(t, err, connect.CodeNotFound)
 }
 
 // ── CreateTenant / ListMyTenants through the handler ────────────────────

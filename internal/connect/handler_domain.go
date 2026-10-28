@@ -84,6 +84,29 @@ func (h *IdentityHandler) ListTenantDomains(
 	}), nil
 }
 
+// SetDomainJoin turns joining by one of a tenant's domains on or off. Owner
+// or admin of the domain's tenant only.
+func (h *IdentityHandler) SetDomainJoin(
+	ctx context.Context,
+	req *connect.Request[identitypb.SetDomainJoinRequest],
+) (*connect.Response[identitypb.SetDomainJoinResponse], error) {
+	if h.domains == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	d, err := h.domains.SetDomainJoin(ctx, userID, req.Msg.GetDomainId(), req.Msg.GetAllowJoin(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.SetDomainJoinResponse{
+		Domain: domainToProto(d),
+	}), nil
+}
+
 // domainToProto converts a service-layer Domain to the proto wire message.
 func domainToProto(d *service.Domain) *identitypb.Domain {
 	if d == nil {
@@ -98,5 +121,6 @@ func domainToProto(d *service.Domain) *identitypb.Domain {
 		VerifiedAt:         msToTimestamp(d.VerifiedAtMs),
 		CreatedAt:          msToTimestamp(d.CreatedAtMs),
 		UpdatedAt:          msToTimestamp(d.UpdatedAtMs),
+		AllowJoin:          d.AllowJoin,
 	}
 }

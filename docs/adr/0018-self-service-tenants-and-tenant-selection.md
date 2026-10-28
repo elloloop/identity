@@ -25,6 +25,14 @@ none of whose owners or admins can sign in any more, each audited
 ([Ownership](#ownership)). Removing a tenant's last owner is refused in the
 same transaction that would remove them.
 
+**Amended** (2026-10-27): a tenant may let the people on its verified
+domains join it themselves. `SetDomainJoin` turns that on or off for one
+domain, and it is off until an admin turns it on. `ListJoinableTenants` and
+`JoinTenantByDomain` then let a person on such a domain who is in no tenant
+of it, such as one whose email moved onto the domain after signup, find the
+tenant and join it as a domain member, audited
+([Joining by domain](#joining-by-domain)).
+
 ## Context
 
 Until now a tenant came into being in one of two ways: auto-formed from the
@@ -323,6 +331,50 @@ That only an owner may transfer does not yet keep the owner role from a
 tenant's admins: an admin can invite an owner, themselves included, and
 can remove an owner who is not the last (issue #657).
 
+### Joining by domain
+
+Auto-formation (ADR-0004) joins a signup, or an anonymous account's
+promotion, to the tenant of its email's domain: the latent tenant formed
+for the domain, which becomes the domain's tenant once it verifies the
+domain. It runs only then, so some people on a verified domain are in no
+tenant of it, and until now could join only by an invitation: people
+auto-formation put in the domain's latent tenant before a *different*
+tenant verified the domain, people whose email moved onto the domain after
+they signed up, and people whose membership ended, for example when their
+email left the domain and later came back. A tenant may now let them join
+themselves.
+
+- **It is off until an admin turns it on, domain by domain.** Proving
+  control of a domain is not agreeing to admit everyone on it, and a tenant
+  that verified a domain before this change must not start admitting people
+  it did not. `domains.allow_join` (migration 0051) records the choice,
+  `false` on every row. `SetDomainJoin(domain_id, allow_join)`, by an owner
+  or admin and not while the tenant is suspended (decision 6), sets it,
+  recorded as `domain_join_set`. It governs only joining by request:
+  auto-formation is unchanged, since putting it behind the setting would
+  either stop signups joining the tenants that rely on it today or need the
+  setting on by default.
+- **Who may join is who a domain membership counts for** (decision 2): an
+  active, signed-up person whose email is verified and on the verified
+  domain, not a public provider's. `ListJoinableTenants` returns the one
+  tenant that qualifies, if the caller is not already an active member: the
+  `claimed` tenant holding the domain's verified row, while that row
+  allows joining. A project holds a domain's verified row on one tenant at
+  most (decision 4), so there is at most one.
+- **A join makes a domain membership.** `JoinTenantByDomain(tenant_id)`
+  grants an active `member` membership with source `domain`, which ends when
+  the email leaves the domain (migration 0047) as auto-formation's does.
+  A caller who is already a member, as `ListMyTenants` counts membership,
+  gets that membership back as it is, never raised or lowered, and nothing
+  is recorded; that is asked before whether the domain lets them join, so
+  a retry after joining is turned off gets the same answer. Every tenant
+  but the one that qualifies is refused alike, an unknown one included, so
+  the call cannot be used to find tenants. Recorded as
+  `tenant_joined_by_domain`, once, by the call whose grant changed
+  something, so two joins racing for one account are recorded once.
+- **Turning it off ends no membership.** The setting decides who may join,
+  not who belongs; ending a membership is `RemoveTenantMember`'s.
+
 ## What this amends
 
 - **ADR-0001**, Decision §1 lists `Tenant` among what identity keeps. That
@@ -375,6 +427,10 @@ can remove an owner who is not the last (issue #657).
   ungoverned until an operator recovers it. Recovery reads who governs the
   tenant before it grants, so two operators recovering one tenant at once,
   naming different accounts, may each appoint an owner (both are audited).
+- **Negative.** While joining by domain is on, a member removed with
+  `RemoveTenantMember` who is still on the domain can join again. An admin
+  turns joining off to keep them out; keeping out one person while others
+  join needs a block list, which does not exist yet.
 - **Negative, open.** These gaps are known and tracked as follow-ups: a
   session records no sign-in method, which would let a tenant's policy
   admit a cross-domain member it did govern; a refresh that chooses or
@@ -386,4 +442,5 @@ can remove an owner who is not the last (issue #657).
   challenge) and 0046 (guarded, scoped agent-governance triggers,
   `users.email_domain` and its index, the `domain_attempts` table, the
   invitation-limit indexes) and 0047 (a trigger on `users` that ends a domain
-  membership when the email leaves the tenant's verified domains).
+  membership when the email leaves the tenant's verified domains); joining
+  by domain adds 0051 (`domains.allow_join`).

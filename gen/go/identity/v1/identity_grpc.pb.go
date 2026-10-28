@@ -135,6 +135,7 @@ const (
 	IdentityService_CreateDomain_FullMethodName                    = "/identity.v1.IdentityService/CreateDomain"
 	IdentityService_VerifyDomain_FullMethodName                    = "/identity.v1.IdentityService/VerifyDomain"
 	IdentityService_ListTenantDomains_FullMethodName               = "/identity.v1.IdentityService/ListTenantDomains"
+	IdentityService_SetDomainJoin_FullMethodName                   = "/identity.v1.IdentityService/SetDomainJoin"
 	IdentityService_CreateTenantInvitation_FullMethodName          = "/identity.v1.IdentityService/CreateTenantInvitation"
 	IdentityService_AcceptTenantInvitation_FullMethodName          = "/identity.v1.IdentityService/AcceptTenantInvitation"
 	IdentityService_ListTenantInvitations_FullMethodName           = "/identity.v1.IdentityService/ListTenantInvitations"
@@ -143,6 +144,8 @@ const (
 	IdentityService_TransferTenantOwnership_FullMethodName         = "/identity.v1.IdentityService/TransferTenantOwnership"
 	IdentityService_CreateTenant_FullMethodName                    = "/identity.v1.IdentityService/CreateTenant"
 	IdentityService_ListMyTenants_FullMethodName                   = "/identity.v1.IdentityService/ListMyTenants"
+	IdentityService_ListJoinableTenants_FullMethodName             = "/identity.v1.IdentityService/ListJoinableTenants"
+	IdentityService_JoinTenantByDomain_FullMethodName              = "/identity.v1.IdentityService/JoinTenantByDomain"
 	IdentityService_InviteUser_FullMethodName                      = "/identity.v1.IdentityService/InviteUser"
 	IdentityService_MergeUsers_FullMethodName                      = "/identity.v1.IdentityService/MergeUsers"
 	IdentityService_AcceptInvitation_FullMethodName                = "/identity.v1.IdentityService/AcceptInvitation"
@@ -419,6 +422,15 @@ type IdentityServiceClient interface {
 	CreateDomain(ctx context.Context, in *CreateDomainRequest, opts ...grpc.CallOption) (*CreateDomainResponse, error)
 	VerifyDomain(ctx context.Context, in *VerifyDomainRequest, opts ...grpc.CallOption) (*VerifyDomainResponse, error)
 	ListTenantDomains(ctx context.Context, in *ListTenantDomainsRequest, opts ...grpc.CallOption) (*ListTenantDomainsResponse, error)
+	// SetDomainJoin turns joining by one of the tenant's domains on or off
+	// (Domain.allow_join): while it is on and the domain is verified, a person
+	// whose verified email is on the domain may join the tenant with
+	// JoinTenantByDomain. An owner or admin of the domain's tenant only, so
+	// PERMISSION_DENIED for anyone else and while the tenant is suspended; an
+	// unknown domain_id is NOT_FOUND. It may be set before the domain is
+	// verified. Turning it off ends no membership. A change is audited; asking
+	// for the value the domain has returns it unchanged and records nothing.
+	SetDomainJoin(ctx context.Context, in *SetDomainJoinRequest, opts ...grpc.CallOption) (*SetDomainJoinResponse, error)
 	// Tenant membership (redesign). Authenticated, project-scoped, and — except
 	// for AcceptTenantInvitation — gated on the caller being an owner/admin
 	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
@@ -482,6 +494,34 @@ type IdentityServiceClient interface {
 	// memory and SQLite drivers return Unimplemented.
 	CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error)
 	ListMyTenants(ctx context.Context, in *ListMyTenantsRequest, opts ...grpc.CallOption) (*ListMyTenantsResponse, error)
+	// Joining by domain. Authenticated and project-scoped; the caller's own
+	// action, needing no invitation. ListJoinableTenants returns the tenant
+	// the caller's verified email's domain lets them join (see
+	// ListJoinableTenantsResponse), and is empty for an account that could not
+	// join. Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	ListJoinableTenants(ctx context.Context, in *ListJoinableTenantsRequest, opts ...grpc.CallOption) (*ListJoinableTenantsResponse, error)
+	// JoinTenantByDomain makes the caller an active member of tenant_id with
+	// role "member" and source "domain", a membership that ends if the email
+	// leaves the domain, and audits the join. tenant_id must be the claimed
+	// tenant that has verified the caller's verified email's domain and turned
+	// joining on for it with SetDomainJoin.
+	//
+	// A caller who is already a member, as ListMyTenants counts membership,
+	// gets that membership back unchanged, whatever its role or source, and
+	// nothing is recorded. That is checked first, so a retry, even after
+	// joining was turned off, gets the same answer, and two joins racing for
+	// one account make one membership, audited once.
+	//
+	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
+	// account, and for every tenant the domain does not let the caller join
+	// (one that has not verified it, has joining off, or is suspended or
+	// latent), an unknown tenant included, so the call reveals nothing about
+	// other tenants; FAILED_PRECONDITION until the caller has verified their
+	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	JoinTenantByDomain(ctx context.Context, in *JoinTenantByDomainRequest, opts ...grpc.CallOption) (*JoinTenantByDomainResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*InviteUserResponse, error)
@@ -1837,6 +1877,16 @@ func (c *identityServiceClient) ListTenantDomains(ctx context.Context, in *ListT
 	return out, nil
 }
 
+func (c *identityServiceClient) SetDomainJoin(ctx context.Context, in *SetDomainJoinRequest, opts ...grpc.CallOption) (*SetDomainJoinResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetDomainJoinResponse)
+	err := c.cc.Invoke(ctx, IdentityService_SetDomainJoin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) CreateTenantInvitation(ctx context.Context, in *CreateTenantInvitationRequest, opts ...grpc.CallOption) (*CreateTenantInvitationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateTenantInvitationResponse)
@@ -1911,6 +1961,26 @@ func (c *identityServiceClient) ListMyTenants(ctx context.Context, in *ListMyTen
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListMyTenantsResponse)
 	err := c.cc.Invoke(ctx, IdentityService_ListMyTenants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListJoinableTenants(ctx context.Context, in *ListJoinableTenantsRequest, opts ...grpc.CallOption) (*ListJoinableTenantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListJoinableTenantsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListJoinableTenants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) JoinTenantByDomain(ctx context.Context, in *JoinTenantByDomainRequest, opts ...grpc.CallOption) (*JoinTenantByDomainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JoinTenantByDomainResponse)
+	err := c.cc.Invoke(ctx, IdentityService_JoinTenantByDomain_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2542,6 +2612,15 @@ type IdentityServiceServer interface {
 	CreateDomain(context.Context, *CreateDomainRequest) (*CreateDomainResponse, error)
 	VerifyDomain(context.Context, *VerifyDomainRequest) (*VerifyDomainResponse, error)
 	ListTenantDomains(context.Context, *ListTenantDomainsRequest) (*ListTenantDomainsResponse, error)
+	// SetDomainJoin turns joining by one of the tenant's domains on or off
+	// (Domain.allow_join): while it is on and the domain is verified, a person
+	// whose verified email is on the domain may join the tenant with
+	// JoinTenantByDomain. An owner or admin of the domain's tenant only, so
+	// PERMISSION_DENIED for anyone else and while the tenant is suspended; an
+	// unknown domain_id is NOT_FOUND. It may be set before the domain is
+	// verified. Turning it off ends no membership. A change is audited; asking
+	// for the value the domain has returns it unchanged and records nothing.
+	SetDomainJoin(context.Context, *SetDomainJoinRequest) (*SetDomainJoinResponse, error)
 	// Tenant membership (redesign). Authenticated, project-scoped, and — except
 	// for AcceptTenantInvitation — gated on the caller being an owner/admin
 	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
@@ -2605,6 +2684,34 @@ type IdentityServiceServer interface {
 	// memory and SQLite drivers return Unimplemented.
 	CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error)
 	ListMyTenants(context.Context, *ListMyTenantsRequest) (*ListMyTenantsResponse, error)
+	// Joining by domain. Authenticated and project-scoped; the caller's own
+	// action, needing no invitation. ListJoinableTenants returns the tenant
+	// the caller's verified email's domain lets them join (see
+	// ListJoinableTenantsResponse), and is empty for an account that could not
+	// join. Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	ListJoinableTenants(context.Context, *ListJoinableTenantsRequest) (*ListJoinableTenantsResponse, error)
+	// JoinTenantByDomain makes the caller an active member of tenant_id with
+	// role "member" and source "domain", a membership that ends if the email
+	// leaves the domain, and audits the join. tenant_id must be the claimed
+	// tenant that has verified the caller's verified email's domain and turned
+	// joining on for it with SetDomainJoin.
+	//
+	// A caller who is already a member, as ListMyTenants counts membership,
+	// gets that membership back unchanged, whatever its role or source, and
+	// nothing is recorded. That is checked first, so a retry, even after
+	// joining was turned off, gets the same answer, and two joins racing for
+	// one account make one membership, audited once.
+	//
+	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
+	// account, and for every tenant the domain does not let the caller join
+	// (one that has not verified it, has joining off, or is suspended or
+	// latent), an unknown tenant included, so the call reveals nothing about
+	// other tenants; FAILED_PRECONDITION until the caller has verified their
+	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	JoinTenantByDomain(context.Context, *JoinTenantByDomainRequest) (*JoinTenantByDomainResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error)
@@ -3148,6 +3255,9 @@ func (UnimplementedIdentityServiceServer) VerifyDomain(context.Context, *VerifyD
 func (UnimplementedIdentityServiceServer) ListTenantDomains(context.Context, *ListTenantDomainsRequest) (*ListTenantDomainsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTenantDomains not implemented")
 }
+func (UnimplementedIdentityServiceServer) SetDomainJoin(context.Context, *SetDomainJoinRequest) (*SetDomainJoinResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetDomainJoin not implemented")
+}
 func (UnimplementedIdentityServiceServer) CreateTenantInvitation(context.Context, *CreateTenantInvitationRequest) (*CreateTenantInvitationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTenantInvitation not implemented")
 }
@@ -3171,6 +3281,12 @@ func (UnimplementedIdentityServiceServer) CreateTenant(context.Context, *CreateT
 }
 func (UnimplementedIdentityServiceServer) ListMyTenants(context.Context, *ListMyTenantsRequest) (*ListMyTenantsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMyTenants not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListJoinableTenants(context.Context, *ListJoinableTenantsRequest) (*ListJoinableTenantsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListJoinableTenants not implemented")
+}
+func (UnimplementedIdentityServiceServer) JoinTenantByDomain(context.Context, *JoinTenantByDomainRequest) (*JoinTenantByDomainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method JoinTenantByDomain not implemented")
 }
 func (UnimplementedIdentityServiceServer) InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InviteUser not implemented")
@@ -5398,6 +5514,24 @@ func _IdentityService_ListTenantDomains_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_SetDomainJoin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetDomainJoinRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).SetDomainJoin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_SetDomainJoin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).SetDomainJoin(ctx, req.(*SetDomainJoinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_CreateTenantInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateTenantInvitationRequest)
 	if err := dec(in); err != nil {
@@ -5538,6 +5672,42 @@ func _IdentityService_ListMyTenants_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).ListMyTenants(ctx, req.(*ListMyTenantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListJoinableTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListJoinableTenantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListJoinableTenants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListJoinableTenants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListJoinableTenants(ctx, req.(*ListJoinableTenantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_JoinTenantByDomain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JoinTenantByDomainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).JoinTenantByDomain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_JoinTenantByDomain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).JoinTenantByDomain(ctx, req.(*JoinTenantByDomainRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -6716,6 +6886,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _IdentityService_ListTenantDomains_Handler,
 		},
 		{
+			MethodName: "SetDomainJoin",
+			Handler:    _IdentityService_SetDomainJoin_Handler,
+		},
+		{
 			MethodName: "CreateTenantInvitation",
 			Handler:    _IdentityService_CreateTenantInvitation_Handler,
 		},
@@ -6746,6 +6920,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListMyTenants",
 			Handler:    _IdentityService_ListMyTenants_Handler,
+		},
+		{
+			MethodName: "ListJoinableTenants",
+			Handler:    _IdentityService_ListJoinableTenants_Handler,
+		},
+		{
+			MethodName: "JoinTenantByDomain",
+			Handler:    _IdentityService_JoinTenantByDomain_Handler,
 		},
 		{
 			MethodName: "InviteUser",

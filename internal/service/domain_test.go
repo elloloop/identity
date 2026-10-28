@@ -32,6 +32,10 @@ type fakeDomainStore struct {
 	writes     int
 	attempts   []DomainAttempt
 	attemptErr error
+	// verifiedErr fails GetVerifiedDomain; allowJoinErr fails
+	// SetDomainAllowJoin.
+	verifiedErr  error
+	allowJoinErr error
 }
 
 func newFakeDomainStore() *fakeDomainStore {
@@ -74,6 +78,9 @@ func (f *fakeDomainStore) GetDomain(_ context.Context, projectID, domainID strin
 }
 
 func (f *fakeDomainStore) GetVerifiedDomain(_ context.Context, projectID, domain string) (*Domain, error) {
+	if f.verifiedErr != nil {
+		return nil, f.verifiedErr
+	}
 	for _, d := range f.byID {
 		if d.ProjectID == projectID && strings.EqualFold(d.Domain, domain) && d.Status == DomainStatusVerified {
 			out := *d
@@ -140,6 +147,22 @@ func (f *fakeDomainStore) ListDomainsByTenant(_ context.Context, projectID, tena
 		}
 	}
 	return out, nil
+}
+
+// SetDomainAllowJoin mirrors the postgres store: it returns the domain as
+// it then stands and whether the call changed it, and nil for an unknown id.
+func (f *fakeDomainStore) SetDomainAllowJoin(_ context.Context, projectID, domainID string, allowJoin bool) (*Domain, bool, error) {
+	if f.allowJoinErr != nil {
+		return nil, false, f.allowJoinErr
+	}
+	d, ok := f.byID[f.key(projectID, domainID)]
+	if !ok {
+		return nil, false, nil
+	}
+	changed := d.AllowJoin != allowJoin
+	d.AllowJoin = allowJoin
+	cp := *d
+	return &cp, changed, nil
 }
 
 var _ DomainStore = (*fakeDomainStore)(nil)

@@ -381,6 +381,9 @@ const (
 	// IdentityServiceListTenantDomainsProcedure is the fully-qualified name of the IdentityService's
 	// ListTenantDomains RPC.
 	IdentityServiceListTenantDomainsProcedure = "/identity.v1.IdentityService/ListTenantDomains"
+	// IdentityServiceSetDomainJoinProcedure is the fully-qualified name of the IdentityService's
+	// SetDomainJoin RPC.
+	IdentityServiceSetDomainJoinProcedure = "/identity.v1.IdentityService/SetDomainJoin"
 	// IdentityServiceCreateTenantInvitationProcedure is the fully-qualified name of the
 	// IdentityService's CreateTenantInvitation RPC.
 	IdentityServiceCreateTenantInvitationProcedure = "/identity.v1.IdentityService/CreateTenantInvitation"
@@ -405,6 +408,12 @@ const (
 	// IdentityServiceListMyTenantsProcedure is the fully-qualified name of the IdentityService's
 	// ListMyTenants RPC.
 	IdentityServiceListMyTenantsProcedure = "/identity.v1.IdentityService/ListMyTenants"
+	// IdentityServiceListJoinableTenantsProcedure is the fully-qualified name of the IdentityService's
+	// ListJoinableTenants RPC.
+	IdentityServiceListJoinableTenantsProcedure = "/identity.v1.IdentityService/ListJoinableTenants"
+	// IdentityServiceJoinTenantByDomainProcedure is the fully-qualified name of the IdentityService's
+	// JoinTenantByDomain RPC.
+	IdentityServiceJoinTenantByDomainProcedure = "/identity.v1.IdentityService/JoinTenantByDomain"
 	// IdentityServiceInviteUserProcedure is the fully-qualified name of the IdentityService's
 	// InviteUser RPC.
 	IdentityServiceInviteUserProcedure = "/identity.v1.IdentityService/InviteUser"
@@ -763,6 +772,15 @@ type IdentityServiceClient interface {
 	CreateDomain(context.Context, *connect.Request[v1.CreateDomainRequest]) (*connect.Response[v1.CreateDomainResponse], error)
 	VerifyDomain(context.Context, *connect.Request[v1.VerifyDomainRequest]) (*connect.Response[v1.VerifyDomainResponse], error)
 	ListTenantDomains(context.Context, *connect.Request[v1.ListTenantDomainsRequest]) (*connect.Response[v1.ListTenantDomainsResponse], error)
+	// SetDomainJoin turns joining by one of the tenant's domains on or off
+	// (Domain.allow_join): while it is on and the domain is verified, a person
+	// whose verified email is on the domain may join the tenant with
+	// JoinTenantByDomain. An owner or admin of the domain's tenant only, so
+	// PERMISSION_DENIED for anyone else and while the tenant is suspended; an
+	// unknown domain_id is NOT_FOUND. It may be set before the domain is
+	// verified. Turning it off ends no membership. A change is audited; asking
+	// for the value the domain has returns it unchanged and records nothing.
+	SetDomainJoin(context.Context, *connect.Request[v1.SetDomainJoinRequest]) (*connect.Response[v1.SetDomainJoinResponse], error)
 	// Tenant membership (redesign). Authenticated, project-scoped, and — except
 	// for AcceptTenantInvitation — gated on the caller being an owner/admin
 	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
@@ -826,6 +844,34 @@ type IdentityServiceClient interface {
 	// memory and SQLite drivers return Unimplemented.
 	CreateTenant(context.Context, *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error)
 	ListMyTenants(context.Context, *connect.Request[v1.ListMyTenantsRequest]) (*connect.Response[v1.ListMyTenantsResponse], error)
+	// Joining by domain. Authenticated and project-scoped; the caller's own
+	// action, needing no invitation. ListJoinableTenants returns the tenant
+	// the caller's verified email's domain lets them join (see
+	// ListJoinableTenantsResponse), and is empty for an account that could not
+	// join. Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	ListJoinableTenants(context.Context, *connect.Request[v1.ListJoinableTenantsRequest]) (*connect.Response[v1.ListJoinableTenantsResponse], error)
+	// JoinTenantByDomain makes the caller an active member of tenant_id with
+	// role "member" and source "domain", a membership that ends if the email
+	// leaves the domain, and audits the join. tenant_id must be the claimed
+	// tenant that has verified the caller's verified email's domain and turned
+	// joining on for it with SetDomainJoin.
+	//
+	// A caller who is already a member, as ListMyTenants counts membership,
+	// gets that membership back unchanged, whatever its role or source, and
+	// nothing is recorded. That is checked first, so a retry, even after
+	// joining was turned off, gets the same answer, and two joins racing for
+	// one account make one membership, audited once.
+	//
+	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
+	// account, and for every tenant the domain does not let the caller join
+	// (one that has not verified it, has joining off, or is suspended or
+	// latent), an unknown tenant included, so the call reveals nothing about
+	// other tenants; FAILED_PRECONDITION until the caller has verified their
+	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	JoinTenantByDomain(context.Context, *connect.Request[v1.JoinTenantByDomainRequest]) (*connect.Response[v1.JoinTenantByDomainResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
@@ -1720,6 +1766,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("ListTenantDomains")),
 			connect.WithClientOptions(opts...),
 		),
+		setDomainJoin: connect.NewClient[v1.SetDomainJoinRequest, v1.SetDomainJoinResponse](
+			httpClient,
+			baseURL+IdentityServiceSetDomainJoinProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SetDomainJoin")),
+			connect.WithClientOptions(opts...),
+		),
 		createTenantInvitation: connect.NewClient[v1.CreateTenantInvitationRequest, v1.CreateTenantInvitationResponse](
 			httpClient,
 			baseURL+IdentityServiceCreateTenantInvitationProcedure,
@@ -1766,6 +1818,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceListMyTenantsProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("ListMyTenants")),
+			connect.WithClientOptions(opts...),
+		),
+		listJoinableTenants: connect.NewClient[v1.ListJoinableTenantsRequest, v1.ListJoinableTenantsResponse](
+			httpClient,
+			baseURL+IdentityServiceListJoinableTenantsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListJoinableTenants")),
+			connect.WithClientOptions(opts...),
+		),
+		joinTenantByDomain: connect.NewClient[v1.JoinTenantByDomainRequest, v1.JoinTenantByDomainResponse](
+			httpClient,
+			baseURL+IdentityServiceJoinTenantByDomainProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("JoinTenantByDomain")),
 			connect.WithClientOptions(opts...),
 		),
 		inviteUser: connect.NewClient[v1.InviteUserRequest, v1.InviteUserResponse](
@@ -2123,6 +2187,7 @@ type identityServiceClient struct {
 	createDomain                    *connect.Client[v1.CreateDomainRequest, v1.CreateDomainResponse]
 	verifyDomain                    *connect.Client[v1.VerifyDomainRequest, v1.VerifyDomainResponse]
 	listTenantDomains               *connect.Client[v1.ListTenantDomainsRequest, v1.ListTenantDomainsResponse]
+	setDomainJoin                   *connect.Client[v1.SetDomainJoinRequest, v1.SetDomainJoinResponse]
 	createTenantInvitation          *connect.Client[v1.CreateTenantInvitationRequest, v1.CreateTenantInvitationResponse]
 	acceptTenantInvitation          *connect.Client[v1.AcceptTenantInvitationRequest, v1.AcceptTenantInvitationResponse]
 	listTenantInvitations           *connect.Client[v1.ListTenantInvitationsRequest, v1.ListTenantInvitationsResponse]
@@ -2131,6 +2196,8 @@ type identityServiceClient struct {
 	transferTenantOwnership         *connect.Client[v1.TransferTenantOwnershipRequest, v1.TransferTenantOwnershipResponse]
 	createTenant                    *connect.Client[v1.CreateTenantRequest, v1.CreateTenantResponse]
 	listMyTenants                   *connect.Client[v1.ListMyTenantsRequest, v1.ListMyTenantsResponse]
+	listJoinableTenants             *connect.Client[v1.ListJoinableTenantsRequest, v1.ListJoinableTenantsResponse]
+	joinTenantByDomain              *connect.Client[v1.JoinTenantByDomainRequest, v1.JoinTenantByDomainResponse]
 	inviteUser                      *connect.Client[v1.InviteUserRequest, v1.InviteUserResponse]
 	mergeUsers                      *connect.Client[v1.MergeUsersRequest, v1.MergeUsersResponse]
 	acceptInvitation                *connect.Client[v1.AcceptInvitationRequest, v1.AcceptInvitationResponse]
@@ -2752,6 +2819,11 @@ func (c *identityServiceClient) ListTenantDomains(ctx context.Context, req *conn
 	return c.listTenantDomains.CallUnary(ctx, req)
 }
 
+// SetDomainJoin calls identity.v1.IdentityService.SetDomainJoin.
+func (c *identityServiceClient) SetDomainJoin(ctx context.Context, req *connect.Request[v1.SetDomainJoinRequest]) (*connect.Response[v1.SetDomainJoinResponse], error) {
+	return c.setDomainJoin.CallUnary(ctx, req)
+}
+
 // CreateTenantInvitation calls identity.v1.IdentityService.CreateTenantInvitation.
 func (c *identityServiceClient) CreateTenantInvitation(ctx context.Context, req *connect.Request[v1.CreateTenantInvitationRequest]) (*connect.Response[v1.CreateTenantInvitationResponse], error) {
 	return c.createTenantInvitation.CallUnary(ctx, req)
@@ -2790,6 +2862,16 @@ func (c *identityServiceClient) CreateTenant(ctx context.Context, req *connect.R
 // ListMyTenants calls identity.v1.IdentityService.ListMyTenants.
 func (c *identityServiceClient) ListMyTenants(ctx context.Context, req *connect.Request[v1.ListMyTenantsRequest]) (*connect.Response[v1.ListMyTenantsResponse], error) {
 	return c.listMyTenants.CallUnary(ctx, req)
+}
+
+// ListJoinableTenants calls identity.v1.IdentityService.ListJoinableTenants.
+func (c *identityServiceClient) ListJoinableTenants(ctx context.Context, req *connect.Request[v1.ListJoinableTenantsRequest]) (*connect.Response[v1.ListJoinableTenantsResponse], error) {
+	return c.listJoinableTenants.CallUnary(ctx, req)
+}
+
+// JoinTenantByDomain calls identity.v1.IdentityService.JoinTenantByDomain.
+func (c *identityServiceClient) JoinTenantByDomain(ctx context.Context, req *connect.Request[v1.JoinTenantByDomainRequest]) (*connect.Response[v1.JoinTenantByDomainResponse], error) {
+	return c.joinTenantByDomain.CallUnary(ctx, req)
 }
 
 // InviteUser calls identity.v1.IdentityService.InviteUser.
@@ -3221,6 +3303,15 @@ type IdentityServiceHandler interface {
 	CreateDomain(context.Context, *connect.Request[v1.CreateDomainRequest]) (*connect.Response[v1.CreateDomainResponse], error)
 	VerifyDomain(context.Context, *connect.Request[v1.VerifyDomainRequest]) (*connect.Response[v1.VerifyDomainResponse], error)
 	ListTenantDomains(context.Context, *connect.Request[v1.ListTenantDomainsRequest]) (*connect.Response[v1.ListTenantDomainsResponse], error)
+	// SetDomainJoin turns joining by one of the tenant's domains on or off
+	// (Domain.allow_join): while it is on and the domain is verified, a person
+	// whose verified email is on the domain may join the tenant with
+	// JoinTenantByDomain. An owner or admin of the domain's tenant only, so
+	// PERMISSION_DENIED for anyone else and while the tenant is suspended; an
+	// unknown domain_id is NOT_FOUND. It may be set before the domain is
+	// verified. Turning it off ends no membership. A change is audited; asking
+	// for the value the domain has returns it unchanged and records nothing.
+	SetDomainJoin(context.Context, *connect.Request[v1.SetDomainJoinRequest]) (*connect.Response[v1.SetDomainJoinResponse], error)
 	// Tenant membership (redesign). Authenticated, project-scoped, and — except
 	// for AcceptTenantInvitation — gated on the caller being an owner/admin
 	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
@@ -3284,6 +3375,34 @@ type IdentityServiceHandler interface {
 	// memory and SQLite drivers return Unimplemented.
 	CreateTenant(context.Context, *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error)
 	ListMyTenants(context.Context, *connect.Request[v1.ListMyTenantsRequest]) (*connect.Response[v1.ListMyTenantsResponse], error)
+	// Joining by domain. Authenticated and project-scoped; the caller's own
+	// action, needing no invitation. ListJoinableTenants returns the tenant
+	// the caller's verified email's domain lets them join (see
+	// ListJoinableTenantsResponse), and is empty for an account that could not
+	// join. Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	ListJoinableTenants(context.Context, *connect.Request[v1.ListJoinableTenantsRequest]) (*connect.Response[v1.ListJoinableTenantsResponse], error)
+	// JoinTenantByDomain makes the caller an active member of tenant_id with
+	// role "member" and source "domain", a membership that ends if the email
+	// leaves the domain, and audits the join. tenant_id must be the claimed
+	// tenant that has verified the caller's verified email's domain and turned
+	// joining on for it with SetDomainJoin.
+	//
+	// A caller who is already a member, as ListMyTenants counts membership,
+	// gets that membership back unchanged, whatever its role or source, and
+	// nothing is recorded. That is checked first, so a retry, even after
+	// joining was turned off, gets the same answer, and two joins racing for
+	// one account make one membership, audited once.
+	//
+	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
+	// account, and for every tenant the domain does not let the caller join
+	// (one that has not verified it, has joining off, or is suspended or
+	// latent), an unknown tenant included, so the call reveals nothing about
+	// other tenants; FAILED_PRECONDITION until the caller has verified their
+	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	JoinTenantByDomain(context.Context, *connect.Request[v1.JoinTenantByDomainRequest]) (*connect.Response[v1.JoinTenantByDomainResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
@@ -4174,6 +4293,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("ListTenantDomains")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceSetDomainJoinHandler := connect.NewUnaryHandler(
+		IdentityServiceSetDomainJoinProcedure,
+		svc.SetDomainJoin,
+		connect.WithSchema(identityServiceMethods.ByName("SetDomainJoin")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceCreateTenantInvitationHandler := connect.NewUnaryHandler(
 		IdentityServiceCreateTenantInvitationProcedure,
 		svc.CreateTenantInvitation,
@@ -4220,6 +4345,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceListMyTenantsProcedure,
 		svc.ListMyTenants,
 		connect.WithSchema(identityServiceMethods.ByName("ListMyTenants")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListJoinableTenantsHandler := connect.NewUnaryHandler(
+		IdentityServiceListJoinableTenantsProcedure,
+		svc.ListJoinableTenants,
+		connect.WithSchema(identityServiceMethods.ByName("ListJoinableTenants")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceJoinTenantByDomainHandler := connect.NewUnaryHandler(
+		IdentityServiceJoinTenantByDomainProcedure,
+		svc.JoinTenantByDomain,
+		connect.WithSchema(identityServiceMethods.ByName("JoinTenantByDomain")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceInviteUserHandler := connect.NewUnaryHandler(
@@ -4690,6 +4827,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceVerifyDomainHandler.ServeHTTP(w, r)
 		case IdentityServiceListTenantDomainsProcedure:
 			identityServiceListTenantDomainsHandler.ServeHTTP(w, r)
+		case IdentityServiceSetDomainJoinProcedure:
+			identityServiceSetDomainJoinHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateTenantInvitationProcedure:
 			identityServiceCreateTenantInvitationHandler.ServeHTTP(w, r)
 		case IdentityServiceAcceptTenantInvitationProcedure:
@@ -4706,6 +4845,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceCreateTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceListMyTenantsProcedure:
 			identityServiceListMyTenantsHandler.ServeHTTP(w, r)
+		case IdentityServiceListJoinableTenantsProcedure:
+			identityServiceListJoinableTenantsHandler.ServeHTTP(w, r)
+		case IdentityServiceJoinTenantByDomainProcedure:
+			identityServiceJoinTenantByDomainHandler.ServeHTTP(w, r)
 		case IdentityServiceInviteUserProcedure:
 			identityServiceInviteUserHandler.ServeHTTP(w, r)
 		case IdentityServiceMergeUsersProcedure:
@@ -5257,6 +5400,10 @@ func (UnimplementedIdentityServiceHandler) ListTenantDomains(context.Context, *c
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListTenantDomains is not implemented"))
 }
 
+func (UnimplementedIdentityServiceHandler) SetDomainJoin(context.Context, *connect.Request[v1.SetDomainJoinRequest]) (*connect.Response[v1.SetDomainJoinResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SetDomainJoin is not implemented"))
+}
+
 func (UnimplementedIdentityServiceHandler) CreateTenantInvitation(context.Context, *connect.Request[v1.CreateTenantInvitationRequest]) (*connect.Response[v1.CreateTenantInvitationResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateTenantInvitation is not implemented"))
 }
@@ -5287,6 +5434,14 @@ func (UnimplementedIdentityServiceHandler) CreateTenant(context.Context, *connec
 
 func (UnimplementedIdentityServiceHandler) ListMyTenants(context.Context, *connect.Request[v1.ListMyTenantsRequest]) (*connect.Response[v1.ListMyTenantsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListMyTenants is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListJoinableTenants(context.Context, *connect.Request[v1.ListJoinableTenantsRequest]) (*connect.Response[v1.ListJoinableTenantsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListJoinableTenants is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) JoinTenantByDomain(context.Context, *connect.Request[v1.JoinTenantByDomainRequest]) (*connect.Response[v1.JoinTenantByDomainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.JoinTenantByDomain is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error) {

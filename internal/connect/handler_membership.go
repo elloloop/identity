@@ -238,3 +238,51 @@ func (h *IdentityHandler) ListMyTenants(
 	}
 	return connect.NewResponse(&identitypb.ListMyTenantsResponse{Tenants: out}), nil
 }
+
+// ListJoinableTenants lists the tenant the authenticated caller's verified
+// email's domain lets them join.
+func (h *IdentityHandler) ListJoinableTenants(
+	ctx context.Context,
+	req *connect.Request[identitypb.ListJoinableTenantsRequest],
+) (*connect.Response[identitypb.ListJoinableTenantsResponse], error) {
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	tenants, err := h.members.ListJoinableTenants(ctx, userID)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	out := make([]*identitypb.JoinableTenant, 0, len(tenants))
+	for _, t := range tenants {
+		out = append(out, &identitypb.JoinableTenant{TenantId: t.TenantID, Name: t.Name})
+	}
+	return connect.NewResponse(&identitypb.ListJoinableTenantsResponse{Tenants: out}), nil
+}
+
+// JoinTenantByDomain makes the authenticated caller a member of the tenant
+// their verified email's domain lets them join.
+func (h *IdentityHandler) JoinTenantByDomain(
+	ctx context.Context,
+	req *connect.Request[identitypb.JoinTenantByDomainRequest],
+) (*connect.Response[identitypb.JoinTenantByDomainResponse], error) {
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	m, err := h.members.JoinTenantByDomain(ctx, userID, req.Msg.GetTenantId(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.JoinTenantByDomainResponse{
+		Membership: membershipToProto(m),
+	}), nil
+}

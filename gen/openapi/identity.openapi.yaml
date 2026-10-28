@@ -2977,6 +2977,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.IssueAssuranceTokenResponse'
+  /identity.v1.IdentityService/JoinTenantByDomain:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: |-
+        JoinTenantByDomain makes the caller an active member of tenant_id with
+         role "member" and source "domain", a membership that ends if the email
+         leaves the domain, and audits the join. tenant_id must be the claimed
+         tenant that has verified the caller's verified email's domain and turned
+         joining on for it with SetDomainJoin.
+      description: |-
+        A caller who is already a member, as ListMyTenants counts membership,
+         gets that membership back unchanged, whatever its role or source, and
+         nothing is recorded. That is checked first, so a retry, even after
+         joining was turned off, gets the same answer, and two joins racing for
+         one account make one membership, audited once.
+
+         Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
+         account, and for every tenant the domain does not let the caller join
+         (one that has not verified it, has joining off, or is suspended or
+         latent), an unknown tenant included, so the call reveals nothing about
+         other tenants; FAILED_PRECONDITION until the caller has verified their
+         email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
+         postgres control-plane driver; the memory and SQLite drivers return
+         Unimplemented.
+      operationId: identity.v1.IdentityService.JoinTenantByDomain
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.JoinTenantByDomainRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.JoinTenantByDomainResponse'
   /identity.v1.IdentityService/LinkIdentity:
     post:
       tags:
@@ -3328,6 +3383,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ListIncomingAgentTransfersResponse'
+  /identity.v1.IdentityService/ListJoinableTenants:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListJoinableTenants
+      description: |-
+        Joining by domain. Authenticated and project-scoped; the caller's own
+         action, needing no invitation. ListJoinableTenants returns the tenant
+         the caller's verified email's domain lets them join (see
+         ListJoinableTenantsResponse), and is empty for an account that could not
+         join. Available only on the postgres control-plane driver; the memory and
+         SQLite drivers return Unimplemented.
+      operationId: identity.v1.IdentityService.ListJoinableTenants
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListJoinableTenantsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListJoinableTenantsResponse'
   /identity.v1.IdentityService/ListLinkedIdentities:
     post:
       tags:
@@ -5099,6 +5196,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.SetAccountMarketResponse'
+  /identity.v1.IdentityService/SetDomainJoin:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: SetDomainJoin
+      description: |-
+        SetDomainJoin turns joining by one of the tenant's domains on or off
+         (Domain.allow_join): while it is on and the domain is verified, a person
+         whose verified email is on the domain may join the tenant with
+         JoinTenantByDomain. An owner or admin of the domain's tenant only, so
+         PERMISSION_DENIED for anyone else and while the tenant is suspended; an
+         unknown domain_id is NOT_FOUND. It may be set before the domain is
+         verified. Turning it off ends no membership. A change is audited; asking
+         for the value the domain has returns it unchanged and records nothing.
+      operationId: identity.v1.IdentityService.SetDomainJoin
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.SetDomainJoinRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.SetDomainJoinResponse'
   /identity.v1.IdentityService/SetManagedChildPassword:
     post:
       tags:
@@ -8366,6 +8507,13 @@ components:
         updatedAt:
           title: updated_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
+        allowJoin:
+          type: boolean
+          title: allow_join
+          description: |-
+            allow_join lets a person whose verified email is on the domain join the
+             tenant themselves with JoinTenantByDomain, while the domain is verified.
+             False on a new domain; a tenant admin sets it with SetDomainJoin.
       title: Domain
       additionalProperties: false
       description: |-
@@ -9029,6 +9177,40 @@ components:
           format: int64
       title: IssueAssuranceTokenResponse
       additionalProperties: false
+    identity.v1.JoinTenantByDomainRequest:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          title: tenant_id
+      title: JoinTenantByDomainRequest
+      additionalProperties: false
+    identity.v1.JoinTenantByDomainResponse:
+      type: object
+      properties:
+        membership:
+          title: membership
+          description: |-
+            membership is the caller's membership in the tenant: a new, active
+             one with role "member" and source "domain", or the one they already
+             held.
+          $ref: '#/components/schemas/identity.v1.TenantMembership'
+      title: JoinTenantByDomainResponse
+      additionalProperties: false
+    identity.v1.JoinableTenant:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          title: tenant_id
+        name:
+          type: string
+          title: name
+      title: JoinableTenant
+      additionalProperties: false
+      description: |-
+        JoinableTenant is a tenant the caller may join by their verified email's
+         domain: only what the caller needs to choose it.
     identity.v1.KeyAlgorithm:
       type: string
       title: KeyAlgorithm
@@ -9372,6 +9554,25 @@ components:
             $ref: '#/components/schemas/identity.v1.User'
           title: agents
       title: ListIncomingAgentTransfersResponse
+      additionalProperties: false
+    identity.v1.ListJoinableTenantsRequest:
+      type: object
+      title: ListJoinableTenantsRequest
+      additionalProperties: false
+    identity.v1.ListJoinableTenantsResponse:
+      type: object
+      properties:
+        tenants:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.JoinableTenant'
+          title: tenants
+          description: |-
+            tenants holds the claimed tenant that has verified the caller's
+             verified email's domain and lets it join, unless the caller already
+             belongs to it; empty otherwise. A project holds a verified domain on
+             one tenant at most, so there is at most one today.
+      title: ListJoinableTenantsResponse
       additionalProperties: false
     identity.v1.ListLinkedIdentitiesRequest:
       type: object
@@ -11278,6 +11479,27 @@ components:
              band and (possibly re-gated) status.
           $ref: '#/components/schemas/identity.v1.User'
       title: SetAccountMarketResponse
+      additionalProperties: false
+    identity.v1.SetDomainJoinRequest:
+      type: object
+      properties:
+        domainId:
+          type: string
+          title: domain_id
+        allowJoin:
+          type: boolean
+          title: allow_join
+          description: allow_join turns joining by the domain on (true) or off (false).
+      title: SetDomainJoinRequest
+      additionalProperties: false
+    identity.v1.SetDomainJoinResponse:
+      type: object
+      properties:
+        domain:
+          title: domain
+          description: domain is the domain as it now stands.
+          $ref: '#/components/schemas/identity.v1.Domain'
+      title: SetDomainJoinResponse
       additionalProperties: false
     identity.v1.SetManagedChildPasswordRequest:
       type: object
