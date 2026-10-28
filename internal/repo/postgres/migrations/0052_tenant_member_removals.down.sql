@@ -1,4 +1,4 @@
--- 0051_tenant_member_removals.down.sql
+-- 0052_tenant_member_removals.down.sql
 --
 -- Drops the removal records. A person removed from a tenant can then join
 -- it again through their domain while the domain lets people join, which

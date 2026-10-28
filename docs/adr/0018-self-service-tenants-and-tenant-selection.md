@@ -398,7 +398,7 @@ themselves.
   again at once, removing them would mean nothing while joining is on, and
   the only way to keep them out would be to close the door on everyone.
   So `RemoveTenantMember` records the removal (`tenant_member_removals`,
-  migration 0051) in the transaction that deletes the membership, and
+  migration 0052) in the transaction that deletes the membership, and
   audits it as `tenant_member_removed`. While the record stands, the tenant
   is not joinable for the person, `JoinTenantByDomain` refuses them with
   `PERMISSION_DENIED`, and auto-formation does not add them back. A
@@ -473,7 +473,7 @@ themselves.
   ungoverned until an operator recovers it. Recovery reads who governs the
   tenant before it grants, so two operators recovering one tenant at once,
   naming different accounts, may each appoint an owner (both are audited).
-- **Negative.** A removal made before migration 0051 left no record, so a
+- **Negative.** A removal made before migration 0052 left no record, so a
   member removed on an earlier release who is still on the domain can join
   once until an owner or admin removes them again.
 - **Negative, open.** These gaps are known and tracked as follow-ups: a

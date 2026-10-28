@@ -281,8 +281,8 @@ func TestMembershipStore_RemovalRacingAJoin(t *testing.T) {
 	}
 }
 
-// TestTenantMemberRemovalsMigrationRoundTrip: 0051 adds the removal table
-// and its user index, and its down migration drops them; 50 → 51 → 50 → 51.
+// TestTenantMemberRemovalsMigrationRoundTrip: 0052 adds the removal table
+// and its user index, and its down migration drops them; 51 → 52 → 51 → 52.
 func TestTenantMemberRemovalsMigrationRoundTrip(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -306,9 +306,9 @@ func TestTenantMemberRemovalsMigrationRoundTrip(t *testing.T) {
 		return name != ""
 	}
 
-	for _, version := range []uint{50, 51, 50, 51} {
+	for _, version := range []uint{51, 52, 51, 52} {
 		migrateToVersion(t, scratch, version)
-		require.Equal(t, version == 51, exists("tenant_member_removals"), "version %d", version)
-		require.Equal(t, version == 51, exists("tenant_member_removals_user_idx"), "version %d", version)
+		require.Equal(t, version == 52, exists("tenant_member_removals"), "version %d", version)
+		require.Equal(t, version == 52, exists("tenant_member_removals_user_idx"), "version %d", version)
 	}
 }

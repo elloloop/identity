@@ -1,4 +1,4 @@
--- 0051_tenant_member_removals.up.sql
+-- 0052_tenant_member_removals.up.sql
 --
 -- When a tenant owner or admin removes a member (RemoveTenantMember), that
 -- is a decision about the person, not about their email. Until now a
@@ -21,10 +21,10 @@
 -- projects, tenants and users while it adds the foreign-key triggers. That
 -- blocks writes to those tables, signups and account updates included, but
 -- not reads, for as long as the catalog change takes. lock_timeout bounds
--- only the wait to acquire them, as in 0034-0050. While the CREATE waits
+-- only the wait to acquire them, as in 0034-0051. While the CREATE waits
 -- behind a transaction writing one of them, new writes to that table queue
 -- behind it too, for up to that 10s. On a timeout the file rolls back and
--- version 51 is left dirty: `identity migrate force 50`, then
+-- version 52 is left dirty: `identity migrate force 51`, then
 -- `identity migrate` again.
 SET LOCAL lock_timeout = '10s';
 

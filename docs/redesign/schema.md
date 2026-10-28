@@ -434,7 +434,7 @@ when no row exists, and only against a VERIFIED domain of a CLAIMED tenant.
 - **FKs:** `project_id` → `projects(id)` CASCADE; `tenant_id` → `tenants(id)`
   CASCADE; `user_id` → `users(id)` CASCADE.
 
-#### `tenant_member_removals` — NEW (0051)
+#### `tenant_member_removals` — NEW (0052)
 
 One row per person a tenant owner or admin removed (`RemoveTenantMember`),
 written in the transaction that deletes the membership. While it stands,

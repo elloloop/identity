@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — a member removed from a tenant cannot rejoin it by domain (migration 0051; behaviour change; `RemoveTenantMember` audited; `MembershipStore.RemoveMembership`, `JoinByDomain`, `IsRemoved` and `MembershipService.RemoveTenantMember` (Go API))
+## Next — a member removed from a tenant cannot rejoin it by domain (migration 0052; behaviour change; `RemoveTenantMember` audited; `MembershipStore.RemoveMembership`, `JoinByDomain`, `IsRemoved` and `MembershipService.RemoveTenantMember` (Go API))
 
 Until now `RemoveTenantMember` deleted the membership and kept no trace of
 it. While the tenant let its domain's people join (`SetDomainJoin`), a
@@ -43,9 +43,9 @@ Removals made before this release left no trace, so they have no record. A
 person removed earlier who is still on the domain can join again while
 joining is on. Removing them after they rejoin records it.
 
-### Migration 0051
+### Migration 0052
 
-0051 creates `tenant_member_removals`, keyed by `(project_id, tenant_id,
+0052 creates `tenant_member_removals`, keyed by `(project_id, tenant_id,
 user_id)` with `removed_at_ms`, and an index on `user_id`. Each id is a
 foreign key that cascades, so deleting the project, the tenant or the
 account deletes the record. Like `tenant_memberships`, it is a governance
@@ -57,11 +57,11 @@ signups and account changes included, while the catalog changes. While the
 migration waits for the locks behind a transaction that has one of the
 tables open, new writes to it queue behind the migration too, for up to its
 10-second `lock_timeout`. On a lock timeout the file rolls back and version
-51 is recorded dirty: run `identity migrate force 50`, then `identity
+52 is recorded dirty: run `identity migrate force 51`, then `identity
 migrate` again.
 
 This release reads or writes `tenant_member_removals` on every membership
-write, auto-formation at signup included, and on every join, so until 0051
+write, auto-formation at signup included, and on every join, so until 0052
 has run those calls fail on its replicas. `GATEWAY_POSTGRES_AUTO_MIGRATE`
 is off by default, so run `identity migrate` as its own job, and let it
 finish, before the deploy starts.
