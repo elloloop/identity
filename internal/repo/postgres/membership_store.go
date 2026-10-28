@@ -630,6 +630,9 @@ func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tena
 	if projectID == "" || tenantID == "" || userID == "" {
 		return nil, false, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
 	}
+	if !by.IsOperator() && by.UserID() == "" {
+		return nil, false, fmt.Errorf("%w: a restore must name who restores", service.ErrPermissionDenied)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, wrapPgErr("RestoreMembership", err)
@@ -660,8 +663,8 @@ func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tena
 		return nil, false, wrapPgErr("RestoreMembership(lock)", err)
 	}
 	if !by.IsOperator() {
-		restorer := held[by.UserID()]
-		if restorer == nil || restorer.Status != service.MembershipStatusActive || (restorer.Role != service.RoleOwner && restorer.Role != service.RoleAdmin) {
+		byMembership := held[by.UserID()]
+		if byMembership == nil || byMembership.Status != service.MembershipStatusActive || (byMembership.Role != service.RoleOwner && byMembership.Role != service.RoleAdmin) {
 			return nil, false, fmt.Errorf("%w: only an active owner or admin of the tenant may restore a member", service.ErrPermissionDenied)
 		}
 	}

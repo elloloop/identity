@@ -110,11 +110,11 @@ suite (email, productivity tools).
   owner, and invite others to it. It is the same entity as a domain tenant,
   claimed from creation (ADR-0018).
 - An owner hands a tenant on to another member with
-  `TransferTenantOwnership`, becoming an admin. When no owner can sign in
-  but an admin can, the admin invites a new owner; once no owner or admin
-  who is a person both can sign in and holds an active membership, an
-  operator appoints one with `AdminRecoverTenantOwnership` (ADR-0018,
-  Ownership).
+  `TransferTenantOwnership`, becoming an admin. When no owner can act but
+  an admin both can sign in and holds an active membership, the admin
+  invites a new owner; once no owner or admin who is a person both can sign
+  in and holds an active membership, an operator appoints one with
+  `AdminRecoverTenantOwnership` (ADR-0018, Ownership).
 - An owner or admin stops a member acting in a tenant for a while with
   `SuspendTenantMember`, which keeps the membership's role and source at
   status `suspended`, and lets them back with `RestoreTenantMember`. A

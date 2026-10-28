@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -244,8 +245,9 @@ func TestMembershipStore_SuspendAndRestoreRefusals(t *testing.T) {
 // TestMembershipStore_RestoreChecksTheRestorer: a restore is written only
 // while the one restoring holds an active owner or admin membership, read
 // where the restore is: a suspended admin, a plain member, someone with no
-// membership and the suspended member themselves are refused, and the
-// suspension stands.
+// membership and the suspended member themselves are refused, as is a
+// restore that names no restorer (the zero Restorer), and the suspension
+// stands.
 func TestMembershipStore_RestoreChecksTheRestorer(t *testing.T) {
 	dsn := suspensionDSN(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -621,6 +623,10 @@ func TestSuspendTenantMembersMigrationRoundTrip(t *testing.T) {
 			VALUES ('d', 'proj-suspend', 't', 'acme.example', 'dns_txt', 'verified', 1, 1)`,
 		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('held', 'proj-suspend', 'held@acme.example', 1, 1)`,
 		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('free', 'proj-suspend', 'free@acme.example', 1, 1)`,
+		`INSERT INTO tenants (id, project_id, status, created_at_ms, updated_at_ms) VALUES ('t2', 'proj-suspend', 'claimed', 1, 1)`,
+		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('tagged', 'proj-suspend', 'Tagged+Work@acme.example', 1, 1)`,
+		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('dotted', 'proj-suspend', 'Dot.Ted@googlemail.com.', 1, 1)`,
+		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('intl', 'proj-suspend', 'intl@bücher.example', 1, 1)`,
 	} {
 		_, err = raw.Exec(ctx, q)
 		require.NoError(t, err, q)
@@ -666,33 +672,7 @@ func TestSuspendTenantMembersMigrationRoundTrip(t *testing.T) {
 			}))
 			assert.True(t, strings.Contains(statusCheck(), "suspended"), "the refused down migration changed nothing")
 			assert.Equal(t, service.MembershipStatusSuspended, status("held"))
-			// The operator decides the suspension with the statement
-			// docs/UPGRADE.md gives: a removal, recorded, that revokes the
-			// invitations the person holds and leaves everyone else's.
-			for _, q := range []string{
-				`INSERT INTO tenant_invitations (id, project_id, tenant_id, token_hash, email, role, status, expires_at_ms, created_at_ms)
-					VALUES ('inv-held', 'proj-suspend', 't', 'hash-held', 'held@acme.example', 'admin', 'pending', 9999999999999, 1)`,
-				`INSERT INTO tenant_invitations (id, project_id, tenant_id, token_hash, email, role, status, expires_at_ms, created_at_ms)
-					VALUES ('inv-free', 'proj-suspend', 't', 'hash-free', 'free@acme.example', 'member', 'pending', 9999999999999, 1)`,
-			} {
-				_, err = raw.Exec(ctx, q)
-				require.NoError(t, err, q)
-			}
-			_, err = raw.Exec(ctx, upgradeSQL(t, "WITH removed AS ("))
-			require.NoError(t, err)
-			var members, removals int
-			require.NoError(t, raw.QueryRow(ctx, `SELECT
-				(SELECT count(*) FROM tenant_memberships WHERE user_id = 'held'),
-				(SELECT count(*) FROM tenant_member_removals WHERE user_id = 'held')`).Scan(&members, &removals))
-			assert.Equal(t, []int{0, 1}, []int{members, removals}, "the suspended member is removed, with a record")
-			invitation := func(id string) string {
-				t.Helper()
-				var s string
-				require.NoError(t, raw.QueryRow(ctx, `SELECT status FROM tenant_invitations WHERE id = $1`, id).Scan(&s))
-				return s
-			}
-			assert.Equal(t, "revoked", invitation("inv-held"), "the removed member's invitation can no longer let them back")
-			assert.Equal(t, "pending", invitation("inv-free"), "another person's invitation is kept")
+			decideSuspensionsInSQL(ctx, t, raw)
 		}
 		migrateToVersion(t, scratch, version)
 		assert.Equal(t, version == 53, strings.Contains(statusCheck(), "suspended"), "version %d", version)
@@ -721,4 +701,106 @@ func TestSuspendTenantMembersMigrationRoundTrip(t *testing.T) {
 	migrateToVersion(t, scratch, 52)
 	moveEmail("held", "held@elsewhere.example")
 	assert.Equal(t, service.MembershipStatusInactive, status("held"))
+}
+
+// decideSuspensionsInSQL runs, at version 53 with "held" suspended in
+// tenant t, what docs/UPGRADE.md tells an operator to run before migrating
+// down while suspensions stand: the listing of suspended members whose
+// email is not all ASCII, then the statement that removes every suspended
+// member and revokes their pending invitations to the tenant. A role that
+// row-level security binds cannot run the statement at all. Run as the
+// guide says, it revokes each removed person's pending invitation to their
+// canonical mailbox in their own tenant, and leaves every other invitation
+// as it was, including the one a non-ASCII address holds, which the listing
+// names for the operator to revoke by hand.
+func decideSuspensionsInSQL(ctx context.Context, t *testing.T, raw *pgx.Conn) {
+	t.Helper()
+	exec := func(q string) {
+		t.Helper()
+		_, err := raw.Exec(ctx, q)
+		require.NoError(t, err, q)
+	}
+	exec(`INSERT INTO tenant_memberships (id, project_id, tenant_id, user_id, source, role, status, created_at_ms, updated_at_ms) VALUES
+		('m-tagged', 'proj-suspend', 't', 'tagged', 'invited', 'member', 'suspended', 1, 1),
+		('m-dotted', 'proj-suspend', 't', 'dotted', 'invited', 'member', 'suspended', 1, 1),
+		('m-intl', 'proj-suspend', 't', 'intl', 'invited', 'member', 'suspended', 1, 1)`)
+	exec(`INSERT INTO tenant_invitations (id, project_id, tenant_id, token_hash, email, role, status, expires_at_ms, created_at_ms) VALUES
+		('inv-held', 'proj-suspend', 't', 'hash-held', 'held@acme.example', 'admin', 'pending', 9999999999999, 1),
+		('inv-held-t2', 'proj-suspend', 't2', 'hash-held-t2', 'held@acme.example', 'member', 'pending', 9999999999999, 1),
+		('inv-held-accepted', 'proj-suspend', 't', 'hash-held-accepted', 'held@acme.example', 'member', 'accepted', 9999999999999, 1),
+		('inv-free', 'proj-suspend', 't', 'hash-free', 'free@acme.example', 'member', 'pending', 9999999999999, 1),
+		('inv-tagged', 'proj-suspend', 't', 'hash-tagged', 'tagged@acme.example', 'member', 'pending', 9999999999999, 1),
+		('inv-dotted', 'proj-suspend', 't', 'hash-dotted', 'dotted@gmail.com', 'member', 'pending', 9999999999999, 1),
+		('inv-intl', 'proj-suspend', 't', 'hash-intl', 'intl@xn--bcher-kva.example', 'member', 'pending', 9999999999999, 1)`)
+	invitations := func() map[string]string {
+		t.Helper()
+		rows, err := raw.Query(ctx, `SELECT id, status FROM tenant_invitations`)
+		require.NoError(t, err)
+		out := map[string]string{}
+		var id, status string
+		_, err = pgx.ForEachRow(rows, []any{&id, &status}, func() error {
+			out[id] = status
+			return nil
+		})
+		require.NoError(t, err)
+		return out
+	}
+	suspended := func() int {
+		t.Helper()
+		var n int
+		require.NoError(t, raw.QueryRow(ctx, `SELECT count(*) FROM tenant_memberships WHERE status = 'suspended'`).Scan(&n))
+		return n
+	}
+	before := invitations()
+	statement := upgradeSQL(t, "SET row_security = off;\nWITH removed AS (")
+
+	role := fmt.Sprintf("rollback_rls_bound_%d", time.Now().UnixNano())
+	exec(`CREATE ROLE ` + role + ` NOLOGIN NOSUPERUSER NOBYPASSRLS`)
+	defer func() {
+		for _, q := range []string{`RESET ROLE`, `DROP OWNED BY ` + role, `DROP ROLE ` + role} {
+			if _, err := raw.Exec(ctx, q); err != nil {
+				t.Logf("%s: %v", q, err)
+			}
+		}
+	}()
+	exec(`GRANT USAGE ON SCHEMA public TO ` + role)
+	exec(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ` + role)
+	exec(`SET ROLE ` + role)
+	_, err := raw.Exec(ctx, statement)
+	require.ErrorContains(t, err, "row-level security", "a role row-level security binds cannot run the statement")
+	exec(`RESET ROLE`)
+	assert.Equal(t, 4, suspended(), "and the refused statement removed no one")
+	assert.Equal(t, before, invitations(), "and revoked nothing")
+
+	setting, listing, ok := strings.Cut(upgradeSQL(t, "SET row_security = off;\nSELECT m."), ";\n")
+	require.True(t, ok)
+	exec(setting)
+	rows, err := raw.Query(ctx, listing)
+	require.NoError(t, err)
+	var projectID, tenantID, userID, email string
+	var listed []string
+	_, err = pgx.ForEachRow(rows, []any{&projectID, &tenantID, &userID, &email}, func() error {
+		listed = append(listed, userID)
+		return nil
+	})
+	require.NoError(t, err)
+	exec(`RESET row_security`)
+	assert.Equal(t, []string{"intl"}, listed, "the listing names the suspended member whose email is not all ASCII")
+
+	exec(statement)
+	exec(`RESET row_security`)
+	assert.Zero(t, suspended(), "every suspended member is removed")
+	var removals int
+	require.NoError(t, raw.QueryRow(ctx, `SELECT count(*) FROM tenant_member_removals
+		WHERE user_id IN ('held', 'tagged', 'dotted', 'intl')`).Scan(&removals))
+	assert.Equal(t, 4, removals, "each removal is recorded")
+	assert.Equal(t, map[string]string{
+		"inv-held":          "revoked",
+		"inv-tagged":        "revoked",
+		"inv-dotted":        "revoked",
+		"inv-held-t2":       "pending",
+		"inv-held-accepted": "accepted",
+		"inv-free":          "pending",
+		"inv-intl":          "pending",
+	}, invitations(), "the canonical mailbox's pending invitations to the tenant are revoked, and nothing else")
 }

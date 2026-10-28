@@ -95,23 +95,59 @@ the schema before 0053 cannot hold a suspension and would let each person
 back on their own. Each suspension is decided first. The tenant's owners
 and admins can do it: `RestoreTenantMember`, or `RemoveTenantMember`, whose
 removal record keeps a domain member from joining again. An invitation the
-person already holds stays redeemable after a removal, as it was while they
-were suspended. An operator who cannot wait for them removes every
-suspended member in SQL instead. The statement also revokes each one's
-pending invitations to the tenant, which the suspension refused and a
-removal would let them accept, so each stays out until someone invites
-them again:
+person already holds stays pending through a removal, as it did through the
+suspension, and after the removal they can accept it. An operator who
+cannot wait for them removes every suspended member in SQL instead, and
+revokes each one's pending invitations to the tenant, so each stays out
+until someone invites them again.
+
+Both statements below need a role with `BYPASSRLS`, or a superuser
+(`docs/postgres-rls.md`). `users` is under row-level security, and without
+`SET row_security = off` any other role would remove the members and
+revoke none of their invitations; with it, such a role fails and changes
+nothing. Run them, then the down migration, with this release's replicas
+stopped, so that no suspension, invitation or join lands in between.
+
+An invitation admits whoever holds its canonical mailbox. SQL computes that
+form only for an all-ASCII address, as 0034 did, so first list the
+suspended members whose email is not all ASCII:
 
 ```sql
+SET row_security = off;
+SELECT m.project_id, m.tenant_id, m.user_id, u.email
+  FROM tenant_memberships m
+  JOIN users u ON u.project_id = m.project_id AND u.id = m.user_id
+ WHERE m.status = 'suspended' AND u.email !~ '^[!-~]+$';
+```
+
+For each row, revoke by hand that tenant's pending invitations to the
+person's mailbox (`UPDATE tenant_invitations SET status = 'revoked' WHERE
+id = '…'`). Then remove every suspended member, recording each removal, and
+revoke each one's pending invitations to the tenant:
+
+```sql
+SET row_security = off;
 WITH removed AS (
   DELETE FROM tenant_memberships WHERE status = 'suspended'
   RETURNING project_id, tenant_id, user_id
-), revoked AS (
-  UPDATE tenant_invitations i SET status = 'revoked'
+), parts AS (
+  SELECT r.project_id, r.tenant_id,
+         substring(lower(u.email COLLATE "C") FROM '^(.*)@') AS local_part,
+         regexp_replace(substring(lower(u.email COLLATE "C") FROM '@([^@]*)$'), '\.$', '') AS domain
     FROM removed r
     JOIN users u ON u.project_id = r.project_id AND u.id = r.user_id
-   WHERE i.project_id = r.project_id AND i.tenant_id = r.tenant_id
-     AND i.status = 'pending' AND lower(i.email COLLATE "C") = u.email_fold
+), mailboxes AS (
+  SELECT project_id, tenant_id,
+         CASE WHEN domain IN ('gmail.com', 'googlemail.com')
+              THEN replace(split_part(local_part, '+', 1), '.', '') || '@gmail.com'
+              ELSE split_part(local_part, '+', 1) || '@' || domain
+         END AS mailbox
+    FROM parts
+), revoked AS (
+  UPDATE tenant_invitations i SET status = 'revoked'
+    FROM mailboxes b
+   WHERE i.project_id = b.project_id AND i.tenant_id = b.tenant_id
+     AND i.status = 'pending' AND lower(i.email COLLATE "C") = b.mailbox
 )
 INSERT INTO tenant_member_removals (project_id, tenant_id, user_id, removed_at_ms)
 SELECT project_id, tenant_id, user_id,
@@ -121,14 +157,13 @@ ON CONFLICT (project_id, tenant_id, user_id)
   DO UPDATE SET removed_at_ms = EXCLUDED.removed_at_ms;
 ```
 
-Nothing records it in the audit trail. Use a role with `BYPASSRLS`
-(`docs/postgres-rls.md`): `users` is under row-level security, so under
-any other role the statement matches no account and revokes no
-invitation. Run it, then the down migration, with this release's replicas
-stopped, so that no suspension, invitation or join lands in between. A
-tenant whose only remaining owner was suspended has no owner afterwards: an
-admin who can still act invites one, and otherwise an operator appoints one
-with `AdminRecoverTenantOwnership`.
+The mailbox is the service's canonical form of an all-ASCII address:
+lower-cased, one trailing dot dropped from the domain, `googlemail.com`
+read as `gmail.com`, the local part cut at its first `+` and, at
+`gmail.com`, its dots removed. Nothing records the statement in the audit
+trail. A tenant whose only remaining owner was suspended has no owner
+afterwards: an admin who can still act invites one, and otherwise an
+operator appoints one with `AdminRecoverTenantOwnership`.
 
 A refused down migration rolls back and records version 52 dirty: run this
 release's `identity migrate force 53`, decide the suspensions, then migrate
@@ -146,8 +181,8 @@ just read every row), and restores 0047's trigger body.
   (*TenantMembership, bool, error)`. Each returns the membership as it now
   stands and whether the call changed it. A suspension refuses the last
   active owner with `ErrLastOwner`, taking the same locks as a removal. A
-  restore by `service.RestoredByMember(userID)` checks, in its own
-  transaction, that userID holds an active owner or admin membership
+  restore by `service.RestoredByMember(restorerID)` checks, in its own
+  transaction, that restorerID holds an active owner or admin membership
   (`ErrPermissionDenied` otherwise); `service.RestoredByOperator()` is an
   operator, and is not checked; the zero `Restorer` is refused. A restore
   makes a `domain` membership `inactive` when the account's email, read in

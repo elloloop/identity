@@ -16480,8 +16480,8 @@ func (x *AdminRestoreTenantResponse) GetTenant() *Tenant {
 }
 
 // AdminRecoverTenantOwnershipRequest names a tenant with no owner or admin
-// left who can sign in and the account to appoint its owner. reason is
-// required; the audit trail keeps it.
+// left who both can sign in and holds an active membership, and the account
+// to appoint its owner. reason is required; the audit trail keeps it.
 type AdminRecoverTenantOwnershipRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`

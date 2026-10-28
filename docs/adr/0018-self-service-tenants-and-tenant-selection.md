@@ -25,7 +25,7 @@ administration and never loosens sign-in controls
 **Amended** (2026-10-27): ownership can move. `TransferTenantOwnership`
 lets an owner hand a tenant to another member, and
 `AdminRecoverTenantOwnership` lets an operator appoint an owner to a tenant
-none of whose owners or admins both can sign in and holds an active
+none of whose owners or admins both can sign in and hold an active
 membership any more, each audited
 ([Ownership](#ownership)). Removing a tenant's last owner is refused in the
 same transaction that would remove them.
@@ -312,9 +312,10 @@ ways, both audited; neither changes any other member's role.
 - **An operator appoints an owner when nobody can govern.** The last-owner
   guard stops a removal, not an account being deleted, deactivated or merged
   away. A tenant whose owners cannot sign in has no owner, but it is still
-  governed while an admin can sign in: that admin can invite a new owner
-  (`CreateTenantInvitation` with `role = "owner"`). Once no owner or admin
-  can sign in, nobody can invite, register a domain or transfer.
+  governed while an admin both can sign in and holds an active membership:
+  that admin can invite a new owner (`CreateTenantInvitation` with
+  `role = "owner"`). Once no owner or admin both can sign in and holds an
+  active membership, nobody can invite, register a domain or transfer.
   `AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason)`,
   with the operator secret, makes an account that could own a tenant (the
   same rule as a transfer) an active owner, member or not, recorded as
@@ -487,7 +488,9 @@ not listed at all. Suspending the tenant (above) stops everyone.
   owners and admins restore or remove each one first, or an operator
   removes them in SQL. A removal leaves an invitation the person already
   holds redeemable, so the operator's statement also revokes their pending
-  invitations to the tenant, and each stays out until invited again.
+  invitations to the tenant, and each stays out until invited again. It
+  runs with `row_security` off, so a role that row-level security binds
+  fails instead of removing members while revoking nothing.
 - **A tenant keeps an owner.** Suspending an owner counts as removing one.
   The suspension takes the locks a removal takes, so the last active owner
   cannot be suspended, even by two suspensions at once or a suspension
@@ -548,8 +551,9 @@ not listed at all. Suspending the tenant (above) stops everyone.
 - **Negative.** Removing a member ends none of their sessions, so a token
   carrying the tenant outlives the membership by one access-token lifetime,
   in `mode=session` as in `mode=ttl`.
-- **Negative.** A tenant left with no owner or admin who can sign in stays
-  ungoverned until an operator recovers it. Recovery reads who governs the
+- **Negative.** A tenant left with no owner or admin who both can sign in
+  and holds an active membership stays ungoverned until an operator
+  recovers it. Recovery reads who governs the
   tenant before it grants, so two operators recovering one tenant at once,
   naming different accounts, may each appoint an owner (both are audited).
 - **Negative.** A removal made before migration 0052 left no record, so a

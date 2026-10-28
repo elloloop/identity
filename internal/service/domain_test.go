@@ -564,13 +564,16 @@ func (f *fakeMembershipStore) SuspendMembership(_ context.Context, projectID, te
 // when it is a domain one and the account's email is not on a domain the
 // tenant verified; an active one is returned unchanged, and anything else
 // is ErrNotFound.
-func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID string, restorer Restorer) (*TenantMembership, bool, error) {
+func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID string, by Restorer) (*TenantMembership, bool, error) {
+	if !by.IsOperator() && by.UserID() == "" {
+		return nil, false, ErrPermissionDenied
+	}
 	if f.onRestore != nil {
 		f.onRestore()
 	}
-	if !restorer.IsOperator() {
-		by := f.byKey[f.key(projectID, tenantID, restorer.UserID())]
-		if by == nil || by.Status != MembershipStatusActive || !isAdminRole(by.Role) {
+	if !by.IsOperator() {
+		byMembership := f.byKey[f.key(projectID, tenantID, by.UserID())]
+		if byMembership == nil || byMembership.Status != MembershipStatusActive || !isAdminRole(byMembership.Role) {
 			return nil, false, ErrPermissionDenied
 		}
 	}

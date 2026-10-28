@@ -7017,8 +7017,8 @@ components:
       additionalProperties: false
       description: |-
         AdminRecoverTenantOwnershipRequest names a tenant with no owner or admin
-         left who can sign in and the account to appoint its owner. reason is
-         required; the audit trail keeps it.
+         left who both can sign in and holds an active membership, and the account
+         to appoint its owner. reason is required; the audit trail keeps it.
     identity.v1.AdminRecoverTenantOwnershipResponse:
       type: object
       properties:
