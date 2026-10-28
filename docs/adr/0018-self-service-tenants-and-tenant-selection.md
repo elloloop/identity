@@ -481,8 +481,10 @@ not listed at all. Suspending the tenant (above) stops everyone.
 - **Rolling back refuses while anyone is suspended.** The schema before
   0053 cannot hold a suspension, and every status it has lets the person
   back on their own. Its down migration therefore refuses to run while a
-  membership is suspended, and an operator restores or removes each one
-  first, rather than the rollback deciding for them.
+  membership is suspended, rather than deciding for anyone: the tenant's
+  owners and admins restore or remove each one first, or an operator
+  removes them in SQL, which keeps each person out, as the suspension did,
+  until invited back.
 - **A tenant keeps an owner.** Suspending an owner counts as removing one.
   The suspension takes the locks a removal takes, so the last active owner
   cannot be suspended, even by two suspensions at once or a suspension

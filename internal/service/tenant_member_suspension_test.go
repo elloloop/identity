@@ -281,14 +281,17 @@ func TestRestoreTenantMember_RefusesYourself(t *testing.T) {
 // ── who else lifts a suspension ─────────────────────────────────────────
 
 // An operator's appointment lifts a suspension: the appointee becomes an
-// active owner, and the appointment is recorded.
+// active owner, and the appointment is recorded. The lift is recorded with
+// the status the restore gave: a domain membership whose email is not on a
+// verified domain of the tenant (heir's is not) ends, and the appointment
+// that follows makes it an active owner one.
 func TestAdminRecoverTenantOwnership_LiftsASuspension(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	for name, seed := range map[string]struct{ source, role string }{
-		"suspended member":        {MembershipSourceInvited, RoleMember},
-		"suspended domain member": {MembershipSourceDomain, RoleMember},
-		"suspended owner":         {MembershipSourceCreated, RoleOwner},
+	for name, seed := range map[string]struct{ source, role, restored string }{
+		"suspended member":        {MembershipSourceInvited, RoleMember, MembershipStatusActive},
+		"suspended domain member": {MembershipSourceDomain, RoleMember, MembershipStatusInactive},
+		"suspended owner":         {MembershipSourceCreated, RoleOwner, MembershipStatusActive},
 	} {
 		f := newRecoveryFixture()
 		f.seedMembership("heir", seed.source, seed.role, MembershipStatusSuspended)
@@ -300,24 +303,23 @@ func TestAdminRecoverTenantOwnership_LiftsASuspension(t *testing.T) {
 		stored, _ := f.members.GetMembership(ctx, "proj", "t-1", "heir")
 		assert.Equal(t, got, stored, name)
 		assert.Equal(t, 1, f.audit.countByEventType(string(audit.EventTenantOwnershipRecovered)), name)
-		requireOperatorRestore(t, f, seed.role, seed.source, "why")
+		requireOperatorRestore(t, f, seed.role, seed.source, seed.restored, "why")
 	}
 }
 
 // requireOperatorRestore checks that the fixture's audit trail holds one
 // lift of heir's suspension in t-1, with no actor, the role and source the
-// membership had, and reason, when one is given.
-func requireOperatorRestore(t *testing.T, f *adminFixture, role, source, reason string) {
+// membership had, the status the restore gave it, and reason, when one is
+// given.
+func requireOperatorRestore(t *testing.T, f *adminFixture, role, source, status, reason string) {
 	t.Helper()
 	event := string(audit.EventTenantMemberRestored)
 	require.Equal(t, 1, f.audit.countByEventTypeActorTarget(event, "", "heir"))
-	want := map[string]any{"project_id": "proj", "tenant_id": "t-1", "role": role, "source": source}
+	want := map[string]any{"project_id": "proj", "tenant_id": "t-1", "role": role, "source": source, "status": status}
 	if reason != "" {
 		want["reason"] = reason
 	}
-	details := f.audit.detailsOf(event)[0]
-	delete(details, "status")
-	assert.Equal(t, want, details)
+	assert.Equal(t, want, f.audit.detailsOf(event)[0])
 }
 
 // The lift is recorded when it lands: a grant that then fails leaves the
@@ -333,7 +335,7 @@ func TestAdminRecoverTenantOwnership_AFailedGrantKeepsTheLiftRecorded(t *testing
 	stored, _ := f.members.GetMembership(context.Background(), "proj", "t-1", "heir")
 	assert.Equal(t, MembershipStatusActive, stored.Status)
 	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantOwnershipRecovered)))
-	requireOperatorRestore(t, f, RoleMember, MembershipSourceInvited, "why")
+	requireOperatorRestore(t, f, RoleMember, MembershipSourceInvited, MembershipStatusActive, "why")
 }
 
 // An operator's grant of administration lifts a suspension too, and the
@@ -349,7 +351,7 @@ func TestAdminAddTenantAdmin_LiftsASuspension(t *testing.T) {
 	stored, _ := f.members.GetMembership(context.Background(), "proj", "t-1", "heir")
 	assert.Equal(t, MembershipStatusActive, stored.Status)
 	assert.Equal(t, RoleAdmin, stored.Role)
-	requireOperatorRestore(t, f, RoleMember, MembershipSourceInvited, "")
+	requireOperatorRestore(t, f, RoleMember, MembershipSourceInvited, MembershipStatusActive, "")
 
 	// A grant to an active member lifts nothing and records no lift.
 	_, err = f.svc.AdminAddTenantAdmin(context.Background(), testAdminSecret, "proj", "t-1", "heir", RoleOwner)

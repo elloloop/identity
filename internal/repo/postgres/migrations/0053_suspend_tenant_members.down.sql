@@ -3,15 +3,16 @@
 -- Version 52 cannot hold a suspension: 'suspended' fails its status CHECK,
 -- and every status it has would let the person back on their own, through
 -- an invitation they already hold or a join by their email's domain. So
--- this file refuses to run while any membership is suspended, and an
--- operator decides each one first: restore it (RestoreTenantMember) or
--- remove it (RemoveTenantMember, whose removal record keeps a domain member
--- from joining again). The refusal rolls the file back and records version
--- 52 dirty: run `migrate force 53`, decide the suspensions, then migrate
--- down again.
+-- this file refuses to run while any membership is suspended, and each one
+-- is decided first: the tenant's owners and admins restore it
+-- (RestoreTenantMember) or remove it (RemoveTenantMember, whose removal
+-- record keeps a domain member from joining again), or an operator removes
+-- it in SQL as docs/UPGRADE.md shows. The refusal rolls the file back and
+-- records version 52 dirty: run this release's `identity migrate force 53`,
+-- decide the suspensions, then migrate down again.
 --
 -- The table lock comes first, so no suspension lands between the check and
--- the constraint. The narrower CHECK is re-added NOT VALID: the check has
+-- the constraint; membership reads wait while the check reads the table. The narrower CHECK is re-added NOT VALID: the check has
 -- just read every row under that lock, so the scan a valid one runs would
 -- find nothing, and every later write is checked. The trigger again ends
 -- every domain membership whose email leaves the domain, as 0047 wrote it.
@@ -26,7 +27,7 @@ DECLARE
 BEGIN
  SELECT count(*) INTO suspended FROM tenant_memberships WHERE status = 'suspended';
  IF suspended > 0 THEN
-  RAISE EXCEPTION '% tenant memberships are suspended: restore or remove each before migrating below 0053', suspended;
+  RAISE EXCEPTION 'tenant memberships suspended: %; restore or remove each before migrating below 0053', suspended;
  END IF;
 END $$;
 

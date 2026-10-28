@@ -386,10 +386,12 @@ const (
 	// AdminAddTenantAdmin, which lift it before they write the membership,
 	// with no actor and, for a recovery, the operator's reason in the
 	// details. The target is the person, and the details hold the project
-	// and tenant ids, the role and source, and the status the membership now
-	// has: "active", or "inactive" for a membership through the email's
-	// domain whose email is not on a domain the tenant has verified.
-	// Restoring an active member records nothing.
+	// and tenant ids, the role and source, and the status the restore gave
+	// the membership: "active", or "inactive" for a membership through the
+	// email's domain whose email is not on a domain the tenant has verified.
+	// An operator's call then writes the membership it was asked for, so
+	// after one the membership is an active owner or admin one whatever
+	// these details say. Restoring an active member records nothing.
 	EventTenantMemberRestored EventType = "tenant_member_restored"
 )
 

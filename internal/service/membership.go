@@ -106,6 +106,11 @@ type UserTenantReader interface {
 	GetActiveTenantForUser(ctx context.Context, projectID, tenantID, userID, emailDomain string) (*UserTenant, error)
 }
 
+// RestoredByOperator is the restoredBy of an operator's
+// MembershipStore.RestoreMembership: no owner or admin, so nobody's
+// membership is checked.
+const RestoredByOperator = ""
+
 // MembershipStore persists TenantMemberships within a Project. Reads that
 // miss return (nil, nil).
 type MembershipStore interface {
@@ -115,9 +120,7 @@ type MembershipStore interface {
 	// updates source/role/status in place (keeping id + created_at_ms). A
 	// source other than MembershipSourceDomain also deletes the user's
 	// removal record (see RemoveMembership). It writes m.Status whatever the
-	// row held, so it lifts a suspension; the operator's call that uses it
-	// restores a suspended membership first, through RestoreMembership, so
-	// the lift is audited. Returns the surviving row id.
+	// row held, so it lifts a suspension. Returns the surviving row id.
 	UpsertMembership(ctx context.Context, m *TenantMembership) (string, error)
 	// GrantMembership makes m.UserID an active member of m.TenantID at
 	// m.Role, unless they already hold an active membership there at m.Role
@@ -194,9 +197,10 @@ type MembershipStore interface {
 	// that moment, on a domain the tenant has verified: that one becomes
 	// inactive. The email is read where the write is, so a change of email
 	// cannot slip between them. restoredBy is the owner or admin restoring
-	// it, or "" for an operator: their membership is checked where the write
-	// is, so unless it is an active owner or admin one when the restore
-	// lands, it is ErrPermissionDenied and nothing changes. Returns the
+	// it, or RestoredByOperator, whom nothing checks: an owner's or admin's
+	// membership is checked where the write is, so unless it is an active
+	// owner or admin one when the restore lands, it is ErrPermissionDenied
+	// and nothing changes. Returns the
 	// membership as it now stands, and whether this call lifted a
 	// suspension; an active membership is returned unchanged. Any other
 	// status, or no membership, is ErrNotFound.

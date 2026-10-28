@@ -43,7 +43,7 @@ func (f *joinFixture) suspend(ctx context.Context, userID string) (*service.Tena
 }
 
 // restore lifts userID's suspension as restoredBy, or as an operator when
-// restoredBy is "".
+// restoredBy is service.RestoredByOperator.
 func (f *joinFixture) restore(ctx context.Context, userID, restoredBy string) (*service.TenantMembership, bool, error) {
 	return f.ms.RestoreMembership(ctx, f.projectID, f.tenantID, userID, restoredBy)
 }
@@ -62,6 +62,32 @@ func (f *joinFixture) account(ctx context.Context, t *testing.T, email string) s
 	id, err := f.accounts.CreateUser(ctx, &service.User{Email: email, Status: "active", CreatedAt: now, UpdatedAt: now})
 	require.NoError(t, err)
 	return id
+}
+
+// accountWithID creates an account of the fixture's project with id and
+// email, for a test that needs ids in a known order.
+func (f *joinFixture) accountWithID(ctx context.Context, t *testing.T, id, email string) string {
+	t.Helper()
+	now := time.Now()
+	id, err := f.accounts.CreateUser(ctx, &service.User{ID: id, Email: email, Status: "active", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	return id
+}
+
+// waitOnLock waits until exactly one session of the test database is
+// waiting on a lock in a statement matching the LIKE pattern like.
+func waitOnLock(ctx context.Context, t *testing.T, dsn, like, msg string) {
+	t.Helper()
+	watch, err := pgx.Connect(ctx, dsn)
+	require.NoError(t, err)
+	defer func() { _ = watch.Close(ctx) }()
+	require.Eventually(t, func() bool {
+		var waiting int
+		err := watch.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'
+			  AND query LIKE $1`, like).Scan(&waiting)
+		return err == nil && waiting == 1
+	}, 10*time.Second, 20*time.Millisecond, msg)
 }
 
 // grant gives userID an invited membership with role.
@@ -147,7 +173,7 @@ func TestMembershipStore_SuspendAndRestore(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = f.suspend(ctx, f.user)
 	require.NoError(t, err)
-	back, _, err := f.restore(ctx, f.user, "")
+	back, _, err := f.restore(ctx, f.user, service.RestoredByOperator)
 	require.NoError(t, err)
 	assert.Equal(t, service.MembershipStatusActive, back.Status, "an operator's restore")
 
@@ -275,22 +301,62 @@ func TestMembershipStore_RestoreJudgesTheEmailWhereItWrites(t *testing.T) {
 		m, _, err := f.restore(ctx, f.user, f.other)
 		done <- result{m, err}
 	}()
-	watch, err := pgx.Connect(ctx, dsn)
-	require.NoError(t, err)
-	defer func() { _ = watch.Close(ctx) }()
-	require.Eventually(t, func() bool {
-		var waiting int
-		err := watch.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock'
-			  AND query LIKE '%FROM users%FOR SHARE%'`).Scan(&waiting)
-		return err == nil && waiting == 1
-	}, 10*time.Second, 20*time.Millisecond, "the restore waits on the account's row")
+	waitOnLock(ctx, t, dsn, "%FROM users%FOR SHARE%", "the restore waits on the account's row")
 
 	require.NoError(t, move.Commit(ctx))
 
 	got := <-done
 	require.NoError(t, got.err)
 	assert.Equal(t, service.MembershipStatusInactive, got.m.Status, "the email the restore waited for is the one it judged")
+}
+
+// TestMembershipStore_RestoreQueuesWithAnAccountDeletion: a restore takes
+// the target's account row before any membership row, the order an account
+// deletion takes them in (its users row, then by cascade its memberships),
+// so the two queue rather than deadlock. Here the restore holds the
+// target's membership while it waits on an owner's, the deletion of the
+// target starts behind it, and both finish once the owner's row is free.
+func TestMembershipStore_RestoreQueuesWithAnAccountDeletion(t *testing.T) {
+	dsn := suspensionDSN(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f := newJoinFixture(ctx, t, dsn)
+	// lockOwnersAnd takes memberships in user_id order, so these ids put the
+	// target's before the owner's the test holds.
+	target := f.accountWithID(ctx, t, "restore-a-target", "target@acme.com")
+	owner := f.accountWithID(ctx, t, "restore-z-owner", "owner@acme.com")
+	f.grant(ctx, t, target, service.RoleMember)
+	f.grant(ctx, t, owner, service.RoleOwner)
+	_, _, err := f.suspend(ctx, target)
+	require.NoError(t, err)
+
+	raw, err := pgx.Connect(ctx, dsn)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close(ctx) }()
+	hold, err := raw.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = hold.Rollback(ctx) }()
+	_, err = hold.Exec(ctx, `SELECT 1 FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3
+		FOR UPDATE`, f.projectID, f.tenantID, owner)
+	require.NoError(t, err)
+
+	restored := make(chan error, 1)
+	go func() {
+		_, _, err := f.restore(ctx, target, f.other)
+		restored <- err
+	}()
+	waitOnLock(ctx, t, dsn, "%FROM tenant_memberships%FOR UPDATE%", "the restore waits on the owner's membership")
+	deleted := make(chan error, 1)
+	go func() { deleted <- f.accounts.DeleteUser(ctx, target) }()
+	waitOnLock(ctx, t, dsn, "DELETE FROM users%", "the deletion waits behind the restore")
+
+	require.NoError(t, hold.Rollback(ctx))
+	require.NoError(t, <-restored, "the restore finishes")
+	require.NoError(t, <-deleted, "the deletion finishes after it")
+	m, err := f.ms.GetMembership(ctx, f.projectID, f.tenantID, target)
+	require.NoError(t, err)
+	assert.Nil(t, m, "the deletion took the restored membership with the account")
 }
 
 // TestMembershipStore_TransferAndSuspension: ownership passes only from an
@@ -465,7 +531,7 @@ func TestDomainMembershipSuspensionSurvivesTheEmailLeaving(t *testing.T) {
 	elsewhere, err := New(ctx, Config{DSN: roleDSN, MaxConns: 2, ConnTimeout: 5 * time.Second, ProjectID: "control-plane"})
 	require.NoError(t, err)
 	t.Cleanup(elsewhere.Close)
-	restored, _, err := NewMembershipStore(elsewhere).RestoreMembership(ctx, f.project, f.tenant, f.onDomain, "")
+	restored, _, err := NewMembershipStore(elsewhere).RestoreMembership(ctx, f.project, f.tenant, f.onDomain, service.RestoredByOperator)
 	require.NoError(t, err)
 	assert.Equal(t, service.MembershipStatusActive, restored.Status)
 }
@@ -530,13 +596,34 @@ func TestSuspendTenantMembersMigrationRoundTrip(t *testing.T) {
 	for _, version := range []uint{53, 52, 53} {
 		if version == 52 {
 			err := withMigrator(t, scratch, func(m *migrate.Migrate) error { return m.Migrate(52) })
-			require.ErrorContains(t, err, "1 tenant memberships are suspended")
-			require.NoError(t, withMigrator(t, scratch, func(m *migrate.Migrate) error { return m.Force(53) }))
+			require.ErrorContains(t, err, "tenant memberships suspended: 1;")
+			require.NoError(t, withMigrator(t, scratch, func(m *migrate.Migrate) error {
+				v, dirty, err := m.Version()
+				require.NoError(t, err)
+				assert.Equal(t, uint(52), v, "a refused down migration records 52")
+				assert.True(t, dirty, "and records it dirty")
+				return m.Force(53)
+			}))
 			assert.True(t, strings.Contains(statusCheck(), "suspended"), "the refused down migration changed nothing")
 			assert.Equal(t, service.MembershipStatusSuspended, status("held"))
-			// The operator decides the suspension: here, a restore.
-			_, err = raw.Exec(ctx, `UPDATE tenant_memberships SET status = 'active' WHERE user_id = 'held'`)
+			// The operator decides the suspension with the statement
+			// docs/UPGRADE.md gives: a removal, recorded.
+			_, err = raw.Exec(ctx, `WITH removed AS (
+				  DELETE FROM tenant_memberships WHERE status = 'suspended'
+				  RETURNING project_id, tenant_id, user_id
+				)
+				INSERT INTO tenant_member_removals (project_id, tenant_id, user_id, removed_at_ms)
+				SELECT project_id, tenant_id, user_id,
+				       (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+				  FROM removed
+				ON CONFLICT (project_id, tenant_id, user_id)
+				  DO UPDATE SET removed_at_ms = EXCLUDED.removed_at_ms`)
 			require.NoError(t, err)
+			var members, removals int
+			require.NoError(t, raw.QueryRow(ctx, `SELECT
+				(SELECT count(*) FROM tenant_memberships WHERE user_id = 'held'),
+				(SELECT count(*) FROM tenant_member_removals WHERE user_id = 'held')`).Scan(&members, &removals))
+			assert.Equal(t, []int{0, 1}, []int{members, removals}, "the suspended member is removed, with a record")
 		}
 		migrateToVersion(t, scratch, version)
 		assert.Equal(t, version == 53, strings.Contains(statusCheck(), "suspended"), "version %d", version)

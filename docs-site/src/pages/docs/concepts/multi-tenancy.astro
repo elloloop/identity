@@ -249,10 +249,11 @@ RestoreTenantMember(tenant_id, user_id)
   />
   <p>
     Both need an active owner or admin of a tenant that is not suspended
-    (<code>PERMISSION_DENIED</code> otherwise). A restore checks that again
-    where it writes, so an owner or admin suspended while their call is in
-    flight lifts nothing. An admin may suspend an owner while another active
-    owner remains. While suspended, the member is listed
+    (<code>PERMISSION_DENIED</code> otherwise). A restore checks again, as
+    it writes, that the caller still holds an active owner or admin
+    membership, so an owner or admin suspended while their call is in flight
+    lifts nothing. An admin may suspend an owner while another active owner
+    remains. While suspended, the member is listed
     by <code>ListTenantMembers</code> with status <code>suspended</code>, is
     left out of <code>ListMyTenants</code> and
     <code>ListJoinableTenants</code>, is refused the tenant at a refresh
@@ -458,15 +459,17 @@ Both:
     A tenant whose owners have all been deleted, deactivated or merged away
     has no owner. While one of its admins can sign in, that admin invites a
     new owner with <code>CreateTenantInvitation</code> and
-    <code>role="owner"</code>. Once no owner or admin can sign in, nobody can
-    govern it, and an operator gives it an owner again, with a reason the
+    <code>role="owner"</code>. Once no owner or admin both can sign in and
+    holds an active membership, nobody can govern it, and an operator gives
+    it an owner again, with a reason the
     audit trail keeps as <code>tenant_ownership_recovered</code>:
   </p>
   <Code
     code={`AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason="owner left the company")
   -> { membership: { role: "owner", source: "added", ... } }   # an existing invited or created source is kept
-  -> FAILED_PRECONDITION   # an owner or admin who is a person can still sign in,
-                           #   the account cannot own a tenant, or latent
+  -> FAILED_PRECONDITION   # an owner or admin who is a person can still sign in
+                           #   and holds an active membership, the account
+                           #   cannot own a tenant, or latent
   -> NOT_FOUND             # no such tenant or account
   -> INVALID_ARGUMENT      # a blank id, or a reason that is blank, over 500
                            #   characters, or holds a control character
@@ -477,13 +480,15 @@ Both:
   <p>
     The account may be any person in the Project who could own a tenant,
     member or not, and a suspended tenant can be recovered. While an owner
-    or an admin who is a person can still sign in, recovery is refused: an
-    owner transfers, an admin invites. A suspended tenant refuses both, so
-    the operator restores it first and they act then. So recovery never
-    puts an outside account above people who can act. An account pending deletion can still
-    sign in, which cancels the deletion, so an owner or admin in that state
-    still counts. Naming an account that is already an owner who can sign in
-    returns its membership and records nothing, so a retry is safe. A
+    or an admin who is a person can still sign in and holds an active
+    membership, recovery is refused: an owner transfers, an admin invites. A
+    suspended tenant refuses both, so the operator restores it first and
+    they act then. So recovery never puts an outside account above people
+    who can act. An account pending deletion can still sign in, which
+    cancels the deletion, so an owner or admin in that state still counts.
+    Naming an account that is already an owner who can sign in, with an
+    active membership, returns its membership and records nothing, so a
+    retry is safe. A
     refused recovery is not audited. <code>AdminAddTenantAdmin</code>, which
     provisions a tenant's first admins, makes none of these checks and
     records nothing but a suspension it lifts, so the same admin secret can
