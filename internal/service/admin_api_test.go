@@ -1419,3 +1419,19 @@ func TestCreateFirstPlatformAdmin_Disabled_RejectedEvenWithCorrectSecret(t *test
 		})
 	}
 }
+
+func TestControlPlaneAdmin_CreateTeammateKeyManagerCredential(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	got, err := f.svc.AdminCreateProjectCredential(context.Background(), testAdminSecret, "proj-1", CredentialKindTeammateKeyManager)
+	if err != nil {
+		t.Fatalf("AdminCreateProjectCredential: %v", err)
+	}
+	if !strings.HasPrefix(got.PublicID, teammateKeyManagerPrefix) || !strings.HasPrefix(got.RawKey, got.PublicID+rawKeySeparator) {
+		t.Fatalf("minted = %+v, want a %q key with a secret half", got, teammateKeyManagerPrefix)
+	}
+	stored := f.projects.credentials[got.ID]
+	if stored == nil || stored.Kind != CredentialKindTeammateKeyManager || stored.ProjectID != "proj-1" || stored.SecretHash == "" {
+		t.Fatalf("stored credential = %+v", stored)
+	}
+}

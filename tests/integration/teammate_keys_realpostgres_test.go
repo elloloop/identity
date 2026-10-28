@@ -1,4 +1,4 @@
-//go:build integration && realpostgres
+//go:build realpostgres
 
 package integration
 
@@ -11,20 +11,30 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jws"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
+	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/config"
 	identityconnect "github.com/elloloop/identity/internal/connect"
+	"github.com/elloloop/identity/internal/repo"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
+	"github.com/elloloop/identity/pkg/passkeys"
 )
 
 const (
@@ -32,8 +42,18 @@ const (
 	teammateAudience = "https://api.example.test"
 )
 
+type teammateHarness struct {
+	BaseURL   string
+	HTTP      *http.Client
+	Client    identityconnectgen.IdentityServiceClient
+	ProjectID string
+	Users     service.Repository
+	Built     *repo.Built
+	Metrics   *prometheus.Registry
+}
+
 type teammateFixture struct {
-	h        *RedesignHarness
+	h        *teammateHarness
 	keys     identityconnectgen.TeammateKeyServiceClient
 	agentID  string
 	ownerID  string
@@ -41,13 +61,55 @@ type teammateFixture struct {
 	managers string
 }
 
-func startTeammateHarness(t *testing.T, enabled bool) *RedesignHarness {
+func startTeammateHarness(t *testing.T, enabled bool) *teammateHarness {
 	t.Helper()
-	return startRedesignHarnessWith(t, func(cfg *config.Config) {
-		cfg.TeammateKeysEnabled = enabled
-		cfg.JWTIssuer = teammateIssuer
-		cfg.JWTAudience = teammateAudience
+	dsn := os.Getenv("GATEWAY_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_POSTGRES_DSN not set")
+	}
+	project := fmt.Sprintf("teammate-keys-%d", time.Now().UnixNano())
+	cfg := newIssue3TestConfig()
+	cfg.DefaultTenantID = project
+	cfg.DefaultProjectID = project
+	cfg.TeammateKeysEnabled = enabled
+	cfg.JWTIssuer = teammateIssuer
+	cfg.JWTAudience = teammateAudience
+	built, err := repo.Build(context.Background(), repo.Config{Driver: repo.DriverPostgres, PostgresDSN: dsn, PostgresMaxConns: 5, PostgresAutoMigrate: true, ProjectID: project}, zap.NewNop())
+	if err != nil {
+		t.Fatalf("repo.Build: %v", err)
+	}
+	if closer, ok := built.Repository.(interface{ Close() }); ok {
+		t.Cleanup(closer.Close)
+	}
+	if _, err = built.ProjectStore.EnsureDefaultProject(context.Background(), project, project, "teammate-keys"); err != nil {
+		t.Fatalf("seed default project: %v", err)
+	}
+	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: cfg.PasskeyRPID, RPName: cfg.PasskeyRPName, Origin: cfg.PasskeyOrigin})
+	if err != nil {
+		t.Fatalf("init webauthn: %v", err)
+	}
+	metrics := prometheus.NewRegistry()
+	appBuilt, err := app.New(app.Deps{
+		Config:               cfg,
+		Logger:               zap.NewNop(),
+		Signer:               jwttest.NewSigner(t, "teammate-keys-kid"),
+		Repo:                 built.Repository,
+		DB:                   built.DB,
+		Passkeys:             pkSvc,
+		TOTPKey:              []byte("01234567890123456789012345678901"),
+		TOTPRecoveryPepper:   []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
+		EmailTransport:       issue3SilentMailer{},
+		DirectoryCredentials: built.DirectoryCredentialStore(),
+		MetricsRegistry:      metrics,
 	})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	appBuilt.Start()
+	t.Cleanup(appBuilt.Stop)
+	srv := httptest.NewServer(appBuilt.Handler)
+	t.Cleanup(srv.Close)
+	return &teammateHarness{BaseURL: srv.URL, HTTP: srv.Client(), Client: identityconnectgen.NewIdentityServiceClient(srv.Client(), srv.URL), ProjectID: project, Users: built.Repository, Built: built, Metrics: metrics}
 }
 
 func newTeammateFixture(t *testing.T) *teammateFixture {
@@ -55,30 +117,47 @@ func newTeammateFixture(t *testing.T) *teammateFixture {
 	h := startTeammateHarness(t, true)
 	ctx := context.Background()
 	unique := fmt.Sprintf("%d", time.Now().UnixNano())
-	owner, err := h.Stores.users.CreateUser(ctx, &service.User{Email: "owner-" + unique + "@example.test", Name: "Owner", Status: service.StatusActive, EmailVerified: true})
+	owner, err := h.Users.CreateUser(ctx, &service.User{Email: "owner-" + unique + "@example.test", Name: "Owner", Status: service.StatusActive, EmailVerified: true})
 	if err != nil {
 		t.Fatalf("CreateUser(owner): %v", err)
 	}
-	agent, err := h.Stores.users.CreateUser(ctx, &service.User{Name: "Teammate", Kind: service.UserKindAgent, OwnerUserID: owner, Status: service.StatusActive})
+	agent, err := h.Users.CreateUser(ctx, &service.User{Name: "Teammate", Kind: service.UserKindAgent, OwnerUserID: owner, Status: service.StatusActive})
 	if err != nil {
 		t.Fatalf("CreateUser(agent): %v", err)
 	}
-	manager := mintCredential(t, h, h.ProjectID, service.CredentialKindTeammateKeyManager)
-	return &teammateFixture{h: h, keys: teammateKeyClient(h, manager.RawKey), agentID: agent, ownerID: owner, unique: unique, managers: manager.RawKey}
+	manager := mintTeammateCredential(t, h, service.CredentialKindTeammateKeyManager, "tk_"+unique)
+	return &teammateFixture{h: h, keys: teammateKeyClient(h, manager), agentID: agent, ownerID: owner, unique: unique, managers: manager}
 }
 
-func mintCredential(t *testing.T, h *RedesignHarness, projectID, kind string) *identitypb.AdminCreateProjectCredentialResponse {
+func mintTeammateCredential(t *testing.T, h *teammateHarness, kind, publicID string) string {
 	t.Helper()
-	resp, err := h.adminClient(harnessAdminSecret).AdminCreateProjectCredential(context.Background(),
-		connect.NewRequest(&identitypb.AdminCreateProjectCredentialRequest{ProjectId: projectID, Kind: kind}))
-	if err != nil {
-		t.Fatalf("AdminCreateProjectCredential(%s): %v", kind, err)
+	secret := "secret-" + publicID
+	digest := sha256.Sum256([]byte(secret))
+	if _, err := h.Built.ProjectStore.CreateProjectCredential(context.Background(), &service.AdminProjectCredential{ProjectID: h.ProjectID, Kind: kind, PublicID: publicID, SecretHash: hex.EncodeToString(digest[:])}); err != nil {
+		t.Fatalf("CreateProjectCredential(%s): %v", kind, err)
 	}
-	return resp.Msg
+	return publicID + "." + secret
 }
 
-func teammateKeyClient(h *RedesignHarness, rawKey string) identityconnectgen.TeammateKeyServiceClient {
-	return identityconnectgen.NewTeammateKeyServiceClient(&redesignHTTPClient{base: h.HTTP, headers: map[string]string{identityconnect.TeammateKeyManagerHeader: rawKey}}, h.BaseURL)
+func requireTeammateCode(t *testing.T, what string, err error, want connect.Code) {
+	t.Helper()
+	if connect.CodeOf(err) != want {
+		t.Fatalf("%s: err = %v, want %v", what, err, want)
+	}
+}
+
+func teammateKeyClient(h *teammateHarness, rawKey string) identityconnectgen.TeammateKeyServiceClient {
+	return identityconnectgen.NewTeammateKeyServiceClient(managerKeyClient{base: h.HTTP, key: rawKey}, h.BaseURL)
+}
+
+type managerKeyClient struct {
+	base *http.Client
+	key  string
+}
+
+func (c managerKeyClient) Do(req *http.Request) (*http.Response, error) {
+	req.Header.Set(identityconnect.TeammateKeyManagerHeader, c.key)
+	return c.base.Do(req)
 }
 
 func (f *teammateFixture) claim(name string) string { return name + "-" + f.unique }
@@ -162,7 +241,7 @@ type teammateTokenClaims struct {
 	Actor         any      `json:"act"`
 }
 
-func verifiedTeammateClaims(t *testing.T, h *RedesignHarness, token string) teammateTokenClaims {
+func verifiedTeammateClaims(t *testing.T, h *teammateHarness, token string) teammateTokenClaims {
 	t.Helper()
 	keys, err := jwk.Fetch(context.Background(), h.BaseURL+"/.well-known/jwks.json", jwk.WithHTTPClient(h.HTTP))
 	if err != nil {
@@ -186,7 +265,7 @@ func verifiedTeammateClaims(t *testing.T, h *RedesignHarness, token string) team
 	return claims
 }
 
-func TestRedesign_TeammateKeys_P256Exchange(t *testing.T) {
+func TestTeammateKeys_P256Exchange(t *testing.T) {
 	f := newTeammateFixture(t)
 	private, public := p256Key(t)
 	claim := f.claim("claim-p256")
@@ -208,18 +287,18 @@ func TestRedesign_TeammateKeys_P256Exchange(t *testing.T) {
 		t.Fatalf("teammate claims = %+v", claims)
 	}
 
-	if got := counter(t, f.h, "identity_teammate_keys_registered_total", map[string]string{"result": "created"}); got != 1 {
+	if got := teammateCounter(t, f.h, "identity_teammate_keys_registered_total", map[string]string{"result": "created"}); got != 1 {
 		t.Fatalf("registered{created} = %v", got)
 	}
-	if got := counter(t, f.h, "identity_teammate_keys_registered_total", map[string]string{"result": "existing"}); got != 1 {
+	if got := teammateCounter(t, f.h, "identity_teammate_keys_registered_total", map[string]string{"result": "existing"}); got != 1 {
 		t.Fatalf("registered{existing} = %v", got)
 	}
-	if got := counter(t, f.h, "identity_agent_exchanges_total", map[string]string{"key_kind": "teammate", "result": "issued"}); got != 1 {
+	if got := teammateCounter(t, f.h, "identity_agent_exchanges_total", map[string]string{"key_kind": "teammate", "result": "issued"}); got != 1 {
 		t.Fatalf("exchanges{teammate,issued} = %v", got)
 	}
 }
 
-func TestRedesign_TeammateKeys_Ed25519Exchange(t *testing.T) {
+func TestTeammateKeys_Ed25519Exchange(t *testing.T) {
 	f := newTeammateFixture(t)
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -239,7 +318,7 @@ func TestRedesign_TeammateKeys_Ed25519Exchange(t *testing.T) {
 	}
 }
 
-func TestRedesign_TeammateKeys_RegistrationRefusals(t *testing.T) {
+func TestTeammateKeys_RegistrationRefusals(t *testing.T) {
 	f := newTeammateFixture(t)
 	_, public := p256Key(t)
 	_, other := p256Key(t)
@@ -248,38 +327,38 @@ func TestRedesign_TeammateKeys_RegistrationRefusals(t *testing.T) {
 		t.Fatalf("RegisterTeammateKey: %v", err)
 	}
 	_, err := f.register(t, claim, other, identitypb.KeyAlgorithm_KEY_ALGORITHM_ECDSA_P256)
-	requireConnectCode(t, "same claim, different key", err, connect.CodeFailedPrecondition)
+	requireTeammateCode(t, "same claim, different key", err, connect.CodeFailedPrecondition)
 	_, err = f.register(t, f.claim("claim-b"), public, identitypb.KeyAlgorithm_KEY_ALGORITHM_ECDSA_P256)
-	requireConnectCode(t, "same key, another claim", err, connect.CodeFailedPrecondition)
+	requireTeammateCode(t, "same key, another claim", err, connect.CodeFailedPrecondition)
 	_, err = f.register(t, f.claim("claim-c"), other, identitypb.KeyAlgorithm_KEY_ALGORITHM_ED25519)
-	requireConnectCode(t, "algorithm mismatch", err, connect.CodeInvalidArgument)
+	requireTeammateCode(t, "algorithm mismatch", err, connect.CodeInvalidArgument)
 	_, err = f.register(t, f.claim("claim-c"), other, identitypb.KeyAlgorithm_KEY_ALGORITHM_UNSPECIFIED)
-	requireConnectCode(t, "unspecified algorithm", err, connect.CodeInvalidArgument)
+	requireTeammateCode(t, "unspecified algorithm", err, connect.CodeInvalidArgument)
 	_, err = f.register(t, f.claim("claim-c"), append([]byte{}, other[:len(other)-1]...), identitypb.KeyAlgorithm_KEY_ALGORITHM_ECDSA_P256)
-	requireConnectCode(t, "truncated key", err, connect.CodeInvalidArgument)
+	requireTeammateCode(t, "truncated key", err, connect.CodeInvalidArgument)
 
 	_, err = f.keys.RegisterTeammateKey(context.Background(), connect.NewRequest(&identitypb.RegisterTeammateKeyRequest{ClaimId: f.claim("claim-human"), TeammateId: f.ownerID, CompanyId: "company-1", WorkstationId: "workstation-1", PublicKey: other, Algorithm: identitypb.KeyAlgorithm_KEY_ALGORITHM_ECDSA_P256}))
-	requireConnectCode(t, "a person as teammate", err, connect.CodeInvalidArgument)
+	requireTeammateCode(t, "a person as teammate", err, connect.CodeInvalidArgument)
 	_, err = f.keys.RegisterTeammateKey(context.Background(), connect.NewRequest(&identitypb.RegisterTeammateKeyRequest{ClaimId: f.claim("claim-blank"), TeammateId: f.agentID, WorkstationId: "workstation-1", PublicKey: other, Algorithm: identitypb.KeyAlgorithm_KEY_ALGORITHM_ECDSA_P256}))
-	requireConnectCode(t, "blank company", err, connect.CodeInvalidArgument)
+	requireTeammateCode(t, "blank company", err, connect.CodeInvalidArgument)
 
-	directory := mintCredential(t, f.h, f.h.ProjectID, service.CredentialKindDirectoryReader)
-	for name, key := range map[string]string{"no credential": "", "malformed": "nodot", "wrong secret": directory.PublicId + ".wrong", "directory key": directory.RawKey} {
+	directory := mintTeammateCredential(t, f.h, service.CredentialKindDirectoryReader, "dk_"+f.unique)
+	for name, key := range map[string]string{"no credential": "", "malformed": "nodot", "wrong secret": "dk_" + f.unique + ".wrong", "directory key": directory} {
 		_, err = teammateKeyClient(f.h, key).RegisterTeammateKey(context.Background(), connect.NewRequest(&identitypb.RegisterTeammateKeyRequest{ClaimId: f.claim("claim-d"), TeammateId: f.agentID, CompanyId: "company-1", WorkstationId: "workstation-1", PublicKey: other, Algorithm: identitypb.KeyAlgorithm_KEY_ALGORITHM_ECDSA_P256}))
-		requireConnectCode(t, name, err, connect.CodePermissionDenied)
+		requireTeammateCode(t, name, err, connect.CodePermissionDenied)
 	}
 	_, err = teammateKeyClient(f.h, f.managers+"x").RevokeTeammateKey(context.Background(), connect.NewRequest(&identitypb.RevokeTeammateKeyRequest{ClaimId: claim, Reason: identitypb.TeammateKeyRevocationReason_TEAMMATE_KEY_REVOCATION_REASON_RELEASED}))
-	requireConnectCode(t, "revoke with a wrong secret", err, connect.CodePermissionDenied)
+	requireTeammateCode(t, "revoke with a wrong secret", err, connect.CodePermissionDenied)
 
-	if got := counter(t, f.h, "identity_teammate_keys_registered_total", map[string]string{"result": "conflict"}); got != 2 {
+	if got := teammateCounter(t, f.h, "identity_teammate_keys_registered_total", map[string]string{"result": "conflict"}); got != 2 {
 		t.Fatalf("registered{conflict} = %v", got)
 	}
-	if got := counter(t, f.h, "identity_teammate_keys_registered_total", map[string]string{"result": "denied"}); got != 4 {
+	if got := teammateCounter(t, f.h, "identity_teammate_keys_registered_total", map[string]string{"result": "denied"}); got != 4 {
 		t.Fatalf("registered{denied} = %v", got)
 	}
 }
 
-func TestRedesign_TeammateKeys_ProofRefusals(t *testing.T) {
+func TestTeammateKeys_ProofRefusals(t *testing.T) {
 	f := newTeammateFixture(t)
 	private, public := p256Key(t)
 	impostor, _ := p256Key(t)
@@ -292,26 +371,26 @@ func TestRedesign_TeammateKeys_ProofRefusals(t *testing.T) {
 		t.Fatalf("CreateAgentMachineChallenge: %v", err)
 	}
 	_, err = f.exchange(t, keyID, challenge.ChallengeId, signP256(t, impostor)(challenge.Message))
-	requireConnectCode(t, "another key's signature", err, connect.CodeUnauthenticated)
+	requireTeammateCode(t, "another key's signature", err, connect.CodeUnauthenticated)
 	signature := signP256(t, private)(challenge.Message)
 	if _, err = f.exchange(t, keyID, challenge.ChallengeId, signature); err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
 	_, err = f.exchange(t, keyID, challenge.ChallengeId, signature)
-	requireConnectCode(t, "replayed challenge", err, connect.CodeUnauthenticated)
+	requireTeammateCode(t, "replayed challenge", err, connect.CodeUnauthenticated)
 	_, err = f.exchange(t, "unknown-key", challenge.ChallengeId, signature)
-	requireConnectCode(t, "unknown key", err, connect.CodeUnauthenticated)
+	requireTeammateCode(t, "unknown key", err, connect.CodeUnauthenticated)
 	_, err = f.challenge(t, "unknown-key")
-	requireConnectCode(t, "challenge for an unknown key", err, connect.CodeUnauthenticated)
+	requireTeammateCode(t, "challenge for an unknown key", err, connect.CodeUnauthenticated)
 
 	_, err = f.h.Client.CreateAgentMachineChallenge(context.Background(), connect.NewRequest(&identitypb.CreateAgentMachineChallengeRequest{TeammateKeyId: keyID, MachineId: "machine", Operation: identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_EXCHANGE_AGENT}))
-	requireConnectCode(t, "teammate key with a machine id", err, connect.CodeInvalidArgument)
+	requireTeammateCode(t, "teammate key with a machine id", err, connect.CodeInvalidArgument)
 	_, err = f.h.Client.CreateAgentMachineChallenge(context.Background(), connect.NewRequest(&identitypb.CreateAgentMachineChallengeRequest{TeammateKeyId: keyID, Operation: identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_LIST_AGENTS}))
-	requireConnectCode(t, "teammate key for another operation", err, connect.CodeInvalidArgument)
+	requireTeammateCode(t, "teammate key for another operation", err, connect.CodeInvalidArgument)
 	_, err = f.h.Client.ExchangeAgentMachineCredential(context.Background(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{TeammateKeyId: keyID, AgentUserId: f.agentID, Proof: &identitypb.AgentMachineProof{ChallengeId: challenge.ChallengeId, Signature: signature}}))
-	requireConnectCode(t, "teammate exchange naming an agent", err, connect.CodeInvalidArgument)
+	requireTeammateCode(t, "teammate exchange naming an agent", err, connect.CodeInvalidArgument)
 
-	if err = f.h.Stores.users.UpdateUser(context.Background(), f.agentID, map[string]any{"status": service.StatusDeactivated}); err != nil {
+	if err = f.h.Users.UpdateUser(context.Background(), f.agentID, map[string]any{"status": service.StatusDeactivated}); err != nil {
 		t.Fatal(err)
 	}
 	next, err := f.challenge(t, keyID)
@@ -319,13 +398,13 @@ func TestRedesign_TeammateKeys_ProofRefusals(t *testing.T) {
 		t.Fatalf("CreateAgentMachineChallenge: %v", err)
 	}
 	_, err = f.exchange(t, keyID, next.ChallengeId, signP256(t, private)(next.Message))
-	requireConnectCode(t, "deactivated teammate", err, connect.CodeUnauthenticated)
-	if got := counter(t, f.h, "identity_agent_exchanges_total", map[string]string{"key_kind": "teammate", "result": "refused"}); got < 4 {
+	requireTeammateCode(t, "deactivated teammate", err, connect.CodeUnauthenticated)
+	if got := teammateCounter(t, f.h, "identity_agent_exchanges_total", map[string]string{"key_kind": "teammate", "result": "refused"}); got < 4 {
 		t.Fatalf("exchanges{teammate,refused} = %v", got)
 	}
 }
 
-func TestRedesign_TeammateKeys_RevocationIsImmediate(t *testing.T) {
+func TestTeammateKeys_RevocationIsImmediate(t *testing.T) {
 	f := newTeammateFixture(t)
 	private, public := p256Key(t)
 	claim := f.claim("claim-revoke")
@@ -345,35 +424,35 @@ func TestRedesign_TeammateKeys_RevocationIsImmediate(t *testing.T) {
 		t.Fatalf("RevokeTeammateKey: %v", err)
 	}
 	_, err = f.exchange(t, keyID, pending.ChallengeId, signP256(t, private)(pending.Message))
-	requireConnectCode(t, "challenge issued before revocation", err, connect.CodeUnauthenticated)
+	requireTeammateCode(t, "challenge issued before revocation", err, connect.CodeUnauthenticated)
 	_, err = f.challenge(t, keyID)
-	requireConnectCode(t, "challenge after revocation", err, connect.CodeUnauthenticated)
+	requireTeammateCode(t, "challenge after revocation", err, connect.CodeUnauthenticated)
 	if err = revoke(claim, identitypb.TeammateKeyRevocationReason_TEAMMATE_KEY_REVOCATION_REASON_REMOVED); err != nil {
 		t.Fatalf("second RevokeTeammateKey: %v", err)
 	}
 	if err = revoke(f.claim("never-registered"), identitypb.TeammateKeyRevocationReason_TEAMMATE_KEY_REVOCATION_REASON_DRIFTED); err != nil {
 		t.Fatalf("RevokeTeammateKey(unknown): %v", err)
 	}
-	requireConnectCode(t, "unspecified reason", revoke(claim, identitypb.TeammateKeyRevocationReason_TEAMMATE_KEY_REVOCATION_REASON_UNSPECIFIED), connect.CodeInvalidArgument)
+	requireTeammateCode(t, "unspecified reason", revoke(claim, identitypb.TeammateKeyRevocationReason_TEAMMATE_KEY_REVOCATION_REASON_UNSPECIFIED), connect.CodeInvalidArgument)
 	_, err = f.register(t, claim, public, identitypb.KeyAlgorithm_KEY_ALGORITHM_ECDSA_P256)
-	requireConnectCode(t, "re-register a revoked claim", err, connect.CodeFailedPrecondition)
-	if got := counter(t, f.h, "identity_teammate_keys_revoked_total", nil); got != 1 {
+	requireTeammateCode(t, "re-register a revoked claim", err, connect.CodeFailedPrecondition)
+	if got := teammateCounter(t, f.h, "identity_teammate_keys_revoked_total", nil); got != 1 {
 		t.Fatalf("revoked = %v", got)
 	}
 }
 
-func TestRedesign_TeammateKeys_DisabledByDefault(t *testing.T) {
+func TestTeammateKeys_DisabledByDefault(t *testing.T) {
 	h := startTeammateHarness(t, false)
-	manager := mintCredential(t, h, h.ProjectID, service.CredentialKindTeammateKeyManager)
-	_, err := teammateKeyClient(h, manager.RawKey).RegisterTeammateKey(context.Background(), connect.NewRequest(&identitypb.RegisterTeammateKeyRequest{ClaimId: "claim"}))
-	requireConnectCode(t, "unmounted TeammateKeyService", err, connect.CodeUnimplemented)
+	manager := mintTeammateCredential(t, h, service.CredentialKindTeammateKeyManager, fmt.Sprintf("tk_off_%d", time.Now().UnixNano()))
+	_, err := teammateKeyClient(h, manager).RegisterTeammateKey(context.Background(), connect.NewRequest(&identitypb.RegisterTeammateKeyRequest{ClaimId: "claim"}))
+	requireTeammateCode(t, "unmounted TeammateKeyService", err, connect.CodeUnimplemented)
 	_, err = h.Client.CreateAgentMachineChallenge(context.Background(), connect.NewRequest(&identitypb.CreateAgentMachineChallengeRequest{TeammateKeyId: "key", Operation: identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_EXCHANGE_AGENT}))
-	requireConnectCode(t, "teammate challenge while disabled", err, connect.CodeFailedPrecondition)
+	requireTeammateCode(t, "teammate challenge while disabled", err, connect.CodeFailedPrecondition)
 	_, err = h.Client.ExchangeAgentMachineCredential(context.Background(), connect.NewRequest(&identitypb.ExchangeAgentMachineCredentialRequest{TeammateKeyId: "key", Proof: &identitypb.AgentMachineProof{ChallengeId: "c", Signature: []byte{1}}}))
-	requireConnectCode(t, "teammate exchange while disabled", err, connect.CodeFailedPrecondition)
+	requireTeammateCode(t, "teammate exchange while disabled", err, connect.CodeFailedPrecondition)
 }
 
-func counter(t *testing.T, h *RedesignHarness, name string, labels map[string]string) float64 {
+func teammateCounter(t *testing.T, h *teammateHarness, name string, labels map[string]string) float64 {
 	t.Helper()
 	families, err := h.Metrics.Gather()
 	if err != nil {
