@@ -1,5 +1,40 @@
 # Upgrade guide
 
+## Next — built with go-jose v4.1.6 for CVE-2026-116587; v4.26.0 withdrawn (no API or schema change)
+
+The binary now links `github.com/go-jose/go-jose/v4` v4.1.6, which fixes
+CVE-2026-116587, a denial of service when parsing a JSON Web Key that holds an
+RSA key. Every release from v4.19.0 to v4.26.0 links the vulnerable v4.1.4:
+v4.19.0 brought go-jose in with the OpenID provider library behind the agent
+OAuth endpoints (`internal/app/agent_oauth.go`), its only user. Those endpoints
+are mounted only with `GATEWAY_AGENT_OAUTH_ENABLED=true`, or
+`Config.AgentOAuthEnabled` in a program that builds `identityserver.Config`
+itself (off by default), so a deployment with the flag off does not serve them;
+upgrade either way, since an image scanner flags the library regardless. govulncheck has no entry for the
+advisory yet, so it gives no reachability answer, and the release image scan
+gates on any fixable HIGH finding, so the fix is the upgrade rather than a
+suppression.
+
+Code that imports only `pkg/...` does not link go-jose. A program embedding
+`identityserver` links it through the same provider library: require the commit
+of `github.com/elloloop/identity` that carries this entry, or a later one, or
+run `go get github.com/go-jose/go-jose/v4@v4.1.6` in the host module. A host
+module that also uses go-jose v4 itself should know that v4.1.6 no longer
+exports `RandReader` and refuses RSA keys over 4096 bits in a JSON Web Key by
+default (`MaxRSAModulusBits`).
+
+v4.26.0 is singled out only because its release scan ran after the advisory was
+published: its image was built, signed and published before the scan failed.
+Do not deploy it. Move any deployment running v4.19.0 through v4.26.0 to
+v4.26.1, which is v4.26.0 plus this entry. Coming from an earlier release, you
+also owe every entry added since it: `git diff <your tag> v4.26.1 --
+docs/UPGRADE.md` lists them. Until v4.26.1 is published, the `4.26`, `4` and
+`latest` image tags resolve to v4.26.0's image, so pin `4.26.1` rather than a
+floating tag. v4.26.1 adds no other upgrade entry, so the three entries below
+that v4.26.0 introduced (joining a tenant by domain with migration 0051, a
+suspended tenant's login policy, and the removal record with migration 0052,
+with their rollout notes) apply to it unchanged.
+
 ## Next — a member removed from a tenant cannot rejoin it by domain (migration 0052; behaviour change; `RemoveTenantMember` audited; `MembershipStore.RemoveMembership`, `JoinByDomain`, `IsRemoved` and `MembershipService.RemoveTenantMember` (Go API))
 
 Until now `RemoveTenantMember` deleted the membership and kept no trace of
