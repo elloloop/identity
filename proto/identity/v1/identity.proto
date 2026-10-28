@@ -2021,7 +2021,7 @@ message TenantMembership {
   string user_id = 3;
   string source = 4; // "domain" | "invited" | "added" | "created"
   string role = 5; // "member" | "admin" | "owner"
-  string status = 6; // "active" | "pending" | "inactive"
+  string status = 6; // "active" | "pending" | "inactive" | "suspended"
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
 }
@@ -2086,6 +2086,32 @@ message RemoveTenantMemberRequest {
 }
 
 message RemoveTenantMemberResponse {}
+
+// SuspendTenantMemberRequest names the member an owner or admin suspends.
+message SuspendTenantMemberRequest {
+  string tenant_id = 1;
+  // user_id is an active member of the tenant other than the caller.
+  string user_id = 2;
+}
+
+message SuspendTenantMemberResponse {
+  // membership is the member's membership, status "suspended".
+  TenantMembership membership = 1;
+}
+
+// RestoreTenantMemberRequest names the suspended member an owner or admin
+// lets back in.
+message RestoreTenantMemberRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message RestoreTenantMemberResponse {
+  // membership is the member's membership as it now stands: status
+  // "active", or "inactive" for one through the email's domain whose email
+  // is not on a domain the tenant has verified when it is restored.
+  TenantMembership membership = 1;
+}
 
 // TransferTenantOwnershipRequest names the member the caller, an owner of
 // the tenant, hands its ownership to.
@@ -3506,7 +3532,10 @@ service IdentityService {
   // canonical form sign-in uses, so a "+tag" spelling of it matches;
   // PERMISSION_DENIED otherwise), and only once they have verified that email
   // (FAILED_PRECONDITION before). Every one, accepting included, is
-  // PERMISSION_DENIED for a suspended tenant. Accepting never lowers a role
+  // PERMISSION_DENIED for a suspended tenant, and accepting is
+  // PERMISSION_DENIED too while the caller's own membership of the tenant is
+  // suspended (SuspendTenantMember); the invitation stays pending through
+  // either. Accepting never lowers a role
   // the caller already holds in the tenant: an owner who accepts a member
   // invitation stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED
   // past the tenant's cap in the window, the inviter's cap across every
@@ -3533,6 +3562,37 @@ service IdentityService {
   // membership from another source lets them back in, such as an invitation
   // they accept.
   rpc RemoveTenantMember(RemoveTenantMemberRequest) returns (RemoveTenantMemberResponse);
+  // SuspendTenantMember stops user_id acting in tenant_id without removing
+  // them: the membership keeps its role and source, and ListTenantMembers
+  // shows it with status "suspended". While it is suspended the member
+  // cannot choose the tenant for a token (RefreshToken refuses it, so an
+  // access token that already names the tenant works until it expires),
+  // ListMyTenants leaves it out, they cannot administer it, and they cannot
+  // come back on their own: accepting an invitation to the tenant and
+  // JoinTenantByDomain are PERMISSION_DENIED, and their email leaving the
+  // domain and coming back does not end the suspension. The caller must be
+  // an active owner or admin of a tenant that is not suspended
+  // (PERMISSION_DENIED otherwise). Naming the caller is INVALID_ARGUMENT,
+  // the tenant's last active owner is FAILED_PRECONDITION, and a user_id
+  // that is not an active or suspended member is NOT_FOUND. Suspending a
+  // suspended member returns the membership unchanged and records nothing;
+  // a suspension is audited. Available only on the postgres control-plane
+  // driver; the memory and SQLite drivers return Unimplemented.
+  rpc SuspendTenantMember(SuspendTenantMemberRequest) returns (SuspendTenantMemberResponse);
+  // RestoreTenantMember lets a suspended member act in the tenant again,
+  // with the role they had. The caller must be an active owner or admin of
+  // a tenant that is not suspended (PERMISSION_DENIED otherwise), and a
+  // user_id that is not an active or suspended member is NOT_FOUND. A
+  // membership through the email's domain whose email is not on a domain
+  // the tenant has verified when it is restored ends instead (status
+  // "inactive"), as an active one does when the email leaves the domain;
+  // the member needs an invitation to come back. Restoring an
+  // active member returns the membership unchanged and records nothing; a
+  // restore is audited. An operator's AdminAddTenantAdmin or
+  // AdminRecoverTenantOwnership also lifts a suspension. Available only on
+  // the postgres control-plane driver; the memory and SQLite drivers return
+  // Unimplemented.
+  rpc RestoreTenantMember(RestoreTenantMemberRequest) returns (RestoreTenantMemberResponse);
   // TransferTenantOwnership hands the caller's ownership of a tenant to
   // another active member in one step: the member becomes an owner and the
   // caller an admin, so the tenant is never left without an owner. Naming a
@@ -3576,7 +3636,8 @@ service IdentityService {
   // action, needing no invitation. ListJoinableTenants returns the tenant
   // the caller's verified email's domain lets them join (see
   // ListJoinableTenantsResponse), and is empty for an account that could not
-  // join, including one removed from the tenant. Available only on the postgres control-plane driver; the memory and
+  // join, including one removed from the tenant or suspended in it.
+  // Available only on the postgres control-plane driver; the memory and
   // SQLite drivers return Unimplemented.
   rpc ListJoinableTenants(ListJoinableTenantsRequest) returns (ListJoinableTenantsResponse);
   // JoinTenantByDomain makes the caller an active member of tenant_id with
@@ -3593,15 +3654,19 @@ service IdentityService {
   //
   // A caller an owner or admin removed from the tenant (RemoveTenantMember)
   // is PERMISSION_DENIED, with a message saying so, until a membership from
-  // another source, such as an invitation they accept, lets them back in.
+  // another source, such as an invitation they accept, lets them back in. A
+  // caller suspended in the tenant (SuspendTenantMember) is
+  // PERMISSION_DENIED, with a message saying so, until an owner or admin
+  // restores them.
   //
   // Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
-  // account, for a caller removed from the tenant, and for every tenant the
-  // domain does not let the caller join (one that has not verified it, has
-  // joining off, or is suspended or latent), an unknown tenant included, so
-  // the call reveals nothing about other tenants; FAILED_PRECONDITION until the caller has verified their
-  // email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
-  // postgres control-plane driver; the memory and SQLite drivers return
+  // account, for a caller removed from or suspended in the tenant, and for
+  // every tenant the domain does not let the caller join (one that has not
+  // verified it, has joining off, or is suspended or latent), an unknown
+  // tenant included, so the call reveals nothing about other tenants;
+  // FAILED_PRECONDITION until the caller has verified their email;
+  // INVALID_ARGUMENT for a blank tenant_id. Available only on the postgres
+  // control-plane driver; the memory and SQLite drivers return
   // Unimplemented.
   rpc JoinTenantByDomain(JoinTenantByDomainRequest) returns (JoinTenantByDomainResponse);
 
@@ -3710,8 +3775,8 @@ service IdentityService {
   // account, so a retry gets the first answer. Otherwise user_id must be an
   // account of the project (else NOT_FOUND) that is an active, signed-up
   // person's with a verified email (else FAILED_PRECONDITION); a membership
-  // it holds becomes an active owner one and keeps a source other than the
-  // domain's. A latent tenant has never had an owner and is
+  // it holds, a suspended one included, becomes an active owner one and
+  // keeps a source other than the domain's. A latent tenant has never had an owner and is
   // FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
   // the audit trail when it appoints; a refusal is not recorded.
   // Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when

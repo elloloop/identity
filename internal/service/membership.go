@@ -29,6 +29,11 @@ const (
 	MembershipStatusActive   = "active"
 	MembershipStatusPending  = "pending"
 	MembershipStatusInactive = "inactive"
+	// MembershipStatusSuspended is a membership a tenant owner or admin
+	// suspended (SuspendTenantMember): it keeps its role and source, and lets
+	// its holder do nothing in the tenant until RestoreTenantMember, or an
+	// operator's grant, lifts it.
+	MembershipStatusSuspended = "suspended"
 )
 
 // Invitation status.
@@ -109,7 +114,8 @@ type MembershipStore interface {
 	// UpsertMembership inserts or, on a (project, tenant, user) conflict,
 	// updates source/role/status in place (keeping id + created_at_ms). A
 	// source other than MembershipSourceDomain also deletes the user's
-	// removal record (see RemoveMembership). Returns the surviving row id.
+	// removal record (see RemoveMembership). It writes m.Status whatever the
+	// row held, so it lifts a suspension. Returns the surviving row id.
 	UpsertMembership(ctx context.Context, m *TenantMembership) (string, error)
 	// GrantMembership makes m.UserID an active member of m.TenantID at
 	// m.Role, unless they already hold an active membership there at m.Role
@@ -123,7 +129,9 @@ type MembershipStore interface {
 	// grant keeps. The decision is made where the write is, so of two
 	// concurrent grants of the same membership one at most reports a change.
 	// A source other than MembershipSourceDomain also deletes the user's
-	// removal record (see RemoveMembership), ordered against a removal.
+	// removal record (see RemoveMembership), ordered against a removal. A
+	// suspended membership is ErrMemberSuspended and is left as it is: only
+	// RestoreMembership lifts a suspension.
 	GrantMembership(ctx context.Context, m *TenantMembership) (granted *TenantMembership, changed bool, err error)
 	// GetMembership returns the membership for (project, tenant, user), or
 	// (nil, nil).
@@ -152,7 +160,8 @@ type MembershipStore interface {
 	// when the domain or the tenant does not let the user join,
 	// ErrRemovedFromTenant while a removal stands, the membership and
 	// false when the user already holds an active one, and the membership
-	// and true when this call wrote it.
+	// and true when this call wrote it. A suspended membership is
+	// ErrMemberSuspended.
 	JoinByDomain(ctx context.Context, projectID, tenantID, userID, domainID string) (joined *TenantMembership, changed bool, err error)
 	// IsRemoved reports whether userID has a removal record in the tenant:
 	// an owner or admin removed them, and no membership from another source
@@ -168,6 +177,24 @@ type MembershipStore interface {
 	// does not end when the email leaves the domain. Returns both memberships
 	// as they now stand.
 	TransferOwnership(ctx context.Context, projectID, tenantID, fromUserID, toUserID string) (from, to *TenantMembership, err error)
+	// SuspendMembership sets the active membership for (project, tenant,
+	// user) to MembershipStatusSuspended, keeping its role and source, unless
+	// it is the tenant's last active owner (ErrLastOwner): the check and the
+	// write are one step, ordered against a removal, a transfer or another
+	// suspension. Returns the membership as it now stands, and whether this
+	// call suspended it; a suspended membership is returned unchanged. Any
+	// other status, or no membership, is ErrNotFound.
+	SuspendMembership(ctx context.Context, projectID, tenantID, userID string) (m *TenantMembership, changed bool, err error)
+	// RestoreMembership lifts the suspension of the membership for (project,
+	// tenant, user), keeping its role and source. It becomes active, except
+	// one with source MembershipSourceDomain whose holder's email domain,
+	// emailDomain (the domain of FoldEmail of the email), is not a domain
+	// the tenant has verified: that one becomes inactive, as it would have
+	// when the email left the domain. Returns the membership as it now
+	// stands, and whether this call lifted a suspension; an active membership
+	// is returned unchanged. Any other status, or no membership, is
+	// ErrNotFound.
+	RestoreMembership(ctx context.Context, projectID, tenantID, userID, emailDomain string) (m *TenantMembership, changed bool, err error)
 }
 
 // InvitationStore persists TenantInvitations within a Project. Reads that

@@ -371,6 +371,22 @@ const (
 	// domain until a membership from another source lets them back in.
 	// Removing a membership that does not exist records nothing.
 	EventTenantMemberRemoved EventType = "tenant_member_removed"
+
+	// EventTenantMemberSuspended records a tenant owner or admin suspending
+	// a member (SuspendTenantMember): actor the caller and target the
+	// person suspended, with the project and tenant ids and the role and
+	// source the membership keeps in the details. Suspending a suspended
+	// member records nothing.
+	EventTenantMemberSuspended EventType = "tenant_member_suspended"
+
+	// EventTenantMemberRestored records a tenant owner or admin lifting a
+	// member's suspension (RestoreTenantMember): actor the caller and target
+	// the person, with the project and tenant ids, the role and source, and
+	// the status the membership now has in the details: "active", or
+	// "inactive" for a membership through the email's domain whose email is
+	// no longer on a domain the tenant has verified. Restoring an active
+	// member records nothing.
+	EventTenantMemberRestored EventType = "tenant_member_restored"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -467,6 +483,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventDomainJoinSet:                 {},
 	EventTenantJoinedByDomain:          {},
 	EventTenantMemberRemoved:           {},
+	EventTenantMemberSuspended:         {},
+	EventTenantMemberRestored:          {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

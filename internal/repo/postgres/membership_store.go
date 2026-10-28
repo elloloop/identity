@@ -129,7 +129,8 @@ var grantHoldsRole = `tenant_memberships.status = 'active' AND ` +
 // source, since such a membership counts only while that email is verified
 // and on the tenant's domain, and a grant is a decision about this person;
 // any other source is left alone, whether the grant raises the role,
-// reactivates the membership or changes nothing.
+// reactivates the membership or changes nothing. A suspended membership is
+// not written: only RestoreMembership lifts a suspension.
 var grantMembershipQuery = `
 		INSERT INTO tenant_memberships (
 			id, project_id, tenant_id, user_id, source, role, status,
@@ -140,7 +141,8 @@ var grantMembershipQuery = `
 			role          = CASE WHEN ` + grantHoldsRole + ` THEN tenant_memberships.role ELSE EXCLUDED.role END,
 			status        = 'active',
 			updated_at_ms = EXCLUDED.updated_at_ms
-		WHERE NOT (` + grantHoldsRole + `
+		WHERE tenant_memberships.status <> 'suspended'
+		  AND NOT (` + grantHoldsRole + `
 		       AND (tenant_memberships.source <> 'domain' OR EXCLUDED.source = 'domain'))
 		RETURNING ` + membershipColumns
 
@@ -153,8 +155,9 @@ var grantMembershipQuery = `
 // decision is the statement's own, so it holds against a concurrent grant.
 // A grant from any source but the email's domain also deletes the user's
 // removal record (clearRemoval), in the same transaction and under the
-// membership's lock, so it cannot interleave with a removal. Returns the
-// surviving row, and whether the statement wrote it.
+// membership's lock, so it cannot interleave with a removal. A suspended
+// membership is service.ErrMemberSuspended and is left as it is. Returns
+// the surviving row, and whether the statement wrote it.
 func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.TenantMembership) (*service.TenantMembership, bool, error) {
 	if m == nil {
 		return nil, false, errors.New("postgres: GrantMembership: nil membership")
@@ -192,8 +195,9 @@ func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.Tenant
 }
 
 // grantIn runs grantMembershipQuery in tx and returns the surviving
-// membership and whether the statement wrote it. op names the caller in
-// errors.
+// membership and whether the statement wrote it, or
+// service.ErrMemberSuspended when the membership is suspended. op names the
+// caller in errors.
 func grantIn(ctx context.Context, tx pgx.Tx, op, projectID, tenantID, userID, source, role string) (*service.TenantMembership, bool, error) {
 	granted, err := scanMembership(tx.QueryRow(ctx, grantMembershipQuery, newID(), projectID, tenantID, userID, source, role, nowMs()))
 	if err == nil {
@@ -202,8 +206,8 @@ func grantIn(ctx context.Context, tx pgx.Tx, op, projectID, tenantID, userID, so
 	if !noRows(err) {
 		return nil, false, wrapPgErr(op, err)
 	}
-	// The user already holds the role or a higher one, from a source the
-	// grant does not replace: nothing changed.
+	// The membership is suspended, or the user already holds the role or a
+	// higher one from a source the grant does not replace: nothing changed.
 	kept, err := scanMembership(tx.QueryRow(ctx, `SELECT `+membershipColumns+`
 		FROM tenant_memberships
 		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`, projectID, tenantID, userID))
@@ -213,13 +217,16 @@ func grantIn(ctx context.Context, tx pgx.Tx, op, projectID, tenantID, userID, so
 	if err != nil {
 		return nil, false, wrapPgErr(op+"(read)", err)
 	}
+	if kept.Status == service.MembershipStatusSuspended {
+		return nil, false, service.ErrMemberSuspended
+	}
 	return kept, false, nil
 }
 
 // membershipLockKey names the advisory lock every write that records,
-// clears or consults a (project, tenant, user) removal takes first:
-// RemoveMembership, JoinByDomain, GrantMembership and UpsertMembership. A
-// statement that waits on a row re-checks only that row, with its old
+// clears or consults a (project, tenant, user) removal or suspension takes
+// first: RemoveMembership, JoinByDomain, GrantMembership, UpsertMembership,
+// SuspendMembership and RestoreMembership. A statement that waits on a row re-checks only that row, with its old
 // snapshot for everything else, so without it a join could wait on the
 // membership a removal deletes and then insert it again, having read no
 // removal record. Each of those transactions takes it before any row lock
@@ -492,16 +499,8 @@ func (s *MembershipStore) RemoveMembership(ctx context.Context, projectID, tenan
 	if target == nil {
 		return nil, nil
 	}
-	if target.Role == service.RoleOwner && target.Status == service.MembershipStatusActive {
-		var others int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM tenant_memberships
-			WHERE project_id = $1 AND tenant_id = $2 AND user_id <> $3
-			  AND role = 'owner' AND status = 'active'`, projectID, tenantID, userID).Scan(&others); err != nil {
-			return nil, wrapPgErr("RemoveMembership(count)", err)
-		}
-		if others == 0 {
-			return nil, fmt.Errorf("%w: cannot remove the last owner of a tenant", service.ErrLastOwner)
-		}
+	if err := keepAnOwner(ctx, tx, "RemoveMembership", target, "remove"); err != nil {
+		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM tenant_memberships
 		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`, projectID, tenantID, userID); err != nil {
@@ -520,10 +519,137 @@ func (s *MembershipStore) RemoveMembership(ctx context.Context, projectID, tenan
 	return target, nil
 }
 
+// keepAnOwner refuses, with service.ErrLastOwner, to take target out of
+// the tenant's active owners when it is the last of them. verb names what
+// the caller would do to it, in the error. It must run after lockOwnersAnd
+// in the same transaction: the count is a statement of its own, so it sees
+// whatever committed while the locks were awaited.
+func keepAnOwner(ctx context.Context, tx pgx.Tx, op string, target *service.TenantMembership, verb string) error {
+	if target.Role != service.RoleOwner || target.Status != service.MembershipStatusActive {
+		return nil
+	}
+	var others int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id <> $3
+		  AND role = 'owner' AND status = 'active'`, target.ProjectID, target.TenantID, target.UserID).Scan(&others); err != nil {
+		return wrapPgErr(op+"(count)", err)
+	}
+	if others == 0 {
+		return fmt.Errorf("%w: cannot %s the last owner of a tenant", service.ErrLastOwner, verb)
+	}
+	return nil
+}
+
+// SuspendMembership sets the active membership for (project, tenant, user)
+// to service.MembershipStatusSuspended, keeping its role and source, unless
+// it is the tenant's last active owner (service.ErrLastOwner). It takes its
+// locks as RemoveMembership does, the membership's lock and then
+// lockOwnersAnd, so a suspension, a removal and a transfer that race cannot
+// together leave the tenant without an owner. Returns the membership as it
+// now stands, and whether this call suspended it: a suspended membership is
+// returned unchanged. Any other status, or no membership, is
+// service.ErrNotFound.
+func (s *MembershipStore) SuspendMembership(ctx context.Context, projectID, tenantID, userID string) (*service.TenantMembership, bool, error) {
+	if projectID == "" || tenantID == "" || userID == "" {
+		return nil, false, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, wrapPgErr("SuspendMembership", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := lockMembership(ctx, tx, "SuspendMembership", projectID, tenantID, userID); err != nil {
+		return nil, false, err
+	}
+	held, err := lockOwnersAnd(ctx, tx, projectID, tenantID, userID)
+	if err != nil {
+		return nil, false, wrapPgErr("SuspendMembership(lock)", err)
+	}
+	target := held[userID]
+	switch {
+	case target == nil:
+		return nil, false, fmt.Errorf("%w: the user is not a member of the tenant", service.ErrNotFound)
+	case target.Status == service.MembershipStatusSuspended:
+		return target, false, nil
+	case target.Status != service.MembershipStatusActive:
+		return nil, false, fmt.Errorf("%w: the user is not an active member of the tenant", service.ErrNotFound)
+	}
+	if err := keepAnOwner(ctx, tx, "SuspendMembership", target, "suspend"); err != nil {
+		return nil, false, err
+	}
+	suspended, err := scanMembership(tx.QueryRow(ctx, `
+		UPDATE tenant_memberships SET status = 'suspended', updated_at_ms = $4
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3
+		RETURNING `+membershipColumns, projectID, tenantID, userID, nowMs()))
+	if err != nil {
+		return nil, false, wrapPgErr("SuspendMembership", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, wrapPgErr("SuspendMembership(commit)", err)
+	}
+	return suspended, true, nil
+}
+
+// RestoreMembership lifts the suspension of the membership for (project,
+// tenant, user). It becomes active again, with the role and source it had,
+// except one from the email's domain whose email is no longer on a domain
+// the tenant has verified: that one becomes inactive, as migration 0047's
+// trigger would have made it had it not been suspended. emailDomain is the
+// domain of the account's email under FoldEmail, as users.email_domain
+// holds it. Returns the membership as it now stands, and whether this call
+// lifted a suspension: an active membership is returned unchanged. Any
+// other status, or no membership, is service.ErrNotFound.
+func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tenantID, userID, emailDomain string) (*service.TenantMembership, bool, error) {
+	if projectID == "" || tenantID == "" || userID == "" {
+		return nil, false, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, wrapPgErr("RestoreMembership", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := lockMembership(ctx, tx, "RestoreMembership", projectID, tenantID, userID); err != nil {
+		return nil, false, err
+	}
+	target, err := scanMembership(tx.QueryRow(ctx, `SELECT `+membershipColumns+`
+		FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3
+		FOR UPDATE`, projectID, tenantID, userID))
+	switch {
+	case noRows(err):
+		return nil, false, fmt.Errorf("%w: the user is not a member of the tenant", service.ErrNotFound)
+	case err != nil:
+		return nil, false, wrapPgErr("RestoreMembership(lock)", err)
+	case target.Status == service.MembershipStatusActive:
+		return target, false, nil
+	case target.Status != service.MembershipStatusSuspended:
+		return nil, false, fmt.Errorf("%w: the user is not a suspended member of the tenant", service.ErrNotFound)
+	}
+	restored, err := scanMembership(tx.QueryRow(ctx, `
+		UPDATE tenant_memberships m SET
+			status = CASE WHEN m.source = 'domain' AND NOT EXISTS (
+			              SELECT 1 FROM domains d
+			              WHERE d.project_id = m.project_id AND d.tenant_id = m.tenant_id
+			                AND lower(d.domain) = $4 AND d.status = 'verified')
+			         THEN 'inactive' ELSE 'active' END,
+			updated_at_ms = $5
+		WHERE m.project_id = $1 AND m.tenant_id = $2 AND m.user_id = $3
+		RETURNING `+membershipColumns, projectID, tenantID, userID, emailDomain, nowMs()))
+	if err != nil {
+		return nil, false, wrapPgErr("RestoreMembership", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, wrapPgErr("RestoreMembership(commit)", err)
+	}
+	return restored, true, nil
+}
+
 // lockOwnersAnd locks the tenant's active owner memberships and those of
 // userIDs, and returns the memberships of userIDs it found, by user id, as
-// they stand once locked. RemoveMembership and TransferOwnership take their
-// locks this way, in one statement and in user_id order, so they queue
+// they stand once locked. RemoveMembership, SuspendMembership and
+// TransferOwnership take their locks this way, in one statement and in user_id order, so they queue
 // behind one another and never deadlock: two transactions that each take
 // all their locks in one ordered pass cannot each hold a row the other
 // waits for. Two writes that change owners do not come through here and

@@ -783,6 +783,14 @@ func (b *grpcBridge) RemoveTenantMember(ctx context.Context, in *identitypb.Remo
 	return invoke(ctx, b, in, b.h.RemoveTenantMember)
 }
 
+func (b *grpcBridge) SuspendTenantMember(ctx context.Context, in *identitypb.SuspendTenantMemberRequest) (*identitypb.SuspendTenantMemberResponse, error) {
+	return invoke(ctx, b, in, b.h.SuspendTenantMember)
+}
+
+func (b *grpcBridge) RestoreTenantMember(ctx context.Context, in *identitypb.RestoreTenantMemberRequest) (*identitypb.RestoreTenantMemberResponse, error) {
+	return invoke(ctx, b, in, b.h.RestoreTenantMember)
+}
+
 func (b *grpcBridge) TransferTenantOwnership(ctx context.Context, in *identitypb.TransferTenantOwnershipRequest) (*identitypb.TransferTenantOwnershipResponse, error) {
 	return invoke(ctx, b, in, b.h.TransferTenantOwnership)
 }

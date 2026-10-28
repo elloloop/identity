@@ -236,6 +236,8 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID, domainID str
 			return nil, err
 		}
 	}
+	// A caller suspended since authorizeVerify passed keeps the suspension
+	// and gains no ownership; the domain they proved stays verified.
 	if _, _, err := s.memberships.GrantMembership(ctx, &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  t.ID,
@@ -243,7 +245,7 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID, domainID str
 		Source:    MembershipSourceAdded,
 		Role:      RoleOwner,
 		Status:    MembershipStatusActive,
-	}); err != nil {
+	}); err != nil && !errors.Is(err, ErrMemberSuspended) {
 		return nil, err
 	}
 

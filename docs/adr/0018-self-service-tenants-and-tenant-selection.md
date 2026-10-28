@@ -43,6 +43,13 @@ domain until a membership from another source, such as an invitation they
 accept, lets them back in, and the removal is audited
 ([Joining by domain](#joining-by-domain)).
 
+**Amended** (2026-10-28): an owner or admin can suspend a member.
+`SuspendTenantMember` keeps the membership, its role and its source, at a
+new status, `suspended` (migration 0053), and `RestoreTenantMember` lifts
+it, each audited. A suspended member cannot select or administer the
+tenant, nor lift the suspension themselves
+([Suspending a member](#suspending-a-member)).
+
 ## Context
 
 Until now a tenant came into being in one of two ways: auto-formed from the
@@ -420,6 +427,54 @@ themselves.
   the transaction, since accounts are under row-level security, so an
   email change off the domain that lands in between leaves a `domain`
   membership that the tenant does not count while the email is off it.
+
+### Suspending a member
+
+An owner or admin sometimes needs to stop one person acting in a tenant
+for a while, during a leave, a dispute or an investigation, and let them
+back afterwards as they were. Removing them and inviting them again loses
+that: the invitation sets the role afresh, a member through the domain
+comes back as an invited one, and until the invitation is accepted they are
+not listed at all. Suspending the tenant (above) stops everyone.
+
+- **A suspension is a membership status.** `SuspendTenantMember` sets the
+  membership's status to `suspended`, keeping its role and source, and
+  `RestoreTenantMember` sets it back to `active`. Every read that lets a
+  member act already asks for an active membership: selection,
+  `ListMyTenants`, the tenant-admin check, ownership transfer. So a
+  suspended member is stopped everywhere at once, and `ListTenantMembers`
+  shows them as suspended. Migration 0053 admits the status. Each change is
+  audited as `tenant_member_suspended` or `tenant_member_restored`, by the
+  call that changed something.
+- **The member cannot lift it.** A suspension that an invitation could
+  undo, one sent before it included, would mean nothing, and neither would
+  one that a domain join could undo. So accepting an invitation to the
+  tenant and `JoinTenantByDomain` refuse a suspended member with
+  `PERMISSION_DENIED`, and the invitation stays open. Any grant that would
+  reactivate the row refuses it in the same way. An operator's
+  `AdminAddTenantAdmin` or `AdminRecoverTenantOwnership` lifts it, because
+  that is a decision about the person, as a restore is.
+- **Leaving the domain does not shed it.** Migration 0047's trigger ends
+  an active domain membership when the email leaves the tenant's verified
+  domains, and the person may join again on returning. Applied to a
+  suspended one, that would let them shed the suspension by moving their
+  email off the domain and back. So the trigger leaves suspended rows
+  alone. A restore applies the rule instead: a domain membership whose
+  email is not on a domain the tenant has verified when it is restored ends
+  (status `inactive`), and the response says so. The rule is applied at the
+  moment of the restore, so an email that is off the domain only
+  temporarily at that moment also ends it.
+- **A tenant keeps an owner.** Suspending an owner counts as removing one.
+  The suspension takes the locks a removal takes, so the last active owner
+  cannot be suspended, even by two suspensions at once or a suspension
+  racing a removal or a transfer. An admin may suspend an owner while
+  another remains, as an admin may remove one. Nobody suspends themselves:
+  a caller who means to leave removes themselves.
+- **It takes effect at the next refresh, and revokes nothing.** Like a
+  removal, a suspension ends none of the member's sessions and does not
+  revoke their agent grants or machines (decision 7). An access token that
+  already names the tenant works until it expires, within the access-token
+  lifetime. A product that cannot wait checks the membership itself.
 
 ## What this amends
 

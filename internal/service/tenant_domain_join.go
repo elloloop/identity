@@ -115,8 +115,8 @@ func (s *DomainService) SetDomainJoin(ctx context.Context, callerID, domainID st
 // verified domain on one tenant at most, so the list has at most one entry
 // today. An account that could not join (an unverified email, a public
 // provider's domain, an anonymous, agent or inactive account) gets an empty
-// list, as does one already an active member and one removed from the
-// tenant (ErrRemovedFromTenant).
+// list, as does one already an active member, one removed from the
+// tenant (ErrRemovedFromTenant) and one suspended in it (ErrMemberSuspended).
 func (s *MembershipService) ListJoinableTenants(ctx context.Context, callerID string) ([]*JoinableTenant, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -149,7 +149,7 @@ func (s *MembershipService) ListJoinableTenants(ctx context.Context, callerID st
 	if err != nil {
 		return nil, err
 	}
-	if m != nil && m.Status == MembershipStatusActive {
+	if m != nil && (m.Status == MembershipStatusActive || m.Status == MembershipStatusSuspended) {
 		return []*JoinableTenant{}, nil
 	}
 	removed, err := s.memberships.IsRemoved(ctx, projectID, t.ID, callerID)
@@ -172,7 +172,9 @@ func (s *MembershipService) ListJoinableTenants(ctx context.Context, callerID st
 // cannot join. The caller must be an active, signed-up person, and an
 // unverified email is ErrEmailVerificationRequired. A person an owner or
 // admin removed from the tenant is ErrRemovedFromTenant until a membership
-// from another source, such as an accepted invitation, lets them back in.
+// from another source, such as an accepted invitation, lets them back in,
+// and one suspended in it is ErrMemberSuspended until an owner or admin
+// restores them.
 // The store decides whether the domain still lets them in where it writes
 // (MembershipStore.JoinByDomain), so a domain turned off, unverified or
 // moved, a suspension or a removal that lands meanwhile refuses the join.

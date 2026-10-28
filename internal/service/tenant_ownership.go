@@ -172,7 +172,9 @@ func requireEligibleTenantOwner(u *User) error {
 //
 // userID may be any account of the project an owner may be (see
 // judgeTenantOwner), a member of the tenant or not; a membership it already
-// holds becomes an active owner one and keeps its source. The tenant must be
+// holds becomes an active owner one and keeps its source. A suspended one is
+// restored first (MembershipStore.RestoreMembership), so the appointment
+// lifts the suspension. The tenant must be
 // claimed or suspended: a latent tenant has never had an owner
 // (ErrTenantStatusConflict). Only a grant that changed something is audited.
 // A refused recovery is not. Recovery reads the governors, then grants, so
@@ -224,6 +226,10 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 		return nil, ErrTenantStillGoverned
 	}
 
+	restored, err := s.liftSuspension(ctx, projectID, tenantID, user)
+	if err != nil {
+		return nil, err
+	}
 	m, changed, err := s.memberships.GrantMembership(ctx, &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  tenantID,
@@ -234,7 +240,7 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	if changed {
+	if changed || restored {
 		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantOwnershipRecovered,
 			audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
 			audit.WithSuccess(true), audit.WithDetails(map[string]any{
@@ -244,6 +250,22 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 			}))
 	}
 	return m, nil
+}
+
+// liftSuspension restores user's membership of the tenant when it is
+// suspended, so a grant can make it an owner one, and reports whether it
+// lifted one. Any other membership, or none, is left to the grant.
+func (s *ControlPlaneAdminService) liftSuspension(ctx context.Context, projectID, tenantID string, user *User) (bool, error) {
+	held, err := s.memberships.GetMembership(ctx, projectID, tenantID, user.ID)
+	if err != nil || held == nil || held.Status != MembershipStatusSuspended {
+		return false, err
+	}
+	_, restored, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, user.ID, accountEmailDomain(user))
+	if errors.Is(err, ErrNotFound) {
+		// Removed or restored since the read: the grant decides.
+		return false, nil
+	}
+	return restored, err
 }
 
 // governorsWhoCanSignIn returns the tenant's active owner and admin

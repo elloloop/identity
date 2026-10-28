@@ -1,5 +1,104 @@
 # Upgrade guide
 
+## Next — an owner or admin can suspend and restore a member (migration 0053; additive RPCs; behaviour change for suspended members; `MembershipStore.SuspendMembership`, `RestoreMembership` (Go API))
+
+Two RPCs are new, each for an active owner or admin of a tenant that is not
+suspended:
+
+- `SuspendTenantMember(tenant_id, user_id)` sets an active member's
+  membership to the new status `suspended`, keeping its role and source.
+  Suspending a suspended member returns it unchanged. Naming yourself is
+  `INVALID_ARGUMENT`, the tenant's last active owner is
+  `FAILED_PRECONDITION`, and anyone not an active or suspended member is
+  `NOT_FOUND`.
+- `RestoreTenantMember(tenant_id, user_id)` makes a suspended member
+  active again, with the role and source they had. A membership through the
+  email's domain whose email is not on a domain the tenant has verified when
+  it is restored becomes `inactive` instead, and the response shows it.
+  Restoring an active member returns it unchanged.
+
+Each change is audited, as `tenant_member_suspended` or
+`tenant_member_restored`: the caller as actor, the member as target, the
+request's IP and user agent, and `project_id`, `tenant_id` and the
+membership's `role`, `source` and resulting `status` in the details. A call
+that changes nothing records nothing. Both are served on the postgres
+control-plane driver only; the memory and SQLite drivers return
+`UNIMPLEMENTED`.
+
+While a member is suspended:
+
+- `ListTenantMembers` lists them with status `suspended`, a value
+  `TenantMembership.status` did not take before. A client that switches on
+  the status should handle it.
+- `RefreshToken` refuses to select the tenant for them (`PERMISSION_DENIED`
+  with the `NOT_A_MEMBER` detail, token unspent), and `ListMyTenants` and
+  `ListJoinableTenants` leave it out.
+- They cannot administer the tenant or have ownership transferred to them.
+- `AcceptTenantInvitation` for the tenant and `JoinTenantByDomain` are
+  `PERMISSION_DENIED`, with the message "your membership of this tenant is
+  suspended; an owner or admin must restore it". The invitation stays
+  pending.
+- Their email leaving the tenant's verified domains does not end a
+  suspended domain membership.
+
+An operator's `AdminAddTenantAdmin` or `AdminRecoverTenantOwnership` lifts a
+suspension, as a restore does. A suspension takes effect at the member's
+next refresh. It ends no session and revokes no agent grant or machine, so
+an access token that already names the tenant works until it expires.
+
+The last active owner now cannot be removed or suspended, and the error
+text changed with that. `RemoveTenantMember` on the last owner is still
+`FAILED_PRECONDITION`, but its message is now "a tenant must keep an active
+owner: cannot remove the last owner of a tenant". Match on the code, not
+the text.
+
+### Migration 0053
+
+0053 widens `tenant_memberships_status_check` to admit `suspended`. The
+check is re-added `NOT VALID`: every existing row satisfies the wider check,
+so no scan runs, and every later write is checked. `VALIDATE CONSTRAINT` may
+be run later, but nothing needs it. 0053 also replaces 0047's
+`end_domain_memberships_off_domain()` so that it skips suspended rows.
+
+The `ALTER`s take an `ACCESS EXCLUSIVE` lock on `tenant_memberships` until
+the migration commits. Membership reads and writes wait for it, sign-in's
+tenant reads included, but the rest of the migration is catalog changes
+only. Waiting for the lock is bounded by a 10-second `lock_timeout`. On a
+timeout the migration rolls back and version 53 is recorded dirty: run
+`identity migrate force 52`, then `identity migrate` again.
+
+Run `identity migrate` before the deploy. Until 0053 has run, a suspension
+fails on the check and nothing else changes. Replicas of the previous
+release keep working against the new schema, and their active-membership
+reads leave suspended members out. They do not refuse a suspended member,
+though: an invitation accepted or a join made through one of them
+reactivates the membership. Suspend no one until every replica runs this
+release, and do not roll back the image while suspensions stand.
+
+The down migration ends every suspended membership (status `inactive`), so
+the narrower check holds again, and restores 0047's trigger body. A person
+whose suspension the rollback ended is no longer a member: an invitation
+lets them back in, and so does a domain join where the domain allows one.
+
+### Go API
+
+- `MembershipStore` gains `SuspendMembership(ctx, projectID, tenantID,
+  userID) (*TenantMembership, bool, error)` and `RestoreMembership(ctx,
+  projectID, tenantID, userID, emailDomain string) (*TenantMembership, bool,
+  error)`. Each returns the membership as it now stands and whether the call
+  changed it. A suspension refuses the last active owner with
+  `ErrLastOwner`, taking the same locks as a removal. A restore makes a
+  `domain` membership `inactive` when `emailDomain`, the target's folded
+  email domain, is not a domain the tenant has verified.
+- `MembershipStore.GrantMembership` and `JoinByDomain` must refuse a
+  suspended membership with `service.ErrMemberSuspended` and write nothing.
+  `UpsertMembership`, an operator's write, lifts it.
+- New: `MembershipService.SuspendTenantMember` and `RestoreTenantMember`;
+  `service.MembershipStatusSuspended`; `service.ErrMemberSuspended`, mapped
+  to `PERMISSION_DENIED`; `audit.EventTenantMemberSuspended` and
+  `audit.EventTenantMemberRestored`.
+- `service.ErrLastOwner`'s text is now "a tenant must keep an active owner".
+
 ## Next — `GATEWAY_TENANT_INVITATION_PAGE_URL`: the page a tenant invitation email links to (additive; one stricter start-up check; no migration)
 
 No schema change and no migration. A deployment that sets nothing new sends

@@ -161,8 +161,9 @@ docker run ... \\
     operator suspends it, its owners and admins are refused with
     <code>PERMISSION_DENIED</code> by every domain and membership call
     (registering, verifying and listing domains; letting a domain's people
-    join; inviting; listing invitations and members; removing a member;
-    transferring ownership), and an invitation to it can no longer be
+    join; inviting; listing invitations and members; removing, suspending
+    or restoring a member; transferring ownership), and an invitation to it
+    can no longer be
     accepted, nor can anyone join it by domain. Nothing they had set up is
     changed.
   </p>
@@ -204,11 +205,11 @@ docker run ... \\
   </p>
   <Code
     code={`ListJoinableTenants()
-  -> tenants: [{ tenant_id, name }]   # at most one; empty if none, already a member, or removed
+  -> tenants: [{ tenant_id, name }]   # at most one; empty if none, already a member, removed or suspended
 JoinTenantByDomain(tenant_id)
   -> membership { role: "member", source: "domain", status: "active" }
   -> PERMISSION_DENIED     # not the tenant your domain lets you join, whether it exists or not,
-                           # or you were removed from it
+                           # or you were removed from it or are suspended in it
   -> FAILED_PRECONDITION   # your email is not verified`}
     lang="bash"
   />
@@ -226,6 +227,51 @@ JoinTenantByDomain(tenant_id)
     <code>domain_join_set</code>, a join as
     <code>tenant_joined_by_domain</code>, and a removal as
     <code>tenant_member_removed</code>.
+  </p>
+  <h3 id="suspending-a-member">Suspending a member</h3>
+  <p>
+    An owner or admin who needs to stop someone acting in the tenant for a
+    while, without losing their role or how they joined, suspends them
+    rather than removing them, and restores them later:
+  </p>
+  <Code
+    code={`SuspendTenantMember(tenant_id, user_id)
+  -> membership { status: "suspended", role, source }   # also if already suspended
+  -> INVALID_ARGUMENT      # user_id is you; remove yourself to leave
+  -> FAILED_PRECONDITION   # the tenant's last active owner
+  -> NOT_FOUND             # not an active or suspended member
+RestoreTenantMember(tenant_id, user_id)
+  -> membership { status: "active", role, source }      # also if already active
+  -> membership { status: "inactive", ... }             # a domain member now off the tenant's verified domains
+  -> NOT_FOUND             # not an active or suspended member`}
+    lang="bash"
+  />
+  <p>
+    Both need an active owner or admin of a tenant that is not suspended
+    (<code>PERMISSION_DENIED</code> otherwise). An admin may suspend an owner
+    while another active owner remains. While suspended, the member is listed
+    by <code>ListTenantMembers</code> with status <code>suspended</code>, is
+    left out of <code>ListMyTenants</code> and
+    <code>ListJoinableTenants</code>, is refused the tenant at a refresh
+    (<code>NOT_A_MEMBER</code>), and cannot administer it. Nor can they come
+    back on their own: accepting an invitation to the tenant is
+    <code>PERMISSION_DENIED</code> and leaves the invitation open, and so is
+    <code>JoinTenantByDomain</code>. A suspended membership through the
+    email's domain does not end when the email leaves the domain, so leaving
+    and returning cannot shed it; if the email is off the tenant's verified
+    domains when the member is restored, the membership ends then instead,
+    and they need an invitation to come back. An operator's
+    <code>AdminAddTenantAdmin</code> or
+    <code>AdminRecoverTenantOwnership</code> also lifts a suspension.
+  </p>
+  <p>
+    A suspension takes effect at the member's next refresh. It ends none of
+    their sessions and revokes none of the agent grants they made, and an
+    access token that already names the tenant works until it expires. A
+    suspension is audited as <code>tenant_member_suspended</code> and a
+    restore as <code>tenant_member_restored</code>, each with the
+    membership's role, source and resulting status; a call that changes
+    nothing records nothing.
   </p>
 
   <h2 id="choosing-a-tenant-for-a-token">Choosing a tenant for a token</h2>
@@ -263,9 +309,9 @@ JoinTenantByDomain(tenant_id)
     surface checks the tenant's status through a short cache, so suspending a
     tenant refuses its tokens there within
     <code>GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS</code> (default 30); ending
-    a membership takes effect at the next
+    or suspending a membership takes effect at the next
     refresh, within the access-token lifetime. That holds in
-    <code>mode=session</code> too: removing a member ends none of their
+    <code>mode=session</code> too: removing or suspending a member ends none of their
     sessions, so a token that already carries the tenant stays valid until it
     expires. A service that verifies tokens
     itself, as a host serving identity over native gRPC does, must accept a
@@ -307,7 +353,9 @@ JoinTenantByDomain(tenant_id)
     tenant, but never a self-service tenant, whose name its creator typed.
     Accepting an invitation needs a verified email at the invited address
     (<code>FAILED_PRECONDITION</code> until then; the invitation stays open),
-    and never lowers a role, so it cannot demote an owner.
+    and never lowers a role, so it cannot demote an owner. A member who is
+    suspended in the tenant cannot accept one
+    (<code>PERMISSION_DENIED</code>; the invitation stays open).
   </p>
   <p>
     The email links to the page set in
