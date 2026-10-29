@@ -101,23 +101,29 @@ cannot wait for them removes every suspended member in SQL instead, and
 revokes each one's pending invitations to the tenant, so each stays out
 until someone invites them again.
 
-Both statements below need a role with `BYPASSRLS`, or a superuser
+Both blocks below need a role with `BYPASSRLS`, or a superuser
 (`docs/postgres-rls.md`). `users` is under row-level security, and without
-`SET row_security = off` any other role would remove the members and
-revoke none of their invitations; with it, such a role fails and changes
-nothing. Run them, then the down migration, with this release's replicas
-stopped, so that no suspension, invitation or join lands in between.
+`row_security = off` any other role would remove the members and revoke
+none of their invitations; with it, such a role fails and changes nothing.
+Each block is one transaction that turns it off with `SET LOCAL`, which
+ends with the transaction, so a pooler in transaction mode, such as
+PgBouncer, keeps the setting and the statements it guards on one
+connection and hands no other client a connection that still has it. Run
+them, then the down migration, with this release's replicas stopped, so
+that no suspension, invitation or join lands in between.
 
 An invitation admits whoever holds its canonical mailbox. SQL computes that
 form only for an all-ASCII address, as 0034 did, so first list the
 suspended members whose email is not all ASCII:
 
 ```sql
-SET row_security = off;
+BEGIN;
+SET LOCAL row_security = off;
 SELECT m.project_id, m.tenant_id, m.user_id, u.email
   FROM tenant_memberships m
   JOIN users u ON u.project_id = m.project_id AND u.id = m.user_id
  WHERE m.status = 'suspended' AND u.email !~ '^[!-~]+$';
+COMMIT;
 ```
 
 For each row, revoke by hand that tenant's pending invitations to the
@@ -126,18 +132,27 @@ id = '…'`). Then remove every suspended member, recording each removal, and
 revoke each one's pending invitations to the tenant:
 
 ```sql
-SET row_security = off;
+BEGIN;
+SET LOCAL row_security = off;
 WITH removed AS (
   DELETE FROM tenant_memberships WHERE status = 'suspended'
   RETURNING project_id, tenant_id, user_id
-), parts AS (
-  SELECT r.project_id, r.tenant_id,
-         substring(lower(u.email COLLATE "C") FROM '^(.*)@') AS local_part,
-         regexp_replace(substring(lower(u.email COLLATE "C") FROM '@([^@]*)$'), '\.$', '') AS domain
+), addresses AS (
+  SELECT r.project_id, r.tenant_id, NULL::text AS invitation_id, u.email
     FROM removed r
     JOIN users u ON u.project_id = r.project_id AND u.id = r.user_id
+  UNION ALL
+  SELECT i.project_id, i.tenant_id, i.id, i.email
+    FROM tenant_invitations i
+   WHERE i.status = 'pending'
+     AND (i.project_id, i.tenant_id) IN (SELECT project_id, tenant_id FROM removed)
+), parts AS (
+  SELECT project_id, tenant_id, invitation_id,
+         substring(lower(email COLLATE "C") FROM '^(.*)@') AS local_part,
+         regexp_replace(substring(lower(email COLLATE "C") FROM '@([^@]*)$'), '\.$', '') AS domain
+    FROM addresses
 ), mailboxes AS (
-  SELECT project_id, tenant_id,
+  SELECT project_id, tenant_id, invitation_id,
          CASE WHEN domain IN ('gmail.com', 'googlemail.com')
               THEN replace(split_part(local_part, '+', 1), '.', '') || '@gmail.com'
               ELSE split_part(local_part, '+', 1) || '@' || domain
@@ -145,9 +160,13 @@ WITH removed AS (
     FROM parts
 ), revoked AS (
   UPDATE tenant_invitations i SET status = 'revoked'
-    FROM mailboxes b
-   WHERE i.project_id = b.project_id AND i.tenant_id = b.tenant_id
-     AND i.status = 'pending' AND lower(i.email COLLATE "C") = b.mailbox
+    FROM mailboxes invitation
+    JOIN mailboxes member
+      ON member.invitation_id IS NULL
+     AND member.project_id = invitation.project_id
+     AND member.tenant_id = invitation.tenant_id
+     AND member.mailbox = invitation.mailbox
+   WHERE i.project_id = invitation.project_id AND i.id = invitation.invitation_id
 )
 INSERT INTO tenant_member_removals (project_id, tenant_id, user_id, removed_at_ms)
 SELECT project_id, tenant_id, user_id,
@@ -155,13 +174,17 @@ SELECT project_id, tenant_id, user_id,
   FROM removed
 ON CONFLICT (project_id, tenant_id, user_id)
   DO UPDATE SET removed_at_ms = EXCLUDED.removed_at_ms;
+COMMIT;
 ```
 
 The mailbox is the service's canonical form of an all-ASCII address:
 lower-cased, one trailing dot dropped from the domain, `googlemail.com`
 read as `gmail.com`, the local part cut at its first `+` and, at
-`gmail.com`, its dots removed. Nothing records the statement in the audit
-trail. A tenant whose only remaining owner was suspended has no owner
+`gmail.com`, its dots removed. The statement computes it for each pending
+invitation too, as accepting one does: an invitation is stored
+canonicalized once, so one typed with two trailing dots keeps one, and
+`a.b@googlemail.com.` still admits `ab@gmail.com`. Nothing records the
+statement in the audit trail. A tenant whose only remaining owner was suspended has no owner
 afterwards: an admin who can still act invites one, and otherwise an
 operator appoints one with `AdminRecoverTenantOwnership`.
 
