@@ -24,8 +24,8 @@ instead.
 - **An empty secret no longer closes these six calls.** Unsetting
   `GATEWAY_ADMIN_API_SECRET` still disables every other admin call, but the
   six keep accepting every live `tenant_operator` credential. To cut the
-  credentials off, revoke them (`AdminRevokeProjectCredential`, which takes
-  the secret) or suspend their project.
+  credentials off, revoke them with `AdminRevokeProjectCredential`, which
+  takes the secret: set it again first if it was emptied.
 - **Every refusal is `PERMISSION_DENIED`** and does not say why. A refusal of
   a `tenant_operator` credential of an active project (a wrong secret, a
   revoked credential, or a call naming another project) records

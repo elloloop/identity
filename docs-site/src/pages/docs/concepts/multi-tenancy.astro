@@ -575,8 +575,9 @@ Both:
     <li>
       An empty <code>GATEWAY_ADMIN_API_SECRET</code> does not close these six
       calls: they keep accepting every live <code>tenant_operator</code>
-      credential. To cut the credentials off, revoke them (which takes the
-      secret) or suspend their Project.
+      credential. To cut the credentials off, revoke them with
+      <code>AdminRevokeProjectCredential</code>, which takes the secret: set
+      it again first if it was emptied.
     </li>
   </ul>
 

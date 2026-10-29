@@ -14,10 +14,12 @@ import (
 // by the shared admin secret in the AdminAPISecretHeader (NOT a user JWT). The
 // handler extracts that header and hands it to the service, which compares it
 // in constant time and — when no secret is configured — returns Unimplemented.
+// The tenant operations (app.TenantOperatorProcedures) also take a
+// tenant_operator credential (middleware.TenantOperatorKeyHeader), which they
+// accept whether or not a secret is configured.
 //
-// h.controlAdmin is nil on memory (no control plane), which also yields
-// Unimplemented, so the surface is doubly off by default: no control plane OR
-// no configured secret both disable it.
+// h.controlAdmin is nil on memory (no control plane), which yields
+// Unimplemented for every one of them, tenant operations included.
 
 // adminSecret reads the operator's presented admin secret from the request.
 func adminSecret(headers headerReader) string {

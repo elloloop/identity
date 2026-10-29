@@ -948,9 +948,9 @@ type IdentityServiceClient interface {
 	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
 	// projects/tenants/credentials out-of-band. Authenticated by the shared
 	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
-	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The tenant
-	// operations below that say so also accept a tenant_operator credential in
-	// "X-Tenant-Operator-Key", whether or not the secret is set.
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The six tenant
+	// operations documented on AdminGetTenant also accept a tenant_operator
+	// credential in "X-Tenant-Operator-Key", whether or not the secret is set.
 	AdminCreateProject(context.Context, *connect.Request[v1.AdminCreateProjectRequest]) (*connect.Response[v1.AdminCreateProjectResponse], error)
 	AdminCreateProjectCredential(context.Context, *connect.Request[v1.AdminCreateProjectCredentialRequest]) (*connect.Response[v1.AdminCreateProjectCredentialResponse], error)
 	// Revokes a project credential of any kind. Operator-only, like the other
@@ -997,8 +997,9 @@ type IdentityServiceClient interface {
 	// surface as UNAVAILABLE; over the native gRPC registration with
 	// RESOURCE_EXHAUSTED and the same value in the "retry-after" response
 	// metadata. UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset and the
-	// call presents no tenant_operator credential, PERMISSION_DENIED for a
-	// wrong secret or a credential refused for any reason.
+	// call presents X-Admin-Secret or no tenant_operator credential,
+	// PERMISSION_DENIED for a wrong secret or a credential refused for any
+	// reason.
 	//
 	// INVALID_ARGUMENT for a blank project_id or tenant_id, and NOT_FOUND when
 	// the project holds no such tenant.
@@ -3598,9 +3599,9 @@ type IdentityServiceHandler interface {
 	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
 	// projects/tenants/credentials out-of-band. Authenticated by the shared
 	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
-	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The tenant
-	// operations below that say so also accept a tenant_operator credential in
-	// "X-Tenant-Operator-Key", whether or not the secret is set.
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The six tenant
+	// operations documented on AdminGetTenant also accept a tenant_operator
+	// credential in "X-Tenant-Operator-Key", whether or not the secret is set.
 	AdminCreateProject(context.Context, *connect.Request[v1.AdminCreateProjectRequest]) (*connect.Response[v1.AdminCreateProjectResponse], error)
 	AdminCreateProjectCredential(context.Context, *connect.Request[v1.AdminCreateProjectCredentialRequest]) (*connect.Response[v1.AdminCreateProjectCredentialResponse], error)
 	// Revokes a project credential of any kind. Operator-only, like the other
@@ -3647,8 +3648,9 @@ type IdentityServiceHandler interface {
 	// surface as UNAVAILABLE; over the native gRPC registration with
 	// RESOURCE_EXHAUSTED and the same value in the "retry-after" response
 	// metadata. UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset and the
-	// call presents no tenant_operator credential, PERMISSION_DENIED for a
-	// wrong secret or a credential refused for any reason.
+	// call presents X-Admin-Secret or no tenant_operator credential,
+	// PERMISSION_DENIED for a wrong secret or a credential refused for any
+	// reason.
 	//
 	// INVALID_ARGUMENT for a blank project_id or tenant_id, and NOT_FOUND when
 	// the project holds no such tenant.

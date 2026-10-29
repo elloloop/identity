@@ -124,29 +124,29 @@ func TestRegisterGRPC_LookupUsersSharesHTTPBudget(t *testing.T) {
 // tenantOperatorCalls calls each tenant operation over native gRPC, keyed by
 // its procedure, so a test can drive every one app.TenantOperatorProcedures
 // names.
-var tenantOperatorCalls = map[string]func(ctx context.Context, c identitypb.IdentityServiceClient) error{
-	identityconnectgen.IdentityServiceAdminGetTenantProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient) error {
-		_, err := c.AdminGetTenant(ctx, &identitypb.AdminGetTenantRequest{TenantId: "t"})
+var tenantOperatorCalls = map[string]func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error{
+	identityconnectgen.IdentityServiceAdminGetTenantProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
+		_, err := c.AdminGetTenant(ctx, &identitypb.AdminGetTenantRequest{TenantId: "t"}, opts...)
 		return err
 	},
-	identityconnectgen.IdentityServiceAdminListTenantsProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient) error {
-		_, err := c.AdminListTenants(ctx, &identitypb.AdminListTenantsRequest{})
+	identityconnectgen.IdentityServiceAdminListTenantsProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
+		_, err := c.AdminListTenants(ctx, &identitypb.AdminListTenantsRequest{}, opts...)
 		return err
 	},
-	identityconnectgen.IdentityServiceAdminSuspendTenantProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient) error {
-		_, err := c.AdminSuspendTenant(ctx, &identitypb.AdminSuspendTenantRequest{TenantId: "t"})
+	identityconnectgen.IdentityServiceAdminSuspendTenantProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
+		_, err := c.AdminSuspendTenant(ctx, &identitypb.AdminSuspendTenantRequest{TenantId: "t"}, opts...)
 		return err
 	},
-	identityconnectgen.IdentityServiceAdminRestoreTenantProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient) error {
-		_, err := c.AdminRestoreTenant(ctx, &identitypb.AdminRestoreTenantRequest{TenantId: "t"})
+	identityconnectgen.IdentityServiceAdminRestoreTenantProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
+		_, err := c.AdminRestoreTenant(ctx, &identitypb.AdminRestoreTenantRequest{TenantId: "t"}, opts...)
 		return err
 	},
-	identityconnectgen.IdentityServiceAdminRecoverTenantOwnershipProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient) error {
-		_, err := c.AdminRecoverTenantOwnership(ctx, &identitypb.AdminRecoverTenantOwnershipRequest{TenantId: "t"})
+	identityconnectgen.IdentityServiceAdminRecoverTenantOwnershipProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
+		_, err := c.AdminRecoverTenantOwnership(ctx, &identitypb.AdminRecoverTenantOwnershipRequest{TenantId: "t"}, opts...)
 		return err
 	},
-	identityconnectgen.IdentityServiceGetLoginPolicyProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient) error {
-		_, err := c.GetLoginPolicy(ctx, &identitypb.GetLoginPolicyRequest{})
+	identityconnectgen.IdentityServiceGetLoginPolicyProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
+		_, err := c.GetLoginPolicy(ctx, &identitypb.GetLoginPolicyRequest{}, opts...)
 		return err
 	},
 }
@@ -183,9 +183,13 @@ func TestRegisterGRPC_EveryTenantOperationThrottled(t *testing.T) {
 			if got := status.Code(call(withKey, client)); got != codes.Unimplemented {
 				t.Fatalf("first keyed call: code = %v, want Unimplemented from the handler", got)
 			}
-			err := call(withKey, client)
+			var header metadata.MD
+			err := call(withKey, client, grpc.Header(&header))
 			if got := status.Code(err); got != codes.ResourceExhausted {
 				t.Fatalf("second keyed call: code = %v (%v), want ResourceExhausted", got, err)
+			}
+			if got := header.Get("retry-after"); len(got) != 1 || got[0] != "45" {
+				t.Fatalf("second keyed call: retry-after = %v, want [45], the window", got)
 			}
 		})
 	}

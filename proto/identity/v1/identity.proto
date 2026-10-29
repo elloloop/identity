@@ -2195,7 +2195,9 @@ message ListMyTenantsResponse {
 // "X-Admin-Secret" header (constant-time compared against
 // GATEWAY_ADMIN_API_SECRET). When that env var is unset the RPCs are
 // DISABLED and return UNIMPLEMENTED, so a deployer who never configures the
-// secret cannot have them reached.
+// secret cannot have them reached. The one exception is the six tenant
+// operations documented on AdminGetTenant, called with a live
+// tenant_operator credential, which only the secret can mint.
 
 message AdminCreateProjectRequest {
   string name = 1;
@@ -3695,9 +3697,9 @@ service IdentityService {
   // Control-plane admin (redesign). PLATFORM-operator RPCs that provision
   // projects/tenants/credentials out-of-band. Authenticated by the shared
   // admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
-  // (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The tenant
-  // operations below that say so also accept a tenant_operator credential in
-  // "X-Tenant-Operator-Key", whether or not the secret is set.
+  // (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The six tenant
+  // operations documented on AdminGetTenant also accept a tenant_operator
+  // credential in "X-Tenant-Operator-Key", whether or not the secret is set.
   rpc AdminCreateProject(AdminCreateProjectRequest) returns (AdminCreateProjectResponse);
   rpc AdminCreateProjectCredential(AdminCreateProjectCredentialRequest) returns (AdminCreateProjectCredentialResponse);
   // Revokes a project credential of any kind. Operator-only, like the other
@@ -3744,8 +3746,9 @@ service IdentityService {
   // surface as UNAVAILABLE; over the native gRPC registration with
   // RESOURCE_EXHAUSTED and the same value in the "retry-after" response
   // metadata. UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset and the
-  // call presents no tenant_operator credential, PERMISSION_DENIED for a
-  // wrong secret or a credential refused for any reason.
+  // call presents X-Admin-Secret or no tenant_operator credential,
+  // PERMISSION_DENIED for a wrong secret or a credential refused for any
+  // reason.
   //
   // INVALID_ARGUMENT for a blank project_id or tenant_id, and NOT_FOUND when
   // the project holds no such tenant.

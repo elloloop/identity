@@ -249,7 +249,8 @@ Suspension is the lever this design relies on to stop a tenant. An operator
 suspends a claimed tenant with `AdminSuspendTenant` and restores it with
 `AdminRestoreTenant`, each with the operator secret (or a `tenant_operator`
 credential of the tenant's project) and a reason, recorded
-as `tenant_suspended` or `tenant_restored`. Each is a compare-and-set on the
+as `tenant_suspended` or `tenant_restored`, with the credential, when one
+was used, as the actor (`credential:<id>`). Each is a compare-and-set on the
 tenant's status: a tenant already in the status asked for is left as it is
 and nothing is recorded, and a latent tenant, which governs nothing, cannot
 be suspended.
@@ -327,7 +328,9 @@ ways, both audited; neither changes any other member's role.
   with the operator secret (or a `tenant_operator` credential of the
   tenant's project), makes an account that could own a tenant (the
   same rule as a transfer) an active owner, member or not, recorded as
-  `tenant_ownership_recovered` with the reason and the operator's client. It
+  `tenant_ownership_recovered` with the reason and the operator's client
+  (and, when a credential was used, the credential as the actor,
+  `credential:<id>`). It
   is refused while any owner or admin who is a person can still sign in and
   holds an active membership (a suspended one does not govern), so an
   operator never appoints an outside account above people who can act. An

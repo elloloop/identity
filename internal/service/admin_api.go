@@ -25,9 +25,10 @@ import (
 // is held here and compared in CONSTANT TIME (crypto/subtle) against the
 // per-request value, so a wrong or missing secret is rejected uniformly and
 // without a timing side-channel. When the configured secret is empty the
-// whole surface is DISABLED — every method returns ErrUnimplemented — so a
-// deployer who never sets GATEWAY_ADMIN_API_SECRET cannot have these RPCs
-// reached.
+// surface is DISABLED — every method returns ErrUnimplemented — so a deployer
+// who never sets GATEWAY_ADMIN_API_SECRET cannot have these RPCs reached. The
+// one exception is the tenant operations (app.TenantOperatorProcedures) called
+// with a live tenant_operator credential, which only the secret can mint.
 //
 // Like the other governance services it is postgres-only: memory have
 // no control plane, so the app constructs no ControlPlaneAdminService and the

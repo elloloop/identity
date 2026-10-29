@@ -329,7 +329,8 @@ type Config struct {
 	// project credential authorizes (app.TenantOperatorProcedures): they
 	// still accept a live credential, which only this secret can mint.
 	// Emptying the secret therefore does not shut those off; revoking the
-	// credentials or suspending their project does. Driven by
+	// credentials (AdminRevokeProjectCredential, which also takes this
+	// secret) does. Driven by
 	// GATEWAY_ADMIN_API_SECRET. Only the postgres driver has a control plane;
 	// the memory driver ignores it.
 	//
