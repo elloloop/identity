@@ -211,8 +211,9 @@ itself, from the same per-IP budgets the HTTP surface uses:
   with the admin secret alone is not counted.
 - The agent machine calls, whenever agent OAuth serves them, from the
   `GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP` and
-  `GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP` budgets. With teammate keys
-  alone, `CreateAgentMachineChallenge` and `ExchangeAgentMachineCredential`,
+  `GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP` budgets. With
+  `GATEWAY_TEAMMATE_KEYS_ENABLED` on and agent OAuth off, the bridge
+  throttles `CreateAgentMachineChallenge` and `ExchangeAgentMachineCredential`
   from the `GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP` budget.
 
 A throttled call fails with `RESOURCE_EXHAUSTED` and a `retry-after` response

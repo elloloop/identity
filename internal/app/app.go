@@ -1311,8 +1311,8 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 //
 // The service is constructed even when no admin secret is configured: in that
 // case every admin RPC returns Unimplemented (the secret check short-circuits
-// on an empty secret), except the tenant operations called with a live
-// tenant_operator credential, which only the secret can mint. This keeps the
+// on an empty secret), except the tenant operations called with a
+// tenant_operator credential (see ControlPlaneAdminService). This keeps the
 // "off by default" guarantee in the service's authorization (authorize, and
 // authorizeTenantOperator for TenantOperatorProcedures) rather than
 // splitting it across the wiring. users

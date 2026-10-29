@@ -329,8 +329,8 @@ ways, both audited; neither changes any other member's role.
   tenant's project), makes an account that could own a tenant (the
   same rule as a transfer) an active owner, member or not, recorded as
   `tenant_ownership_recovered` with the reason and the operator's client
-  (and, when a credential was used, with the credential as the actor,
-  `credential:<id>`, so the audit trail names the credential that acted). It
+  (and, when a credential was used, the credential as the actor,
+  `credential:<id>`; a call made with the secret alone names no actor). It
   is refused while any owner or admin who is a person can still sign in and
   holds an active membership (a suspended one does not govern), so an
   operator never appoints an outside account above people who can act. An

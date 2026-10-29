@@ -213,8 +213,8 @@ type ControlPlaneProjectStore interface {
 // platform operator authenticated by a shared secret.
 type ControlPlaneAdminService struct {
 	// secret is the shared admin secret. Empty disables the surface, except
-	// the tenant operations called with a live tenant_operator credential
-	// (authorizeTenantOperator).
+	// the tenant operations called with a tenant_operator credential, as the
+	// type doc describes (authorizeTenantOperator).
 	secret string
 	// disableFirstAdminBootstrap closes CreateFirstPlatformAdmin entirely
 	// (GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP): when true the RPC is rejected with
@@ -261,7 +261,7 @@ type ControlPlaneAdminService struct {
 // NewControlPlaneAdminService wires the admin service. An empty secret
 // leaves the service constructed but DISABLED: every method returns
 // ErrUnimplemented (so the handler maps it to CodeUnimplemented), except the
-// tenant operations called with a live tenant_operator credential. A nil
+// tenant operations given a tenant_operator credential, which check it. A nil
 // logger defaults to a no-op. A nil resolver defaults to net.DefaultResolver,
 // matching DomainService. A nil auditLog defaults to a no-op audit.Logger so
 // blocked-bootstrap recording stays best-effort. A nil policies store leaves

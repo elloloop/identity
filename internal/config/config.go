@@ -326,8 +326,9 @@ type Config struct {
 	// Empty (the default) DISABLES the admin RPCs — they return
 	// CodeUnimplemented — so a deployer who never sets it cannot have them
 	// reached. The one exception is the tenant operations a tenant_operator
-	// project credential authorizes (app.TenantOperatorProcedures): they
-	// still accept a live credential, which only this secret can mint.
+	// project credential authorizes (app.TenantOperatorProcedures): called
+	// with a credential and no secret, they check it, admitting a live one
+	// and refusing any other. Only this secret can mint one.
 	// Emptying the secret therefore does not shut those off; revoking the
 	// credentials (AdminRevokeProjectCredential, which also takes this
 	// secret) does. Driven by GATEWAY_ADMIN_API_SECRET. Only the postgres
