@@ -630,7 +630,7 @@ func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tena
 	if projectID == "" || tenantID == "" || userID == "" {
 		return nil, false, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
 	}
-	if !by.IsOperator() && by.UserID() == "" {
+	if by.NamesNobody() {
 		return nil, false, fmt.Errorf("%w: a restore must name who restores", service.ErrPermissionDenied)
 	}
 	tx, err := s.pool.Begin(ctx)

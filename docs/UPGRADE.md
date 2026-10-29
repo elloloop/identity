@@ -114,7 +114,8 @@ that no suspension, invitation or join lands in between.
 
 An invitation admits whoever holds its canonical mailbox. SQL computes that
 form only for an all-ASCII address, as 0034 did, so first list the
-suspended members whose email is not all ASCII:
+suspended members whose email is not all ASCII, and the pending invitations
+to an address that is not all ASCII in the tenants they are suspended from:
 
 ```sql
 BEGIN;
@@ -122,14 +123,40 @@ SET LOCAL row_security = off;
 SELECT m.project_id, m.tenant_id, m.user_id, u.email
   FROM tenant_memberships m
   JOIN users u ON u.project_id = m.project_id AND u.id = m.user_id
- WHERE m.status = 'suspended' AND u.email !~ '^[!-~]+$';
+ WHERE m.status = 'suspended' AND u.email <> '' AND u.email !~ '^[!-~]+$';
+SELECT i.project_id, i.tenant_id, i.id, i.email
+  FROM tenant_invitations i
+ WHERE i.status = 'pending' AND i.email !~ '^[!-~]+$'
+   AND (i.project_id, i.tenant_id) IN
+       (SELECT project_id, tenant_id FROM tenant_memberships WHERE status = 'suspended');
 COMMIT;
 ```
 
-For each row, revoke by hand that tenant's pending invitations to the
-person's mailbox (`UPDATE tenant_invitations SET status = 'revoked' WHERE
-id = '…'`). Then remove every suspended member, recording each removal, and
-revoke each one's pending invitations to the tenant:
+Revoke by hand each pending invitation that would admit a suspended member
+back to the tenant they are suspended from and that the statement below
+cannot match:
+
+- each invitation in the second list whose address is the mailbox of a
+  member suspended from its tenant;
+- for each member in the first list, that tenant's pending invitations to
+  their mailbox, which `SELECT id, email FROM tenant_invitations WHERE
+  project_id = '…' AND tenant_id = '…' AND status = 'pending'` lists.
+
+Two addresses are one mailbox when they are equal once each is trimmed and
+lower-cased, its local part cut at its first `+`, one trailing dot dropped
+from its domain, an internationalized domain written in its `xn--` form,
+`googlemail.com` read as `gmail.com` and, at `gmail.com`, the dots removed
+from its local part. Revoke an invitation with `UPDATE tenant_invitations
+SET status = 'revoked' WHERE project_id = '…' AND id = '…'`. A suspended
+member with no email has no mailbox, and no invitation admits them.
+
+Then remove every suspended member, recording each removal, and revoke each
+one's pending invitations to the tenant. The statement lists each member it
+removed, and each invitation it revoked, with its id; keep that output,
+since nothing else records which invitations it revoked. It expects tables
+the planner has statistics for, as autovacuum keeps them; on a database
+never analyzed, run `ANALYZE tenant_memberships, tenant_invitations, users;`
+first:
 
 ```sql
 BEGIN;
@@ -167,13 +194,22 @@ WITH removed AS (
      AND member.tenant_id = invitation.tenant_id
      AND member.mailbox = invitation.mailbox
    WHERE i.project_id = invitation.project_id AND i.id = invitation.invitation_id
+  RETURNING i.project_id, i.tenant_id, i.id, i.email
+), recorded AS (
+  INSERT INTO tenant_member_removals (project_id, tenant_id, user_id, removed_at_ms)
+  SELECT project_id, tenant_id, user_id,
+         (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+    FROM removed
+  ON CONFLICT (project_id, tenant_id, user_id)
+    DO UPDATE SET removed_at_ms = EXCLUDED.removed_at_ms
+  RETURNING project_id, tenant_id, user_id
 )
-INSERT INTO tenant_member_removals (project_id, tenant_id, user_id, removed_at_ms)
-SELECT project_id, tenant_id, user_id,
-       (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
-  FROM removed
-ON CONFLICT (project_id, tenant_id, user_id)
-  DO UPDATE SET removed_at_ms = EXCLUDED.removed_at_ms;
+SELECT 'removed' AS change, project_id, tenant_id, user_id AS id, NULL::text AS email
+  FROM recorded
+UNION ALL
+SELECT 'revoked', project_id, tenant_id, id, email
+  FROM revoked
+ORDER BY change, project_id, tenant_id, id;
 COMMIT;
 ```
 
@@ -181,12 +217,13 @@ The mailbox is the service's canonical form of an all-ASCII address:
 lower-cased, one trailing dot dropped from the domain, `googlemail.com`
 read as `gmail.com`, the local part cut at its first `+` and, at
 `gmail.com`, its dots removed. The statement computes it for each pending
-invitation too, as accepting one does: an invitation is stored
-canonicalized once, so one typed with two trailing dots keeps one, and
-`a.b@googlemail.com.` still admits `ab@gmail.com`. Nothing records the
-statement in the audit trail. A tenant whose only remaining owner was suspended has no owner
-afterwards: an admin who can still act invites one, and otherwise an
-operator appoints one with `AdminRecoverTenantOwnership`.
+invitation whose address is all ASCII too, as accepting one does: an
+invitation is stored canonicalized once, so one typed with two trailing
+dots keeps one, and `a.b@googlemail.com.` still admits `ab@gmail.com`. The
+others are the second list, decided by hand above. Nothing records the
+statement in the audit trail. A tenant whose only remaining owner was
+suspended has no owner afterwards: an admin who can still act invites one,
+and otherwise an operator appoints one with `AdminRecoverTenantOwnership`.
 
 A refused down migration rolls back and records version 52 dirty: run this
 release's `identity migrate force 53`, decide the suspensions, then migrate
@@ -207,10 +244,11 @@ just read every row), and restores 0047's trigger body.
   restore by `service.RestoredByMember(restorerID)` checks, in its own
   transaction, that restorerID holds an active owner or admin membership
   (`ErrPermissionDenied` otherwise); `service.RestoredByOperator()` is an
-  operator, and is not checked; the zero `Restorer` is refused. A restore
-  makes a `domain` membership `inactive` when the account's email, read in
-  that transaction, is not on a domain the tenant has verified, and takes
-  the account's row only for a suspended membership.
+  operator, and is not checked; the zero `Restorer`, for which
+  `Restorer.NamesNobody` reports true, is refused before any lock or read.
+  A restore makes a `domain` membership `inactive` when the account's
+  email, read in that transaction, is not on a domain the tenant has
+  verified, and takes the account's row only for a suspended membership.
 - `MembershipStore.GrantMembership` and `JoinByDomain` must refuse a
   suspended membership with `service.ErrMemberSuspended` and write nothing.
   `UpsertMembership`, an operator's write, lifts it; `AdminAddTenantAdmin`

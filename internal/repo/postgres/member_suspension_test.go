@@ -276,9 +276,30 @@ func TestMembershipStore_RestoreChecksTheRestorer(t *testing.T) {
 		require.ErrorIs(t, err, service.ErrPermissionDenied, name)
 		assert.Equal(t, service.MembershipStatusSuspended, f.held(ctx, t).Status, name)
 	}
+	// The zero Restorer names the empty user id. A row for that id, an
+	// active owner of the tenant, would let it restore if the store judged
+	// it as a member; it refuses it before reading anything.
+	raw, err := pgx.Connect(ctx, dsn)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close(ctx) }()
+	nobody := []string{
+		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('', $1, 'nobody@acme.com', 1, 1)`,
+		`INSERT INTO tenant_memberships (id, project_id, tenant_id, user_id, source, role, status, created_at_ms, updated_at_ms)
+			VALUES ('m-nobody', $1, $2, '', 'added', 'owner', 'active', 1, 1)`,
+	}
+	_, err = raw.Exec(ctx, `SELECT set_config('app.current_project_id', $1, false)`, f.projectID)
+	require.NoError(t, err)
+	_, err = raw.Exec(ctx, nobody[0], f.projectID)
+	require.NoError(t, err)
+	_, err = raw.Exec(ctx, nobody[1], f.projectID, f.tenantID)
+	require.NoError(t, err)
 	_, _, err = f.ms.RestoreMembership(ctx, f.projectID, f.tenantID, f.user, service.Restorer{})
 	require.ErrorIs(t, err, service.ErrPermissionDenied, "a restore that names no restorer fails closed")
 	assert.Equal(t, service.MembershipStatusSuspended, f.held(ctx, t).Status)
+	_, err = raw.Exec(ctx, `DELETE FROM tenant_memberships WHERE project_id = $1 AND id = 'm-nobody'`, f.projectID)
+	require.NoError(t, err)
+	_, err = raw.Exec(ctx, `DELETE FROM users WHERE project_id = $1 AND id = ''`, f.projectID)
+	require.NoError(t, err)
 	_, _, err = f.restore(ctx, admin, admin)
 	require.ErrorIs(t, err, service.ErrPermissionDenied, "a suspended admin restoring themselves")
 
@@ -624,10 +645,6 @@ func TestSuspendTenantMembersMigrationRoundTrip(t *testing.T) {
 			VALUES ('d', 'proj-suspend', 't', 'acme.example', 'dns_txt', 'verified', 1, 1)`,
 		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('held', 'proj-suspend', 'held@acme.example', 1, 1)`,
 		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('free', 'proj-suspend', 'free@acme.example', 1, 1)`,
-		`INSERT INTO tenants (id, project_id, status, created_at_ms, updated_at_ms) VALUES ('t2', 'proj-suspend', 'claimed', 1, 1)`,
-		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('tagged', 'proj-suspend', 'Tagged+Work@acme.example', 1, 1)`,
-		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('dotted', 'proj-suspend', 'Dot.Ted@googlemail.com.', 1, 1)`,
-		`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES ('intl', 'proj-suspend', 'intl@bücher.example', 1, 1)`,
 	} {
 		_, err = raw.Exec(ctx, q)
 		require.NoError(t, err, q)
@@ -706,16 +723,21 @@ func TestSuspendTenantMembersMigrationRoundTrip(t *testing.T) {
 
 // decideSuspensionsInSQL runs, at version 53 with "held" suspended in
 // tenant t, what docs/UPGRADE.md tells an operator to run before migrating
-// down while suspensions stand: the listing of suspended members whose
-// email is not all ASCII, then the statement that removes every suspended
-// member and revokes their pending invitations to the tenant. Each block is
-// one transaction whose SET LOCAL row_security = off ends with it. A role
-// that row-level security binds cannot run the statement at all. Run as the
-// guide says, it revokes each removed person's pending invitations whose
-// address canonicalizes, as acceptance does, to their canonical mailbox in
-// the tenant they were removed from, and leaves every other invitation as it
-// was, including the one a non-ASCII address holds, which the listing names
-// for the operator to revoke by hand.
+// down while suspensions stand. Each block is one transaction whose SET
+// LOCAL row_security = off ends with it.
+//
+// The listing names, for the operator to decide by hand, the suspended
+// members whose email is not all ASCII (one with no email has no mailbox,
+// and is left out), and the pending invitations to an address that is not
+// all ASCII in the tenants they are suspended from. A role that row-level
+// security binds cannot run the statement at all. Run as the guide says,
+// it removes every suspended member, recording each removal, revokes each
+// removed person's pending invitations whose address canonicalizes, as
+// acceptance does, to their canonical mailbox in the tenant they were
+// removed from, leaves every other invitation as it was, and lists what it
+// changed. The accounts' emails are stored as typed, as accounts made
+// before the service canonicalized them are, so the statement
+// canonicalizes the member's side too.
 func decideSuspensionsInSQL(ctx context.Context, t *testing.T, raw *pgx.Conn) {
 	t.Helper()
 	exec := func(q string) {
@@ -723,11 +745,25 @@ func decideSuspensionsInSQL(ctx context.Context, t *testing.T, raw *pgx.Conn) {
 		_, err := raw.Exec(ctx, q)
 		require.NoError(t, err, q)
 	}
+	exec(`INSERT INTO tenants (id, project_id, status, created_at_ms, updated_at_ms) VALUES
+		('t2', 'proj-suspend', 'claimed', 1, 1),
+		('t3', 'proj-suspend', 'claimed', 1, 1)`)
+	exec(`INSERT INTO users (id, project_id, email, created_at_ms, updated_at_ms) VALUES
+		('tagged', 'proj-suspend', 'Tagged+Work@acme.example', 1, 1),
+		('dotted', 'proj-suspend', 'Dot.Ted@googlemail.com.', 1, 1),
+		('intl', 'proj-suspend', 'intl@bücher.example', 1, 1),
+		('nomail', 'proj-suspend', '', 1, 1),
+		('present', 'proj-suspend', 'present@acme.example', 1, 1)`)
 	exec(`INSERT INTO tenant_memberships (id, project_id, tenant_id, user_id, source, role, status, created_at_ms, updated_at_ms) VALUES
 		('m-tagged', 'proj-suspend', 't', 'tagged', 'invited', 'member', 'suspended', 1, 1),
 		('m-dotted', 'proj-suspend', 't', 'dotted', 'invited', 'member', 'suspended', 1, 1),
 		('m-intl', 'proj-suspend', 't', 'intl', 'invited', 'member', 'suspended', 1, 1),
-		('m-free-t2', 'proj-suspend', 't2', 'free', 'invited', 'member', 'suspended', 1, 1)`)
+		('m-free-t2', 'proj-suspend', 't2', 'free', 'invited', 'member', 'suspended', 1, 1),
+		('m-nomail-t2', 'proj-suspend', 't2', 'nomail', 'added', 'member', 'suspended', 1, 1),
+		('m-present-t3', 'proj-suspend', 't3', 'present', 'invited', 'member', 'active', 1, 1)`)
+	// free was removed from t2 once before being invited back; the
+	// statement records the new removal over the old one.
+	exec(`INSERT INTO tenant_member_removals (project_id, tenant_id, user_id, removed_at_ms) VALUES ('proj-suspend', 't2', 'free', 1)`)
 	exec(`INSERT INTO tenant_invitations (id, project_id, tenant_id, token_hash, email, role, status, expires_at_ms, created_at_ms) VALUES
 		('inv-held', 'proj-suspend', 't', 'hash-held', 'held@acme.example', 'admin', 'pending', 9999999999999, 1),
 		('inv-held-t2', 'proj-suspend', 't2', 'hash-held-t2', 'held@acme.example', 'member', 'pending', 9999999999999, 1),
@@ -735,10 +771,14 @@ func decideSuspensionsInSQL(ctx context.Context, t *testing.T, raw *pgx.Conn) {
 		('inv-free', 'proj-suspend', 't', 'hash-free', 'free@acme.example', 'member', 'pending', 9999999999999, 1),
 		('inv-tagged', 'proj-suspend', 't', 'hash-tagged', 'tagged@acme.example', 'member', 'pending', 9999999999999, 1),
 		('inv-dotted', 'proj-suspend', 't', 'hash-dotted', 'dotted@gmail.com', 'member', 'pending', 9999999999999, 1),
-		('inv-intl', 'proj-suspend', 't', 'hash-intl', 'intl@xn--bcher-kva.example', 'member', 'pending', 9999999999999, 1)`)
+		('inv-intl', 'proj-suspend', 't', 'hash-intl', 'intl@xn--bcher-kva.example', 'member', 'pending', 9999999999999, 1),
+		('inv-umlaut', 'proj-suspend', 't', 'hash-umlaut', 'jürgen@acme.example', 'member', 'pending', 9999999999999, 1),
+		('inv-umlaut-accepted', 'proj-suspend', 't', 'hash-umlaut-accepted', 'jürgen@acme.example', 'member', 'accepted', 9999999999999, 1),
+		('inv-umlaut-t3', 'proj-suspend', 't3', 'hash-umlaut-t3', 'jürgen@acme.example', 'member', 'pending', 9999999999999, 1)`)
 	// An invitation is stored canonicalized once, so one typed with two
-	// trailing dots keeps one; acceptance canonicalizes it again and admits
-	// the person.
+	// trailing dots keeps one, and one typed with a space other than ASCII's
+	// before its dot keeps the space; acceptance canonicalizes it again and
+	// admits the person.
 	storedOnce := func(typed, account string) string {
 		t.Helper()
 		stored, usable := emailaddr.Mailbox(typed)
@@ -748,9 +788,13 @@ func decideSuspensionsInSQL(ctx context.Context, t *testing.T, raw *pgx.Conn) {
 	}
 	_, err := raw.Exec(ctx, `INSERT INTO tenant_invitations (id, project_id, tenant_id, token_hash, email, role, status, expires_at_ms, created_at_ms) VALUES
 		('inv-held-fqdn', 'proj-suspend', 't', 'hash-held-fqdn', $1, 'member', 'pending', 9999999999999, 1),
-		('inv-dotted-fqdn', 'proj-suspend', 't', 'hash-dotted-fqdn', $2, 'member', 'pending', 9999999999999, 1)`,
+		('inv-dotted-fqdn', 'proj-suspend', 't', 'hash-dotted-fqdn', $2, 'member', 'pending', 9999999999999, 1),
+		('inv-held-nbsp', 'proj-suspend', 't', 'hash-held-nbsp', $3, 'member', 'pending', 9999999999999, 1),
+		('inv-held-vt', 'proj-suspend', 't', 'hash-held-vt', $4, 'member', 'pending', 9999999999999, 1)`,
 		storedOnce("held@acme.example..", "held@acme.example"),
-		storedOnce("Dot.Ted@GoogleMail.com..", "Dot.Ted@googlemail.com."))
+		storedOnce("Dot.Ted@GoogleMail.com..", "Dot.Ted@googlemail.com."),
+		storedOnce("held@acme.example .", "held@acme.example"),
+		storedOnce("held@acme.example\v.", "held@acme.example"))
 	require.NoError(t, err)
 	invitations := func() map[string]string {
 		t.Helper()
@@ -777,15 +821,44 @@ func decideSuspensionsInSQL(ctx context.Context, t *testing.T, raw *pgx.Conn) {
 		require.NoError(t, raw.QueryRow(ctx, `SHOW row_security`).Scan(&setting))
 		return setting
 	}
+	// block returns the statements of the guide's sql block that starts
+	// with the opening and then first, one per element, as psql sends them.
 	const opening = "BEGIN;\nSET LOCAL row_security = off;\n"
-	before := invitations()
-	statement := upgradeSQL(t, opening+"WITH removed AS (")
-	require.True(t, strings.HasSuffix(statement, ";\nCOMMIT;\n"), "the statement's block commits")
+	block := func(first string) []string {
+		t.Helper()
+		body := upgradeSQL(t, opening+first)
+		require.True(t, strings.HasSuffix(body, ";\nCOMMIT;\n"), "the block starting %q commits", first)
+		return strings.Split(strings.TrimSuffix(body, ";\n"), ";\n")
+	}
+	// column returns column i of every row q returns, joined with "/" to the
+	// columns before it from from.
+	column := func(q string, from, i int) []string {
+		t.Helper()
+		rows, err := raw.Query(ctx, q)
+		require.NoError(t, err, q)
+		var out []string
+		for rows.Next() {
+			values, err := rows.Values()
+			require.NoError(t, err)
+			parts := make([]string, 0, i-from+1)
+			for _, v := range values[from : i+1] {
+				parts = append(parts, fmt.Sprint(v))
+			}
+			out = append(out, strings.Join(parts, "/"))
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+	before, stillSuspended := invitations(), suspended()
 
+	removal := block("WITH removed AS (")
+	require.Len(t, removal, 4, "BEGIN, SET LOCAL, the statement, COMMIT")
 	role := fmt.Sprintf("rollback_rls_bound_%d", time.Now().UnixNano())
 	exec(`CREATE ROLE ` + role + ` NOLOGIN NOSUPERUSER NOBYPASSRLS`)
 	defer func() {
-		for _, q := range []string{`RESET ROLE`, `DROP OWNED BY ` + role, `DROP ROLE ` + role} {
+		// ROLLBACK first: a failure inside an open transaction would make
+		// every later statement fail, and leave the role in the cluster.
+		for _, q := range []string{`ROLLBACK`, `RESET ROLE`, `DROP OWNED BY ` + role, `DROP ROLE ` + role} {
 			if _, err := raw.Exec(ctx, q); err != nil {
 				t.Logf("%s: %v", q, err)
 			}
@@ -794,52 +867,72 @@ func decideSuspensionsInSQL(ctx context.Context, t *testing.T, raw *pgx.Conn) {
 	exec(`GRANT USAGE ON SCHEMA public TO ` + role)
 	exec(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ` + role)
 	exec(`SET ROLE ` + role)
-	_, err = raw.Exec(ctx, statement)
+	// Sent as one string, as psql -c sends it, the block stops at the
+	// statement and never reaches its COMMIT.
+	_, err = raw.Exec(ctx, strings.Join(removal, ";\n")+";\n")
 	require.ErrorContains(t, err, "row-level security", "a role row-level security binds cannot run the statement")
 	assert.Equal(t, byte('E'), raw.PgConn().TxStatus(), "the refusal leaves its transaction failed, so nothing commits")
 	exec(`ROLLBACK`)
 	exec(`RESET ROLE`)
-	assert.Equal(t, 5, suspended(), "and the refused statement removed no one")
+	assert.Equal(t, stillSuspended, suspended(), "and the refused statement removed no one")
 	assert.Equal(t, before, invitations(), "and revoked nothing")
 
-	// The listing runs as psql runs it, one statement at a time, so its rows
-	// can be read inside the transaction.
-	listing := strings.Split(strings.TrimSuffix(upgradeSQL(t, opening+"SELECT m."), ";\n"), ";\n")
-	require.Len(t, listing, 4)
-	require.Equal(t, "COMMIT", listing[3])
+	// Each block runs as psql runs a file, one statement at a time, so its
+	// rows can be read inside its transaction.
+	listing := block("SELECT m.")
+	require.Len(t, listing, 5, "BEGIN, SET LOCAL, the two lists, COMMIT")
 	exec(listing[0])
 	exec(listing[1])
-	rows, err := raw.Query(ctx, listing[2])
-	require.NoError(t, err)
-	var projectID, tenantID, userID, email string
-	var listed []string
-	_, err = pgx.ForEachRow(rows, []any{&projectID, &tenantID, &userID, &email}, func() error {
-		listed = append(listed, userID)
-		return nil
-	})
-	require.NoError(t, err)
-	exec(listing[3])
+	members := column(listing[2], 2, 2)
+	invited := column(listing[3], 2, 2)
+	exec(listing[4])
 	assert.Equal(t, "on", rowSecurity(), "the listing's setting ends with its transaction")
-	assert.Equal(t, []string{"intl"}, listed, "the listing names the suspended member whose email is not all ASCII")
+	assert.Equal(t, []string{"intl"}, members, "the listing names the suspended member whose email is not all ASCII, and not one with none")
+	assert.ElementsMatch(t, []string{"inv-held-nbsp", "inv-held-vt", "inv-umlaut"}, invited,
+		"and the pending invitations not all ASCII in the tenants members are suspended from")
 
-	exec(statement)
+	exec(removal[0])
+	exec(removal[1])
+	changes := column(removal[2], 0, 3)
+	exec(removal[3])
 	assert.Equal(t, byte('I'), raw.PgConn().TxStatus(), "the statement's transaction committed")
 	assert.Equal(t, "on", rowSecurity(), "and its setting ended with it")
+	assert.Equal(t, []string{
+		"removed/proj-suspend/t/dotted",
+		"removed/proj-suspend/t/held",
+		"removed/proj-suspend/t/intl",
+		"removed/proj-suspend/t/tagged",
+		"removed/proj-suspend/t2/free",
+		"removed/proj-suspend/t2/nomail",
+		"revoked/proj-suspend/t/inv-dotted",
+		"revoked/proj-suspend/t/inv-dotted-fqdn",
+		"revoked/proj-suspend/t/inv-held",
+		"revoked/proj-suspend/t/inv-held-fqdn",
+		"revoked/proj-suspend/t/inv-tagged",
+	}, changes, "the statement lists each member it removed and each invitation it revoked")
 	assert.Zero(t, suspended(), "every suspended member is removed")
-	rows, err = raw.Query(ctx, `SELECT tenant_id || '/' || user_id FROM tenant_member_removals ORDER BY 1`)
+	rows, err := raw.Query(ctx, `SELECT tenant_id || '/' || user_id FROM tenant_member_removals ORDER BY 1`)
 	require.NoError(t, err)
 	removals, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	require.NoError(t, err)
-	assert.Equal(t, []string{"t/dotted", "t/held", "t/intl", "t/tagged", "t2/free"}, removals, "each removal is recorded in its tenant")
+	assert.Equal(t, []string{"t/dotted", "t/held", "t/intl", "t/tagged", "t2/free", "t2/nomail"}, removals, "each removal is recorded in its tenant")
+	var removedAt int64
+	require.NoError(t, raw.QueryRow(ctx, `SELECT removed_at_ms FROM tenant_member_removals WHERE tenant_id = 't2' AND user_id = 'free'`).Scan(&removedAt))
+	assert.Greater(t, removedAt, int64(1), "a removal recorded before is recorded again")
 	assert.Equal(t, map[string]string{
-		"inv-held":          "revoked",
-		"inv-held-fqdn":     "revoked",
-		"inv-tagged":        "revoked",
-		"inv-dotted":        "revoked",
-		"inv-dotted-fqdn":   "revoked",
-		"inv-held-t2":       "pending",
-		"inv-held-accepted": "accepted",
-		"inv-free":          "pending",
-		"inv-intl":          "pending",
+		"inv-held":            "revoked",
+		"inv-held-fqdn":       "revoked",
+		"inv-tagged":          "revoked",
+		"inv-dotted":          "revoked",
+		"inv-dotted-fqdn":     "revoked",
+		"inv-held-t2":         "pending",
+		"inv-held-accepted":   "accepted",
+		"inv-free":            "pending",
+		"inv-intl":            "pending",
+		"inv-held-nbsp":       "pending",
+		"inv-held-vt":         "pending",
+		"inv-umlaut":          "pending",
+		"inv-umlaut-accepted": "accepted",
+		"inv-umlaut-t3":       "pending",
 	}, invitations(), "the pending invitations to the canonical mailbox in the tenant each was removed from are revoked, and nothing else")
 }

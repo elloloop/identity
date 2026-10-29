@@ -565,7 +565,7 @@ func (f *fakeMembershipStore) SuspendMembership(_ context.Context, projectID, te
 // tenant verified; an active one is returned unchanged, and anything else
 // is ErrNotFound.
 func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID string, by Restorer) (*TenantMembership, bool, error) {
-	if !by.IsOperator() && by.UserID() == "" {
+	if by.NamesNobody() {
 		return nil, false, ErrPermissionDenied
 	}
 	if f.onRestore != nil {

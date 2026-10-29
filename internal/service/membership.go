@@ -132,6 +132,10 @@ func (r Restorer) UserID() string { return r.userID }
 // IsOperator reports whether an operator restores, whom nothing checks.
 func (r Restorer) IsOperator() bool { return r.operator }
 
+// NamesNobody reports whether r is the zero Restorer, neither a member nor
+// an operator, which the store refuses before it reads anything.
+func (r Restorer) NamesNobody() bool { return !r.operator && r.userID == "" }
+
 // MembershipStore persists TenantMemberships within a Project. Reads that
 // miss return (nil, nil).
 type MembershipStore interface {

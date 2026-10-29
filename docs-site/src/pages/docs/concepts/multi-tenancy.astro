@@ -457,8 +457,9 @@ Both:
   </p>
   <p>
     A tenant whose owners have all been deleted, deactivated or merged away
-    has no owner. While one of its admins can sign in, that admin invites a
-    new owner with <code>CreateTenantInvitation</code> and
+    has no owner. While one of its admins both can sign in and holds an
+    active membership, that admin invites a new owner with
+    <code>CreateTenantInvitation</code> and
     <code>role="owner"</code>. Once no owner or admin both can sign in and
     holds an active membership, nobody can govern it, and an operator gives
     it an owner again, with a reason the
