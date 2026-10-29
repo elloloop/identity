@@ -15,31 +15,6 @@ import (
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
-// ControlPlaneAdminService implements the redesign's control-plane admin
-// RPCs: PLATFORM-operator operations that provision projects, project
-// credentials, project auth-domains, tenants and the first tenant admin —
-// the out-of-band bootstrap a deployer runs before any human can self-serve.
-//
-// It is authenticated DIFFERENTLY from every other service: not by a user
-// JWT but by a shared secret the operator presents on each call. The secret
-// is held here and compared in CONSTANT TIME (crypto/subtle) against the
-// per-request value, so a wrong or missing secret is rejected uniformly and
-// without a timing side-channel. When the configured secret is empty the
-// surface is DISABLED — every method returns ErrUnimplemented — so a deployer
-// who never sets GATEWAY_ADMIN_API_SECRET cannot have these RPCs reached. The
-// one exception is the tenant operations (app.TenantOperatorProcedures) called
-// with a tenant_operator credential and no secret: the credential is checked,
-// a live one admitted and any other refused with ErrPermissionDenied. Only
-// the secret can mint one.
-//
-// Like the other governance services it is postgres-only: memory have
-// no control plane, so the app constructs no ControlPlaneAdminService and the
-// handler returns Unimplemented.
-//
-// TODO(redesign): the shared secret is the shipped auth mechanism. Future
-// work hardens it with mTLS client-certificate auth and an optional
-// internal-only listener port bound away from the public RPC surface.
-
 // adminPublicIDBytes / adminSecretBytes size the two halves of a minted
 // project credential. The public id is the (non-secret) lookup key; the
 // secret half is the part shown once and stored only as a hash.
@@ -209,12 +184,34 @@ type ControlPlaneProjectStore interface {
 	DirectoryCredentialStore
 }
 
-// ControlPlaneAdminService provisions control-plane resources on behalf of a
-// platform operator authenticated by a shared secret.
+// ControlPlaneAdminService implements the redesign's control-plane admin
+// RPCs: PLATFORM-operator operations that provision projects, project
+// credentials, project auth-domains, tenants and the first tenant admin —
+// the out-of-band bootstrap a deployer runs before any human can self-serve.
+//
+// It is authenticated DIFFERENTLY from every other service: not by a user
+// JWT but by a shared secret the operator presents on each call. The secret
+// is held here and compared in CONSTANT TIME (crypto/subtle) against the
+// per-request value, so a wrong or missing secret is rejected uniformly and
+// without a timing side-channel. When the configured secret is empty the
+// surface is DISABLED — every method returns ErrUnimplemented — so a deployer
+// who never sets GATEWAY_ADMIN_API_SECRET cannot have these RPCs reached. The
+// one exception is the tenant operations (app.TenantOperatorProcedures) called
+// with a tenant_operator credential and no secret: the credential is checked,
+// a live one admitted and any other refused with ErrPermissionDenied. Only
+// the secret can mint one.
+//
+// Like the other governance services it is postgres-only: memory have
+// no control plane, so the app constructs no ControlPlaneAdminService and the
+// handler returns Unimplemented.
+//
+// TODO(redesign): the shared secret is the shipped auth mechanism. Future
+// work hardens it with mTLS client-certificate auth and an optional
+// internal-only listener port bound away from the public RPC surface.
 type ControlPlaneAdminService struct {
 	// secret is the shared admin secret. Empty disables the surface, except
-	// the tenant operations called with a tenant_operator credential, as the
-	// type doc describes (authorizeTenantOperator).
+	// the tenant operations called with a tenant_operator credential and no
+	// secret, as the type doc describes (authorizeTenantOperator).
 	secret string
 	// disableFirstAdminBootstrap closes CreateFirstPlatformAdmin entirely
 	// (GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP): when true the RPC is rejected with
@@ -258,17 +255,17 @@ type ControlPlaneAdminService struct {
 	nowFunc func() int64
 }
 
-// NewControlPlaneAdminService wires the admin service. An empty secret
-// leaves the service constructed but DISABLED: every method returns
-// ErrUnimplemented (so the handler maps it to CodeUnimplemented), except the
-// tenant operations given a tenant_operator credential, which check it. A nil
-// logger defaults to a no-op. A nil resolver defaults to net.DefaultResolver,
-// matching DomainService. A nil auditLog defaults to a no-op audit.Logger so
-// blocked-bootstrap recording stays best-effort. A nil policies store leaves
-// the LoginPolicy-authoring RPCs disabled (ErrUnimplemented), matching the
-// memory shape with no governance plane. users is required. nowFunc is injected so
-// the auth-domain verified-at stamp is deterministic in tests; it defaults
-// to wall-clock epoch-millis.
+// NewControlPlaneAdminService wires the admin service. An empty secret leaves
+// the service constructed but DISABLED: every method returns ErrUnimplemented
+// (so the handler maps it to CodeUnimplemented), except the tenant operations
+// given a tenant_operator credential and no secret, which check it (see the
+// type doc). A nil logger defaults to a no-op. A nil resolver defaults to
+// net.DefaultResolver, matching DomainService. A nil auditLog defaults to a
+// no-op audit.Logger so blocked-bootstrap recording stays best-effort. A nil
+// policies store leaves the LoginPolicy-authoring RPCs disabled
+// (ErrUnimplemented), matching the memory shape with no governance plane.
+// users is required. nowFunc is injected so the auth-domain verified-at stamp
+// is deterministic in tests; it defaults to wall-clock epoch-millis.
 func NewControlPlaneAdminService(
 	secret string,
 	disableFirstAdminBootstrap bool,

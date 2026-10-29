@@ -328,11 +328,11 @@ type Config struct {
 	// reached. The one exception is the tenant operations a tenant_operator
 	// project credential authorizes (app.TenantOperatorProcedures): called
 	// with a credential and no secret, they check it, admitting a live one
-	// and refusing any other. Only this secret can mint one.
-	// Emptying the secret therefore does not shut those off; revoking the
-	// credentials (AdminRevokeProjectCredential, which also takes this
-	// secret) does. Driven by GATEWAY_ADMIN_API_SECRET. Only the postgres
-	// driver has a control plane; the memory driver ignores it.
+	// and refusing any other, so emptying the secret does not shut them off;
+	// revoking the credentials (AdminRevokeProjectCredential, which also
+	// takes this secret) does. Only this secret can mint such a credential.
+	// Driven by GATEWAY_ADMIN_API_SECRET. Only the postgres driver has a
+	// control plane; the memory driver ignores it.
 	//
 	// TODO(redesign): the shared secret is the shipped mechanism. Future
 	// work hardens this with mTLS client-certificate auth and an optional
