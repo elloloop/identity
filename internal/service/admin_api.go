@@ -209,7 +209,9 @@ type ControlPlaneProjectStore interface {
 // ControlPlaneAdminService provisions control-plane resources on behalf of a
 // platform operator authenticated by a shared secret.
 type ControlPlaneAdminService struct {
-	// secret is the shared admin secret. Empty disables the whole surface.
+	// secret is the shared admin secret. Empty disables the surface, except
+	// the tenant operations called with a live tenant_operator credential
+	// (authorizeTenantOperator).
 	secret string
 	// disableFirstAdminBootstrap closes CreateFirstPlatformAdmin entirely
 	// (GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP): when true the RPC is rejected with
@@ -255,7 +257,8 @@ type ControlPlaneAdminService struct {
 
 // NewControlPlaneAdminService wires the admin service. An empty secret
 // leaves the service constructed but DISABLED: every method returns
-// ErrUnimplemented (so the handler maps it to CodeUnimplemented). A nil
+// ErrUnimplemented (so the handler maps it to CodeUnimplemented), except the
+// tenant operations called with a live tenant_operator credential. A nil
 // logger defaults to a no-op. A nil resolver defaults to net.DefaultResolver,
 // matching DomainService. A nil auditLog defaults to a no-op audit.Logger so
 // blocked-bootstrap recording stays best-effort. A nil policies store leaves
@@ -303,18 +306,21 @@ func NewControlPlaneAdminService(
 	}
 }
 
-// Enabled reports whether the admin surface is active (a non-empty secret is
-// configured). The handler consults it to return Unimplemented up front
-// without leaking, via the secret check, whether a secret happens to match.
+// Enabled reports whether an admin secret is configured. With none, the
+// secret-only admin RPCs are disabled, but the tenant operations still accept
+// a live tenant_operator credential, so false does not mean the whole admin
+// surface is off.
 func (s *ControlPlaneAdminService) Enabled() bool {
 	return s.secret != ""
 }
 
-// authorize gates every admin RPC. When no secret is configured the surface
-// is disabled (ErrUnimplemented). Otherwise the presented secret must match
-// the configured one in constant time; a blank or mismatched secret is
-// ErrPermissionDenied. The constant-time compare ensures a near-miss secret
-// is indistinguishable, by timing, from a wildly wrong one.
+// authorize gates every admin RPC by the secret (the tenant operations call
+// it through authorizeTenantOperator, unless a tenant_operator credential is
+// presented without a secret). When no secret is configured it returns
+// ErrUnimplemented. Otherwise the presented secret must match the configured
+// one in constant time; a blank or mismatched secret is ErrPermissionDenied.
+// The constant-time compare ensures a near-miss secret is indistinguishable,
+// by timing, from a wildly wrong one.
 func (s *ControlPlaneAdminService) authorize(presented string) error {
 	if s.secret == "" {
 		return ErrUnimplemented

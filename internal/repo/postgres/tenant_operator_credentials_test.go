@@ -15,7 +15,7 @@ import (
 
 // A tenant_operator credential is stored like any other kind and read back
 // uncached by its public id, which is how the operator service checks one on
-// every call.
+// every call. It never selects a project as X-Project-Key.
 func TestTenantOperatorCredential_StoredAndReadByPublicID(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -38,6 +38,10 @@ func TestTenantOperatorCredential_StoredAndReadByPublicID(t *testing.T) {
 	require.Equal(t, service.CredentialKindTenantOperator, got.Kind)
 	require.Equal(t, projectID, got.ProjectID)
 	require.Equal(t, "hash", got.SecretHash)
+
+	resolved, err := store.ResolveByCredential(ctx, "ok_store")
+	require.NoError(t, err)
+	require.Nil(t, resolved, "a tenant operator key must not select a project as X-Project-Key")
 }
 
 // 0054 widens the kind check to admit tenant_operator; rolling it back

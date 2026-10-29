@@ -11,9 +11,9 @@ import (
 // OperatorCredentials is what a caller of an operator RPC presents. The
 // admin secret authorizes every operator RPC on every project. A
 // tenant_operator credential ("<public id>.<secret>") authorizes only the
-// tenant operations (AdminGetTenant, AdminListTenants, AdminSuspendTenant,
-// AdminRestoreTenant, AdminRecoverTenantOwnership and GetLoginPolicy), and
-// only on its own project, so a service that runs a project's tenants never
+// tenant operations, the methods that call authorizeTenantOperator
+// (app.TenantOperatorProcedures names them for the rate limit), and only on
+// its own project, so a service that runs a project's tenants never
 // holds the admin secret. When an admin secret is presented, it alone is
 // checked.
 type OperatorCredentials struct {

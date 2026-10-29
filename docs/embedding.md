@@ -197,14 +197,25 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
 }
 ```
 
-**Rate limits are the host's responsibility too, with one exception.** The
-per-IP limits on the sign-up, sign-in and other abuse-prone RPCs live in the
-HTTP chain; apply your own in an interceptor. `LookupUsers` is the exception:
-its limit cannot be switched off, so the bridge enforces it itself, from the
-same per-IP budget (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`) the HTTP surface
-uses. A throttled call fails with `RESOURCE_EXHAUSTED` and a `retry-after`
-response metadata value in seconds. The caller is the connection's peer
-address, or the first untrusted `x-forwarded-for` hop when the peer is in
+**Rate limits are the host's responsibility too, with three exceptions.**
+The per-IP limits on the sign-up, sign-in and other abuse-prone RPCs live in
+the HTTP chain; apply your own in an interceptor. The bridge enforces these
+itself, from the same per-IP budgets the HTTP surface uses:
+
+- `LookupUsers`, whose limit cannot be switched off
+  (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`).
+- The tenant operations (`AdminGetTenant`, `AdminListTenants`,
+  `AdminSuspendTenant`, `AdminRestoreTenant`, `AdminRecoverTenantOwnership`
+  and `GetLoginPolicy`) when the call presents `X-Tenant-Operator-Key`, one
+  budget across them all (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`). A call made
+  with the admin secret alone is not counted.
+- The agent machine calls, when the server configures their limits
+  (`GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP`,
+  `GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP`).
+
+A throttled call fails with `RESOURCE_EXHAUSTED` and a `retry-after` response
+metadata value in seconds. The caller is the connection's peer address, or the
+first untrusted `x-forwarded-for` hop when the peer is in
 `GATEWAY_TRUSTED_PROXIES`.
 
 Unauthenticated RPCs (`PasswordSignup`, `PasswordLogin`, `BeginOAuthLogin`,

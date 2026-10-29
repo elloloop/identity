@@ -331,9 +331,11 @@ const (
 	// (AdminSuspendTenant, AdminRestoreTenant), with the operator's IP
 	// address and user agent. The actor is "credential:<id>" when a
 	// tenant_operator credential made the call, and empty for the admin
-	// secret. The details carry the project id, the tenant id and the reason
-	// the operator gave. A call that finds the tenant already in the status
-	// asked for changes nothing and records nothing.
+	// secret. No user is the target, so the target repeats the actor, as in
+	// every record that names no target. The details carry the project id,
+	// the tenant id and the reason the operator gave. A call that finds the
+	// tenant already in the status asked for changes nothing and records
+	// nothing.
 	EventTenantSuspended EventType = "tenant_suspended"
 	EventTenantRestored  EventType = "tenant_restored"
 

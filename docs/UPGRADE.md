@@ -9,8 +9,8 @@ instead.
 
 - **Mint one** with the secret:
   `AdminCreateProjectCredential(project_id, kind = "tenant_operator")`
-  returns a `raw_key` (`ok_<public id>.<secret>`), shown once. Revoke it with
-  `AdminRevokeProjectCredential`.
+  returns a `raw_key` (`<public id>.<secret>`, the public id beginning
+  `ok_`), shown once. Revoke it with `AdminRevokeProjectCredential`.
 - **Present it** in `X-Tenant-Operator-Key`, in place of `X-Admin-Secret`, on
   six calls: `AdminGetTenant`, `AdminListTenants`, `AdminSuspendTenant`,
   `AdminRestoreTenant`, `AdminRecoverTenantOwnership` and `GetLoginPolicy`.
@@ -21,6 +21,11 @@ instead.
   suspended project refuses it from the next call. It works whether or not
   `GATEWAY_ADMIN_API_SECRET` is still set. A call that presents both headers
   is checked against the secret alone, as before.
+- **An empty secret no longer closes these six calls.** Unsetting
+  `GATEWAY_ADMIN_API_SECRET` still disables every other admin call, but the
+  six keep accepting every live `tenant_operator` credential. To cut the
+  credentials off, revoke them (`AdminRevokeProjectCredential`, which takes
+  the secret) or suspend their project.
 - **Every refusal is `PERMISSION_DENIED`** and does not say why. A refusal of
   a `tenant_operator` credential of an active project (a wrong secret, a
   revoked credential, or a call naming another project) records
@@ -35,9 +40,10 @@ instead.
 - **Rate limit:** the calls that present the header share one per-IP budget,
   `GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` (default 120) per
   `GATEWAY_RATE_LIMIT_WINDOW_SECONDS`, across the six calls and across HTTP and
-  an embedding host's native gRPC registration. It is separate from the
-  budgets of `LookupUsers` and `TeammateKeyService`. Calls made with the
-  secret alone are not counted.
+  an embedding host's native gRPC registration. It is counted separately
+  from the budgets of `LookupUsers` and `TeammateKeyService`, but the setting
+  is shared: raising it raises those two budgets as well. It is per client
+  IP, not per credential. Calls made with the secret alone are not counted.
 - **Migration 0054** widens `project_credentials_kind_check` with
   `tenant_operator`. It holds `ACCESS EXCLUSIVE` on `project_credentials`
   while it validates the new check, bounded by a 10s `lock_timeout`. Run it

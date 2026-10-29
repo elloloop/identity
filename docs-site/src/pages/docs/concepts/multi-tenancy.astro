@@ -567,7 +567,16 @@ Both:
       <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code> (default 120) per
       <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window, across the six
       calls and across HTTP and native gRPC, so a guessed secret cannot be
-      tried at line rate. Calls made with the admin secret are not counted.
+      tried at line rate. Calls made with the admin secret alone are not
+      counted. The setting is shared with the <code>LookupUsers</code> and
+      <code>TeammateKeyService</code> budgets, which are counted separately:
+      raising it raises those too.
+    </li>
+    <li>
+      An empty <code>GATEWAY_ADMIN_API_SECRET</code> does not close these six
+      calls: they keep accepting every live <code>tenant_operator</code>
+      credential. To cut the credentials off, revoke them (which takes the
+      secret) or suspend their Project.
     </li>
   </ul>
 

@@ -323,10 +323,15 @@ type Config struct {
 	// operator by presenting this exact value in the
 	// middleware.AdminAPISecretHeader header, compared in constant time.
 	//
-	// Empty (the default) DISABLES the admin RPCs entirely — they return
+	// Empty (the default) DISABLES the admin RPCs — they return
 	// CodeUnimplemented — so a deployer who never sets it cannot have them
-	// reached. Driven by GATEWAY_ADMIN_API_SECRET. Only the postgres driver
-	// has a control plane; the memory driver ignores it.
+	// reached. The one exception is the tenant operations a tenant_operator
+	// project credential authorizes (app.TenantOperatorProcedures): they
+	// still accept a live credential, which only this secret can mint.
+	// Emptying the secret therefore does not shut those off; revoking the
+	// credentials or suspending their project does. Driven by
+	// GATEWAY_ADMIN_API_SECRET. Only the postgres driver has a control plane;
+	// the memory driver ignores it.
 	//
 	// TODO(redesign): the shared secret is the shipped mechanism. Future
 	// work hardens this with mTLS client-certificate auth and an optional

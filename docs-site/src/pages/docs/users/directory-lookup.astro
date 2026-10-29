@@ -234,8 +234,10 @@ import { Code } from "astro-expressive-code/components";
   </p>
   <p>
     <code>AdminRevokeProjectCredential</code> revokes project credentials of
-    every kind, not only directory keys, but the other kinds are not refused
-    as promptly. A publishable, secret or mTLS key presented as
+    every kind, not only directory keys. Teammate key manager and tenant
+    operator credentials are read afresh too, so they are refused on their
+    next call, but publishable, secret and mTLS keys are not refused as
+    promptly. A publishable, secret or mTLS key presented as
     <code>X-Project-Key</code> (or <code>project_key</code>) selects its project through a per-replica
     project-resolution cache that revocation does not clear, so each replica
     keeps resolving the key for up to

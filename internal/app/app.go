@@ -1310,10 +1310,12 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 // treats nil as "disabled" and returns CodeUnimplemented.
 //
 // The service is constructed even when no admin secret is configured: in that
-// case it is constructed-but-disabled and every admin RPC returns
-// Unimplemented (the secret check short-circuits on an empty secret). This
-// keeps the "off by default" guarantee in one place — the service's
-// constant-time authorize — rather than splitting it across the wiring. users
+// case every admin RPC returns Unimplemented (the secret check short-circuits
+// on an empty secret), except the tenant operations called with a live
+// tenant_operator credential, which only the secret can mint. This keeps the
+// "off by default" guarantee in the service's authorization (authorize, and
+// authorizeTenantOperator for TenantOperatorProcedures) rather than
+// splitting it across the wiring. users
 // resolves an account in a named project, as for buildMembershipService; the
 // service requires it, so without one there is no service.
 func buildControlPlaneAdminService(deps Deps, users service.UserDirectory, auditLog *audit.Logger, logger *zap.Logger) *service.ControlPlaneAdminService {

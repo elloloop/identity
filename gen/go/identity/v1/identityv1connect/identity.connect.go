@@ -948,7 +948,9 @@ type IdentityServiceClient interface {
 	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
 	// projects/tenants/credentials out-of-band. Authenticated by the shared
 	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
-	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The tenant
+	// operations below that say so also accept a tenant_operator credential in
+	// "X-Tenant-Operator-Key", whether or not the secret is set.
 	AdminCreateProject(context.Context, *connect.Request[v1.AdminCreateProjectRequest]) (*connect.Response[v1.AdminCreateProjectResponse], error)
 	AdminCreateProjectCredential(context.Context, *connect.Request[v1.AdminCreateProjectCredentialRequest]) (*connect.Response[v1.AdminCreateProjectCredentialResponse], error)
 	// Revokes a project credential of any kind. Operator-only, like the other
@@ -988,9 +990,15 @@ type IdentityServiceClient interface {
 	// alone is checked. What a credential does is recorded with it as the
 	// actor ("credential:<id>"); a refusal of one that exists is recorded as
 	// tenant_operator_refused. Calls that present the credential share one
-	// budget per client IP, GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window.
-	// UNIMPLEMENTED when neither is configured, PERMISSION_DENIED for a wrong
-	// secret or a credential refused for any reason.
+	// budget per client IP, GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window;
+	// calls made with the admin secret alone are not counted. Over the limit
+	// the call is refused before the RPC runs: over HTTP with status 429 and
+	// a Retry-After header of the window in seconds, which Connect clients
+	// surface as UNAVAILABLE; over the native gRPC registration with
+	// RESOURCE_EXHAUSTED and the same value in the "retry-after" response
+	// metadata. UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset and the
+	// call presents no tenant_operator credential, PERMISSION_DENIED for a
+	// wrong secret or a credential refused for any reason.
 	//
 	// INVALID_ARGUMENT for a blank project_id or tenant_id, and NOT_FOUND when
 	// the project holds no such tenant.
@@ -1031,8 +1039,6 @@ type IdentityServiceClient interface {
 	AdminSuspendTenant(context.Context, *connect.Request[v1.AdminSuspendTenantRequest]) (*connect.Response[v1.AdminSuspendTenantResponse], error)
 	// Moves a suspended tenant back to claimed and records the operator's
 	// reason, IP address and user agent in the audit trail as tenant_restored.
-	// Authorized like AdminGetTenant: the admin secret, or a tenant_operator
-	// credential of project_id.
 	// Administration and a refresh that chooses the tenant work again at once;
 	// identity's HTTP chain accepts the tokens that chose it within
 	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Sign-in is as it was: its login
@@ -1042,8 +1048,9 @@ type IdentityServiceClient interface {
 	// back none the suspension revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
-	// so a retry is safe. Operator-only, authorized like AdminGetTenant, with
-	// the same refusals as AdminSuspendTenant: FAILED_PRECONDITION for a
+	// so a retry is safe. Operator-only, authorized like AdminGetTenant: the
+	// admin secret, or a tenant_operator credential of project_id. It has the
+	// same refusals as AdminSuspendTenant: FAILED_PRECONDITION for a
 	// latent tenant, and for a tenant with no creator and no owner or admin,
 	// since restoring it would make it selectable with no one answering for
 	// its domain (appoint an owner with AdminRecoverTenantOwnership, then
@@ -1094,7 +1101,9 @@ type IdentityServiceClient interface {
 	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)
 	// GetLoginPolicy is authorized like AdminGetTenant: the admin secret, or a
 	// tenant_operator credential of project_id. Writing or deleting a policy
-	// takes the admin secret.
+	// takes the admin secret. The policy is returned whole, sso_connection_json
+	// verbatim, so that field must not hold a secret a tenant_operator
+	// credential's holder should not read.
 	GetLoginPolicy(context.Context, *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error)
 	DeleteLoginPolicy(context.Context, *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error)
 	// Per-project config authoring. UpsertProjectConfig replaces a project's
@@ -3589,7 +3598,9 @@ type IdentityServiceHandler interface {
 	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
 	// projects/tenants/credentials out-of-band. Authenticated by the shared
 	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
-	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The tenant
+	// operations below that say so also accept a tenant_operator credential in
+	// "X-Tenant-Operator-Key", whether or not the secret is set.
 	AdminCreateProject(context.Context, *connect.Request[v1.AdminCreateProjectRequest]) (*connect.Response[v1.AdminCreateProjectResponse], error)
 	AdminCreateProjectCredential(context.Context, *connect.Request[v1.AdminCreateProjectCredentialRequest]) (*connect.Response[v1.AdminCreateProjectCredentialResponse], error)
 	// Revokes a project credential of any kind. Operator-only, like the other
@@ -3629,9 +3640,15 @@ type IdentityServiceHandler interface {
 	// alone is checked. What a credential does is recorded with it as the
 	// actor ("credential:<id>"); a refusal of one that exists is recorded as
 	// tenant_operator_refused. Calls that present the credential share one
-	// budget per client IP, GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window.
-	// UNIMPLEMENTED when neither is configured, PERMISSION_DENIED for a wrong
-	// secret or a credential refused for any reason.
+	// budget per client IP, GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window;
+	// calls made with the admin secret alone are not counted. Over the limit
+	// the call is refused before the RPC runs: over HTTP with status 429 and
+	// a Retry-After header of the window in seconds, which Connect clients
+	// surface as UNAVAILABLE; over the native gRPC registration with
+	// RESOURCE_EXHAUSTED and the same value in the "retry-after" response
+	// metadata. UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset and the
+	// call presents no tenant_operator credential, PERMISSION_DENIED for a
+	// wrong secret or a credential refused for any reason.
 	//
 	// INVALID_ARGUMENT for a blank project_id or tenant_id, and NOT_FOUND when
 	// the project holds no such tenant.
@@ -3672,8 +3689,6 @@ type IdentityServiceHandler interface {
 	AdminSuspendTenant(context.Context, *connect.Request[v1.AdminSuspendTenantRequest]) (*connect.Response[v1.AdminSuspendTenantResponse], error)
 	// Moves a suspended tenant back to claimed and records the operator's
 	// reason, IP address and user agent in the audit trail as tenant_restored.
-	// Authorized like AdminGetTenant: the admin secret, or a tenant_operator
-	// credential of project_id.
 	// Administration and a refresh that chooses the tenant work again at once;
 	// identity's HTTP chain accepts the tokens that chose it within
 	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Sign-in is as it was: its login
@@ -3683,8 +3698,9 @@ type IdentityServiceHandler interface {
 	// back none the suspension revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
-	// so a retry is safe. Operator-only, authorized like AdminGetTenant, with
-	// the same refusals as AdminSuspendTenant: FAILED_PRECONDITION for a
+	// so a retry is safe. Operator-only, authorized like AdminGetTenant: the
+	// admin secret, or a tenant_operator credential of project_id. It has the
+	// same refusals as AdminSuspendTenant: FAILED_PRECONDITION for a
 	// latent tenant, and for a tenant with no creator and no owner or admin,
 	// since restoring it would make it selectable with no one answering for
 	// its domain (appoint an owner with AdminRecoverTenantOwnership, then
@@ -3735,7 +3751,9 @@ type IdentityServiceHandler interface {
 	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)
 	// GetLoginPolicy is authorized like AdminGetTenant: the admin secret, or a
 	// tenant_operator credential of project_id. Writing or deleting a policy
-	// takes the admin secret.
+	// takes the admin secret. The policy is returned whole, sso_connection_json
+	// verbatim, so that field must not hold a secret a tenant_operator
+	// credential's holder should not read.
 	GetLoginPolicy(context.Context, *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error)
 	DeleteLoginPolicy(context.Context, *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error)
 	// Per-project config authoring. UpsertProjectConfig replaces a project's

@@ -209,7 +209,7 @@ GATEWAY_DEFAULT_TENANT_ID           = <string>   # the storage scope the default
 GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS= <csv>      # serving hostnames seeded (verified) on the default project; first is primary
 GATEWAY_DEFAULT_PRODUCT             = <string>   # default "default"; product slug attributed to a request with no X-Product header
 GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN= <bool>     # default true; primary auth-domain (branded links) must be DNS-verified. false lets an unverified is_primary host drive links
-GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane admin RPCs; empty disables them
+GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane admin RPCs; empty disables them, except the tenant operations called with a live tenant_operator credential
 GATEWAY_PUBLIC_EMAIL_DOMAINS        = <csv>      # extra public domains that never auto-form a tenant
 GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS = <int>  # default 30; in-process cache for credential/Host→project resolution; 0 disables
 GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES = <int>  # default 10000; LRU bound on cached resolution keys
@@ -250,7 +250,9 @@ audit trail keeps), and given an owner again with
 person both can sign in and holds an active membership (also with a
 reason). They authenticate via the `GATEWAY_ADMIN_API_SECRET`
 shared secret rather than a user token. With the secret empty (the default) those RPCs return
-`CodeUnimplemented`, so a deployer who never sets it cannot reach them.
+`CodeUnimplemented`, so a deployer who never sets it cannot reach them, except
+the tenant operations below when they are called with a live
+`tenant_operator` credential.
 
 The tenant operations among them (`AdminGetTenant`, `AdminListTenants`,
 `AdminSuspendTenant`, `AdminRestoreTenant` and

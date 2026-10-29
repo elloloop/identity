@@ -116,7 +116,7 @@ All config is via environment variables. See `internal/config/config.go` for the
 | `GATEWAY_DEFAULT_PROJECT_ID` | ID of the control-plane Project seeded on boot and used to pin zero-config requests (default `default`) |
 | `GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS` | Comma-separated serving hostnames seeded (verified) onto the default project; the first is primary. Lets the `Host` header resolve to the default project |
 | `GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN` | When `true` (default), a project's primary auth-domain (which drives branded link URLs / cookie domains) must be DNS-verified — an unverified `is_primary` custom host is ignored. Set `false` to let an unverified primary host drive branded links |
-| `GATEWAY_ADMIN_API_SECRET` | Shared secret authenticating the control-plane admin RPCs (`AdminCreateProject`, …). Empty (default) disables them |
+| `GATEWAY_ADMIN_API_SECRET` | Shared secret authenticating the control-plane admin RPCs (`AdminCreateProject`, …). Empty (default) disables them, except the six tenant operations called with a live `tenant_operator` credential, which only the secret can mint; revoke those credentials to shut them off |
 | `GATEWAY_PUBLIC_EMAIL_DOMAINS` | Extra consumer/public email domains never auto-formed into a tenant (adds to the built-in gmail/outlook/… set) |
 | `GATEWAY_JWT_SIGNER` | JWT signer backend: `file` (default) or `kms_aws` |
 | `GATEWAY_JWT_KEYS_FILE` | Path to the file-backed signer's keys file (see [docs/key-rotation.md](./docs/key-rotation.md)) |
