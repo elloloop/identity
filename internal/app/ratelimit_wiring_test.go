@@ -340,6 +340,43 @@ func TestBuildRateLimits_DirectoryLookupLimited(t *testing.T) {
 	assertQuotaExhausts(t, handler, path, "9.9.9.9", 2)
 }
 
+// The six tenant-operator procedures share one per-IP budget, drawn only by
+// requests that present a tenant_operator key: a caller holding the admin
+// secret alone is not newly throttled, and a guessed key cannot be tried at
+// line rate.
+func TestBuildRateLimits_TenantOperatorLimited(t *testing.T) {
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitDirectoryPerIP: 2}
+	limits := buildRateLimits(cfg)
+	for _, path := range TenantOperatorProcedures {
+		limit, ok := middleware.MatchPathLimit(limits, path)
+		require.True(t, ok, path)
+		require.Equal(t, "tenant_operator", limit.Tag, path)
+		require.Equal(t, middleware.TenantOperatorKeyHeader, limit.Header, path)
+	}
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	serve := func(path string, withKey bool) int {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "9.9.9.7")
+		if withKey {
+			req.Header.Set(middleware.TenantOperatorKeyHeader, "ok_x.secret")
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	first, second := TenantOperatorProcedures[0], TenantOperatorProcedures[len(TenantOperatorProcedures)-1]
+	for i := 0; i < 4; i++ {
+		require.Equal(t, http.StatusOK, serve(first, false), "a call without the key is not counted")
+	}
+	require.Equal(t, http.StatusOK, serve(first, true))
+	require.Equal(t, http.StatusOK, serve(second, true))
+	assert.Equal(t, http.StatusTooManyRequests, serve(first, true), "the six share one budget")
+	assert.Equal(t, http.StatusTooManyRequests, serve(second, true))
+	assert.Equal(t, http.StatusOK, serve(second, false), "the admin secret's callers stay unthrottled")
+}
+
 // TestBuildRateLimits_SCIMLimited asserts every request under /scim/v2/
 // carries a per-IP quota, so the deployment-wide bearer token cannot be
 // guessed at line rate, and that a zero quota switches it off like the other

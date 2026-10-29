@@ -25,10 +25,9 @@ import (
 )
 
 const (
-	teammateKeyChallengeDomain    = "identity.agent-machine.v1"
-	teammateKeyExchangeOperation  = "exchange_teammate"
-	maxTeammatePublicKeyBytes     = 256
-	teammateKeyManagerActorPrefix = "credential:"
+	teammateKeyChallengeDomain   = "identity.agent-machine.v1"
+	teammateKeyExchangeOperation = "exchange_teammate"
+	maxTeammatePublicKeyBytes    = 256
 )
 
 var (
@@ -140,7 +139,7 @@ func (s *TeammateKeyService) manager(ctx context.Context, presentedKey string) (
 		return nil, errTeammateKeyManager
 	}
 	if reason != "" {
-		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: cred.ProjectID}), audit.EventTeammateKeyManagerRefused, audit.WithActor(teammateKeyManagerActorPrefix+cred.ID), audit.WithSuccess(false), audit.WithDetails(map[string]any{"reason": reason}))
+		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: cred.ProjectID}), audit.EventTeammateKeyManagerRefused, audit.WithActor(credentialActor(cred)), audit.WithSuccess(false), audit.WithDetails(map[string]any{"reason": reason}))
 		return nil, errTeammateKeyManager
 	}
 	return cred, nil
@@ -181,7 +180,7 @@ func (s *TeammateKeyService) register(ctx context.Context, presentedKey string, 
 		return stored.ID, "existing", nil
 	}
 	fingerprint := sha256.Sum256(stored.PublicKey)
-	s.audit.Log(ctx, audit.EventTeammateKeyRegistered, audit.WithActor(teammateKeyManagerActorPrefix+cred.ID), audit.WithTarget(stored.TeammateID), audit.WithSuccess(true), audit.WithDetails(map[string]any{"key_id": stored.ID, "claim_id": stored.ClaimID, "workstation_id": stored.WorkstationID, "company_id": stored.CompanyID, "algorithm": stored.Algorithm, "key_fingerprint": hex.EncodeToString(fingerprint[:])}))
+	s.audit.Log(ctx, audit.EventTeammateKeyRegistered, audit.WithActor(credentialActor(cred)), audit.WithTarget(stored.TeammateID), audit.WithSuccess(true), audit.WithDetails(map[string]any{"key_id": stored.ID, "claim_id": stored.ClaimID, "workstation_id": stored.WorkstationID, "company_id": stored.CompanyID, "algorithm": stored.Algorithm, "key_fingerprint": hex.EncodeToString(fingerprint[:])}))
 	return stored.ID, "created", nil
 }
 
@@ -212,7 +211,7 @@ func (s *TeammateKeyService) RevokeTeammateKey(ctx context.Context, presentedKey
 		return err
 	}
 	s.metrics.revoked.Inc()
-	s.audit.Log(ctx, audit.EventTeammateKeyRevoked, audit.WithActor(teammateKeyManagerActorPrefix+cred.ID), audit.WithSuccess(true), audit.WithDetails(map[string]any{"claim_id": claimID, "reason": reason}))
+	s.audit.Log(ctx, audit.EventTeammateKeyRevoked, audit.WithActor(credentialActor(cred)), audit.WithSuccess(true), audit.WithDetails(map[string]any{"claim_id": claimID, "reason": reason}))
 	return nil
 }
 

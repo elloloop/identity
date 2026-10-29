@@ -24,6 +24,16 @@ func adminSecret(headers headerReader) string {
 	return headers.Get(middleware.AdminAPISecretHeader)
 }
 
+// operatorCredentials reads what the caller of a tenant operation presents:
+// the admin secret, or a tenant_operator key
+// (middleware.TenantOperatorKeyHeader).
+func operatorCredentials(headers headerReader) service.OperatorCredentials {
+	return service.OperatorCredentials{
+		AdminSecret:       adminSecret(headers),
+		TenantOperatorKey: headers.Get(middleware.TenantOperatorKeyHeader),
+	}
+}
+
 // AdminCreateProject provisions a control-plane project. Operator-only.
 func (h *IdentityHandler) AdminCreateProject(
 	ctx context.Context,
@@ -239,7 +249,8 @@ func (h *IdentityHandler) UpsertLoginPolicy(
 }
 
 // GetLoginPolicy reads a tenant's LoginPolicy. The policy field is
-// unset when none exists. Operator-only.
+// unset when none exists. Operator-only: the admin secret, or a
+// tenant_operator credential of the project.
 func (h *IdentityHandler) GetLoginPolicy(
 	ctx context.Context,
 	req *connect.Request[identitypb.GetLoginPolicyRequest],
@@ -247,7 +258,7 @@ func (h *IdentityHandler) GetLoginPolicy(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	policy, err := h.controlAdmin.GetLoginPolicy(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId)
+	policy, err := h.controlAdmin.GetLoginPolicy(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.TenantId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

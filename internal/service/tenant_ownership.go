@@ -181,12 +181,15 @@ func requireEligibleTenantOwner(u *User) error {
 // (ErrTenantStatusConflict). Only a grant that changed something is audited.
 // A refused recovery is not. Recovery reads the governors, then grants, so
 // two operators recovering one tenant at once with different accounts may
-// each appoint an owner; both are audited.
-func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Context, secret, projectID, tenantID, userID, reason, ip, ua string) (*TenantMembership, error) {
-	if err := s.authorize(secret); err != nil {
+// each appoint an owner; both are audited. caller presents the admin secret
+// or a tenant_operator credential of the project, which the audit records
+// then name as their actor.
+func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Context, caller OperatorCredentials, projectID, tenantID, userID, reason, ip, ua string) (*TenantMembership, error) {
+	op, err := s.authorizeTenantOperator(ctx, caller, projectID)
+	if err != nil {
 		return nil, err
 	}
-	projectID, tenantID, err := requireTenantRef(projectID, tenantID)
+	projectID, tenantID, err = requireTenantRef(projectID, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +231,7 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 		return nil, ErrTenantStillGoverned
 	}
 
-	restored, err := s.liftSuspension(ctx, projectID, tenantID, userID, reason, ip, ua)
+	restored, err := s.liftSuspension(ctx, op, projectID, tenantID, userID, reason, ip, ua)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +247,7 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 	}
 	if changed || restored {
 		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantOwnershipRecovered,
-			audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
+			audit.WithActor(op.actor), audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
 			audit.WithSuccess(true), audit.WithDetails(map[string]any{
 				"project_id": projectID,
 				"tenant_id":  tenantID,
@@ -257,10 +260,11 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 // liftSuspension is an operator's restore of userID's membership of the
 // tenant, made so that a grant can then write it: the grant refuses a
 // suspended one. It reports whether it lifted a suspension, and audits the
-// lift at once as EventTenantMemberRestored, with no actor and the
-// operator's reason, if any, so a grant that then fails cannot leave it
-// unrecorded. Any other membership, or none, is left to the grant.
-func (s *ControlPlaneAdminService) liftSuspension(ctx context.Context, projectID, tenantID, userID, reason, ip, ua string) (bool, error) {
+// lift at once as EventTenantMemberRestored, with the operator's actor (none
+// for the admin secret) and reason, if any, so a grant that then fails
+// cannot leave it unrecorded. Any other membership, or none, is left to the
+// grant.
+func (s *ControlPlaneAdminService) liftSuspension(ctx context.Context, op tenantOperator, projectID, tenantID, userID, reason, ip, ua string) (bool, error) {
 	m, restored, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, userID, RestoredByOperator())
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
@@ -273,7 +277,7 @@ func (s *ControlPlaneAdminService) liftSuspension(ctx context.Context, projectID
 		details["reason"] = reason
 	}
 	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantMemberRestored,
-		audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
+		audit.WithActor(op.actor), audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
 		audit.WithSuccess(true), audit.WithDetails(details))
 	return true, nil
 }

@@ -97,7 +97,12 @@ var AuthExemptPaths = map[string]bool{
 	// admin handler authenticates each call by constant-time-comparing the
 	// X-Admin-Secret header against GATEWAY_ADMIN_API_SECRET, and the whole
 	// surface is disabled (CodeUnimplemented) when that secret is unset. So
-	// the secret check, not the JWT, is their auth.
+	// the secret check, not the JWT, is their auth. The tenant operations
+	// (AdminGetTenant, AdminListTenants, AdminSuspendTenant,
+	// AdminRestoreTenant, AdminRecoverTenantOwnership, GetLoginPolicy) also
+	// accept a tenant_operator project credential in TenantOperatorKeyHeader
+	// in place of the secret, which the admin service verifies and which
+	// confines the call to that credential's project.
 	"/identity.v1.IdentityService/AdminCreateProject":              true,
 	"/identity.v1.IdentityService/AdminCreateProjectCredential":    true,
 	"/identity.v1.IdentityService/AdminRevokeProjectCredential":    true,

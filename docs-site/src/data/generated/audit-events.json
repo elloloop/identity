@@ -81,6 +81,7 @@
   "tenant_member_removed",
   "tenant_member_restored",
   "tenant_member_suspended",
+  "tenant_operator_refused",
   "tenant_ownership_recovered",
   "tenant_ownership_transferred",
   "tenant_restored",

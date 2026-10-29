@@ -620,18 +620,34 @@ type IdentityServiceClient interface {
 	// Operator-only, like the other Admin* RPCs.
 	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
 	// Returns one tenant's own record, in any status: never its members,
-	// domains or login policy. Operator-only, like the other Admin* RPCs:
-	// UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED
-	// for a wrong secret. INVALID_ARGUMENT for a blank project_id or
-	// tenant_id, and NOT_FOUND when the project holds no such tenant.
+	// domains or login policy.
+	//
+	// Operator-only, and one of the six tenant operations (with
+	// AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
+	// AdminRecoverTenantOwnership and GetLoginPolicy) that also accept a
+	// tenant_operator project credential, "<public id>.<secret>", in the
+	// X-Tenant-Operator-Key header in place of the admin secret. The
+	// credential authorizes these six alone, and only on its own project:
+	// project_id must name it. It is checked on every call, so a revocation
+	// holds from the next one, and works whether or not
+	// GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
+	// alone is checked. What a credential does is recorded with it as the
+	// actor ("credential:<id>"); a refusal of one that exists is recorded as
+	// tenant_operator_refused. Calls that present the credential share one
+	// budget per client IP, GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window.
+	// UNIMPLEMENTED when neither is configured, PERMISSION_DENIED for a wrong
+	// secret or a credential refused for any reason.
+	//
+	// INVALID_ARGUMENT for a blank project_id or tenant_id, and NOT_FOUND when
+	// the project holds no such tenant.
 	AdminGetTenant(ctx context.Context, in *AdminGetTenantRequest, opts ...grpc.CallOption) (*AdminGetTenantResponse, error)
 	// Returns one page of a project's tenants, latent, claimed and suspended
 	// alike, newest first by creation time, then id: their own records only,
 	// never their members, domains or login policy. Pass next_cursor back as
 	// cursor for the next page. Paging never repeats or skips a tenant that
 	// existed when it began; one created meanwhile may or may not appear.
-	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
-	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// Operator-only, authorized like AdminGetTenant: the admin secret, or a
+	// tenant_operator credential of project_id.
 	// INVALID_ARGUMENT for a blank project_id or a cursor that does not
 	// decode. A project with no tenants, or one that does not exist, is an
 	// empty page.
@@ -652,15 +668,17 @@ type IdentityServiceClient interface {
 	// controls.
 	//
 	// A tenant already suspended is returned unchanged and nothing is
-	// recorded, so a retry is safe. Operator-only, like the other Admin*
-	// RPCs: UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset,
-	// PERMISSION_DENIED for a wrong secret. INVALID_ARGUMENT for a blank id or
+	// recorded, so a retry is safe. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id. INVALID_ARGUMENT for a blank id or
 	// reason, NOT_FOUND when the project holds no such tenant,
 	// FAILED_PRECONDITION for a latent tenant, which governs nothing yet, and
 	// ABORTED when its status changed between the read and the write.
 	AdminSuspendTenant(ctx context.Context, in *AdminSuspendTenantRequest, opts ...grpc.CallOption) (*AdminSuspendTenantResponse, error)
 	// Moves a suspended tenant back to claimed and records the operator's
 	// reason, IP address and user agent in the audit trail as tenant_restored.
+	// Authorized like AdminGetTenant: the admin secret, or a tenant_operator
+	// credential of project_id.
 	// Administration and a refresh that chooses the tenant work again at once;
 	// identity's HTTP chain accepts the tokens that chose it within
 	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Sign-in is as it was: its login
@@ -670,12 +688,13 @@ type IdentityServiceClient interface {
 	// back none the suspension revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
-	// so a retry is safe. Operator-only, with the same refusals as
-	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
-	// tenant with no creator and no owner or admin, since restoring it would
-	// make it selectable with no one answering for its domain (appoint an
-	// owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
-	// its status changed between the read and the write.
+	// so a retry is safe. Operator-only, authorized like AdminGetTenant, with
+	// the same refusals as AdminSuspendTenant: FAILED_PRECONDITION for a
+	// latent tenant, and for a tenant with no creator and no owner or admin,
+	// since restoring it would make it selectable with no one answering for
+	// its domain (appoint an owner with AdminRecoverTenantOwnership, then
+	// restore it); ABORTED when its status changed between the read and the
+	// write.
 	AdminRestoreTenant(ctx context.Context, in *AdminRestoreTenantRequest, opts ...grpc.CallOption) (*AdminRestoreTenantResponse, error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it is a person who both can sign in and
@@ -695,8 +714,8 @@ type IdentityServiceClient interface {
 	// lands. A latent tenant has never had an owner and is
 	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent
 	// in the audit trail when it appoints; a refusal is not recorded.
-	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
-	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// Operator-only, authorized like AdminGetTenant: the admin secret, or a
+	// tenant_operator credential of project_id.
 	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
 	// characters or holds a control or invisible formatting character.
 	AdminRecoverTenantOwnership(ctx context.Context, in *AdminRecoverTenantOwnershipRequest, opts ...grpc.CallOption) (*AdminRecoverTenantOwnershipResponse, error)
@@ -719,6 +738,9 @@ type IdentityServiceClient interface {
 	// Operator-only: authenticated by the shared admin secret, like the other
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertLoginPolicy(ctx context.Context, in *UpsertLoginPolicyRequest, opts ...grpc.CallOption) (*UpsertLoginPolicyResponse, error)
+	// GetLoginPolicy is authorized like AdminGetTenant: the admin secret, or a
+	// tenant_operator credential of project_id. Writing or deleting a policy
+	// takes the admin secret.
 	GetLoginPolicy(ctx context.Context, in *GetLoginPolicyRequest, opts ...grpc.CallOption) (*GetLoginPolicyResponse, error)
 	DeleteLoginPolicy(ctx context.Context, in *DeleteLoginPolicyRequest, opts ...grpc.CallOption) (*DeleteLoginPolicyResponse, error)
 	// Per-project config authoring. UpsertProjectConfig replaces a project's
@@ -2894,18 +2916,34 @@ type IdentityServiceServer interface {
 	// Operator-only, like the other Admin* RPCs.
 	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
 	// Returns one tenant's own record, in any status: never its members,
-	// domains or login policy. Operator-only, like the other Admin* RPCs:
-	// UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED
-	// for a wrong secret. INVALID_ARGUMENT for a blank project_id or
-	// tenant_id, and NOT_FOUND when the project holds no such tenant.
+	// domains or login policy.
+	//
+	// Operator-only, and one of the six tenant operations (with
+	// AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
+	// AdminRecoverTenantOwnership and GetLoginPolicy) that also accept a
+	// tenant_operator project credential, "<public id>.<secret>", in the
+	// X-Tenant-Operator-Key header in place of the admin secret. The
+	// credential authorizes these six alone, and only on its own project:
+	// project_id must name it. It is checked on every call, so a revocation
+	// holds from the next one, and works whether or not
+	// GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
+	// alone is checked. What a credential does is recorded with it as the
+	// actor ("credential:<id>"); a refusal of one that exists is recorded as
+	// tenant_operator_refused. Calls that present the credential share one
+	// budget per client IP, GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window.
+	// UNIMPLEMENTED when neither is configured, PERMISSION_DENIED for a wrong
+	// secret or a credential refused for any reason.
+	//
+	// INVALID_ARGUMENT for a blank project_id or tenant_id, and NOT_FOUND when
+	// the project holds no such tenant.
 	AdminGetTenant(context.Context, *AdminGetTenantRequest) (*AdminGetTenantResponse, error)
 	// Returns one page of a project's tenants, latent, claimed and suspended
 	// alike, newest first by creation time, then id: their own records only,
 	// never their members, domains or login policy. Pass next_cursor back as
 	// cursor for the next page. Paging never repeats or skips a tenant that
 	// existed when it began; one created meanwhile may or may not appear.
-	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
-	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// Operator-only, authorized like AdminGetTenant: the admin secret, or a
+	// tenant_operator credential of project_id.
 	// INVALID_ARGUMENT for a blank project_id or a cursor that does not
 	// decode. A project with no tenants, or one that does not exist, is an
 	// empty page.
@@ -2926,15 +2964,17 @@ type IdentityServiceServer interface {
 	// controls.
 	//
 	// A tenant already suspended is returned unchanged and nothing is
-	// recorded, so a retry is safe. Operator-only, like the other Admin*
-	// RPCs: UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset,
-	// PERMISSION_DENIED for a wrong secret. INVALID_ARGUMENT for a blank id or
+	// recorded, so a retry is safe. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id. INVALID_ARGUMENT for a blank id or
 	// reason, NOT_FOUND when the project holds no such tenant,
 	// FAILED_PRECONDITION for a latent tenant, which governs nothing yet, and
 	// ABORTED when its status changed between the read and the write.
 	AdminSuspendTenant(context.Context, *AdminSuspendTenantRequest) (*AdminSuspendTenantResponse, error)
 	// Moves a suspended tenant back to claimed and records the operator's
 	// reason, IP address and user agent in the audit trail as tenant_restored.
+	// Authorized like AdminGetTenant: the admin secret, or a tenant_operator
+	// credential of project_id.
 	// Administration and a refresh that chooses the tenant work again at once;
 	// identity's HTTP chain accepts the tokens that chose it within
 	// GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Sign-in is as it was: its login
@@ -2944,12 +2984,13 @@ type IdentityServiceServer interface {
 	// back none the suspension revoked.
 	//
 	// A tenant already claimed is returned unchanged and nothing is recorded,
-	// so a retry is safe. Operator-only, with the same refusals as
-	// AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
-	// tenant with no creator and no owner or admin, since restoring it would
-	// make it selectable with no one answering for its domain (appoint an
-	// owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
-	// its status changed between the read and the write.
+	// so a retry is safe. Operator-only, authorized like AdminGetTenant, with
+	// the same refusals as AdminSuspendTenant: FAILED_PRECONDITION for a
+	// latent tenant, and for a tenant with no creator and no owner or admin,
+	// since restoring it would make it selectable with no one answering for
+	// its domain (appoint an owner with AdminRecoverTenantOwnership, then
+	// restore it); ABORTED when its status changed between the read and the
+	// write.
 	AdminRestoreTenant(context.Context, *AdminRestoreTenantRequest) (*AdminRestoreTenantResponse, error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it is a person who both can sign in and
@@ -2969,8 +3010,8 @@ type IdentityServiceServer interface {
 	// lands. A latent tenant has never had an owner and is
 	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent
 	// in the audit trail when it appoints; a refusal is not recorded.
-	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
-	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+	// Operator-only, authorized like AdminGetTenant: the admin secret, or a
+	// tenant_operator credential of project_id.
 	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
 	// characters or holds a control or invisible formatting character.
 	AdminRecoverTenantOwnership(context.Context, *AdminRecoverTenantOwnershipRequest) (*AdminRecoverTenantOwnershipResponse, error)
@@ -2993,6 +3034,9 @@ type IdentityServiceServer interface {
 	// Operator-only: authenticated by the shared admin secret, like the other
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertLoginPolicy(context.Context, *UpsertLoginPolicyRequest) (*UpsertLoginPolicyResponse, error)
+	// GetLoginPolicy is authorized like AdminGetTenant: the admin secret, or a
+	// tenant_operator credential of project_id. Writing or deleting a policy
+	// takes the admin secret.
 	GetLoginPolicy(context.Context, *GetLoginPolicyRequest) (*GetLoginPolicyResponse, error)
 	DeleteLoginPolicy(context.Context, *DeleteLoginPolicyRequest) (*DeleteLoginPolicyResponse, error)
 	// Per-project config authoring. UpsertProjectConfig replaces a project's

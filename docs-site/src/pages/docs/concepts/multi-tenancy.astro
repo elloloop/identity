@@ -379,9 +379,10 @@ RestoreTenantMember(tenant_id, user_id)
   <p>
     A platform operator reads a Project's tenants with the control-plane
     admin calls, which authenticate with the <code>X-Admin-Secret</code>
-    header (<code>GATEWAY_ADMIN_API_SECRET</code>) rather than a user token.
-    They return the tenant's own record, never its members, domains or
-    policy:
+    header (<code>GATEWAY_ADMIN_API_SECRET</code>) rather than a user token,
+    or with a <a href="#tenant-operator-credential">credential for one
+    Project's tenants</a>. They return the tenant's own record, never its
+    members, domains or policy:
   </p>
   <Code
     code={`AdminGetTenant(project_id, tenant_id)
@@ -392,8 +393,10 @@ AdminListTenants(project_id, limit=50, cursor="")
   -> { tenants: [...], next_cursor }   # every status, newest first
   -> INVALID_ARGUMENT              # a blank project_id, or a cursor that does not decode
 Both:
-  -> UNIMPLEMENTED                 # GATEWAY_ADMIN_API_SECRET is unset
-  -> PERMISSION_DENIED             # a wrong X-Admin-Secret`}
+  -> UNIMPLEMENTED                 # GATEWAY_ADMIN_API_SECRET is unset and no
+                                   #   X-Tenant-Operator-Key is presented
+  -> PERMISSION_DENIED             # a wrong X-Admin-Secret, or a refused
+                                   #   X-Tenant-Operator-Key`}
     lang="bash"
   />
   <p>
@@ -426,8 +429,10 @@ Both:
                                                #   characters, or holds a control or formatting
                                                #   character such as a newline
   -> NOT_FOUND                                 # the Project holds no such tenant
-  -> UNIMPLEMENTED                             # GATEWAY_ADMIN_API_SECRET is unset
-  -> PERMISSION_DENIED                         # a wrong X-Admin-Secret`}
+  -> UNIMPLEMENTED                             # GATEWAY_ADMIN_API_SECRET is unset and
+                                               #   no X-Tenant-Operator-Key is presented
+  -> PERMISSION_DENIED                         # a wrong X-Admin-Secret, or a refused
+                                               #   X-Tenant-Operator-Key`}
     lang="bash"
   />
   <p>
@@ -474,8 +479,10 @@ Both:
   -> NOT_FOUND             # no such tenant or account
   -> INVALID_ARGUMENT      # a blank id, or a reason that is blank, over 500
                            #   characters, or holds a control character
-  -> UNIMPLEMENTED         # GATEWAY_ADMIN_API_SECRET is unset
-  -> PERMISSION_DENIED     # a wrong X-Admin-Secret`}
+  -> UNIMPLEMENTED         # GATEWAY_ADMIN_API_SECRET is unset and no
+                           #   X-Tenant-Operator-Key is presented
+  -> PERMISSION_DENIED     # a wrong X-Admin-Secret, or a refused
+                           #   X-Tenant-Operator-Key`}
     lang="bash"
   />
   <p>
@@ -506,6 +513,63 @@ Both:
     <code>ReactivateUser</code>, but it signs each account out of every
     tenant) and the operator then recovers the tenant.
   </p>
+
+  <h3 id="tenant-operator-credential">A credential for one Project's tenants</h3>
+  <p>
+    The admin secret governs every Project. A service that runs one
+    Project's tenants, such as a support console, can hold a
+    <code>tenant_operator</code> credential of that Project instead, which an
+    operator mints with the secret:
+  </p>
+  <Code
+    code={`AdminCreateProjectCredential(project_id, kind="tenant_operator")
+  -> { credential_id, public_id: "ok_...", raw_key: "ok_....<secret>" }   # raw_key is shown once`}
+    lang="bash"
+  />
+  <p>
+    The service presents <code>raw_key</code> in the
+    <code>X-Tenant-Operator-Key</code> header, in place of
+    <code>X-Admin-Secret</code>, on six calls:
+    <code>AdminGetTenant</code>, <code>AdminListTenants</code>,
+    <code>AdminSuspendTenant</code>, <code>AdminRestoreTenant</code>,
+    <code>AdminRecoverTenantOwnership</code> and
+    <code>GetLoginPolicy</code>. Each must name the credential's own
+    <code>project_id</code>. No other call accepts it: creating Projects,
+    tenants or credentials, adding a tenant's admins, and writing or deleting
+    a login policy still take the admin secret.
+  </p>
+  <ul>
+    <li>
+      It is read from the database on every call, so revoking it with
+      <code>AdminRevokeProjectCredential</code> holds from the next call, and
+      a suspended Project's credential is refused. It works whether or not
+      <code>GATEWAY_ADMIN_API_SECRET</code> is still set. A call that presents
+      both headers is checked against the secret alone.
+    </li>
+    <li>
+      What it changes is recorded with the credential as the actor,
+      <code>credential:&lt;credential_id&gt;</code>: the
+      <code>tenant_suspended</code>, <code>tenant_restored</code> and
+      <code>tenant_ownership_recovered</code> records, and the
+      <code>tenant_member_restored</code> of a suspension a recovery lifts.
+      With the admin secret those records name no actor.
+    </li>
+    <li>
+      Every refusal is <code>PERMISSION_DENIED</code> and says nothing about
+      why. A refusal of a credential of an active Project (a wrong secret, a
+      revoked credential, or a call naming another Project) is recorded under
+      the credential's own Project as <code>tenant_operator_refused</code>,
+      with the <code>reason</code>. An unknown public id, another kind's
+      credential and a suspended Project's record nothing.
+    </li>
+    <li>
+      Calls that present it share one budget per client IP,
+      <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code> (default 120) per
+      <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window, across the six
+      calls and across HTTP and native gRPC, so a guessed secret cannot be
+      tried at line rate. Calls made with the admin secret are not counted.
+    </li>
+  </ul>
 
   <p>
     See <a href="/identity/docs/concepts/auth-model">Auth model</a> for how the Project

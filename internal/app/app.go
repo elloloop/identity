@@ -265,6 +265,22 @@ var guardianManagementPaths = []string{
 	"/identity.v1.IdentityService/DeleteManagedChildAccount",
 }
 
+// TenantOperatorProcedures are the calls a tenant_operator credential
+// authorizes. A request to one that carries the credential's header
+// (middleware.TenantOperatorKeyHeader) is counted against one per-IP
+// budget for them all, on the HTTP and native gRPC surfaces alike: the
+// credential is read from the database on every call, as a directory
+// reader's is, so the budget bounds what a caller holding a leaked public
+// id can drive. A call made with the admin secret alone is not counted.
+var TenantOperatorProcedures = []string{
+	identityconnectgen.IdentityServiceAdminGetTenantProcedure,
+	identityconnectgen.IdentityServiceAdminListTenantsProcedure,
+	identityconnectgen.IdentityServiceAdminSuspendTenantProcedure,
+	identityconnectgen.IdentityServiceAdminRestoreTenantProcedure,
+	identityconnectgen.IdentityServiceAdminRecoverTenantOwnershipProcedure,
+	identityconnectgen.IdentityServiceGetLoginPolicyProcedure,
+}
+
 // rateLimitWindow is the window every per-IP limiter counts over:
 // GATEWAY_RATE_LIMIT_WINDOW_SECONDS, or one minute when that is unset.
 func rateLimitWindow(cfg *config.Config) time.Duration {
@@ -545,6 +561,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	}
 	if cfg.TeammateKeysEnabled {
 		limits = append(limits, middleware.PathLimit{PathPrefix: "/" + identityconnectgen.TeammateKeyServiceName + "/", Tag: "teammate_key_manager", Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0)})
+	}
+	tenantOperator := middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0)
+	for _, path := range TenantOperatorProcedures {
+		limits = append(limits, middleware.PathLimit{
+			PathPrefix: path, Tag: "tenant_operator", Limiter: tenantOperator,
+			Header: middleware.TenantOperatorKeyHeader,
+		})
 	}
 	for _, path := range guardianManagementPaths {
 		limits = append(limits, middleware.PathLimit{

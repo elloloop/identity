@@ -111,10 +111,11 @@ const (
 	// deleter of live accounts.
 	MaxAnonymousRetentionDays = 10000
 
-	// DefaultRateLimitDirectoryPerIP is the LookupUsers per-IP cap per window
+	// DefaultRateLimitDirectoryPerIP is the per-IP cap per window on the
+	// surfaces a project credential authenticates (RateLimitDirectoryPerIP)
 	// when none is configured or the configured value is zero, whether it came
-	// from the environment or a Config built in code: the directory surface is
-	// never unthrottled.
+	// from the environment or a Config built in code: those surfaces are never
+	// unthrottled.
 	DefaultRateLimitDirectoryPerIP = 120
 
 	// DefaultRateLimitSCIMPerIP is the per-IP cap per window on requests
@@ -1290,11 +1291,14 @@ type Config struct {
 	RateLimitIDVPerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
 	RateLimitBootstrapPerIP int
-	// RateLimitDirectoryPerIP is the per-IP cap per window on LookupUsers
-	// across the HTTP and native gRPC surfaces; unlike the other per-IP caps it
-	// cannot be switched off, so zero selects the default and a negative value
-	// is refused at boot. Each call resolves up to 100 addresses, and one
-	// budget per client IP covers both surfaces.
+	// RateLimitDirectoryPerIP is the per-IP cap per window on each surface a
+	// project credential authenticates: LookupUsers (directory_reader), the
+	// TeammateKeyService (teammate_key_manager) and the tenant operations
+	// called with a tenant_operator credential, across the HTTP and native
+	// gRPC surfaces; unlike the other per-IP caps it cannot be switched off,
+	// so zero selects the default and a negative value is refused at boot.
+	// Each surface has its own budget per client IP, which covers both
+	// transports; a LookupUsers call resolves up to 100 addresses.
 	RateLimitDirectoryPerIP int
 	// RateLimitSCIMPerIP is the per-IP cap per window on every request under
 	// /scim/v2/, authenticated or not, so the SCIM bearer token cannot be

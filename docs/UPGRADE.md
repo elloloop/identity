@@ -1,5 +1,66 @@
 # Upgrade guide
 
+## Next — a `tenant_operator` credential runs one project's tenants without the admin secret (migration 0054; additive credential kind and header; `ControlPlaneAdminService`'s tenant operations take `service.OperatorCredentials` and `ControlPlaneProjectStore` reads a credential by its public id (Go API))
+
+The admin secret (`GATEWAY_ADMIN_API_SECRET`) governs every project, so a
+service that only runs one project's tenants, such as a support console, had
+to hold it. It can now hold a `tenant_operator` credential of that project
+instead.
+
+- **Mint one** with the secret:
+  `AdminCreateProjectCredential(project_id, kind = "tenant_operator")`
+  returns a `raw_key` (`ok_<public id>.<secret>`), shown once. Revoke it with
+  `AdminRevokeProjectCredential`.
+- **Present it** in `X-Tenant-Operator-Key`, in place of `X-Admin-Secret`, on
+  six calls: `AdminGetTenant`, `AdminListTenants`, `AdminSuspendTenant`,
+  `AdminRestoreTenant`, `AdminRecoverTenantOwnership` and `GetLoginPolicy`.
+  Each must name the credential's own `project_id`. No other call accepts it:
+  creating projects, tenants and credentials, adding a tenant's admin, and
+  writing or deleting a login policy still take the secret.
+- **It is checked on every call**, read uncached, so a revocation or a
+  suspended project refuses it from the next call. It works whether or not
+  `GATEWAY_ADMIN_API_SECRET` is still set. A call that presents both headers
+  is checked against the secret alone, as before.
+- **Every refusal is `PERMISSION_DENIED`** and does not say why. A refusal of
+  a `tenant_operator` credential of an active project (a wrong secret, a
+  revoked credential, or a call naming another project) records
+  `tenant_operator_refused` under the credential's own project, with the
+  `reason`. An unknown public id, another kind's credential and a suspended
+  project's record nothing.
+- **Attribution:** `tenant_suspended`, `tenant_restored`,
+  `tenant_ownership_recovered`, and the `tenant_member_restored` of a
+  suspension a recovery lifts, name the credential as their actor,
+  `credential:<credential id>`. With the admin secret they name no actor, as
+  before.
+- **Rate limit:** the calls that present the header share one per-IP budget,
+  `GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` (default 120) per
+  `GATEWAY_RATE_LIMIT_WINDOW_SECONDS`, across the six calls and across HTTP and
+  an embedding host's native gRPC registration. It is separate from the
+  budgets of `LookupUsers` and `TeammateKeyService`. Calls made with the
+  secret alone are not counted.
+- **Migration 0054** widens `project_credentials_kind_check` with
+  `tenant_operator`. It holds `ACCESS EXCLUSIVE` on `project_credentials`
+  while it validates the new check, bounded by a 10s `lock_timeout`. Run it
+  (or set `GATEWAY_POSTGRES_AUTO_MIGRATE`) before minting one. Rolling it back
+  deletes every `tenant_operator` credential, so a service that held one needs
+  the secret again.
+
+Nothing changes for a caller that keeps using the secret.
+
+### Go API
+
+- `ControlPlaneAdminService.AdminGetTenant`, `AdminListTenants`,
+  `AdminSuspendTenant`, `AdminRestoreTenant`, `AdminRecoverTenantOwnership`
+  and `GetLoginPolicy` take a `service.OperatorCredentials{AdminSecret,
+  TenantOperatorKey}` in place of the secret string.
+- `ControlPlaneProjectStore` embeds `DirectoryCredentialStore`, so a custom one
+  implements `CredentialByPublicIDInActiveProject`, read uncached.
+- New: `service.CredentialKindTenantOperator`,
+  `middleware.TenantOperatorKeyHeader`, `app.TenantOperatorProcedures`,
+  `audit.EventTenantOperatorRefused`, and `middleware.PathLimit.Header` with
+  `PathLimit.Counts`, which confine a limit to the requests that carry a
+  header.
+
 ## Next — an owner or admin can suspend and restore a member (migration 0053; additive RPCs; behaviour change for suspended members; `MembershipStore.SuspendMembership`, `RestoreMembership` (Go API))
 
 Two RPCs are new, each for an active owner or admin of a tenant that is not

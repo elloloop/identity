@@ -57,15 +57,21 @@ const (
 	// CredentialKindTeammateKeyManager authorizes TeammateKeyService in its
 	// project, presented in X-Teammate-Key-Manager-Key.
 	CredentialKindTeammateKeyManager = "teammate_key_manager"
+	// CredentialKindTenantOperator authorizes the tenant operations
+	// OperatorCredentials names on its own project, in place of the admin
+	// secret, presented in X-Tenant-Operator-Key.
+	CredentialKindTenantOperator = "tenant_operator"
 )
 
 // Credential public-id prefixes, so a key is self-describing at a glance
-// (Stripe-style): pk_ for publishable, sk_ for secret, dk_ for directory.
+// (Stripe-style): pk_ for publishable, sk_ for secret, dk_ for directory,
+// tk_ for a teammate key manager, ok_ for a tenant operator.
 const (
 	publishableKeyPrefix     = "pk_"
 	secretKeyPrefix          = "sk_"
 	directoryReaderKeyPrefix = "dk_"
 	teammateKeyManagerPrefix = "tk_"
+	tenantOperatorKeyPrefix  = "ok_"
 )
 
 // rawKeySeparator joins a credential's public id and secret half in the raw
@@ -194,6 +200,10 @@ type ControlPlaneProjectStore interface {
 	// round-trips back into UpdateProjectConfig. A project that does not exist
 	// surfaces ErrNotFound.
 	GetProjectConfig(ctx context.Context, projectID string) (configJSON string, version int64, err error)
+
+	// DirectoryCredentialStore reads a credential by its public id, uncached,
+	// which is how a tenant_operator credential is checked on every call.
+	DirectoryCredentialStore
 }
 
 // ControlPlaneAdminService provisions control-plane resources on behalf of a
@@ -342,8 +352,8 @@ type MintedCredential struct {
 }
 
 // AdminCreateProjectCredential mints a credential for a project. For a
-// publishable kind it generates a public id only (no secret). For the secret
-// and directory_reader kinds it generates a public id AND a secret half: the
+// publishable kind it generates a public id only (no secret). For every other
+// kind it generates a public id AND a secret half: the
 // secret's hash is stored, and the full "publicID.secret" raw key is returned
 // ONCE — the only time it is ever shown, exactly like an API key. The public
 // id is always the lookup key the project resolver matches on.
@@ -389,8 +399,9 @@ func (s *ControlPlaneAdminService) AdminCreateProjectCredential(ctx context.Cont
 }
 
 // AdminRevokeProjectCredential revokes one of a project's credentials, of any
-// kind. A revoked directory_reader key is refused on its next lookup, which
-// reads the credential uncached. A revoked publishable, secret or mTLS key
+// kind. A revoked directory_reader, teammate_key_manager or tenant_operator
+// key is refused on its next call, which reads the credential uncached. A
+// revoked publishable, secret or mTLS key
 // stops resolving a project once each replica's project-resolution cache
 // expires it, within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS. Revoking an
 // already-revoked credential is a no-op; a credential id the project does not
@@ -653,7 +664,7 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, secr
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.liftSuspension(ctx, projectID, tenantID, userID, "", "", ""); err != nil {
+	if _, err := s.liftSuspension(ctx, tenantOperator{}, projectID, tenantID, userID, "", "", ""); err != nil {
 		return nil, err
 	}
 	m := &TenantMembership{
@@ -837,9 +848,12 @@ func normalizeCredentialKind(kind string) (canonical, prefix string, err error) 
 		return CredentialKindDirectoryReader, directoryReaderKeyPrefix, nil
 	case CredentialKindTeammateKeyManager:
 		return CredentialKindTeammateKeyManager, teammateKeyManagerPrefix, nil
+	case CredentialKindTenantOperator:
+		return CredentialKindTenantOperator, tenantOperatorKeyPrefix, nil
 	default:
-		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q, %q or %q)",
-			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret, CredentialKindDirectoryReader, CredentialKindTeammateKeyManager)
+		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q, %q, %q or %q)",
+			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret, CredentialKindDirectoryReader,
+			CredentialKindTeammateKeyManager, CredentialKindTenantOperator)
 	}
 }
 

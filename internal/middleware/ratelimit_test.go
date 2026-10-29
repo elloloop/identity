@@ -191,6 +191,49 @@ func TestRateLimitMiddleware_RetryAfterFollowsWindow(t *testing.T) {
 	}
 }
 
+// A limit naming a Header counts only the requests that carry it: the same
+// path called without it passes through uncounted.
+func TestRateLimitMiddleware_HeaderScopedLimit(t *testing.T) {
+	const path = "/identity.v1.IdentityService/AdminGetTenant"
+	limits := []PathLimit{{
+		PathPrefix: path, Tag: "scoped", Header: "X-Scoped-Key",
+		Limiter: NewFixedWindowLimiter(time.Minute, 2, 0),
+	}}
+	handler := RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	serve := func(key string) int {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(ClientIPHeader, "1.2.3.4")
+		if key != "" {
+			req.Header.Set("X-Scoped-Key", key)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for i := 0; i < 5; i++ {
+		assert.Equal(t, http.StatusOK, serve(""), "a request without the header is not counted (i=%d)", i)
+	}
+	assert.Equal(t, http.StatusOK, serve("k"))
+	assert.Equal(t, http.StatusOK, serve("k"))
+	assert.Equal(t, http.StatusTooManyRequests, serve("k"), "the third request carrying the header is over quota")
+	assert.Equal(t, http.StatusOK, serve(""), "a request without it still passes")
+}
+
+func TestPathLimit_Counts(t *testing.T) {
+	none := func(string) string { return "" }
+	carries := func(name string) string {
+		if name == "X-Scoped-Key" {
+			return "k"
+		}
+		return ""
+	}
+	assert.True(t, PathLimit{}.Counts(none), "a limit without a Header counts every request")
+	assert.False(t, PathLimit{Header: "X-Scoped-Key"}.Counts(none))
+	assert.True(t, PathLimit{Header: "X-Scoped-Key"}.Counts(carries))
+}
+
 func TestPathLimit_Allow(t *testing.T) {
 	pl := PathLimit{Tag: "t", Limiter: NewFixedWindowLimiter(time.Minute, 1, 0)}
 	now := time.Now()

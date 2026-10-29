@@ -71,6 +71,20 @@ func (w *projectAuditWriter) ExecuteAtomic(_ context.Context, projectID, _ strin
 	return &graph.CommitResult{}, nil
 }
 
+// newProjectScopedAuditLog returns an audit logger that writes each event
+// under the project its context is scoped to ("boot-project" when none), and
+// the writer that records them.
+func newProjectScopedAuditLog() (*audit.Logger, *projectAuditWriter) {
+	writer := &projectAuditWriter{}
+	return audit.NewLogger(writer, "boot-project", zap.NewNop()).
+		WithProjectScoper(func(ctx context.Context) (audit.NodeWriter, string) {
+			if scope := ProjectScopeFromContext(ctx); scope != nil {
+				return writer, scope.ProjectID
+			}
+			return writer, "boot-project"
+		}), writer
+}
+
 func (w *projectAuditWriter) byEvent(event string) []projectAuditEntry {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -107,14 +121,7 @@ func newDirectoryFixture(t *testing.T) *directoryFixture {
 func newDirectoryFixtureWith(t *testing.T, requireVerifiedEmail bool) *directoryFixture {
 	t.Helper()
 	store := newFakeControlPlaneStore()
-	writer := &projectAuditWriter{}
-	auditLog := audit.NewLogger(writer, "boot-project", zap.NewNop()).
-		WithProjectScoper(func(ctx context.Context) (audit.NodeWriter, string) {
-			if scope := ProjectScopeFromContext(ctx); scope != nil {
-				return writer, scope.ProjectID
-			}
-			return writer, "boot-project"
-		})
+	auditLog, writer := newProjectScopedAuditLog()
 	repos := newProjectFakeRepos()
 	return &directoryFixture{
 		admin: NewControlPlaneAdminService(dirTestSecret, false, nil, store, newFakeTenantStore(), newFakeMembershipStore(), nil,
@@ -292,7 +299,7 @@ func TestDirectoryLookup_RefusesEveryOtherPresentation(t *testing.T) {
 			}
 			entry := after[len(after)-1]
 			if entry.details["reason"] != tc.reason || entry.project != dirTestProjectA ||
-				!strings.HasPrefix(entry.actor, directoryAuditActorPrefix) {
+				!strings.HasPrefix(entry.actor, "credential:") {
 				t.Fatalf("refusal audit = %+v, want reason %q under %s by a credential", entry, tc.reason, dirTestProjectA)
 			}
 		})
@@ -423,7 +430,7 @@ func TestDirectoryLookup_AuditsCountsNotAddresses(t *testing.T) {
 		t.Fatalf("directory_lookup events = %d, want 1", len(lookups))
 	}
 	e := lookups[0]
-	if e.actor != directoryAuditActorPrefix+minted.ID {
+	if e.actor != "credential:"+minted.ID {
 		t.Fatalf("actor = %q, want the credential", e.actor)
 	}
 	if e.details["requested"] != float64(2) || e.details["matched"] != float64(1) {

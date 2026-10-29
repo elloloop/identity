@@ -173,9 +173,10 @@ func (s *ControlPlaneAdminService) UpsertLoginPolicy(ctx context.Context, secret
 }
 
 // GetLoginPolicy returns the LoginPolicy for (projectID, tenantID), or
-// (nil, nil) when none is set. project_id and tenant_id are required.
-func (s *ControlPlaneAdminService) GetLoginPolicy(ctx context.Context, secret, projectID, tenantID string) (*LoginPolicy, error) {
-	if err := s.authorize(secret); err != nil {
+// (nil, nil) when none is set. project_id and tenant_id are required. caller
+// presents the admin secret or a tenant_operator credential of the project.
+func (s *ControlPlaneAdminService) GetLoginPolicy(ctx context.Context, caller OperatorCredentials, projectID, tenantID string) (*LoginPolicy, error) {
+	if _, err := s.authorizeTenantOperator(ctx, caller, projectID); err != nil {
 		return nil, err
 	}
 	if s.policies == nil {

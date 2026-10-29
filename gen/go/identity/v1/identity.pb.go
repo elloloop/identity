@@ -14944,7 +14944,12 @@ type AdminCreateProjectCredentialRequest struct {
 	// project's directory, presented in the X-Directory-Key header), or
 	// "teammate_key_manager" (a machine credential whose secret half is shown
 	// ONCE and which authorizes only TeammateKeyService in this project,
-	// presented in the X-Teammate-Key-Manager-Key header).
+	// presented in the X-Teammate-Key-Manager-Key header), or
+	// "tenant_operator" (a machine credential whose secret half is shown ONCE
+	// and which authorizes only AdminGetTenant, AdminListTenants,
+	// AdminSuspendTenant, AdminRestoreTenant, AdminRecoverTenantOwnership and
+	// GetLoginPolicy on this project, presented in the X-Tenant-Operator-Key
+	// header in place of the admin secret).
 	Kind          string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -15060,8 +15065,9 @@ func (x *AdminCreateProjectCredentialResponse) GetRawKey() string {
 
 // AdminRevokeProjectCredentialRequest names the credential to revoke by the
 // credential_id AdminCreateProjectCredential returned, together with the
-// project it belongs to. A revoked directory_reader key is refused on its next
-// lookup; a revoked publishable, secret or mTLS key stops selecting its
+// project it belongs to. A revoked directory_reader, teammate_key_manager or
+// tenant_operator key is refused on its next call; a revoked publishable,
+// secret or mTLS key stops selecting its
 // project within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS (default 30s) on
 // each replica, which caches project resolution. The row is kept for audit.
 type AdminRevokeProjectCredentialRequest struct {

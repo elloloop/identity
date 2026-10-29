@@ -440,13 +440,28 @@ paths:
     post:
       tags:
         - identity.v1.IdentityService
-      summary: AdminGetTenant
-      description: |-
+      summary: |-
         Returns one tenant's own record, in any status: never its members,
-         domains or login policy. Operator-only, like the other Admin* RPCs:
-         UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED
-         for a wrong secret. INVALID_ARGUMENT for a blank project_id or
-         tenant_id, and NOT_FOUND when the project holds no such tenant.
+         domains or login policy.
+      description: |-
+        Operator-only, and one of the six tenant operations (with
+         AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
+         AdminRecoverTenantOwnership and GetLoginPolicy) that also accept a
+         tenant_operator project credential, "<public id>.<secret>", in the
+         X-Tenant-Operator-Key header in place of the admin secret. The
+         credential authorizes these six alone, and only on its own project:
+         project_id must name it. It is checked on every call, so a revocation
+         holds from the next one, and works whether or not
+         GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
+         alone is checked. What a credential does is recorded with it as the
+         actor ("credential:<id>"); a refusal of one that exists is recorded as
+         tenant_operator_refused. Calls that present the credential share one
+         budget per client IP, GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window.
+         UNIMPLEMENTED when neither is configured, PERMISSION_DENIED for a wrong
+         secret or a credential refused for any reason.
+
+         INVALID_ARGUMENT for a blank project_id or tenant_id, and NOT_FOUND when
+         the project holds no such tenant.
       operationId: identity.v1.IdentityService.AdminGetTenant
       parameters:
         - name: Connect-Protocol-Version
@@ -523,8 +538,8 @@ paths:
          never their members, domains or login policy. Pass next_cursor back as
          cursor for the next page. Paging never repeats or skips a tenant that
          existed when it began; one created meanwhile may or may not appear.
-         Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
-         GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+         Operator-only, authorized like AdminGetTenant: the admin secret, or a
+         tenant_operator credential of project_id.
          INVALID_ARGUMENT for a blank project_id or a cursor that does not
          decode. A project with no tenants, or one that does not exist, is an
          empty page.
@@ -582,8 +597,8 @@ paths:
          lands. A latent tenant has never had an owner and is
          FAILED_PRECONDITION. Records the operator's reason, IP and user agent
          in the audit trail when it appoints; a refusal is not recorded.
-         Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
-         GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+         Operator-only, authorized like AdminGetTenant: the admin secret, or a
+         tenant_operator credential of project_id.
          INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
          characters or holds a control or invisible formatting character.
       operationId: identity.v1.IdentityService.AdminRecoverTenantOwnership
@@ -623,6 +638,8 @@ paths:
       summary: |-
         Moves a suspended tenant back to claimed and records the operator's
          reason, IP address and user agent in the audit trail as tenant_restored.
+         Authorized like AdminGetTenant: the admin secret, or a tenant_operator
+         credential of project_id.
          Administration and a refresh that chooses the tenant work again at once;
          identity's HTTP chain accepts the tokens that chose it within
          GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS. Sign-in is as it was: its login
@@ -632,12 +649,13 @@ paths:
          back none the suspension revoked.
       description: |-
         A tenant already claimed is returned unchanged and nothing is recorded,
-         so a retry is safe. Operator-only, with the same refusals as
-         AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
-         tenant with no creator and no owner or admin, since restoring it would
-         make it selectable with no one answering for its domain (appoint an
-         owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
-         its status changed between the read and the write.
+         so a retry is safe. Operator-only, authorized like AdminGetTenant, with
+         the same refusals as AdminSuspendTenant: FAILED_PRECONDITION for a
+         latent tenant, and for a tenant with no creator and no owner or admin,
+         since restoring it would make it selectable with no one answering for
+         its domain (appoint an owner with AdminRecoverTenantOwnership, then
+         restore it); ABORTED when its status changed between the read and the
+         write.
       operationId: identity.v1.IdentityService.AdminRestoreTenant
       parameters:
         - name: Connect-Protocol-Version
@@ -811,9 +829,9 @@ paths:
          controls.
       description: |-
         A tenant already suspended is returned unchanged and nothing is
-         recorded, so a retry is safe. Operator-only, like the other Admin*
-         RPCs: UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset,
-         PERMISSION_DENIED for a wrong secret. INVALID_ARGUMENT for a blank id or
+         recorded, so a retry is safe. Operator-only, authorized like
+         AdminGetTenant: the admin secret, or a tenant_operator credential of
+         project_id. INVALID_ARGUMENT for a blank id or
          reason, NOT_FOUND when the project holds no such tenant,
          FAILED_PRECONDITION for a latent tenant, which governs nothing yet, and
          ABORTED when its status changed between the read and the write.
@@ -2589,6 +2607,10 @@ paths:
       tags:
         - identity.v1.IdentityService
       summary: GetLoginPolicy
+      description: |-
+        GetLoginPolicy is authorized like AdminGetTenant: the admin secret, or a
+         tenant_operator credential of project_id. Writing or deleting a policy
+         takes the admin secret.
       operationId: identity.v1.IdentityService.GetLoginPolicy
       parameters:
         - name: Connect-Protocol-Version
@@ -6778,7 +6800,12 @@ components:
              project's directory, presented in the X-Directory-Key header), or
              "teammate_key_manager" (a machine credential whose secret half is shown
              ONCE and which authorizes only TeammateKeyService in this project,
-             presented in the X-Teammate-Key-Manager-Key header).
+             presented in the X-Teammate-Key-Manager-Key header), or
+             "tenant_operator" (a machine credential whose secret half is shown ONCE
+             and which authorizes only AdminGetTenant, AdminListTenants,
+             AdminSuspendTenant, AdminRestoreTenant, AdminRecoverTenantOwnership and
+             GetLoginPolicy on this project, presented in the X-Tenant-Operator-Key
+             header in place of the admin secret).
       title: AdminCreateProjectCredentialRequest
       additionalProperties: false
     identity.v1.AdminCreateProjectCredentialResponse:
@@ -7073,8 +7100,9 @@ components:
       description: |-
         AdminRevokeProjectCredentialRequest names the credential to revoke by the
          credential_id AdminCreateProjectCredential returned, together with the
-         project it belongs to. A revoked directory_reader key is refused on its next
-         lookup; a revoked publishable, secret or mTLS key stops selecting its
+         project it belongs to. A revoked directory_reader, teammate_key_manager or
+         tenant_operator key is refused on its next call; a revoked publishable,
+         secret or mTLS key stops selecting its
          project within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS (default 30s) on
          each replica, which caches project resolution. The row is kept for audit.
     identity.v1.AdminRevokeProjectCredentialResponse:

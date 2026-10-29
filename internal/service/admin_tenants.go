@@ -46,9 +46,10 @@ type TenantPage struct {
 }
 
 // AdminGetTenant returns a tenant's own record. A tenant the project does not
-// hold is ErrNotFound.
-func (s *ControlPlaneAdminService) AdminGetTenant(ctx context.Context, secret, projectID, tenantID string) (*Tenant, error) {
-	if err := s.authorize(secret); err != nil {
+// hold is ErrNotFound. caller presents the admin secret or a tenant_operator
+// credential of the project (authorizeTenantOperator).
+func (s *ControlPlaneAdminService) AdminGetTenant(ctx context.Context, caller OperatorCredentials, projectID, tenantID string) (*Tenant, error) {
+	if _, err := s.authorizeTenantOperator(ctx, caller, projectID); err != nil {
 		return nil, err
 	}
 	projectID, tenantID, err := requireTenantRef(projectID, tenantID)
@@ -64,9 +65,10 @@ func (s *ControlPlaneAdminService) AdminGetTenant(ctx context.Context, secret, p
 // ErrInvalidArgument. A cursor is a position, not a grant: it is not bound to
 // the project it came from, and the listing is always of projectID's tenants
 // alone. A project with no tenants, or one that does not exist, is an empty
-// page.
-func (s *ControlPlaneAdminService) AdminListTenants(ctx context.Context, secret, projectID string, limit int32, cursor string) (*TenantPage, error) {
-	if err := s.authorize(secret); err != nil {
+// page. caller presents the admin secret or a tenant_operator credential of
+// the project.
+func (s *ControlPlaneAdminService) AdminListTenants(ctx context.Context, caller OperatorCredentials, projectID string, limit int32, cursor string) (*TenantPage, error) {
+	if _, err := s.authorizeTenantOperator(ctx, caller, projectID); err != nil {
 		return nil, err
 	}
 	projectID = strings.TrimSpace(projectID)
@@ -103,9 +105,11 @@ func (s *ControlPlaneAdminService) AdminListTenants(ctx context.Context, secret,
 // for a token, the tokens that chose it are refused within the tenant-status
 // cache TTL, and its admins can no longer administer it. Suspending a
 // suspended tenant changes nothing and records nothing. A latent tenant
-// governs nothing, so suspending one is ErrTenantStatusConflict.
-func (s *ControlPlaneAdminService) AdminSuspendTenant(ctx context.Context, secret, projectID, tenantID, reason, ip, ua string) (*Tenant, error) {
-	return s.moveTenant(ctx, secret, tenantMove{
+// governs nothing, so suspending one is ErrTenantStatusConflict. caller
+// presents the admin secret or a tenant_operator credential of the project,
+// which the audit record then names as its actor.
+func (s *ControlPlaneAdminService) AdminSuspendTenant(ctx context.Context, caller OperatorCredentials, projectID, tenantID, reason, ip, ua string) (*Tenant, error) {
+	return s.moveTenant(ctx, caller, tenantMove{
 		projectID: projectID, tenantID: tenantID, reason: reason, ip: ip, ua: ua,
 		from: TenantStatusClaimed, to: TenantStatusSuspended, event: audit.EventTenantSuspended,
 	})
@@ -115,9 +119,10 @@ func (s *ControlPlaneAdminService) AdminSuspendTenant(ctx context.Context, secre
 // reason, and the operator's ip and ua, in the audit trail. Restoring a
 // claimed tenant changes nothing and records nothing; restoring a latent one
 // is ErrTenantStatusConflict, and so is restoring a suspended tenant that
-// shows no sign of ever having been claimed (wasClaimed).
-func (s *ControlPlaneAdminService) AdminRestoreTenant(ctx context.Context, secret, projectID, tenantID, reason, ip, ua string) (*Tenant, error) {
-	return s.moveTenant(ctx, secret, tenantMove{
+// shows no sign of ever having been claimed (wasClaimed). caller is as for
+// AdminSuspendTenant.
+func (s *ControlPlaneAdminService) AdminRestoreTenant(ctx context.Context, caller OperatorCredentials, projectID, tenantID, reason, ip, ua string) (*Tenant, error) {
+	return s.moveTenant(ctx, caller, tenantMove{
 		projectID: projectID, tenantID: tenantID, reason: reason, ip: ip, ua: ua,
 		from: TenantStatusSuspended, to: TenantStatusClaimed, event: audit.EventTenantRestored,
 		admit: s.requireAnswerable,
@@ -138,8 +143,9 @@ type tenantMove struct {
 // audits the move. A tenant already in m.to is returned unchanged, so an
 // operator who retries after a lost response gets the same answer; only the
 // call that changes the status records its reason.
-func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, secret string, m tenantMove) (*Tenant, error) {
-	if err := s.authorize(secret); err != nil {
+func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, caller OperatorCredentials, m tenantMove) (*Tenant, error) {
+	op, err := s.authorizeTenantOperator(ctx, caller, m.projectID)
+	if err != nil {
 		return nil, err
 	}
 	projectID, tenantID, err := requireTenantRef(m.projectID, m.tenantID)
@@ -171,7 +177,7 @@ func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, secret string
 	}
 	if moved {
 		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), m.event,
-			audit.WithSuccess(true), audit.WithIP(m.ip), audit.WithUserAgent(m.ua),
+			audit.WithActor(op.actor), audit.WithSuccess(true), audit.WithIP(m.ip), audit.WithUserAgent(m.ua),
 			audit.WithDetails(map[string]any{
 				"project_id": projectID,
 				"tenant_id":  tenantID,

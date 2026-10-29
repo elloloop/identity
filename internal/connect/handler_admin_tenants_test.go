@@ -10,6 +10,7 @@ import (
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
+	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -260,4 +261,62 @@ func TestAdminRecoverTenantOwnership_Handler(t *testing.T) {
 	requireCode(t, err, connect.CodeFailedPrecondition)
 	_, err = appoint(handlerAdminSecret, "t-2", "heir", "why")
 	requireCode(t, err, connect.CodeFailedPrecondition)
+}
+
+// withTenantOperatorKey presents rawKey in X-Tenant-Operator-Key.
+func withTenantOperatorKey[T any](msg *T, rawKey string) *connect.Request[T] {
+	req := connect.NewRequest(msg)
+	req.Header().Set(middleware.TenantOperatorKeyHeader, rawKey)
+	return req
+}
+
+// A tenant_operator key in its header authorizes the tenant operations of its
+// own project and nothing else: another project, and every other operator
+// call, which reads only the admin secret, are refused.
+func TestTenantOperatorKey_Handler(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := &adminTenantStore{tenants: []*service.Tenant{
+		{ID: "t-1", ProjectID: testProjectID, Name: "Alpha", Status: service.TenantStatusClaimed, CreatedBy: "u-1"},
+	}}
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"heir": {ID: "heir", Email: "heir@example.test", Status: service.StatusActive, EmailVerified: true},
+	}}
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), &adminControlStore{}, store, &connectMembershipStore{}, users, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	minted, err := svc.AdminCreateProjectCredential(ctx, handlerAdminSecret, testProjectID, service.CredentialKindTenantOperator)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	client := startAdminServer(t, svc)
+	key := minted.RawKey
+
+	if _, err := client.AdminGetTenant(ctx, withTenantOperatorKey(&identitypb.AdminGetTenantRequest{ProjectId: testProjectID, TenantId: "t-1"}, key)); err != nil {
+		t.Fatalf("AdminGetTenant: %v", err)
+	}
+	if _, err := client.AdminListTenants(ctx, withTenantOperatorKey(&identitypb.AdminListTenantsRequest{ProjectId: testProjectID}, key)); err != nil {
+		t.Fatalf("AdminListTenants: %v", err)
+	}
+	if _, err := client.GetLoginPolicy(ctx, withTenantOperatorKey(&identitypb.GetLoginPolicyRequest{ProjectId: testProjectID, TenantId: "t-1"}, key)); err != nil {
+		t.Fatalf("GetLoginPolicy: %v", err)
+	}
+	if _, err := client.AdminSuspendTenant(ctx, withTenantOperatorKey(&identitypb.AdminSuspendTenantRequest{ProjectId: testProjectID, TenantId: "t-1", Reason: "why"}, key)); err != nil {
+		t.Fatalf("AdminSuspendTenant: %v", err)
+	}
+	if _, err := client.AdminRestoreTenant(ctx, withTenantOperatorKey(&identitypb.AdminRestoreTenantRequest{ProjectId: testProjectID, TenantId: "t-1", Reason: "why"}, key)); err != nil {
+		t.Fatalf("AdminRestoreTenant: %v", err)
+	}
+	if _, err := client.AdminRecoverTenantOwnership(ctx, withTenantOperatorKey(&identitypb.AdminRecoverTenantOwnershipRequest{ProjectId: testProjectID, TenantId: "t-1", UserId: "heir", Reason: "why"}, key)); err != nil {
+		t.Fatalf("AdminRecoverTenantOwnership: %v", err)
+	}
+
+	_, err = client.AdminGetTenant(ctx, withTenantOperatorKey(&identitypb.AdminGetTenantRequest{ProjectId: "other", TenantId: "t-1"}, key))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminGetTenant(ctx, withTenantOperatorKey(&identitypb.AdminGetTenantRequest{ProjectId: testProjectID, TenantId: "t-1"}, minted.PublicID+".wrong"))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminCreateTenant(ctx, withTenantOperatorKey(&identitypb.AdminCreateTenantRequest{ProjectId: testProjectID, Name: "New", PrimaryDomain: "new.example"}, key))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminCreateProjectCredential(ctx, withTenantOperatorKey(&identitypb.AdminCreateProjectCredentialRequest{ProjectId: testProjectID, Kind: service.CredentialKindTenantOperator}, key))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.UpsertLoginPolicy(ctx, withTenantOperatorKey(&identitypb.UpsertLoginPolicyRequest{ProjectId: testProjectID, TenantId: "t-1"}, key))
+	requireCode(t, err, connect.CodePermissionDenied)
 }

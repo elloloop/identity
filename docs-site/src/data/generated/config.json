@@ -1543,7 +1543,7 @@
     "type": "integer",
     "default": "120",
     "required": false,
-    "description": "is the per-IP cap per window on LookupUsers across the HTTP and native gRPC surfaces; unlike the other per-IP caps it cannot be switched off, so zero selects the default and a negative value is refused at boot.",
+    "description": "is the per-IP cap per window on each surface a project credential authenticates: LookupUsers (directory_reader), the TeammateKeyService (teammate_key_manager) and the tenant operations called with a tenant_operator credential, across the HTTP and native gRPC surfaces; unlike the other per-IP caps it cannot be switched off, so zero selects the default and a negative value is refused at boot.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },
