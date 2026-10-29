@@ -634,7 +634,9 @@ func (s *ControlPlaneAdminService) AdminCreateTenant(ctx context.Context, secret
 // (invite others, verify domains, manage members). The role defaults to
 // owner — the highest privilege an operator would grant when standing up a
 // tenant — and may be admin; plain member is rejected (this RPC bootstraps
-// administration, not ordinary membership).
+// administration, not ordinary membership). The membership written is
+// active: a suspended one is restored first (liftSuspension), which audits
+// the lift as EventTenantMemberRestored.
 func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, secret, projectID, tenantID, userID, role string) (*TenantMembership, error) {
 	if err := s.authorize(secret); err != nil {
 		return nil, err
@@ -649,6 +651,9 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, secr
 	}
 	role, err = normalizeAdminRole(role)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := s.liftSuspension(ctx, projectID, tenantID, userID, "", "", ""); err != nil {
 		return nil, err
 	}
 	m := &TenantMembership{

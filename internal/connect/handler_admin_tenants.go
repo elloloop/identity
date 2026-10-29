@@ -76,7 +76,8 @@ func (h *IdentityHandler) AdminRestoreTenant(
 }
 
 // AdminRecoverTenantOwnership appoints an owner to a tenant with no owner or
-// admin left who can sign in. Operator-only.
+// admin left who both can sign in and holds an active membership.
+// Operator-only.
 func (h *IdentityHandler) AdminRecoverTenantOwnership(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminRecoverTenantOwnershipRequest],

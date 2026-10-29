@@ -342,12 +342,13 @@ const (
 	EventTenantOwnershipTransferred EventType = "tenant_ownership_transferred"
 
 	// EventTenantOwnershipRecovered records an operator appointing an owner
-	// to a tenant that has no owner or admin left who can sign in
-	// (AdminRecoverTenantOwnership): target the appointed owner, the
-	// operator's IP and user agent, and the project id, the tenant id and the
-	// reason the operator gave in the details. Only a call that changed the
-	// membership records it: one that finds the account already an owner, or
-	// whose grant a concurrent recovery made first, records nothing.
+	// to a tenant that has no owner or admin left who both can sign in and
+	// holds an active membership (AdminRecoverTenantOwnership): target the
+	// appointed owner, the operator's IP and user agent, and the project id,
+	// the tenant id and the reason the operator gave in the details. Only a
+	// call that changed the membership records it: one that finds the
+	// account already an owner, or whose grant a concurrent recovery made
+	// first, records nothing.
 	EventTenantOwnershipRecovered EventType = "tenant_ownership_recovered"
 
 	// EventDomainJoinSet records a tenant admin turning joining by a domain
@@ -366,11 +367,33 @@ const (
 	// EventTenantMemberRemoved records a tenant owner or admin removing a
 	// member (RemoveTenantMember), themselves included: actor the caller and
 	// target the person removed, with the project and tenant ids and the
-	// role and source the membership had in the details. The removal also
+	// role, source and status the membership had in the details, so the
+	// removal of a suspended member shows as one. The removal also
 	// keeps the person from joining the tenant again by their email's
 	// domain until a membership from another source lets them back in.
 	// Removing a membership that does not exist records nothing.
 	EventTenantMemberRemoved EventType = "tenant_member_removed"
+
+	// EventTenantMemberSuspended records a tenant owner or admin suspending
+	// a member (SuspendTenantMember): actor the caller and target the
+	// person suspended, with the project and tenant ids, the role and source
+	// the membership keeps, and its status, "suspended", in the details.
+	// Suspending a suspended member records nothing.
+	EventTenantMemberSuspended EventType = "tenant_member_suspended"
+
+	// EventTenantMemberRestored records a member's suspension being lifted:
+	// by a tenant owner or admin (RestoreTenantMember), with the caller as
+	// actor, or by an operator's AdminRecoverTenantOwnership or
+	// AdminAddTenantAdmin, which lift it before they write the membership,
+	// with no actor and, for a recovery, the operator's reason in the
+	// details. The target is the person, and the details hold the project
+	// and tenant ids, the role and source, and the status the restore gave
+	// the membership: "active", or "inactive" for a membership through the
+	// email's domain whose email is not on a domain the tenant has verified.
+	// When it succeeds, an operator's call then writes the membership it was
+	// asked for, an active owner or admin one. Restoring an active member
+	// records nothing.
+	EventTenantMemberRestored EventType = "tenant_member_restored"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -467,6 +490,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventDomainJoinSet:                 {},
 	EventTenantJoinedByDomain:          {},
 	EventTenantMemberRemoved:           {},
+	EventTenantMemberSuspended:         {},
+	EventTenantMemberRestored:          {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

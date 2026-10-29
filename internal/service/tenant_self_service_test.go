@@ -35,6 +35,7 @@ func newSelfServiceFixture(cfg *config.Config) *selfServiceFixture {
 	mem, tnt := newFakeMembershipStore(), newFakeTenantStore()
 	linkFakeTenantStores(tnt, mem)
 	usr := newFakeUserDirectory()
+	mem.accounts = usr
 	usr.set(ssProject, &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive, EmailVerified: true})
 	usr.set(ssProject, &User{ID: ssOtherID, Email: "other@example.test", Status: StatusActive, EmailVerified: true})
 	w := newRecordingAuditWriter()

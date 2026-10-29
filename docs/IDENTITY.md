@@ -110,10 +110,17 @@ suite (email, productivity tools).
   owner, and invite others to it. It is the same entity as a domain tenant,
   claimed from creation (ADR-0018).
 - An owner hands a tenant on to another member with
-  `TransferTenantOwnership`, becoming an admin. When no owner can sign in
-  but an admin can, the admin invites a new owner; once no owner or admin
-  who is a person can sign in any more, an operator appoints one with
+  `TransferTenantOwnership`, becoming an admin. When no owner can act but
+  an admin both can sign in and holds an active membership, the admin
+  invites a new owner; once no owner or admin who is a person both can sign
+  in and holds an active membership, an operator appoints one with
   `AdminRecoverTenantOwnership` (ADR-0018, Ownership).
+- An owner or admin stops a member acting in a tenant for a while with
+  `SuspendTenantMember`, which keeps the membership's role and source at
+  status `suspended`, and lets them back with `RestoreTenantMember`. A
+  suspended member cannot select the tenant, administer it, or come back
+  through an invitation or a domain join on their own (ADR-0018,
+  Suspending a member).
 - Onboarding:
   1. **Domain self-service** — a user with a company email signs up; the
      tenant auto-forms; once a domain owner verifies the domain, other
@@ -129,7 +136,8 @@ suite (email, productivity tools).
      someone whose membership ended (ADR-0018, Joining by domain). A
      person an owner or admin removed (`RemoveTenantMember`) cannot join
      this way until an invitation or an operator's grant lets them back
-     in (`tenant_member_removals`).
+     in (`tenant_member_removals`), and a suspended one cannot until they
+     are restored.
 - Per-request resolution is **Project first, then Tenant**: the project
   is resolved from an `X-Project-Key` credential or the `Host` header (a
   project auth-domain), and the tenant from the authenticated user's
@@ -239,7 +247,8 @@ an opaque cursor, 50 by default and at most 200), and suspended and restored
 with `AdminSuspendTenant` and `AdminRestoreTenant` (each with a reason the
 audit trail keeps), and given an owner again with
 `AdminRecoverTenantOwnership` once none of its owners or admins who is a
-person can sign in (also with a reason). They authenticate via the `GATEWAY_ADMIN_API_SECRET`
+person both can sign in and holds an active membership (also with a
+reason). They authenticate via the `GATEWAY_ADMIN_API_SECRET`
 shared secret rather than a user token. With the secret empty (the default) those RPCs return
 `CodeUnimplemented`, so a deployer who never sets it cannot reach them.
 
@@ -752,7 +761,11 @@ moved onto the domain after signup, or whose membership ended) joins with
 signup would have. `RemoveTenantMember` records the removal in
 `tenant_member_removals`, and while that record stands neither a join nor
 auto-formation makes the person a member again; any of the explicit grants
-above deletes it.
+above deletes it. `SuspendTenantMember` keeps the row at status `suspended`:
+neither a join nor an accepted invitation lifts that, and an email leaving
+the domain does not end it. `RestoreTenantMember`, checked against the
+restorer in the same transaction, or an operator's grant or recovery does,
+and each lift is audited.
 
 ## Identity's role model vs tenant-shard-db's role model
 

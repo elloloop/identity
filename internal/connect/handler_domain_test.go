@@ -139,6 +139,9 @@ type connectMembershipStore struct {
 	upserted *service.TenantMembership
 	// active is what ListActiveTenantsForUser returns.
 	active []*service.UserTenant
+	// changeErr, when set, is what SuspendMembership and RestoreMembership
+	// return.
+	changeErr error
 }
 
 func (s *connectMembershipStore) UpsertMembership(_ context.Context, m *service.TenantMembership) (string, error) {
@@ -185,6 +188,28 @@ func (s *connectMembershipStore) JoinByDomain(ctx context.Context, projectID, te
 
 func (s *connectMembershipStore) IsRemoved(context.Context, string, string, string) (bool, error) {
 	return false, nil
+}
+
+// SuspendMembership reports userID's invited membership as suspended, or
+// changeErr.
+func (s *connectMembershipStore) SuspendMembership(_ context.Context, projectID, tenantID, userID string) (*service.TenantMembership, bool, error) {
+	return s.changed(projectID, tenantID, userID, service.MembershipStatusSuspended)
+}
+
+// RestoreMembership reports userID's invited membership as active again, or
+// changeErr.
+func (s *connectMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID string, _ service.Restorer) (*service.TenantMembership, bool, error) {
+	return s.changed(projectID, tenantID, userID, service.MembershipStatusActive)
+}
+
+func (s *connectMembershipStore) changed(projectID, tenantID, userID, status string) (*service.TenantMembership, bool, error) {
+	if s.changeErr != nil {
+		return nil, false, s.changeErr
+	}
+	return &service.TenantMembership{
+		ID: "mem-" + userID, ProjectID: projectID, TenantID: tenantID, UserID: userID,
+		Source: service.MembershipSourceInvited, Role: service.RoleMember, Status: status,
+	}, true, nil
 }
 
 // TransferOwnership reports the transfer as made: toUserID an added owner,

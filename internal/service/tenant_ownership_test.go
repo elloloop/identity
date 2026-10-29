@@ -292,8 +292,9 @@ func TestAdminRecoverTenantOwnership_AppointsAndAudits(t *testing.T) {
 	require.ErrorIs(t, err, ErrTenantStillGoverned)
 }
 
-// Each way an owner or admin stops being one who can sign in leaves the
-// tenant recoverable, and an account outside the tenant may be appointed.
+// Each way an owner or admin stops governing, by no longer being able to
+// sign in or by no longer holding an active membership, leaves the tenant
+// recoverable, and an account outside the tenant may be appointed.
 func TestAdminRecoverTenantOwnership_WhenNobodyCanGovern(t *testing.T) {
 	t.Parallel()
 	for name, gone := range map[string]func(f *adminFixture){
@@ -318,6 +319,15 @@ func TestAdminRecoverTenantOwnership_WhenNobodyCanGovern(t *testing.T) {
 		"admin membership inactive": func(f *adminFixture) {
 			f.users.set("proj", &User{ID: "old-admin", Email: "a@example.test", Status: StatusActive, EmailVerified: true})
 			f.seedMembership("old-admin", MembershipSourceInvited, RoleAdmin, MembershipStatusInactive)
+		},
+		"owner membership suspended": func(f *adminFixture) {
+			// An owner who can sign in, but whose membership is suspended.
+			f.users.byID["proj/gone"].Status = StatusActive
+			f.seedMembership("gone", MembershipSourceCreated, RoleOwner, MembershipStatusSuspended)
+		},
+		"admin membership suspended": func(f *adminFixture) {
+			f.users.set("proj", &User{ID: "old-admin", Email: "a@example.test", Status: StatusActive, EmailVerified: true})
+			f.seedMembership("old-admin", MembershipSourceInvited, RoleAdmin, MembershipStatusSuspended)
 		},
 		"admin an agent": func(f *adminFixture) {
 			f.users.set("proj", &User{ID: "bot", Kind: UserKindAgent, OwnerUserID: "gone", Status: StatusActive})

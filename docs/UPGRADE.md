@@ -1,5 +1,265 @@
 # Upgrade guide
 
+## Next — an owner or admin can suspend and restore a member (migration 0053; additive RPCs; behaviour change for suspended members; `MembershipStore.SuspendMembership`, `RestoreMembership` (Go API))
+
+Two RPCs are new, each for an active owner or admin of a tenant that is not
+suspended:
+
+- `SuspendTenantMember(tenant_id, user_id)` sets an active member's
+  membership to the new status `suspended`, keeping its role and source.
+  Suspending a suspended member returns it unchanged. Naming yourself is
+  `INVALID_ARGUMENT`, the tenant's last active owner is
+  `FAILED_PRECONDITION`, and anyone not an active or suspended member is
+  `NOT_FOUND`.
+- `RestoreTenantMember(tenant_id, user_id)` makes a suspended member
+  active again, with the role and source they had. A membership through the
+  email's domain whose email is not on a domain the tenant has verified when
+  it is restored becomes `inactive` instead, and the response shows it.
+  Restoring an active member returns it unchanged. When the restore is
+  written, the caller must still hold an active owner or admin membership,
+  so one suspended or removed while the call is in flight is
+  `PERMISSION_DENIED` and lifts nothing. Naming yourself is
+  `INVALID_ARGUMENT`.
+
+Each change is audited, as `tenant_member_suspended` or
+`tenant_member_restored`: the caller as actor, the member as target, the
+request's IP and user agent, and `project_id`, `tenant_id` and the
+membership's `role`, `source` and resulting `status` in the details. A call
+that changes nothing records nothing. Both are served on the postgres
+control-plane driver only; the memory and SQLite drivers return
+`UNIMPLEMENTED`. `tenant_member_removed` gains a `status` detail too: the
+status the membership had, so the removal of a suspended member shows as
+one.
+
+While a member is suspended:
+
+- `ListTenantMembers` lists them with status `suspended`, a value
+  `TenantMembership.status` did not take before. A client that switches on
+  the status should handle it.
+- `RefreshToken` refuses to select the tenant for them (`PERMISSION_DENIED`
+  with the `NOT_A_MEMBER` detail, token unspent), and `ListMyTenants` and
+  `ListJoinableTenants` leave it out.
+- They cannot administer the tenant or have ownership transferred to them.
+- `AcceptTenantInvitation` for the tenant and `JoinTenantByDomain` are
+  `PERMISSION_DENIED`, with the message "your membership of this tenant is
+  suspended; an owner or admin must restore it". The invitation stays
+  pending.
+- Their email leaving the tenant's verified domains does not end a
+  suspended domain membership.
+
+An operator's `AdminAddTenantAdmin` or `AdminRecoverTenantOwnership` lifts a
+suspension, as a restore does, and records the lift as
+`tenant_member_restored` with no actor (a recovery adds its `reason`). An
+owner or admin whose membership is suspended does not count as one who can
+govern, so it does not stop a recovery. A suspension takes effect at the
+member's next refresh. It ends no session and revokes no agent grant or
+machine, so an access token that already names the tenant works until it
+expires.
+
+Removing the last active owner was already refused; suspending one is
+refused too, and the error text changed with that. `RemoveTenantMember` on
+the last owner is still `FAILED_PRECONDITION`, but its message is now "a
+tenant must keep an active owner: cannot remove the last owner of a
+tenant". Match on the code, not the text.
+
+### Migration 0053
+
+0053 widens `tenant_memberships_status_check` to admit `suspended`. The
+check is re-added `NOT VALID`: every existing row satisfies the wider check,
+so no scan runs, and every later write is checked. `VALIDATE CONSTRAINT` may
+be run later, but nothing needs it. 0053 also replaces 0047's
+`end_domain_memberships_off_domain()` so that it skips suspended rows.
+
+The `ALTER`s take an `ACCESS EXCLUSIVE` lock on `tenant_memberships` until
+the migration commits. Membership reads and writes wait for it, sign-in's
+tenant reads included, but the rest of the migration is catalog changes
+only. Waiting for the lock is bounded by a 10-second `lock_timeout`. On a
+timeout the migration rolls back and version 53 is recorded dirty: run
+`identity migrate force 52`, then `identity migrate` again.
+
+Run `identity migrate` before the deploy. Until 0053 has run, a suspension
+fails on the check and nothing else changes. Replicas of the previous
+release keep working against the new schema, and their active-membership
+reads leave suspended members out. They do not refuse a suspended member,
+though: an invitation accepted or a join made through one of them
+reactivates the membership. Keep the rolling deploy short, suspend no one
+until every replica runs this release, and do not roll the image back while
+suspensions stand. Whether any do:
+
+```sql
+SELECT count(*) FROM tenant_memberships WHERE status = 'suspended';
+```
+
+The down migration refuses to run while that count is not zero, because
+the schema before 0053 cannot hold a suspension and would let each person
+back on their own. Each suspension is decided first. The tenant's owners
+and admins can do it: `RestoreTenantMember`, or `RemoveTenantMember`, whose
+removal record keeps a domain member from joining again. An invitation the
+person already holds stays pending through a removal, as it did through the
+suspension, and after the removal they can accept it. An operator who
+cannot wait for them removes every suspended member in SQL instead, and
+revokes each one's pending invitations to the tenant, so each stays out
+until someone invites them again.
+
+Both blocks below need a role with `BYPASSRLS`, or a superuser
+(`docs/postgres-rls.md`). `users` is under row-level security, and without
+`row_security = off` any other role would remove the members and revoke
+none of their invitations; with it, such a role fails and changes nothing.
+Each block is one transaction that turns it off with `SET LOCAL`, which
+ends with the transaction, so a pooler in transaction mode, such as
+PgBouncer, keeps the setting and the statements it guards on one
+connection and hands no other client a connection that still has it. Run
+them, then the down migration, with this release's replicas stopped, so
+that no suspension, invitation or join lands in between.
+
+An invitation admits whoever holds its canonical mailbox. SQL computes that
+form only for an all-ASCII address, as 0034 did, so first list the
+suspended members whose email is not all ASCII, and the pending invitations
+to an address that is not all ASCII in the tenants they are suspended from:
+
+```sql
+BEGIN;
+SET LOCAL row_security = off;
+SELECT m.project_id, m.tenant_id, m.user_id, u.email
+  FROM tenant_memberships m
+  JOIN users u ON u.project_id = m.project_id AND u.id = m.user_id
+ WHERE m.status = 'suspended' AND u.email <> '' AND u.email !~ '^[!-~]+$';
+SELECT i.project_id, i.tenant_id, i.id, i.email
+  FROM tenant_invitations i
+ WHERE i.status = 'pending' AND i.email !~ '^[!-~]+$'
+   AND (i.project_id, i.tenant_id) IN
+       (SELECT project_id, tenant_id FROM tenant_memberships WHERE status = 'suspended');
+COMMIT;
+```
+
+Revoke by hand each pending invitation that would admit a suspended member
+back to the tenant they are suspended from and that the statement below
+cannot match:
+
+- each invitation in the second list whose address is the mailbox of a
+  member suspended from its tenant;
+- for each member in the first list, that tenant's pending invitations to
+  their mailbox, which `SELECT id, email FROM tenant_invitations WHERE
+  project_id = '…' AND tenant_id = '…' AND status = 'pending'` lists.
+
+Two addresses are one mailbox when they are equal once each is trimmed and
+lower-cased, its local part cut at its first `+`, one trailing dot dropped
+from its domain, an internationalized domain written in its `xn--` form,
+`googlemail.com` read as `gmail.com` and, at `gmail.com`, the dots removed
+from its local part. Revoke an invitation with `UPDATE tenant_invitations
+SET status = 'revoked' WHERE project_id = '…' AND id = '…'`. A suspended
+member with no email has no mailbox, and no invitation admits them.
+
+Then remove every suspended member, recording each removal, and revoke each
+one's pending invitations to the tenant. The statement lists each member it
+removed, and each invitation it revoked, with its id; keep that output,
+since nothing else records which invitations it revoked. It expects tables
+the planner has statistics for, as autovacuum keeps them; on a database
+never analyzed, run `ANALYZE tenant_memberships, tenant_invitations, users;`
+first:
+
+```sql
+BEGIN;
+SET LOCAL row_security = off;
+WITH removed AS (
+  DELETE FROM tenant_memberships WHERE status = 'suspended'
+  RETURNING project_id, tenant_id, user_id
+), addresses AS (
+  SELECT r.project_id, r.tenant_id, NULL::text AS invitation_id, u.email
+    FROM removed r
+    JOIN users u ON u.project_id = r.project_id AND u.id = r.user_id
+  UNION ALL
+  SELECT i.project_id, i.tenant_id, i.id, i.email
+    FROM tenant_invitations i
+   WHERE i.status = 'pending'
+     AND (i.project_id, i.tenant_id) IN (SELECT project_id, tenant_id FROM removed)
+), parts AS (
+  SELECT project_id, tenant_id, invitation_id,
+         substring(lower(email COLLATE "C") FROM '^(.*)@') AS local_part,
+         regexp_replace(substring(lower(email COLLATE "C") FROM '@([^@]*)$'), '\.$', '') AS domain
+    FROM addresses
+), mailboxes AS (
+  SELECT project_id, tenant_id, invitation_id,
+         CASE WHEN domain IN ('gmail.com', 'googlemail.com')
+              THEN replace(split_part(local_part, '+', 1), '.', '') || '@gmail.com'
+              ELSE split_part(local_part, '+', 1) || '@' || domain
+         END AS mailbox
+    FROM parts
+), revoked AS (
+  UPDATE tenant_invitations i SET status = 'revoked'
+    FROM mailboxes invitation
+    JOIN mailboxes member
+      ON member.invitation_id IS NULL
+     AND member.project_id = invitation.project_id
+     AND member.tenant_id = invitation.tenant_id
+     AND member.mailbox = invitation.mailbox
+   WHERE i.project_id = invitation.project_id AND i.id = invitation.invitation_id
+  RETURNING i.project_id, i.tenant_id, i.id, i.email
+), recorded AS (
+  INSERT INTO tenant_member_removals (project_id, tenant_id, user_id, removed_at_ms)
+  SELECT project_id, tenant_id, user_id,
+         (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+    FROM removed
+  ON CONFLICT (project_id, tenant_id, user_id)
+    DO UPDATE SET removed_at_ms = EXCLUDED.removed_at_ms
+  RETURNING project_id, tenant_id, user_id
+)
+SELECT 'removed' AS change, project_id, tenant_id, user_id AS id, NULL::text AS email
+  FROM recorded
+UNION ALL
+SELECT 'revoked', project_id, tenant_id, id, email
+  FROM revoked
+ORDER BY change, project_id, tenant_id, id;
+COMMIT;
+```
+
+The mailbox is the service's canonical form of an all-ASCII address:
+lower-cased, one trailing dot dropped from the domain, `googlemail.com`
+read as `gmail.com`, the local part cut at its first `+` and, at
+`gmail.com`, its dots removed. The statement computes it for each pending
+invitation whose address is all ASCII too, as accepting one does: an
+invitation is stored canonicalized once, so one typed with two trailing
+dots keeps one, and `a.b@googlemail.com.` still admits `ab@gmail.com`. The
+others are the second list, decided by hand above. Nothing records the
+statement in the audit trail. A tenant whose only remaining owner was
+suspended has no owner afterwards: an admin who can still act invites one,
+and otherwise an operator appoints one with `AdminRecoverTenantOwnership`.
+
+A refused down migration rolls back and records version 52 dirty: run this
+release's `identity migrate force 53`, decide the suspensions, then migrate
+down again. Once none stands, it takes an `ACCESS EXCLUSIVE` lock on
+`tenant_memberships` first and counts the suspended rows, reading the whole
+table, so membership reads, sign-in's tenant reads included, wait while it
+runs. It then re-adds the narrower check `NOT VALID` (its own count has
+just read every row), and restores 0047's trigger body.
+
+### Go API
+
+- `MembershipStore` gains `SuspendMembership(ctx, projectID, tenantID,
+  userID) (*TenantMembership, bool, error)` and `RestoreMembership(ctx,
+  projectID, tenantID, userID string, by service.Restorer)
+  (*TenantMembership, bool, error)`. Each returns the membership as it now
+  stands and whether the call changed it. A suspension refuses the last
+  active owner with `ErrLastOwner`, taking the same locks as a removal. A
+  restore by `service.RestoredByMember(restorerID)` checks, in its own
+  transaction, that restorerID holds an active owner or admin membership
+  (`ErrPermissionDenied` otherwise); `service.RestoredByOperator()` is an
+  operator, and is not checked; the zero `Restorer`, for which
+  `Restorer.NamesNobody` reports true, is refused before any lock or read.
+  A restore makes a `domain` membership `inactive` when the account's
+  email, read in that transaction, is not on a domain the tenant has
+  verified, and takes the account's row only for a suspended membership.
+- `MembershipStore.GrantMembership` and `JoinByDomain` must refuse a
+  suspended membership with `service.ErrMemberSuspended` and write nothing.
+  `UpsertMembership`, an operator's write, lifts it; `AdminAddTenantAdmin`
+  restores a suspended membership first, so the lift is audited.
+- New: `MembershipService.SuspendTenantMember` and `RestoreTenantMember`;
+  `service.MembershipStatusSuspended`; `service.Restorer`,
+  `service.RestoredByMember` and `service.RestoredByOperator`;
+  `service.ErrMemberSuspended`, mapped to `PERMISSION_DENIED`;
+  `audit.EventTenantMemberSuspended` and `audit.EventTenantMemberRestored`.
+- `service.ErrLastOwner`'s text is now "a tenant must keep an active owner".
+
 ## Next — `GATEWAY_TENANT_INVITATION_PAGE_URL`: the page a tenant invitation email links to (additive; one stricter start-up check; no migration)
 
 No schema change and no migration. A deployment that sets nothing new sends

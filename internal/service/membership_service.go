@@ -56,6 +56,12 @@ var (
 	// window (GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT). Mapped to
 	// CodeResourceExhausted.
 	ErrInvitationRecipientLimited = errors.New("this address has been invited too often recently; try again later")
+	// ErrMemberSuspended refuses a person whose membership of the tenant an
+	// owner or admin suspended (SuspendTenantMember) the ways back in that
+	// would lift it: accepting an invitation to the tenant and joining it
+	// by domain. Only RestoreTenantMember, or an operator's grant, lifts a
+	// suspension. Mapped to CodePermissionDenied.
+	ErrMemberSuspended = errors.New("your membership of this tenant is suspended; an owner or admin must restore it")
 )
 
 // UserDirectory is the narrow user-lookup boundary MembershipService needs:
@@ -239,7 +245,9 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 // canonicalized as sign-in canonicalizes an address (emailaddr.Canonicalize); a
 // mismatch is PermissionDenied, and an unverified email is
 // ErrEmailVerificationRequired. A suspended tenant admits nobody
-// (requireGovernableTenant); the invitation stays pending through either. An
+// (requireGovernableTenant), and a caller whose membership of the tenant is
+// suspended is ErrMemberSuspended (MembershipStore.GrantMembership); the
+// invitation stays pending through each. An
 // expired invitation is marked expired and rejected; an
 // unknown/revoked/already-accepted token is rejected without mutation.
 func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID, rawToken string) (*TenantMembership, error) {
@@ -373,20 +381,9 @@ func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, ten
 // store checks and removes in one step (MembershipStore.RemoveMembership),
 // so a concurrent removal or ownership transfer cannot slip between them.
 func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID, tenantID, targetUserID, ip, userAgent string) error {
-	projectID, err := s.requireProject(ctx)
+	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
 	if err != nil {
 		return err
-	}
-	if callerID == "" {
-		return ErrUnauthenticated
-	}
-	tenantID = strings.TrimSpace(tenantID)
-	targetUserID = strings.TrimSpace(targetUserID)
-	if tenantID == "" {
-		return fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
-	}
-	if targetUserID == "" {
-		return fmt.Errorf("%w: missing user_id", ErrInvalidArgument)
 	}
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
 		return err
@@ -397,19 +394,127 @@ func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID, te
 		// Removing a membership that does not exist is a no-op.
 		return err
 	}
-	if s.audit != nil {
-		s.audit.Log(ctx, audit.EventTenantMemberRemoved,
-			audit.WithActor(callerID), audit.WithTarget(targetUserID),
-			audit.WithIP(ip), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(true), audit.WithDetails(map[string]any{
-				"project_id": projectID,
-				"tenant_id":  tenantID,
-				"role":       removed.Role,
-				"source":     removed.Source,
-			}),
-		)
-	}
+	s.auditMemberChange(ctx, audit.EventTenantMemberRemoved, callerID, removed, ip, userAgent)
 	return nil
+}
+
+// SuspendTenantMember stops targetUserID acting in the tenant without
+// removing them: their membership keeps its role and source at status
+// MembershipStatusSuspended. Every read that lets a member act asks for an
+// active membership, so while it is suspended they cannot select the tenant
+// on a refresh, do not see it in ListMyTenants and cannot administer it; an
+// access token already issued for the tenant is not revoked and lasts until
+// it expires. Neither an invitation they accept nor joining by domain lifts
+// it (ErrMemberSuspended), and the email leaving the domain does not end it
+// (migration 0053). callerID must be an active owner or admin of a tenant
+// that may be governed (authorizeTenantAdmin); an admin may suspend an
+// owner, as an admin may remove one.
+//
+// Suspending oneself is ErrInvalidArgument: a caller who means to leave
+// removes themselves. Suspending the tenant's last active owner is
+// ErrLastOwner, decided where the write is (MembershipStore.SuspendMembership).
+// A target that is not an active or suspended member is ErrNotFound.
+// Suspending a suspended member returns the membership unchanged and records
+// nothing; a suspension is audited as EventTenantMemberSuspended.
+func (s *MembershipService) SuspendTenantMember(ctx context.Context, callerID, tenantID, targetUserID, ip, userAgent string) (*TenantMembership, error) {
+	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+		return nil, err
+	}
+	if targetUserID == callerID {
+		return nil, fmt.Errorf("%w: you cannot suspend yourself; remove yourself to leave the tenant", ErrInvalidArgument)
+	}
+	m, changed, err := s.memberships.SuspendMembership(ctx, projectID, tenantID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		s.auditMemberChange(ctx, audit.EventTenantMemberSuspended, callerID, m, ip, userAgent)
+	}
+	return m, nil
+}
+
+// RestoreTenantMember lifts targetUserID's suspension in the tenant: the
+// membership is active again with the role and source it had. A membership
+// through the email's domain whose email is not on a domain the tenant has
+// verified when it is restored ends instead (MembershipStatusInactive).
+// callerID must be an active owner or admin of a tenant that may be
+// governed, and still be one where the restore is written
+// (MembershipStore.RestoreMembership), so one suspended while the call is in
+// flight is ErrPermissionDenied and lifts nothing. Naming oneself is
+// ErrInvalidArgument: a caller who may restore is not suspended. A target
+// that is not an active or suspended member is ErrNotFound. Restoring an
+// active member returns the membership unchanged and records nothing; a
+// restore is audited as EventTenantMemberRestored, with the status it left.
+func (s *MembershipService) RestoreTenantMember(ctx context.Context, callerID, tenantID, targetUserID, ip, userAgent string) (*TenantMembership, error) {
+	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+		return nil, err
+	}
+	if targetUserID == callerID {
+		return nil, fmt.Errorf("%w: you cannot restore yourself", ErrInvalidArgument)
+	}
+	m, changed, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, targetUserID, RestoredByMember(callerID))
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		s.auditMemberChange(ctx, audit.EventTenantMemberRestored, callerID, m, ip, userAgent)
+	}
+	return m, nil
+}
+
+// memberChangeRef checks an owner or admin's request to change a member:
+// it needs the request's project, a caller, and a tenant and a member id,
+// which it trims. It returns the project and the trimmed ids.
+func (s *MembershipService) memberChangeRef(ctx context.Context, callerID, tenantID, targetUserID string) (projectID, tenant, target string, err error) {
+	projectID, err = s.requireProject(ctx)
+	if err != nil {
+		return "", "", "", err
+	}
+	if callerID == "" {
+		return "", "", "", ErrUnauthenticated
+	}
+	tenant, target = strings.TrimSpace(tenantID), strings.TrimSpace(targetUserID)
+	if tenant == "" {
+		return "", "", "", fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
+	}
+	if target == "" {
+		return "", "", "", fmt.Errorf("%w: missing user_id", ErrInvalidArgument)
+	}
+	return projectID, tenant, target, nil
+}
+
+// auditMemberChange records an owner or admin's change to member m: actor
+// callerID, target the member, with memberChangeDetails of the membership
+// the change left, or, for a removal, removed.
+func (s *MembershipService) auditMemberChange(ctx context.Context, event audit.EventType, callerID string, m *TenantMembership, ip, userAgent string) {
+	if s.audit == nil {
+		return
+	}
+	s.audit.Log(ctx, event,
+		audit.WithActor(callerID), audit.WithTarget(m.UserID),
+		audit.WithIP(ip), audit.WithUserAgent(userAgent),
+		audit.WithSuccess(true), audit.WithDetails(memberChangeDetails(m)),
+	)
+}
+
+// memberChangeDetails is what the audit trail keeps of a change to
+// membership m: the project and tenant ids, and its role, source and status.
+func memberChangeDetails(m *TenantMembership) map[string]any {
+	return map[string]any{
+		"project_id": m.ProjectID,
+		"tenant_id":  m.TenantID,
+		"role":       m.Role,
+		"source":     m.Source,
+		"status":     m.Status,
+	}
 }
 
 // sendInvitationEmail renders and best-effort dispatches the branded tenant

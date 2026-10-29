@@ -66,6 +66,23 @@ func TestToConnectErrorRemovedFromTenant(t *testing.T) {
 	}
 }
 
+// TestToConnectErrorMemberSuspended proves a way back into a tenant refused
+// to a suspended member maps to PermissionDenied and keeps its message,
+// which tells the caller who can lift the suspension; the last owner a
+// suspension would take away is a FailedPrecondition.
+func TestToConnectErrorMemberSuspended(t *testing.T) {
+	err := toConnectError(fmt.Errorf("join: %w", service.ErrMemberSuspended))
+	if got := connect.CodeOf(err); got != connect.CodePermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", got)
+	}
+	if !strings.Contains(err.Error(), "an owner or admin must restore it") {
+		t.Fatalf("message = %q, want the way back in", err.Error())
+	}
+	if got := connect.CodeOf(toConnectError(fmt.Errorf("%w: cannot suspend the last owner of a tenant", service.ErrLastOwner))); got != connect.CodeFailedPrecondition {
+		t.Fatalf("last owner code = %v, want FailedPrecondition", got)
+	}
+}
+
 // TestToConnectErrorSessionExpired proves a session killed by the tenant's
 // idle/absolute timeout maps to Unauthenticated (like ErrTokenExpired): the
 // presented refresh token is no longer valid, so the client must re-authenticate

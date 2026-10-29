@@ -1357,12 +1357,13 @@ var (
 	// Domain/Tenant RPCs are postgres-only; memory returns this).
 	// The Connect handler layer maps it to CodeUnimplemented.
 	ErrUnimplemented = errors.New("operation unimplemented for this repository driver")
-	// ErrLastOwner is returned by RemoveTenantMember (and
-	// MembershipStore.RemoveMembership) when removing the target would leave
-	// the tenant with no active owner. The caller is permitted
-	// to remove members (so PermissionDenied is wrong); this is a state
-	// precondition, mapped to CodeFailedPrecondition.
-	ErrLastOwner = errors.New("cannot remove the last owner of a tenant")
+	// ErrLastOwner is returned by RemoveTenantMember and SuspendTenantMember
+	// (and MembershipStore.RemoveMembership and SuspendMembership) when the
+	// change would leave the tenant with no active owner. The caller is
+	// permitted to remove and suspend members (so PermissionDenied is
+	// wrong); this is a state precondition, mapped to
+	// CodeFailedPrecondition.
+	ErrLastOwner = errors.New("a tenant must keep an active owner")
 	// ErrPlatformAdminExists is returned by CreateFirstPlatformAdmin once any
 	// platform admin already exists: the zero-config bootstrap is a one-time
 	// path that permanently closes after the first admin is created, so a

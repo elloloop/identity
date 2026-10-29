@@ -343,6 +343,13 @@ type fakeMembershipStore struct {
 	// tenants supplies each tenant's name and status to the active-tenant
 	// reads (linkFakeTenantStores); unlinked, those reads find nothing.
 	tenants *fakeTenantStore
+	// accounts supplies the email RestoreMembership judges a domain
+	// membership by, as the postgres store reads users.email_domain;
+	// unlinked, or without the account, the email is "".
+	accounts *fakeUserDirectory
+	// onRestore runs as RestoreMembership starts, standing for a write that
+	// lands between the service's checks and the restore's transaction.
+	onRestore func()
 	// verified holds each tenant's verified domains, keyed project/tenant,
 	// for the active-tenant reads' domain rule (verifyDomain).
 	verified map[string]map[string]bool
@@ -402,16 +409,20 @@ func (f *fakeMembershipStore) UpsertMembership(_ context.Context, m *TenantMembe
 // fakeRoleRank orders the roles as the postgres store does.
 var fakeRoleRank = map[string]int{RoleOwner: 3, RoleAdmin: 2, RoleMember: 1}
 
-// GrantMembership mirrors the postgres store: an active membership at the
-// role or a higher one keeps its role; anything else becomes active at
-// m.Role. Either way a membership keeps its source unless that is the
-// domain's, and a grant from another source clears a removal.
+// GrantMembership mirrors the postgres store: a suspended membership is
+// ErrMemberSuspended and changes nothing; an active membership at the role
+// or a higher one keeps its role; anything else becomes active at m.Role.
+// Either way a membership keeps its source unless that is the domain's, and
+// a grant from another source clears a removal.
 func (f *fakeMembershipStore) GrantMembership(ctx context.Context, m *TenantMembership) (*TenantMembership, bool, error) {
 	if f.upsertErr != nil {
 		return nil, false, f.upsertErr
 	}
-	f.clearRemoval(m)
 	k := f.key(m.ProjectID, m.TenantID, m.UserID)
+	if prior, ok := f.byKey[k]; ok && prior.Status == MembershipStatusSuspended {
+		return nil, false, ErrMemberSuspended
+	}
+	f.clearRemoval(m)
 	granted := *m
 	granted.Status = MembershipStatusActive
 	if prior, ok := f.byKey[k]; ok {
@@ -502,20 +513,98 @@ func (f *fakeMembershipStore) RemoveMembership(_ context.Context, projectID, ten
 	if !ok {
 		return nil, nil
 	}
-	if target.Role == RoleOwner && target.Status == MembershipStatusActive {
-		others := 0
-		for key, m := range f.byKey {
-			if key != k && m.ProjectID == projectID && m.TenantID == tenantID && m.Role == RoleOwner && m.Status == MembershipStatusActive {
-				others++
-			}
-		}
-		if others == 0 {
-			return nil, ErrLastOwner
-		}
+	if err := f.keepAnOwner(target); err != nil {
+		return nil, err
 	}
 	delete(f.byKey, k)
 	f.removed[k] = true
 	return target, nil
+}
+
+// keepAnOwner mirrors the postgres store's rule: target may not leave the
+// tenant's active owners when it is the last of them (ErrLastOwner).
+func (f *fakeMembershipStore) keepAnOwner(target *TenantMembership) error {
+	if target.Role != RoleOwner || target.Status != MembershipStatusActive {
+		return nil
+	}
+	for _, m := range f.byKey {
+		if m.ProjectID == target.ProjectID && m.TenantID == target.TenantID && m.UserID != target.UserID &&
+			m.Role == RoleOwner && m.Status == MembershipStatusActive {
+			return nil
+		}
+	}
+	return ErrLastOwner
+}
+
+// SuspendMembership mirrors the postgres store: an active membership is
+// suspended unless it is the last active owner, a suspended one is returned
+// unchanged, and anything else is ErrNotFound.
+func (f *fakeMembershipStore) SuspendMembership(_ context.Context, projectID, tenantID, userID string) (*TenantMembership, bool, error) {
+	target, ok := f.byKey[f.key(projectID, tenantID, userID)]
+	switch {
+	case !ok:
+		return nil, false, ErrNotFound
+	case target.Status == MembershipStatusSuspended:
+		out := *target
+		return &out, false, nil
+	case target.Status != MembershipStatusActive:
+		return nil, false, ErrNotFound
+	}
+	if err := f.keepAnOwner(target); err != nil {
+		return nil, false, err
+	}
+	target.Status = MembershipStatusSuspended
+	out := *target
+	return &out, true, nil
+}
+
+// RestoreMembership mirrors the postgres store: by, unless an operator,
+// must hold an active owner or admin membership, else
+// ErrPermissionDenied; a suspended membership becomes active, or inactive
+// when it is a domain one and the account's email is not on a domain the
+// tenant verified; an active one is returned unchanged, and anything else
+// is ErrNotFound.
+func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, tenantID, userID string, by Restorer) (*TenantMembership, bool, error) {
+	if by.NamesNobody() {
+		return nil, false, ErrPermissionDenied
+	}
+	if f.onRestore != nil {
+		f.onRestore()
+	}
+	if !by.IsOperator() {
+		byMembership := f.byKey[f.key(projectID, tenantID, by.UserID())]
+		if byMembership == nil || byMembership.Status != MembershipStatusActive || !isAdminRole(byMembership.Role) {
+			return nil, false, ErrPermissionDenied
+		}
+	}
+	target, ok := f.byKey[f.key(projectID, tenantID, userID)]
+	switch {
+	case !ok:
+		return nil, false, ErrNotFound
+	case target.Status == MembershipStatusActive:
+		out := *target
+		return &out, false, nil
+	case target.Status != MembershipStatusSuspended:
+		return nil, false, ErrNotFound
+	}
+	target.Status = MembershipStatusActive
+	if target.Source == MembershipSourceDomain && !f.verified[projectID+"/"+tenantID][f.accountEmailDomain(projectID, userID)] {
+		target.Status = MembershipStatusInactive
+	}
+	out := *target
+	return &out, true, nil
+}
+
+// accountEmailDomain is the domain of the email of userID's account in
+// accounts, as users.email_domain holds it, or "" for none.
+func (f *fakeMembershipStore) accountEmailDomain(projectID, userID string) string {
+	if f.accounts == nil {
+		return ""
+	}
+	if u := f.accounts.byID[f.accounts.key(projectID, userID)]; u != nil {
+		return emailDomain(FoldEmail(u.Email))
+	}
+	return ""
 }
 
 // TransferOwnership mirrors the postgres store's checks and writes.

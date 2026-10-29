@@ -399,6 +399,12 @@ const (
 	// IdentityServiceRemoveTenantMemberProcedure is the fully-qualified name of the IdentityService's
 	// RemoveTenantMember RPC.
 	IdentityServiceRemoveTenantMemberProcedure = "/identity.v1.IdentityService/RemoveTenantMember"
+	// IdentityServiceSuspendTenantMemberProcedure is the fully-qualified name of the IdentityService's
+	// SuspendTenantMember RPC.
+	IdentityServiceSuspendTenantMemberProcedure = "/identity.v1.IdentityService/SuspendTenantMember"
+	// IdentityServiceRestoreTenantMemberProcedure is the fully-qualified name of the IdentityService's
+	// RestoreTenantMember RPC.
+	IdentityServiceRestoreTenantMemberProcedure = "/identity.v1.IdentityService/RestoreTenantMember"
 	// IdentityServiceTransferTenantOwnershipProcedure is the fully-qualified name of the
 	// IdentityService's TransferTenantOwnership RPC.
 	IdentityServiceTransferTenantOwnershipProcedure = "/identity.v1.IdentityService/TransferTenantOwnership"
@@ -789,7 +795,10 @@ type IdentityServiceClient interface {
 	// canonical form sign-in uses, so a "+tag" spelling of it matches;
 	// PERMISSION_DENIED otherwise), and only once they have verified that email
 	// (FAILED_PRECONDITION before). Every one, accepting included, is
-	// PERMISSION_DENIED for a suspended tenant. Accepting never lowers a role
+	// PERMISSION_DENIED for a suspended tenant, and accepting is
+	// PERMISSION_DENIED too while the caller's own membership of the tenant is
+	// suspended (SuspendTenantMember); the invitation stays pending through
+	// either. Accepting never lowers a role
 	// the caller already holds in the tenant: an owner who accepts a member
 	// invitation stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED
 	// past the tenant's cap in the window, the inviter's cap across every
@@ -816,6 +825,41 @@ type IdentityServiceClient interface {
 	// membership from another source lets them back in, such as an invitation
 	// they accept.
 	RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error)
+	// SuspendTenantMember stops user_id acting in tenant_id without removing
+	// them: the membership keeps its role and source, and ListTenantMembers
+	// shows it with status "suspended". While it is suspended the member
+	// cannot choose the tenant for a token (RefreshToken refuses it,
+	// PERMISSION_DENIED with reason NOT_A_MEMBER, so an access token that
+	// already names the tenant works until it expires),
+	// ListMyTenants leaves it out, they cannot administer it, and they cannot
+	// come back on their own: accepting an invitation to the tenant and
+	// JoinTenantByDomain are PERMISSION_DENIED, and their email leaving the
+	// domain and coming back does not end the suspension. The caller must be
+	// an active owner or admin of a tenant that is not suspended
+	// (PERMISSION_DENIED otherwise). Naming the caller is INVALID_ARGUMENT,
+	// the tenant's last active owner is FAILED_PRECONDITION, and a user_id
+	// that is not an active or suspended member is NOT_FOUND. Suspending a
+	// suspended member returns the membership unchanged and records nothing;
+	// a suspension is audited. Available only on the postgres control-plane
+	// driver; the memory and SQLite drivers return Unimplemented.
+	SuspendTenantMember(context.Context, *connect.Request[v1.SuspendTenantMemberRequest]) (*connect.Response[v1.SuspendTenantMemberResponse], error)
+	// RestoreTenantMember lets a suspended member act in the tenant again,
+	// with the role they had. The caller must be an active owner or admin of
+	// a tenant that is not suspended, and must still hold an active owner or
+	// admin membership when the restore is written (PERMISSION_DENIED
+	// otherwise, and nothing changes). Naming the caller is INVALID_ARGUMENT,
+	// and a user_id that is not an active or suspended member is NOT_FOUND. A
+	// membership through the email's domain whose email is not on a domain
+	// the tenant has verified when it is restored ends instead (status
+	// "inactive"); the person comes back as any former member does, through
+	// an invitation or, once their email is on a domain that lets people
+	// join, JoinTenantByDomain. Restoring an active member returns the
+	// membership unchanged and records nothing; a restore is audited. An
+	// operator's AdminAddTenantAdmin or AdminRecoverTenantOwnership also lifts
+	// a suspension, and audits the lift. Available only on the postgres
+	// control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	RestoreTenantMember(context.Context, *connect.Request[v1.RestoreTenantMemberRequest]) (*connect.Response[v1.RestoreTenantMemberResponse], error)
 	// TransferTenantOwnership hands the caller's ownership of a tenant to
 	// another active member in one step: the member becomes an owner and the
 	// caller an admin, so the tenant is never left without an owner. Naming a
@@ -857,7 +901,8 @@ type IdentityServiceClient interface {
 	// action, needing no invitation. ListJoinableTenants returns the tenant
 	// the caller's verified email's domain lets them join (see
 	// ListJoinableTenantsResponse), and is empty for an account that could not
-	// join, including one removed from the tenant. Available only on the postgres control-plane driver; the memory and
+	// join, including one removed from the tenant or suspended in it.
+	// Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	ListJoinableTenants(context.Context, *connect.Request[v1.ListJoinableTenantsRequest]) (*connect.Response[v1.ListJoinableTenantsResponse], error)
 	// JoinTenantByDomain makes the caller an active member of tenant_id with
@@ -874,15 +919,19 @@ type IdentityServiceClient interface {
 	//
 	// A caller an owner or admin removed from the tenant (RemoveTenantMember)
 	// is PERMISSION_DENIED, with a message saying so, until a membership from
-	// another source, such as an invitation they accept, lets them back in.
+	// another source, such as an invitation they accept, lets them back in. A
+	// caller suspended in the tenant (SuspendTenantMember) is
+	// PERMISSION_DENIED, with a message saying so, until an owner or admin
+	// restores them.
 	//
 	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
-	// account, for a caller removed from the tenant, and for every tenant the
-	// domain does not let the caller join (one that has not verified it, has
-	// joining off, or is suspended or latent), an unknown tenant included, so
-	// the call reveals nothing about other tenants; FAILED_PRECONDITION until the caller has verified their
-	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
-	// postgres control-plane driver; the memory and SQLite drivers return
+	// account, for a caller removed from or suspended in the tenant, and for
+	// every tenant the domain does not let the caller join (one that has not
+	// verified it, has joining off, or is suspended or latent), an unknown
+	// tenant included, so the call reveals nothing about other tenants;
+	// FAILED_PRECONDITION until the caller has verified their email;
+	// INVALID_ARGUMENT for a blank tenant_id. Available only on the postgres
+	// control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.
 	JoinTenantByDomain(context.Context, *connect.Request[v1.JoinTenantByDomainRequest]) (*connect.Response[v1.JoinTenantByDomainResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
@@ -919,6 +968,10 @@ type IdentityServiceClient interface {
 	// the same transaction. Only a verified domain may be promoted.
 	SetPrimaryAuthDomain(context.Context, *connect.Request[v1.SetPrimaryAuthDomainRequest]) (*connect.Response[v1.SetPrimaryAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[v1.AdminCreateTenantRequest]) (*connect.Response[v1.AdminCreateTenantResponse], error)
+	// AdminAddTenantAdmin makes user_id an owner or admin of the tenant (role
+	// "owner", the default, or "admin"), with an active membership: one that
+	// is suspended is restored first, and the lift is audited as a restore.
+	// Operator-only, like the other Admin* RPCs.
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy. Operator-only, like the other Admin* RPCs:
@@ -979,20 +1032,23 @@ type IdentityServiceClient interface {
 	// its status changed between the read and the write.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
-	// govern: no owner or admin of it who is a person can sign in (each was
-	// deleted, deactivated or merged away). While an owner or admin who is a
-	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
-	// an admin invites a new owner, after an operator restores the tenant if
-	// it is suspended. An account pending deletion can still sign in, so it
-	// counts. When user_id is already an owner who can sign in, it
-	// returns that membership unchanged and records nothing, before judging the
-	// account, so a retry gets the first answer. Otherwise user_id must be an
-	// account of the project (else NOT_FOUND) that is an active, signed-up
-	// person's with a verified email (else FAILED_PRECONDITION); a membership
-	// it holds becomes an active owner one and keeps a source other than the
-	// domain's. A latent tenant has never had an owner and is
-	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
-	// the audit trail when it appoints; a refusal is not recorded.
+	// govern: no owner or admin of it is a person who both can sign in and
+	// holds an active membership. An account deleted, deactivated or merged
+	// away cannot sign in, and a suspended membership is not active. While
+	// such an owner or admin remains it is FAILED_PRECONDITION: an owner
+	// transfers, an admin invites a new owner, after an operator restores the
+	// tenant if it is suspended. An account pending deletion can still sign
+	// in, so it counts. When user_id is already an owner who can sign in,
+	// with an active membership, it returns that membership unchanged and
+	// records nothing, before judging the account, so a retry gets the first
+	// answer. Otherwise user_id must be an account of the project (else
+	// NOT_FOUND) that is an active, signed-up person's with a verified email
+	// (else FAILED_PRECONDITION); a membership it holds, a suspended one
+	// included, becomes an active owner one and keeps a source other than the
+	// domain's, and lifting a suspension is audited as a restore when it
+	// lands. A latent tenant has never had an owner and is
+	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent
+	// in the audit trail when it appoints; a refusal is not recorded.
 	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
 	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
 	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
@@ -1816,6 +1872,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("RemoveTenantMember")),
 			connect.WithClientOptions(opts...),
 		),
+		suspendTenantMember: connect.NewClient[v1.SuspendTenantMemberRequest, v1.SuspendTenantMemberResponse](
+			httpClient,
+			baseURL+IdentityServiceSuspendTenantMemberProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SuspendTenantMember")),
+			connect.WithClientOptions(opts...),
+		),
+		restoreTenantMember: connect.NewClient[v1.RestoreTenantMemberRequest, v1.RestoreTenantMemberResponse](
+			httpClient,
+			baseURL+IdentityServiceRestoreTenantMemberProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RestoreTenantMember")),
+			connect.WithClientOptions(opts...),
+		),
 		transferTenantOwnership: connect.NewClient[v1.TransferTenantOwnershipRequest, v1.TransferTenantOwnershipResponse](
 			httpClient,
 			baseURL+IdentityServiceTransferTenantOwnershipProcedure,
@@ -2207,6 +2275,8 @@ type identityServiceClient struct {
 	listTenantInvitations           *connect.Client[v1.ListTenantInvitationsRequest, v1.ListTenantInvitationsResponse]
 	listTenantMembers               *connect.Client[v1.ListTenantMembersRequest, v1.ListTenantMembersResponse]
 	removeTenantMember              *connect.Client[v1.RemoveTenantMemberRequest, v1.RemoveTenantMemberResponse]
+	suspendTenantMember             *connect.Client[v1.SuspendTenantMemberRequest, v1.SuspendTenantMemberResponse]
+	restoreTenantMember             *connect.Client[v1.RestoreTenantMemberRequest, v1.RestoreTenantMemberResponse]
 	transferTenantOwnership         *connect.Client[v1.TransferTenantOwnershipRequest, v1.TransferTenantOwnershipResponse]
 	createTenant                    *connect.Client[v1.CreateTenantRequest, v1.CreateTenantResponse]
 	listMyTenants                   *connect.Client[v1.ListMyTenantsRequest, v1.ListMyTenantsResponse]
@@ -2863,6 +2933,16 @@ func (c *identityServiceClient) RemoveTenantMember(ctx context.Context, req *con
 	return c.removeTenantMember.CallUnary(ctx, req)
 }
 
+// SuspendTenantMember calls identity.v1.IdentityService.SuspendTenantMember.
+func (c *identityServiceClient) SuspendTenantMember(ctx context.Context, req *connect.Request[v1.SuspendTenantMemberRequest]) (*connect.Response[v1.SuspendTenantMemberResponse], error) {
+	return c.suspendTenantMember.CallUnary(ctx, req)
+}
+
+// RestoreTenantMember calls identity.v1.IdentityService.RestoreTenantMember.
+func (c *identityServiceClient) RestoreTenantMember(ctx context.Context, req *connect.Request[v1.RestoreTenantMemberRequest]) (*connect.Response[v1.RestoreTenantMemberResponse], error) {
+	return c.restoreTenantMember.CallUnary(ctx, req)
+}
+
 // TransferTenantOwnership calls identity.v1.IdentityService.TransferTenantOwnership.
 func (c *identityServiceClient) TransferTenantOwnership(ctx context.Context, req *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error) {
 	return c.transferTenantOwnership.CallUnary(ctx, req)
@@ -3334,7 +3414,10 @@ type IdentityServiceHandler interface {
 	// canonical form sign-in uses, so a "+tag" spelling of it matches;
 	// PERMISSION_DENIED otherwise), and only once they have verified that email
 	// (FAILED_PRECONDITION before). Every one, accepting included, is
-	// PERMISSION_DENIED for a suspended tenant. Accepting never lowers a role
+	// PERMISSION_DENIED for a suspended tenant, and accepting is
+	// PERMISSION_DENIED too while the caller's own membership of the tenant is
+	// suspended (SuspendTenantMember); the invitation stays pending through
+	// either. Accepting never lowers a role
 	// the caller already holds in the tenant: an owner who accepts a member
 	// invitation stays the owner. CreateTenantInvitation is RESOURCE_EXHAUSTED
 	// past the tenant's cap in the window, the inviter's cap across every
@@ -3361,6 +3444,41 @@ type IdentityServiceHandler interface {
 	// membership from another source lets them back in, such as an invitation
 	// they accept.
 	RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error)
+	// SuspendTenantMember stops user_id acting in tenant_id without removing
+	// them: the membership keeps its role and source, and ListTenantMembers
+	// shows it with status "suspended". While it is suspended the member
+	// cannot choose the tenant for a token (RefreshToken refuses it,
+	// PERMISSION_DENIED with reason NOT_A_MEMBER, so an access token that
+	// already names the tenant works until it expires),
+	// ListMyTenants leaves it out, they cannot administer it, and they cannot
+	// come back on their own: accepting an invitation to the tenant and
+	// JoinTenantByDomain are PERMISSION_DENIED, and their email leaving the
+	// domain and coming back does not end the suspension. The caller must be
+	// an active owner or admin of a tenant that is not suspended
+	// (PERMISSION_DENIED otherwise). Naming the caller is INVALID_ARGUMENT,
+	// the tenant's last active owner is FAILED_PRECONDITION, and a user_id
+	// that is not an active or suspended member is NOT_FOUND. Suspending a
+	// suspended member returns the membership unchanged and records nothing;
+	// a suspension is audited. Available only on the postgres control-plane
+	// driver; the memory and SQLite drivers return Unimplemented.
+	SuspendTenantMember(context.Context, *connect.Request[v1.SuspendTenantMemberRequest]) (*connect.Response[v1.SuspendTenantMemberResponse], error)
+	// RestoreTenantMember lets a suspended member act in the tenant again,
+	// with the role they had. The caller must be an active owner or admin of
+	// a tenant that is not suspended, and must still hold an active owner or
+	// admin membership when the restore is written (PERMISSION_DENIED
+	// otherwise, and nothing changes). Naming the caller is INVALID_ARGUMENT,
+	// and a user_id that is not an active or suspended member is NOT_FOUND. A
+	// membership through the email's domain whose email is not on a domain
+	// the tenant has verified when it is restored ends instead (status
+	// "inactive"); the person comes back as any former member does, through
+	// an invitation or, once their email is on a domain that lets people
+	// join, JoinTenantByDomain. Restoring an active member returns the
+	// membership unchanged and records nothing; a restore is audited. An
+	// operator's AdminAddTenantAdmin or AdminRecoverTenantOwnership also lifts
+	// a suspension, and audits the lift. Available only on the postgres
+	// control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	RestoreTenantMember(context.Context, *connect.Request[v1.RestoreTenantMemberRequest]) (*connect.Response[v1.RestoreTenantMemberResponse], error)
 	// TransferTenantOwnership hands the caller's ownership of a tenant to
 	// another active member in one step: the member becomes an owner and the
 	// caller an admin, so the tenant is never left without an owner. Naming a
@@ -3402,7 +3520,8 @@ type IdentityServiceHandler interface {
 	// action, needing no invitation. ListJoinableTenants returns the tenant
 	// the caller's verified email's domain lets them join (see
 	// ListJoinableTenantsResponse), and is empty for an account that could not
-	// join, including one removed from the tenant. Available only on the postgres control-plane driver; the memory and
+	// join, including one removed from the tenant or suspended in it.
+	// Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	ListJoinableTenants(context.Context, *connect.Request[v1.ListJoinableTenantsRequest]) (*connect.Response[v1.ListJoinableTenantsResponse], error)
 	// JoinTenantByDomain makes the caller an active member of tenant_id with
@@ -3419,15 +3538,19 @@ type IdentityServiceHandler interface {
 	//
 	// A caller an owner or admin removed from the tenant (RemoveTenantMember)
 	// is PERMISSION_DENIED, with a message saying so, until a membership from
-	// another source, such as an invitation they accept, lets them back in.
+	// another source, such as an invitation they accept, lets them back in. A
+	// caller suspended in the tenant (SuspendTenantMember) is
+	// PERMISSION_DENIED, with a message saying so, until an owner or admin
+	// restores them.
 	//
 	// Errors: PERMISSION_DENIED for an anonymous, agent, merged or inactive
-	// account, for a caller removed from the tenant, and for every tenant the
-	// domain does not let the caller join (one that has not verified it, has
-	// joining off, or is suspended or latent), an unknown tenant included, so
-	// the call reveals nothing about other tenants; FAILED_PRECONDITION until the caller has verified their
-	// email; INVALID_ARGUMENT for a blank tenant_id. Available only on the
-	// postgres control-plane driver; the memory and SQLite drivers return
+	// account, for a caller removed from or suspended in the tenant, and for
+	// every tenant the domain does not let the caller join (one that has not
+	// verified it, has joining off, or is suspended or latent), an unknown
+	// tenant included, so the call reveals nothing about other tenants;
+	// FAILED_PRECONDITION until the caller has verified their email;
+	// INVALID_ARGUMENT for a blank tenant_id. Available only on the postgres
+	// control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.
 	JoinTenantByDomain(context.Context, *connect.Request[v1.JoinTenantByDomainRequest]) (*connect.Response[v1.JoinTenantByDomainResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
@@ -3464,6 +3587,10 @@ type IdentityServiceHandler interface {
 	// the same transaction. Only a verified domain may be promoted.
 	SetPrimaryAuthDomain(context.Context, *connect.Request[v1.SetPrimaryAuthDomainRequest]) (*connect.Response[v1.SetPrimaryAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[v1.AdminCreateTenantRequest]) (*connect.Response[v1.AdminCreateTenantResponse], error)
+	// AdminAddTenantAdmin makes user_id an owner or admin of the tenant (role
+	// "owner", the default, or "admin"), with an active membership: one that
+	// is suspended is restored first, and the lift is audited as a restore.
+	// Operator-only, like the other Admin* RPCs.
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy. Operator-only, like the other Admin* RPCs:
@@ -3524,20 +3651,23 @@ type IdentityServiceHandler interface {
 	// its status changed between the read and the write.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
-	// govern: no owner or admin of it who is a person can sign in (each was
-	// deleted, deactivated or merged away). While an owner or admin who is a
-	// person can still sign in it is FAILED_PRECONDITION: an owner transfers,
-	// an admin invites a new owner, after an operator restores the tenant if
-	// it is suspended. An account pending deletion can still sign in, so it
-	// counts. When user_id is already an owner who can sign in, it
-	// returns that membership unchanged and records nothing, before judging the
-	// account, so a retry gets the first answer. Otherwise user_id must be an
-	// account of the project (else NOT_FOUND) that is an active, signed-up
-	// person's with a verified email (else FAILED_PRECONDITION); a membership
-	// it holds becomes an active owner one and keeps a source other than the
-	// domain's. A latent tenant has never had an owner and is
-	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent in
-	// the audit trail when it appoints; a refusal is not recorded.
+	// govern: no owner or admin of it is a person who both can sign in and
+	// holds an active membership. An account deleted, deactivated or merged
+	// away cannot sign in, and a suspended membership is not active. While
+	// such an owner or admin remains it is FAILED_PRECONDITION: an owner
+	// transfers, an admin invites a new owner, after an operator restores the
+	// tenant if it is suspended. An account pending deletion can still sign
+	// in, so it counts. When user_id is already an owner who can sign in,
+	// with an active membership, it returns that membership unchanged and
+	// records nothing, before judging the account, so a retry gets the first
+	// answer. Otherwise user_id must be an account of the project (else
+	// NOT_FOUND) that is an active, signed-up person's with a verified email
+	// (else FAILED_PRECONDITION); a membership it holds, a suspended one
+	// included, becomes an active owner one and keeps a source other than the
+	// domain's, and lifting a suspension is audited as a restore when it
+	// lands. A latent tenant has never had an owner and is
+	// FAILED_PRECONDITION. Records the operator's reason, IP and user agent
+	// in the audit trail when it appoints; a refusal is not recorded.
 	// Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
 	// GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
 	// INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
@@ -4357,6 +4487,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("RemoveTenantMember")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceSuspendTenantMemberHandler := connect.NewUnaryHandler(
+		IdentityServiceSuspendTenantMemberProcedure,
+		svc.SuspendTenantMember,
+		connect.WithSchema(identityServiceMethods.ByName("SuspendTenantMember")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRestoreTenantMemberHandler := connect.NewUnaryHandler(
+		IdentityServiceRestoreTenantMemberProcedure,
+		svc.RestoreTenantMember,
+		connect.WithSchema(identityServiceMethods.ByName("RestoreTenantMember")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceTransferTenantOwnershipHandler := connect.NewUnaryHandler(
 		IdentityServiceTransferTenantOwnershipProcedure,
 		svc.TransferTenantOwnership,
@@ -4867,6 +5009,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceListTenantMembersHandler.ServeHTTP(w, r)
 		case IdentityServiceRemoveTenantMemberProcedure:
 			identityServiceRemoveTenantMemberHandler.ServeHTTP(w, r)
+		case IdentityServiceSuspendTenantMemberProcedure:
+			identityServiceSuspendTenantMemberHandler.ServeHTTP(w, r)
+		case IdentityServiceRestoreTenantMemberProcedure:
+			identityServiceRestoreTenantMemberHandler.ServeHTTP(w, r)
 		case IdentityServiceTransferTenantOwnershipProcedure:
 			identityServiceTransferTenantOwnershipHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateTenantProcedure:
@@ -5450,6 +5596,14 @@ func (UnimplementedIdentityServiceHandler) ListTenantMembers(context.Context, *c
 
 func (UnimplementedIdentityServiceHandler) RemoveTenantMember(context.Context, *connect.Request[v1.RemoveTenantMemberRequest]) (*connect.Response[v1.RemoveTenantMemberResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RemoveTenantMember is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) SuspendTenantMember(context.Context, *connect.Request[v1.SuspendTenantMemberRequest]) (*connect.Response[v1.SuspendTenantMemberResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SuspendTenantMember is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RestoreTenantMember(context.Context, *connect.Request[v1.RestoreTenantMemberRequest]) (*connect.Response[v1.RestoreTenantMemberResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RestoreTenantMember is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) TransferTenantOwnership(context.Context, *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error) {

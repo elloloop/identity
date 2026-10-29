@@ -129,6 +129,49 @@ func (h *IdentityHandler) RemoveTenantMember(
 	return connect.NewResponse(&identitypb.RemoveTenantMemberResponse{}), nil
 }
 
+// SuspendTenantMember stops a member acting in a tenant, keeping their
+// membership. Owner/admin only, never the caller, and never the tenant's
+// last active owner.
+func (h *IdentityHandler) SuspendTenantMember(
+	ctx context.Context,
+	req *connect.Request[identitypb.SuspendTenantMemberRequest],
+) (*connect.Response[identitypb.SuspendTenantMemberResponse], error) {
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	m, err := h.members.SuspendTenantMember(ctx, userID, req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.SuspendTenantMemberResponse{Membership: membershipToProto(m)}), nil
+}
+
+// RestoreTenantMember lets a suspended member act in a tenant again.
+// Owner/admin only.
+func (h *IdentityHandler) RestoreTenantMember(
+	ctx context.Context,
+	req *connect.Request[identitypb.RestoreTenantMemberRequest],
+) (*connect.Response[identitypb.RestoreTenantMemberResponse], error) {
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	m, err := h.members.RestoreTenantMember(ctx, userID, req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.RestoreTenantMemberResponse{Membership: membershipToProto(m)}), nil
+}
+
 // TransferTenantOwnership hands the caller's ownership of a tenant to another
 // active member, leaving the caller an admin. Owner only.
 func (h *IdentityHandler) TransferTenantOwnership(

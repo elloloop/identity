@@ -20,6 +20,13 @@ import (
 // migration under test.
 func migrateToVersion(t *testing.T, dsn string, version uint) {
 	t.Helper()
+	require.NoError(t, withMigrator(t, dsn, func(m *migrate.Migrate) error { return m.Migrate(version) }))
+}
+
+// withMigrator runs do with a migrator over dsn's database and the embedded
+// migrations, and returns do's error, so a test can see a migration fail.
+func withMigrator(t *testing.T, dsn string, do func(*migrate.Migrate) error) error {
+	t.Helper()
 	src, err := iofs.New(migrationFS, "migrations")
 	require.NoError(t, err)
 	migrateDSN := dsn
@@ -29,7 +36,7 @@ func migrateToVersion(t *testing.T, dsn string, version uint) {
 	m, err := migrate.NewWithSourceInstance("iofs", src, migrateDSN)
 	require.NoError(t, err)
 	defer func() { _, _ = m.Close() }()
-	require.NoError(t, m.Migrate(version))
+	return do(m)
 }
 
 // TestMigration0031_GuardianEdgeBackfill proves the 0031 up migration derives

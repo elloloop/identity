@@ -16,10 +16,11 @@ var (
 	// CodeFailedPrecondition.
 	ErrIneligibleTenantOwner = errors.New("this account cannot own a tenant")
 	// ErrTenantStillGoverned is returned by AdminRecoverTenantOwnership
-	// while the tenant still has an owner or admin who is a person and can
-	// sign in: an owner transfers the ownership, and an admin invites a new
-	// owner, instead. A suspended tenant refuses both, so the operator
-	// restores it first. Mapped to CodeFailedPrecondition.
+	// while the tenant still has an owner or admin who is a person, can sign
+	// in and holds an active membership: an owner transfers the ownership,
+	// and an admin invites a new owner, instead. A suspended tenant refuses
+	// both, so the operator restores it first. Mapped to
+	// CodeFailedPrecondition.
 	ErrTenantStillGoverned = errors.New("the tenant still has an owner or admin who can sign in")
 )
 
@@ -155,25 +156,28 @@ func requireEligibleTenantOwner(u *User) error {
 }
 
 // AdminRecoverTenantOwnership appoints userID an owner of a tenant that
-// nobody can govern any more: no owner or admin of it can sign in, because
-// each was deleted, deactivated or merged away. reason, with the operator's
+// nobody can govern any more: no owner or admin of it who is a person both
+// can sign in and holds an active membership. reason, with the operator's
 // ip and ua, is kept in the audit trail.
 //
-// While any owner or admin can still sign in, recovery is
-// ErrTenantStillGoverned: an owner hands the tenant on with
-// TransferTenantOwnership, and an admin invites a new owner with
+// While any owner or admin both can still sign in and holds an active
+// membership, recovery is ErrTenantStillGoverned: an owner hands the tenant
+// on with TransferTenantOwnership, and an admin invites a new owner with
 // CreateTenantInvitation, so an operator never appoints an outside account
 // above people who can act. An account pending deletion can still sign in
 // (its sign-in cancels the deletion), so it counts as one who can act. The
-// exception is when userID is already an owner who can sign in: recovery
-// then returns that membership unchanged and records nothing, before judging
-// the account again, so an operator who retries after a lost response gets
-// the same answer.
+// exception is when userID is already such an owner: recovery then returns
+// that membership unchanged and records nothing, before judging the account
+// again, so an operator who retries after a lost response gets the same
+// answer.
 //
 // userID may be any account of the project an owner may be (see
 // judgeTenantOwner), a member of the tenant or not; a membership it already
-// holds becomes an active owner one and keeps its source. The tenant must be
-// claimed or suspended: a latent tenant has never had an owner
+// holds becomes an active owner one and keeps its source. A suspended one is
+// restored first (liftSuspension), so the appointment lifts the suspension,
+// and the lift is audited when it lands. An owner or admin whose membership
+// is suspended does not govern, and does not stop a recovery. The tenant
+// must be claimed or suspended: a latent tenant has never had an owner
 // (ErrTenantStatusConflict). Only a grant that changed something is audited.
 // A refused recovery is not. Recovery reads the governors, then grants, so
 // two operators recovering one tenant at once with different accounts may
@@ -224,6 +228,10 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 		return nil, ErrTenantStillGoverned
 	}
 
+	restored, err := s.liftSuspension(ctx, projectID, tenantID, userID, reason, ip, ua)
+	if err != nil {
+		return nil, err
+	}
 	m, changed, err := s.memberships.GrantMembership(ctx, &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  tenantID,
@@ -234,7 +242,7 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	if changed {
+	if changed || restored {
 		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantOwnershipRecovered,
 			audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
 			audit.WithSuccess(true), audit.WithDetails(map[string]any{
@@ -244,6 +252,30 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 			}))
 	}
 	return m, nil
+}
+
+// liftSuspension is an operator's restore of userID's membership of the
+// tenant, made so that a grant can then write it: the grant refuses a
+// suspended one. It reports whether it lifted a suspension, and audits the
+// lift at once as EventTenantMemberRestored, with no actor and the
+// operator's reason, if any, so a grant that then fails cannot leave it
+// unrecorded. Any other membership, or none, is left to the grant.
+func (s *ControlPlaneAdminService) liftSuspension(ctx context.Context, projectID, tenantID, userID, reason, ip, ua string) (bool, error) {
+	m, restored, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, userID, RestoredByOperator())
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil || !restored {
+		return false, err
+	}
+	details := memberChangeDetails(m)
+	if reason != "" {
+		details["reason"] = reason
+	}
+	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantMemberRestored,
+		audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
+		audit.WithSuccess(true), audit.WithDetails(details))
+	return true, nil
 }
 
 // governorsWhoCanSignIn returns the tenant's active owner and admin

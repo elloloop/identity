@@ -549,7 +549,7 @@ func TestRemoveTenantMember_IsAudited(t *testing.T) {
 	require.Len(t, details, 1)
 	assert.Equal(t, map[string]any{
 		"project_id": ssProject, "tenant_id": ownTenant,
-		"role": RoleMember, "source": MembershipSourceDomain,
+		"role": RoleMember, "source": MembershipSourceDomain, "status": MembershipStatusActive,
 	}, details[0])
 
 	// Nothing left to remove: no record.
@@ -559,6 +559,19 @@ func TestRemoveTenantMember_IsAudited(t *testing.T) {
 	// The last owner is refused: no record.
 	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, ssOwnerID, "", ""), ErrLastOwner)
 	assert.Equal(t, 1, f.audit.countByEventType(event))
+
+	// Removing a suspended member records the status it had.
+	_, _, err = f.members.GrantMembership(context.Background(), &TenantMembership{
+		ProjectID: ssProject, TenantID: ownTenant, UserID: joinerID,
+		Source: MembershipSourceInvited, Role: RoleMember,
+	})
+	require.NoError(t, err)
+	_, err = f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	require.NoError(t, err)
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", ""))
+	details = f.audit.detailsOf(event)
+	require.Len(t, details, 2)
+	assert.Equal(t, MembershipStatusSuspended, details[1]["status"])
 
 	// Without an audit trail a removal still happens.
 	f.svc.WithAudit(nil)

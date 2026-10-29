@@ -150,6 +150,14 @@ func TestMembershipRPCs_NilService_ReturnUnimplemented(t *testing.T) {
 		withAuth(&identitypb.TransferTenantOwnershipRequest{TenantId: "t", UserId: "u2"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
 
+	_, err = srv.client.SuspendTenantMember(ctx,
+		withAuth(&identitypb.SuspendTenantMemberRequest{TenantId: "t", UserId: "u2"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = srv.client.RestoreTenantMember(ctx,
+		withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t", UserId: "u2"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+
 	_, err = srv.client.CreateTenant(ctx,
 		withAuth(&identitypb.CreateTenantRequest{Name: "Acme"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
@@ -201,6 +209,14 @@ func TestMembershipRPCs_MissingAuth_Unauthenticated(t *testing.T) {
 
 	_, err = srv.client.TransferTenantOwnership(ctx,
 		connect.NewRequest(&identitypb.TransferTenantOwnershipRequest{TenantId: "t", UserId: "u2"}))
+	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.SuspendTenantMember(ctx,
+		connect.NewRequest(&identitypb.SuspendTenantMemberRequest{TenantId: "t", UserId: "u2"}))
+	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.RestoreTenantMember(ctx,
+		connect.NewRequest(&identitypb.RestoreTenantMemberRequest{TenantId: "t", UserId: "u2"}))
 	requireCode(t, err, connect.CodeUnauthenticated)
 
 	_, err = srv.client.CreateTenant(ctx,
@@ -322,6 +338,73 @@ func TestTransferTenantOwnership_Handler(t *testing.T) {
 	members.member.Role = service.RoleAdmin
 	_, err = srv.client.TransferTenantOwnership(ctx,
 		withAuth(&identitypb.TransferTenantOwnershipRequest{TenantId: "t-1", UserId: "heir"}, "owner-1"))
+	requireCode(t, err, connect.CodePermissionDenied)
+}
+
+// ── SuspendTenantMember / RestoreTenantMember through the handler ───────
+
+func TestSuspendAndRestoreTenantMember_Handler(t *testing.T) {
+	t.Parallel()
+	members := &connectMembershipStore{member: &service.TenantMembership{
+		Role: service.RoleAdmin, Status: service.MembershipStatusActive,
+	}}
+	srv := startMembershipServer(t, newMembershipSvc(newConnectInvitationStore(), members, claimedTenantStore(), &connectUserDirectory{}))
+	ctx := context.Background()
+
+	suspended, err := srv.client.SuspendTenantMember(ctx,
+		withAuth(&identitypb.SuspendTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
+	if err != nil {
+		t.Fatalf("SuspendTenantMember: %v", err)
+	}
+	if m := suspended.Msg.GetMembership(); m.GetUserId() != "bob" || m.GetTenantId() != "t-1" ||
+		m.GetStatus() != service.MembershipStatusSuspended || m.GetRole() != service.RoleMember {
+		t.Fatalf("suspended membership = %+v", m)
+	}
+	restored, err := srv.client.RestoreTenantMember(ctx,
+		withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
+	if err != nil {
+		t.Fatalf("RestoreTenantMember: %v", err)
+	}
+	if m := restored.Msg.GetMembership(); m.GetUserId() != "bob" || m.GetStatus() != service.MembershipStatusActive {
+		t.Fatalf("restored membership = %+v", m)
+	}
+
+	_, err = srv.client.SuspendTenantMember(ctx,
+		withAuth(&identitypb.SuspendTenantMemberRequest{TenantId: "t-1", UserId: "admin-1"}, "admin-1"))
+	requireCode(t, err, connect.CodeInvalidArgument)
+	_, err = srv.client.RestoreTenantMember(ctx,
+		withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t-1"}, "admin-1"))
+	requireCode(t, err, connect.CodeInvalidArgument)
+
+	_, err = srv.client.RestoreTenantMember(ctx,
+		withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t-1", UserId: "admin-1"}, "admin-1"))
+	requireCode(t, err, connect.CodeInvalidArgument)
+
+	members.changeErr = service.ErrLastOwner
+	_, err = srv.client.SuspendTenantMember(ctx,
+		withAuth(&identitypb.SuspendTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+	for err, code := range map[error]connect.Code{
+		service.ErrNotFound:         connect.CodeNotFound,
+		service.ErrPermissionDenied: connect.CodePermissionDenied,
+	} {
+		members.changeErr = err
+		_, got := srv.client.RestoreTenantMember(ctx,
+			withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
+		requireCode(t, got, code)
+	}
+	members.changeErr = service.ErrNotFound
+	_, err = srv.client.SuspendTenantMember(ctx,
+		withAuth(&identitypb.SuspendTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
+	requireCode(t, err, connect.CodeNotFound)
+
+	members.changeErr = nil
+	members.member.Status = service.MembershipStatusSuspended
+	_, err = srv.client.SuspendTenantMember(ctx,
+		withAuth(&identitypb.SuspendTenantMemberRequest{TenantId: "t-1", UserId: "bob"}, "admin-1"))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = srv.client.RestoreTenantMember(ctx,
+		withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t-1", UserId: "admin-1"}, "admin-1"))
 	requireCode(t, err, connect.CodePermissionDenied)
 }
 

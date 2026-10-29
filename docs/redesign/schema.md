@@ -421,9 +421,9 @@ when no row exists, and only against a VERIFIED domain of a CLAIMED tenant.
 | `project_id` | TEXT | N | **FK** → `projects(id)` ON DELETE CASCADE. Leading column. |
 | `tenant_id` | TEXT | N | **FK** → `tenants(id)` ON DELETE CASCADE. |
 | `user_id` | TEXT | N | **FK** → `users(id)` ON DELETE CASCADE. |
-| `source` | TEXT | N | `CHECK IN ('domain','invited','added','created')`; `created` (0044) is the owner membership `CreateTenant` writes. A grant (an accepted invitation, a verifying owner) replaces a `domain` source and keeps any other. A `domain` membership counts only while the user's email is verified and on a domain the tenant has verified (the active-tenant reads), and 0047 ends it when the email leaves. |
+| `source` | TEXT | N | `CHECK IN ('domain','invited','added','created')`; `created` (0044) is the owner membership `CreateTenant` writes. A grant (an accepted invitation, a verifying owner) replaces a `domain` source and keeps any other. A `domain` membership counts only while the user's email is verified and on a domain the tenant has verified (the active-tenant reads), and 0047 ends it when the email leaves, unless it is suspended (0053). |
 | `role` | TEXT | N | `CHECK IN ('member','admin','owner')`. Default `member`. |
-| `status` | TEXT | N | `CHECK IN ('active','pending','inactive')`. Default `active`. |
+| `status` | TEXT | N | `CHECK IN ('active','pending','inactive','suspended')`. Default `active`. `suspended` (0053) is a membership an owner or admin suspended (`SuspendTenantMember`): it keeps its role and source, every active-membership read skips it, a grant or a join refuses it, and only `RestoreTenantMember` or an operator's grant or recovery lifts it. |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
 
