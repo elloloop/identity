@@ -393,8 +393,9 @@ AdminListTenants(project_id, limit=50, cursor="")
   -> { tenants: [...], next_cursor }   # every status, newest first
   -> INVALID_ARGUMENT              # a blank project_id, or a cursor that does not decode
 Both:
-  -> UNIMPLEMENTED                 # GATEWAY_ADMIN_API_SECRET is unset and no
-                                   #   X-Tenant-Operator-Key is presented
+  -> UNIMPLEMENTED                 # GATEWAY_ADMIN_API_SECRET is unset and the call
+                                   #   presents X-Admin-Secret or no
+                                   #   X-Tenant-Operator-Key
   -> PERMISSION_DENIED             # a wrong X-Admin-Secret, or a refused
                                    #   X-Tenant-Operator-Key`}
     lang="bash"
@@ -430,7 +431,8 @@ Both:
                                                #   character such as a newline
   -> NOT_FOUND                                 # the Project holds no such tenant
   -> UNIMPLEMENTED                             # GATEWAY_ADMIN_API_SECRET is unset and
-                                               #   no X-Tenant-Operator-Key is presented
+                                               #   the call presents X-Admin-Secret or no
+                                               #   X-Tenant-Operator-Key
   -> PERMISSION_DENIED                         # a wrong X-Admin-Secret, or a refused
                                                #   X-Tenant-Operator-Key`}
     lang="bash"
@@ -479,8 +481,9 @@ Both:
   -> NOT_FOUND             # no such tenant or account
   -> INVALID_ARGUMENT      # a blank id, or a reason that is blank, over 500
                            #   characters, or holds a control character
-  -> UNIMPLEMENTED         # GATEWAY_ADMIN_API_SECRET is unset and no
-                           #   X-Tenant-Operator-Key is presented
+  -> UNIMPLEMENTED         # GATEWAY_ADMIN_API_SECRET is unset and the call
+                           #   presents X-Admin-Secret or no
+                           #   X-Tenant-Operator-Key
   -> PERMISSION_DENIED     # a wrong X-Admin-Secret, or a refused
                            #   X-Tenant-Operator-Key`}
     lang="bash"

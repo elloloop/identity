@@ -330,9 +330,8 @@ type Config struct {
 	// still accept a live credential, which only this secret can mint.
 	// Emptying the secret therefore does not shut those off; revoking the
 	// credentials (AdminRevokeProjectCredential, which also takes this
-	// secret) does. Driven by
-	// GATEWAY_ADMIN_API_SECRET. Only the postgres driver has a control plane;
-	// the memory driver ignores it.
+	// secret) does. Driven by GATEWAY_ADMIN_API_SECRET. Only the postgres
+	// driver has a control plane; the memory driver ignores it.
 	//
 	// TODO(redesign): the shared secret is the shipped mechanism. Future
 	// work hardens this with mTLS client-certificate auth and an optional

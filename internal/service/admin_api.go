@@ -28,7 +28,9 @@ import (
 // surface is DISABLED — every method returns ErrUnimplemented — so a deployer
 // who never sets GATEWAY_ADMIN_API_SECRET cannot have these RPCs reached. The
 // one exception is the tenant operations (app.TenantOperatorProcedures) called
-// with a live tenant_operator credential, which only the secret can mint.
+// with a tenant_operator credential and no secret: the credential is checked,
+// a live one admitted and any other refused with ErrPermissionDenied. Only
+// the secret can mint one.
 //
 // Like the other governance services it is postgres-only: memory have
 // no control plane, so the app constructs no ControlPlaneAdminService and the
