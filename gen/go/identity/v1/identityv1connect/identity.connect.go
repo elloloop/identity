@@ -25,6 +25,8 @@ const (
 	IdentityServiceName = "identity.v1.IdentityService"
 	// TeammateKeyServiceName is the fully-qualified name of the TeammateKeyService service.
 	TeammateKeyServiceName = "identity.v1.TeammateKeyService"
+	// HireGrantServiceName is the fully-qualified name of the HireGrantService service.
+	HireGrantServiceName = "identity.v1.HireGrantService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -549,6 +551,9 @@ const (
 	// TeammateKeyServiceRevokeTeammateKeyProcedure is the fully-qualified name of the
 	// TeammateKeyService's RevokeTeammateKey RPC.
 	TeammateKeyServiceRevokeTeammateKeyProcedure = "/identity.v1.TeammateKeyService/RevokeTeammateKey"
+	// HireGrantServiceCreateHireGrantProcedure is the fully-qualified name of the HireGrantService's
+	// CreateHireGrant RPC.
+	HireGrantServiceCreateHireGrantProcedure = "/identity.v1.HireGrantService/CreateHireGrant"
 )
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
@@ -5928,15 +5933,18 @@ func (UnimplementedIdentityServiceHandler) LookupUsers(context.Context, *connect
 // TeammateKeyServiceClient is a client for the identity.v1.TeammateKeyService service.
 type TeammateKeyServiceClient interface {
 	// Registering a claim again with the same teammate, company, workstation,
-	// key and algorithm returns the same key_id. FAILED_PRECONDITION: the
-	// claim already has a different registration or was revoked, or the key is
-	// registered for another claim. INVALID_ARGUMENT: a blank or malformed
-	// field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
-	// a teammate_id that is not an active agent account of the project.
+	// key, algorithm and grant returns the same key_id, even after the grant
+	// expired. FAILED_PRECONDITION: the claim already has a different
+	// registration or was revoked, or the key is registered for another claim.
+	// PERMISSION_DENIED: the grant is missing, expired, used by another claim,
+	// or names another teammate, placement or company. INVALID_ARGUMENT: a
+	// blank or malformed field, a key that is not a DER SubjectPublicKeyInfo of
+	// an ECDSA P-256 key, or a teammate_id that is not an active agent account
+	// of the project.
 	RegisterTeammateKey(context.Context, *connect.Request[v1.RegisterTeammateKeyRequest]) (*connect.Response[v1.RegisterTeammateKeyResponse], error)
-	// The key is refused from the moment this returns. Revoking an unknown or
-	// already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
-	// unspecified reason.
+	// Revoking an unknown claim, or one whose key already stops at or before
+	// the deadline, succeeds and changes nothing. INVALID_ARGUMENT: a blank
+	// claim_id, an unspecified reason or a deadline more than an hour away.
 	RevokeTeammateKey(context.Context, *connect.Request[v1.RevokeTeammateKeyRequest]) (*connect.Response[v1.RevokeTeammateKeyResponse], error)
 }
 
@@ -5985,15 +5993,18 @@ func (c *teammateKeyServiceClient) RevokeTeammateKey(ctx context.Context, req *c
 // TeammateKeyServiceHandler is an implementation of the identity.v1.TeammateKeyService service.
 type TeammateKeyServiceHandler interface {
 	// Registering a claim again with the same teammate, company, workstation,
-	// key and algorithm returns the same key_id. FAILED_PRECONDITION: the
-	// claim already has a different registration or was revoked, or the key is
-	// registered for another claim. INVALID_ARGUMENT: a blank or malformed
-	// field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
-	// a teammate_id that is not an active agent account of the project.
+	// key, algorithm and grant returns the same key_id, even after the grant
+	// expired. FAILED_PRECONDITION: the claim already has a different
+	// registration or was revoked, or the key is registered for another claim.
+	// PERMISSION_DENIED: the grant is missing, expired, used by another claim,
+	// or names another teammate, placement or company. INVALID_ARGUMENT: a
+	// blank or malformed field, a key that is not a DER SubjectPublicKeyInfo of
+	// an ECDSA P-256 key, or a teammate_id that is not an active agent account
+	// of the project.
 	RegisterTeammateKey(context.Context, *connect.Request[v1.RegisterTeammateKeyRequest]) (*connect.Response[v1.RegisterTeammateKeyResponse], error)
-	// The key is refused from the moment this returns. Revoking an unknown or
-	// already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
-	// unspecified reason.
+	// Revoking an unknown claim, or one whose key already stops at or before
+	// the deadline, succeeds and changes nothing. INVALID_ARGUMENT: a blank
+	// claim_id, an unspecified reason or a deadline more than an hour away.
 	RevokeTeammateKey(context.Context, *connect.Request[v1.RevokeTeammateKeyRequest]) (*connect.Response[v1.RevokeTeammateKeyResponse], error)
 }
 
@@ -6037,4 +6048,88 @@ func (UnimplementedTeammateKeyServiceHandler) RegisterTeammateKey(context.Contex
 
 func (UnimplementedTeammateKeyServiceHandler) RevokeTeammateKey(context.Context, *connect.Request[v1.RevokeTeammateKeyRequest]) (*connect.Response[v1.RevokeTeammateKeyResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.TeammateKeyService.RevokeTeammateKey is not implemented"))
+}
+
+// HireGrantServiceClient is a client for the identity.v1.HireGrantService service.
+type HireGrantServiceClient interface {
+	// Records that the signed-in person hires the teammate into the placement
+	// for the company. The grant is single use: RegisterTeammateKey consumes it
+	// for one claim, and it expires after 24 hours unused. UNAUTHENTICATED: no
+	// session. PERMISSION_DENIED: the caller is not an active person (an agent,
+	// an anonymous or a merged account). INVALID_ARGUMENT: a blank or
+	// malformed id, or a teammate_id that is not an active agent account of the
+	// project.
+	CreateHireGrant(context.Context, *connect.Request[v1.CreateHireGrantRequest]) (*connect.Response[v1.CreateHireGrantResponse], error)
+}
+
+// NewHireGrantServiceClient constructs a client for the identity.v1.HireGrantService service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHireGrantServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HireGrantServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	hireGrantServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("HireGrantService").Methods()
+	return &hireGrantServiceClient{
+		createHireGrant: connect.NewClient[v1.CreateHireGrantRequest, v1.CreateHireGrantResponse](
+			httpClient,
+			baseURL+HireGrantServiceCreateHireGrantProcedure,
+			connect.WithSchema(hireGrantServiceMethods.ByName("CreateHireGrant")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// hireGrantServiceClient implements HireGrantServiceClient.
+type hireGrantServiceClient struct {
+	createHireGrant *connect.Client[v1.CreateHireGrantRequest, v1.CreateHireGrantResponse]
+}
+
+// CreateHireGrant calls identity.v1.HireGrantService.CreateHireGrant.
+func (c *hireGrantServiceClient) CreateHireGrant(ctx context.Context, req *connect.Request[v1.CreateHireGrantRequest]) (*connect.Response[v1.CreateHireGrantResponse], error) {
+	return c.createHireGrant.CallUnary(ctx, req)
+}
+
+// HireGrantServiceHandler is an implementation of the identity.v1.HireGrantService service.
+type HireGrantServiceHandler interface {
+	// Records that the signed-in person hires the teammate into the placement
+	// for the company. The grant is single use: RegisterTeammateKey consumes it
+	// for one claim, and it expires after 24 hours unused. UNAUTHENTICATED: no
+	// session. PERMISSION_DENIED: the caller is not an active person (an agent,
+	// an anonymous or a merged account). INVALID_ARGUMENT: a blank or
+	// malformed id, or a teammate_id that is not an active agent account of the
+	// project.
+	CreateHireGrant(context.Context, *connect.Request[v1.CreateHireGrantRequest]) (*connect.Response[v1.CreateHireGrantResponse], error)
+}
+
+// NewHireGrantServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHireGrantServiceHandler(svc HireGrantServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	hireGrantServiceMethods := v1.File_identity_v1_identity_proto.Services().ByName("HireGrantService").Methods()
+	hireGrantServiceCreateHireGrantHandler := connect.NewUnaryHandler(
+		HireGrantServiceCreateHireGrantProcedure,
+		svc.CreateHireGrant,
+		connect.WithSchema(hireGrantServiceMethods.ByName("CreateHireGrant")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/identity.v1.HireGrantService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HireGrantServiceCreateHireGrantProcedure:
+			hireGrantServiceCreateHireGrantHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHireGrantServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedHireGrantServiceHandler struct{}
+
+func (UnimplementedHireGrantServiceHandler) CreateHireGrant(context.Context, *connect.Request[v1.CreateHireGrantRequest]) (*connect.Response[v1.CreateHireGrantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.HireGrantService.CreateHireGrant is not implemented"))
 }

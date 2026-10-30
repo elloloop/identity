@@ -292,8 +292,13 @@ const (
 	EventTeammateKeyRevoked        EventType = "teammate_key_revoked"
 	EventTeammateKeyManagerRefused EventType = "teammate_key_manager_refused"
 	EventTeammateAccessIssued      EventType = "teammate_access_issued"
-	EventOAuthClientCreated        EventType = "oauth_client_created"
-	EventOAuthClientUpdated        EventType = "oauth_client_updated"
+	// A signed-in person grants a hire, with that person as actor and the
+	// teammate as target; a registration whose grant does not qualify is
+	// refused with the managing credential as actor.
+	EventHireGrantCreated   EventType = "hire_grant_created"
+	EventHireGrantRefused   EventType = "hire_grant_refused"
+	EventOAuthClientCreated EventType = "oauth_client_created"
+	EventOAuthClientUpdated EventType = "oauth_client_updated"
 
 	// Agent accounts (non-human accounts owned by a person): one event type
 	// per management operation, actor the caller (the owner or a project
@@ -484,6 +489,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventTeammateKeyRevoked:            {},
 	EventTeammateKeyManagerRefused:     {},
 	EventTeammateAccessIssued:          {},
+	EventHireGrantCreated:              {},
+	EventHireGrantRefused:              {},
 	EventOAuthClientCreated:            {},
 	EventOAuthClientUpdated:            {},
 	EventAgentCreated:                  {},

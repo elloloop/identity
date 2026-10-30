@@ -547,22 +547,23 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSCIMPerIP, 0),
 		},
 	}
+	if cfg.AgentOAuthEnabled || cfg.TeammateKeysEnabled {
+		limits = append(limits, middleware.PathLimit{PathPrefix: identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, Tag: "agent_machine_challenge", Limiter: middleware.NewFixedWindowLimiter(window, cfg.AgentMachineChallengePerIP, 0)})
+	}
 	if cfg.AgentOAuthEnabled {
 		protocol := middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthProtocolPerIP, 0)
-		for _, path := range []string{agentOAuthAuthorizePath, agentOAuthTokenPath, agentOAuthRevokePath, identityconnectgen.IdentityServiceGetAgentAuthorizationProcedure, identityconnectgen.IdentityServiceDecideAgentAuthorizationProcedure, identityconnectgen.IdentityServiceListAgentDelegationsProcedure, identityconnectgen.IdentityServiceRevokeAgentDelegationProcedure, identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, identityconnectgen.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityconnectgen.IdentityServiceRegisterAgentMachineProcedure, identityconnectgen.IdentityServiceListAgentMachinesProcedure, identityconnectgen.IdentityServiceSelectAgentMachineAgentsProcedure, identityconnectgen.IdentityServiceRevokeAgentMachineProcedure, identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure, identityconnectgen.IdentityServiceListAgentMachineAgentsProcedure} {
+		for _, path := range []string{agentOAuthAuthorizePath, agentOAuthTokenPath, agentOAuthRevokePath, identityconnectgen.IdentityServiceGetAgentAuthorizationProcedure, identityconnectgen.IdentityServiceDecideAgentAuthorizationProcedure, identityconnectgen.IdentityServiceListAgentDelegationsProcedure, identityconnectgen.IdentityServiceRevokeAgentDelegationProcedure, identityconnectgen.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityconnectgen.IdentityServiceRegisterAgentMachineProcedure, identityconnectgen.IdentityServiceListAgentMachinesProcedure, identityconnectgen.IdentityServiceSelectAgentMachineAgentsProcedure, identityconnectgen.IdentityServiceRevokeAgentMachineProcedure, identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure, identityconnectgen.IdentityServiceListAgentMachineAgentsProcedure} {
 			limits = append(limits, middleware.PathLimit{PathPrefix: path, Tag: "agent_oauth_protocol", Limiter: protocol})
 		}
 		limits = append(limits, middleware.PathLimit{PathPrefix: identityconnectgen.IdentityServiceIntrospectAgentMachineProcedure, Tag: "agent_machine_introspection", Limiter: middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthIntrospectionPerIP, 0)})
 		limits = append(limits, middleware.PathLimit{PathPrefix: agentOAuthIntrospectPath, Tag: "agent_oauth_introspection", Limiter: middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthIntrospectionPerIP, 0)})
 	}
 	if cfg.TeammateKeysEnabled && !cfg.AgentOAuthEnabled {
-		protocol := middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthProtocolPerIP, 0)
-		for _, path := range []string{identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure} {
-			limits = append(limits, middleware.PathLimit{PathPrefix: path, Tag: "agent_oauth_protocol", Limiter: protocol})
-		}
+		limits = append(limits, middleware.PathLimit{PathPrefix: identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure, Tag: "agent_oauth_protocol", Limiter: middleware.NewFixedWindowLimiter(window, cfg.AgentOAuthProtocolPerIP, 0)})
 	}
 	if cfg.TeammateKeysEnabled {
 		limits = append(limits, middleware.PathLimit{PathPrefix: "/" + identityconnectgen.TeammateKeyServiceName + "/", Tag: "teammate_key_manager", Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0)})
+		limits = append(limits, middleware.PathLimit{PathPrefix: "/" + identityconnectgen.HireGrantServiceName + "/", Tag: "hire_grant", Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0)})
 	}
 	tenantOperator := middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0)
 	for _, path := range TenantOperatorProcedures {

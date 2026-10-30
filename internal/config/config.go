@@ -1429,6 +1429,12 @@ type Config struct {
 	// AgentOAuthProtocolPerIP sets the protocol budget per configured rate-limit window.
 	// GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP defaults to 30; zero selects default.
 	AgentOAuthProtocolPerIP int
+	// AgentMachineChallengePerIP sets the CreateAgentMachineChallenge budget
+	// per client address per configured rate-limit window, on its own and
+	// not out of the protocol budget: the call takes no credential, so the
+	// address is what it can be held to. GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP
+	// defaults to 60; zero selects the default.
+	AgentMachineChallengePerIP int
 	// AgentOAuthIntrospectionPerIP sets the authenticated resource
 	// budget. GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP defaults to 1200.
 	AgentOAuthIntrospectionPerIP int
@@ -1850,6 +1856,7 @@ func loadFromEnv() *Config {
 		ExportMaxAuditEvents:              envInt("GATEWAY_EXPORT_MAX_AUDIT_EVENTS", DefaultExportMaxAuditEvents),
 		AgentsEnabled:                     envBool("GATEWAY_AGENTS_ENABLED", false),
 		AgentOAuthProtocolPerIP:           envInt("GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP", DefaultAgentOAuthProtocolPerIP),
+		AgentMachineChallengePerIP:        envInt("GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP", DefaultAgentMachineChallengePerIP),
 		AgentOAuthIntrospectionPerIP:      envInt("GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP", DefaultAgentOAuthIntrospectionPerIP),
 		AgentOAuthEnabled:                 envBool("GATEWAY_AGENT_OAUTH_ENABLED", false),
 		AgentMachineEnabled:               envBool("GATEWAY_AGENT_MACHINE_ENABLED", false),

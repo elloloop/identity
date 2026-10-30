@@ -14,6 +14,7 @@ import (
 
 const (
 	DefaultAgentOAuthProtocolPerIP      = 30
+	DefaultAgentMachineChallengePerIP   = 60
 	DefaultAgentOAuthIntrospectionPerIP = 1200
 	DefaultAgentOAuthAccessSeconds      = 300
 	DefaultAgentOAuthConsentSeconds     = 86400
@@ -80,7 +81,10 @@ func (c *Config) ValidateAgentOAuth() error {
 	if c.AgentOAuthIntrospectionPerIP == 0 {
 		c.AgentOAuthIntrospectionPerIP = DefaultAgentOAuthIntrospectionPerIP
 	}
-	if c.AgentOAuthProtocolPerIP < 0 || c.AgentOAuthIntrospectionPerIP < 0 {
+	if c.AgentMachineChallengePerIP == 0 {
+		c.AgentMachineChallengePerIP = DefaultAgentMachineChallengePerIP
+	}
+	if c.AgentOAuthProtocolPerIP < 0 || c.AgentOAuthIntrospectionPerIP < 0 || c.AgentMachineChallengePerIP < 0 {
 		return errors.New("config: delegated OAuth rate limits cannot be disabled")
 	}
 	if !c.AgentsEnabled || c.RevocationMode != RevocationModeSession {

@@ -11,7 +11,7 @@ import (
 
 func teammateClaims() TeammateAccessClaims {
 	now := time.Now().Unix()
-	return TeammateAccessClaims{Sub: "agent", Kind: "agent", Issuer: "https://auth.example.test", Project: "project", Audience: []string{"https://api.example.test"}, ClaimID: "claim", WorkstationID: "workstation", CompanyID: "company", IssuedAt: now, ExpiresAt: now + 300, JWTID: "jti"}
+	return TeammateAccessClaims{Sub: "agent", Kind: "agent", Actor: DelegatedActor{Sub: "lead"}, Issuer: "https://auth.example.test", Project: "project", Audience: []string{"https://api.example.test"}, ClaimID: "claim", WorkstationID: "workstation", CompanyID: "company", IssuedAt: now, ExpiresAt: now + 300, JWTID: "jti"}
 }
 
 func TestTeammateTokenProfileAndBindings(t *testing.T) {
@@ -51,9 +51,9 @@ func TestTeammateClaimsRejectIncompletePrincipals(t *testing.T) {
 	c := teammateClaims()
 	m, err := c.ClaimsMap()
 	require.NoError(t, err)
-	require.NotContains(t, m, "act")
+	require.Equal(t, DelegatedActor{Sub: "lead"}, m["act"])
 	require.NotContains(t, m, "scope")
-	for _, mutate := range []func(*TeammateAccessClaims){func(c *TeammateAccessClaims) { c.Sub = "" }, func(c *TeammateAccessClaims) { c.Kind = "person" }, func(c *TeammateAccessClaims) { c.Issuer = "" }, func(c *TeammateAccessClaims) { c.Project = "" }, func(c *TeammateAccessClaims) { c.Audience = nil }, func(c *TeammateAccessClaims) { c.Audience = append(c.Audience, "urn:other") }, func(c *TeammateAccessClaims) { c.Audience = []string{""} }, func(c *TeammateAccessClaims) { c.ClaimID = "" }, func(c *TeammateAccessClaims) { c.WorkstationID = "" }, func(c *TeammateAccessClaims) { c.CompanyID = "" }, func(c *TeammateAccessClaims) { c.JWTID = "" }, func(c *TeammateAccessClaims) { c.IssuedAt = 0 }, func(c *TeammateAccessClaims) { c.ExpiresAt = c.IssuedAt }} {
+	for _, mutate := range []func(*TeammateAccessClaims){func(c *TeammateAccessClaims) { c.Sub = "" }, func(c *TeammateAccessClaims) { c.Actor.Sub = "" }, func(c *TeammateAccessClaims) { c.Actor.Sub = c.Sub }, func(c *TeammateAccessClaims) { c.Kind = "person" }, func(c *TeammateAccessClaims) { c.Issuer = "" }, func(c *TeammateAccessClaims) { c.Project = "" }, func(c *TeammateAccessClaims) { c.Audience = nil }, func(c *TeammateAccessClaims) { c.Audience = append(c.Audience, "urn:other") }, func(c *TeammateAccessClaims) { c.Audience = []string{""} }, func(c *TeammateAccessClaims) { c.ClaimID = "" }, func(c *TeammateAccessClaims) { c.WorkstationID = "" }, func(c *TeammateAccessClaims) { c.CompanyID = "" }, func(c *TeammateAccessClaims) { c.JWTID = "" }, func(c *TeammateAccessClaims) { c.IssuedAt = 0 }, func(c *TeammateAccessClaims) { c.ExpiresAt = c.IssuedAt }} {
 		next := c
 		mutate(&next)
 		_, err := next.ClaimsMap()

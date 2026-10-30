@@ -3,9 +3,11 @@ package connect
 import (
 	"context"
 	"errors"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/prometheus/client_golang/prometheus"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/service"
@@ -32,13 +34,10 @@ func NewTeammateKeyHandler(keys *service.TeammateKeyService) *TeammateKeyHandler
 
 func (h *TeammateKeyHandler) RegisterTeammateKey(ctx context.Context, req *connect.Request[identitypb.RegisterTeammateKeyRequest]) (*connect.Response[identitypb.RegisterTeammateKeyResponse], error) {
 	algorithm := ""
-	switch req.Msg.Algorithm {
-	case identitypb.KeyAlgorithm_KEY_ALGORITHM_ED25519:
-		algorithm = service.TeammateKeyEd25519
-	case identitypb.KeyAlgorithm_KEY_ALGORITHM_ECDSA_P256:
+	if req.Msg.Algorithm == identitypb.KeyAlgorithm_KEY_ALGORITHM_ECDSA_P256 {
 		algorithm = service.TeammateKeyECDSAP256
 	}
-	id, err := h.keys.RegisterTeammateKey(ctx, req.Header().Get(TeammateKeyManagerHeader), service.TeammateKeyRegistration{ClaimID: req.Msg.ClaimId, TeammateID: req.Msg.TeammateId, CompanyID: req.Msg.CompanyId, WorkstationID: req.Msg.WorkstationId, PublicKey: req.Msg.PublicKey, Algorithm: algorithm})
+	id, err := h.keys.RegisterTeammateKey(ctx, req.Header().Get(TeammateKeyManagerHeader), service.TeammateKeyRegistration{ClaimID: req.Msg.ClaimId, TeammateID: req.Msg.TeammateId, CompanyID: req.Msg.CompanyId, WorkstationID: req.Msg.WorkstationId, PublicKey: req.Msg.PublicKey, Algorithm: algorithm, GrantID: req.Msg.GrantId, PlacementID: req.Msg.PlacementId})
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -57,10 +56,39 @@ func (h *TeammateKeyHandler) RevokeTeammateKey(ctx context.Context, req *connect
 	case identitypb.TeammateKeyRevocationReason_TEAMMATE_KEY_REVOCATION_REASON_DRIFTED:
 		reason = service.TeammateKeyDrifted
 	}
-	if err := h.keys.RevokeTeammateKey(ctx, req.Header().Get(TeammateKeyManagerHeader), req.Msg.ClaimId, reason); err != nil {
+	var deadline time.Time
+	if req.Msg.Deadline != nil {
+		if err := req.Msg.Deadline.CheckValid(); err != nil {
+			return nil, toConnectError(service.ErrInvalidArgument)
+		}
+		deadline = req.Msg.Deadline.AsTime()
+	}
+	revokedAt, err := h.keys.RevokeTeammateKey(ctx, req.Header().Get(TeammateKeyManagerHeader), req.Msg.ClaimId, reason, deadline)
+	if err != nil {
 		return nil, toConnectError(err)
 	}
-	return machineResponse(&identitypb.RevokeTeammateKeyResponse{}), nil
+	response := &identitypb.RevokeTeammateKeyResponse{}
+	if !revokedAt.IsZero() {
+		response.RevokedAt = timestamppb.New(revokedAt)
+	}
+	return machineResponse(response), nil
+}
+
+// HireGrantHandler serves HireGrantService for the signed-in person.
+type HireGrantHandler struct {
+	keys *service.TeammateKeyService
+}
+
+func NewHireGrantHandler(keys *service.TeammateKeyService) *HireGrantHandler {
+	return &HireGrantHandler{keys: keys}
+}
+
+func (h *HireGrantHandler) CreateHireGrant(ctx context.Context, req *connect.Request[identitypb.CreateHireGrantRequest]) (*connect.Response[identitypb.CreateHireGrantResponse], error) {
+	grant, err := h.keys.CreateHireGrant(ctx, authenticatedUserID(req.Header()), req.Msg.TeammateId, req.Msg.PlacementId, req.Msg.CompanyId)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return machineResponse(&identitypb.CreateHireGrantResponse{GrantId: grant.ID, ExpiresAt: timestamppb.New(time.UnixMilli(grant.ExpiresAtMs))}), nil
 }
 
 // NewAgentExchangeMetrics registers identity_agent_exchanges_total{key_kind,result},

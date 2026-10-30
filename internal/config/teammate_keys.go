@@ -15,8 +15,11 @@ func (c *Config) ValidateTeammateKeys() error {
 	if c.AgentOAuthProtocolPerIP == 0 {
 		c.AgentOAuthProtocolPerIP = DefaultAgentOAuthProtocolPerIP
 	}
-	if c.AgentOAuthProtocolPerIP < 0 {
-		return errors.New("config: GATEWAY_TEAMMATE_KEYS_ENABLED cannot disable GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP")
+	if c.AgentMachineChallengePerIP == 0 {
+		c.AgentMachineChallengePerIP = DefaultAgentMachineChallengePerIP
+	}
+	if c.AgentOAuthProtocolPerIP < 0 || c.AgentMachineChallengePerIP < 0 {
+		return errors.New("config: GATEWAY_TEAMMATE_KEYS_ENABLED cannot disable GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP or GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP")
 	}
 	return nil
 }
