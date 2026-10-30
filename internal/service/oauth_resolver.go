@@ -183,9 +183,13 @@ func (r *OAuthResolver) buildHostClient(projectID, provider, host string, client
 	key := projectID + "\x00" + provider + "\x00" + host
 	fields := []zap.Field{zap.String("project_id", projectID), zap.String("provider", provider), zap.String("callback_host", host)}
 	if base, ok := cfg.provider(provider); ok {
-		// A nil swap (a type withHostClient does not know) fails in build and
-		// is cached as unavailable.
+		// The project's own base wins, as in exchangerFor, even when it has no
+		// hosted client to swap: then the provider stays unavailable here, as
+		// it is on every other host.
 		swapped := withHostClient(base, client)
+		if swapped == nil {
+			return nil
+		}
 		return r.cached(key, providerConfigHash(swapped), provider, fields, func() (oauth.Exchanger, error) {
 			return r.build(provider, swapped)
 		})
@@ -433,44 +437,54 @@ func (c ProjectOAuthConfig) provider(provider string) (any, bool) {
 }
 
 // hostClient returns the client the project names for provider on host
-// (ADR-0019), or ok=false when it names none there.
+// (ADR-0019), or ok=false when it names none there. Hosts holds only the
+// built-in provider keys, so an env OIDC provider registered under a key of
+// its own never matches.
 func (c ProjectOAuthConfig) hostClient(host, provider string) (ProjectOAuthHostClient, bool) {
-	if !isOAuthProviderKey(provider) {
-		return ProjectOAuthHostClient{}, false // e.g. an env OIDC provider under its own key
-	}
 	client, ok := c.Hosts[host][provider]
 	return client, ok
 }
 
 // withHostClient returns a copy of a configured provider (as provider returns
-// it) whose client identity is client's, or nil for a type it does not know.
-// Apple keeps its key: it signs for any Services ID of its team, so only the
-// client id changes.
+// it) whose client identity is client's. It returns nil for a base with no
+// hosted client of its own, a native-only block (native_audiences alone), since
+// an override swaps a client and never adds one (ADR-0019 §3), and for a type
+// it does not know. Apple keeps its key: it signs for any Services ID of its
+// team, so only the client id changes.
 func withHostClient(base any, client ProjectOAuthHostClient) any {
 	switch b := base.(type) {
 	case *ProjectOAuthGoogle:
-		c := *b
-		c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
-		return &c
+		if b.ClientID != "" {
+			c := *b
+			c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
+			return &c
+		}
 	case *ProjectOAuthMicrosoft:
-		c := *b
-		c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
-		return &c
+		if b.ClientID != "" {
+			c := *b
+			c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
+			return &c
+		}
 	case *ProjectOAuthApple:
-		c := *b
-		c.ClientID = client.ClientID
-		return &c
+		if b.ClientID != "" {
+			c := *b
+			c.ClientID = client.ClientID
+			return &c
+		}
 	case *ProjectOAuthGitHub:
-		c := *b
-		c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
-		return &c
+		if b.ClientID != "" {
+			c := *b
+			c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
+			return &c
+		}
 	case *ProjectOAuthOIDC:
-		c := *b
-		c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
-		return &c
+		if b.ClientID != "" {
+			c := *b
+			c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
+			return &c
+		}
 	}
-	// A provider type this function does not know: fail closed, since the
-	// base client is not registered for the host's callback.
+	// Fail closed: the base client is not registered for the host's callback.
 	return nil
 }
 

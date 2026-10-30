@@ -27,8 +27,11 @@ from that provider. See the `oauth.md` section "A client per auth host".
   override from a `ProjectOAuthHostClient` (`provider`, `callback_host`,
   `client_id`, `client_secret`; an empty secret keeps the stored one, and Apple
   takes none), and `AdminDeleteProjectOAuthHostClient` removes one. Neither
-  touches the base provider, and a server that predates them answers
-  `UNIMPLEMENTED`. `AdminListProjectOAuthProvidersResponse.host_clients` (2)
+  touches the base provider. A server that predates them refuses them and
+  changes nothing: over HTTP it answers `UNAUTHENTICATED`, because it does not
+  know them as admin-secret calls, so during a rolling upgrade that code means
+  the call reached an old replica, not that the admin secret is wrong.
+  `AdminListProjectOAuthProvidersResponse.host_clients` (2)
   returns the overrides, redacted. Setting or deleting a base provider leaves
   its overrides in place. Writing or removing an override is audited as
   `project_oauth_provider_set` or `project_oauth_provider_removed` with a

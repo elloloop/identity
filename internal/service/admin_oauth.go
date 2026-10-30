@@ -186,8 +186,9 @@ func (s *ControlPlaneAdminService) AdminSetProjectOAuthProvider(ctx context.Cont
 // an absent provider is a no-op — and does NOT decode or validate the surviving
 // providers, so a stale invalid neighbour never blocks the deletion. An unknown
 // project surfaces ErrNotFound. The provider's host clients (ADR-0019) stay
-// stored: an override never enables a provider, so they apply again only once
-// a base for it is back, and AdminDeleteProjectOAuthHostClient removes them.
+// stored and apply to whichever base the precedence then selects
+// (ADR-0010/0011); with none they are inert, since an override never enables
+// a provider. AdminDeleteProjectOAuthHostClient removes them.
 func (s *ControlPlaneAdminService) AdminDeleteProjectOAuthProvider(ctx context.Context, secret, projectID, provider string) error {
 	if err := s.authorize(secret); err != nil {
 		return err
@@ -365,17 +366,29 @@ func hostClientAuditDetails(projectID, provider, host string) map[string]any {
 // (ADR-0019). A key is valid only if it comes back from this function
 // unchanged, which is what parsing a stored config checks, so a host whose
 // normalized form would normalize again to something else (a doubled
-// trailing dot, a space before the dot) is refused rather than stored in a
-// form no parse accepts.
+// trailing dot) is refused rather than stored in a form no parse accepts. So
+// is one with a character outside a-z, 0-9, '.' and '-', since a request's
+// host is an ASCII DNS name (a browser sends an IDN in punycode) and could
+// never match it.
 func normalizeCallbackHost(host string) (string, error) {
 	h, err := normalizeHostname("callback_host", host)
 	if err != nil {
 		return "", err
 	}
-	if again, err := normalizeHostname("callback_host", h); err != nil || again != h {
+	if again, err := normalizeHostname("callback_host", h); err != nil || again != h || !isDNSName(h) {
 		return "", fmt.Errorf("%w: invalid callback_host %q", ErrInvalidArgument, host)
 	}
 	return h, nil
+}
+
+// isDNSName reports whether h holds only a-z, 0-9, '.' and '-'.
+func isDNSName(h string) bool {
+	for _, r := range h {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '.' && r != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 // decodeHostClients decodes the oauth subtree's "hosts" object into raw
@@ -782,11 +795,9 @@ func normalizeStringList(in []string) []string {
 // normalizeOAuthProvider lower-cases/trims a provider key and rejects any that
 // is not one of the five configurable providers.
 func normalizeOAuthProvider(provider string) (string, error) {
-	switch k := strings.ToLower(strings.TrimSpace(provider)); k {
-	case oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderGitHub, oauthProviderOIDC:
+	if k := strings.ToLower(strings.TrimSpace(provider)); isOAuthProviderKey(k) {
 		return k, nil
-	default:
-		return "", fmt.Errorf("%w: unknown oauth provider %q (want %q, %q, %q, %q, or %q)",
-			ErrInvalidArgument, provider, oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderGitHub, oauthProviderOIDC)
 	}
+	return "", fmt.Errorf("%w: unknown oauth provider %q (want %q, %q, %q, %q, or %q)",
+		ErrInvalidArgument, provider, oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderGitHub, oauthProviderOIDC)
 }

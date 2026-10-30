@@ -142,11 +142,13 @@ func TestRedesign_OAuthHostClient_OwnProvider(t *testing.T) {
 		t.Fatalf("callback elsewhere: client_id = %q, want the base", got)
 	}
 
-	// A host the resolver could never match is refused, not stored.
+	// A host the resolver could never match is refused, not stored. The
+	// request carries a secret, so only the host can refuse it.
 	_, err = setHostClient(ctx, admin, projectID, &identitypb.ProjectOAuthHostClient{
 		Provider:     "google",
 		CallbackHost: hostClientCallbackHost + "..",
 		ClientId:     "host-b-google",
+		ClientSecret: "s",
 	})
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("a host client with a doubled trailing dot: err = %v, want InvalidArgument", err)

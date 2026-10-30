@@ -74,7 +74,9 @@ split from their accounts. The products need one pool and a client per host.
 
    An override never enables a provider: with no base (a non-default project
    that configures no `P` and does not borrow), `P` stays unavailable at every
-   host. A host with no override uses the base, exactly as before.
+   host. Nor does it add a hosted client to a base with none, a native-only
+   block (`native_audiences` alone): the hosted flow stays unavailable there
+   on every host too. A host with no override uses the base, exactly as before.
 
    Overrides are part of the project's stored configuration, so a request
    carries them when it resolves to the project by an auth domain or a
@@ -103,14 +105,18 @@ split from their accounts. The products need one pool and a client per host.
    stored one; Apple takes none). `AdminDeleteProjectOAuthHostClient` removes
    it, and `AdminListProjectOAuthProviders` returns the overrides, redacted, in
    `host_clients`. A host the write would store in a form the resolver could
-   never match (a doubled trailing dot, say) is refused, not stored. Setting
+   never match (a doubled trailing dot, or a character outside a-z, 0-9, `.`
+   and `-`) is refused, not stored. Setting
    or deleting the base provider leaves its overrides alone.
 
    They are separate RPCs, not a `callback_host` field on the provider RPCs,
    because proto3 discards a field it does not know. Sent to a server that
    predates this ADR, an override written through the provider RPCs would be
-   read as a write to the base provider, replacing it or deleting it; through
-   its own RPC it fails with `UNIMPLEMENTED` and changes nothing.
+   read as a write to the base provider, replacing it or deleting it. An
+   older server refuses an override's own RPC and changes nothing: over HTTP
+   (Connect, gRPC or gRPC-Web) it answers `UNAUTHENTICATED`, because it does
+   not know the RPC as an admin-secret call, and through an embedder's native
+   gRPC server `UNIMPLEMENTED`.
 
 7. **Caching.** An override's exchanger is cached in its own slot per
    (project, provider, host), keyed on a hash of the base and the override,

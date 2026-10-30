@@ -758,10 +758,10 @@ func New(deps Deps) (*Built, error) {
 	// An embedder's registry is opaque, so only an env-built one can be rebuilt
 	// with a host's own client (ADR-0019).
 	oauthRegistry := deps.OAuthRegistry
-	var envOAuthProviders service.EnvOAuthProviderBuilder
+	var envOAuthBuilder service.EnvOAuthProviderBuilder
 	if oauthRegistry == nil {
 		oauthRegistry = buildOAuthRegistry(deps.Config, logger)
-		envOAuthProviders = envOAuthProviderBuilder(deps.Config)
+		envOAuthBuilder = envOAuthProviderBuilder(deps.Config)
 	}
 	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 
@@ -797,7 +797,7 @@ func New(deps Deps) (*Built, error) {
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
-		WithEnvOAuthProviders(envOAuthProviders).
+		WithEnvOAuthProviders(envOAuthBuilder).
 		WithReturnAllowlist(returnAllow)
 	// Dispatch credential emails asynchronously in the served deployment so SMTP
 	// latency cannot time the gated send/no-send decision. Tests that read the

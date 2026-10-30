@@ -18198,7 +18198,8 @@ func (*AdminDeleteProjectOAuthProviderResponse) Descriptor() ([]byte, []int) {
 // whether the provider is available at all, come from the provider the
 // project's precedence selects (its own, the default project's env provider,
 // or a hub provider borrowed under hub sharing, ADR-0010/0011). A host client
-// never enables a provider that has no base.
+// never enables a provider that has no base, nor the hosted flow of a
+// native-only base (native_audiences alone).
 type ProjectOAuthHostClient struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// provider is the provider key: "google", "microsoft", "apple", "github",
@@ -18206,8 +18207,9 @@ type ProjectOAuthHostClient struct {
 	// own takes no host client.
 	Provider string `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
 	// callback_host is the host of the flow's callback URL: a DNS name with no
-	// scheme, port or path. A write lower-cases it and drops one trailing dot.
-	// Required.
+	// scheme, port or path, an IDN in its punycode form. A write lower-cases it
+	// and drops one trailing dot, and refuses any other character than a-z,
+	// 0-9, '.' and '-'. Required.
 	CallbackHost string `protobuf:"bytes,2,opt,name=callback_host,json=callbackHost,proto3" json:"callback_host,omitempty"`
 	// client_id is the provider client registered for callback_host; for Apple,
 	// the Services ID. Required.

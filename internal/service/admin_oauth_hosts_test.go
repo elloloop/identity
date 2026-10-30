@@ -157,6 +157,13 @@ func TestAdminHostClient_SetRejects(t *testing.T) {
 		"two trailing dots":      {Provider: oauthProviderGoogle, CallbackHost: "auth.b.example..", ClientID: "g", ClientSecret: "s"},
 		"only dots":              {Provider: oauthProviderGoogle, CallbackHost: "..", ClientID: "g", ClientSecret: "s"},
 		"a space before the dot": {Provider: oauthProviderGoogle, CallbackHost: "auth.b.example\u00a0.", ClientID: "g", ClientSecret: "s"},
+		"a query character":      {Provider: oauthProviderGoogle, CallbackHost: "auth.b?example", ClientID: "g", ClientSecret: "s"},
+		"a fragment character":   {Provider: oauthProviderGoogle, CallbackHost: "auth.b#example", ClientID: "g", ClientSecret: "s"},
+		"a newline":              {Provider: oauthProviderGoogle, CallbackHost: "auth.b\n.example", ClientID: "g", ClientSecret: "s"},
+		"a NUL":                  {Provider: oauthProviderGoogle, CallbackHost: "auth.b\x00.example", ClientID: "g", ClientSecret: "s"},
+		"an escape":              {Provider: oauthProviderGoogle, CallbackHost: "auth.b%2eexample", ClientID: "g", ClientSecret: "s"},
+		"an underscore":          {Provider: oauthProviderGoogle, CallbackHost: "auth_b.example", ClientID: "g", ClientSecret: "s"},
+		"a Unicode letter":       {Provider: oauthProviderGoogle, CallbackHost: "auth.b\u00e9.example", ClientID: "g", ClientSecret: "s"},
 		"apple secret":           {Provider: oauthProviderApple, CallbackHost: hostB, ClientID: "a", ClientSecret: "s"},
 		"no secret, none stored": {Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: "g"},
 		"no client id":           {Provider: oauthProviderGitHub, CallbackHost: hostB, ClientSecret: "s"},
@@ -199,12 +206,12 @@ func TestAdminHostClient_SetRejects(t *testing.T) {
 	}
 }
 
-// A stored null where an object belongs ("oauth": null, "hosts": null or one
-// host's entry) reads as empty: a host write succeeds and leaves a config
-// that parses.
+// A stored null where an object belongs (the whole config, "oauth": null,
+// "hosts": null or one host's entry) reads as empty: a host write succeeds
+// and leaves a config that parses.
 func TestAdminHostClient_StoredNulls(t *testing.T) {
 	t.Parallel()
-	for _, seed := range []string{`{"oauth":null}`, `{"oauth":{"hosts":null}}`, `{"oauth":{"hosts":{"auth.b.example":null}}}`} {
+	for _, seed := range []string{`null`, `{"oauth":null}`, `{"oauth":{"hosts":null}}`, `{"oauth":{"hosts":{"auth.b.example":null}}}`} {
 		f := newAdminFixture(oauthAdminSecret)
 		ctx := context.Background()
 		projectID := seedOAuthProject(t, f)
@@ -219,13 +226,15 @@ func TestAdminHostClient_StoredNulls(t *testing.T) {
 			t.Fatalf("%s: stored hosts = %+v", seed, cfg.Hosts)
 		}
 	}
-	f := newAdminFixture(oauthAdminSecret)
-	projectID := seedOAuthProject(t, f)
-	seedProjectConfig(t, f, projectID, `{"oauth":null}`)
-	if _, err := f.svc.AdminSetProjectOAuthProvider(context.Background(), oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
-		Provider: oauthProviderGoogle, ClientID: "g", ClientSecret: "s",
-	}); err != nil {
-		t.Fatalf(`set base over "oauth": null: %v`, err)
+	for _, seed := range []string{`null`, `{"oauth":null}`} {
+		f := newAdminFixture(oauthAdminSecret)
+		projectID := seedOAuthProject(t, f)
+		seedProjectConfig(t, f, projectID, seed)
+		if _, err := f.svc.AdminSetProjectOAuthProvider(context.Background(), oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+			Provider: oauthProviderGoogle, ClientID: "g", ClientSecret: "s",
+		}); err != nil {
+			t.Fatalf("set base over %s: %v", seed, err)
+		}
 	}
 }
 

@@ -2752,7 +2752,8 @@ message AdminDeleteProjectOAuthProviderResponse {}
 // whether the provider is available at all, come from the provider the
 // project's precedence selects (its own, the default project's env provider,
 // or a hub provider borrowed under hub sharing, ADR-0010/0011). A host client
-// never enables a provider that has no base.
+// never enables a provider that has no base, nor the hosted flow of a
+// native-only base (native_audiences alone).
 message ProjectOAuthHostClient {
   // provider is the provider key: "google", "microsoft", "apple", "github",
   // or "oidc". Required. An env OIDC provider registered under a key of its
@@ -2760,8 +2761,9 @@ message ProjectOAuthHostClient {
   string provider = 1;
 
   // callback_host is the host of the flow's callback URL: a DNS name with no
-  // scheme, port or path. A write lower-cases it and drops one trailing dot.
-  // Required.
+  // scheme, port or path, an IDN in its punycode form. A write lower-cases it
+  // and drops one trailing dot, and refuses any other character than a-z,
+  // 0-9, '.' and '-'. Required.
   string callback_host = 2;
 
   // client_id is the provider client registered for callback_host; for Apple,
@@ -3962,9 +3964,11 @@ service IdentityService {
   // signs in through when the flow's callback is on one host.
   // AdminSetProjectOAuthHostClient sets/rotates one (encrypting any plaintext
   // secret server-side); AdminDeleteProjectOAuthHostClient removes one, so its
-  // host reverts to the base client. Neither touches the base provider; a
-  // server that predates them answers UNIMPLEMENTED. Operator-only, like the
-  // other Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+  // host reverts to the base client. Neither touches the base provider. A
+  // server that predates them refuses them and changes nothing: over HTTP it
+  // answers UNAUTHENTICATED, as it does not know them as admin-secret calls.
+  // Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
+  // with no control plane.
   rpc AdminSetProjectOAuthHostClient(AdminSetProjectOAuthHostClientRequest) returns (AdminSetProjectOAuthHostClientResponse);
   rpc AdminDeleteProjectOAuthHostClient(AdminDeleteProjectOAuthHostClientRequest) returns (AdminDeleteProjectOAuthHostClientResponse);
 

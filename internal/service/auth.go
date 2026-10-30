@@ -1609,9 +1609,8 @@ func (s *AuthService) WithProjectOAuthSecrets(secretsKey []byte, wrap func(provi
 }
 
 // WithEnvOAuthProviders wires the builder that rebuilds an env provider with a
-// host's own client (ADR-0019), and returns the service for chaining. app.New
-// calls it when it built the OAuth registry from the env; without it, a host
-// override whose base is an env provider is unavailable.
+// host's own client (ADR-0019), and returns the service for chaining. With a
+// nil builder, a host override whose base is an env provider is unavailable.
 func (s *AuthService) WithEnvOAuthProviders(build EnvOAuthProviderBuilder) *AuthService {
 	s.oauthResolver.envProvider = build
 	return s

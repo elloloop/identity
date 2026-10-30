@@ -41,7 +41,7 @@ func envGoogleBuilder(provider, clientID, clientSecret string) (oauth.Exchanger,
 // hostClientScope scopes a request to projectID with cfg, adding a Google
 // override for hostB whose secret is secretEnc.
 func hostClientScope(projectID string, cfg ProjectOAuthConfig, secretEnc string) context.Context {
-	cfg.Hosts = map[string]map[string]ProjectOAuthHostClient{
+	cfg.Hosts = map[string]ProjectOAuthHostClients{
 		hostB: {oauthProviderGoogle: {ClientID: hostBGoogle, ClientSecretEnc: secretEnc}},
 	}
 	return WithProjectScope(context.Background(), &ProjectScope{ProjectID: projectID, OAuth: cfg})
@@ -151,10 +151,41 @@ func TestOAuthHostClient_NoEnvBaseNeverEnables(t *testing.T) {
 	}
 }
 
+// A project's own native-only block (native_audiences alone) has no hosted
+// client to swap, so a host client does not give it one: the provider stays
+// unavailable for the hosted flow on the override's host, as on every other.
+func TestOAuthHostClient_NativeOnlyBaseNeverEnables(t *testing.T) {
+	r := newOAuthResolver("default", oauth.NewRegistry(), false, nil).withSecrets(resolverSecretsKey(), nil)
+	secretEnc := encForProject(t, "host-secret")
+	for _, tc := range []struct {
+		provider string
+		cfg      ProjectOAuthConfig
+		client   ProjectOAuthHostClient
+	}{
+		{oauthProviderGoogle, ProjectOAuthConfig{Google: &ProjectOAuthGoogle{NativeAudiences: []string{"native.example"}}},
+			ProjectOAuthHostClient{ClientID: hostBGoogle, ClientSecretEnc: secretEnc}},
+		{oauthProviderMicrosoft, ProjectOAuthConfig{Microsoft: &ProjectOAuthMicrosoft{NativeAudiences: []string{"native.example"}}},
+			ProjectOAuthHostClient{ClientID: "host-b-microsoft", ClientSecretEnc: secretEnc}},
+		{oauthProviderApple, ProjectOAuthConfig{Apple: &ProjectOAuthApple{NativeAudiences: []string{"native.example"}}},
+			ProjectOAuthHostClient{ClientID: hostBAppleID}},
+	} {
+		if err := tc.cfg.validate(); err != nil {
+			t.Fatalf("%s: the native-only block must be a valid config: %v", tc.provider, err)
+		}
+		tc.cfg.Hosts = map[string]ProjectOAuthHostClients{hostB: {tc.provider: tc.client}}
+		ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "other", OAuth: tc.cfg})
+		for _, host := range []string{hostA, hostB} {
+			if _, ok := r.exchangerFor(ctx, tc.provider, "https://"+host+"/oauth/callback/"+tc.provider); ok {
+				t.Errorf("%s on %s: a native-only base must stay unavailable for the hosted flow", tc.provider, host)
+			}
+		}
+	}
+}
+
 // Apple's host client swaps only the Services ID: the base team, key id and
 // key sign for it, on an own base and on an env base alike.
 func TestOAuthHostClient_AppleSwapsOnlyTheServicesID(t *testing.T) {
-	hosts := map[string]map[string]ProjectOAuthHostClient{hostB: {oauthProviderApple: {ClientID: hostBAppleID}}}
+	hosts := map[string]ProjectOAuthHostClients{hostB: {oauthProviderApple: {ClientID: hostBAppleID}}}
 
 	r := newOAuthResolver("default", oauth.NewRegistry(), false, nil).withSecrets(resolverSecretsKey(), nil)
 	own := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "other", OAuth: ProjectOAuthConfig{
@@ -323,5 +354,14 @@ func TestWithHostClient_SwapsOnlyTheClient(t *testing.T) {
 	}
 	if got := withHostClient(struct{}{}, client); got != nil {
 		t.Errorf("an unknown provider type must fail closed, got %#v", got)
+	}
+	for _, native := range []any{
+		&ProjectOAuthGoogle{NativeAudiences: []string{"native.example"}},
+		&ProjectOAuthMicrosoft{NativeAudiences: []string{"native.example"}},
+		&ProjectOAuthApple{NativeAudiences: []string{"native.example"}},
+	} {
+		if got := withHostClient(native, client); got != nil {
+			t.Errorf("a base with no hosted client (%T) must take no override, got %#v", native, got)
+		}
 	}
 }

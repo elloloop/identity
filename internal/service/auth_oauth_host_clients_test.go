@@ -67,7 +67,7 @@ func TestHostedOAuth_HostClient_StartAndCallbackUseTheSameClient(t *testing.T) {
 				UserURL:         srv.URL + "/user",
 				UserMailURL:     srv.URL + "/user/emails",
 			},
-			Hosts: map[string]map[string]ProjectOAuthHostClient{
+			Hosts: map[string]ProjectOAuthHostClients{
 				hostB: {oauthProviderGitHub: {ClientID: "host-b-github", ClientSecretEnc: encForProject(t, "host-b-secret")}},
 			},
 		},
@@ -119,7 +119,7 @@ func TestHostedUIOptions_HostClientStartsOnThePageHost(t *testing.T) {
 		PrimaryAuthDomain: hostA,
 		OAuth: ProjectOAuthConfig{
 			Google: &ProjectOAuthGoogle{ClientID: "own-google"},
-			Hosts: map[string]map[string]ProjectOAuthHostClient{
+			Hosts: map[string]ProjectOAuthHostClients{
 				hostB: {
 					oauthProviderGoogle:    {ClientID: "b-google", ClientSecretEnc: "enc"},
 					oauthProviderMicrosoft: {ClientID: "b-microsoft", ClientSecretEnc: "enc"},

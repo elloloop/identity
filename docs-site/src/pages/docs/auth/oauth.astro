@@ -109,7 +109,8 @@ import { Code } from "astro-expressive-code/components";
       never leak across projects, unless the deployment opts into hub sharing
       (<code>GATEWAY_OAUTH_HUB_SHARING</code>, ADR-0011): then it borrows the
       default project's env provider, and the flow runs on the hub's auth
-      domain.
+      domain, unless the page's host has its own client for that provider
+      (see <a href="#host-clients">A client per auth host</a>).
     </li>
   </ul>
   <p>
@@ -187,7 +188,8 @@ import { Code } from "astro-expressive-code/components";
       (idempotent).
     </li>
     <li>
-      <code>AdminListProjectOAuthProviders</code> — list configured providers.
+      <code>AdminListProjectOAuthProviders</code> — list configured providers
+      and host clients.
     </li>
   </ul>
   <p>
@@ -267,9 +269,9 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
       secret.
     </li>
     <li>
-      An override never enables a provider the precedence does not, and a
-      broken one makes the provider unavailable on its host rather than
-      falling back to the base client.
+      An override never enables a provider the precedence does not, nor the
+      hosted flow of a native-only block, and a broken one makes the provider
+      unavailable on its host rather than falling back to the base client.
     </li>
     <li>
       The hosted page starts an overridden provider on its own host, with no
@@ -287,8 +289,10 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
     keeps the stored one, and Apple takes no secret),
     <code>AdminDeleteProjectOAuthHostClient</code> removes one, and
     <code>AdminListProjectOAuthProviders</code> returns them, redacted, in
-    <code>host_clients</code>. A server that predates them answers
-    <code>UNIMPLEMENTED</code>.
+    <code>host_clients</code>. A server that predates them refuses them and
+    changes nothing: over HTTP it answers <code>UNAUTHENTICATED</code>,
+    because it does not know them as admin-secret calls, so during a rolling
+    upgrade that code means the call reached an old replica.
   </p>
   <p>
     Register each override's client with the callback URL of the flows that
@@ -299,7 +303,7 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
   </p>
   <Code code={`message ProjectOAuthHostClient {
   string provider = 1;           // "google" | "microsoft" | "apple" | "github" | "oidc"
-  string callback_host = 2;      // a DNS name: no scheme, port or path
+  string callback_host = 2;      // an ASCII DNS name (an IDN as punycode): no scheme, port or path
   string client_id = 3;          // for Apple, the Services ID
   string client_secret = 4;      // write-only plaintext; empty = keep stored; none for Apple
   bool   has_client_secret = 5;  // read-only (redacted presence)

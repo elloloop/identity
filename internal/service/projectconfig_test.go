@@ -489,12 +489,32 @@ func TestParseProjectConfig_OAuth_HostClients_Present(t *testing.T) {
 func TestParseProjectConfig_OAuth_HostClients_UnknownProviderIgnored(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := ParseProjectConfig(`{"oauth":{"hosts":{"auth.b.example":{"okta":{"client_id":"o"},"google":{"client_id":"g","client_secret_enc":"e"}}}}}`)
-	require.NoError(t, err)
-	_, ok := cfg.OAuth.hostClient("auth.b.example", "okta")
-	assert.False(t, ok)
-	_, ok = cfg.OAuth.hostClient("auth.b.example", "google")
-	assert.True(t, ok)
+	// An unknown provider's entry is never decoded, whatever shape a newer
+	// binary gave it.
+	for name, unknown := range map[string]string{
+		"host-client shape": `{"client_id":"o"}`,
+		"array":             `["x"]`,
+		"non-string id":     `{"client_id":7}`,
+		"string":            `"x"`,
+	} {
+		cfg, err := ParseProjectConfig(`{"oauth":{"hosts":{"auth.b.example":{"okta":` + unknown + `,"google":{"client_id":"g","client_secret_enc":"e"}}}}}`)
+		require.NoError(t, err, name)
+		assert.Equal(t, ProjectOAuthHostClients{"google": {ClientID: "g", ClientSecretEnc: "e"}}, cfg.OAuth.Hosts["auth.b.example"], name)
+	}
+}
+
+func TestParseProjectConfig_OAuth_HostClients_Malformed(t *testing.T) {
+	t.Parallel()
+
+	for name, hosts := range map[string]string{
+		"host not an object":     `{"auth.b.example":"x"}`,
+		"built-in not an object": `{"auth.b.example":{"google":["x"]}}`,
+		"built-in non-string id": `{"auth.b.example":{"google":{"client_id":7,"client_secret_enc":"e"}}}`,
+		"hosts not an object":    `["auth.b.example"]`,
+	} {
+		_, err := ParseProjectConfig(`{"oauth":{"hosts":` + hosts + `}}`)
+		require.Error(t, err, name)
+	}
 }
 
 func TestParseProjectConfig_OAuth_HostClients_Rejected(t *testing.T) {
@@ -510,6 +530,8 @@ func TestParseProjectConfig_OAuth_HostClients_Rejected(t *testing.T) {
 		"apple with a secret":  {`{"auth.b.example":{"apple":{"client_id":"a","client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].apple takes no client_secret_enc`},
 		"apple without client": {`{"auth.b.example":{"apple":{}}}`, `oauth.hosts["auth.b.example"].apple requires client_id`},
 		"two trailing dots":    {`{"auth.b.example..":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b.example.."`},
+		"query character":      {`{"auth.b?example":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b?example"`},
+		"control character":    {`{"auth.b\n.example":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b\n.example"`},
 	} {
 		_, err := ParseProjectConfig(`{"oauth":{"hosts":` + tc.hosts + `}}`)
 		require.Error(t, err, name)

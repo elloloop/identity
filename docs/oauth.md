@@ -295,7 +295,8 @@ itself or borrows from the hub.
   key id and private key come from it. Apple's override is a Services ID of
   the same team; the others are a client id and secret.
 - **An override never enables a provider.** Where the precedence yields
-  none, the provider stays unavailable on every host.
+  none, the provider stays unavailable on every host, and where it yields a
+  native-only block (`native_audiences` alone) the hosted flow does.
 - **A broken override is unavailable** on its host (a secret that will not
   decrypt, or an env base the server cannot rebuild because the embedder
   supplied its own `OAuthRegistry`). It never falls back to the base client,
@@ -327,8 +328,10 @@ a `ProjectOAuthHostClient` (`provider`, `callback_host`, `client_id`,
 `client_secret`; an empty secret keeps the stored one, and Apple takes none),
 `AdminDeleteProjectOAuthHostClient` removes one, and
 `AdminListProjectOAuthProviders` returns them, redacted, in `host_clients`.
-A server that predates them answers `UNIMPLEMENTED`. Setting or deleting the
-base provider leaves its overrides in place.
+A server that predates them refuses them and changes nothing: over HTTP it
+answers `UNAUTHENTICATED`, because it does not know them as admin-secret
+calls, so during a rolling upgrade that code means the call reached an old
+replica. Setting or deleting the base provider leaves its overrides in place.
 
 ### The hosted auth UI (`/auth/`)
 
