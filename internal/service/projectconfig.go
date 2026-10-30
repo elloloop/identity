@@ -131,8 +131,9 @@ type ProjectOAuthHostClients map[string]ProjectOAuthHostClient
 // UnmarshalJSON decodes each host's clients under the built-in provider keys.
 // Any other provider key is skipped unread, as an unknown key under "oauth"
 // is, so an entry a newer binary wrote never stops this one loading the
-// project. An entry that does not decode is reported by its host and
-// provider, the path validate reports a bad entry by.
+// project. An entry that does not decode is reported by its host, and a
+// built-in provider's entry also by its provider, the path validate reports
+// a bad entry by.
 func (h *ProjectOAuthHosts) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -985,15 +986,17 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 	return out
 }
 
-// isBareDomainName reports whether d, ALREADY canonicalized, has the shape an
-// address's domain can actually take: dot-separated LDH labels, at least two of
-// them, no empty or over-long label, no leading or trailing hyphen.
+// isBareDomainName reports whether d, ALREADY canonicalized (lower case, an IDN
+// in punycode), is a bare domain name: dot-separated LDH labels, at least two
+// of them, none empty or over 63 characters, none starting or ending with a
+// hyphen, 253 characters in all. An email domain entry and a callback host are
+// both held to it.
 //
-// It is checked against the canonical form rather than the raw entry because
-// emailaddr.CanonicalizeDomain punycodes IDN labels — "café.example" is a legitimate
-// entry whose canonical form is ASCII. It also means an entry idna could not
-// convert (emailaddr.CanonicalizeDomain returns such input unchanged) is caught here
-// rather than stored as a rule that matches nothing.
+// A domain entry is checked against its canonical form rather than the raw
+// entry because emailaddr.CanonicalizeDomain punycodes IDN labels — "café.example"
+// is a legitimate entry whose canonical form is ASCII. It also means an entry
+// idna could not convert (emailaddr.CanonicalizeDomain returns such input
+// unchanged) is caught here rather than stored as a rule that matches nothing.
 func isBareDomainName(d string) bool {
 	if d == "" || len(d) > 253 {
 		return false

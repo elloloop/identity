@@ -258,7 +258,10 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
       The key is the host of the flow's callback URL: the host the hosted
       page and <code>/oauth/start</code> are served on, or the host of the
       app's <code>redirect_uri</code> in the headless flow. The callback
-      completes with the client the start used.
+      completes with the client the start used. A key a write adds, through
+      the RPCs below or a whole-config <code>UpsertProjectConfig</code>, is
+      held to the <code>callback_host</code> rule; a key already stored is
+      written back as it is.
     </li>
     <li>
       An override swaps the client and nothing else. The provider is still
@@ -289,7 +292,7 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
     keeps the stored one, and Apple takes no secret),
     <code>AdminDeleteProjectOAuthHostClient</code> removes one, and
     <code>AdminListProjectOAuthProviders</code> returns them, redacted, in
-    <code>host_clients</code>. A server that predates them refuses them and
+    <code>host_clients</code>. A server that predates these RPCs refuses them and
     changes nothing: over HTTP it answers <code>UNAUTHENTICATED</code>,
     because it does not know them as admin-secret calls, so during a rolling
     upgrade that code means the call reached an old replica; through an

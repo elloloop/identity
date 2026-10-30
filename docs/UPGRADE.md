@@ -31,8 +31,9 @@ from that provider. See the `oauth.md` section "A client per auth host".
   `-`, none starting or ending with `-`, at most 63 characters each and 253 in
   all, an IDN in its punycode form. A whole-config write
   (`UpsertProjectConfig`) holds each `oauth.hosts` key it adds to the same
-  rule, and writes a key already stored back as it is. Neither override RPC
-  touches the base provider. A server that predates them refuses them and
+  rule, and writes a key already stored back as it is, even when the rest of
+  the stored config no longer parses. Neither override RPC touches the base
+  provider. A server that predates the override RPCs refuses them and
   changes nothing: over HTTP it answers `UNAUTHENTICATED`, because it does not
   know them as admin-secret calls, so during a rolling upgrade that code means
   the call reached an old replica, not that the admin secret is wrong. Through

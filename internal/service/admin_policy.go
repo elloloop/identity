@@ -217,8 +217,10 @@ func (s *ControlPlaneAdminService) DeleteLoginPolicy(ctx context.Context, secret
 // stored (normalised) value. The blob must be a valid JSON object — it is
 // validated by decoding it through ParseProjectConfig so a malformed config is
 // rejected (ErrInvalidArgument) before it is persisted, never silently stored.
-// The mutation emits an audit event. project_id is required; an unknown
-// project surfaces ErrNotFound from the store.
+// Each oauth.hosts key it adds must also be one AdminSetProjectOAuthHostClient
+// would store; a key already stored is written back as it is
+// (checkNewHostKeys). The mutation emits an audit event. project_id is
+// required; an unknown project surfaces ErrNotFound from the store.
 func (s *ControlPlaneAdminService) UpsertProjectConfig(ctx context.Context, secret, projectID, configJSON string) (string, error) {
 	if err := s.authorize(secret); err != nil {
 		return "", err
@@ -241,7 +243,7 @@ func (s *ControlPlaneAdminService) UpsertProjectConfig(ctx context.Context, secr
 	// so it is serialized against concurrent config mutators (e.g. an in-flight
 	// OAuth-provider write) rather than blindly clobbering under a lost update.
 	stored, err := s.mutateProjectConfig(ctx, projectID, func(current string) (string, error) {
-		if err := checkNewHostKeys(current, cfg.OAuth.Hosts); err != nil {
+		if err := checkNewHostKeys(current, configJSON); err != nil {
 			return "", err
 		}
 		return configJSON, nil

@@ -516,7 +516,8 @@ func TestParseProjectConfig_OAuth_HostClients_UnknownProviderIgnored(t *testing.
 func TestParseProjectConfig_OAuth_HostClients_Malformed(t *testing.T) {
 	t.Parallel()
 
-	// The error names the entry that does not decode, by host and provider.
+	// The error names the entry that does not decode: by its host, and a
+	// built-in provider's entry also by its provider.
 	for name, tc := range map[string]struct{ hosts, want string }{
 		"host not an object":     {`{"auth.b.example":"x"}`, `oauth.hosts["auth.b.example"]: `},
 		"built-in not an object": {`{"auth.b.example":{"google":["x"]}}`, `oauth.hosts["auth.b.example"].google: `},

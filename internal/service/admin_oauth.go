@@ -405,28 +405,64 @@ func newCallbackHost(host string) (string, error) {
 const callbackHostRule = "want a hostname of two or more labels of a-z, 0-9 and '-', none starting or ending " +
 	"with '-', at most 63 characters each and 253 in all (an IDN in punycode)"
 
-// checkNewHostKeys holds each oauth.hosts key that next adds to the stored
-// config current to the rule a host client write is held to
-// (newCallbackHost), so a whole-config write cannot store a key the host
-// client RPC would refuse. A key already stored is kept whatever rule it was
-// written under, so writing back a config as read never fails on it. Keys in
-// next are already in normalized form (ParseProjectConfig checked them), so
-// only the bare-domain-name rule remains. A stored config that does not parse
-// has no keys to keep: the write replaces it.
-func checkNewHostKeys(current string, next ProjectOAuthHosts) error {
-	var stored ProjectOAuthHosts
-	if cfg, err := ParseProjectConfig(current); err == nil {
-		stored = cfg.OAuth.Hosts
-	}
-	for host := range next {
-		if _, ok := stored[host]; ok {
+// checkNewHostKeys holds each oauth.hosts key that the config text next adds
+// to the stored config text current to the rule a host client write is held
+// to: a key must be what newCallbackHost would store. So a whole-config write
+// cannot store a key the host client RPC would refuse. A key already stored
+// is kept whatever rule it was written under, so writing back a config as
+// read never fails on it, even when the stored config no longer parses (a
+// whole-config write is how such a config is repaired).
+func checkNewHostKeys(current, next string) error {
+	stored := configHostKeys(current)
+	for host := range configHostKeys(next) {
+		if stored[host] {
 			continue
 		}
-		if !isBareDomainName(host) {
+		if h, err := newCallbackHost(host); err != nil || h != host {
 			return fmt.Errorf("%w: oauth.hosts key %q: %s", ErrInvalidArgument, host, callbackHostRule)
 		}
 	}
 	return nil
+}
+
+// configHostKeys returns the oauth.hosts keys in a config's JSON text under
+// every spelling of "oauth" and "hosts" that encoding/json reads as that
+// field: it matches a field name case-insensitively and keeps the last
+// duplicate, and a jsonb store reorders an object's keys, so which spelling
+// a later parse reads is not the one a parse of the written text read. Text
+// that is not a JSON object, or a spelling whose value is not one, adds no
+// key.
+func configHostKeys(config string) map[string]bool {
+	keys := map[string]bool{}
+	for _, oauth := range foldedObjects(json.RawMessage(config), "oauth") {
+		for _, hosts := range foldedObjects(oauth, "hosts") {
+			var entries map[string]json.RawMessage
+			if json.Unmarshal(hosts, &entries) != nil {
+				continue
+			}
+			for host := range entries {
+				keys[host] = true
+			}
+		}
+	}
+	return keys
+}
+
+// foldedObjects returns the value of every key of the JSON object data that
+// equals field under Unicode case folding, the match encoding/json uses for
+// a field name. Data that is not a JSON object has none.
+func foldedObjects(data json.RawMessage, field string) []json.RawMessage {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(data, &obj) != nil {
+		return nil
+	}
+	var out []json.RawMessage
+	for k, v := range obj {
+		if strings.EqualFold(k, field) {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // decodeHostClients decodes the oauth subtree's "hosts" object into raw

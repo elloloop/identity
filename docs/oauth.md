@@ -331,14 +331,16 @@ a `ProjectOAuthHostClient` (`provider`, `callback_host`, `client_id`,
 `-`, none starting or ending with `-`, at most 63 characters each and 253 in
 all, an IDN in its punycode form), `AdminDeleteProjectOAuthHostClient` removes
 one, and `AdminListProjectOAuthProviders` returns them, redacted, in
-`host_clients`. A whole-config write (`UpsertProjectConfig`) holds each
-`oauth.hosts` key it adds to the same rule; a key already stored is written
-back as it is.
-A server that predates them refuses them and changes nothing: over HTTP it
-answers `UNAUTHENTICATED`, because it does not know them as admin-secret
-calls, so during a rolling upgrade that code means the call reached an old
-replica; through an embedder's native gRPC server it answers
+`host_clients`. A server that predates these RPCs refuses them and changes
+nothing: over HTTP it answers `UNAUTHENTICATED`, because it does not know them
+as admin-secret calls, so during a rolling upgrade that code means the call
+reached an old replica; through an embedder's native gRPC server it answers
 `UNIMPLEMENTED`. Setting or deleting the base provider leaves its overrides in place.
+
+A whole-config write (`UpsertProjectConfig`) holds each `oauth.hosts` key it
+adds to the same rule. A key already stored is written back as it is, even
+when the rest of the stored config no longer parses, so a whole-config write
+can still repair such a project.
 
 ### The hosted auth UI (`/auth/`)
 

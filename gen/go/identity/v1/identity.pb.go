@@ -17234,7 +17234,9 @@ type UpsertProjectConfigRequest struct {
 	// config_json is the project's full config blob (a JSON object). It
 	// REPLACES the project's existing config; an empty value normalises to
 	// "{}" (no per-project overrides). A malformed blob is rejected
-	// (INVALID_ARGUMENT).
+	// (INVALID_ARGUMENT), and so is one that adds an oauth.hosts key
+	// ProjectOAuthHostClient.callback_host would refuse; a key already stored
+	// is written back as it is.
 	ConfigJson    string `protobuf:"bytes,2,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

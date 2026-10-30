@@ -239,7 +239,7 @@ func TestNewCallbackHost(t *testing.T) {
 		{"a leading hyphen", "-auth.example"},
 		{"a label ending in '-'", "auth-.example"},
 		{"a 64-character label", label63 + "a.example"},
-		{"over 253 characters", "c" + host253},
+		{"over 253 characters", strings.Join([]string{label63, label63, label63, strings.Repeat("b", 62)}, ".")},
 		{"a single label", "localhost"},
 		{"an underscore", "auth_b.example"},
 		{"a Unicode letter", "b\u00fccher.example"},
@@ -326,6 +326,63 @@ func TestUpsertProjectConfig_HostKeys(t *testing.T) {
 	}
 	if _, cfg := storedOAuth(t, f, projectID); len(cfg.Hosts) != 2 {
 		t.Fatalf("hosts = %v, want the stored key and the LDH one", cfg.Hosts)
+	}
+}
+
+// The whole-config check reads the keys under every spelling of "oauth" and
+// "hosts" that encoding/json would read as that field. A spelling this parse
+// skips (it keeps the last duplicate) can be the one a later parse of the
+// stored text reads, because a jsonb store reorders an object's keys.
+func TestUpsertProjectConfig_HostKeysUnderEverySpelling(t *testing.T) {
+	t.Parallel()
+	const client = `{"github":{"client_id":"h","client_secret_enc":"e"}}`
+	for name, cfg := range map[string]string{
+		"a HOSTS sibling":           `{"oauth":{"hosts":{"auth_b.example":` + client + `},"HOSTS":{}}}`,
+		"an OAUTH sibling":          `{"oauth":{"hosts":{"auth_b.example":` + client + `}},"OAUTH":{"hosts":{}}}`,
+		"a folded long s":           `{"oauth":{"ho\u017fts":{"auth_b.example":` + client + `},"hosts":{}}}`,
+		"an unnormalized key there": `{"oauth":{"HOSTS":{"Auth.B.Example":` + client + `},"hosts":{}}}`,
+	} {
+		f := newAdminFixture(oauthAdminSecret)
+		projectID := seedOAuthProject(t, f)
+		if _, err := ParseProjectConfig(cfg); err != nil {
+			t.Fatalf("%s: the config must parse for the key check to be what refuses it: %v", name, err)
+		}
+		if _, err := f.svc.UpsertProjectConfig(context.Background(), oauthAdminSecret, projectID, cfg); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("%s: err = %v, want ErrInvalidArgument", name, err)
+		}
+	}
+}
+
+// A whole-config write replaces a stored config that does not parse, which
+// is how such a project is repaired, and still keeps the keys stored under
+// oauth.hosts and holds a new one to the rule.
+func TestUpsertProjectConfig_ReplacesAConfigThatDoesNotParse(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const client = `{"github":{"client_id":"h","client_secret_enc":"e"}}`
+	for _, tc := range []struct {
+		name, stored, write string
+		ok                  bool
+	}{
+		{"oauth not an object, replaced", `{"oauth":["x"]}`, `{}`, true},
+		{"oauth not an object, a new LDH key", `{"oauth":["x"]}`, `{"oauth":{"hosts":{"auth.c.example":` + client + `}}}`, true},
+		{"oauth not an object, a new non-LDH key", `{"oauth":["x"]}`, `{"oauth":{"hosts":{"auth_c.example":` + client + `}}}`, false},
+		{"an unnormalized key, replaced", `{"oauth":{"hosts":{"Auth.B.Example":{}}}}`, `{}`, true},
+		{"a broken entry under a stored key, repaired", `{"oauth":{"hosts":{"auth_b.example":{"github":{"client_id":7}}}}}`, `{"oauth":{"hosts":{"auth_b.example":` + client + `}}}`, true},
+	} {
+		f := newAdminFixture(oauthAdminSecret)
+		projectID := seedOAuthProject(t, f)
+		seedProjectConfig(t, f, projectID, tc.stored)
+		if _, err := ParseProjectConfig(tc.stored); err == nil {
+			t.Fatalf("%s: the stored config must not parse", tc.name)
+		}
+		_, err := f.svc.UpsertProjectConfig(ctx, oauthAdminSecret, projectID, tc.write)
+		if tc.ok && err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+		if !tc.ok && !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("%s: err = %v, want ErrInvalidArgument", tc.name, err)
+		}
 	}
 }
 
