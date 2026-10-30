@@ -162,12 +162,21 @@ func TestOAuthHostClient_NativeOnlyBaseNeverEnables(t *testing.T) {
 		cfg      ProjectOAuthConfig
 		client   ProjectOAuthHostClient
 	}{
-		{oauthProviderGoogle, ProjectOAuthConfig{Google: &ProjectOAuthGoogle{NativeAudiences: []string{"native.example"}}},
-			ProjectOAuthHostClient{ClientID: hostBGoogle, ClientSecretEnc: secretEnc}},
-		{oauthProviderMicrosoft, ProjectOAuthConfig{Microsoft: &ProjectOAuthMicrosoft{NativeAudiences: []string{"native.example"}}},
-			ProjectOAuthHostClient{ClientID: "host-b-microsoft", ClientSecretEnc: secretEnc}},
-		{oauthProviderApple, ProjectOAuthConfig{Apple: &ProjectOAuthApple{NativeAudiences: []string{"native.example"}}},
-			ProjectOAuthHostClient{ClientID: hostBAppleID}},
+		{
+			oauthProviderGoogle,
+			ProjectOAuthConfig{Google: &ProjectOAuthGoogle{NativeAudiences: []string{"native.example"}}},
+			ProjectOAuthHostClient{ClientID: hostBGoogle, ClientSecretEnc: secretEnc},
+		},
+		{
+			oauthProviderMicrosoft,
+			ProjectOAuthConfig{Microsoft: &ProjectOAuthMicrosoft{NativeAudiences: []string{"native.example"}}},
+			ProjectOAuthHostClient{ClientID: "host-b-microsoft", ClientSecretEnc: secretEnc},
+		},
+		{
+			oauthProviderApple,
+			ProjectOAuthConfig{Apple: &ProjectOAuthApple{NativeAudiences: []string{"native.example"}}},
+			ProjectOAuthHostClient{ClientID: hostBAppleID},
+		},
 	} {
 		if err := tc.cfg.validate(); err != nil {
 			t.Fatalf("%s: the native-only block must be a valid config: %v", tc.provider, err)
