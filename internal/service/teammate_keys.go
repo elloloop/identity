@@ -289,10 +289,7 @@ func (s *TeammateKeyService) Exchange(ctx context.Context, keyID string, proof A
 	if challenge == nil || challenge.KeyID != key.ID || challenge.CreatedAtMs > now.UnixMilli() || challenge.ExpiresAtMs <= now.UnixMilli() || !verifyTeammateSignature(key, []byte(challenge.Message), proof.Signature) {
 		return nil, ErrUnauthenticated
 	}
-	if err = s.activeTeammate(ctx, project, key.TeammateID, ErrUnauthenticated); err != nil {
-		return nil, err
-	}
-	if err = s.activeOwner(ctx, project, key.OwnerUserID); err != nil {
+	if err = s.ownerStandsBehind(ctx, project, key); err != nil {
 		return nil, err
 	}
 	consumed, stopsAtMs, err := repo.ConsumeTeammateKeyChallenge(ctx, challenge.ID, key.ID, now.UnixMilli())
@@ -334,20 +331,32 @@ func (s *TeammateKeyService) activeKey(ctx context.Context, keyID string) (*Team
 	return key, nil
 }
 
-// activeOwner refuses a token whose owner may no longer stand behind one: an
-// agent can never do more than the person who granted it.
-func (s *TeammateKeyService) activeOwner(ctx context.Context, project, ownerID string) error {
-	owner, err := s.base.WithProject(project).GetUser(ctx, ownerID)
-	if errors.Is(err, ErrNotFound) {
-		return ErrUnauthenticated
-	}
-	if err != nil {
+// ownerStandsBehind refuses a token unless the teammate is an active agent
+// and the person who granted its hire may still grant it: an active person
+// who owns it now, or a project admin now. An agent can never do more than
+// the person named as its owner, so a transfer or a lost admin role ends the
+// key's tokens as the grant rule would refuse a new grant.
+func (s *TeammateKeyService) ownerStandsBehind(ctx context.Context, project string, key *TeammateKey) error {
+	users := s.base.WithProject(project)
+	teammate, err := users.GetUser(ctx, key.TeammateID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	if !isActivePerson(owner) {
+	owner, err := users.GetUser(ctx, key.OwnerUserID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if !mayGrantHire(owner, teammate) {
 		return ErrUnauthenticated
 	}
 	return nil
+}
+
+// mayGrantHire is the rule every action on an agent follows: an active
+// person who owns the active agent, or a project admin.
+func mayGrantHire(person, teammate *User) bool {
+	return isActivePerson(person) && teammate.IsAgent() && isActiveStatus(teammate.Status) &&
+		(teammate.OwnerUserID == person.ID || strings.EqualFold(person.Role, RoleAdmin))
 }
 
 func (s *TeammateKeyService) activeTeammate(ctx context.Context, project, teammateID string, refusal error) error {

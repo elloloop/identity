@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/jackc/pgx/v5"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jws"
 	"github.com/prometheus/client_golang/prometheus"
@@ -146,19 +147,26 @@ func newTeammateFixture(t *testing.T, configure ...func(*config.Config)) *teamma
 
 func (f *teammateFixture) person(t *testing.T, name, role string) identityconnectgen.HireGrantServiceClient {
 	t.Helper()
+	grants, _ := f.personWithID(t, name, role)
+	return grants
+}
+
+func (f *teammateFixture) personWithID(t *testing.T, name, role string) (identityconnectgen.HireGrantServiceClient, string) {
+	t.Helper()
 	email := name + "-" + f.unique + "@example.com"
 	passwordHash, err := passwords.Hash(issue3Password)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.h.Users.CreateUser(context.Background(), &service.User{Email: email, Name: name, Role: role, Status: service.StatusActive, EmailVerified: true, PasswordHash: passwordHash}); err != nil {
+	id, err := f.h.Users.CreateUser(context.Background(), &service.User{Email: email, Name: name, Role: role, Status: service.StatusActive, EmailVerified: true, PasswordHash: passwordHash})
+	if err != nil {
 		t.Fatalf("CreateUser(%s): %v", name, err)
 	}
 	login, err := f.h.Client.PasswordLogin(context.Background(), connect.NewRequest(&identitypb.PasswordLoginRequest{Email: email, Password: issue3Password}))
 	if err != nil {
 		t.Fatalf("PasswordLogin(%s): %v", name, err)
 	}
-	return hireGrantClient(f.h, login.Msg.AccessToken)
+	return hireGrantClient(f.h, login.Msg.AccessToken), id
 }
 
 func hireGrantClient(h *teammateHarness, accessToken string) identityconnectgen.HireGrantServiceClient {
@@ -448,6 +456,60 @@ func TestTeammateKeys_HireGrantNeedsTheTeammatesOwnerOrAnAdmin(t *testing.T) {
 	requireTeammateCode(t, "a malformed placement", err, connect.CodeInvalidArgument)
 	_, err = f.grants.CreateHireGrant(context.Background(), connect.NewRequest(&identitypb.CreateHireGrantRequest{TeammateId: f.agentID, PlacementId: "placement-1"}))
 	requireTeammateCode(t, "no company", err, connect.CodeInvalidArgument)
+}
+
+func TestTeammateKeys_ExchangesEndWhenTheGrantorCouldNoLongerGrant(t *testing.T) {
+	f := newTeammateFixture(t)
+	ctx := context.Background()
+	private, public := p256Key(t)
+	claim := f.claim("claim-transfer")
+	keyID, err := f.register(t, claim, public)
+	if err != nil {
+		t.Fatalf("RegisterTeammateKey: %v", err)
+	}
+	f.issue(t, keyID, signP256(t, private))
+	_, strangerID := f.personWithID(t, "new-owner", "")
+	raw, err := pgx.Connect(ctx, os.Getenv("GATEWAY_POSTGRES_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close(ctx) }()
+	if _, err = raw.Exec(ctx, `SELECT set_config('app.current_project_id',$1,false)`, f.h.ProjectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = raw.Exec(ctx, `UPDATE users SET owner_user_id=$1 WHERE id=$2`, strangerID, f.agentID); err != nil {
+		t.Fatalf("transfer the teammate: %v", err)
+	}
+	next, err := f.challenge(t, keyID)
+	if err != nil {
+		t.Fatalf("CreateAgentMachineChallenge: %v", err)
+	}
+	_, err = f.exchange(t, keyID, next.ChallengeId, signP256(t, private)(next.Message))
+	requireTeammateCode(t, "an exchange after the teammate moved to another owner", err, connect.CodeUnauthenticated)
+
+	admin, adminID := f.personWithID(t, "admin", service.RoleAdmin)
+	adminClaim := f.claim("claim-admin")
+	grant, err := admin.CreateHireGrant(ctx, connect.NewRequest(&identitypb.CreateHireGrantRequest{TeammateId: f.agentID, PlacementId: f.placement(adminClaim), CompanyId: "company-1"}))
+	if err != nil {
+		t.Fatalf("CreateHireGrant(admin): %v", err)
+	}
+	adminPrivate, adminPublic := p256Key(t)
+	adminKey, err := f.send(f.registration(adminClaim, adminPublic, grant.Msg.GrantId))
+	if err != nil {
+		t.Fatalf("RegisterTeammateKey(admin grant): %v", err)
+	}
+	if claims := verifiedTeammateClaims(t, f.h, f.issue(t, adminKey, signP256(t, adminPrivate)).AccessToken); claims.Actor.Sub != adminID {
+		t.Fatalf("act.sub = %q, want the granting admin %q", claims.Actor.Sub, adminID)
+	}
+	if err = f.h.Users.UpdateUser(ctx, adminID, map[string]any{"role": service.RoleMember}); err != nil {
+		t.Fatal(err)
+	}
+	next, err = f.challenge(t, adminKey)
+	if err != nil {
+		t.Fatalf("CreateAgentMachineChallenge: %v", err)
+	}
+	_, err = f.exchange(t, adminKey, next.ChallengeId, signP256(t, adminPrivate)(next.Message))
+	requireTeammateCode(t, "an exchange after the granting admin lost the role", err, connect.CodeUnauthenticated)
 }
 
 func TestTeammateKeys_Ed25519IsRefused(t *testing.T) {

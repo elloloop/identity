@@ -27,12 +27,9 @@ func (r *pgRepository) CreateHireGrant(ctx context.Context, grant *service.HireG
 }
 
 func (r *pgRepository) RegisterTeammateKey(ctx context.Context, key *service.TeammateKey, placementID string) (*service.TeammateKey, error) {
-	inserted, err := r.registerGrantedTeammateKey(ctx, key, placementID)
+	err := r.registerGrantedTeammateKey(ctx, key, placementID)
 	if err != nil && !errors.Is(err, service.ErrHireGrantRefused) {
 		return nil, err
-	}
-	if inserted {
-		return r.teammateKeyOfClaim(ctx, key.ClaimID)
 	}
 	stored, readErr := r.teammateKeyOfClaim(ctx, key.ClaimID)
 	switch {
@@ -47,14 +44,14 @@ func (r *pgRepository) RegisterTeammateKey(ctx context.Context, key *service.Tea
 }
 
 // registerGrantedTeammateKey consumes the grant and inserts the key in one
-// transaction, and reports whether it did. Consuming the grant first holds
+// transaction. Consuming the grant first holds
 // its row, so a concurrent registration of the same claim waits and then
 // finds the grant used and the key stored. A claim that already has a key
 // leaves the grant unused.
-func (r *pgRepository) registerGrantedTeammateKey(ctx context.Context, key *service.TeammateKey, placementID string) (bool, error) {
+func (r *pgRepository) registerGrantedTeammateKey(ctx context.Context, key *service.TeammateKey, placementID string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -62,23 +59,23 @@ func (r *pgRepository) registerGrantedTeammateKey(ctx context.Context, key *serv
 	err = tx.QueryRow(ctx, `UPDATE hire_grants SET used_at_ms=$3,used_claim_id=$4 WHERE project_id=$1 AND id=$2 AND used_claim_id='' AND expires_at_ms>$3 AND teammate_id=$5 AND placement_id=$6 AND company_id=$7 RETURNING owner_user_id`,
 		r.projectID, key.GrantID, key.CreatedAtMs, key.ClaimID, key.TeammateID, placementID, key.CompanyID).Scan(&owner)
 	if noRows(err) {
-		return false, service.ErrHireGrantRefused
+		return service.ErrHireGrantRefused
 	}
 	if err != nil {
-		return false, wrapPgErr("RegisterTeammateKey", err)
+		return wrapPgErr("RegisterTeammateKey", err)
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO teammate_keys(project_id,`+teammateKeyColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,'') ON CONFLICT (project_id,claim_id) DO NOTHING`,
 		r.projectID, key.ID, key.ClaimID, key.TeammateID, key.CompanyID, key.WorkstationID, key.PublicKey, key.Algorithm, key.GrantID, owner, key.CreatedAtMs)
 	if err != nil {
-		return false, wrapPgErr("RegisterTeammateKey", err)
+		return wrapPgErr("RegisterTeammateKey", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return false, nil
+		return nil
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return false, wrapPgErr("RegisterTeammateKey", err)
+		return wrapPgErr("RegisterTeammateKey", err)
 	}
-	return true, nil
+	return nil
 }
 
 func (r *pgRepository) teammateKeyOfClaim(ctx context.Context, claimID string) (*service.TeammateKey, error) {
@@ -87,7 +84,7 @@ func (r *pgRepository) teammateKeyOfClaim(ctx context.Context, claimID string) (
 		return nil, nil
 	}
 	if err != nil {
-		return nil, wrapPgErr("RegisterTeammateKey", err)
+		return nil, wrapPgErr("teammateKeyOfClaim", err)
 	}
 	return key, nil
 }

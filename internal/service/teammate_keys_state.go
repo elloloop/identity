@@ -87,8 +87,8 @@ var (
 // is unknown or no longer working with ErrUnauthenticated, and
 // ConsumeTeammateKeyChallenge consumes a challenge only while it is
 // unexpired and its key still working, and returns when the key stops
-// working as of that consumption, so a deadline set during the exchange is
-// not missed.
+// working as the consuming statement read it, so a deadline committed before
+// it is not missed.
 type TeammateKeyRepository interface {
 	CreateHireGrant(context.Context, *HireGrant) error
 	RegisterTeammateKey(ctx context.Context, key *TeammateKey, placementID string) (*TeammateKey, error)

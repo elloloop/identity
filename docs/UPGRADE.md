@@ -49,7 +49,9 @@ services that verify teammate tokens with `pkg/jwt` (see `act.sub` below).
   `identity_teammate_keys_revoked_total` gains a `schedule` label
   (`immediate` or `deadline`).
 - **The teammate token carries `act.sub`**, the person who granted the hire,
-  and an exchange is refused once that person is no longer active.
+  and every exchange applies the grant rule again: it is refused once that
+  person is no longer active, or neither owns the teammate (after a transfer)
+  nor is a project admin (after a demotion).
   `jwt.TeammateAccessClaims.Actor` is required, so `VerifyTeammateAccessToken`
   refuses a token an older release issued: upgrade the server before the
   services that verify with `pkg/jwt` (old tokens last at most 300 seconds).
@@ -63,7 +65,10 @@ services that verify teammate tokens with `pkg/jwt` (see `act.sub` below).
   challenges, set `GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP` to match.
 - **Migration 0055** adds `hire_grants` and gives `teammate_keys` a
   `grant_id` and `owner_user_id`, and revokes every unrevoked key (reason
-  `removed`), as above. It lifts `FORCE ROW LEVEL SECURITY` on
+  `removed`), as above. A server of the previous release still running once
+  0055 is applied fails `RegisterTeammateKey` with an internal error, because
+  its keys carry no grant: finish the server rollout before the managing
+  service registers keys. It lifts `FORCE ROW LEVEL SECURITY` on
   `teammate_keys` for its own transaction to see every project's rows, so it
   must run as the table's owner, as every migration does. Rolling it back
   drops the grants and the two columns; the keys it revoked stay revoked, and

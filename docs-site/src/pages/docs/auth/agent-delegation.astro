@@ -177,8 +177,10 @@ revocation deadline when that is sooner, with <code>sub</code> the agent,
 <code>act.sub</code> the person who granted the hire, <code>kind</code>
 <code>agent</code>, <code>aud</code> the <code>GATEWAY_JWT_AUDIENCE</code> value,
 and <code>claim_id</code>, <code>workstation_id</code> and <code>company_id</code>
-read from the key, never from the request. The exchange is refused once that
-person is no longer active. The token has no client, scope or grant id, so a
+read from the key, never from the request. Every exchange applies the grant
+rule again, so it is refused once that person is no longer active, or neither
+owns the teammate (after a transfer) nor is a project admin (after a
+demotion). The token has no client, scope or grant id, so a
 delegated-access verifier refuses it; verify it with
 <code>VerifyTeammateAccessToken</code> or an equivalent check of
 <code>typ</code>, issuer, project and audience.</p>

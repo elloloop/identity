@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/elloloop/identity/pkg/audit"
 )
@@ -16,7 +15,8 @@ var errHireGrantCaller = fmt.Errorf("%w: only the teammate's owner or a project 
 // request's project, hires teammateID into placementID for companyID. As for
 // every action on an agent, only its owner or a project admin may, and every
 // other caller is refused alike whether the id names an agent, a person or
-// nothing. The grant is single use and expires after HireGrantLifetime.
+// nothing. The exchange applies the same rule again on every token. The
+// grant is single use and expires after HireGrantLifetime.
 func (s *TeammateKeyService) CreateHireGrant(ctx context.Context, callerID, teammateID, placementID, companyID string) (*HireGrant, error) {
 	if callerID == "" {
 		return nil, ErrUnauthenticated
@@ -44,7 +44,7 @@ func (s *TeammateKeyService) CreateHireGrant(ctx context.Context, callerID, team
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
-	if teammate == nil || !teammate.IsAgent() || !isActiveStatus(teammate.Status) || (teammate.OwnerUserID != caller.ID && !strings.EqualFold(caller.Role, RoleAdmin)) {
+	if !mayGrantHire(caller, teammate) {
 		return nil, refuse("not_permitted")
 	}
 	now := s.now()
