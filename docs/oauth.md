@@ -257,6 +257,92 @@ https://auth.example.com/oauth/start/google?return_to=<app-url>&project_key=<pk>
   the same operator as the hub — the provider consent screen shows the
   shared client's branding for all of them. It is off by default.
 
+### A client per auth host (host clients)
+
+A provider's consent screen names the application its client is registered
+as, so a project served on several auth hosts shows every user the same name.
+When one project (one account pool) serves several products, each on its own
+auth host, a project can name a different client for a given callback host
+(ADR-0019):
+
+```json
+"oauth": {
+  "google": { "client_id": "base", "client_secret_enc": "<enc>" },
+  "hosts": {
+    "auth.widgets.example": {
+      "google":    { "client_id": "widgets", "client_secret_enc": "<enc>" },
+      "microsoft": { "client_id": "widgets-ms", "client_secret_enc": "<enc>" },
+      "apple":     { "client_id": "example.widgets.web" }
+    }
+  }
+}
+```
+
+Here only Google has a base in the project's own config, so on the default
+project the Microsoft and Apple overrides swap the client of the env
+providers; on a non-default project they apply only to providers it configures
+itself or borrows from the hub.
+
+- **The key is the host of the flow's callback URL**: the host the hosted
+  sign-in page and `/oauth/start` are served on, or the host of the app's
+  `redirect_uri` in the headless flow. The callback resolves the client from
+  the redirect URI signed into the state, so it completes with the client
+  the start used.
+- **An override swaps the client and nothing else.** The provider is still
+  the one the precedence above selects: the project's own, the env provider
+  for the default project, or the hub's under `GATEWAY_OAUTH_HUB_SHARING`.
+  Endpoints, Microsoft tenant settings, native audiences and Apple's team id,
+  key id and private key come from it. Apple's override is a Services ID of
+  the same team; the others are a client id and secret.
+- **An override never enables a provider.** Where the precedence yields
+  none, the provider stays unavailable on every host, and where it yields a
+  native-only block (`native_audiences` alone), the hosted flow stays
+  unavailable on every host.
+- **A broken override is unavailable** on its host (a secret that will not
+  decrypt, or an env base the server cannot rebuild because the embedder
+  supplied its own `OAuthRegistry`). It never falls back to the base client,
+  which the provider would reject for that callback.
+- **The hosted page starts an overridden provider on its own host**, with no
+  `project_key`, since its client is registered there. Other providers start
+  where their base client is registered, as before. If the project's primary
+  auth domain has an override, the own-provider flows that other hosts start
+  there use it too.
+- **The default project's overrides** apply to requests that resolve to it by
+  an auth domain or a key. A request that names no project falls back to the
+  env settings, which carry no overrides.
+- **Only the built-in provider keys** (`google`, `microsoft`, `apple`,
+  `github`, `oidc`) take an override. An env OIDC provider registered under a
+  key of its own (`GATEWAY_OAUTH_OIDC_PROVIDER_KEY=okta`, say) takes none;
+  with the key set to `oidc` it can. Any other key under a host is kept but
+  never read.
+
+Register each override's client with the callback URL of the flows that use
+it: `https://<host>/oauth/callback/<provider>` for the hosted flow, and the
+app's own `redirect_uri` for the headless flow. Configure overrides only once
+every replica runs a version that reads them: an older replica ignores
+`oauth.hosts`, so a flow it completes would exchange the code with the base
+client and fail. Delete them before rolling back below that version, for the
+same reason.
+
+Author them with their own admin RPCs. `AdminSetProjectOAuthHostClient` takes
+a `ProjectOAuthHostClient` (`provider`, `callback_host`, `client_id`,
+`client_secret`; an empty secret keeps the stored one, and Apple takes none;
+`callback_host` must be an LDH hostname: two or more labels of a-z, 0-9 and
+`-`, none starting or ending with `-`, at most 63 characters each and 253 in
+all, an IDN in its punycode form), `AdminDeleteProjectOAuthHostClient` removes
+one, and `AdminListProjectOAuthProviders` returns them, redacted, in
+`host_clients`. A server that predates these RPCs refuses them and changes
+nothing: over HTTP it answers `UNAUTHENTICATED`, because it does not know them
+as admin-secret calls, so during a rolling upgrade that code means the call
+reached an old replica; through an embedder's native gRPC server it answers
+`UNIMPLEMENTED`. Setting or deleting the base provider leaves its overrides in place.
+
+A whole-config write (`UpsertProjectConfig`) holds each `oauth.hosts` key it
+adds, under any letter case of `oauth` and `hosts`, to the same rule, in the
+lower-case form the override RPC stores. A key already stored is written back
+as it is, even when the rest of the stored config no longer parses, so a
+whole-config write can still repair such a project.
+
 ### The hosted auth UI (`/auth/`)
 
 The built-in sign-in page is rendered **per request** and mirrors the

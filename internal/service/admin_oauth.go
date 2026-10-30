@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -29,6 +31,11 @@ import (
 // survives verbatim, so a set/delete is never a lossy rewrite. Only the ONE
 // provider being Set is decoded + validated at author time; Delete just removes
 // a key, so a stale invalid neighbour never blocks an unrelated deletion.
+//
+// A host's own client for a provider (ADR-0019) lives one level down, under
+// oauth.hosts.<host>.<provider>. It has its own Set and Delete calls, so a
+// write meant for one host's client can never reach the base provider, and
+// AdminListProjectOAuthProviders lists it beside the providers.
 
 // OAuth provider keys, mirroring the login `provider` argument callers pass.
 const (
@@ -42,6 +49,11 @@ const (
 // oauthProviderKeys is the canonical (sorted) set of configurable provider
 // keys, used to enumerate a project's providers deterministically.
 var oauthProviderKeys = []string{oauthProviderApple, oauthProviderGitHub, oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderOIDC}
+
+// isOAuthProviderKey reports whether key is one of the built-in provider keys.
+func isOAuthProviderKey(key string) bool {
+	return slices.Contains(oauthProviderKeys, key)
+}
 
 // ProjectOAuthProviderInput is the operator-supplied authoring input for one of
 // a project's OAuth providers. Secret fields (ClientSecret, ApplePrivateKey)
@@ -173,7 +185,10 @@ func (s *ControlPlaneAdminService) AdminSetProjectOAuthProvider(ctx context.Cont
 // (including keys this binary does not understand). It is idempotent — removing
 // an absent provider is a no-op — and does NOT decode or validate the surviving
 // providers, so a stale invalid neighbour never blocks the deletion. An unknown
-// project surfaces ErrNotFound.
+// project surfaces ErrNotFound. The provider's host clients (ADR-0019) stay
+// stored and apply to whichever base the precedence then selects
+// (ADR-0010/0011); with none they are inert, since an override never enables
+// a provider. AdminDeleteProjectOAuthHostClient removes them.
 func (s *ControlPlaneAdminService) AdminDeleteProjectOAuthProvider(ctx context.Context, secret, projectID, provider string) error {
 	if err := s.authorize(secret); err != nil {
 		return err
@@ -204,12 +219,34 @@ func (s *ControlPlaneAdminService) AdminDeleteProjectOAuthProvider(ctx context.C
 	return nil
 }
 
-// AdminListProjectOAuthProviders lists a project's configured OAuth providers,
-// ordered by provider key, with secrets REDACTED. Only the known provider keys
-// are surfaced; an unknown key stored under "oauth" is preserved on write but
-// not listed (its shape is unknown to this binary). An unknown project surfaces
-// ErrNotFound.
-func (s *ControlPlaneAdminService) AdminListProjectOAuthProviders(ctx context.Context, secret, projectID string) ([]*ProjectOAuthProviderView, error) {
+// ProjectOAuthHostClientInput is the operator-supplied client one provider uses
+// on one callback host (ADR-0019); every other setting is the base provider's.
+// ClientSecret is PLAINTEXT, encrypted before storage, and an EMPTY one keeps
+// the stored secret. Apple takes none: the base provider's key signs for the
+// host's Services ID.
+type ProjectOAuthHostClientInput struct {
+	Provider     string
+	CallbackHost string
+	ClientID     string
+	ClientSecret string
+}
+
+// ProjectOAuthHostClientView is the REDACTED read view of a host client:
+// HasClientSecret in place of the secret.
+type ProjectOAuthHostClientView struct {
+	Provider        string
+	CallbackHost    string
+	ClientID        string
+	HasClientSecret bool
+}
+
+// AdminSetProjectOAuthHostClient sets (or rotates) the client one of a
+// project's providers uses on one callback host (ADR-0019). It encrypts any
+// plaintext secret, merges the client into the project's config_json without
+// disturbing the base provider or any other config key, and returns it with
+// the secret REDACTED. project_id, a known provider key and a callback host
+// are required. An unknown project surfaces ErrNotFound.
+func (s *ControlPlaneAdminService) AdminSetProjectOAuthHostClient(ctx context.Context, secret, projectID string, in *ProjectOAuthHostClientInput) (*ProjectOAuthHostClientView, error) {
 	if err := s.authorize(secret); err != nil {
 		return nil, err
 	}
@@ -217,15 +254,288 @@ func (s *ControlPlaneAdminService) AdminListProjectOAuthProviders(ctx context.Co
 	if projectID == "" {
 		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
-	stored, _, err := s.projects.GetProjectConfig(ctx, projectID)
+	if in == nil {
+		return nil, fmt.Errorf("%w: missing client", ErrInvalidArgument)
+	}
+	provider, err := normalizeOAuthProvider(in.Provider)
 	if err != nil {
 		return nil, err
+	}
+	host, err := newCallbackHost(in.CallbackHost)
+	if err != nil {
+		return nil, err
+	}
+	if provider == oauthProviderApple && in.ClientSecret != "" {
+		return nil, fmt.Errorf("%w: apple takes no client_secret on a callback host: the base provider's key signs for its client", ErrInvalidArgument)
+	}
+
+	var view *ProjectOAuthHostClientView
+	if _, err := s.mutateProjectConfig(ctx, projectID, func(current string) (string, error) {
+		top, oauthSub, err := decodeOAuthSubtree(current)
+		if err != nil {
+			return "", err
+		}
+		hosts, err := decodeHostClients(oauthSub)
+		if err != nil {
+			return "", err
+		}
+		var stored ProjectOAuthHostClient
+		if raw, ok := hosts[host][provider]; ok {
+			if err := json.Unmarshal(raw, &stored); err != nil {
+				return "", fmt.Errorf("%w: stored oauth.hosts[%q].%s is malformed: %s", ErrInvalidArgument, host, provider, err.Error())
+			}
+		}
+		enc, err := s.encryptOrKeep(in.ClientSecret, stored.ClientSecretEnc)
+		if err != nil {
+			return "", err
+		}
+		client := ProjectOAuthHostClient{ClientID: strings.TrimSpace(in.ClientID), ClientSecretEnc: enc}
+		if err := client.validate(provider); err != nil {
+			return "", fmt.Errorf("%w: oauth.hosts[%q].%s", ErrInvalidArgument, host, err.Error())
+		}
+		raw, err := json.Marshal(client)
+		if err != nil {
+			return "", fmt.Errorf("marshal oauth host client: %w", err)
+		}
+		if hosts[host] == nil {
+			hosts[host] = map[string]json.RawMessage{}
+		}
+		hosts[host][provider] = raw
+		if err := encodeHostClients(oauthSub, hosts); err != nil {
+			return "", err
+		}
+		view = hostClientView(host, provider, client)
+		return encodeOAuthSubtree(top, oauthSub)
+	}); err != nil {
+		return nil, err
+	}
+	s.audit.Log(ctx, audit.EventProjectOAuthProviderSet, audit.WithSuccess(true), audit.WithDetails(hostClientAuditDetails(projectID, provider, host)))
+	return view, nil
+}
+
+// AdminDeleteProjectOAuthHostClient removes the client one of a project's
+// providers uses on one callback host, leaving the base provider, every other
+// host client and every other config key intact. It is idempotent — removing
+// an absent host client is a no-op. An unknown project surfaces ErrNotFound.
+func (s *ControlPlaneAdminService) AdminDeleteProjectOAuthHostClient(ctx context.Context, secret, projectID, provider, callbackHost string) error {
+	if err := s.authorize(secret); err != nil {
+		return err
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
+	}
+	provider, err := normalizeOAuthProvider(provider)
+	if err != nil {
+		return err
+	}
+	host, err := normalizeCallbackHost(callbackHost)
+	if err != nil {
+		return err
+	}
+	// No key holds U+0000 (a Postgres jsonb config cannot store one), and the
+	// audit row naming it would be refused by the same jsonb cast.
+	if strings.ContainsRune(host, 0) {
+		return fmt.Errorf("%w: invalid callback_host %q", ErrInvalidArgument, callbackHost)
+	}
+
+	if _, err := s.mutateProjectConfig(ctx, projectID, func(current string) (string, error) {
+		top, oauthSub, err := decodeOAuthSubtree(current)
+		if err != nil {
+			return "", err
+		}
+		hosts, err := decodeHostClients(oauthSub)
+		if err != nil {
+			return "", err
+		}
+		delete(hosts[host], provider)
+		if err := encodeHostClients(oauthSub, hosts); err != nil {
+			return "", err
+		}
+		return encodeOAuthSubtree(top, oauthSub)
+	}); err != nil {
+		return err
+	}
+	s.audit.Log(ctx, audit.EventProjectOAuthProviderRemoved, audit.WithSuccess(true), audit.WithDetails(hostClientAuditDetails(projectID, provider, host)))
+	return nil
+}
+
+// hostClientAuditDetails names what a host-client write changed: the project,
+// the provider and the callback host.
+func hostClientAuditDetails(projectID, provider, host string) map[string]any {
+	return map[string]any{"project_id": projectID, "provider": provider, "callback_host": host}
+}
+
+// normalizeCallbackHost validates the host a host client is keyed by and
+// returns it in the form the resolver compares a redirect URI's host in
+// (ADR-0019). A key is valid only if it comes back from this function
+// unchanged, which is what parsing a stored config checks, so a host whose
+// normalized form would normalize again to something else (a doubled
+// trailing dot) is refused rather than stored in a form no parse accepts.
+func normalizeCallbackHost(host string) (string, error) {
+	h, err := normalizeHostname("callback_host", host)
+	if err != nil {
+		return "", err
+	}
+	if again, err := normalizeHostname("callback_host", h); err != nil || again != h {
+		return "", fmt.Errorf("%w: invalid callback_host %q", ErrInvalidArgument, host)
+	}
+	return h, nil
+}
+
+// newCallbackHost is normalizeCallbackHost for a host client being written,
+// which must also be a bare domain name (isBareDomainName: two or more LDH
+// labels), an IDN in its punycode form. That catches a typo, a stray URL
+// character, an empty label or a control character at the write, instead of
+// storing a key that silently never applies. A stored config is held only to
+// normalizeCallbackHost, so a key written under a wider rule never stops this
+// binary loading the project, and the delete can always remove it.
+func newCallbackHost(host string) (string, error) {
+	h, err := normalizeCallbackHost(host)
+	if err != nil {
+		return "", err
+	}
+	if !isBareDomainName(h) {
+		return "", fmt.Errorf("%w: invalid callback_host %q: %s", ErrInvalidArgument, host, callbackHostRule)
+	}
+	return h, nil
+}
+
+// callbackHostRule says, in an error, what a written callback host must be.
+const callbackHostRule = "want a hostname of two or more labels of a-z, 0-9 and '-', none starting or ending " +
+	"with '-', at most 63 characters each and 253 in all (an IDN in punycode)"
+
+// checkNewHostKeys holds each oauth.hosts key that the config text next adds
+// to the stored config text current to the rule a host client write is held
+// to: a key must be what newCallbackHost would store. So a whole-config write
+// cannot store a key the host client RPC would refuse. A key already stored
+// is kept whatever rule it was written under, so writing back a config as
+// read never fails on it, even when the stored config no longer parses (a
+// whole-config write is how such a config is repaired).
+func checkNewHostKeys(current, next string) error {
+	stored := configHostKeys(current)
+	for host := range configHostKeys(next) {
+		if stored[host] {
+			continue
+		}
+		if h, err := newCallbackHost(host); err != nil || h != host {
+			return fmt.Errorf("%w: oauth.hosts key %q (under any letter case of oauth.hosts): %s",
+				ErrInvalidArgument, host, callbackHostRule)
+		}
+	}
+	return nil
+}
+
+// configHostKeys returns the oauth.hosts keys in a config's JSON text under
+// every spelling of "oauth" and "hosts" that encoding/json reads as that
+// field: it matches a field name case-insensitively and keeps the last
+// duplicate, and a jsonb store reorders an object's keys, so which spelling
+// a later parse reads need not be the one a parse of the written text read.
+// Text that is not a JSON object, or a spelling whose value is not one, adds
+// no key.
+func configHostKeys(config string) map[string]bool {
+	keys := map[string]bool{}
+	for _, oauth := range foldedValues(json.RawMessage(config), "oauth") {
+		for _, hosts := range foldedValues(oauth, "hosts") {
+			var entries map[string]json.RawMessage
+			if json.Unmarshal(hosts, &entries) != nil {
+				continue
+			}
+			for host := range entries {
+				keys[host] = true
+			}
+		}
+	}
+	return keys
+}
+
+// foldedValues returns the value, of any JSON type, of every key of the JSON
+// object data that equals field under Unicode case folding, the match
+// encoding/json uses for a field name. Data that is not a JSON object has
+// none.
+func foldedValues(data json.RawMessage, field string) []json.RawMessage {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(data, &obj) != nil {
+		return nil
+	}
+	var out []json.RawMessage
+	for k, v := range obj {
+		if strings.EqualFold(k, field) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// decodeHostClients decodes the oauth subtree's "hosts" object into raw
+// per-host, per-provider entries, so every entry a write does not touch
+// round-trips byte-for-byte.
+func decodeHostClients(oauthSub map[string]json.RawMessage) (map[string]map[string]json.RawMessage, error) {
+	hosts := map[string]map[string]json.RawMessage{}
+	if raw, ok := oauthSub["hosts"]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &hosts); err != nil {
+			return nil, fmt.Errorf("%w: stored oauth.hosts is not an object of objects: %s", ErrInvalidArgument, err.Error())
+		}
+	}
+	if hosts == nil { // a stored "hosts": null
+		hosts = map[string]map[string]json.RawMessage{}
+	}
+	return hosts, nil
+}
+
+// encodeHostClients writes hosts back into the oauth subtree, dropping a host
+// left with no client and the "hosts" key itself once no host remains.
+func encodeHostClients(oauthSub map[string]json.RawMessage, hosts map[string]map[string]json.RawMessage) error {
+	for host, clients := range hosts {
+		if len(clients) == 0 {
+			delete(hosts, host)
+		}
+	}
+	if len(hosts) == 0 {
+		delete(oauthSub, "hosts")
+		return nil
+	}
+	raw, err := json.Marshal(hosts)
+	if err != nil {
+		return fmt.Errorf("marshal oauth hosts: %w", err)
+	}
+	oauthSub["hosts"] = raw
+	return nil
+}
+
+// hostClientView renders the redacted read view of a host's client.
+func hostClientView(host, provider string, client ProjectOAuthHostClient) *ProjectOAuthHostClientView {
+	return &ProjectOAuthHostClientView{
+		Provider:        provider,
+		CallbackHost:    host,
+		ClientID:        client.ClientID,
+		HasClientSecret: client.ClientSecretEnc != "",
+	}
+}
+
+// AdminListProjectOAuthProviders lists a project's configured OAuth providers,
+// ordered by provider key, and its host clients, ordered by host and then
+// provider key, all with secrets REDACTED. Only the known provider keys are
+// surfaced; an unknown key stored under "oauth" is preserved on write but not
+// listed (its shape is unknown to this binary). An unknown project surfaces
+// ErrNotFound.
+func (s *ControlPlaneAdminService) AdminListProjectOAuthProviders(ctx context.Context, secret, projectID string) (providers []*ProjectOAuthProviderView, hostClients []*ProjectOAuthHostClientView, err error) {
+	if err := s.authorize(secret); err != nil {
+		return nil, nil, err
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
+	}
+	stored, _, err := s.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		return nil, nil, err
 	}
 	_, oauthSub, err := decodeOAuthSubtree(stored)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := make([]*ProjectOAuthProviderView, 0, len(oauthProviderKeys))
+	providers = make([]*ProjectOAuthProviderView, 0, len(oauthProviderKeys))
 	for _, key := range oauthProviderKeys {
 		raw, ok := oauthSub[key]
 		if !ok || len(raw) == 0 {
@@ -233,11 +543,29 @@ func (s *ControlPlaneAdminService) AdminListProjectOAuthProviders(ctx context.Co
 		}
 		prov, err := decodeProvider(key, raw)
 		if err != nil {
-			return nil, fmt.Errorf("%w: stored oauth.%s is malformed: %s", ErrInvalidArgument, key, err.Error())
+			return nil, nil, fmt.Errorf("%w: stored oauth.%s is malformed: %s", ErrInvalidArgument, key, err.Error())
 		}
-		out = append(out, providerView(key, prov))
+		providers = append(providers, providerView(key, prov))
 	}
-	return out, nil
+	hosts, err := decodeHostClients(oauthSub)
+	if err != nil {
+		return nil, nil, err
+	}
+	hostClients = []*ProjectOAuthHostClientView{}
+	for _, host := range slices.Sorted(maps.Keys(hosts)) {
+		for _, key := range oauthProviderKeys {
+			raw, ok := hosts[host][key]
+			if !ok {
+				continue
+			}
+			var client ProjectOAuthHostClient
+			if err := json.Unmarshal(raw, &client); err != nil {
+				return nil, nil, fmt.Errorf("%w: stored oauth.hosts[%q].%s is malformed: %s", ErrInvalidArgument, host, key, err.Error())
+			}
+			hostClients = append(hostClients, hostClientView(host, key, client))
+		}
+	}
+	return providers, hostClients, nil
 }
 
 // decodeOAuthSubtree decodes a stored config_json blob into its top-level object
@@ -252,11 +580,17 @@ func decodeOAuthSubtree(stored string) (top, oauthSub map[string]json.RawMessage
 			return nil, nil, fmt.Errorf("%w: stored project config is not a JSON object: %s", ErrInvalidArgument, err.Error())
 		}
 	}
+	if top == nil { // a stored null
+		top = map[string]json.RawMessage{}
+	}
 	oauthSub = map[string]json.RawMessage{}
 	if raw, ok := top["oauth"]; ok && len(raw) > 0 {
 		if err := json.Unmarshal(raw, &oauthSub); err != nil {
 			return nil, nil, fmt.Errorf("%w: stored oauth config is not a JSON object: %s", ErrInvalidArgument, err.Error())
 		}
+	}
+	if oauthSub == nil { // a stored "oauth": null
+		oauthSub = map[string]json.RawMessage{}
 	}
 	return top, oauthSub, nil
 }
@@ -537,11 +871,9 @@ func normalizeStringList(in []string) []string {
 // normalizeOAuthProvider lower-cases/trims a provider key and rejects any that
 // is not one of the five configurable providers.
 func normalizeOAuthProvider(provider string) (string, error) {
-	switch k := strings.ToLower(strings.TrimSpace(provider)); k {
-	case oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderGitHub, oauthProviderOIDC:
+	if k := strings.ToLower(strings.TrimSpace(provider)); isOAuthProviderKey(k) {
 		return k, nil
-	default:
-		return "", fmt.Errorf("%w: unknown oauth provider %q (want %q, %q, %q, %q, or %q)",
-			ErrInvalidArgument, provider, oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderGitHub, oauthProviderOIDC)
 	}
+	return "", fmt.Errorf("%w: unknown oauth provider %q (want %q, %q, %q, %q, or %q)",
+		ErrInvalidArgument, provider, oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderGitHub, oauthProviderOIDC)
 }

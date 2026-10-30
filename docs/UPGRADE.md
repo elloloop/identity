@@ -1,5 +1,86 @@
 # Upgrade guide
 
+## Next — a project can give one auth host its own OAuth client (additive RPCs and field; no migration; `oauth.hosts` is now validated; `HostedUIOptions` and `AdminListProjectOAuthProviders` change shape (Go API))
+
+A provider's consent screen names the application its client is registered
+as, so a project served on several auth hosts showed the same name on all of
+them. A project can now name a different client for one callback host
+(ADR-0019), for each provider its precedence already selects: its own, the
+default project's env provider, or a hub provider borrowed under
+`GATEWAY_OAUTH_HUB_SHARING`. Only the client changes; every other setting comes
+from that provider. See the `oauth.md` section "A client per auth host".
+
+- **Stored in `config_json.oauth.hosts`**, keyed by lower-case host, then by
+  provider: `client_id`, and `client_secret_enc` for every provider but Apple,
+  whose override is a Services ID signed with the base's team, key id and
+  private key. Only the built-in provider keys are read, so an env OIDC
+  provider registered under a key of its own takes no override.
+- **Keyed by the callback host**: the host the hosted page and
+  `/oauth/start` are served on, or the host of the headless flow's
+  `redirect_uri`. The callback completes with the client its start used.
+- **Never enables a provider**, and a broken override (a secret that will not
+  decrypt, or an env base that cannot be rebuilt) makes the provider
+  unavailable on that host. It never falls back to the base client.
+- **The hosted page** starts a provider with an override for its own host on
+  that host, with no `project_key`.
+- **Admin API (additive):** `AdminSetProjectOAuthHostClient` writes an override
+  from a `ProjectOAuthHostClient` (`provider`, `callback_host`, `client_id`,
+  `client_secret`; an empty secret keeps the stored one, and Apple takes none),
+  and `AdminDeleteProjectOAuthHostClient` removes one. A write's
+  `callback_host` must be an LDH hostname: two or more labels of a-z, 0-9 and
+  `-`, none starting or ending with `-`, at most 63 characters each and 253 in
+  all, an IDN in its punycode form. A whole-config write
+  (`UpsertProjectConfig`) holds each `oauth.hosts` key it adds, under any
+  letter case of `oauth` and `hosts`, to the same rule in the lower-case form
+  the override RPC stores, and writes a key already stored back as it is, even
+  when the rest of the stored config no longer parses. Neither override RPC
+  touches the base provider. A server that predates the override RPCs refuses
+  them and changes nothing: over HTTP it answers `UNAUTHENTICATED`, because it
+  does not know them as admin-secret calls, so during a rolling upgrade that
+  code means the call reached an old replica, not that the admin secret is
+  wrong. Through an embedder's native gRPC server an older build answers
+  `UNIMPLEMENTED`. `AdminListProjectOAuthProvidersResponse.host_clients` (2)
+  returns the overrides, redacted. Setting or deleting a base provider leaves
+  its overrides in place. Writing or removing an override is audited as
+  `project_oauth_provider_set` or `project_oauth_provider_removed` with a
+  `callback_host` detail.
+- **`oauth.hosts` is validated** when a project's config loads: a host key
+  must be a lower-case DNS name with no scheme, port, path or trailing dot,
+  and each built-in provider's override must be complete. An older version
+  ignored the key, so a project that already stores an `oauth.hosts` value for
+  some other purpose fails to load after the upgrade until it is removed.
+- **`UpsertProjectConfig` refuses data after the config object**
+  (`{…} {}`, say) with `INVALID_ARGUMENT`. The Postgres store already refused
+  such a blob, as an internal error, so no stored config is affected.
+- **Rollout:** register each override's client with the callback URL of the
+  flows that use it (`https://<host>/oauth/callback/<provider>` for the hosted
+  flow, the app's own `redirect_uri` for the headless flow), and configure an
+  override only once every replica runs this version. An older replica ignores
+  `oauth.hosts`, so a flow it completes would exchange the code with the base
+  client and fail.
+- **Rollback:** delete the overrides before rolling back below this version.
+  An older version signs in on their hosts with the base client, which is not
+  registered there.
+
+Nothing changes for a project without overrides.
+
+### Go API
+
+- `AuthService.HostedUIOptions` takes the page's origin:
+  `HostedUIOptions(ctx, pageOrigin string)`.
+- `ControlPlaneAdminService.AdminListProjectOAuthProviders` returns the host
+  overrides as a second slice:
+  `(providers []*ProjectOAuthProviderView, hostClients []*ProjectOAuthHostClientView, err error)`.
+- New: `ControlPlaneAdminService.AdminSetProjectOAuthHostClient` and
+  `AdminDeleteProjectOAuthHostClient`, with `ProjectOAuthHostClientInput` and
+  `ProjectOAuthHostClientView`; `ProjectOAuthConfig.Hosts`, a
+  `ProjectOAuthHosts` (callback host to that host's `ProjectOAuthHostClients`,
+  each provider key to its `ProjectOAuthHostClient`; only the built-in keys
+  are decoded); and `AuthService.WithEnvOAuthProviders`, which
+  takes a `service.EnvOAuthProviderBuilder`. An embedder that supplies its own
+  `OAuthRegistry` gets no builder, so an override whose base is an env
+  provider is unavailable there.
+
 ## Next — a `tenant_operator` credential runs one project's tenants without the admin secret (migration 0054; additive credential kind and header; `ControlPlaneAdminService`'s tenant operations take `service.OperatorCredentials` and `ControlPlaneProjectStore` reads a credential by its public id (Go API))
 
 The admin secret (`GATEWAY_ADMIN_API_SECRET`) governs every project, so a

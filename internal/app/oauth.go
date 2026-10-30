@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/oauth"
 )
 
@@ -33,11 +34,8 @@ func buildNativeOAuthVerifier(cfg *config.Config, logger *zap.Logger) *oauth.Nat
 }
 
 // buildOAuthRegistry constructs an oauth.Registry from the gateway
-// configuration. A provider is registered only if its required credentials
-// are non-empty; this lets operators leave a provider's credentials unset
-// to disable it (rather than gating each provider behind its own boolean).
-// Apple requires client ID, team ID, key ID, and private key. Others
-// require client ID and client secret.
+// configuration: each provider envOAuthProviders lists, built by
+// newEnvOAuthProvider to sign in through its env client.
 //
 // The returned registry is never nil so the AuthService can call
 // (*Registry).Len() unconditionally.
@@ -46,61 +44,10 @@ func buildOAuthRegistry(cfg *config.Config, logger *zap.Logger) *oauth.Registry 
 		logger = zap.NewNop()
 	}
 	r := oauth.NewRegistry()
-
-	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
-		r.Register("google", oauth.NewGoogle(oauth.GoogleConfig{
-			ClientID:         cfg.GoogleClientID,
-			ClientSecret:     cfg.GoogleClientSecret,
-			Prompt:           cfg.OAuthPrompt,
-			AuthorizationURL: cfg.GoogleAuthorizationURL,
-			TokenURL:         cfg.GoogleTokenURL,
-			JWKSURL:          cfg.GoogleJWKSURL,
-			DiscoveryURL:     cfg.GoogleDiscoveryURL,
-			UserinfoURL:      cfg.GoogleUserinfoURL,
-			Issuer:           cfg.GoogleIssuer,
-		}))
-	}
-	if cfg.MicrosoftClientID != "" && cfg.MicrosoftClientSecret != "" {
-		r.Register("microsoft", oauth.NewMicrosoft(oauth.MicrosoftConfig{
-			ClientID:       cfg.MicrosoftClientID,
-			ClientSecret:   cfg.MicrosoftClientSecret,
-			Prompt:         cfg.OAuthPrompt,
-			TenantID:       cfg.MicrosoftTenantID,
-			AllowedTenants: cfg.MicrosoftAllowedTenantList(),
-		}))
-	}
-	if cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "" {
-		r.Register("github", oauth.NewGitHub(oauth.GitHubConfig{
-			ClientID:     cfg.GitHubClientID,
-			ClientSecret: cfg.GitHubClientSecret,
-		}))
-	}
-	if cfg.AppleClientID != "" && cfg.AppleTeamID != "" && cfg.AppleKeyID != "" && cfg.ApplePrivateKey != "" {
-		r.Register("apple", oauth.NewApple(oauth.AppleConfig{
-			ClientID:   cfg.AppleClientID,
-			TeamID:     cfg.AppleTeamID,
-			KeyID:      cfg.AppleKeyID,
-			PrivateKey: cfg.ApplePrivateKey,
-		}))
-	}
-	// Generic, config-driven OIDC provider: registers an arbitrary
-	// standards-compliant IdP (Okta, Auth0, Keycloak, a self-hosted issuer)
-	// under its configured key. cfg.Validate() guarantees the key and
-	// credentials are present and the key does not shadow a built-in provider.
-	if cfg.OIDCEnabled {
-		// Register under the same lowercased/trimmed key the service uses
-		// for lookups, so a config like PROVIDER_KEY="Okta" (or with stray
-		// whitespace) still resolves at login. Robust even when a Config is
-		// constructed directly rather than via config.Load.
-		oidcKey := strings.ToLower(strings.TrimSpace(cfg.OIDCProviderKey))
-		r.Register(oidcKey, oauth.NewOIDC(oauth.GenericOIDCConfig{
-			ProviderKey:  oidcKey,
-			IssuerURL:    cfg.OIDCIssuer,
-			DiscoveryURL: cfg.OIDCDiscoveryURL,
-			ClientID:     cfg.OIDCClientID,
-			ClientSecret: cfg.OIDCClientSecret,
-			Scopes:       cfg.OIDCScopeList(),
-		}))
+	for _, p := range envOAuthProviders(cfg) {
+		if e, ok := newEnvOAuthProvider(cfg, p.key, p.kind, p.clientID, p.clientSecret); ok {
+			r.Register(p.key, e)
+		}
 	}
 
 	if r.Len() == 0 {
@@ -118,4 +65,111 @@ func buildOAuthRegistry(cfg *config.Config, logger *zap.Logger) *oauth.Registry 
 		)
 	}
 	return r
+}
+
+// envOAuthProvider is one provider the env configures: the key it registers
+// under, its kind, and the env client it signs in through.
+type envOAuthProvider struct{ key, kind, clientID, clientSecret string }
+
+// envOAuthProviders lists the providers the env configures. A provider is
+// configured when its required env credentials are all set, so an operator
+// disables one by leaving them unset: Apple requires the client id, team id,
+// key id and private key, the others the client id and secret. The generic
+// OIDC provider is listed when enabled, under its configured key, which
+// cfg.Validate() then keeps from shadowing a built-in provider; its kind, not
+// its key, says how it is built.
+func envOAuthProviders(cfg *config.Config) []envOAuthProvider {
+	var providers []envOAuthProvider
+	add := func(configured bool, p envOAuthProvider) {
+		if configured {
+			providers = append(providers, p)
+		}
+	}
+	add(cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "",
+		envOAuthProvider{"google", "google", cfg.GoogleClientID, cfg.GoogleClientSecret})
+	add(cfg.MicrosoftClientID != "" && cfg.MicrosoftClientSecret != "",
+		envOAuthProvider{"microsoft", "microsoft", cfg.MicrosoftClientID, cfg.MicrosoftClientSecret})
+	add(cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "",
+		envOAuthProvider{"github", "github", cfg.GitHubClientID, cfg.GitHubClientSecret})
+	add(cfg.AppleClientID != "" && cfg.AppleTeamID != "" && cfg.AppleKeyID != "" && cfg.ApplePrivateKey != "",
+		envOAuthProvider{"apple", "apple", cfg.AppleClientID, ""})
+	add(cfg.OIDCEnabled,
+		envOAuthProvider{envOIDCKey(cfg), "oidc", cfg.OIDCClientID, cfg.OIDCClientSecret})
+	return providers
+}
+
+// envOAuthProviderBuilder rebuilds the env provider registered under a key
+// with another client, for a host override (ADR-0019) whose base is an env
+// provider.
+func envOAuthProviderBuilder(cfg *config.Config) service.EnvOAuthProviderBuilder {
+	return func(provider, clientID, clientSecret string) (oauth.Exchanger, bool) {
+		for _, p := range envOAuthProviders(cfg) {
+			if p.key == provider {
+				return newEnvOAuthProvider(cfg, p.key, p.kind, clientID, clientSecret)
+			}
+		}
+		return nil, false
+	}
+}
+
+// newEnvOAuthProvider builds the env provider of kind, registered under key,
+// signing in through clientID and clientSecret with every other setting from
+// the env, or reports false for a kind it does not know. Apple has no client
+// secret, so clientSecret is ignored for it.
+func newEnvOAuthProvider(cfg *config.Config, key, kind, clientID, clientSecret string) (oauth.Exchanger, bool) {
+	switch kind {
+	case "google":
+		return oauth.NewGoogle(oauth.GoogleConfig{
+			ClientID:         clientID,
+			ClientSecret:     clientSecret,
+			Prompt:           cfg.OAuthPrompt,
+			AuthorizationURL: cfg.GoogleAuthorizationURL,
+			TokenURL:         cfg.GoogleTokenURL,
+			JWKSURL:          cfg.GoogleJWKSURL,
+			DiscoveryURL:     cfg.GoogleDiscoveryURL,
+			UserinfoURL:      cfg.GoogleUserinfoURL,
+			Issuer:           cfg.GoogleIssuer,
+		}), true
+	case "microsoft":
+		return oauth.NewMicrosoft(oauth.MicrosoftConfig{
+			ClientID:       clientID,
+			ClientSecret:   clientSecret,
+			Prompt:         cfg.OAuthPrompt,
+			TenantID:       cfg.MicrosoftTenantID,
+			AllowedTenants: cfg.MicrosoftAllowedTenantList(),
+		}), true
+	case "github":
+		return oauth.NewGitHub(oauth.GitHubConfig{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+		}), true
+	case "apple":
+		return oauth.NewApple(oauth.AppleConfig{
+			ClientID:   clientID,
+			TeamID:     cfg.AppleTeamID,
+			KeyID:      cfg.AppleKeyID,
+			PrivateKey: cfg.ApplePrivateKey,
+		}), true
+	case "oidc":
+		// Generic, config-driven OIDC provider: an arbitrary
+		// standards-compliant IdP (Okta, Auth0, Keycloak, a self-hosted
+		// issuer) under its configured key.
+		return oauth.NewOIDC(oauth.GenericOIDCConfig{
+			ProviderKey:  key,
+			IssuerURL:    cfg.OIDCIssuer,
+			DiscoveryURL: cfg.OIDCDiscoveryURL,
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			Scopes:       cfg.OIDCScopeList(),
+		}), true
+	}
+	return nil, false
+}
+
+// envOIDCKey is the key the env OIDC provider registers under: the same
+// lowercased, trimmed form the service uses for lookups, so a config like
+// PROVIDER_KEY="Okta" (or with stray whitespace) still resolves at login, even
+// when a Config is constructed directly rather than via config.Load.
+func envOIDCKey(cfg *config.Config) string {
+	return strings.ToLower(strings.TrimSpace(cfg.OIDCProviderKey))
 }

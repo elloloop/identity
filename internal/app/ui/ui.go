@@ -20,7 +20,7 @@ var staticFS embed.FS
 // offer. Implemented by service.AuthService; the indirection keeps this
 // package free of the service's construction graph in tests.
 type OptionsSource interface {
-	HostedUIOptions(ctx context.Context) service.HostedUIOptions
+	HostedUIOptions(ctx context.Context, pageOrigin string) service.HostedUIOptions
 }
 
 // configData holds the serialized configuration injected into the template.
@@ -82,7 +82,7 @@ func Handler(cfg *config.Config, options OptionsSource, hostedOAuthEnabled bool)
 	fsHandler := http.StripPrefix("/auth/", http.FileServer(http.FS(sub)))
 
 	renderIndex := func(w http.ResponseWriter, r *http.Request) {
-		opts := options.HostedUIOptions(r.Context())
+		opts := options.HostedUIOptions(r.Context(), RequestOrigin(r).String())
 		providers := opts.OAuthProviders
 		if providers == nil {
 			providers = []service.HostedUIProvider{}

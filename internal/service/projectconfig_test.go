@@ -91,6 +91,21 @@ func TestParseProjectConfig_Malformed_Errors(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse project config")
 }
 
+// Anything after the config value is refused, so a check that reads the
+// whole text never sees a config other than the one this parse returns;
+// whitespace around the value is not data.
+func TestParseProjectConfig_DataAfterTheValue_Errors(t *testing.T) {
+	t.Parallel()
+
+	for _, blob := range []string{`{} {}`, `{"oauth":{}} x`, `{}]`, `{}{"oauth":{}}`, `null null`} {
+		_, err := ParseProjectConfig(blob)
+		require.Error(t, err, blob)
+		assert.Contains(t, err.Error(), "parse project config", blob)
+	}
+	_, err := ParseProjectConfig(" \n{\"oauth\":{}}\n\t ")
+	require.NoError(t, err)
+}
+
 func TestParseProjectConfig_Branding(t *testing.T) {
 	t.Parallel()
 
@@ -468,4 +483,97 @@ func TestParseProjectConfig_TenantsSelfService(t *testing.T) {
 	cfg, err = ParseProjectConfig(`{"cors":{"allowed_origins":["https://a.example.test"]}}`)
 	require.NoError(t, err)
 	assert.False(t, cfg.Tenants.SelfService)
+}
+
+func TestParseProjectConfig_OAuth_HostClients_Present(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"oauth":{"google":{"client_id":"g","client_secret_enc":"enc"},"hosts":{"auth.b.example":{` +
+		`"google":{"client_id":"gb","client_secret_enc":"enc-b"},"apple":{"client_id":"example.b.web"}}}}}`)
+	require.NoError(t, err)
+	assert.Equal(t, ProjectOAuthHostClient{ClientID: "gb", ClientSecretEnc: "enc-b"}, cfg.OAuth.Hosts["auth.b.example"]["google"])
+	client, ok := cfg.OAuth.hostClient("auth.b.example", "apple")
+	assert.True(t, ok)
+	assert.Equal(t, "example.b.web", client.ClientID)
+	_, ok = cfg.OAuth.hostClient("auth.a.example", "google")
+	assert.False(t, ok)
+
+	// A key with hyphens and digits, a punycode IDN among them, is found
+	// under that exact key.
+	for _, host := range []string{"auth-2.b.example", "xn--bcher-kva.example", "123.example"} {
+		cfg, err := ParseProjectConfig(`{"oauth":{"hosts":{"` + host + `":{"github":{"client_id":"h","client_secret_enc":"e"}}}}}`)
+		require.NoError(t, err, host)
+		client, ok := cfg.OAuth.hostClient(host, "github")
+		assert.True(t, ok, host)
+		assert.Equal(t, "h", client.ClientID, host)
+	}
+}
+
+// A provider this binary does not know, under a host, is kept unread rather
+// than failing the whole config, and a lookup by that key finds nothing.
+func TestParseProjectConfig_OAuth_HostClients_UnknownProviderIgnored(t *testing.T) {
+	t.Parallel()
+
+	// An unknown provider's entry is never decoded, whatever shape a newer
+	// binary gave it.
+	for name, unknown := range map[string]string{
+		"host-client shape": `{"client_id":"o"}`,
+		"array":             `["x"]`,
+		"non-string id":     `{"client_id":7}`,
+		"string":            `"x"`,
+	} {
+		cfg, err := ParseProjectConfig(`{"oauth":{"hosts":{"auth.b.example":{"okta":` + unknown + `,"google":{"client_id":"g","client_secret_enc":"e"}}}}}`)
+		require.NoError(t, err, name)
+		assert.Equal(t, ProjectOAuthHostClients{"google": {ClientID: "g", ClientSecretEnc: "e"}}, cfg.OAuth.Hosts["auth.b.example"], name)
+	}
+}
+
+func TestParseProjectConfig_OAuth_HostClients_Malformed(t *testing.T) {
+	t.Parallel()
+
+	// The error names the entry that does not decode: by its host, and a
+	// built-in provider's entry also by its provider.
+	for name, tc := range map[string]struct{ hosts, want string }{
+		"host not an object":     {`{"auth.b.example":"x"}`, `oauth.hosts["auth.b.example"]: `},
+		"built-in not an object": {`{"auth.b.example":{"google":["x"]}}`, `oauth.hosts["auth.b.example"].google: `},
+		"built-in non-string id": {`{"auth.b.example":{"google":{"client_id":7,"client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].google: `},
+		"hosts not an object":    {`["auth.b.example"]`, `oauth.hosts: `},
+	} {
+		_, err := ParseProjectConfig(`{"oauth":{"hosts":` + tc.hosts + `}}`)
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), tc.want, name)
+	}
+}
+
+// A stored host key the write would refuse for its characters alone (not an
+// LDH hostname) still loads: the parse holds a key only to its normalized
+// form, so a key written under a wider rule never takes the project offline.
+func TestParseProjectConfig_OAuth_HostClients_NonLDHKeyLoads(t *testing.T) {
+	t.Parallel()
+
+	for _, host := range []string{"auth_b.example", "auth.b?example", "auth.b\u00e9.example"} {
+		cfg, err := ParseProjectConfig(`{"oauth":{"hosts":{"` + host + `":{"google":{"client_id":"g","client_secret_enc":"e"}}}}}`)
+		require.NoError(t, err, host)
+		assert.Len(t, cfg.OAuth.Hosts, 1, host)
+	}
+}
+
+func TestParseProjectConfig_OAuth_HostClients_Rejected(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct{ hosts, want string }{
+		"upper-case host":      {`{"Auth.B.Example":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "Auth.B.Example"`},
+		"host with a port":     {`{"auth.b.example:8443":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b.example:8443"`},
+		"host with a scheme":   {`{"https://auth.b.example":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "https://auth.b.example"`},
+		"trailing dot":         {`{"auth.b.example.":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b.example."`},
+		"secret missing":       {`{"auth.b.example":{"microsoft":{"client_id":"m"}}}`, `oauth.hosts["auth.b.example"].microsoft requires client_id and client_secret_enc`},
+		"client id missing":    {`{"auth.b.example":{"github":{"client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].github requires client_id and client_secret_enc`},
+		"apple with a secret":  {`{"auth.b.example":{"apple":{"client_id":"a","client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].apple takes no client_secret_enc`},
+		"apple without client": {`{"auth.b.example":{"apple":{}}}`, `oauth.hosts["auth.b.example"].apple requires client_id`},
+		"two trailing dots":    {`{"auth.b.example..":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b.example.."`},
+	} {
+		_, err := ParseProjectConfig(`{"oauth":{"hosts":` + tc.hosts + `}}`)
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), tc.want, name)
+	}
 }

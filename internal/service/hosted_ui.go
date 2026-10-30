@@ -13,8 +13,8 @@ type HostedUIProvider struct {
 	// provider's flow, or "" when the current page origin works. A provider
 	// client is registered with exactly one callback URL: a project's own
 	// provider for the project's auth-domain, a borrowed (hub-shared) one
-	// for the hub's — starting the flow anywhere else makes the provider
-	// reject the redirect_uri.
+	// for the hub's, and a host override (ADR-0019) for its host — starting
+	// the flow anywhere else makes the provider reject the redirect_uri.
 	StartOrigin string `json:"startOrigin"`
 	// NeedsProjectKey marks a borrowed provider: its callback lands on the
 	// hub host, which can only re-scope to this project via the project_key
@@ -54,12 +54,14 @@ type HostedUIOptions struct {
 	OAuthProviders []HostedUIProvider
 }
 
-// HostedUIOptions resolves what the hosted auth UI may offer for the
-// request's project. It reads the same sources the login paths enforce —
-// project-wide AllowedMethods (login_policy_enforce), the deployment's
-// local-auth and password-signup flags, and the OAuth resolver's provider
-// precedence — so the page mirrors the project-wide policy.
-func (s *AuthService) HostedUIOptions(ctx context.Context) HostedUIOptions {
+// HostedUIOptions resolves what the hosted auth UI served on pageOrigin may
+// offer for the request's project. It reads the same sources the login paths
+// enforce — project-wide AllowedMethods (login_policy_enforce), the
+// deployment's local-auth and password-signup flags, and the OAuth resolver's
+// provider precedence — so the page mirrors the project-wide policy. A
+// provider the project overrides for pageOrigin's host starts there, where its
+// client is registered.
+func (s *AuthService) HostedUIOptions(ctx context.Context, pageOrigin string) HostedUIOptions {
 	allowed := ""
 	authDomain := ""
 	scope := ProjectScopeFromContext(ctx)
@@ -80,19 +82,32 @@ func (s *AuthService) HostedUIOptions(ctx context.Context) HostedUIOptions {
 	opts.UsernameSignupEnabled = signupOn && usernameSelfSignupRefusal(scope) == nil
 	opts.UsernameLoginEnabled = opts.PasswordLoginEnabled && accounts.usernameSignup() != SignupOff
 	if methodAllowed(LoginMethodOAuth) {
+		host := callbackHost(pageOrigin)
+		overridden := func(key string) bool {
+			if scope == nil {
+				return false
+			}
+			_, ok := scope.OAuth.hostClient(host, key)
+			return ok
+		}
 		own, borrowed := s.oauthResolver.providersFor(ctx)
 		for _, key := range own {
-			opts.OAuthProviders = append(opts.OAuthProviders, HostedUIProvider{
-				Key:         key,
-				StartOrigin: authDomainOrigin(authDomain),
-			})
+			p := HostedUIProvider{Key: key, StartOrigin: authDomainOrigin(authDomain)}
+			if overridden(key) {
+				p.StartOrigin = ""
+			}
+			opts.OAuthProviders = append(opts.OAuthProviders, p)
 		}
 		for _, key := range borrowed {
-			opts.OAuthProviders = append(opts.OAuthProviders, HostedUIProvider{
+			p := HostedUIProvider{
 				Key:             key,
 				StartOrigin:     authDomainOrigin(s.cfg.DefaultPrimaryAuthDomain()),
 				NeedsProjectKey: true,
-			})
+			}
+			if overridden(key) {
+				p.StartOrigin, p.NeedsProjectKey = "", false
+			}
+			opts.OAuthProviders = append(opts.OAuthProviders, p)
 		}
 	}
 	return opts

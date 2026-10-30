@@ -91,7 +91,9 @@ type Options struct {
 	SMSSender sms.Sender
 
 	// OAuthRegistry holds the per-provider exchangers. nil builds one
-	// from the OAuth client credentials in Config.
+	// from the OAuth client credentials in Config. A supplied registry
+	// cannot be rebuilt with another client, so a per-host client
+	// (ADR-0019) whose base is one of its providers is unavailable.
 	OAuthRegistry *oauth.Registry
 
 	// IDVProvider drives document/selfie identity verification. nil

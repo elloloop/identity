@@ -817,6 +817,71 @@ func TestAdminRPCs_OAuthProvider_Handler(t *testing.T) {
 	requireCode(t, err, connect.CodeInvalidArgument)
 }
 
+// TestAdminRPCs_OAuthHostClient_Handler maps a host client through its own
+// RPCs: a set writes the host's client and leaves the base provider, the list
+// returns it in host_clients (redacted) and not among the providers, and a
+// delete removes only it.
+func TestAdminRPCs_OAuthHostClient_Handler(t *testing.T) {
+	t.Parallel()
+	svc, store, _ := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	if _, err := client.AdminSetProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthProviderRequest{
+		ProjectId: "p",
+		Config:    &identitypb.ProjectOAuthProviderConfig{Provider: "google", ClientId: "base-client", ClientSecret: "base-plaintext"},
+	}, handlerAdminSecret)); err != nil {
+		t.Fatalf("set base: %v", err)
+	}
+	set, err := client.AdminSetProjectOAuthHostClient(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthHostClientRequest{
+		ProjectId: "p",
+		Client:    &identitypb.ProjectOAuthHostClient{Provider: "google", CallbackHost: "Auth.B.Example", ClientId: "host-client", ClientSecret: "host-plaintext"},
+	}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("set host client: %v", err)
+	}
+	if got := set.Msg.GetClient(); got.GetCallbackHost() != "auth.b.example" || got.GetClientId() != "host-client" || !got.GetHasClientSecret() || got.GetClientSecret() != "" {
+		t.Fatalf("set host client response = %+v", got)
+	}
+	if strings.Contains(store.configs["p"], "host-plaintext") {
+		t.Fatalf("plaintext leaked into stored config: %s", store.configs["p"])
+	}
+
+	list, err := client.AdminListProjectOAuthProviders(ctx, withAdminSecret(&identitypb.AdminListProjectOAuthProvidersRequest{ProjectId: "p"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if ps := list.Msg.GetProviders(); len(ps) != 1 || ps[0].GetClientId() != "base-client" {
+		t.Fatalf("providers = %+v", ps)
+	}
+	hc := list.Msg.GetHostClients()
+	if len(hc) != 1 || hc[0].GetProvider() != "google" || hc[0].GetCallbackHost() != "auth.b.example" ||
+		hc[0].GetClientId() != "host-client" || !hc[0].GetHasClientSecret() || hc[0].GetClientSecret() != "" {
+		t.Fatalf("host_clients = %+v", hc)
+	}
+
+	if _, err := client.AdminDeleteProjectOAuthHostClient(ctx, withAdminSecret(&identitypb.AdminDeleteProjectOAuthHostClientRequest{
+		ProjectId: "p", Provider: "google", CallbackHost: "auth.b.example",
+	}, handlerAdminSecret)); err != nil {
+		t.Fatalf("delete host client: %v", err)
+	}
+	list, err = client.AdminListProjectOAuthProviders(ctx, withAdminSecret(&identitypb.AdminListProjectOAuthProvidersRequest{ProjectId: "p"}, handlerAdminSecret))
+	if err != nil || len(list.Msg.GetProviders()) != 1 || len(list.Msg.GetHostClients()) != 0 {
+		t.Fatalf("after delete: %+v, %v", list.Msg, err)
+	}
+
+	// No client, or no callback host, is refused.
+	_, err = client.AdminSetProjectOAuthHostClient(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthHostClientRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeInvalidArgument)
+	_, err = client.AdminSetProjectOAuthHostClient(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthHostClientRequest{
+		ProjectId: "p",
+		Client:    &identitypb.ProjectOAuthHostClient{Provider: "google", ClientId: "c", ClientSecret: "s"},
+	}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeInvalidArgument)
+	_, err = client.AdminDeleteProjectOAuthHostClient(ctx, withAdminSecret(&identitypb.AdminDeleteProjectOAuthHostClientRequest{ProjectId: "p", Provider: "google"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeInvalidArgument)
+}
+
 func TestAdminOAuthRPCs_NilService_Unimplemented(t *testing.T) {
 	t.Parallel()
 	client := startAdminServer(t, nil)
@@ -827,6 +892,10 @@ func TestAdminOAuthRPCs_NilService_Unimplemented(t *testing.T) {
 	_, err = client.AdminDeleteProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminDeleteProjectOAuthProviderRequest{ProjectId: "p", Provider: "google"}, handlerAdminSecret))
 	requireCode(t, err, connect.CodeUnimplemented)
 	_, err = client.AdminListProjectOAuthProviders(ctx, withAdminSecret(&identitypb.AdminListProjectOAuthProvidersRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.AdminSetProjectOAuthHostClient(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthHostClientRequest{ProjectId: "p", Client: &identitypb.ProjectOAuthHostClient{Provider: "google"}}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.AdminDeleteProjectOAuthHostClient(ctx, withAdminSecret(&identitypb.AdminDeleteProjectOAuthHostClientRequest{ProjectId: "p", Provider: "google", CallbackHost: "auth.b.example"}, handlerAdminSecret))
 	requireCode(t, err, connect.CodeUnimplemented)
 }
 
@@ -841,6 +910,10 @@ func TestAdminOAuthRPCs_BadSecret_Denied(t *testing.T) {
 	_, err = client.AdminDeleteProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminDeleteProjectOAuthProviderRequest{ProjectId: "p", Provider: "google"}, "nope"))
 	requireCode(t, err, connect.CodePermissionDenied)
 	_, err = client.AdminListProjectOAuthProviders(ctx, withAdminSecret(&identitypb.AdminListProjectOAuthProvidersRequest{ProjectId: "p"}, ""))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminSetProjectOAuthHostClient(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthHostClientRequest{ProjectId: "p", Client: &identitypb.ProjectOAuthHostClient{Provider: "google", CallbackHost: "auth.b.example", ClientId: "g", ClientSecret: "s"}}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminDeleteProjectOAuthHostClient(ctx, withAdminSecret(&identitypb.AdminDeleteProjectOAuthHostClientRequest{ProjectId: "p", Provider: "google", CallbackHost: "auth.b.example"}, "nope"))
 	requireCode(t, err, connect.CodePermissionDenied)
 }
 

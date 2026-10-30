@@ -14,7 +14,7 @@ import (
 // stubOptions is a fixed OptionsSource for handler tests.
 type stubOptions struct{ opts service.HostedUIOptions }
 
-func (s stubOptions) HostedUIOptions(context.Context) service.HostedUIOptions { return s.opts }
+func (s stubOptions) HostedUIOptions(context.Context, string) service.HostedUIOptions { return s.opts }
 
 // allEnabled is the zero-friction default most tests use: password login +
 // signup on, no providers.
@@ -120,7 +120,7 @@ func TestHandler_InjectsServerConfig(t *testing.T) {
 // on the project scope the middleware injected into the request context.
 type scopeOptions struct{}
 
-func (scopeOptions) HostedUIOptions(ctx context.Context) service.HostedUIOptions {
+func (scopeOptions) HostedUIOptions(ctx context.Context, _ string) service.HostedUIOptions {
 	if sc := service.ProjectScopeFromContext(ctx); sc != nil && sc.ProjectID == "proj-google" {
 		return service.HostedUIOptions{OAuthProviders: []service.HostedUIProvider{{Key: "google"}}}
 	}
@@ -240,4 +240,41 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 			}
 		}
 	})
+}
+
+// originRecorder records the page origin each render asks the options for.
+type originRecorder struct{ origins *[]string }
+
+func (o originRecorder) HostedUIOptions(_ context.Context, pageOrigin string) service.HostedUIOptions {
+	*o.origins = append(*o.origins, pageOrigin)
+	return service.HostedUIOptions{PasswordLoginEnabled: true}
+}
+
+// The sign-in page and the agent consent page ask for the options of the
+// origin they are served on, so a host's own OAuth client (ADR-0019) starts
+// on that host: the request's Host, or the forwarded host and scheme a proxy
+// in front of the server reports.
+func TestHandlers_PassThePageOrigin(t *testing.T) {
+	var origins []string
+	rec := originRecorder{origins: &origins}
+	pages := map[string]http.Handler{
+		"/auth/":              Handler(&config.Config{}, rec, true),
+		"/auth/agent-consent": AgentConsentHandler(&config.Config{}, rec, service.ReturnAllowlist{}),
+	}
+	for path, h := range pages {
+		origins = origins[:0]
+		plain := httptest.NewRequest(http.MethodGet, path, nil)
+		plain.Host = "auth.b.example"
+		h.ServeHTTP(httptest.NewRecorder(), plain)
+
+		proxied := httptest.NewRequest(http.MethodGet, path, nil)
+		proxied.Host = "internal.example:8080"
+		proxied.Header.Set("X-Forwarded-Host", "auth.a.example")
+		proxied.Header.Set("X-Forwarded-Proto", "https")
+		h.ServeHTTP(httptest.NewRecorder(), proxied)
+
+		if want := []string{"http://auth.b.example", "https://auth.a.example"}; strings.Join(origins, " ") != strings.Join(want, " ") {
+			t.Errorf("%s: page origins = %v, want %v", path, origins, want)
+		}
+	}
 }

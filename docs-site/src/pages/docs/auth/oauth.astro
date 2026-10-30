@@ -106,7 +106,11 @@ import { Code } from "astro-expressive-code/components";
       <strong>unavailable</strong> for that project (the same
       "unknown provider" error an unregistered provider returns). A non-default
       project never inherits the default project's providers, so credentials
-      never leak across projects.
+      never leak across projects, unless the deployment opts into hub sharing
+      (<code>GATEWAY_OAUTH_HUB_SHARING</code>, ADR-0011): then it borrows the
+      default project's env provider, and the flow runs on the hub's auth
+      domain, unless the page's host has its own client for that provider
+      (see <a href="#host-clients">A client per auth host</a>).
     </li>
   </ul>
   <p>
@@ -184,7 +188,8 @@ import { Code } from "astro-expressive-code/components";
       (idempotent).
     </li>
     <li>
-      <code>AdminListProjectOAuthProviders</code> — list configured providers.
+      <code>AdminListProjectOAuthProviders</code> — list configured providers
+      and host clients.
     </li>
   </ul>
   <p>
@@ -217,6 +222,110 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
     "config": {
       "provider": "google",
       "client_id": "1234.apps.googleusercontent.com",
+      "client_secret": "GOCSPX-plaintext-secret"
+    }
+  }'`} lang="bash" />
+
+  <h2 id="host-clients">A client per auth host</h2>
+  <p>
+    A provider's consent screen names the application its client is
+    registered as. When one project, and so one account pool, serves several
+    products on their own auth hosts, it can name a different client for a
+    given <strong>callback host</strong>, so each host's consent screen names
+    its own product (ADR-0019). The overrides live under
+    <code>oauth.hosts</code>:
+  </p>
+  <Code code={`{
+  "oauth": {
+    "google": { "client_id": "base", "client_secret_enc": "<enc>" },
+    "hosts": {
+      "auth.widgets.example": {
+        "google":    { "client_id": "widgets", "client_secret_enc": "<enc>" },
+        "microsoft": { "client_id": "widgets-ms", "client_secret_enc": "<enc>" },
+        "apple":     { "client_id": "example.widgets.web" }
+      }
+    }
+  }
+}`} lang="json" />
+  <p>
+    Here only Google has a base in the project's own config, so on the default
+    project the Microsoft and Apple overrides swap the client of the env
+    providers; on a non-default project they apply only to providers it
+    configures itself or borrows from the hub.
+  </p>
+  <ul>
+    <li>
+      The key is the host of the flow's callback URL: the host the hosted
+      page and <code>/oauth/start</code> are served on, or the host of the
+      app's <code>redirect_uri</code> in the headless flow. The callback
+      completes with the client the start used. A key a write adds, through
+      the RPCs below or a whole-config <code>UpsertProjectConfig</code>, must
+      be what <code>callback_host</code> stores: a lower-case LDH hostname of
+      two or more labels (the rule is in the block below). A whole-config
+      write writes a key already stored back as it is.
+    </li>
+    <li>
+      An override swaps the client and nothing else. The provider is still
+      the one the precedence above selects, including the env provider of the
+      default project and a hub provider borrowed under hub sharing, and every
+      other setting comes from it. Apple's override is a Services ID of the
+      same team, signed with the same key; the others are a client id and
+      secret.
+    </li>
+    <li>
+      An override never enables a provider the precedence does not, nor the
+      hosted flow of a native-only block, and a broken one makes the provider
+      unavailable on its host rather than falling back to the base client.
+    </li>
+    <li>
+      The hosted page starts an overridden provider on its own host, with no
+      <code>project_key</code>.
+    </li>
+    <li>
+      Only the built-in provider keys take an override. An env OIDC provider
+      registered under a key of its own takes none; with the key set to
+      <code>oidc</code> it can.
+    </li>
+  </ul>
+  <p>
+    Overrides have their own RPCs, which never touch the base provider:
+    <code>AdminSetProjectOAuthHostClient</code> sets one (an empty secret
+    keeps the stored one, and Apple takes no secret),
+    <code>AdminDeleteProjectOAuthHostClient</code> removes one, and
+    <code>AdminListProjectOAuthProviders</code> returns them, redacted, in
+    <code>host_clients</code>. A server that predates these RPCs refuses them and
+    changes nothing: over HTTP it answers <code>UNAUTHENTICATED</code>,
+    because it does not know them as admin-secret calls, so during a rolling
+    upgrade that code means the call reached an old replica; through an
+    embedder's native gRPC server it answers <code>UNIMPLEMENTED</code>.
+  </p>
+  <p>
+    Register each override's client with the callback URL of the flows that
+    use it: <code>https://&lt;host&gt;/oauth/callback/&lt;provider&gt;</code>
+    for the hosted flow, and the app's own <code>redirect_uri</code> for the
+    headless flow. Configure overrides only once every replica runs a version
+    that reads them, and delete them before rolling back below it.
+  </p>
+  <Code code={`message ProjectOAuthHostClient {
+  string provider = 1;           // "google" | "microsoft" | "apple" | "github" | "oidc"
+  string callback_host = 2;      // an LDH hostname of 2+ labels (≤63 chars each, ≤253 in all; an IDN as punycode)
+  string client_id = 3;          // for Apple, the Services ID
+  string client_secret = 4;      // write-only plaintext; empty = keep stored; none for Apple
+  bool   has_client_secret = 5;  // read-only (redacted presence)
+}
+
+rpc AdminSetProjectOAuthHostClient(AdminSetProjectOAuthHostClientRequest) returns (AdminSetProjectOAuthHostClientResponse);
+rpc AdminDeleteProjectOAuthHostClient(AdminDeleteProjectOAuthHostClientRequest) returns (AdminDeleteProjectOAuthHostClientResponse);`} lang="protobuf" />
+  <Code code={`# Give one callback host its own Google client.
+curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAuthHostClient \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "project_id": "proj_123",
+    "client": {
+      "provider": "google",
+      "callback_host": "auth.widgets.example",
+      "client_id": "5678.apps.googleusercontent.com",
       "client_secret": "GOCSPX-plaintext-secret"
     }
   }'`} lang="bash" />

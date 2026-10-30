@@ -2556,8 +2556,11 @@ message UpsertProjectConfigRequest {
   string project_id = 1;
   // config_json is the project's full config blob (a JSON object). It
   // REPLACES the project's existing config; an empty value normalises to
-  // "{}" (no per-project overrides). A malformed blob is rejected
-  // (INVALID_ARGUMENT).
+  // "{}" (no per-project overrides). A malformed blob, or one with data
+  // after the object, is rejected (INVALID_ARGUMENT), and so is one that adds
+  // an oauth.hosts key (under any letter case of oauth and hosts) other than
+  // one ProjectOAuthHostClient.callback_host would store: a lower-case LDH
+  // hostname. A key already stored is written back as it is.
   string config_json = 2;
 }
 
@@ -2665,7 +2668,8 @@ message AdminSetProjectOAuthProviderRequest {
   string project_id = 1;
   // config carries the provider key plus its non-secret fields and any
   // plaintext secret to store. It fully replaces the named provider's block,
-  // preserving every OTHER key in the project's config (branding, passkey, …).
+  // preserving every OTHER key in the project's config (branding, passkey, …)
+  // and the provider's host clients (ADR-0019).
   ProjectOAuthProviderConfig config = 2;
 }
 
@@ -2738,10 +2742,72 @@ message AdminDeleteProjectOAuthProviderRequest {
   string project_id = 1;
   // provider is the provider key to remove: "google", "microsoft", "apple",
   // "github", or "oidc". Removing an absent provider is a no-op (idempotent).
+  // Its host clients (ADR-0019) stay stored: they then apply to whichever base
+  // the project falls back to (ADR-0010/0011), if any.
   string provider = 2;
 }
 
 message AdminDeleteProjectOAuthProviderResponse {}
+
+// ProjectOAuthHostClient is the client one of a project's OAuth providers
+// signs in through when the flow's callback is on one host, instead of its
+// base client (ADR-0019). Only the client changes: every other setting, and
+// whether the provider is available at all, come from the provider the
+// project's precedence selects (its own, the default project's env provider,
+// or a hub provider borrowed under hub sharing, ADR-0010/0011). A host client
+// never enables a provider that has no base, nor the hosted flow of a
+// native-only base (native_audiences alone).
+message ProjectOAuthHostClient {
+  // provider is the provider key: "google", "microsoft", "apple", "github",
+  // or "oidc". Required. An env OIDC provider registered under a key of its
+  // own takes no host client.
+  string provider = 1;
+
+  // callback_host is the host of the flow's callback URL: a DNS name with no
+  // scheme, port or path. A write lower-cases it, drops one trailing dot, and
+  // requires a hostname of two or more labels of a-z, 0-9 and '-', none
+  // starting or ending with '-', at most 63 characters each and 253 in all
+  // (an IDN in its punycode form). Required.
+  string callback_host = 2;
+
+  // client_id is the provider client registered for callback_host; for Apple,
+  // the Services ID. Required.
+  string client_id = 3;
+
+  // client_secret is the PLAINTEXT client secret, sent only on a write over TLS
+  // and stored encrypted at rest. It is NEVER returned on a read (see
+  // has_client_secret). On a write an EMPTY value keeps the stored secret.
+  // Apple takes none, and a write with one is refused: the base provider's
+  // key signs for its Services ID.
+  string client_secret = 4;
+
+  // has_client_secret reports, on a read, whether a secret is stored.
+  // Output-only.
+  bool has_client_secret = 5;
+}
+
+message AdminSetProjectOAuthHostClientRequest {
+  string project_id = 1;
+  // client replaces the client its provider uses on its callback_host, leaving
+  // the base provider, every other host and every other config key alone.
+  ProjectOAuthHostClient client = 2;
+}
+
+message AdminSetProjectOAuthHostClientResponse {
+  // client is the stored host client with its secret REDACTED.
+  ProjectOAuthHostClient client = 1;
+}
+
+message AdminDeleteProjectOAuthHostClientRequest {
+  string project_id = 1;
+  // provider is the provider key whose host client to remove.
+  string provider = 2;
+  // callback_host is the host whose client to remove; it reverts to the base
+  // client. Removing an absent host client is a no-op (idempotent).
+  string callback_host = 3;
+}
+
+message AdminDeleteProjectOAuthHostClientResponse {}
 
 message AdminListProjectOAuthProvidersRequest {
   string project_id = 1;
@@ -2751,6 +2817,9 @@ message AdminListProjectOAuthProvidersResponse {
   // providers lists every configured provider with secrets REDACTED, ordered by
   // provider key.
   repeated ProjectOAuthProviderConfig providers = 1;
+  // host_clients lists every host client (ADR-0019) with secrets REDACTED,
+  // ordered by callback_host and then provider key.
+  repeated ProjectOAuthHostClient host_clients = 2;
 }
 
 // ─── Directory lookup (machine credential) ──────────────────────────
@@ -3873,9 +3942,9 @@ service IdentityService {
   // sets/rotates one provider (encrypting any plaintext secret server-side and
   // merging it into config_json without disturbing other keys);
   // AdminDeleteProjectOAuthProvider removes one provider;
-  // AdminListProjectOAuthProviders lists the configured providers with secrets
-  // redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
-  // build with no control plane.
+  // AdminListProjectOAuthProviders lists the configured providers and host
+  // clients with secrets redacted. Operator-only, like the other Admin* RPCs,
+  // and UNIMPLEMENTED on a build with no control plane.
   rpc AdminSetProjectOAuthProvider(AdminSetProjectOAuthProviderRequest) returns (AdminSetProjectOAuthProviderResponse);
   // SignInAnonymously creates a credential-less account and returns it with
   // a token pair. Every call mints a NEW user; the refresh token is the
@@ -3895,6 +3964,18 @@ service IdentityService {
   rpc AdminGetProjectAssurance(AdminGetProjectAssuranceRequest) returns (AdminGetProjectAssuranceResponse);
   rpc AdminDeleteProjectOAuthProvider(AdminDeleteProjectOAuthProviderRequest) returns (AdminDeleteProjectOAuthProviderResponse);
   rpc AdminListProjectOAuthProviders(AdminListProjectOAuthProvidersRequest) returns (AdminListProjectOAuthProvidersResponse);
+  // Per-host OAuth client authoring (ADR-0019): the client a project's provider
+  // signs in through when the flow's callback is on one host.
+  // AdminSetProjectOAuthHostClient sets/rotates one (encrypting any plaintext
+  // secret server-side); AdminDeleteProjectOAuthHostClient removes one, so its
+  // host reverts to the base client. Neither touches the base provider. A
+  // server that predates them refuses them and changes nothing: over HTTP it
+  // answers UNAUTHENTICATED, as it does not know them as admin-secret calls,
+  // and through an embedder's native gRPC server UNIMPLEMENTED. Operator-only,
+  // like the other Admin* RPCs, and UNIMPLEMENTED on a build with no control
+  // plane.
+  rpc AdminSetProjectOAuthHostClient(AdminSetProjectOAuthHostClientRequest) returns (AdminSetProjectOAuthHostClientResponse);
+  rpc AdminDeleteProjectOAuthHostClient(AdminDeleteProjectOAuthHostClientRequest) returns (AdminDeleteProjectOAuthHostClientResponse);
 
   // Read-only directory lookup for services. Authenticated NOT by a user JWT
   // but by a directory_reader project credential (minted with

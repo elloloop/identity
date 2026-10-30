@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/mail"
 	"net/url"
 	"strings"
@@ -115,6 +116,64 @@ type ProjectOAuthConfig struct {
 	Apple     *ProjectOAuthApple     `json:"apple,omitempty"`
 	GitHub    *ProjectOAuthGitHub    `json:"github,omitempty"`
 	OIDC      *ProjectOAuthOIDC      `json:"oidc,omitempty"`
+	// Hosts holds the per-host client overrides (ADR-0019), keyed by the host
+	// a flow's callback URL is on and then by provider key: on that host the
+	// provider signs in through this client instead of its base one.
+	Hosts ProjectOAuthHosts `json:"hosts,omitempty"`
+}
+
+// ProjectOAuthHosts holds a project's host clients (ADR-0019), keyed by the
+// callback host they apply on.
+type ProjectOAuthHosts map[string]ProjectOAuthHostClients
+
+// ProjectOAuthHostClients is one callback host's clients, keyed by provider.
+type ProjectOAuthHostClients map[string]ProjectOAuthHostClient
+
+// UnmarshalJSON decodes each host's clients under the built-in provider keys.
+// Any other provider key is skipped unread, as an unknown key under "oauth"
+// is, so an entry a newer binary wrote never stops this one loading the
+// project. An entry that does not decode is reported by its host, and a
+// built-in provider's entry also by its provider, the path validate reports
+// a bad entry by.
+func (h *ProjectOAuthHosts) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("oauth.hosts: %w", err)
+	}
+	if raw == nil {
+		*h = nil
+		return nil
+	}
+	hosts := make(ProjectOAuthHosts, len(raw))
+	for host, value := range raw {
+		var entries map[string]json.RawMessage
+		if err := json.Unmarshal(value, &entries); err != nil {
+			return fmt.Errorf("oauth.hosts[%q]: %w", host, err)
+		}
+		clients := ProjectOAuthHostClients{}
+		for provider, value := range entries {
+			if !isOAuthProviderKey(provider) {
+				continue
+			}
+			var client ProjectOAuthHostClient
+			if err := json.Unmarshal(value, &client); err != nil {
+				return fmt.Errorf("oauth.hosts[%q].%s: %w", host, provider, err)
+			}
+			clients[provider] = client
+		}
+		hosts[host] = clients
+	}
+	*h = hosts
+	return nil
+}
+
+// ProjectOAuthHostClient is the client a provider uses on one callback host
+// (ADR-0019). It replaces only the base provider's client identity: ClientID,
+// and for every provider but Apple, whose base key signs for any Services ID of
+// its team, the encrypted ClientSecretEnc.
+type ProjectOAuthHostClient struct {
+	ClientID        string `json:"client_id"`
+	ClientSecretEnc string `json:"client_secret_enc,omitempty"`
 }
 
 // ProjectOAuthGoogle configures the project's Google provider. ClientID and
@@ -356,6 +415,37 @@ func (c ProjectOAuthConfig) validate() error {
 		if err := c.OIDC.validate(); err != nil {
 			return err
 		}
+	}
+	for host, clients := range c.Hosts {
+		if normalized, err := normalizeCallbackHost(host); err != nil || normalized != host {
+			return fmt.Errorf("oauth.hosts key %q must be a lower-case hostname with no scheme, port or path", host)
+		}
+		for provider, client := range clients {
+			if err := client.validate(provider); err != nil {
+				return fmt.Errorf("oauth.hosts[%q].%w", host, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validate rejects an override that names no client, an unknown provider, a
+// missing secret, or an Apple secret (Apple's base key signs for its client).
+func (h ProjectOAuthHostClient) validate(provider string) error {
+	switch provider {
+	case oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderGitHub, oauthProviderOIDC:
+		if h.ClientID == "" || h.ClientSecretEnc == "" {
+			return fmt.Errorf("%s requires client_id and client_secret_enc", provider)
+		}
+	case oauthProviderApple:
+		if h.ClientID == "" {
+			return errors.New("apple requires client_id")
+		}
+		if h.ClientSecretEnc != "" {
+			return errors.New("apple takes no client_secret_enc: its key is the base provider's")
+		}
+	default:
+		return fmt.Errorf("%s is not an oauth provider", provider)
 	}
 	return nil
 }
@@ -897,15 +987,17 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 	return out
 }
 
-// isBareDomainName reports whether d, ALREADY canonicalized, has the shape an
-// address's domain can actually take: dot-separated LDH labels, at least two of
-// them, no empty or over-long label, no leading or trailing hyphen.
+// isBareDomainName reports whether d, ALREADY canonicalized (lower case, an IDN
+// in punycode), is a bare domain name: dot-separated LDH labels, at least two
+// of them, none empty or over 63 characters, none starting or ending with a
+// hyphen, 253 characters in all. An email domain entry and a callback host are
+// both held to it.
 //
-// It is checked against the canonical form rather than the raw entry because
-// emailaddr.CanonicalizeDomain punycodes IDN labels — "café.example" is a legitimate
-// entry whose canonical form is ASCII. It also means an entry idna could not
-// convert (emailaddr.CanonicalizeDomain returns such input unchanged) is caught here
-// rather than stored as a rule that matches nothing.
+// A domain entry is checked against its canonical form rather than the raw
+// entry because emailaddr.CanonicalizeDomain punycodes IDN labels — "café.example"
+// is a legitimate entry whose canonical form is ASCII. It also means an entry
+// idna could not convert (emailaddr.CanonicalizeDomain returns such input
+// unchanged) is caught here rather than stored as a rule that matches nothing.
 func isBareDomainName(d string) bool {
 	if d == "" || len(d) > 253 {
 		return false
@@ -1259,7 +1351,9 @@ func (c ProjectCORSConfig) Allowlist() (origin.Allowlist, error) {
 // ProjectConfig. An empty or all-whitespace blob is the zero config (no
 // per-project overrides) — the same meaning the store gives "" by normalising
 // it to "{}". A malformed blob is a configuration error the caller must
-// surface, never silently swallow.
+// surface, never silently swallow; so is anything after the config value,
+// which a check reading the whole text (checkNewHostKeys) would otherwise see
+// differently from this parse.
 func ParseProjectConfig(configJSON string) (ProjectConfig, error) {
 	var cfg ProjectConfig
 	if strings.TrimSpace(configJSON) == "" {
@@ -1268,6 +1362,9 @@ func ParseProjectConfig(configJSON string) (ProjectConfig, error) {
 	dec := json.NewDecoder(strings.NewReader(configJSON))
 	if err := dec.Decode(&cfg); err != nil {
 		return ProjectConfig{}, fmt.Errorf("parse project config: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return ProjectConfig{}, errors.New("parse project config: data after the config value")
 	}
 	if err := cfg.Validate(); err != nil {
 		return ProjectConfig{}, fmt.Errorf("parse project config: %w", err)

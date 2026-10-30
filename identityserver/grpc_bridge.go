@@ -752,12 +752,20 @@ func (b *grpcBridge) AdminDeleteProjectOAuthProvider(ctx context.Context, in *id
 	return invoke(ctx, b, in, b.h.AdminDeleteProjectOAuthProvider)
 }
 
+func (b *grpcBridge) AdminDeleteProjectOAuthHostClient(ctx context.Context, in *identitypb.AdminDeleteProjectOAuthHostClientRequest) (*identitypb.AdminDeleteProjectOAuthHostClientResponse, error) {
+	return invoke(ctx, b, in, b.h.AdminDeleteProjectOAuthHostClient)
+}
+
 func (b *grpcBridge) AdminGetProjectAssurance(ctx context.Context, in *identitypb.AdminGetProjectAssuranceRequest) (*identitypb.AdminGetProjectAssuranceResponse, error) {
 	return invoke(ctx, b, in, b.h.AdminGetProjectAssurance)
 }
 
 func (b *grpcBridge) AdminListProjectOAuthProviders(ctx context.Context, in *identitypb.AdminListProjectOAuthProvidersRequest) (*identitypb.AdminListProjectOAuthProvidersResponse, error) {
 	return invoke(ctx, b, in, b.h.AdminListProjectOAuthProviders)
+}
+
+func (b *grpcBridge) AdminSetProjectOAuthHostClient(ctx context.Context, in *identitypb.AdminSetProjectOAuthHostClientRequest) (*identitypb.AdminSetProjectOAuthHostClientResponse, error) {
+	return invoke(ctx, b, in, b.h.AdminSetProjectOAuthHostClient)
 }
 
 func (b *grpcBridge) AdminSetProjectAssurance(ctx context.Context, in *identitypb.AdminSetProjectAssuranceRequest) (*identitypb.AdminSetProjectAssuranceResponse, error) {
