@@ -149,8 +149,10 @@ unexpired and be unused, or used by this claim. Otherwise it is
 audited as <code>hire_grant_refused</code>. The claim is the idempotency key: the
 same registration returns the same <code>key_id</code>, even after the grant
 expired; one claim has one key, so a different key or grant for it, a revoked
-claim or a key already registered for another claim is
-<code>FAILED_PRECONDITION</code>.</p>
+claim or a key already registered for another claim, revoked or not, is
+<code>FAILED_PRECONDITION</code>: a new claim needs a new key pair. A blank or
+malformed <code>placement_id</code> or other field is
+<code>INVALID_ARGUMENT</code>; a <code>grant_id</code> never is.</p>
 <p><code>RevokeTeammateKey(claim_id, reason, deadline)</code> sets when the key
 stops working: at <code>deadline</code>, at most an hour away, or at once when it
 is unset or past. Identity enforces the deadline itself, with no further call: a

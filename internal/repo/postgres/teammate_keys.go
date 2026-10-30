@@ -28,7 +28,7 @@ func (r *pgRepository) CreateHireGrant(ctx context.Context, grant *service.HireG
 
 func (r *pgRepository) RegisterTeammateKey(ctx context.Context, key *service.TeammateKey, placementID string) (*service.TeammateKey, error) {
 	err := r.registerGrantedTeammateKey(ctx, key, placementID)
-	if err != nil && !errors.Is(err, service.ErrHireGrantRefused) {
+	if err != nil && !errors.Is(err, service.ErrHireGrantRefused) && !errors.Is(err, service.ErrAlreadyExists) {
 		return nil, err
 	}
 	stored, readErr := r.teammateKeyOfClaim(ctx, key.ClaimID)

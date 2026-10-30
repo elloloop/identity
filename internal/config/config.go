@@ -1431,10 +1431,10 @@ type Config struct {
 	// GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP defaults to 30; zero selects default.
 	AgentOAuthProtocolPerIP int
 	// AgentMachineChallengePerIP sets the CreateAgentMachineChallenge budget
-	// per client address per configured rate-limit window, on its own and
-	// not out of the protocol budget: the call takes no credential, so the
-	// address is what it can be held to. GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP
-	// defaults to 60; zero selects the default.
+	// per client address per rate-limit window (default 60; zero selects the
+	// default and a negative value fails boot), on its own and not out of the
+	// protocol budget: the call takes no credential, so the address is what it
+	// can be held to. Driven by GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP.
 	AgentMachineChallengePerIP int
 	// AgentOAuthIntrospectionPerIP sets the authenticated resource
 	// budget. GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP defaults to 1200.

@@ -94,7 +94,7 @@
     "type": "integer",
     "default": "",
     "required": false,
-    "description": "sets the CreateAgentMachineChallenge budget per client address per configured rate-limit window, on its own and not out of the protocol budget: the call takes no credential, so the address is what it can be held to.",
+    "description": "sets the CreateAgentMachineChallenge budget per client address per rate-limit window, on its own and not out of the protocol budget: the call takes no credential, so the address is what it can be held to.",
     "category": "Agent accounts",
     "anchor": "agent-accounts"
   },

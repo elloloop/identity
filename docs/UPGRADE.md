@@ -11,7 +11,10 @@ revocation can carry a drain deadline that Identity enforces on its own.
 has no owner. A workstation using one is refused at its next challenge, with
 no drain. To recover, upgrade the managing service so it sends `grant_id`
 and `placement_id`, have each teammate's owner (or a project admin) sign in
-and call `CreateHireGrant`, and register the key again under a new claim. Roll
+and call `CreateHireGrant`, and have each workstation make a new P-256 key
+pair, which the managing service registers under a new claim with that
+grant. The old public key cannot be registered again: a public key stays
+unique in a project for the year a revoked key is kept. Roll
 out in that order: this release, then the managing service, then the
 services that verify teammate tokens with `pkg/jwt` (see `act.sub` below).
 
