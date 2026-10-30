@@ -91,7 +91,7 @@ func (s *AuthService) BeginHostedOAuth(
 		return nil, fmt.Errorf("%w: code_challenge must be an S256 challenge", ErrInvalidArgument)
 	}
 
-	exchanger, ok := s.oauthResolver.exchangerFor(ctx, provider)
+	exchanger, ok := s.oauthResolver.exchangerFor(ctx, provider, redirectURI)
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
 	}

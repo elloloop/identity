@@ -30,7 +30,7 @@ func AgentConsentHandler(cfg *config.Config, options OptionsSource, returnAllow 
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		opts := options.HostedUIOptions(r.Context())
+		opts := options.HostedUIOptions(r.Context(), RequestOrigin(r).String())
 		settings := configData{
 			PasswordLoginEnabled: opts.PasswordLoginEnabled,
 			OAuthProviders:       opts.OAuthProviders,

@@ -1,8 +1,11 @@
 package app
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -10,6 +13,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
+	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -175,5 +179,69 @@ func TestNewBuildsHealthHandler(t *testing.T) {
 	}
 	if rr.Body.String() != `{"status":"ok"}` {
 		t.Fatalf("health body = %q", rr.Body.String())
+	}
+}
+
+// newEnvOAuthProvider rebuilds an env provider with another client: the
+// client changes, every other env setting (endpoints, the Microsoft tenant,
+// Apple's signing identity) is kept, and a provider the env does not
+// configure is not built at all.
+func TestNewEnvOAuthProvider(t *testing.T) {
+	cfg := &config.Config{
+		GoogleClientID:         "env-google",
+		GoogleAuthorizationURL: "https://accounts.example/authorize",
+		MicrosoftClientID:      "env-microsoft",
+		MicrosoftTenantID:      "acme-tenant",
+		AppleClientID:          "example.env.web",
+		AppleTeamID:            "team",
+		AppleKeyID:             "key",
+		OIDCEnabled:            true,
+		OIDCProviderKey:        "Okta",
+		OIDCIssuer:             "https://acme.example",
+		OIDCClientID:           "env-okta",
+		OIDCClientSecret:       "env-okta-secret",
+	}
+	cfg.GoogleClientSecret = testCredential("google")
+	cfg.MicrosoftClientSecret = testCredential("microsoft")
+	cfg.ApplePrivateKey = testCredential("apple")
+
+	authURL := func(t *testing.T, provider, clientID string) string {
+		t.Helper()
+		e, ok := newEnvOAuthProvider(cfg, provider, clientID, "override-secret")
+		if !ok {
+			t.Fatalf("%s: env provider not built", provider)
+		}
+		a, ok := e.(oauth.Authorizer)
+		if !ok {
+			t.Fatalf("%s: exchanger is not an Authorizer", provider)
+		}
+		u, err := a.AuthorizationURL(context.Background(), "https://auth.b.example/oauth/callback/"+provider, "state", "challenge")
+		if err != nil {
+			t.Fatalf("%s: AuthorizationURL: %v", provider, err)
+		}
+		return u
+	}
+
+	for _, tc := range []struct{ provider, clientID, keeps string }{
+		{"google", "override-google", "https://accounts.example/authorize?"},
+		{"microsoft", "override-microsoft", "/acme-tenant/"},
+		{"apple", "example.override.web", "https://appleid.apple.com/"},
+	} {
+		u := authURL(t, tc.provider, tc.clientID)
+		if !strings.Contains(u, "client_id="+url.QueryEscape(tc.clientID)) {
+			t.Errorf("%s: authorization url %q does not carry the override client", tc.provider, u)
+		}
+		if !strings.Contains(u, tc.keeps) {
+			t.Errorf("%s: authorization url %q lost the env setting %q", tc.provider, u, tc.keeps)
+		}
+	}
+
+	if _, ok := newEnvOAuthProvider(cfg, "okta", "override-okta", "s"); !ok {
+		t.Error("the env OIDC provider must rebuild under its normalized key")
+	}
+	for _, provider := range []string{"github", "Okta", "unknown"} {
+		if _, ok := newEnvOAuthProvider(cfg, provider, "c", "s"); ok {
+			t.Errorf("%s: a provider the env does not configure must not be built", provider)
+		}
 	}
 }

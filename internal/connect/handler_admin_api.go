@@ -315,6 +315,7 @@ func (h *IdentityHandler) GetProjectConfig(
 }
 
 // AdminSetProjectOAuthProvider sets/rotates one of a project's OAuth providers,
+// or with config.callback_host set, the client it uses on that host (ADR-0019),
 // encrypting any plaintext secret server-side. The response redacts secrets.
 // Operator-only.
 func (h *IdentityHandler) AdminSetProjectOAuthProvider(
@@ -408,8 +409,8 @@ func assuranceViewToProto(v *service.ProjectAssuranceView) *identitypb.ProjectAs
 	}
 }
 
-// AdminDeleteProjectOAuthProvider removes one of a project's OAuth providers.
-// Operator-only.
+// AdminDeleteProjectOAuthProvider removes one of a project's OAuth providers,
+// or with callback_host set, the client it uses on that host. Operator-only.
 func (h *IdentityHandler) AdminDeleteProjectOAuthProvider(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminDeleteProjectOAuthProviderRequest],
@@ -417,14 +418,14 @@ func (h *IdentityHandler) AdminDeleteProjectOAuthProvider(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	if err := h.controlAdmin.AdminDeleteProjectOAuthProvider(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Provider); err != nil {
+	if err := h.controlAdmin.AdminDeleteProjectOAuthProvider(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Provider, req.Msg.CallbackHost); err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.AdminDeleteProjectOAuthProviderResponse{}), nil
 }
 
 // AdminListProjectOAuthProviders lists a project's configured OAuth providers
-// with secrets redacted. Operator-only.
+// and its per-host clients, with secrets redacted. Operator-only.
 func (h *IdentityHandler) AdminListProjectOAuthProviders(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminListProjectOAuthProvidersRequest],
@@ -432,15 +433,23 @@ func (h *IdentityHandler) AdminListProjectOAuthProviders(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	views, err := h.controlAdmin.AdminListProjectOAuthProviders(ctx, adminSecret(req.Header()), req.Msg.ProjectId)
+	providers, hostClients, err := h.controlAdmin.AdminListProjectOAuthProviders(ctx, adminSecret(req.Header()), req.Msg.ProjectId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
+	return connect.NewResponse(&identitypb.AdminListProjectOAuthProvidersResponse{
+		Providers:   oauthProviderViewsToProto(providers),
+		HostClients: oauthProviderViewsToProto(hostClients),
+	}), nil
+}
+
+// oauthProviderViewsToProto maps a list of REDACTED provider views in order.
+func oauthProviderViewsToProto(views []*service.ProjectOAuthProviderView) []*identitypb.ProjectOAuthProviderConfig {
 	out := make([]*identitypb.ProjectOAuthProviderConfig, 0, len(views))
 	for _, v := range views {
 		out = append(out, oauthProviderViewToProto(v))
 	}
-	return connect.NewResponse(&identitypb.AdminListProjectOAuthProvidersResponse{Providers: out}), nil
+	return out
 }
 
 // oauthProviderInputFromProto maps the write-side proto config (which carries
@@ -452,6 +461,7 @@ func oauthProviderInputFromProto(c *identitypb.ProjectOAuthProviderConfig) *serv
 	}
 	return &service.ProjectOAuthProviderInput{
 		Provider:                c.Provider,
+		CallbackHost:            c.CallbackHost,
 		ClientID:                c.ClientId,
 		ClientSecret:            c.ClientSecret,
 		NativeAudiences:         c.NativeAudiences,
@@ -484,6 +494,7 @@ func oauthProviderViewToProto(v *service.ProjectOAuthProviderView) *identitypb.P
 	}
 	return &identitypb.ProjectOAuthProviderConfig{
 		Provider:                v.Provider,
+		CallbackHost:            v.CallbackHost,
 		ClientId:                v.ClientID,
 		HasClientSecret:         v.HasClientSecret,
 		NativeAudiences:         v.NativeAudiences,

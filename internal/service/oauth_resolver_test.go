@@ -89,7 +89,7 @@ func TestOAuthResolver_DefaultProjectUsesEnv(t *testing.T) {
 		if !r.available(ctx) {
 			t.Fatalf("%s: expected available", name)
 		}
-		e, ok := r.exchangerFor(ctx, "google")
+		e, ok := r.exchangerFor(ctx, "google", "")
 		if !ok {
 			t.Fatalf("%s: expected google exchanger", name)
 		}
@@ -107,7 +107,7 @@ func TestOAuthResolver_NonDefaultProjectWithoutConfig_Unavailable(t *testing.T) 
 	if r.available(ctx) {
 		t.Fatal("non-default project without OAuth config must not be available")
 	}
-	if _, ok := r.exchangerFor(ctx, "google"); ok {
+	if _, ok := r.exchangerFor(ctx, "google", ""); ok {
 		t.Fatal("non-default project must NOT inherit the env google provider (isolation leak)")
 	}
 }
@@ -123,7 +123,7 @@ func TestOAuthResolver_HubSharing_NonDefaultBorrowsDefault(t *testing.T) {
 	if !r.available(ctx) {
 		t.Fatal("hub sharing must make the default providers available to a non-default project")
 	}
-	e, ok := r.exchangerFor(ctx, "google")
+	e, ok := r.exchangerFor(ctx, "google", "")
 	if !ok {
 		t.Fatal("hub sharing must resolve the env google provider for a non-default project")
 	}
@@ -138,7 +138,7 @@ func TestOAuthResolver_HubSharing_ProjectConfigStillWins(t *testing.T) {
 	r := newOAuthResolver("default", envGoogleRegistry("env-google"), true, nil).
 		withSecrets(resolverSecretsKey(), nil)
 
-	e, ok := r.exchangerFor(projectGoogleScope(t, "other", "proj-google"), "google")
+	e, ok := r.exchangerFor(projectGoogleScope(t, "other", "proj-google"), "google", "")
 	if !ok {
 		t.Fatal("project-configured google must resolve")
 	}
@@ -153,7 +153,7 @@ func TestOAuthResolver_ProjectConfigWinsAndIsolated(t *testing.T) {
 
 	// A second project with its OWN google client_id resolves to THAT client_id.
 	projCtx := projectGoogleScope(t, "other", "proj-google")
-	e, ok := r.exchangerFor(projCtx, "google")
+	e, ok := r.exchangerFor(projCtx, "google", "")
 	if !ok {
 		t.Fatal("project-configured google must resolve")
 	}
@@ -163,7 +163,7 @@ func TestOAuthResolver_ProjectConfigWinsAndIsolated(t *testing.T) {
 
 	// The default project still uses the env client_id — no cross-contamination.
 	defCtx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "default"})
-	de, _ := r.exchangerFor(defCtx, "google")
+	de, _ := r.exchangerFor(defCtx, "google", "")
 	if got := authURL(t, de); !strings.Contains(got, "client_id=env-google") {
 		t.Errorf("default project must keep env client_id, got %q", got)
 	}
@@ -176,7 +176,7 @@ func TestOAuthResolver_DefaultProjectConfigOverridesEnv(t *testing.T) {
 		withSecrets(resolverSecretsKey(), nil)
 	ctx := projectGoogleScope(t, "default", "override-google")
 
-	e, ok := r.exchangerFor(ctx, "google")
+	e, ok := r.exchangerFor(ctx, "google", "")
 	if !ok {
 		t.Fatal("default project config google must resolve")
 	}
@@ -220,7 +220,7 @@ func TestOAuthResolver_GitHubPerProjectIsolation(t *testing.T) {
 
 	// A non-default project with its OWN github client_id resolves to THAT id.
 	projCtx := projectGitHubScope(t, "other", "proj-github")
-	e, ok := r.exchangerFor(projCtx, "github")
+	e, ok := r.exchangerFor(projCtx, "github", "")
 	if !ok {
 		t.Fatal("project-configured github must resolve")
 	}
@@ -230,7 +230,7 @@ func TestOAuthResolver_GitHubPerProjectIsolation(t *testing.T) {
 
 	// The default project still uses the env client_id — no cross-contamination.
 	defCtx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "default"})
-	de, ok := r.exchangerFor(defCtx, "github")
+	de, ok := r.exchangerFor(defCtx, "github", "")
 	if !ok {
 		t.Fatal("default project must resolve the env github provider")
 	}
@@ -240,7 +240,7 @@ func TestOAuthResolver_GitHubPerProjectIsolation(t *testing.T) {
 
 	// A non-default project WITHOUT a github block never inherits the env one.
 	bareCtx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "bare"})
-	if _, ok := r.exchangerFor(bareCtx, "github"); ok {
+	if _, ok := r.exchangerFor(bareCtx, "github", ""); ok {
 		t.Fatal("non-default project without github config must NOT inherit env github (isolation leak)")
 	}
 }
@@ -250,11 +250,11 @@ func TestOAuthResolver_CacheReusesAndRebuilds(t *testing.T) {
 		withSecrets(resolverSecretsKey(), nil)
 	ctx := projectGoogleScope(t, "other", "proj-google")
 
-	e1, ok := r.exchangerFor(ctx, "google")
+	e1, ok := r.exchangerFor(ctx, "google", "")
 	if !ok {
 		t.Fatal("first build must succeed")
 	}
-	e2, _ := r.exchangerFor(ctx, "google")
+	e2, _ := r.exchangerFor(ctx, "google", "")
 	if e1 != e2 {
 		t.Error("same config must reuse the cached exchanger instance")
 	}
@@ -268,7 +268,7 @@ func TestOAuthResolver_CacheReusesAndRebuilds(t *testing.T) {
 			AuthorizationURL: "https://accounts.example/authorize",
 		}},
 	})
-	e3, _ := r.exchangerFor(changed, "google")
+	e3, _ := r.exchangerFor(changed, "google", "")
 	if e1 == e3 {
 		t.Error("a changed config must rebuild the exchanger")
 	}
@@ -293,7 +293,7 @@ func TestOAuthResolver_MissingSecretsKey_ProviderUnavailable(t *testing.T) {
 			t.Errorf("%s: a configured provider should report available", provider)
 		}
 		// ...but it cannot be built without the key.
-		if _, ok := r.exchangerFor(ctx, provider); ok {
+		if _, ok := r.exchangerFor(ctx, provider, ""); ok {
 			t.Errorf("%s: must be unavailable when the secrets key is missing", provider)
 		}
 	}
@@ -303,7 +303,7 @@ func TestOAuthResolver_UnknownProviderMisses(t *testing.T) {
 	r := newOAuthResolver("default", envGoogleRegistry("env-google"), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "default"})
-	if _, ok := r.exchangerFor(ctx, "github"); ok {
+	if _, ok := r.exchangerFor(ctx, "github", ""); ok {
 		t.Fatal("a provider not in the env registry must miss for the default project")
 	}
 }
@@ -329,7 +329,7 @@ func TestOAuthResolver_BuildsAllProviders(t *testing.T) {
 	}
 	for provider, cfg := range cases {
 		ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "other", OAuth: cfg})
-		if _, ok := r.exchangerFor(ctx, provider); !ok {
+		if _, ok := r.exchangerFor(ctx, provider, ""); !ok {
 			t.Errorf("provider %q must build from project config", provider)
 		}
 	}
@@ -341,10 +341,10 @@ func TestOAuthResolver_CacheSingleSlotPerProviderEvictsSuperseded(t *testing.T) 
 
 	// Build the initial config, then a rotated one (different hash) for the SAME
 	// project+provider. The superseded entry must be evicted, not accumulated.
-	if _, ok := r.exchangerFor(projectGoogleScope(t, "other", "proj-google"), "google"); !ok {
+	if _, ok := r.exchangerFor(projectGoogleScope(t, "other", "proj-google"), "google", ""); !ok {
 		t.Fatal("initial build must succeed")
 	}
-	if _, ok := r.exchangerFor(rotatedGoogleScope(t, "other", "proj-google"), "google"); !ok {
+	if _, ok := r.exchangerFor(rotatedGoogleScope(t, "other", "proj-google"), "google", ""); !ok {
 		t.Fatal("rotated build must succeed")
 	}
 
@@ -365,7 +365,7 @@ func TestOAuthResolver_NegativeResultCachedNoRebuildOrRelog(t *testing.T) {
 	// Repeated logins with the SAME broken config must neither rebuild nor
 	// re-log — the negative result is cached under its config hash.
 	for i := 0; i < 3; i++ {
-		if _, ok := r.exchangerFor(ctx, "google"); ok {
+		if _, ok := r.exchangerFor(ctx, "google", ""); ok {
 			t.Fatal("a build failure must report the provider unavailable")
 		}
 	}
@@ -374,7 +374,7 @@ func TestOAuthResolver_NegativeResultCachedNoRebuildOrRelog(t *testing.T) {
 	}
 
 	// A genuinely changed config (new hash) misses the negative entry and retries.
-	if _, ok := r.exchangerFor(rotatedGoogleScope(t, "other", "proj-google"), "google"); ok {
+	if _, ok := r.exchangerFor(rotatedGoogleScope(t, "other", "proj-google"), "google", ""); ok {
 		t.Fatal("changed-but-still-broken config must still be unavailable")
 	}
 	if got := logs.FilterMessage("oauth_project_provider_build_failed").Len(); got != 2 {

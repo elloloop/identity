@@ -90,7 +90,7 @@ func TestAdminSetProjectOAuthProvider_EncryptsAndResolves(t *testing.T) {
 	// and use the authored secret end-to-end (build fails → ok=false otherwise).
 	r := newOAuthResolver("default-proj", nil, false, zap.NewNop()).withSecrets(testAdminSecretsKey(), nil)
 	rctx := WithProjectScope(ctx, &ProjectScope{ProjectID: projectID, OAuth: cfg.OAuth})
-	if ex, ok := r.exchangerFor(rctx, oauthProviderGoogle); !ok || ex == nil {
+	if ex, ok := r.exchangerFor(rctx, oauthProviderGoogle, ""); !ok || ex == nil {
 		t.Fatal("resolver could not build the authored google provider")
 	}
 
@@ -153,12 +153,12 @@ func TestAdminSetProjectOAuthProvider_GitHub_RoundTrip(t *testing.T) {
 	// The resolver builds the exchanger for this project end-to-end.
 	r := newOAuthResolver("default-proj", nil, false, zap.NewNop()).withSecrets(testAdminSecretsKey(), nil)
 	rctx := WithProjectScope(ctx, &ProjectScope{ProjectID: projectID, OAuth: cfg.OAuth})
-	if ex, ok := r.exchangerFor(rctx, oauthProviderGitHub); !ok || ex == nil {
+	if ex, ok := r.exchangerFor(rctx, oauthProviderGitHub, ""); !ok || ex == nil {
 		t.Fatal("resolver could not build the authored github provider")
 	}
 
 	// List surfaces github (redacted) with the endpoint overrides intact.
-	list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
+	list, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
 	if err != nil || len(list) != 1 || list[0].Provider != oauthProviderGitHub || list[0].GitHubUserURL == "" {
 		t.Fatalf("list = %+v, err = %v", list, err)
 	}
@@ -172,10 +172,10 @@ func TestAdminSetProjectOAuthProvider_GitHub_RoundTrip(t *testing.T) {
 	}
 
 	// Delete removes only it.
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGitHub); err != nil {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGitHub, ""); err != nil {
 		t.Fatalf("delete github: %v", err)
 	}
-	if list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); err != nil || len(list) != 0 {
+	if list, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); err != nil || len(list) != 0 {
 		t.Fatalf("after delete list = %+v, err = %v; want empty", list, err)
 	}
 }
@@ -339,11 +339,11 @@ func TestAdminDeleteProjectOAuthProvider_RemovesOnlyThatProvider(t *testing.T) {
 	mustSet(&ProjectOAuthProviderInput{Provider: oauthProviderGoogle, ClientID: "g", ClientSecret: "gs"})
 	mustSet(&ProjectOAuthProviderInput{Provider: oauthProviderOIDC, ClientID: "o", ClientSecret: "os", OIDCIssuer: "https://idp.example.com"})
 
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle); err != nil {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle, ""); err != nil {
 		t.Fatalf("delete google: %v", err)
 	}
 
-	list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
+	list, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestAdminListProjectOAuthProviders_RedactsSecrets(t *testing.T) {
 		t.Fatalf("set apple: %v", err)
 	}
 
-	list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
+	list, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -579,10 +579,10 @@ func TestAdminOAuthRPCs_BadSecretDenied(t *testing.T) {
 	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, "wrong", "p", &ProjectOAuthProviderInput{Provider: oauthProviderGoogle}); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("set: err = %v, want ErrPermissionDenied", err)
 	}
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, "wrong", "p", oauthProviderGoogle); !errors.Is(err, ErrPermissionDenied) {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, "wrong", "p", oauthProviderGoogle, ""); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("delete: err = %v, want ErrPermissionDenied", err)
 	}
-	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, "wrong", "p"); !errors.Is(err, ErrPermissionDenied) {
+	if _, _, err := f.svc.AdminListProjectOAuthProviders(ctx, "wrong", "p"); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("list: err = %v, want ErrPermissionDenied", err)
 	}
 }
@@ -595,10 +595,10 @@ func TestAdminOAuthRPCs_DisabledWhenSecretEmpty(t *testing.T) {
 	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, "anything", "p", &ProjectOAuthProviderInput{Provider: oauthProviderGoogle}); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("set: err = %v, want ErrUnimplemented", err)
 	}
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, "anything", "p", oauthProviderGoogle); !errors.Is(err, ErrUnimplemented) {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, "anything", "p", oauthProviderGoogle, ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("delete: err = %v, want ErrUnimplemented", err)
 	}
-	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, "anything", "p"); !errors.Is(err, ErrUnimplemented) {
+	if _, _, err := f.svc.AdminListProjectOAuthProviders(ctx, "anything", "p"); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("list: err = %v, want ErrUnimplemented", err)
 	}
 }
@@ -647,7 +647,7 @@ func TestAdminOAuthProvider_PreservesUnknownOAuthKeys(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set microsoft: %v", err)
 	}
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderApple); err != nil {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderApple, ""); err != nil {
 		t.Fatalf("delete apple: %v", err)
 	}
 
@@ -689,7 +689,7 @@ func TestAdminDeleteProjectOAuthProvider_IgnoresInvalidNeighbor(t *testing.T) {
 		`"microsoft":{"client_id":"m","client_secret_enc":"ENC","issuer_format":"https://login.test/no-verb"}}}`
 	seedProjectConfig(t, f, projectID, seed)
 
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle); err != nil {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle, ""); err != nil {
 		t.Fatalf("delete google must succeed despite invalid neighbor: %v", err)
 	}
 	sub := oauthSubtreeOf(t, f, projectID)
@@ -708,10 +708,10 @@ func TestAdminDeleteProjectOAuthProvider_MissingIsNoop(t *testing.T) {
 	projectID := seedOAuthProject(t, f)
 
 	// Delete a provider that was never configured — no error, no oauth block.
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle); err != nil {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle, ""); err != nil {
 		t.Fatalf("delete missing: %v", err)
 	}
-	if list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); err != nil || len(list) != 0 {
+	if list, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); err != nil || len(list) != 0 {
 		t.Fatalf("list = %+v, err = %v; want empty", list, err)
 	}
 }
@@ -720,7 +720,7 @@ func TestAdminListProjectOAuthProviders_EmptyProject(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(oauthAdminSecret)
 	projectID := seedOAuthProject(t, f)
-	list, err := f.svc.AdminListProjectOAuthProviders(context.Background(), oauthAdminSecret, projectID)
+	list, _, err := f.svc.AdminListProjectOAuthProviders(context.Background(), oauthAdminSecret, projectID)
 	if err != nil || len(list) != 0 {
 		t.Fatalf("list = %+v, err = %v; want empty", list, err)
 	}
@@ -780,7 +780,7 @@ func TestAdminSetProjectOAuthProvider_AllProviderFields(t *testing.T) {
 
 	// List returns all three, ordered by provider key (apple, microsoft, oidc),
 	// with secrets redacted.
-	list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
+	list, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -804,7 +804,7 @@ func TestAdminOAuthProvider_MalformedStoredSubtree(t *testing.T) {
 	ctx := context.Background()
 	projectID := seedOAuthProject(t, f)
 	seedProjectConfig(t, f, projectID, `{"oauth":["not","an","object"]}`)
-	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
+	if _, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("list malformed oauth: err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -819,10 +819,10 @@ func TestAdminOAuthRPCs_ArgumentValidation(t *testing.T) {
 	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, "  ", &ProjectOAuthProviderInput{Provider: oauthProviderGoogle, ClientID: "g", ClientSecret: "s"}); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("set missing project_id: %v", err)
 	}
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, "", oauthProviderGoogle); !errors.Is(err, ErrInvalidArgument) {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, "", oauthProviderGoogle, ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("delete missing project_id: %v", err)
 	}
-	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, ""); !errors.Is(err, ErrInvalidArgument) {
+	if _, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("list missing project_id: %v", err)
 	}
 
@@ -832,7 +832,7 @@ func TestAdminOAuthRPCs_ArgumentValidation(t *testing.T) {
 	}
 
 	// Unknown provider on Delete (normalize rejects it before touching config).
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, "p", "facebook"); !errors.Is(err, ErrInvalidArgument) {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, "p", "facebook", ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("delete unknown provider: %v", err)
 	}
 }
@@ -844,7 +844,7 @@ func TestAdminOAuthProvider_MalformedStoredTopLevel(t *testing.T) {
 	ctx := context.Background()
 	projectID := seedOAuthProject(t, f)
 	seedProjectConfig(t, f, projectID, `[1,2,3]`)
-	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
+	if _, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("list malformed top-level: err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -857,7 +857,7 @@ func TestAdminListProjectOAuthProviders_MalformedProviderValue(t *testing.T) {
 	ctx := context.Background()
 	projectID := seedOAuthProject(t, f)
 	seedProjectConfig(t, f, projectID, `{"oauth":{"google":"not-an-object"}}`)
-	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
+	if _, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("list malformed provider: err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -918,7 +918,7 @@ func TestAdminListProjectOAuthProviders_MalformedPerProvider(t *testing.T) {
 			ctx := context.Background()
 			projectID := seedOAuthProject(t, f)
 			seedProjectConfig(t, f, projectID, `{"oauth":{"`+key+`":42}}`)
-			if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
+			if _, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
 				t.Fatalf("list malformed %s: err = %v, want ErrInvalidArgument", key, err)
 			}
 		})

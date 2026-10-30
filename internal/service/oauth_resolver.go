@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -38,14 +39,25 @@ import (
 // project's own provider config always wins, including a configured-but-broken
 // one.
 //
+// Within whichever provider those rules select, a project may name another
+// client for one callback host (config_json.oauth.hosts, ADR-0019): a flow
+// whose callback is on that host signs in through it, with every other setting
+// taken from the selected provider. The override never selects a provider of
+// its own, and a broken one leaves the provider unavailable on that host.
+//
 // Building an Exchanger creates a JWKS/discovery cache, so instances are cached
-// keyed by (projectID, provider, configHash): a config change rebuilds, steady
-// state reuses the cache.
+// keyed by (projectID, provider[, host], configHash): a config change rebuilds,
+// steady state reuses the cache.
 type OAuthResolver struct {
 	defaultProjectID string
 	defaultRegistry  *oauth.Registry
 	hubSharing       bool
 	logger           *zap.Logger
+	// envProvider rebuilds an env provider of defaultRegistry with another
+	// client, for a host override whose base is one (rules 2 and 3). nil when
+	// the registry was not built from the env (an embedder supplied it), and
+	// such an override is then unavailable.
+	envProvider EnvOAuthProviderBuilder
 
 	// secretsKey decrypts per-project provider secrets at rest (AES-256-GCM).
 	// Empty until wiring calls withSecrets; when empty, a project that stores
@@ -57,8 +69,10 @@ type OAuthResolver struct {
 	wrap func(provider string, e oauth.Exchanger) oauth.Exchanger
 
 	mu sync.RWMutex
-	// cache holds at most ONE entry per (projectID, provider): a config change
-	// (new hash) overwrites the superseded entry rather than accumulating. An
+	// cache holds at most ONE entry per (projectID, provider), and one per
+	// (projectID, provider, host) for each host override a request has used: a
+	// config change (new hash) overwrites the superseded entry rather than
+	// accumulating. An
 	// entry with a nil exchanger is a NEGATIVE result (the build failed for that
 	// hash), cached so a persistently-misconfigured project neither rebuilds nor
 	// re-logs on every login; a genuinely fixed config (new hash) retries.
@@ -98,6 +112,13 @@ func (r *OAuthResolver) withSecrets(secretsKey []byte, wrap func(provider string
 	return r
 }
 
+// EnvOAuthProviderBuilder builds the env-configured (GATEWAY_OAUTH_*) provider
+// with another client id and secret, keeping every other env setting, or
+// reports ok=false when the env does not configure the provider. Apple takes
+// no secret: the env key signs for the client. It builds the host overrides
+// (ADR-0019) whose base is an env provider.
+type EnvOAuthProviderBuilder func(provider, clientID, clientSecret string) (e oauth.Exchanger, ok bool)
+
 // available reports whether ANY OAuth provider is usable for the request's
 // project. It drives the ErrOAuthDisabled short-circuit; a specific
 // unconfigured provider is still reported by exchangerFor as a miss.
@@ -118,15 +139,23 @@ func (r *OAuthResolver) available(ctx context.Context) bool {
 }
 
 // exchangerFor returns the Exchanger for the request's project and provider,
-// or ok=false when the provider is not available for that project (an
-// unconfigured provider, a non-default project without it, or a build failure).
-// provider must already be lower-cased/trimmed by the caller.
-func (r *OAuthResolver) exchangerFor(ctx context.Context, provider string) (oauth.Exchanger, bool) {
+// signing in through the client the project names for redirectURI's host when
+// it names one (ADR-0019), or ok=false when the provider is not available for
+// that project (an unconfigured provider, a non-default project without it, or
+// a build failure). provider must already be lower-cased/trimmed by the
+// caller. Callers pass the redirect URI the flow is bound to, so a start and
+// its callback resolve the same client.
+func (r *OAuthResolver) exchangerFor(ctx context.Context, provider, redirectURI string) (oauth.Exchanger, bool) {
 	if r == nil {
 		return nil, false
 	}
 	scope := ProjectScopeFromContext(ctx)
 	if scope != nil {
+		host := callbackHost(redirectURI)
+		if client, ok := scope.OAuth.hostClient(host, provider); ok {
+			built := r.buildHostClient(scope.ProjectID, provider, host, client, scope.OAuth)
+			return built, built != nil
+		}
 		if present, built := r.buildProject(scope.ProjectID, provider, scope.OAuth); present {
 			// present with a nil Exchanger means the project configured this
 			// provider but it could not be built (bad secret / config). Project
@@ -144,6 +173,44 @@ func (r *OAuthResolver) exchangerFor(ctx context.Context, provider string) (oaut
 		}
 	}
 	return r.defaultRegistry.Get(provider)
+}
+
+// buildHostClient builds (and caches) the provider for a host override: the
+// provider exchangerFor would otherwise select, signing in through client. It
+// returns nil when there is no such provider or the build fails — never the
+// base client, which is not registered for this host's callback.
+func (r *OAuthResolver) buildHostClient(projectID, provider, host string, client ProjectOAuthHostClient, cfg ProjectOAuthConfig) oauth.Exchanger {
+	key := projectID + "\x00" + provider + "\x00" + host
+	fields := []zap.Field{zap.String("project_id", projectID), zap.String("provider", provider), zap.String("callback_host", host)}
+	if base, ok := cfg.provider(provider); ok {
+		swapped := withHostClient(base, client)
+		return r.cached(key, providerConfigHash(swapped), provider, fields, func() (oauth.Exchanger, error) {
+			return r.build(provider, swapped)
+		})
+	}
+	if r.isNonDefaultProject(projectID) && !r.hubSharing {
+		return nil
+	}
+	if _, ok := r.defaultRegistry.Get(provider); !ok {
+		return nil
+	}
+	return r.cached(key, "env\x00"+providerConfigHash(client), provider, fields, func() (oauth.Exchanger, error) {
+		if r.envProvider == nil {
+			return nil, errors.New("the env providers were supplied by the embedder, so none can be rebuilt with a host's client")
+		}
+		secret := ""
+		if client.ClientSecretEnc != "" {
+			var err error
+			if secret, err = r.decrypt(client.ClientSecretEnc); err != nil {
+				return nil, fmt.Errorf("%s client_secret: %w", provider, err)
+			}
+		}
+		e, ok := r.envProvider(provider, client.ClientID, secret)
+		if !ok {
+			return nil, errors.New("the env does not configure the provider")
+		}
+		return e, nil
+	})
 }
 
 // providersFor returns the provider keys CONFIGURED for the request's
@@ -210,27 +277,30 @@ func (r *OAuthResolver) buildProject(projectID, provider string, cfg ProjectOAut
 	if !ok {
 		return false, nil
 	}
-	hash := providerConfigHash(raw)
 	// One slot per (projectID, provider) — a config change overwrites it.
-	key := projectID + "\x00" + provider
+	fields := []zap.Field{zap.String("project_id", projectID), zap.String("provider", provider)}
+	return true, r.cached(projectID+"\x00"+provider, providerConfigHash(raw), provider, fields, func() (oauth.Exchanger, error) {
+		return r.build(provider, raw)
+	})
+}
 
+// cached returns provider's Exchanger cached in slot key for hash, building,
+// wrapping and storing it on a miss. A failed build is cached too, as nil, and
+// logged with fields once, so the same broken config neither rebuilds nor
+// re-logs on every login; a fixed config (new hash) misses the entry and
+// retries.
+func (r *OAuthResolver) cached(key, hash, provider string, fields []zap.Field, build func() (oauth.Exchanger, error)) oauth.Exchanger {
 	r.mu.RLock()
 	entry, hit := r.cache[key]
 	r.mu.RUnlock()
 	if hit && entry.hash == hash {
 		// Hit for the current config — positive OR negative (nil exchanger).
-		return true, entry.exchanger
+		return entry.exchanger
 	}
 
-	built, err := r.build(provider, raw)
+	built, err := build()
 	if err != nil {
-		// Cache the negative result under this hash so the same broken config
-		// neither rebuilds nor re-logs on every login; a fixed config (new
-		// hash) misses this entry and retries. built stays nil.
-		r.logger.Warn("oauth_project_provider_build_failed",
-			zap.String("project_id", projectID),
-			zap.String("provider", provider),
-			zap.Error(err))
+		r.logger.Warn("oauth_project_provider_build_failed", append(fields, zap.Error(err))...)
 	} else if r.wrap != nil {
 		built = r.wrap(provider, built)
 	}
@@ -244,7 +314,7 @@ func (r *OAuthResolver) buildProject(projectID, provider string, cfg ProjectOAut
 		r.cache[key] = oauthCacheEntry{hash: hash, exchanger: built}
 	}
 	r.mu.Unlock()
-	return true, built
+	return built
 }
 
 // build constructs the concrete Exchanger for a project-configured provider,
@@ -356,6 +426,53 @@ func (c ProjectOAuthConfig) provider(provider string) (any, bool) {
 		}
 	}
 	return nil, false
+}
+
+// hostClient returns the client the project names for provider on host
+// (ADR-0019), or ok=false when it names none there.
+func (c ProjectOAuthConfig) hostClient(host, provider string) (ProjectOAuthHostClient, bool) {
+	client, ok := c.Hosts[host][provider]
+	return client, ok
+}
+
+// withHostClient returns a copy of a configured provider (as provider returns
+// it) whose client identity is client's. Apple keeps its key: it signs for any
+// Services ID of its team, so only the client id changes.
+func withHostClient(base any, client ProjectOAuthHostClient) any {
+	switch b := base.(type) {
+	case *ProjectOAuthGoogle:
+		c := *b
+		c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
+		return &c
+	case *ProjectOAuthMicrosoft:
+		c := *b
+		c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
+		return &c
+	case *ProjectOAuthApple:
+		c := *b
+		c.ClientID = client.ClientID
+		return &c
+	case *ProjectOAuthGitHub:
+		c := *b
+		c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
+		return &c
+	case *ProjectOAuthOIDC:
+		c := *b
+		c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
+		return &c
+	}
+	return base
+}
+
+// callbackHost is the host a host override is keyed by: redirectURI's, in the
+// form oauth.hosts keys are stored in (lower-cased, no port, no trailing dot),
+// or "" when it has none.
+func callbackHost(redirectURI string) string {
+	u, err := url.Parse(strings.TrimSpace(redirectURI))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 }
 
 // hasAny reports whether the project configured at least one provider.

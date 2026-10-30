@@ -194,8 +194,9 @@ const (
 	// operator authoring or removing one of a project's hosted/native OAuth
 	// providers. They make a change to how a project's users can sign in with a
 	// federated provider — including a client-secret rotation — visible in the
-	// audit trail. The recorded details carry the project id and provider key
-	// only; secret material is never logged.
+	// audit trail. The recorded details carry the project id and provider key,
+	// and the callback_host of a host's own client (ADR-0019); secret material
+	// is never logged.
 	EventProjectOAuthProviderSet     EventType = "project_oauth_provider_set"
 	EventProjectOAuthProviderRemoved EventType = "project_oauth_provider_removed"
 

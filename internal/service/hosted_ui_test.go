@@ -22,7 +22,7 @@ func providerKeys(providers []HostedUIProvider) []string {
 func TestHostedUIOptions_Defaults(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
 
-	opts := svc.HostedUIOptions(withProject("proj-1"))
+	opts := svc.HostedUIOptions(withProject("proj-1"), "")
 
 	assert.True(t, opts.PasswordLoginEnabled)
 	assert.True(t, opts.PasswordSignupEnabled)
@@ -38,7 +38,7 @@ func TestHostedUIOptions_SignupDisabled(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
 	svc.cfg.PasswordSignupEnabled = false
 
-	opts := svc.HostedUIOptions(withProject("proj-1"))
+	opts := svc.HostedUIOptions(withProject("proj-1"), "")
 
 	assert.True(t, opts.PasswordLoginEnabled)
 	assert.False(t, opts.PasswordSignupEnabled)
@@ -50,7 +50,7 @@ func TestHostedUIOptions_LocalAuthDisabled(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
 	svc.cfg.AuthAllowLocal = false
 
-	opts := svc.HostedUIOptions(withProject("proj-1"))
+	opts := svc.HostedUIOptions(withProject("proj-1"), "")
 
 	assert.False(t, opts.PasswordLoginEnabled)
 	assert.False(t, opts.PasswordSignupEnabled)
@@ -67,7 +67,7 @@ func TestHostedUIOptions_AllowedMethodsGate(t *testing.T) {
 		ProjectID:     "proj-1",
 		LoginDefaults: ProjectLoginConfig{AllowedMethods: "oauth"},
 	})
-	opts := svc.HostedUIOptions(oauthOnly)
+	opts := svc.HostedUIOptions(oauthOnly, "")
 	assert.False(t, opts.PasswordLoginEnabled)
 	assert.False(t, opts.PasswordSignupEnabled)
 	assert.NotEmpty(t, opts.OAuthProviders)
@@ -76,7 +76,7 @@ func TestHostedUIOptions_AllowedMethodsGate(t *testing.T) {
 		ProjectID:     "proj-1",
 		LoginDefaults: ProjectLoginConfig{AllowedMethods: "password, email_otp"},
 	})
-	opts = svc.HostedUIOptions(passwordOnly)
+	opts = svc.HostedUIOptions(passwordOnly, "")
 	assert.True(t, opts.PasswordLoginEnabled)
 	assert.Empty(t, opts.OAuthProviders)
 }
@@ -87,13 +87,13 @@ func TestHostedUIOptions_AllowedMethodsGate(t *testing.T) {
 // BORROWED — flagged to need a project_key and routed to the hub's origin.
 func TestHostedUIOptions_ProviderIsolationAndHubSharing(t *testing.T) {
 	strict := hubSharingService(t, newFakeRepo(), false)
-	opts := strict.HostedUIOptions(withProject("proj-hub"))
+	opts := strict.HostedUIOptions(withProject("proj-hub"), "")
 	assert.Empty(t, opts.OAuthProviders,
 		"strict isolation must not advertise the hub's providers")
 
 	sharing := hubSharingService(t, newFakeRepo(), true)
 	sharing.cfg.DefaultProjectAuthDomains = "auth.hub.test, alt.hub.test"
-	opts = sharing.HostedUIOptions(withProject("proj-hub"))
+	opts = sharing.HostedUIOptions(withProject("proj-hub"), "")
 	assert.Equal(t, []string{"github", "google", "microsoft"}, providerKeys(opts.OAuthProviders))
 	for _, p := range opts.OAuthProviders {
 		assert.True(t, p.NeedsProjectKey, "%s: borrowed providers need the key to re-scope the hub callback", p.Key)
@@ -113,7 +113,7 @@ func TestHostedUIOptions_ProjectOwnProviderWinsOverBorrowed(t *testing.T) {
 		PrimaryAuthDomain: "auth.own.test",
 		OAuth:             ProjectOAuthConfig{Google: &ProjectOAuthGoogle{ClientID: "own-google"}},
 	}
-	opts := svc.HostedUIOptions(WithProjectScope(context.Background(), scope))
+	opts := svc.HostedUIOptions(WithProjectScope(context.Background(), scope), "")
 
 	assert.Equal(t, []string{"google", "github", "microsoft"}, providerKeys(opts.OAuthProviders))
 	byKey := map[string]HostedUIProvider{}
@@ -127,7 +127,7 @@ func TestHostedUIOptions_ProjectOwnProviderWinsOverBorrowed(t *testing.T) {
 	assert.True(t, byKey["microsoft"].NeedsProjectKey)
 
 	strict := hubSharingService(t, newFakeRepo(), false)
-	opts = strict.HostedUIOptions(WithProjectScope(context.Background(), scope))
+	opts = strict.HostedUIOptions(WithProjectScope(context.Background(), scope), "")
 	assert.Equal(t, []string{"google"}, providerKeys(opts.OAuthProviders),
 		"strict isolation lists only the project's own providers")
 }
@@ -157,7 +157,7 @@ func TestHostedUIOptions_AccountSettings(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := svc.HostedUIOptions(hostedScope(t, tc.config))
+			opts := svc.HostedUIOptions(hostedScope(t, tc.config), "")
 			assert.Equal(t, tc.email, opts.PasswordSignupEnabled, "email sign-up")
 			assert.Equal(t, tc.username, opts.UsernameSignupEnabled, "username sign-up")
 			assert.Equal(t, tc.userLogin, opts.UsernameLoginEnabled, "username sign-in")

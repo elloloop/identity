@@ -257,6 +257,65 @@ https://auth.example.com/oauth/start/google?return_to=<app-url>&project_key=<pk>
   the same operator as the hub — the provider consent screen shows the
   shared client's branding for all of them. It is off by default.
 
+### A client per auth host (`callback_host`)
+
+A provider's consent screen names the application its client is registered
+as, so a project served on several auth hosts shows every user the same name.
+When one project (one account pool) serves several products, each on its own
+auth host, a project can name a different client for a given callback host
+(ADR-0019):
+
+```json
+"oauth": {
+  "google": { "client_id": "base", "client_secret_enc": "<enc>" },
+  "hosts": {
+    "auth.widgets.example": {
+      "google":    { "client_id": "widgets", "client_secret_enc": "<enc>" },
+      "microsoft": { "client_id": "widgets-ms", "client_secret_enc": "<enc>" },
+      "apple":     { "client_id": "example.widgets.web" }
+    }
+  }
+}
+```
+
+- **The key is the host of the flow's callback URL**: the host the hosted
+  sign-in page and `/oauth/start` are served on, or the host of the app's
+  `redirect_uri` in the headless flow. The callback resolves the client from
+  the redirect URI signed into the state, so it completes with the client
+  the start used.
+- **An override swaps the client and nothing else.** The provider is still
+  the one the precedence above selects: the project's own, the env provider
+  for the default project, or the hub's under `GATEWAY_OAUTH_HUB_SHARING`.
+  Endpoints, Microsoft tenant settings, native audiences and Apple's team id,
+  key id and private key come from it. Apple's override is a Services ID of
+  the same team; the others are a client id and secret.
+- **An override never enables a provider.** Where the precedence yields
+  none, the provider stays unavailable on every host.
+- **A broken override is unavailable** on its host (a secret that will not
+  decrypt, or an env base the server cannot rebuild because the embedder
+  supplied its own `OAuthRegistry`). It never falls back to the base client,
+  which the provider would reject for that callback.
+- **The hosted page starts an overridden provider on its own host**, with no
+  `project_key`, since its client is registered there. Other providers start
+  where their base client is registered, as before. If the project's primary
+  auth domain has an override, the own-provider flows that other hosts start
+  there use it too.
+- **The default project's overrides** apply to requests that resolve to it by
+  an auth domain or a key. A request that names no project falls back to the
+  env settings, which carry no overrides.
+
+Register each override's callback, `https://<host>/oauth/callback/<provider>`,
+with its client, and configure overrides only once every replica runs a
+version that reads them: an older replica ignores `oauth.hosts`, so a flow it
+completes would exchange the code with the base client and fail.
+
+Author them with the admin API: `AdminSetProjectOAuthProvider` with
+`config.callback_host` set takes only `client_id` and `client_secret` (an
+empty secret keeps the stored one; Apple takes none),
+`AdminDeleteProjectOAuthProvider` with `callback_host` removes one, and
+`AdminListProjectOAuthProviders` returns them, redacted, in `host_clients`.
+Setting or deleting the base provider leaves its overrides in place.
+
 ### The hosted auth UI (`/auth/`)
 
 The built-in sign-in page is rendered **per request** and mirrors the

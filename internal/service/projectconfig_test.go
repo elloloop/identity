@@ -469,3 +469,37 @@ func TestParseProjectConfig_TenantsSelfService(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, cfg.Tenants.SelfService)
 }
+
+func TestParseProjectConfig_OAuth_HostClients_Present(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"oauth":{"google":{"client_id":"g","client_secret_enc":"enc"},"hosts":{"auth.b.example":{` +
+		`"google":{"client_id":"gb","client_secret_enc":"enc-b"},"apple":{"client_id":"example.b.web"}}}}}`)
+	require.NoError(t, err)
+	assert.Equal(t, ProjectOAuthHostClient{ClientID: "gb", ClientSecretEnc: "enc-b"}, cfg.OAuth.Hosts["auth.b.example"]["google"])
+	client, ok := cfg.OAuth.hostClient("auth.b.example", "apple")
+	assert.True(t, ok)
+	assert.Equal(t, "example.b.web", client.ClientID)
+	_, ok = cfg.OAuth.hostClient("auth.a.example", "google")
+	assert.False(t, ok)
+}
+
+func TestParseProjectConfig_OAuth_HostClients_Rejected(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct{ hosts, want string }{
+		"upper-case host":      {`{"Auth.B.Example":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "Auth.B.Example"`},
+		"host with a port":     {`{"auth.b.example:8443":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b.example:8443"`},
+		"host with a scheme":   {`{"https://auth.b.example":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "https://auth.b.example"`},
+		"trailing dot":         {`{"auth.b.example.":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b.example."`},
+		"secret missing":       {`{"auth.b.example":{"microsoft":{"client_id":"m"}}}`, `oauth.hosts["auth.b.example"].microsoft requires client_id and client_secret_enc`},
+		"client id missing":    {`{"auth.b.example":{"github":{"client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].github requires client_id and client_secret_enc`},
+		"apple with a secret":  {`{"auth.b.example":{"apple":{"client_id":"a","client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].apple takes no client_secret_enc`},
+		"apple without client": {`{"auth.b.example":{"apple":{}}}`, `oauth.hosts["auth.b.example"].apple requires client_id`},
+		"unknown provider":     {`{"auth.b.example":{"facebook":{"client_id":"f","client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].facebook is not an oauth provider`},
+	} {
+		_, err := ParseProjectConfig(`{"oauth":{"hosts":` + tc.hosts + `}}`)
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), tc.want, name)
+	}
+}

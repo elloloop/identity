@@ -4,6 +4,10 @@
 
 Accepted (2026-07-02).
 
+Amended by [ADR-0019](./0019-per-host-oauth-clients.md): within the provider
+this precedence selects, a project may name another client for one callback
+host.
+
 Depends on ADR-0002 (Project is the isolation shard) and ADR-0003 (global user
 pool per project). Extends the per-project configuration surface already carried
 in a project's `config_json` (branding, passkey RP-ID, CORS, login defaults) to

@@ -1608,6 +1608,15 @@ func (s *AuthService) WithProjectOAuthSecrets(secretsKey []byte, wrap func(provi
 	return s
 }
 
+// WithEnvOAuthProviders wires the builder that rebuilds an env provider with a
+// host's own client (ADR-0019), and returns the service for chaining. app.New
+// calls it when it built the OAuth registry from the env; without it, a host
+// override whose base is an env provider is unavailable.
+func (s *AuthService) WithEnvOAuthProviders(build EnvOAuthProviderBuilder) *AuthService {
+	s.oauthResolver.envProvider = build
+	return s
+}
+
 // WithNativeOAuth wires the native mobile sign-in dependencies (the ID-token
 // verifier and the optional control-plane project lookup) and returns the
 // service for chaining. app.New calls it once at construction: with a non-nil

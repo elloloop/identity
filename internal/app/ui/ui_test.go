@@ -14,7 +14,7 @@ import (
 // stubOptions is a fixed OptionsSource for handler tests.
 type stubOptions struct{ opts service.HostedUIOptions }
 
-func (s stubOptions) HostedUIOptions(context.Context) service.HostedUIOptions { return s.opts }
+func (s stubOptions) HostedUIOptions(context.Context, string) service.HostedUIOptions { return s.opts }
 
 // allEnabled is the zero-friction default most tests use: password login +
 // signup on, no providers.
@@ -120,7 +120,7 @@ func TestHandler_InjectsServerConfig(t *testing.T) {
 // on the project scope the middleware injected into the request context.
 type scopeOptions struct{}
 
-func (scopeOptions) HostedUIOptions(ctx context.Context) service.HostedUIOptions {
+func (scopeOptions) HostedUIOptions(ctx context.Context, _ string) service.HostedUIOptions {
 	if sc := service.ProjectScopeFromContext(ctx); sc != nil && sc.ProjectID == "proj-google" {
 		return service.HostedUIOptions{OAuthProviders: []service.HostedUIProvider{{Key: "google"}}}
 	}

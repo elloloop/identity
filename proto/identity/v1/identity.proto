@@ -2659,6 +2659,15 @@ message ProjectOAuthProviderConfig {
   string github_token_url = 21;
   string github_user_url = 22;
   string github_user_mail_url = 23;
+
+  // callback_host, when set, makes this block the client the provider uses on
+  // that host instead of its base client (ADR-0019): the host of the flow's
+  // callback URL, a lower-case DNS name with no scheme, port or path. Such a
+  // block carries only client_id and client_secret (Apple takes no secret: the
+  // base provider's key signs for its Services ID); every other setting is the
+  // base provider's, and an override never enables a provider that has no base.
+  // On a read it is set only on the entries of host_clients.
+  string callback_host = 24;
 }
 
 message AdminSetProjectOAuthProviderRequest {
@@ -2666,6 +2675,8 @@ message AdminSetProjectOAuthProviderRequest {
   // config carries the provider key plus its non-secret fields and any
   // plaintext secret to store. It fully replaces the named provider's block,
   // preserving every OTHER key in the project's config (branding, passkey, …).
+  // With config.callback_host set it replaces only that host's client for the
+  // provider, leaving the base provider and every other host alone.
   ProjectOAuthProviderConfig config = 2;
 }
 
@@ -2739,6 +2750,12 @@ message AdminDeleteProjectOAuthProviderRequest {
   // provider is the provider key to remove: "google", "microsoft", "apple",
   // "github", or "oidc". Removing an absent provider is a no-op (idempotent).
   string provider = 2;
+  // callback_host, when set, removes only the client the provider uses on that
+  // host (ADR-0019), leaving the base provider and every other host alone.
+  // Removing an absent host client is a no-op too. Removing the base provider
+  // (callback_host empty) leaves its host clients stored: they then apply to
+  // whichever base the project falls back to (ADR-0010/0011), if any.
+  string callback_host = 3;
 }
 
 message AdminDeleteProjectOAuthProviderResponse {}
@@ -2751,6 +2768,10 @@ message AdminListProjectOAuthProvidersResponse {
   // providers lists every configured provider with secrets REDACTED, ordered by
   // provider key.
   repeated ProjectOAuthProviderConfig providers = 1;
+  // host_clients lists every per-host client (ADR-0019) with secrets REDACTED,
+  // ordered by callback_host and then provider key. Each sets provider,
+  // callback_host, client_id and has_client_secret only.
+  repeated ProjectOAuthProviderConfig host_clients = 2;
 }
 
 // ─── Directory lookup (machine credential) ──────────────────────────

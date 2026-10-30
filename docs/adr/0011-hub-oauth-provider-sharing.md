@@ -4,6 +4,10 @@
 
 Accepted (2026-07-18).
 
+Amended by [ADR-0019](./0019-per-host-oauth-clients.md): within the provider
+this precedence selects, a project may name another client for one callback
+host.
+
 Amends ADR-0010 (Per-project OAuth providers): precedence rule 4's "a
 non-default project **never** falls back to the env providers" becomes "…never,
 **unless** the deployment explicitly opts into hub sharing". ADR-0010's
