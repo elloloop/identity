@@ -86,7 +86,9 @@ var (
 // and can never be consumed. CreateTeammateKeyChallenge refuses a key that
 // is unknown or no longer working with ErrUnauthenticated, and
 // ConsumeTeammateKeyChallenge consumes a challenge only while it is
-// unexpired and its key still working.
+// unexpired and its key still working, and returns when the key stops
+// working as of that consumption, so a deadline set during the exchange is
+// not missed.
 type TeammateKeyRepository interface {
 	CreateHireGrant(context.Context, *HireGrant) error
 	RegisterTeammateKey(ctx context.Context, key *TeammateKey, placementID string) (*TeammateKey, error)
@@ -94,7 +96,7 @@ type TeammateKeyRepository interface {
 	RevokeTeammateKey(ctx context.Context, claimID, reason string, atMs, nowMs int64) (int64, bool, error)
 	CreateTeammateKeyChallenge(context.Context, *TeammateKeyChallenge) error
 	GetTeammateKeyChallenge(context.Context, string) (*TeammateKeyChallenge, error)
-	ConsumeTeammateKeyChallenge(context.Context, string, string, int64) (bool, error)
+	ConsumeTeammateKeyChallenge(ctx context.Context, challengeID, keyID string, nowMs int64) (bool, int64, error)
 	DeleteExpiredTeammateKeyChallenges(context.Context, int64, int) error
 	DeleteTeammateKeysRevokedBefore(context.Context, int64, int) error
 	DeleteHireGrantsExpiredBefore(context.Context, int64, int) error

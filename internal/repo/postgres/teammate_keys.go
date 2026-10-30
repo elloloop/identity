@@ -164,12 +164,16 @@ func (r *pgRepository) GetTeammateKeyChallenge(ctx context.Context, id string) (
 	return &challenge, nil
 }
 
-func (r *pgRepository) ConsumeTeammateKeyChallenge(ctx context.Context, id, keyID string, now int64) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM teammate_key_challenges c USING teammate_keys k WHERE c.project_id=$1 AND c.id=$2 AND c.key_id=$3 AND c.created_at_ms<=$4 AND c.expires_at_ms>$4 AND k.project_id=c.project_id AND k.id=c.key_id AND (k.revoked_at_ms=0 OR k.revoked_at_ms>$4)`, r.projectID, id, keyID, now)
-	if err != nil {
-		return false, err
+func (r *pgRepository) ConsumeTeammateKeyChallenge(ctx context.Context, id, keyID string, now int64) (bool, int64, error) {
+	var stopsAt int64
+	err := r.pool.QueryRow(ctx, `DELETE FROM teammate_key_challenges c USING teammate_keys k WHERE c.project_id=$1 AND c.id=$2 AND c.key_id=$3 AND c.created_at_ms<=$4 AND c.expires_at_ms>$4 AND k.project_id=c.project_id AND k.id=c.key_id AND (k.revoked_at_ms=0 OR k.revoked_at_ms>$4) RETURNING k.revoked_at_ms`, r.projectID, id, keyID, now).Scan(&stopsAt)
+	if noRows(err) {
+		return false, 0, nil
 	}
-	return tag.RowsAffected() == 1, nil
+	if err != nil {
+		return false, 0, err
+	}
+	return true, stopsAt, nil
 }
 
 func (r *pgRepository) DeleteExpiredTeammateKeyChallenges(ctx context.Context, before int64, limit int) error {

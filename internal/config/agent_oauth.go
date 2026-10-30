@@ -85,7 +85,7 @@ func (c *Config) ValidateAgentOAuth() error {
 		c.AgentMachineChallengePerIP = DefaultAgentMachineChallengePerIP
 	}
 	if c.AgentOAuthProtocolPerIP < 0 || c.AgentOAuthIntrospectionPerIP < 0 || c.AgentMachineChallengePerIP < 0 {
-		return errors.New("config: delegated OAuth rate limits cannot be disabled")
+		return errors.New("config: delegated OAuth rate limits cannot be disabled: GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP, GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP and GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP must not be negative")
 	}
 	if !c.AgentsEnabled || c.RevocationMode != RevocationModeSession {
 		return errors.New("config: GATEWAY_AGENT_OAUTH_ENABLED requires agents and session revocation")

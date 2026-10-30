@@ -5936,8 +5936,9 @@ type TeammateKeyServiceClient interface {
 	// key, algorithm and grant returns the same key_id, even after the grant
 	// expired. FAILED_PRECONDITION: the claim already has a different
 	// registration or was revoked, or the key is registered for another claim.
-	// PERMISSION_DENIED: the grant is missing, expired, used by another claim,
-	// or names another teammate, placement or company. INVALID_ARGUMENT: a
+	// PERMISSION_DENIED: the grant_id is blank, unknown, expired, used by
+	// another claim, or names another teammate, placement or company; a
+	// grant_id is never INVALID_ARGUMENT. INVALID_ARGUMENT: a
 	// blank or malformed field, a key that is not a DER SubjectPublicKeyInfo of
 	// an ECDSA P-256 key, or a teammate_id that is not an active agent account
 	// of the project.
@@ -5996,8 +5997,9 @@ type TeammateKeyServiceHandler interface {
 	// key, algorithm and grant returns the same key_id, even after the grant
 	// expired. FAILED_PRECONDITION: the claim already has a different
 	// registration or was revoked, or the key is registered for another claim.
-	// PERMISSION_DENIED: the grant is missing, expired, used by another claim,
-	// or names another teammate, placement or company. INVALID_ARGUMENT: a
+	// PERMISSION_DENIED: the grant_id is blank, unknown, expired, used by
+	// another claim, or names another teammate, placement or company; a
+	// grant_id is never INVALID_ARGUMENT. INVALID_ARGUMENT: a
 	// blank or malformed field, a key that is not a DER SubjectPublicKeyInfo of
 	// an ECDSA P-256 key, or a teammate_id that is not an active agent account
 	// of the project.
@@ -6055,10 +6057,10 @@ type HireGrantServiceClient interface {
 	// Records that the signed-in person hires the teammate into the placement
 	// for the company. The grant is single use: RegisterTeammateKey consumes it
 	// for one claim, and it expires after 24 hours unused. UNAUTHENTICATED: no
-	// session. PERMISSION_DENIED: the caller is not an active person (an agent,
-	// an anonymous or a merged account). INVALID_ARGUMENT: a blank or
-	// malformed id, or a teammate_id that is not an active agent account of the
-	// project.
+	// session. PERMISSION_DENIED: the caller is not an active person, or is
+	// neither the teammate's owner nor a project admin, or teammate_id is not
+	// an active agent account of the project; every such caller gets the same
+	// answer. INVALID_ARGUMENT: a blank or malformed id.
 	CreateHireGrant(context.Context, *connect.Request[v1.CreateHireGrantRequest]) (*connect.Response[v1.CreateHireGrantResponse], error)
 }
 
@@ -6097,10 +6099,10 @@ type HireGrantServiceHandler interface {
 	// Records that the signed-in person hires the teammate into the placement
 	// for the company. The grant is single use: RegisterTeammateKey consumes it
 	// for one claim, and it expires after 24 hours unused. UNAUTHENTICATED: no
-	// session. PERMISSION_DENIED: the caller is not an active person (an agent,
-	// an anonymous or a merged account). INVALID_ARGUMENT: a blank or
-	// malformed id, or a teammate_id that is not an active agent account of the
-	// project.
+	// session. PERMISSION_DENIED: the caller is not an active person, or is
+	// neither the teammate's owner nor a project admin, or teammate_id is not
+	// an active agent account of the project; every such caller gets the same
+	// answer. INVALID_ARGUMENT: a blank or malformed id.
 	CreateHireGrant(context.Context, *connect.Request[v1.CreateHireGrantRequest]) (*connect.Response[v1.CreateHireGrantResponse], error)
 }
 

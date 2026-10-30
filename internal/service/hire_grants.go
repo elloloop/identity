@@ -5,15 +5,18 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/elloloop/identity/pkg/audit"
 )
 
-var errHireGrantCaller = fmt.Errorf("%w: only an active person can grant a hire", ErrPermissionDenied)
+var errHireGrantCaller = fmt.Errorf("%w: only the teammate's owner or a project admin can grant its hire", ErrPermissionDenied)
 
 // CreateHireGrant records that callerID, the person signed in to the
-// request's project, hires teammateID into placementID for companyID. The
-// grant is single use and expires after HireGrantLifetime.
+// request's project, hires teammateID into placementID for companyID. As for
+// every action on an agent, only its owner or a project admin may, and every
+// other caller is refused alike whether the id names an agent, a person or
+// nothing. The grant is single use and expires after HireGrantLifetime.
 func (s *TeammateKeyService) CreateHireGrant(ctx context.Context, callerID, teammateID, placementID, companyID string) (*HireGrant, error) {
 	if callerID == "" {
 		return nil, ErrUnauthenticated
@@ -22,24 +25,33 @@ func (s *TeammateKeyService) CreateHireGrant(ctx context.Context, callerID, team
 		return nil, ErrInvalidArgument
 	}
 	project := s.requestProject(ctx)
-	caller, err := s.base.WithProject(project).GetUser(ctx, callerID)
+	users := s.base.WithProject(project)
+	caller, err := users.GetUser(ctx, callerID)
 	if errors.Is(err, ErrNotFound) || err == nil && caller == nil {
 		return nil, ErrUnauthenticated
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !isActivePerson(caller) {
-		return nil, errHireGrantCaller
+	refuse := func(step string) error {
+		s.audit.Log(ctx, audit.EventHireGrantRefused, audit.WithActor(callerID), audit.WithTarget(teammateID), audit.WithSuccess(false), audit.WithDetails(map[string]any{"step": step, "placement_id": placementID, "company_id": companyID}))
+		return errHireGrantCaller
 	}
-	if err = s.activeTeammate(ctx, project, teammateID, ErrInvalidArgument); err != nil {
+	if !isActivePerson(caller) {
+		return nil, refuse("caller_not_active_person")
+	}
+	teammate, err := users.GetUser(ctx, teammateID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
+	}
+	if teammate == nil || !teammate.IsAgent() || !isActiveStatus(teammate.Status) || (teammate.OwnerUserID != caller.ID && !strings.EqualFold(caller.Role, RoleAdmin)) {
+		return nil, refuse("not_permitted")
 	}
 	now := s.now()
 	grant := &HireGrant{ID: rand.Text(), OwnerUserID: caller.ID, TeammateID: teammateID, PlacementID: placementID, CompanyID: companyID, CreatedAtMs: now.UnixMilli(), ExpiresAtMs: now.Add(HireGrantLifetime).UnixMilli()}
 	if err = s.repo(project).CreateHireGrant(ctx, grant); err != nil {
 		return nil, err
 	}
-	s.audit.Log(ctx, audit.EventHireGrantCreated, audit.WithActor(caller.ID), audit.WithTarget(teammateID), audit.WithSuccess(true), audit.WithDetails(map[string]any{"grant_id": grant.ID, "placement_id": placementID, "company_id": companyID}))
+	s.audit.Log(ctx, audit.EventHireGrantCreated, audit.WithActor(caller.ID), audit.WithTarget(teammateID), audit.WithSuccess(true), audit.WithDetails(map[string]any{"placement_id": placementID, "company_id": companyID}))
 	return grant, nil
 }

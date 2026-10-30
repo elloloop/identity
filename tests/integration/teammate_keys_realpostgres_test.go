@@ -144,6 +144,23 @@ func newTeammateFixture(t *testing.T, configure ...func(*config.Config)) *teamma
 	return &teammateFixture{h: h, keys: teammateKeyClient(h, manager), grants: hireGrantClient(h, login.Msg.AccessToken), agentID: agent, ownerID: owner, unique: unique, managers: manager}
 }
 
+func (f *teammateFixture) person(t *testing.T, name, role string) identityconnectgen.HireGrantServiceClient {
+	t.Helper()
+	email := name + "-" + f.unique + "@example.com"
+	passwordHash, err := passwords.Hash(issue3Password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.h.Users.CreateUser(context.Background(), &service.User{Email: email, Name: name, Role: role, Status: service.StatusActive, EmailVerified: true, PasswordHash: passwordHash}); err != nil {
+		t.Fatalf("CreateUser(%s): %v", name, err)
+	}
+	login, err := f.h.Client.PasswordLogin(context.Background(), connect.NewRequest(&identitypb.PasswordLoginRequest{Email: email, Password: issue3Password}))
+	if err != nil {
+		t.Fatalf("PasswordLogin(%s): %v", name, err)
+	}
+	return hireGrantClient(f.h, login.Msg.AccessToken)
+}
+
 func hireGrantClient(h *teammateHarness, accessToken string) identityconnectgen.HireGrantServiceClient {
 	return identityconnectgen.NewHireGrantServiceClient(issue3BearerHTTPClient{base: h.HTTP, token: accessToken}, h.BaseURL)
 }
@@ -410,15 +427,23 @@ func TestTeammateKeys_RegistrationNeedsTheLeadsGrantForThisHire(t *testing.T) {
 	}
 }
 
-func TestTeammateKeys_HireGrantNeedsAnActivePersonsSession(t *testing.T) {
+func TestTeammateKeys_HireGrantNeedsTheTeammatesOwnerOrAnAdmin(t *testing.T) {
 	f := newTeammateFixture(t)
 	request := func(teammate string) *connect.Request[identitypb.CreateHireGrantRequest] {
 		return connect.NewRequest(&identitypb.CreateHireGrantRequest{TeammateId: teammate, PlacementId: "placement-1", CompanyId: "company-1"})
 	}
 	_, err := hireGrantClient(f.h, "").CreateHireGrant(context.Background(), request(f.agentID))
 	requireTeammateCode(t, "no session", err, connect.CodeUnauthenticated)
+	stranger := f.person(t, "stranger", "")
+	for name, teammate := range map[string]string{"another person's teammate": f.agentID, "a person": f.ownerID, "nothing": "no-such-account"} {
+		_, err = stranger.CreateHireGrant(context.Background(), request(teammate))
+		requireTeammateCode(t, "a non-owner hiring "+name, err, connect.CodePermissionDenied)
+	}
 	_, err = f.grants.CreateHireGrant(context.Background(), request(f.ownerID))
-	requireTeammateCode(t, "a person as teammate", err, connect.CodeInvalidArgument)
+	requireTeammateCode(t, "the owner hiring a person", err, connect.CodePermissionDenied)
+	if _, err = f.person(t, "admin", service.RoleAdmin).CreateHireGrant(context.Background(), request(f.agentID)); err != nil {
+		t.Fatalf("a project admin hiring the teammate: %v", err)
+	}
 	_, err = f.grants.CreateHireGrant(context.Background(), connect.NewRequest(&identitypb.CreateHireGrantRequest{TeammateId: f.agentID, PlacementId: "placement 1", CompanyId: "company-1"}))
 	requireTeammateCode(t, "a malformed placement", err, connect.CodeInvalidArgument)
 	_, err = f.grants.CreateHireGrant(context.Background(), connect.NewRequest(&identitypb.CreateHireGrantRequest{TeammateId: f.agentID, PlacementId: "placement-1"}))

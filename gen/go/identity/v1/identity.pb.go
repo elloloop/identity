@@ -22640,8 +22640,10 @@ type RevokeTeammateKeyRequest struct {
 	// deadline is when the key stops working, at most one hour after the call
 	// by the server's clock; unset or past means now. The server enforces it
 	// with no further call: from the deadline every challenge and exchange is
-	// refused, and a token issued before it expires at it. A later call can
-	// bring the deadline forward, never move it back.
+	// refused, and a token issued after this call expires at the deadline at
+	// the latest. A token issued before this call keeps its own expiry, at most
+	// 300 seconds later. A later call can bring the deadline forward, never
+	// move it back.
 	Deadline      *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -22746,7 +22748,8 @@ func (x *RevokeTeammateKeyResponse) GetRevokedAt() *timestamppb.Timestamp {
 
 type CreateHireGrantRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// teammate_id is an active agent account of the caller's project.
+	// teammate_id is an active agent account of the caller's project that the
+	// caller owns, or any one when the caller is a project admin.
 	TeammateId    string `protobuf:"bytes,1,opt,name=teammate_id,json=teammateId,proto3" json:"teammate_id,omitempty"`
 	PlacementId   string `protobuf:"bytes,2,opt,name=placement_id,json=placementId,proto3" json:"placement_id,omitempty"`
 	CompanyId     string `protobuf:"bytes,3,opt,name=company_id,json=companyId,proto3" json:"company_id,omitempty"`

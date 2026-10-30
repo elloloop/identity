@@ -91,10 +91,11 @@ Each operation first obtains a <code>CreateAgentMachineChallenge</code> and sign
 its exact message. Challenges bind issuer, project, machine, agent, operation and
 request, expire after 60 seconds and can be consumed once across issuer restarts.
 After response loss, obtain a fresh challenge; do not replay a consumed proof.</p>
-<p>Machine challenge creation shares the
-<code>GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP</code> budget with the other machine
-protocol operations, independently of the signup budget used by
-<code>CreateAgent</code>. Machine introspection uses
+<p>Machine challenge creation has its own per-address budget,
+<code>GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP</code> (default 60 per window); the
+other machine protocol operations share
+<code>GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP</code>. Both are independent of the
+signup budget used by <code>CreateAgent</code>. Machine introspection uses
 <code>GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP</code>. A throttled request returns
 HTTP 429 with a <code>Retry-After</code> header.</p>
 <p><code>ListAgentMachineAgents</code> pages the selected owned agents. Continue
@@ -126,9 +127,10 @@ a teammate key answers <code>FAILED_PRECONDITION</code>.</p>
 <p>A person hires the teammate. The hiring application calls
 <code>HireGrantService.CreateHireGrant(teammate_id, placement_id, company_id)</code>
 with that person's access token, while they are signed in, before it asks for a
-workstation. The caller must be an active person (not an agent, an anonymous or
-a merged account) and <code>teammate_id</code> an active agent account of the
-project. The reply's <code>grant_id</code> is single use and expires after 24
+workstation. As for every action on an agent, the caller must be an active person
+who owns the teammate, or a project admin; anyone else, and a
+<code>teammate_id</code> that is not an active agent account, gets the same
+<code>PERMISSION_DENIED</code>. The reply's <code>grant_id</code> is single use and expires after 24
 hours unused. The grant is what lets a key be registered for the teammate, so
 the managing service's credential alone cannot mint tokens for anyone, and its
 person becomes the owner of every token the key is exchanged for.</p>
@@ -152,8 +154,10 @@ claim or a key already registered for another claim is
 <p><code>RevokeTeammateKey(claim_id, reason, deadline)</code> sets when the key
 stops working: at <code>deadline</code>, at most an hour away, or at once when it
 is unset or past. Identity enforces the deadline itself, with no further call: a
-draining workstation keeps exchanging until it, a token issued in the meantime
-expires at it, and from it every challenge and exchange is refused. A later call
+draining workstation keeps exchanging until it, a token issued after the call
+expires at the deadline at the latest, and from it every challenge and exchange
+is refused. A token issued before the call keeps its own expiry, at most 300
+seconds later. A later call
 can bring the time forward, never move it back. The reply's
 <code>revoked_at</code> is when the key stops working, so a caller that retries
 until it gets one knows Identity has recorded it. An unknown claim succeeds with

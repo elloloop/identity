@@ -1301,7 +1301,8 @@ type Config struct {
 	// project credential authenticates: LookupUsers (directory_reader), the
 	// TeammateKeyService (teammate_key_manager) and the tenant operations
 	// called with a tenant_operator credential, across the HTTP and native
-	// gRPC surfaces; unlike the other per-IP caps it cannot be switched off,
+	// gRPC surfaces, and HireGrantService over HTTP, called with a person's
+	// session; unlike the other per-IP caps it cannot be switched off,
 	// so zero selects the default and a negative value is refused at boot.
 	// Each surface has its own budget per client IP, which covers both
 	// transports; a LookupUsers call resolves up to 100 addresses.

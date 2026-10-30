@@ -289,23 +289,23 @@ func (s *TeammateKeyService) Exchange(ctx context.Context, keyID string, proof A
 	if challenge == nil || challenge.KeyID != key.ID || challenge.CreatedAtMs > now.UnixMilli() || challenge.ExpiresAtMs <= now.UnixMilli() || !verifyTeammateSignature(key, []byte(challenge.Message), proof.Signature) {
 		return nil, ErrUnauthenticated
 	}
-	consumed, err := repo.ConsumeTeammateKeyChallenge(ctx, challenge.ID, key.ID, now.UnixMilli())
-	if err != nil {
-		return nil, err
-	}
-	if !consumed {
-		return nil, ErrUnauthenticated
-	}
 	if err = s.activeTeammate(ctx, project, key.TeammateID, ErrUnauthenticated); err != nil {
 		return nil, err
 	}
 	if err = s.activeOwner(ctx, project, key.OwnerUserID); err != nil {
 		return nil, err
 	}
+	consumed, stopsAtMs, err := repo.ConsumeTeammateKeyChallenge(ctx, challenge.ID, key.ID, now.UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	if !consumed {
+		return nil, ErrUnauthenticated
+	}
 	issuedAt := now.Unix()
 	expiresAt := issuedAt + config.TeammateAccessSeconds
-	if key.RevokedAtMs != 0 {
-		expiresAt = min(expiresAt, key.RevokedAtMs/1000)
+	if stopsAtMs != 0 {
+		expiresAt = min(expiresAt, stopsAtMs/1000)
 	}
 	lifetime := expiresAt - issuedAt
 	if lifetime <= 0 {

@@ -215,7 +215,8 @@ itself, from the same per-IP budgets the HTTP surface uses:
   `CreateAgentMachineChallenge`, which has its own
   `GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP` budget. With
   `GATEWAY_TEAMMATE_KEYS_ENABLED` on and agent OAuth off, the bridge
-  throttles `CreateAgentMachineChallenge` from that budget and
+  throttles `CreateAgentMachineChallenge` from
+  `GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP` and
   `ExchangeAgentMachineCredential` from the
   `GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP` budget.
 
