@@ -47,6 +47,9 @@ func sweepTeammateKeys(ctx context.Context, base service.Repository, projects se
 		if err := store.DeleteTeammateKeysRevokedBefore(ctx, beforeMs-service.TeammateKeyRetention.Milliseconds(), limit); err != nil {
 			return err
 		}
+		if err := store.DeleteHireGrantsExpiredBefore(ctx, beforeMs, limit); err != nil {
+			return err
+		}
 	}
 	return nil
 }

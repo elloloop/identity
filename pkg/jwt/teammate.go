@@ -12,19 +12,22 @@ import (
 
 // TeammateAccessClaims is the at+jwt access token an agent account receives
 // for one claim on one workstation. Its identity fields come from the
-// registered teammate key, so a verifier can trust them as it trusts sub.
+// registered teammate key, so a verifier can trust them as it trusts sub;
+// act.sub is the person whose hire grant the key was registered with, the
+// token's owner.
 type TeammateAccessClaims struct {
-	Sub           string   `json:"sub"`
-	Kind          string   `json:"kind"`
-	Issuer        string   `json:"iss"`
-	Project       string   `json:"project"`
-	Audience      []string `json:"aud"`
-	ClaimID       string   `json:"claim_id"`
-	WorkstationID string   `json:"workstation_id"`
-	CompanyID     string   `json:"company_id"`
-	IssuedAt      int64    `json:"iat"`
-	ExpiresAt     int64    `json:"exp"`
-	JWTID         string   `json:"jti"`
+	Sub           string         `json:"sub"`
+	Kind          string         `json:"kind"`
+	Actor         DelegatedActor `json:"act"`
+	Issuer        string         `json:"iss"`
+	Project       string         `json:"project"`
+	Audience      []string       `json:"aud"`
+	ClaimID       string         `json:"claim_id"`
+	WorkstationID string         `json:"workstation_id"`
+	CompanyID     string         `json:"company_id"`
+	IssuedAt      int64          `json:"iat"`
+	ExpiresAt     int64          `json:"exp"`
+	JWTID         string         `json:"jti"`
 }
 
 // TeammateSigner signs teammate access tokens under the at+jwt profile.
@@ -34,7 +37,7 @@ type TeammateSigner interface {
 }
 
 func (c TeammateAccessClaims) Validate() error {
-	if c.Sub == "" || c.Kind != "agent" || c.Issuer == "" || c.Project == "" || len(c.Audience) != 1 || c.Audience[0] == "" || c.ClaimID == "" || c.WorkstationID == "" || c.CompanyID == "" || c.JWTID == "" || c.IssuedAt <= 0 || c.ExpiresAt <= c.IssuedAt {
+	if c.Sub == "" || c.Kind != "agent" || c.Actor.Sub == "" || c.Actor.Sub == c.Sub || c.Issuer == "" || c.Project == "" || len(c.Audience) != 1 || c.Audience[0] == "" || c.ClaimID == "" || c.WorkstationID == "" || c.CompanyID == "" || c.JWTID == "" || c.IssuedAt <= 0 || c.ExpiresAt <= c.IssuedAt {
 		return errors.New("invalid teammate access-token claims")
 	}
 	return nil
@@ -44,7 +47,7 @@ func (c TeammateAccessClaims) ClaimsMap() (map[string]any, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	return map[string]any{"sub": c.Sub, "kind": c.Kind, "iss": c.Issuer, "project": c.Project, "aud": c.Audience, "claim_id": c.ClaimID, "workstation_id": c.WorkstationID, "company_id": c.CompanyID, "iat": c.IssuedAt, "exp": c.ExpiresAt, "jti": c.JWTID}, nil
+	return map[string]any{"sub": c.Sub, "kind": c.Kind, "act": c.Actor, "iss": c.Issuer, "project": c.Project, "aud": c.Audience, "claim_id": c.ClaimID, "workstation_id": c.WorkstationID, "company_id": c.CompanyID, "iat": c.IssuedAt, "exp": c.ExpiresAt, "jti": c.JWTID}, nil
 }
 
 // VerifyTeammateAccessToken verifies a teammate access token's signature,

@@ -8,6 +8,8 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/asn1"
+	"math/big"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -25,7 +27,7 @@ func p256PublicKey(t *testing.T, curve elliptic.Curve) (*ecdsa.PrivateKey, []byt
 	return private, der
 }
 
-func TestValidTeammatePublicKeyAcceptsOnlyCanonicalKeysOfTheAlgorithm(t *testing.T) {
+func TestValidTeammatePublicKeyAcceptsOnlyCanonicalP256Keys(t *testing.T) {
 	_, p256 := p256PublicKey(t, elliptic.P256())
 	_, p384 := p256PublicKey(t, elliptic.P384())
 	edPublic, _, err := ed25519.GenerateKey(rand.Reader)
@@ -38,13 +40,13 @@ func TestValidTeammatePublicKeyAcceptsOnlyCanonicalKeysOfTheAlgorithm(t *testing
 	require.NoError(t, err)
 
 	require.True(t, validTeammatePublicKey(TeammateKeyECDSAP256, p256))
-	require.True(t, validTeammatePublicKey(TeammateKeyEd25519, ed))
 	for name, c := range map[string]struct {
 		algorithm string
 		der       []byte
 	}{
-		"p256 as ed25519":  {TeammateKeyEd25519, p256},
-		"ed25519 as p256":  {TeammateKeyECDSAP256, ed},
+		"ed25519 key":      {TeammateKeyECDSAP256, ed},
+		"ed25519 label":    {"ed25519", ed},
+		"p256 as ed25519":  {"ed25519", p256},
 		"p384":             {TeammateKeyECDSAP256, p384},
 		"rsa":              {TeammateKeyECDSAP256, rsaDER},
 		"unknown":          {"", p256},
@@ -52,35 +54,37 @@ func TestValidTeammatePublicKeyAcceptsOnlyCanonicalKeysOfTheAlgorithm(t *testing
 		"trailing byte":    {TeammateKeyECDSAP256, append(append([]byte{}, p256...), 0)},
 		"not der":          {TeammateKeyECDSAP256, []byte("not a key")},
 		"oversized":        {TeammateKeyECDSAP256, make([]byte, maxTeammatePublicKeyBytes+1)},
-		"raw ed25519 key":  {TeammateKeyEd25519, edPublic},
-		"rsa as ed25519":   {TeammateKeyEd25519, rsaDER},
-		"p384 as ed25519":  {TeammateKeyEd25519, p384},
-		"ed25519 unknown":  {"rsa", ed},
+		"raw ed25519 key":  {TeammateKeyECDSAP256, edPublic},
 		"p256 wrong label": {"ECDSA_P256", p256},
 	} {
 		require.False(t, validTeammatePublicKey(c.algorithm, c.der), name)
 	}
 }
 
-func TestVerifyTeammateSignature(t *testing.T) {
+func TestVerifyTeammateSignatureAcceptsOnlyDERECDSAOverSHA256(t *testing.T) {
 	message := []byte(`{"nonce":"n"}`)
 	private, p256 := p256PublicKey(t, elliptic.P256())
 	digest := sha256.Sum256(message)
-	signature, err := ecdsa.SignASN1(rand.Reader, private, digest[:])
+	r, sv, err := ecdsa.Sign(rand.Reader, private, digest[:])
+	require.NoError(t, err)
+	signature, err := asn1.Marshal(struct{ R, S *big.Int }{r, sv})
 	require.NoError(t, err)
 	key := &TeammateKey{PublicKey: p256, Algorithm: TeammateKeyECDSAP256}
 	require.True(t, verifyTeammateSignature(key, message, signature))
 	require.False(t, verifyTeammateSignature(key, []byte("other"), signature))
-	require.False(t, verifyTeammateSignature(&TeammateKey{PublicKey: p256, Algorithm: TeammateKeyEd25519}, message, signature))
+	require.False(t, verifyTeammateSignature(&TeammateKey{PublicKey: p256, Algorithm: "ed25519"}, message, signature))
+	raw := append(r.FillBytes(make([]byte, 32)), sv.FillBytes(make([]byte, 32))...)
+	require.False(t, verifyTeammateSignature(key, message, raw), "a raw r and s signature")
+	unhashed, err := ecdsa.SignASN1(rand.Reader, private, message)
+	require.NoError(t, err)
+	require.False(t, verifyTeammateSignature(key, message, unhashed), "a signature over the message, not its digest")
 
 	edPublic, edPrivate, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	ed, err := x509.MarshalPKIXPublicKey(edPublic)
 	require.NoError(t, err)
-	edKey := &TeammateKey{PublicKey: ed, Algorithm: TeammateKeyEd25519}
 	edSignature := ed25519.Sign(edPrivate, message)
-	require.True(t, verifyTeammateSignature(edKey, message, edSignature))
-	require.False(t, verifyTeammateSignature(edKey, message, edSignature[:10]))
+	require.False(t, verifyTeammateSignature(&TeammateKey{PublicKey: ed, Algorithm: "ed25519"}, message, edSignature), "an Ed25519 key")
 	require.False(t, verifyTeammateSignature(&TeammateKey{PublicKey: ed, Algorithm: TeammateKeyECDSAP256}, message, edSignature))
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -89,6 +93,13 @@ func TestVerifyTeammateSignature(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, verifyTeammateSignature(&TeammateKey{PublicKey: rsaDER, Algorithm: TeammateKeyECDSAP256}, message, signature))
 	require.False(t, verifyTeammateSignature(&TeammateKey{PublicKey: []byte("garbage"), Algorithm: TeammateKeyECDSAP256}, message, signature))
+}
+
+func TestTeammateKeyStopsWorkingAtItsRevocationTime(t *testing.T) {
+	require.False(t, (&TeammateKey{}).revokedBy(5000))
+	require.False(t, (&TeammateKey{RevokedAtMs: 5001}).revokedBy(5000))
+	require.True(t, (&TeammateKey{RevokedAtMs: 5000}).revokedBy(5000))
+	require.True(t, (&TeammateKey{RevokedAtMs: 4999}).revokedBy(5000))
 }
 
 func TestTeammateKeyRevocationReasonsAndResults(t *testing.T) {
@@ -117,7 +128,7 @@ func TestNewTeammateKeyServiceRefusesWhatCannotServeIt(t *testing.T) {
 
 func TestTeammateKeyMetricsRegisterOnce(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	require.NoError(t, reg.Register(prometheus.NewCounter(prometheus.CounterOpts{Name: "identity_teammate_keys_revoked_total", Help: "taken"})))
+	require.NoError(t, reg.Register(prometheus.NewCounterVec(prometheus.CounterOpts{Name: "identity_teammate_keys_revoked_total", Help: "taken"}, []string{"schedule"})))
 	_, err := newTeammateKeyMetrics(reg)
 	require.Error(t, err)
 	_, err = newTeammateKeyMetrics(nil)

@@ -41,6 +41,8 @@
   "guardian_child_username_changed",
   "guardian_edge_created",
   "guardian_edge_removed",
+  "hire_grant_created",
+  "hire_grant_refused",
   "identity_linked",
   "identity_unlinked",
   "login_failure",

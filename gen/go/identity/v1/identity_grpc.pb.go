@@ -7466,15 +7466,19 @@ const (
 // that kind.
 type TeammateKeyServiceClient interface {
 	// Registering a claim again with the same teammate, company, workstation,
-	// key and algorithm returns the same key_id. FAILED_PRECONDITION: the
-	// claim already has a different registration or was revoked, or the key is
-	// registered for another claim. INVALID_ARGUMENT: a blank or malformed
-	// field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
-	// a teammate_id that is not an active agent account of the project.
+	// key, algorithm and grant returns the same key_id, even after the grant
+	// expired. FAILED_PRECONDITION: the claim already has a different
+	// registration or was revoked, or the key is registered for another claim.
+	// PERMISSION_DENIED: the grant_id is blank, unknown, expired, used by
+	// another claim, or names another teammate, placement or company; a
+	// grant_id is never INVALID_ARGUMENT. INVALID_ARGUMENT: a
+	// blank or malformed field, a key that is not a DER SubjectPublicKeyInfo of
+	// an ECDSA P-256 key, or a teammate_id that is not an active agent account
+	// of the project.
 	RegisterTeammateKey(ctx context.Context, in *RegisterTeammateKeyRequest, opts ...grpc.CallOption) (*RegisterTeammateKeyResponse, error)
-	// The key is refused from the moment this returns. Revoking an unknown or
-	// already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
-	// unspecified reason.
+	// Revoking an unknown claim, or one whose key already stops at or before
+	// the deadline, succeeds and changes nothing. INVALID_ARGUMENT: a blank
+	// claim_id, an unspecified reason or a deadline more than an hour away.
 	RevokeTeammateKey(ctx context.Context, in *RevokeTeammateKeyRequest, opts ...grpc.CallOption) (*RevokeTeammateKeyResponse, error)
 }
 
@@ -7517,15 +7521,19 @@ func (c *teammateKeyServiceClient) RevokeTeammateKey(ctx context.Context, in *Re
 // that kind.
 type TeammateKeyServiceServer interface {
 	// Registering a claim again with the same teammate, company, workstation,
-	// key and algorithm returns the same key_id. FAILED_PRECONDITION: the
-	// claim already has a different registration or was revoked, or the key is
-	// registered for another claim. INVALID_ARGUMENT: a blank or malformed
-	// field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
-	// a teammate_id that is not an active agent account of the project.
+	// key, algorithm and grant returns the same key_id, even after the grant
+	// expired. FAILED_PRECONDITION: the claim already has a different
+	// registration or was revoked, or the key is registered for another claim.
+	// PERMISSION_DENIED: the grant_id is blank, unknown, expired, used by
+	// another claim, or names another teammate, placement or company; a
+	// grant_id is never INVALID_ARGUMENT. INVALID_ARGUMENT: a
+	// blank or malformed field, a key that is not a DER SubjectPublicKeyInfo of
+	// an ECDSA P-256 key, or a teammate_id that is not an active agent account
+	// of the project.
 	RegisterTeammateKey(context.Context, *RegisterTeammateKeyRequest) (*RegisterTeammateKeyResponse, error)
-	// The key is refused from the moment this returns. Revoking an unknown or
-	// already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
-	// unspecified reason.
+	// Revoking an unknown claim, or one whose key already stops at or before
+	// the deadline, succeeds and changes nothing. INVALID_ARGUMENT: a blank
+	// claim_id, an unspecified reason or a deadline more than an hour away.
 	RevokeTeammateKey(context.Context, *RevokeTeammateKeyRequest) (*RevokeTeammateKeyResponse, error)
 	mustEmbedUnimplementedTeammateKeyServiceServer()
 }
@@ -7614,6 +7622,130 @@ var TeammateKeyService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokeTeammateKey",
 			Handler:    _TeammateKeyService_RevokeTeammateKey_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "identity/v1/identity.proto",
+}
+
+const (
+	HireGrantService_CreateHireGrant_FullMethodName = "/identity.v1.HireGrantService/CreateHireGrant"
+)
+
+// HireGrantServiceClient is the client API for HireGrantService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// HireGrantService is served only while GATEWAY_TEAMMATE_KEYS_ENABLED is on,
+// over Connect and HTTP. Its caller is a person signed in to the project: the
+// Authorization header carries that person's access token.
+type HireGrantServiceClient interface {
+	// Records that the signed-in person hires the teammate into the placement
+	// for the company. The grant is single use: RegisterTeammateKey consumes it
+	// for one claim, and it expires after 24 hours unused. UNAUTHENTICATED: no
+	// session. PERMISSION_DENIED: the caller is not an active person, or is
+	// neither the teammate's owner nor a project admin, or teammate_id is not
+	// an active agent account of the project; every such caller gets the same
+	// answer. INVALID_ARGUMENT: a blank or malformed id.
+	CreateHireGrant(ctx context.Context, in *CreateHireGrantRequest, opts ...grpc.CallOption) (*CreateHireGrantResponse, error)
+}
+
+type hireGrantServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewHireGrantServiceClient(cc grpc.ClientConnInterface) HireGrantServiceClient {
+	return &hireGrantServiceClient{cc}
+}
+
+func (c *hireGrantServiceClient) CreateHireGrant(ctx context.Context, in *CreateHireGrantRequest, opts ...grpc.CallOption) (*CreateHireGrantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateHireGrantResponse)
+	err := c.cc.Invoke(ctx, HireGrantService_CreateHireGrant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// HireGrantServiceServer is the server API for HireGrantService service.
+// All implementations must embed UnimplementedHireGrantServiceServer
+// for forward compatibility.
+//
+// HireGrantService is served only while GATEWAY_TEAMMATE_KEYS_ENABLED is on,
+// over Connect and HTTP. Its caller is a person signed in to the project: the
+// Authorization header carries that person's access token.
+type HireGrantServiceServer interface {
+	// Records that the signed-in person hires the teammate into the placement
+	// for the company. The grant is single use: RegisterTeammateKey consumes it
+	// for one claim, and it expires after 24 hours unused. UNAUTHENTICATED: no
+	// session. PERMISSION_DENIED: the caller is not an active person, or is
+	// neither the teammate's owner nor a project admin, or teammate_id is not
+	// an active agent account of the project; every such caller gets the same
+	// answer. INVALID_ARGUMENT: a blank or malformed id.
+	CreateHireGrant(context.Context, *CreateHireGrantRequest) (*CreateHireGrantResponse, error)
+	mustEmbedUnimplementedHireGrantServiceServer()
+}
+
+// UnimplementedHireGrantServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedHireGrantServiceServer struct{}
+
+func (UnimplementedHireGrantServiceServer) CreateHireGrant(context.Context, *CreateHireGrantRequest) (*CreateHireGrantResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateHireGrant not implemented")
+}
+func (UnimplementedHireGrantServiceServer) mustEmbedUnimplementedHireGrantServiceServer() {}
+func (UnimplementedHireGrantServiceServer) testEmbeddedByValue()                          {}
+
+// UnsafeHireGrantServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to HireGrantServiceServer will
+// result in compilation errors.
+type UnsafeHireGrantServiceServer interface {
+	mustEmbedUnimplementedHireGrantServiceServer()
+}
+
+func RegisterHireGrantServiceServer(s grpc.ServiceRegistrar, srv HireGrantServiceServer) {
+	// If the following call pancis, it indicates UnimplementedHireGrantServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&HireGrantService_ServiceDesc, srv)
+}
+
+func _HireGrantService_CreateHireGrant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateHireGrantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HireGrantServiceServer).CreateHireGrant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HireGrantService_CreateHireGrant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HireGrantServiceServer).CreateHireGrant(ctx, req.(*CreateHireGrantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// HireGrantService_ServiceDesc is the grpc.ServiceDesc for HireGrantService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var HireGrantService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "identity.v1.HireGrantService",
+	HandlerType: (*HireGrantServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateHireGrant",
+			Handler:    _HireGrantService_CreateHireGrant_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

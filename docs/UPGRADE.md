@@ -1,5 +1,87 @@
 # Upgrade guide
 
+## Next — teammate keys need a hire grant and take a revoke deadline: `HireGrantService.CreateHireGrant`, `grant_id` and `placement_id` on `RegisterTeammateKey`, `deadline` on `RevokeTeammateKey`, P-256 only, `GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP` (migration 0055; behaviour change behind `GATEWAY_TEAMMATE_KEYS_ENABLED`; `TeammateKeyRepository`, `TeammateKeyService.RevokeTeammateKey` and `jwt.TeammateAccessClaims` change shape (Go API))
+
+A teammate key is now registered with a single-use grant a signed-in person
+made, and that person owns every token the key is exchanged for. A
+revocation can carry a drain deadline that Identity enforces on its own.
+
+**Migration 0055 revokes every existing teammate key at once, whatever
+`GATEWAY_TEAMMATE_KEYS_ENABLED` is set to**: a key registered without a grant
+has no owner. A workstation using one is refused at its next challenge, with
+no drain. To recover, upgrade the managing service so it sends `grant_id`
+and `placement_id`, have each teammate's owner (or a project admin) sign in
+and call `CreateHireGrant`, and have each workstation make a new P-256 key
+pair, which the managing service registers under a new claim with that
+grant. The old public key cannot be registered again: a public key stays
+unique in a project for the year a revoked key is kept. Roll
+out in that order: this release, then the managing service, then the
+services that verify teammate tokens with `pkg/jwt` (see `act.sub` below).
+
+- **`HireGrantService.CreateHireGrant(teammate_id, placement_id, company_id)`**
+  is new, served over Connect and HTTP while `GATEWAY_TEAMMATE_KEYS_ENABLED` is
+  on, and called with the hiring person's access token. The caller must be an
+  active person who owns the teammate, or a project admin, as for every other
+  action on an agent; anyone else, and a `teammate_id` that is not an active
+  agent account, gets the same `PERMISSION_DENIED`, audited as
+  `hire_grant_refused` with its `step`. The grant expires after 24 hours
+  unused and is audited as `hire_grant_created`.
+  It shares the `GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` budget, counted on its
+  own. Like `TeammateKeyService`, an embedding host's native gRPC registration
+  does not carry it.
+- **`RegisterTeammateKey` requires `grant_id` (7) and `placement_id` (8)
+  (behaviour change).** The grant must name the request's teammate, placement
+  and company, be unexpired and be unused, or used by this claim; otherwise the
+  call is `PERMISSION_DENIED`, counted as `result="grant_refused"` and audited
+  as `hire_grant_refused`. A caller built for the previous release sends
+  neither field and is refused with `INVALID_ARGUMENT` (`result="invalid"`),
+  because `placement_id` is checked first: upgrade the managing service with
+  this release. A retry of a registered claim with its grant succeeds after the
+  grant expired. A claim still has one key for life, and registering it again
+  under another grant is `FAILED_PRECONDITION`.
+- **Teammate keys are ECDSA P-256 only (behaviour change).**
+  `KEY_ALGORITHM_ED25519` is deprecated and refused with `INVALID_ARGUMENT`.
+- **`RevokeTeammateKey.deadline` (3)** is when the key stops working, at most
+  an hour away; unset or past means now, as before. From the deadline every
+  challenge and exchange is refused with no further call, and a token issued
+  after the call expires at the deadline at the latest (`expires_in` says
+  so); a token issued before the call keeps its own expiry, at most 300
+  seconds later. A later call can bring the
+  time forward, never move it back. `RevokeTeammateKeyResponse.revoked_at` (1)
+  is when the key stops working, unset for an unknown claim.
+  `identity_teammate_keys_revoked_total` gains a `schedule` label
+  (`immediate` or `deadline`).
+- **The teammate token carries `act.sub`**, the person who granted the hire,
+  and every exchange applies the grant rule again: it is refused once that
+  person is no longer active, or neither owns the teammate (after a transfer)
+  nor is a project admin (after a demotion).
+  `jwt.TeammateAccessClaims.Actor` is required, so `VerifyTeammateAccessToken`
+  refuses a token an older release issued: upgrade the server before the
+  services that verify with `pkg/jwt` (old tokens last at most 300 seconds).
+- **`CreateAgentMachineChallenge` has its own per-address budget,**
+  `GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP` (default 60 per
+  `GATEWAY_RATE_LIMIT_WINDOW_SECONDS`; zero selects the default and a
+  negative value fails boot), whenever agent OAuth or teammate keys are on,
+  beside the 16 pending challenges per key. It no longer draws on
+  `GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP`, which keeps budgeting the exchange
+  and the other machine calls. If you lowered that budget to throttle
+  challenges, set `GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP` to match.
+- **Migration 0055** adds `hire_grants` and gives `teammate_keys` a
+  `grant_id` and `owner_user_id`, and revokes every unrevoked key (reason
+  `removed`), as above. A server of the previous release still running once
+  0055 is applied fails `RegisterTeammateKey` with an internal error, because
+  its keys carry no grant: finish the server rollout before the managing
+  service registers keys. It lifts `FORCE ROW LEVEL SECURITY` on
+  `teammate_keys` for its own transaction to see every project's rows, so it
+  must run as the table's owner, as every migration does. Rolling it back
+  drops the grants and the two columns; the keys it revoked stay revoked, and
+  a deadline still ahead reads as already revoked to the older release.
+- Go API: `service.TeammateKeyRepository` gains `CreateHireGrant` and
+  `DeleteHireGrantsExpiredBefore`, and `RegisterTeammateKey` and
+  `RevokeTeammateKey` change signature; `TeammateKeyService.RevokeTeammateKey`
+  takes the deadline and returns when the key stops working;
+  `service.TeammateKeyEd25519` is removed.
+
 ## Next — a project can give one auth host its own OAuth client (additive RPCs and field; no migration; `oauth.hosts` is now validated; `HostedUIOptions` and `AdminListProjectOAuthProviders` change shape (Go API))
 
 A provider's consent screen names the application its client is registered

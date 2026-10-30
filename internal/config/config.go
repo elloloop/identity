@@ -1301,7 +1301,8 @@ type Config struct {
 	// project credential authenticates: LookupUsers (directory_reader), the
 	// TeammateKeyService (teammate_key_manager) and the tenant operations
 	// called with a tenant_operator credential, across the HTTP and native
-	// gRPC surfaces; unlike the other per-IP caps it cannot be switched off,
+	// gRPC surfaces, and HireGrantService over HTTP, called with a person's
+	// session; unlike the other per-IP caps it cannot be switched off,
 	// so zero selects the default and a negative value is refused at boot.
 	// Each surface has its own budget per client IP, which covers both
 	// transports; a LookupUsers call resolves up to 100 addresses.
@@ -1429,6 +1430,12 @@ type Config struct {
 	// AgentOAuthProtocolPerIP sets the protocol budget per configured rate-limit window.
 	// GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP defaults to 30; zero selects default.
 	AgentOAuthProtocolPerIP int
+	// AgentMachineChallengePerIP sets the CreateAgentMachineChallenge budget
+	// per client address per rate-limit window (default 60; zero selects the
+	// default and a negative value fails boot), on its own and not out of the
+	// protocol budget: the call takes no credential, so the address is what it
+	// can be held to. Driven by GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP.
+	AgentMachineChallengePerIP int
 	// AgentOAuthIntrospectionPerIP sets the authenticated resource
 	// budget. GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP defaults to 1200.
 	AgentOAuthIntrospectionPerIP int
@@ -1850,6 +1857,7 @@ func loadFromEnv() *Config {
 		ExportMaxAuditEvents:              envInt("GATEWAY_EXPORT_MAX_AUDIT_EVENTS", DefaultExportMaxAuditEvents),
 		AgentsEnabled:                     envBool("GATEWAY_AGENTS_ENABLED", false),
 		AgentOAuthProtocolPerIP:           envInt("GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP", DefaultAgentOAuthProtocolPerIP),
+		AgentMachineChallengePerIP:        envInt("GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP", DefaultAgentMachineChallengePerIP),
 		AgentOAuthIntrospectionPerIP:      envInt("GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP", DefaultAgentOAuthIntrospectionPerIP),
 		AgentOAuthEnabled:                 envBool("GATEWAY_AGENT_OAUTH_ENABLED", false),
 		AgentMachineEnabled:               envBool("GATEWAY_AGENT_MACHINE_ENABLED", false),

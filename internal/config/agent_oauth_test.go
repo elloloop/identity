@@ -17,8 +17,10 @@ func oauthConfig() *Config {
 
 func TestAgentOAuthConfigFailClosed(t *testing.T) {
 	require.NoError(t, (&Config{}).ValidateAgentOAuth())
-	require.NoError(t, oauthConfig().ValidateAgentOAuth())
-	cases := map[string]func(*Config){"agents off": func(c *Config) { c.AgentsEnabled = false }, "ttl revocation": func(c *Config) { c.RevocationMode = RevocationModeTTL }, "missing issuer": func(c *Config) { c.JWTIssuer = "" }, "oversized issuer": func(c *Config) {
+	defaulted := oauthConfig()
+	require.NoError(t, defaulted.ValidateAgentOAuth())
+	require.Equal(t, DefaultAgentMachineChallengePerIP, defaulted.AgentMachineChallengePerIP)
+	cases := map[string]func(*Config){"negative challenge budget": func(c *Config) { c.AgentMachineChallengePerIP = -1 }, "agents off": func(c *Config) { c.AgentsEnabled = false }, "ttl revocation": func(c *Config) { c.RevocationMode = RevocationModeTTL }, "missing issuer": func(c *Config) { c.JWTIssuer = "" }, "oversized issuer": func(c *Config) {
 		c.JWTIssuer = "https://auth.example.test/" + strings.Repeat("x", maxAgentOAuthIssuerBytes)
 	}, "http issuer": func(c *Config) { c.JWTIssuer = "http://auth.example.test" }, "issuer fragment": func(c *Config) { c.JWTIssuer += "#x" }, "issuer query": func(c *Config) { c.JWTIssuer += "?x=1" }, "trailing slash": func(c *Config) { c.JWTIssuer += "/" }, "missing credential": func(c *Config) { c.AgentOAuthResourceCredentialsJSON = "[]" }, "unknown credential field": func(c *Config) { c.AgentOAuthResourceCredentialsJSON = `[{"id":"files","unexpected":true}]` }, "zero access": func(c *Config) { c.AgentOAuthAccessSeconds = 0 }, "long access": func(c *Config) { c.AgentOAuthAccessSeconds = 901 }, "short grant": func(c *Config) { c.AgentOAuthConsentSeconds = 1 }, "long grant": func(c *Config) { c.AgentOAuthConsentSeconds = 31 * 24 * 60 * 60 }, "short idle": func(c *Config) { c.AgentOAuthRefreshIdleSeconds = 1 }, "wide idle": func(c *Config) { c.AgentOAuthRefreshIdleSeconds = c.AgentOAuthConsentSeconds + 1 }, "oversized config": func(c *Config) {
 		c.AgentOAuthResourceCredentialsJSON = strings.Repeat("x", maxAgentOAuthCredentialJSONBytes+1)

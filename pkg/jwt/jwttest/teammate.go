@@ -13,7 +13,7 @@ import (
 func AssertTeammateProfile(t *testing.T, signer jwt.TeammateSigner) {
 	t.Helper()
 	now := time.Now().Unix()
-	claims := jwt.TeammateAccessClaims{Sub: "agent", Kind: "agent", Issuer: "https://auth.example.test", Project: "project", Audience: []string{"https://api.example.test"}, ClaimID: "claim", WorkstationID: "workstation", CompanyID: "company", IssuedAt: now, ExpiresAt: now + 300, JWTID: "token-id"}
+	claims := jwt.TeammateAccessClaims{Sub: "agent", Kind: "agent", Actor: jwt.DelegatedActor{Sub: "lead"}, Issuer: "https://auth.example.test", Project: "project", Audience: []string{"https://api.example.test"}, ClaimID: "claim", WorkstationID: "workstation", CompanyID: "company", IssuedAt: now, ExpiresAt: now + 300, JWTID: "token-id"}
 	token, err := signer.SignTeammateAccessToken(context.Background(), claims)
 	if err != nil {
 		t.Fatal(err)

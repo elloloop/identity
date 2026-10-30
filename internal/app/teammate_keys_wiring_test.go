@@ -39,12 +39,13 @@ func TestTeammateKeySweepNeedsTheirRepository(t *testing.T) {
 }
 
 func TestBuildRateLimits_TeammateKeysLimited(t *testing.T) {
-	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitDirectoryPerIP: 2, AgentOAuthProtocolPerIP: 3, TeammateKeysEnabled: true}
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitDirectoryPerIP: 2, AgentOAuthProtocolPerIP: 3, AgentMachineChallengePerIP: 4, TeammateKeysEnabled: true}
 	limits := buildRateLimits(cfg)
 	for path, tag := range map[string]string{
 		identityconnectgen.TeammateKeyServiceRegisterTeammateKeyProcedure:         "teammate_key_manager",
 		identityconnectgen.TeammateKeyServiceRevokeTeammateKeyProcedure:           "teammate_key_manager",
-		identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure:    "agent_oauth_protocol",
+		identityconnectgen.HireGrantServiceCreateHireGrantProcedure:               "hire_grant",
+		identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure:    "agent_machine_challenge",
 		identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure: "agent_oauth_protocol",
 	} {
 		limit, ok := middleware.MatchPathLimit(limits, path)
@@ -55,6 +56,9 @@ func TestBuildRateLimits_TeammateKeysLimited(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	assertQuotaExhausts(t, handler, identityconnectgen.TeammateKeyServiceRegisterTeammateKeyProcedure, "9.9.9.8", 2)
+	assertQuotaExhausts(t, handler, identityconnectgen.HireGrantServiceCreateHireGrantProcedure, "9.9.9.8", 2)
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, "9.9.9.7", 4)
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure, "9.9.9.7", 3)
 
 	cfg.TeammateKeysEnabled = false
 	_, ok := middleware.MatchPathLimit(buildRateLimits(cfg), identityconnectgen.TeammateKeyServiceRegisterTeammateKeyProcedure)

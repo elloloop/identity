@@ -1,6 +1,49 @@
 openapi: 3.1.0
 info: {}
 paths:
+  /identity.v1.HireGrantService/CreateHireGrant:
+    post:
+      tags:
+        - identity.v1.HireGrantService
+      summary: CreateHireGrant
+      description: |-
+        Records that the signed-in person hires the teammate into the placement
+         for the company. The grant is single use: RegisterTeammateKey consumes it
+         for one claim, and it expires after 24 hours unused. UNAUTHENTICATED: no
+         session. PERMISSION_DENIED: the caller is not an active person, or is
+         neither the teammate's owner nor a project admin, or teammate_id is not
+         an active agent account of the project; every such caller gets the same
+         answer. INVALID_ARGUMENT: a blank or malformed id.
+      operationId: identity.v1.HireGrantService.CreateHireGrant
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CreateHireGrantRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CreateHireGrantResponse'
   /identity.v1.IdentityService/AcceptAgentTransfer:
     post:
       tags:
@@ -6456,11 +6499,15 @@ paths:
       summary: RegisterTeammateKey
       description: |-
         Registering a claim again with the same teammate, company, workstation,
-         key and algorithm returns the same key_id. FAILED_PRECONDITION: the
-         claim already has a different registration or was revoked, or the key is
-         registered for another claim. INVALID_ARGUMENT: a blank or malformed
-         field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
-         a teammate_id that is not an active agent account of the project.
+         key, algorithm and grant returns the same key_id, even after the grant
+         expired. FAILED_PRECONDITION: the claim already has a different
+         registration or was revoked, or the key is registered for another claim.
+         PERMISSION_DENIED: the grant_id is blank, unknown, expired, used by
+         another claim, or names another teammate, placement or company; a
+         grant_id is never INVALID_ARGUMENT. INVALID_ARGUMENT: a
+         blank or malformed field, a key that is not a DER SubjectPublicKeyInfo of
+         an ECDSA P-256 key, or a teammate_id that is not an active agent account
+         of the project.
       operationId: identity.v1.TeammateKeyService.RegisterTeammateKey
       parameters:
         - name: Connect-Protocol-Version
@@ -6497,9 +6544,9 @@ paths:
         - identity.v1.TeammateKeyService
       summary: RevokeTeammateKey
       description: |-
-        The key is refused from the moment this returns. Revoking an unknown or
-         already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
-         unspecified reason.
+        Revoking an unknown claim, or one whose key already stops at or before
+         the deadline, succeeds and changes nothing. INVALID_ARGUMENT: a blank
+         claim_id, an unspecified reason or a deadline more than an hour away.
       operationId: identity.v1.TeammateKeyService.RevokeTeammateKey
       parameters:
         - name: Connect-Protocol-Version
@@ -8290,6 +8337,34 @@ components:
           $ref: '#/components/schemas/identity.v1.Group'
       title: CreateGroupResponse
       additionalProperties: false
+    identity.v1.CreateHireGrantRequest:
+      type: object
+      properties:
+        teammateId:
+          type: string
+          title: teammate_id
+          description: |-
+            teammate_id is an active agent account of the caller's project that the
+             caller owns, or any one when the caller is a project admin.
+        placementId:
+          type: string
+          title: placement_id
+        companyId:
+          type: string
+          title: company_id
+      title: CreateHireGrantRequest
+      additionalProperties: false
+    identity.v1.CreateHireGrantResponse:
+      type: object
+      properties:
+        grantId:
+          type: string
+          title: grant_id
+        expiresAt:
+          title: expires_at
+          $ref: '#/components/schemas/google.protobuf.Timestamp'
+      title: CreateHireGrantResponse
+      additionalProperties: false
     identity.v1.CreateManagedChildAccountRequest:
       type: object
       properties:
@@ -9531,10 +9606,14 @@ components:
         - KEY_ALGORITHM_ECDSA_P256
       description: |-
         A teammate is an agent account that runs on a workstation for one claim.
-         A service that manages workstations registers the public half of a key the
-         workstation made for that claim; the workstation then proves possession of
-         it through CreateAgentMachineChallenge and ExchangeAgentMachineCredential
-         (teammate_key_id) and receives a short access token for the teammate.
+         A person signed in to the project hires it: CreateHireGrant records, under
+         that person's session, a single-use grant for the teammate, the placement it
+         is hired into and the company. A service that manages workstations then
+         registers, with that grant, the public half of a key the workstation made
+         for the claim; the workstation proves possession of it through
+         CreateAgentMachineChallenge and ExchangeAgentMachineCredential
+         (teammate_key_id) and receives a short access token for the teammate whose
+         owner (act.sub) is the person who granted it.
     identity.v1.LinkIdentityRequest:
       type: object
       properties:
@@ -11398,10 +11477,20 @@ components:
           type: string
           title: public_key
           format: byte
-          description: public_key is a DER SubjectPublicKeyInfo of the algorithm's key type.
+          description: public_key is a DER SubjectPublicKeyInfo of an ECDSA P-256 key.
         algorithm:
           title: algorithm
           $ref: '#/components/schemas/identity.v1.KeyAlgorithm'
+        grantId:
+          type: string
+          title: grant_id
+          description: |-
+            grant_id is a hire grant of the credential's project for this teammate,
+             placement and company, unexpired and not used by another claim. Its
+             person becomes the owner of every token the key is exchanged for.
+        placementId:
+          type: string
+          title: placement_id
       title: RegisterTeammateKeyRequest
       additionalProperties: false
     identity.v1.RegisterTeammateKeyResponse:
@@ -11759,10 +11848,28 @@ components:
         reason:
           title: reason
           $ref: '#/components/schemas/identity.v1.TeammateKeyRevocationReason'
+        deadline:
+          title: deadline
+          description: |-
+            deadline is when the key stops working, at most one hour after the call
+             by the server's clock; unset or past means now. The server enforces it
+             with no further call: from the deadline every challenge and exchange is
+             refused, and a token issued after this call expires at the deadline at
+             the latest. A token issued before this call keeps its own expiry, at most
+             300 seconds later. A later call can bring the deadline forward, never
+             move it back.
+          $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: RevokeTeammateKeyRequest
       additionalProperties: false
     identity.v1.RevokeTeammateKeyResponse:
       type: object
+      properties:
+        revokedAt:
+          title: revoked_at
+          description: |-
+            revoked_at is when the key stops working, after this call; unset when
+             the claim has no key.
+          $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: RevokeTeammateKeyResponse
       additionalProperties: false
     identity.v1.SelectAgentMachineAgentsRequest:
@@ -13071,3 +13178,8 @@ tags:
        ("<public id>.<secret>") in the X-Teammate-Key-Manager-Key header; the
        credential selects the project. PERMISSION_DENIED: no valid credential of
        that kind.
+  - name: identity.v1.HireGrantService
+    description: |-
+      HireGrantService is served only while GATEWAY_TEAMMATE_KEYS_ENABLED is on,
+       over Connect and HTTP. Its caller is a person signed in to the project: the
+       Authorization header carries that person's access token.

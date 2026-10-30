@@ -4002,13 +4002,18 @@ service IdentityService {
 // ─── Teammate keys (machine credential) ─────────────────────────────
 
 // A teammate is an agent account that runs on a workstation for one claim.
-// A service that manages workstations registers the public half of a key the
-// workstation made for that claim; the workstation then proves possession of
-// it through CreateAgentMachineChallenge and ExchangeAgentMachineCredential
-// (teammate_key_id) and receives a short access token for the teammate.
+// A person signed in to the project hires it: CreateHireGrant records, under
+// that person's session, a single-use grant for the teammate, the placement it
+// is hired into and the company. A service that manages workstations then
+// registers, with that grant, the public half of a key the workstation made
+// for the claim; the workstation proves possession of it through
+// CreateAgentMachineChallenge and ExchangeAgentMachineCredential
+// (teammate_key_id) and receives a short access token for the teammate whose
+// owner (act.sub) is the person who granted it.
 enum KeyAlgorithm {
   KEY_ALGORITHM_UNSPECIFIED = 0;
-  KEY_ALGORITHM_ED25519 = 1;
+  // Refused by RegisterTeammateKey: teammate keys are ECDSA P-256.
+  KEY_ALGORITHM_ED25519 = 1 [deprecated = true];
   KEY_ALGORITHM_ECDSA_P256 = 2;
 }
 
@@ -4028,9 +4033,14 @@ message RegisterTeammateKeyRequest {
   string teammate_id = 2;
   string company_id = 3;
   string workstation_id = 4;
-  // public_key is a DER SubjectPublicKeyInfo of the algorithm's key type.
+  // public_key is a DER SubjectPublicKeyInfo of an ECDSA P-256 key.
   bytes public_key = 5;
   KeyAlgorithm algorithm = 6;
+  // grant_id is a hire grant of the credential's project for this teammate,
+  // placement and company, unexpired and not used by another claim. Its
+  // person becomes the owner of every token the key is exchanged for.
+  string grant_id = 7;
+  string placement_id = 8;
 }
 
 message RegisterTeammateKeyResponse {
@@ -4040,9 +4050,21 @@ message RegisterTeammateKeyResponse {
 message RevokeTeammateKeyRequest {
   string claim_id = 1;
   TeammateKeyRevocationReason reason = 2;
+  // deadline is when the key stops working, at most one hour after the call
+  // by the server's clock; unset or past means now. The server enforces it
+  // with no further call: from the deadline every challenge and exchange is
+  // refused, and a token issued after this call expires at the deadline at
+  // the latest. A token issued before this call keeps its own expiry, at most
+  // 300 seconds later. A later call can bring the deadline forward, never
+  // move it back.
+  google.protobuf.Timestamp deadline = 3;
 }
 
-message RevokeTeammateKeyResponse {}
+message RevokeTeammateKeyResponse {
+  // revoked_at is when the key stops working, after this call; unset when
+  // the claim has no key.
+  google.protobuf.Timestamp revoked_at = 1;
+}
 
 // TeammateKeyService is served only while GATEWAY_TEAMMATE_KEYS_ENABLED is
 // on. Every call presents a teammate_key_manager project credential
@@ -4051,14 +4073,45 @@ message RevokeTeammateKeyResponse {}
 // that kind.
 service TeammateKeyService {
   // Registering a claim again with the same teammate, company, workstation,
-  // key and algorithm returns the same key_id. FAILED_PRECONDITION: the
-  // claim already has a different registration or was revoked, or the key is
-  // registered for another claim. INVALID_ARGUMENT: a blank or malformed
-  // field, a key that is not a DER SubjectPublicKeyInfo of the algorithm, or
-  // a teammate_id that is not an active agent account of the project.
+  // key, algorithm and grant returns the same key_id, even after the grant
+  // expired. FAILED_PRECONDITION: the claim already has a different
+  // registration or was revoked, or the key is registered for another claim.
+  // PERMISSION_DENIED: the grant_id is blank, unknown, expired, used by
+  // another claim, or names another teammate, placement or company; a
+  // grant_id is never INVALID_ARGUMENT. INVALID_ARGUMENT: a
+  // blank or malformed field, a key that is not a DER SubjectPublicKeyInfo of
+  // an ECDSA P-256 key, or a teammate_id that is not an active agent account
+  // of the project.
   rpc RegisterTeammateKey(RegisterTeammateKeyRequest) returns (RegisterTeammateKeyResponse);
-  // The key is refused from the moment this returns. Revoking an unknown or
-  // already revoked claim succeeds. INVALID_ARGUMENT: a blank claim_id or an
-  // unspecified reason.
+  // Revoking an unknown claim, or one whose key already stops at or before
+  // the deadline, succeeds and changes nothing. INVALID_ARGUMENT: a blank
+  // claim_id, an unspecified reason or a deadline more than an hour away.
   rpc RevokeTeammateKey(RevokeTeammateKeyRequest) returns (RevokeTeammateKeyResponse);
+}
+
+message CreateHireGrantRequest {
+  // teammate_id is an active agent account of the caller's project that the
+  // caller owns, or any one when the caller is a project admin.
+  string teammate_id = 1;
+  string placement_id = 2;
+  string company_id = 3;
+}
+
+message CreateHireGrantResponse {
+  string grant_id = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+// HireGrantService is served only while GATEWAY_TEAMMATE_KEYS_ENABLED is on,
+// over Connect and HTTP. Its caller is a person signed in to the project: the
+// Authorization header carries that person's access token.
+service HireGrantService {
+  // Records that the signed-in person hires the teammate into the placement
+  // for the company. The grant is single use: RegisterTeammateKey consumes it
+  // for one claim, and it expires after 24 hours unused. UNAUTHENTICATED: no
+  // session. PERMISSION_DENIED: the caller is not an active person, or is
+  // neither the teammate's owner nor a project admin, or teammate_id is not
+  // an active agent account of the project; every such caller gets the same
+  // answer. INVALID_ARGUMENT: a blank or malformed id.
+  rpc CreateHireGrant(CreateHireGrantRequest) returns (CreateHireGrantResponse);
 }

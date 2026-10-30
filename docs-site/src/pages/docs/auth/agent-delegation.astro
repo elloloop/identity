@@ -91,10 +91,11 @@ Each operation first obtains a <code>CreateAgentMachineChallenge</code> and sign
 its exact message. Challenges bind issuer, project, machine, agent, operation and
 request, expire after 60 seconds and can be consumed once across issuer restarts.
 After response loss, obtain a fresh challenge; do not replay a consumed proof.</p>
-<p>Machine challenge creation shares the
-<code>GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP</code> budget with the other machine
-protocol operations, independently of the signup budget used by
-<code>CreateAgent</code>. Machine introspection uses
+<p>Machine challenge creation has its own per-address budget,
+<code>GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP</code> (default 60 per window); the
+other machine protocol operations share
+<code>GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP</code>. Both are independent of the
+signup budget used by <code>CreateAgent</code>. Machine introspection uses
 <code>GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP</code>. A throttled request returns
 HTTP 429 with a <code>Retry-After</code> header.</p>
 <p><code>ListAgentMachineAgents</code> pages the selected owned agents. Continue
@@ -116,38 +117,77 @@ No application machine policy or existing expiring approval is silently extended
 <h2>Teammate keys on managed workstations</h2>
 <p>A service that runs agent accounts on workstations it manages can give each
 agent a key bound to one claim on one workstation, made where the private key
-cannot leave the machine. A TPM makes ECDSA P-256 keys, so P-256 is accepted
-beside Ed25519. Enable <code>GATEWAY_TEAMMATE_KEYS_ENABLED</code> (off by
+cannot leave the machine. Teammate keys are ECDSA P-256, the key a TPM makes;
+Ed25519 is refused. Enable <code>GATEWAY_TEAMMATE_KEYS_ENABLED</code> (off by
 default; it needs the postgres driver, <code>GATEWAY_JWT_ISSUER</code> and
-<code>GATEWAY_JWT_AUDIENCE</code>). Off, <code>TeammateKeyService</code> is not
-served and a challenge or exchange naming a teammate key answers
-<code>FAILED_PRECONDITION</code>.</p>
+<code>GATEWAY_JWT_AUDIENCE</code>). Off, <code>TeammateKeyService</code> and
+<code>HireGrantService</code> are not served and a challenge or exchange naming
+a teammate key answers <code>FAILED_PRECONDITION</code>.</p>
+<h3>The hire grant</h3>
+<p>A person hires the teammate. The hiring application calls
+<code>HireGrantService.CreateHireGrant(teammate_id, placement_id, company_id)</code>
+with that person's access token, while they are signed in, before it asks for a
+workstation. As for every action on an agent, the caller must be an active person
+who owns the teammate, or a project admin; anyone else, and a
+<code>teammate_id</code> that is not an active agent account, gets the same
+<code>PERMISSION_DENIED</code>. The reply's <code>grant_id</code> is single use and expires after 24
+hours unused. The grant is what lets a key be registered for the teammate, so
+the managing service's credential alone cannot mint tokens for anyone, and its
+person becomes the owner of every token the key is exchanged for.</p>
+<h3>Registering and revoking a key</h3>
 <p>An operator mints a <code>teammate_key_manager</code> project credential with
 <code>AdminCreateProjectCredential</code>. The managing service presents it in the
 <code>X-Teammate-Key-Manager-Key</code> header; it authorizes
 <code>TeammateKeyService</code> in that project and nothing else.
 <code>RegisterTeammateKey(claim_id, teammate_id, company_id, workstation_id,
-public_key, algorithm)</code> takes a DER SubjectPublicKeyInfo of the algorithm's
-key type and an active agent account of the project, and returns a
-<code>key_id</code>. The claim is the idempotency key: the same registration
-returns the same <code>key_id</code>; a different one, a revoked claim or a key
-already registered for another claim is <code>FAILED_PRECONDITION</code>.
-<code>RevokeTeammateKey(claim_id, reason)</code> refuses the key from the moment it
-returns, ending its pending challenges; an unknown or already revoked claim
-succeeds. Revoked keys are kept for a year, then the sweeper deletes them.</p>
+public_key, algorithm, grant_id, placement_id)</code> takes a DER
+SubjectPublicKeyInfo of a P-256 key and an active agent account of the project,
+and consumes the grant: it must name this teammate, placement and company, be
+unexpired and be unused, or used by this claim. Otherwise it is
+<code>PERMISSION_DENIED</code>, counted as
+<code>identity_teammate_keys_registered_total{result="grant_refused"}</code> and
+audited as <code>hire_grant_refused</code>. The claim is the idempotency key: the
+same registration returns the same <code>key_id</code>, even after the grant
+expired; one claim has one key, so a different key or grant for it, a revoked
+claim or a key already registered for another claim, revoked or not, is
+<code>FAILED_PRECONDITION</code>: a new claim needs a new key pair. A blank or
+malformed <code>placement_id</code> or other field is
+<code>INVALID_ARGUMENT</code>; a <code>grant_id</code> never is.</p>
+<p><code>RevokeTeammateKey(claim_id, reason, deadline)</code> sets when the key
+stops working: at <code>deadline</code>, at most an hour away, or at once when it
+is unset or past. Identity enforces the deadline itself, with no further call: a
+draining workstation keeps exchanging until it, a token issued after the call
+expires at the deadline at the latest, and from it every challenge and exchange
+is refused. A token issued before the call keeps its own expiry, at most 300
+seconds later. A later call
+can bring the time forward, never move it back. The reply's
+<code>revoked_at</code> is when the key stops working, so a caller that retries
+until it gets one knows Identity has recorded it. An unknown claim succeeds with
+no <code>revoked_at</code>. Revoked keys are kept for a year, then the sweeper
+deletes them; it deletes expired grants too.</p>
+<h3>Exchanging the key</h3>
 <p>The workstation calls <code>CreateAgentMachineChallenge</code> with
 <code>teammate_key_id</code> and <code>AGENT_MACHINE_OPERATION_EXCHANGE_AGENT</code>,
-signs the exact message (Ed25519, or ASN.1 DER ECDSA over its SHA-256 digest), and
-calls <code>ExchangeAgentMachineCredential</code> with <code>teammate_key_id</code>
-and the proof. Challenges are single use and expire after 60 seconds. The result is
-an <code>at+jwt</code> access token for 300 seconds with <code>sub</code> the agent,
-<code>kind</code> <code>agent</code>, <code>aud</code> the
-<code>GATEWAY_JWT_AUDIENCE</code> value, and <code>claim_id</code>,
-<code>workstation_id</code> and <code>company_id</code> read from the key, never
-from the request. It has no owner, client, scope or grant, so a delegated-access
-verifier refuses it; verify it with <code>VerifyTeammateAccessToken</code> or an
-equivalent check of <code>typ</code>, issuer, project and audience.</p>
+signs the exact message (ASN.1 DER ECDSA over its SHA-256 digest; a raw r and s
+signature is refused), and calls <code>ExchangeAgentMachineCredential</code> with
+<code>teammate_key_id</code> and the proof. Challenges are single use, expire
+after 60 seconds, are capped at 16 pending per key, and are limited per client
+address by <code>GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP</code> (default 60 per
+<code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window), counted on their own. The
+result is an <code>at+jwt</code> access token for 300 seconds, or until the
+revocation deadline when that is sooner, with <code>sub</code> the agent,
+<code>act.sub</code> the person who granted the hire, <code>kind</code>
+<code>agent</code>, <code>aud</code> the <code>GATEWAY_JWT_AUDIENCE</code> value,
+and <code>claim_id</code>, <code>workstation_id</code> and <code>company_id</code>
+read from the key, never from the request. Every exchange applies the grant
+rule again, so it is refused once that person is no longer active, or neither
+owns the teammate (after a transfer) nor is a project admin (after a
+demotion). The token has no client, scope or grant id, so a
+delegated-access verifier refuses it; verify it with
+<code>VerifyTeammateAccessToken</code> or an equivalent check of
+<code>typ</code>, issuer, project and audience.</p>
 <p>Metrics: <code>identity_teammate_keys_registered_total{result}</code>,
-<code>identity_teammate_keys_revoked_total</code> and
+<code>identity_teammate_keys_revoked_total{schedule}</code> (<code>immediate</code>
+or <code>deadline</code>) and
 <code>identity_agent_exchanges_total{key_kind,result}</code>.</p>
 </DocsLayout>

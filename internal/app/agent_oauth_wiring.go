@@ -57,6 +57,8 @@ func mountIdentityService(
 	if teammateKeys != nil {
 		keyPath, keyHandler := identityconnectgen.NewTeammateKeyServiceHandler(identityconnect.NewTeammateKeyHandler(teammateKeys), append(connectOpts, connect.WithReadMaxBytes(config.AgentMachineRequestMaxBytes))...)
 		mux.Handle(keyPath, keyHandler)
+		grantPath, grantHandler := identityconnectgen.NewHireGrantServiceHandler(identityconnect.NewHireGrantHandler(teammateKeys), connectOpts...)
+		mux.Handle(grantPath, grantHandler)
 	}
 
 	return nil

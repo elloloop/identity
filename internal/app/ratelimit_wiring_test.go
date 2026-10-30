@@ -502,10 +502,12 @@ func TestBuildRateLimits_QrLoginLimited(t *testing.T) {
 func TestBuildRateLimitsAgentMachinePaths(t *testing.T) {
 	limits := buildRateLimits(&config.Config{
 		AgentOAuthEnabled: true, RateLimitWindowSeconds: 60,
-		RateLimitSignupPerIP: 1, AgentOAuthProtocolPerIP: 3, AgentOAuthIntrospectionPerIP: 5,
+		RateLimitSignupPerIP: 1, AgentOAuthProtocolPerIP: 3, AgentOAuthIntrospectionPerIP: 5, AgentMachineChallengePerIP: 4,
 	})
+	challenge, ok := middleware.MatchPathLimit(limits, identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure)
+	require.True(t, ok)
+	require.Equal(t, "agent_machine_challenge", challenge.Tag)
 	for _, path := range []string{
-		identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure,
 		identityconnectgen.IdentityServiceRegisterAgentMachineAgentKeyProcedure,
 		identityconnectgen.IdentityServiceRegisterAgentMachineProcedure,
 		identityconnectgen.IdentityServiceListAgentMachinesProcedure,
@@ -527,7 +529,8 @@ func TestBuildRateLimitsAgentMachinePaths(t *testing.T) {
 	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, "203.0.113.9", 3)
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, "203.0.113.9", 4)
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceExchangeAgentMachineCredentialProcedure, "203.0.113.9", 3)
 	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceCreateAgentProcedure, "203.0.113.9", 1)
 	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceIntrospectAgentMachineProcedure, "203.0.113.9", 5)
 }

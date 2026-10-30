@@ -571,8 +571,9 @@ Both:
       <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window, across the six
       calls and across HTTP and native gRPC, so a guessed secret cannot be
       tried at line rate. Calls made with the admin secret alone are not
-      counted. The setting is shared with the <code>LookupUsers</code> and
-      <code>TeammateKeyService</code> budgets, which are counted separately:
+      counted. The setting is shared with the <code>LookupUsers</code>,
+      <code>TeammateKeyService</code> and <code>HireGrantService</code>
+      budgets, which are counted separately:
       raising it raises those too.
     </li>
     <li>
