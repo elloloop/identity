@@ -68,7 +68,7 @@ exactly as the container does. Set one to inject your own:
 | `Repo` + `DB`                      | built from `Config.RepoDriver` (must be set together)   |
 | `EmailTransport`                   | built from SMTP settings (falls back to log-only)       |
 | `SMSSender`                        | built from `GATEWAY_SMS_*` (log-only when SMS disabled)  |
-| `OAuthRegistry`                    | built from the OAuth client credentials in `Config`     |
+| `OAuthRegistry`                    | built from the OAuth client credentials in `Config`; a supplied one cannot be rebuilt with a host's own client (ADR-0019), so such an override is unavailable |
 | `IDVProvider`                      | built from `Config.IDVProvider` (may be disabled)       |
 | `AssuranceWebVerifier`             | built from `Config.AssuranceWebProvider`; nil (and no configured provider) means NO web verifier, so browser clients cannot obtain an assurance token |
 | `DNSResolver`                      | `net.DefaultResolver` (used by `VerifyDomain` on the postgres control plane) |

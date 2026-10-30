@@ -45,22 +45,22 @@ func TestAdminHostClient_SetListDelete(t *testing.T) {
 	}
 
 	const hostSecret = "host-b-google-secret"
-	view, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+	view, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &ProjectOAuthHostClientInput{
 		Provider: oauthProviderGoogle, CallbackHost: " Auth.B.Example. ", ClientID: hostBGoogle, ClientSecret: hostSecret,
 	})
 	if err != nil {
 		t.Fatalf("set host google: %v", err)
 	}
-	want := ProjectOAuthProviderView{Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: hostBGoogle, HasClientSecret: true}
+	want := ProjectOAuthHostClientView{Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: hostBGoogle, HasClientSecret: true}
 	if !reflect.DeepEqual(*view, want) {
 		t.Fatalf("view = %+v, want %+v", *view, want)
 	}
-	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+	if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &ProjectOAuthHostClientInput{
 		Provider: oauthProviderApple, CallbackHost: hostB, ClientID: hostBAppleID,
 	}); err != nil {
 		t.Fatalf("set host apple: %v", err)
 	}
-	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+	if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &ProjectOAuthHostClientInput{
 		Provider: oauthProviderMicrosoft, CallbackHost: hostA, ClientID: "host-a-microsoft", ClientSecret: "host-a-secret",
 	}); err != nil {
 		t.Fatalf("set host microsoft: %v", err)
@@ -85,7 +85,7 @@ func TestAdminHostClient_SetListDelete(t *testing.T) {
 	}
 
 	providers, hostClients, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
-	if err != nil || len(providers) != 1 || providers[0].Provider != oauthProviderGoogle || providers[0].CallbackHost != "" {
+	if err != nil || len(providers) != 1 || providers[0].Provider != oauthProviderGoogle || providers[0].ClientID != "base-google" {
 		t.Fatalf("providers = %+v, err = %v", providers, err)
 	}
 	var listed []string
@@ -100,7 +100,7 @@ func TestAdminHostClient_SetListDelete(t *testing.T) {
 	}
 
 	// An empty secret keeps the stored one.
-	if v, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+	if v, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &ProjectOAuthHostClientInput{
 		Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: "host-b-google-2",
 	}); err != nil || !v.HasClientSecret || v.ClientID != "host-b-google-2" {
 		t.Fatalf("empty-secret keep: v = %+v, err = %v", v, err)
@@ -110,7 +110,7 @@ func TestAdminHostClient_SetListDelete(t *testing.T) {
 	}
 
 	// Deleting the base provider leaves its host clients.
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle, ""); err != nil {
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle); err != nil {
 		t.Fatalf("delete base google: %v", err)
 	}
 	if _, cfg = storedOAuth(t, f, projectID); cfg.Google != nil || len(cfg.Hosts[hostB]) != 2 {
@@ -121,7 +121,7 @@ func TestAdminHostClient_SetListDelete(t *testing.T) {
 	for _, d := range []struct{ provider, host string }{
 		{oauthProviderGoogle, hostB}, {oauthProviderGoogle, hostB}, {oauthProviderApple, "AUTH.B.EXAMPLE"}, {oauthProviderMicrosoft, hostA},
 	} {
-		if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, d.provider, d.host); err != nil {
+		if err := f.svc.AdminDeleteProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, d.provider, d.host); err != nil {
 			t.Fatalf("delete %s on %s: %v", d.provider, d.host, err)
 		}
 	}
@@ -140,46 +140,106 @@ func TestAdminHostClient_SetListDelete(t *testing.T) {
 	}
 }
 
-// A host client takes only a client: any other setting, an Apple secret, a
-// bad host or a missing client is refused, and nothing is stored.
+// A host client with a bad host, an Apple secret or a missing client is
+// refused, and nothing is stored.
 func TestAdminHostClient_SetRejects(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(oauthAdminSecret)
 	ctx := context.Background()
 	projectID := seedOAuthProject(t, f)
 
-	for name, in := range map[string]ProjectOAuthProviderInput{
+	for name, in := range map[string]ProjectOAuthHostClientInput{
+		"no host":                {Provider: oauthProviderGoogle, ClientID: "g", ClientSecret: "s"},
+		"a blank host":           {Provider: oauthProviderGoogle, CallbackHost: "   ", ClientID: "g", ClientSecret: "s"},
 		"host with a scheme":     {Provider: oauthProviderGoogle, CallbackHost: "https://auth.b.example", ClientID: "g", ClientSecret: "s"},
 		"host with a port":       {Provider: oauthProviderGoogle, CallbackHost: "auth.b.example:8443", ClientID: "g", ClientSecret: "s"},
 		"host without a dot":     {Provider: oauthProviderGoogle, CallbackHost: "localhost", ClientID: "g", ClientSecret: "s"},
-		"native audiences":       {Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: "g", ClientSecret: "s", NativeAudiences: []string{"aud"}},
-		"an endpoint":            {Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: "g", ClientSecret: "s", GoogleAuthorizationURL: "https://accounts.example/authorize"},
-		"a tenant":               {Provider: oauthProviderMicrosoft, CallbackHost: hostB, ClientID: "m", ClientSecret: "s", MicrosoftTenantID: "organizations"},
-		"apple team":             {Provider: oauthProviderApple, CallbackHost: hostB, ClientID: "a", AppleTeamID: "TEAM"},
-		"apple key":              {Provider: oauthProviderApple, CallbackHost: hostB, ClientID: "a", ApplePrivateKey: "pem"},
+		"two trailing dots":      {Provider: oauthProviderGoogle, CallbackHost: "auth.b.example..", ClientID: "g", ClientSecret: "s"},
+		"only dots":              {Provider: oauthProviderGoogle, CallbackHost: "..", ClientID: "g", ClientSecret: "s"},
+		"a space before the dot": {Provider: oauthProviderGoogle, CallbackHost: "auth.b.example\u00a0.", ClientID: "g", ClientSecret: "s"},
 		"apple secret":           {Provider: oauthProviderApple, CallbackHost: hostB, ClientID: "a", ClientSecret: "s"},
 		"no secret, none stored": {Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: "g"},
 		"no client id":           {Provider: oauthProviderGitHub, CallbackHost: hostB, ClientSecret: "s"},
 		"unknown provider":       {Provider: "facebook", CallbackHost: hostB, ClientID: "f", ClientSecret: "s"},
 	} {
-		if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &in); !errors.Is(err, ErrInvalidArgument) {
+		if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &in); !errors.Is(err, ErrInvalidArgument) {
 			t.Errorf("%s: err = %v, want ErrInvalidArgument", name, err)
 		}
+	}
+	if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, nil); !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("no client: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, " ", &ProjectOAuthHostClientInput{
+		Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: "g", ClientSecret: "s",
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("no project: err = %v, want ErrInvalidArgument", err)
 	}
 	if stored, _ := storedOAuth(t, f, projectID); strings.Contains(stored, "hosts") {
 		t.Fatalf("a refused write stored something: %s", stored)
 	}
 
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle, "auth.b.example:8443"); !errors.Is(err, ErrInvalidArgument) {
-		t.Errorf("delete with a bad host: err = %v, want ErrInvalidArgument", err)
+	for name, d := range map[string]struct{ project, provider, host string }{
+		"a bad host":       {projectID, oauthProviderGoogle, "auth.b.example:8443"},
+		"two dots":         {projectID, oauthProviderGoogle, "auth.b.example.."},
+		"no host":          {projectID, oauthProviderGoogle, ""},
+		"unknown provider": {projectID, "facebook", hostB},
+		"no project":       {"", oauthProviderGoogle, hostB},
+	} {
+		if err := f.svc.AdminDeleteProjectOAuthHostClient(ctx, oauthAdminSecret, d.project, d.provider, d.host); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("delete with %s: err = %v, want ErrInvalidArgument", name, err)
+		}
 	}
-	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, "wrong", projectID, &ProjectOAuthProviderInput{
+	if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, "wrong", projectID, &ProjectOAuthHostClientInput{
 		Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: "g", ClientSecret: "s",
 	}); !errors.Is(err, ErrPermissionDenied) {
 		t.Errorf("wrong secret: err = %v, want ErrPermissionDenied", err)
 	}
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, "wrong", projectID, oauthProviderGoogle, hostB); !errors.Is(err, ErrPermissionDenied) {
+	if err := f.svc.AdminDeleteProjectOAuthHostClient(ctx, "wrong", projectID, oauthProviderGoogle, hostB); !errors.Is(err, ErrPermissionDenied) {
 		t.Errorf("delete with the wrong secret: err = %v, want ErrPermissionDenied", err)
+	}
+}
+
+// A stored null where an object belongs ("oauth": null, "hosts": null or one
+// host's entry) reads as empty: a host write succeeds and leaves a config
+// that parses.
+func TestAdminHostClient_StoredNulls(t *testing.T) {
+	t.Parallel()
+	for _, seed := range []string{`{"oauth":null}`, `{"oauth":{"hosts":null}}`, `{"oauth":{"hosts":{"auth.b.example":null}}}`} {
+		f := newAdminFixture(oauthAdminSecret)
+		ctx := context.Background()
+		projectID := seedOAuthProject(t, f)
+		seedProjectConfig(t, f, projectID, seed)
+
+		if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &ProjectOAuthHostClientInput{
+			Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: hostBGoogle, ClientSecret: "s",
+		}); err != nil {
+			t.Fatalf("%s: set host client: %v", seed, err)
+		}
+		if _, cfg := storedOAuth(t, f, projectID); cfg.Hosts[hostB][oauthProviderGoogle].ClientID != hostBGoogle {
+			t.Fatalf("%s: stored hosts = %+v", seed, cfg.Hosts)
+		}
+	}
+	f := newAdminFixture(oauthAdminSecret)
+	projectID := seedOAuthProject(t, f)
+	seedProjectConfig(t, f, projectID, `{"oauth":null}`)
+	if _, err := f.svc.AdminSetProjectOAuthProvider(context.Background(), oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderGoogle, ClientID: "g", ClientSecret: "s",
+	}); err != nil {
+		t.Fatalf(`set base over "oauth": null: %v`, err)
+	}
+}
+
+// Deleting a host client that is not there is a no-op that still succeeds.
+func TestAdminHostClient_DeleteAbsentIsANoop(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	projectID := seedOAuthProject(t, f)
+	seedProjectConfig(t, f, projectID, `{"custom":{"keep":1}}`)
+	if err := f.svc.AdminDeleteProjectOAuthHostClient(context.Background(), oauthAdminSecret, projectID, oauthProviderGoogle, hostB); err != nil {
+		t.Fatalf("delete absent: %v", err)
+	}
+	if stored, _ := storedOAuth(t, f, projectID); stored != `{"custom":{"keep":1}}` {
+		t.Fatalf("an absent delete changed the config: %s", stored)
 	}
 }
 
@@ -192,12 +252,12 @@ func TestAdminHostClient_MalformedStoredHosts(t *testing.T) {
 	projectID := seedOAuthProject(t, f)
 	seedProjectConfig(t, f, projectID, `{"oauth":{"hosts":["not","an","object"]}}`)
 
-	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+	if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &ProjectOAuthHostClientInput{
 		Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: "g", ClientSecret: "s",
 	}); !errors.Is(err, ErrInvalidArgument) {
 		t.Errorf("set over malformed hosts: err = %v, want ErrInvalidArgument", err)
 	}
-	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle, hostB); !errors.Is(err, ErrInvalidArgument) {
+	if err := f.svc.AdminDeleteProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, oauthProviderGoogle, hostB); !errors.Is(err, ErrInvalidArgument) {
 		t.Errorf("delete over malformed hosts: err = %v, want ErrInvalidArgument", err)
 	}
 	if _, _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {

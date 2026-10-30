@@ -72,10 +72,10 @@ type OAuthResolver struct {
 	// cache holds at most ONE entry per (projectID, provider), and one per
 	// (projectID, provider, host) for each host override a request has used: a
 	// config change (new hash) overwrites the superseded entry rather than
-	// accumulating. An
-	// entry with a nil exchanger is a NEGATIVE result (the build failed for that
-	// hash), cached so a persistently-misconfigured project neither rebuilds nor
-	// re-logs on every login; a genuinely fixed config (new hash) retries.
+	// accumulating. An entry with a nil exchanger is a NEGATIVE result (the
+	// build failed for that hash), cached so a persistently-misconfigured
+	// project neither rebuilds nor re-logs on every login; a genuinely fixed
+	// config (new hash) retries.
 	cache map[string]oauthCacheEntry
 }
 
@@ -183,6 +183,8 @@ func (r *OAuthResolver) buildHostClient(projectID, provider, host string, client
 	key := projectID + "\x00" + provider + "\x00" + host
 	fields := []zap.Field{zap.String("project_id", projectID), zap.String("provider", provider), zap.String("callback_host", host)}
 	if base, ok := cfg.provider(provider); ok {
+		// A nil swap (a type withHostClient does not know) fails in build and
+		// is cached as unavailable.
 		swapped := withHostClient(base, client)
 		return r.cached(key, providerConfigHash(swapped), provider, fields, func() (oauth.Exchanger, error) {
 			return r.build(provider, swapped)
@@ -300,6 +302,8 @@ func (r *OAuthResolver) cached(key, hash, provider string, fields []zap.Field, b
 
 	built, err := build()
 	if err != nil {
+		// Host-client builds log under this event too, env bases included;
+		// their callback_host field tells them apart.
 		r.logger.Warn("oauth_project_provider_build_failed", append(fields, zap.Error(err))...)
 	} else if r.wrap != nil {
 		built = r.wrap(provider, built)
@@ -431,13 +435,17 @@ func (c ProjectOAuthConfig) provider(provider string) (any, bool) {
 // hostClient returns the client the project names for provider on host
 // (ADR-0019), or ok=false when it names none there.
 func (c ProjectOAuthConfig) hostClient(host, provider string) (ProjectOAuthHostClient, bool) {
+	if !isOAuthProviderKey(provider) {
+		return ProjectOAuthHostClient{}, false // e.g. an env OIDC provider under its own key
+	}
 	client, ok := c.Hosts[host][provider]
 	return client, ok
 }
 
 // withHostClient returns a copy of a configured provider (as provider returns
-// it) whose client identity is client's. Apple keeps its key: it signs for any
-// Services ID of its team, so only the client id changes.
+// it) whose client identity is client's, or nil for a type it does not know.
+// Apple keeps its key: it signs for any Services ID of its team, so only the
+// client id changes.
 func withHostClient(base any, client ProjectOAuthHostClient) any {
 	switch b := base.(type) {
 	case *ProjectOAuthGoogle:
@@ -461,7 +469,9 @@ func withHostClient(base any, client ProjectOAuthHostClient) any {
 		c.ClientID, c.ClientSecretEnc = client.ClientID, client.ClientSecretEnc
 		return &c
 	}
-	return base
+	// A provider type this function does not know: fail closed, since the
+	// base client is not registered for the host's callback.
+	return nil
 }
 
 // callbackHost is the host a host override is keyed by: redirectURI's, in the

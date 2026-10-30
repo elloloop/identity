@@ -257,7 +257,7 @@ https://auth.example.com/oauth/start/google?return_to=<app-url>&project_key=<pk>
   the same operator as the hub — the provider consent screen shows the
   shared client's branding for all of them. It is off by default.
 
-### A client per auth host (`callback_host`)
+### A client per auth host (host clients)
 
 A provider's consent screen names the application its client is registered
 as, so a project served on several auth hosts shows every user the same name.
@@ -277,6 +277,11 @@ auth host, a project can name a different client for a given callback host
   }
 }
 ```
+
+Here only Google has a base in the project's own config, so on the default
+project the Microsoft and Apple overrides swap the client of the env
+providers; on a non-default project they apply only to providers it configures
+itself or borrows from the hub.
 
 - **The key is the host of the flow's callback URL**: the host the hosted
   sign-in page and `/oauth/start` are served on, or the host of the app's
@@ -303,18 +308,27 @@ auth host, a project can name a different client for a given callback host
 - **The default project's overrides** apply to requests that resolve to it by
   an auth domain or a key. A request that names no project falls back to the
   env settings, which carry no overrides.
+- **Only the built-in provider keys** (`google`, `microsoft`, `apple`,
+  `github`, `oidc`) take an override. An env OIDC provider registered under a
+  key of its own (`GATEWAY_OAUTH_OIDC_PROVIDER_KEY=okta`, say) takes none;
+  under the default `oidc` key it can. Any other key under a host is kept but
+  never read.
 
-Register each override's callback, `https://<host>/oauth/callback/<provider>`,
-with its client, and configure overrides only once every replica runs a
-version that reads them: an older replica ignores `oauth.hosts`, so a flow it
-completes would exchange the code with the base client and fail.
+Register each override's client with the callback URL of the flows that use
+it: `https://<host>/oauth/callback/<provider>` for the hosted flow, and the
+app's own `redirect_uri` for the headless flow. Configure overrides only once
+every replica runs a version that reads them: an older replica ignores
+`oauth.hosts`, so a flow it completes would exchange the code with the base
+client and fail. Delete them before rolling back below that version, for the
+same reason.
 
-Author them with the admin API: `AdminSetProjectOAuthProvider` with
-`config.callback_host` set takes only `client_id` and `client_secret` (an
-empty secret keeps the stored one; Apple takes none),
-`AdminDeleteProjectOAuthProvider` with `callback_host` removes one, and
+Author them with their own admin RPCs. `AdminSetProjectOAuthHostClient` takes
+a `ProjectOAuthHostClient` (`provider`, `callback_host`, `client_id`,
+`client_secret`; an empty secret keeps the stored one, and Apple takes none),
+`AdminDeleteProjectOAuthHostClient` removes one, and
 `AdminListProjectOAuthProviders` returns them, redacted, in `host_clients`.
-Setting or deleting the base provider leaves its overrides in place.
+A server that predates them answers `UNIMPLEMENTED`. Setting or deleting the
+base provider leaves its overrides in place.
 
 ### The hosted auth UI (`/auth/`)
 

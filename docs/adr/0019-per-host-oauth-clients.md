@@ -30,6 +30,7 @@ split from their accounts. The products need one pool and a client per host.
    ```json
    "oauth": {
      "google": { "client_id": "base", "client_secret_enc": "…" },
+     "apple":  { "client_id": "example.base.web", "team_id": "…", "key_id": "…", "private_key_enc": "…" },
      "hosts": {
        "auth.widgets.example": {
          "google": { "client_id": "widgets", "client_secret_enc": "…" },
@@ -42,7 +43,12 @@ split from their accounts. The products need one pool and a client per host.
    An override holds a client identity and nothing else: `client_id`, and for
    every provider but Apple a `client_secret_enc`, encrypted like any other
    provider secret (ADR-0010 §2). A host key is a lower-case DNS name with no
-   scheme, port or path.
+   scheme, port or path. Only the built-in provider keys (`google`,
+   `microsoft`, `apple`, `github`, `oidc`) are read under a host; any other is
+   kept but never consulted, as an unknown key under `oauth` is, so a config a
+   newer version wrote still loads after a rollback. An env OIDC provider
+   registered under a key of its own (`GATEWAY_OAUTH_OIDC_PROVIDER_KEY`) can
+   therefore take no override; under the default `oidc` key it can.
 
 2. **The key is the host of the flow's callback URL.** A provider client is
    registered with a list of callback URLs, so the host a callback lands on is
@@ -90,13 +96,21 @@ split from their accounts. The products need one pool and a client per host.
    is registered. A provider with an override for the page's host starts on
    that host, needing no `project_key`: its client is registered there.
 
-6. **Authoring.** `AdminSetProjectOAuthProvider` with `callback_host` set
-   writes the override for that host and provider, and accepts only
-   `client_id` and `client_secret` (an empty secret keeps the stored one; Apple
-   takes none). `AdminDeleteProjectOAuthProvider` with `callback_host` removes
+6. **Authoring.** Overrides have their own RPCs.
+   `AdminSetProjectOAuthHostClient` writes the override for one host and
+   provider from a `ProjectOAuthHostClient` that carries only `provider`,
+   `callback_host`, `client_id` and `client_secret` (an empty secret keeps the
+   stored one; Apple takes none). `AdminDeleteProjectOAuthHostClient` removes
    it, and `AdminListProjectOAuthProviders` returns the overrides, redacted, in
-   `host_clients`. Setting or deleting the base provider leaves its overrides
-   alone.
+   `host_clients`. A host the write would store in a form the resolver could
+   never match (a doubled trailing dot, say) is refused, not stored. Setting
+   or deleting the base provider leaves its overrides alone.
+
+   They are separate RPCs, not a `callback_host` field on the provider RPCs,
+   because proto3 discards a field it does not know. Sent to a server that
+   predates this ADR, an override written through the provider RPCs would be
+   read as a write to the base provider, replacing it or deleting it; through
+   its own RPC it fails with `UNIMPLEMENTED` and changes nothing.
 
 7. **Caching.** An override's exchanger is cached in its own slot per
    (project, provider, host), keyed on a hash of the base and the override,
@@ -111,10 +125,19 @@ split from their accounts. The products need one pool and a client per host.
   the hub, as before. If the primary auth domain itself has an override, the
   own-provider flows other hosts start there use it too; to keep the base
   client on another host's pages, make a host without an override the primary.
+- **Operational.** Register each override's client with the callback URL of
+  the flows that use it: `https://<host>/oauth/callback/<provider>` for the
+  hosted flow, and the app's own `redirect_uri` for the headless flow.
 - **Operational.** Configure overrides only once every replica runs a version
   that reads them. An older replica ignores `oauth.hosts` (the config decoder
   tolerates unknown keys and the admin merge preserves them), so a flow started
   on a newer replica and completed on an older one would exchange its code with
-  the base client and fail.
+  the base client and fail. For the same reason, delete the overrides before
+  rolling back below this version: an older version signs in on their hosts
+  with the base client, which is not registered there.
+- **Operational.** This version validates `oauth.hosts` when it loads a
+  project's config, where an older one ignored it: a project that already
+  stores a `hosts` key under `oauth` for some other purpose fails to load
+  until it is removed.
 - **Neutral.** Native sign-in is unchanged: it verifies ID tokens against the
   provider's `native_audiences`, which an override does not touch.

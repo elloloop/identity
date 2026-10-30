@@ -117,7 +117,8 @@ type ProjectOAuthConfig struct {
 	OIDC      *ProjectOAuthOIDC      `json:"oidc,omitempty"`
 	// Hosts holds the per-host client overrides (ADR-0019), keyed by the host
 	// a flow's callback URL is on and then by provider key: on that host the
-	// provider signs in through this client instead of its base one.
+	// provider signs in through this client instead of its base one. Only
+	// the built-in provider keys are consulted; any other is kept unread.
 	Hosts map[string]map[string]ProjectOAuthHostClient `json:"hosts,omitempty"`
 }
 
@@ -371,10 +372,16 @@ func (c ProjectOAuthConfig) validate() error {
 		}
 	}
 	for host, clients := range c.Hosts {
-		if normalized, err := normalizeAuthHostname(host); err != nil || normalized != host {
+		if normalized, err := normalizeCallbackHost(host); err != nil || normalized != host {
 			return fmt.Errorf("oauth.hosts key %q must be a lower-case hostname with no scheme, port or path", host)
 		}
 		for provider, client := range clients {
+			if !isOAuthProviderKey(provider) {
+				// A provider this binary does not know (one a newer binary
+				// wrote) is kept but never consulted, like an unknown key
+				// under "oauth", so a rollback leaves the project usable.
+				continue
+			}
 			if err := client.validate(provider); err != nil {
 				return fmt.Errorf("oauth.hosts[%q].%w", host, err)
 			}
@@ -385,6 +392,8 @@ func (c ProjectOAuthConfig) validate() error {
 
 // validate rejects an override that names no client, an unknown provider, a
 // missing secret, or an Apple secret (Apple's base key signs for its client).
+// ProjectOAuthConfig.validate skips an unknown provider before calling it; the
+// admin write refuses one before it gets here.
 func (h ProjectOAuthHostClient) validate(provider string) error {
 	switch provider {
 	case oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderGitHub, oauthProviderOIDC:

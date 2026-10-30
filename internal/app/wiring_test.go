@@ -103,6 +103,39 @@ func TestBuildOAuthRegistry_GenericOIDCKeyNormalized(t *testing.T) {
 	}
 }
 
+// A disabled OIDC block is ignored, even when its provider key names a
+// built-in provider (the reserved-key check runs only when OIDC is enabled):
+// the built-in keeps its own env client.
+func TestBuildOAuthRegistry_DisabledOIDCKeepsBuiltIns(t *testing.T) {
+	cfg := &config.Config{
+		GoogleClientID:   "env-google",
+		OIDCProviderKey:  "google",
+		OIDCIssuer:       "https://acme.example",
+		OIDCClientID:     "leftover-oidc",
+		OIDCClientSecret: "leftover-oidc-secret",
+	}
+	cfg.GoogleClientSecret = testCredential("google")
+	for name, e := range map[string]func() (oauth.Exchanger, bool){
+		"registry": func() (oauth.Exchanger, bool) { return buildOAuthRegistry(cfg, zap.NewNop()).Get("google") },
+		"builder":  func() (oauth.Exchanger, bool) { return envOAuthProviderBuilder(cfg)("google", "env-google", "s") },
+	} {
+		exchanger, ok := e()
+		if !ok {
+			t.Fatalf("%s: google not built", name)
+		}
+		u, err := exchanger.(oauth.Authorizer).AuthorizationURL(context.Background(), "https://auth.a.example/cb", "state", "challenge")
+		if err != nil {
+			t.Fatalf("%s: AuthorizationURL: %v", name, err)
+		}
+		if !strings.Contains(u, "client_id=env-google") || !strings.Contains(u, "accounts.google.com") {
+			t.Fatalf("%s: google authorization url %q is not the env Google client", name, u)
+		}
+	}
+	if n := buildOAuthRegistry(cfg, zap.NewNop()).Len(); n != 1 {
+		t.Fatalf("registry Len = %d, want 1 (google only)", n)
+	}
+}
+
 func TestBuildEmailTransport(t *testing.T) {
 	cases := []struct {
 		name string
@@ -182,11 +215,11 @@ func TestNewBuildsHealthHandler(t *testing.T) {
 	}
 }
 
-// newEnvOAuthProvider rebuilds an env provider with another client: the
+// The env provider builder rebuilds an env provider with another client: the
 // client changes, every other env setting (endpoints, the Microsoft tenant,
 // Apple's signing identity) is kept, and a provider the env does not
 // configure is not built at all.
-func TestNewEnvOAuthProvider(t *testing.T) {
+func TestEnvOAuthProviderBuilder(t *testing.T) {
 	cfg := &config.Config{
 		GoogleClientID:         "env-google",
 		GoogleAuthorizationURL: "https://accounts.example/authorize",
@@ -196,18 +229,19 @@ func TestNewEnvOAuthProvider(t *testing.T) {
 		AppleTeamID:            "team",
 		AppleKeyID:             "key",
 		OIDCEnabled:            true,
-		OIDCProviderKey:        "Okta",
+		OIDCProviderKey:        "OIDC",
 		OIDCIssuer:             "https://acme.example",
-		OIDCClientID:           "env-okta",
-		OIDCClientSecret:       "env-okta-secret",
+		OIDCClientID:           "env-oidc",
+		OIDCClientSecret:       "env-oidc-secret",
 	}
 	cfg.GoogleClientSecret = testCredential("google")
 	cfg.MicrosoftClientSecret = testCredential("microsoft")
 	cfg.ApplePrivateKey = testCredential("apple")
 
+	build := envOAuthProviderBuilder(cfg)
 	authURL := func(t *testing.T, provider, clientID string) string {
 		t.Helper()
-		e, ok := newEnvOAuthProvider(cfg, provider, clientID, "override-secret")
+		e, ok := build(provider, clientID, "override-secret")
 		if !ok {
 			t.Fatalf("%s: env provider not built", provider)
 		}
@@ -236,11 +270,13 @@ func TestNewEnvOAuthProvider(t *testing.T) {
 		}
 	}
 
-	if _, ok := newEnvOAuthProvider(cfg, "okta", "override-okta", "s"); !ok {
+	// A host client can name the env OIDC provider only under the built-in
+	// "oidc" key (ADR-0019), which is the one it rebuilds under.
+	if _, ok := build("oidc", "override-oidc", "s"); !ok {
 		t.Error("the env OIDC provider must rebuild under its normalized key")
 	}
-	for _, provider := range []string{"github", "Okta", "unknown"} {
-		if _, ok := newEnvOAuthProvider(cfg, provider, "c", "s"); ok {
+	for _, provider := range []string{"github", "OIDC", "unknown"} {
+		if _, ok := build(provider, "c", "s"); ok {
 			t.Errorf("%s: a provider the env does not configure must not be built", provider)
 		}
 	}

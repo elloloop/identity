@@ -41,4 +41,19 @@ func TestOAuthAdmin_Unimplemented_WithoutControlPlane(t *testing.T) {
 	if got := connect.CodeOf(err); got != connect.CodeUnimplemented {
 		t.Fatalf("AdminListProjectOAuthProviders code = %v, want Unimplemented", got)
 	}
+
+	_, err = h.Client.AdminSetProjectOAuthHostClient(ctx, connect.NewRequest(&identitypb.AdminSetProjectOAuthHostClientRequest{
+		ProjectId: "p",
+		Client:    &identitypb.ProjectOAuthHostClient{Provider: "google", CallbackHost: "auth.b.example", ClientId: "g", ClientSecret: "s"},
+	}))
+	if got := connect.CodeOf(err); got != connect.CodeUnimplemented {
+		t.Fatalf("AdminSetProjectOAuthHostClient code = %v, want Unimplemented", got)
+	}
+
+	_, err = h.Client.AdminDeleteProjectOAuthHostClient(ctx, connect.NewRequest(&identitypb.AdminDeleteProjectOAuthHostClientRequest{
+		ProjectId: "p", Provider: "google", CallbackHost: "auth.b.example",
+	}))
+	if got := connect.CodeOf(err); got != connect.CodeUnimplemented {
+		t.Fatalf("AdminDeleteProjectOAuthHostClient code = %v, want Unimplemented", got)
+	}
 }

@@ -761,9 +761,7 @@ func New(deps Deps) (*Built, error) {
 	var envOAuthProviders service.EnvOAuthProviderBuilder
 	if oauthRegistry == nil {
 		oauthRegistry = buildOAuthRegistry(deps.Config, logger)
-		envOAuthProviders = func(provider, clientID, clientSecret string) (oauth.Exchanger, bool) {
-			return newEnvOAuthProvider(deps.Config, provider, clientID, clientSecret)
-		}
+		envOAuthProviders = envOAuthProviderBuilder(deps.Config)
 	}
 	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 

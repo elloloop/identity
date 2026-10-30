@@ -484,6 +484,19 @@ func TestParseProjectConfig_OAuth_HostClients_Present(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// A provider this binary does not know, under a host, is kept unread rather
+// than failing the whole config, and a lookup by that key finds nothing.
+func TestParseProjectConfig_OAuth_HostClients_UnknownProviderIgnored(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"oauth":{"hosts":{"auth.b.example":{"okta":{"client_id":"o"},"google":{"client_id":"g","client_secret_enc":"e"}}}}}`)
+	require.NoError(t, err)
+	_, ok := cfg.OAuth.hostClient("auth.b.example", "okta")
+	assert.False(t, ok)
+	_, ok = cfg.OAuth.hostClient("auth.b.example", "google")
+	assert.True(t, ok)
+}
+
 func TestParseProjectConfig_OAuth_HostClients_Rejected(t *testing.T) {
 	t.Parallel()
 
@@ -496,7 +509,7 @@ func TestParseProjectConfig_OAuth_HostClients_Rejected(t *testing.T) {
 		"client id missing":    {`{"auth.b.example":{"github":{"client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].github requires client_id and client_secret_enc`},
 		"apple with a secret":  {`{"auth.b.example":{"apple":{"client_id":"a","client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].apple takes no client_secret_enc`},
 		"apple without client": {`{"auth.b.example":{"apple":{}}}`, `oauth.hosts["auth.b.example"].apple requires client_id`},
-		"unknown provider":     {`{"auth.b.example":{"facebook":{"client_id":"f","client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].facebook is not an oauth provider`},
+		"two trailing dots":    {`{"auth.b.example..":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b.example.."`},
 	} {
 		_, err := ParseProjectConfig(`{"oauth":{"hosts":` + tc.hosts + `}}`)
 		require.Error(t, err, name)

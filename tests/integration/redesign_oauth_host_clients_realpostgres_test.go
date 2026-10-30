@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -43,16 +42,24 @@ func beginGoogleClientID(t *testing.T, client identityconnectgen.IdentityService
 	return u.Query().Get("client_id")
 }
 
-func setGoogleHostClient(ctx context.Context, admin identityconnectgen.IdentityServiceClient, projectID string, cfg *identitypb.ProjectOAuthProviderConfig) (*identitypb.ProjectOAuthProviderConfig, error) {
+func setGoogleBase(ctx context.Context, admin identityconnectgen.IdentityServiceClient, projectID string, cfg *identitypb.ProjectOAuthProviderConfig) error {
 	cfg.Provider = "google"
-	resp, err := admin.AdminSetProjectOAuthProvider(ctx, connect.NewRequest(&identitypb.AdminSetProjectOAuthProviderRequest{
+	_, err := admin.AdminSetProjectOAuthProvider(ctx, connect.NewRequest(&identitypb.AdminSetProjectOAuthProviderRequest{
 		ProjectId: projectID,
 		Config:    cfg,
+	}))
+	return err
+}
+
+func setHostClient(ctx context.Context, admin identityconnectgen.IdentityServiceClient, projectID string, c *identitypb.ProjectOAuthHostClient) (*identitypb.ProjectOAuthHostClient, error) {
+	resp, err := admin.AdminSetProjectOAuthHostClient(ctx, connect.NewRequest(&identitypb.AdminSetProjectOAuthHostClientRequest{
+		ProjectId: projectID,
+		Client:    c,
 	}))
 	if err != nil {
 		return nil, err
 	}
-	return resp.Msg.GetConfig(), nil
+	return resp.Msg.GetClient(), nil
 }
 
 // TestRedesign_OAuthHostClient_OwnProvider authors a client for one callback
@@ -76,7 +83,7 @@ func TestRedesign_OAuthHostClient_OwnProvider(t *testing.T) {
 	}
 	projectID := proj.Msg.GetProjectId()
 
-	if _, err := setGoogleHostClient(ctx, admin, projectID, &identitypb.ProjectOAuthProviderConfig{
+	if err := setGoogleBase(ctx, admin, projectID, &identitypb.ProjectOAuthProviderConfig{
 		ClientId:               "base-google",
 		ClientSecret:           "base-secret-plaintext",
 		GoogleAuthorizationUrl: "https://accounts.example/authorize",
@@ -84,7 +91,8 @@ func TestRedesign_OAuthHostClient_OwnProvider(t *testing.T) {
 		t.Fatalf("set base provider: %v", err)
 	}
 	const hostSecret = "host-secret-plaintext"
-	set, err := setGoogleHostClient(ctx, admin, projectID, &identitypb.ProjectOAuthProviderConfig{
+	set, err := setHostClient(ctx, admin, projectID, &identitypb.ProjectOAuthHostClient{
+		Provider:     "google",
 		CallbackHost: "Auth.B.Example.",
 		ClientId:     "host-b-google",
 		ClientSecret: hostSecret,
@@ -134,18 +142,18 @@ func TestRedesign_OAuthHostClient_OwnProvider(t *testing.T) {
 		t.Fatalf("callback elsewhere: client_id = %q, want the base", got)
 	}
 
-	// An override takes a client identity only.
-	_, err = setGoogleHostClient(ctx, admin, projectID, &identitypb.ProjectOAuthProviderConfig{
-		CallbackHost:           hostClientCallbackHost,
-		ClientId:               "host-b-google",
-		GoogleAuthorizationUrl: "https://elsewhere.example/authorize",
+	// A host the resolver could never match is refused, not stored.
+	_, err = setHostClient(ctx, admin, projectID, &identitypb.ProjectOAuthHostClient{
+		Provider:     "google",
+		CallbackHost: hostClientCallbackHost + "..",
+		ClientId:     "host-b-google",
 	})
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("a host client with a base setting: err = %v, want InvalidArgument", err)
+		t.Fatalf("a host client with a doubled trailing dot: err = %v, want InvalidArgument", err)
 	}
 
 	// Re-authoring the base keeps the override.
-	if _, err := setGoogleHostClient(ctx, admin, projectID, &identitypb.ProjectOAuthProviderConfig{
+	if err := setGoogleBase(ctx, admin, projectID, &identitypb.ProjectOAuthProviderConfig{
 		ClientId:               "base-google-2",
 		GoogleAuthorizationUrl: "https://accounts.example/authorize",
 	}); err != nil {
@@ -159,7 +167,7 @@ func TestRedesign_OAuthHostClient_OwnProvider(t *testing.T) {
 	}
 
 	// Deleting the override reverts its host to the base; the base stays.
-	if _, err := admin.AdminDeleteProjectOAuthProvider(ctx, connect.NewRequest(&identitypb.AdminDeleteProjectOAuthProviderRequest{
+	if _, err := admin.AdminDeleteProjectOAuthHostClient(ctx, connect.NewRequest(&identitypb.AdminDeleteProjectOAuthHostClientRequest{
 		ProjectId:    projectID,
 		Provider:     "google",
 		CallbackHost: hostClientCallbackHost,
@@ -202,7 +210,8 @@ func TestRedesign_OAuthHostClient_EnvBaseDefaultProject(t *testing.T) {
 	if got := beginGoogleClientID(t, client, hostClientRedirectOnB); got != "env-google" {
 		t.Fatalf("before any override: client_id = %q, want the env client", got)
 	}
-	if _, err := setGoogleHostClient(ctx, admin, h.ProjectID, &identitypb.ProjectOAuthProviderConfig{
+	if _, err := setHostClient(ctx, admin, h.ProjectID, &identitypb.ProjectOAuthHostClient{
+		Provider:     "google",
 		CallbackHost: hostClientCallbackHost,
 		ClientId:     "host-b-google",
 		ClientSecret: "host-secret-plaintext",
@@ -220,24 +229,19 @@ func TestRedesign_OAuthHostClient_EnvBaseDefaultProject(t *testing.T) {
 	}
 
 	// An override never enables a provider the project has no base for.
-	_, err := admin.AdminSetProjectOAuthProvider(ctx, connect.NewRequest(&identitypb.AdminSetProjectOAuthProviderRequest{
-		ProjectId: h.ProjectID,
-		Config: &identitypb.ProjectOAuthProviderConfig{
-			Provider:     "github",
-			CallbackHost: hostClientCallbackHost,
-			ClientId:     "host-b-github",
-			ClientSecret: "host-secret-plaintext",
-		},
-	}))
-	if err != nil {
+	if _, err := setHostClient(ctx, admin, h.ProjectID, &identitypb.ProjectOAuthHostClient{
+		Provider:     "github",
+		CallbackHost: hostClientCallbackHost,
+		ClientId:     "host-b-github",
+		ClientSecret: "host-secret-plaintext",
+	}); err != nil {
 		t.Fatalf("set github host client: %v", err)
 	}
-	_, err = client.BeginOAuthLogin(ctx, connect.NewRequest(&identitypb.BeginOAuthLoginRequest{
+	_, err := client.BeginOAuthLogin(ctx, connect.NewRequest(&identitypb.BeginOAuthLoginRequest{
 		Provider:    "github",
 		RedirectUri: hostClientRedirectOnB,
 	}))
-	var cerr *connect.Error
-	if !errors.As(err, &cerr) {
-		t.Fatalf("github with only a host client must stay unavailable, got err = %v", err)
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("github with only a host client must stay unavailable (InvalidArgument), got err = %v", err)
 	}
 }

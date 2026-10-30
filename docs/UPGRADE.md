@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — a project can give one auth host its own OAuth client (additive fields; no migration; `HostedUIOptions`, `AdminDeleteProjectOAuthProvider` and `AdminListProjectOAuthProviders` change shape (Go API))
+## Next — a project can give one auth host its own OAuth client (additive RPCs and field; no migration; `oauth.hosts` is now validated; `HostedUIOptions` and `AdminListProjectOAuthProviders` change shape (Go API))
 
 A provider's consent screen names the application its client is registered
 as, so a project served on several auth hosts showed the same name on all of
@@ -13,7 +13,8 @@ from that provider. See the `oauth.md` section "A client per auth host".
 - **Stored in `config_json.oauth.hosts`**, keyed by lower-case host, then by
   provider: `client_id`, and `client_secret_enc` for every provider but Apple,
   whose override is a Services ID signed with the base's team, key id and
-  private key.
+  private key. Only the built-in provider keys are read, so an env OIDC
+  provider registered under a key of its own takes no override.
 - **Keyed by the callback host**: the host the hosted page and
   `/oauth/start` are served on, or the host of the headless flow's
   `redirect_uri`. The callback completes with the client its start used.
@@ -22,20 +23,30 @@ from that provider. See the `oauth.md` section "A client per auth host".
   unavailable on that host. It never falls back to the base client.
 - **The hosted page** starts a provider with an override for its own host on
   that host, with no `project_key`.
-- **Admin API (additive):** `ProjectOAuthProviderConfig.callback_host` (24)
-  on `AdminSetProjectOAuthProvider` writes an override, which takes only
-  `client_id` and `client_secret` (an empty secret keeps the stored one; Apple
-  takes none). `AdminDeleteProjectOAuthProviderRequest.callback_host` (3)
-  removes one. `AdminListProjectOAuthProvidersResponse.host_clients` (2)
-  returns them, redacted. Setting or deleting a base provider leaves its
-  overrides in place. Writing or removing an override is audited as
+- **Admin API (additive):** `AdminSetProjectOAuthHostClient` writes an
+  override from a `ProjectOAuthHostClient` (`provider`, `callback_host`,
+  `client_id`, `client_secret`; an empty secret keeps the stored one, and Apple
+  takes none), and `AdminDeleteProjectOAuthHostClient` removes one. Neither
+  touches the base provider, and a server that predates them answers
+  `UNIMPLEMENTED`. `AdminListProjectOAuthProvidersResponse.host_clients` (2)
+  returns the overrides, redacted. Setting or deleting a base provider leaves
+  its overrides in place. Writing or removing an override is audited as
   `project_oauth_provider_set` or `project_oauth_provider_removed` with a
   `callback_host` detail.
-- **Rollout:** configure an override only once every replica runs this
-  version. An older replica ignores `oauth.hosts`, so a flow it completes
-  would exchange the code with the base client and fail. Register
-  `https://<host>/oauth/callback/<provider>` with each override's client
-  first.
+- **`oauth.hosts` is validated** when a project's config loads: a host key
+  must be a lower-case DNS name with no scheme, port, path or trailing dot,
+  and each built-in provider's override must be complete. An older version
+  ignored the key, so a project that already stores an `oauth.hosts` value for
+  some other purpose fails to load after the upgrade until it is removed.
+- **Rollout:** register each override's client with the callback URL of the
+  flows that use it (`https://<host>/oauth/callback/<provider>` for the hosted
+  flow, the app's own `redirect_uri` for the headless flow), and configure an
+  override only once every replica runs this version. An older replica ignores
+  `oauth.hosts`, so a flow it completes would exchange the code with the base
+  client and fail.
+- **Rollback:** delete the overrides before rolling back below this version.
+  An older version signs in on their hosts with the base client, which is not
+  registered there.
 
 Nothing changes for a project without overrides.
 
@@ -43,13 +54,13 @@ Nothing changes for a project without overrides.
 
 - `AuthService.HostedUIOptions` takes the page's origin:
   `HostedUIOptions(ctx, pageOrigin string)`.
-- `ControlPlaneAdminService.AdminDeleteProjectOAuthProvider` takes a
-  `callbackHost` after `provider` ("" deletes the base provider, as before),
-  and `AdminListProjectOAuthProviders` returns the host overrides as a second
-  slice: `(providers, hostClients []*ProjectOAuthProviderView, err error)`.
-- New: `ProjectOAuthProviderInput.CallbackHost`,
-  `ProjectOAuthProviderView.CallbackHost`, `ProjectOAuthConfig.Hosts` of
-  `ProjectOAuthHostClient`, and `AuthService.WithEnvOAuthProviders`, which
+- `ControlPlaneAdminService.AdminListProjectOAuthProviders` returns the host
+  overrides as a second slice:
+  `(providers []*ProjectOAuthProviderView, hostClients []*ProjectOAuthHostClientView, err error)`.
+- New: `ControlPlaneAdminService.AdminSetProjectOAuthHostClient` and
+  `AdminDeleteProjectOAuthHostClient`, with `ProjectOAuthHostClientInput` and
+  `ProjectOAuthHostClientView`; `ProjectOAuthConfig.Hosts` of
+  `ProjectOAuthHostClient`; and `AuthService.WithEnvOAuthProviders`, which
   takes a `service.EnvOAuthProviderBuilder`. An embedder that supplies its own
   `OAuthRegistry` gets no builder, so an override whose base is an env
   provider is unavailable there.

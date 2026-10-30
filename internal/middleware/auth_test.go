@@ -75,6 +75,8 @@ func TestAuthMiddleware_OperatorRPCs_Exempt(t *testing.T) {
 		"AdminSetProjectOAuthProvider",
 		"AdminDeleteProjectOAuthProvider",
 		"AdminListProjectOAuthProviders",
+		"AdminSetProjectOAuthHostClient",
+		"AdminDeleteProjectOAuthHostClient",
 		"AdminSetProjectAssurance",
 		"AdminGetProjectAssurance",
 		"CreateFirstPlatformAdmin",

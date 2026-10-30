@@ -398,8 +398,7 @@ func legacyDNSTXTChallenge(projectID, domain string) (name, value string) {
 // normalizeHostname lower-cases, trims, and strips a trailing dot from a host,
 // rejecting blanks and anything with whitespace, a scheme, an '@', or no dot at
 // all — the shape a real fully-qualified hostname/domain must take. label names
-// the value in error messages ("domain" / "hostname"). Shared by email-domain
-// (normalizeDomain) and custom auth-domain (normalizeAuthHostname) validation.
+// the value in error messages ("domain" / "hostname").
 func normalizeHostname(label, host string) (string, error) {
 	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 	if h == "" {

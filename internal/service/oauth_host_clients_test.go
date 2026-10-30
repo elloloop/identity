@@ -321,4 +321,7 @@ func TestWithHostClient_SwapsOnlyTheClient(t *testing.T) {
 	if google.ClientID != "base" || microsoft.ClientID != "base" || github.ClientID != "base" || oidc.ClientID != "base" || apple.ClientID != "base" {
 		t.Error("withHostClient must not modify the base")
 	}
+	if got := withHostClient(struct{}{}, client); got != nil {
+		t.Errorf("an unknown provider type must fail closed, got %#v", got)
+	}
 }

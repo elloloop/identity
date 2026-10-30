@@ -315,7 +315,6 @@ func (h *IdentityHandler) GetProjectConfig(
 }
 
 // AdminSetProjectOAuthProvider sets/rotates one of a project's OAuth providers,
-// or with config.callback_host set, the client it uses on that host (ADR-0019),
 // encrypting any plaintext secret server-side. The response redacts secrets.
 // Operator-only.
 func (h *IdentityHandler) AdminSetProjectOAuthProvider(
@@ -409,8 +408,8 @@ func assuranceViewToProto(v *service.ProjectAssuranceView) *identitypb.ProjectAs
 	}
 }
 
-// AdminDeleteProjectOAuthProvider removes one of a project's OAuth providers,
-// or with callback_host set, the client it uses on that host. Operator-only.
+// AdminDeleteProjectOAuthProvider removes one of a project's OAuth providers.
+// Operator-only.
 func (h *IdentityHandler) AdminDeleteProjectOAuthProvider(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminDeleteProjectOAuthProviderRequest],
@@ -418,7 +417,7 @@ func (h *IdentityHandler) AdminDeleteProjectOAuthProvider(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	if err := h.controlAdmin.AdminDeleteProjectOAuthProvider(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Provider, req.Msg.CallbackHost); err != nil {
+	if err := h.controlAdmin.AdminDeleteProjectOAuthProvider(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Provider); err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.AdminDeleteProjectOAuthProviderResponse{}), nil
@@ -439,7 +438,7 @@ func (h *IdentityHandler) AdminListProjectOAuthProviders(
 	}
 	return connect.NewResponse(&identitypb.AdminListProjectOAuthProvidersResponse{
 		Providers:   oauthProviderViewsToProto(providers),
-		HostClients: oauthProviderViewsToProto(hostClients),
+		HostClients: oauthHostClientViewsToProto(hostClients),
 	}), nil
 }
 
@@ -448,6 +447,77 @@ func oauthProviderViewsToProto(views []*service.ProjectOAuthProviderView) []*ide
 	out := make([]*identitypb.ProjectOAuthProviderConfig, 0, len(views))
 	for _, v := range views {
 		out = append(out, oauthProviderViewToProto(v))
+	}
+	return out
+}
+
+// AdminSetProjectOAuthHostClient sets/rotates the client one of a project's
+// OAuth providers uses on one callback host (ADR-0019), encrypting any
+// plaintext secret server-side. The response redacts the secret.
+// Operator-only.
+func (h *IdentityHandler) AdminSetProjectOAuthHostClient(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminSetProjectOAuthHostClientRequest],
+) (*connect.Response[identitypb.AdminSetProjectOAuthHostClientResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	view, err := h.controlAdmin.AdminSetProjectOAuthHostClient(ctx, adminSecret(req.Header()), req.Msg.ProjectId, oauthHostClientInputFromProto(req.Msg.Client))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminSetProjectOAuthHostClientResponse{Client: oauthHostClientViewToProto(view)}), nil
+}
+
+// AdminDeleteProjectOAuthHostClient removes the client one of a project's
+// OAuth providers uses on one callback host. Operator-only.
+func (h *IdentityHandler) AdminDeleteProjectOAuthHostClient(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminDeleteProjectOAuthHostClientRequest],
+) (*connect.Response[identitypb.AdminDeleteProjectOAuthHostClientResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	if err := h.controlAdmin.AdminDeleteProjectOAuthHostClient(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Provider, req.Msg.CallbackHost); err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminDeleteProjectOAuthHostClientResponse{}), nil
+}
+
+// oauthHostClientInputFromProto maps the write-side host client (which carries
+// a plaintext secret) to the service input. A nil message yields nil, which
+// the service rejects with a clear "missing client" error.
+func oauthHostClientInputFromProto(c *identitypb.ProjectOAuthHostClient) *service.ProjectOAuthHostClientInput {
+	if c == nil {
+		return nil
+	}
+	return &service.ProjectOAuthHostClientInput{
+		Provider:     c.Provider,
+		CallbackHost: c.CallbackHost,
+		ClientID:     c.ClientId,
+		ClientSecret: c.ClientSecret,
+	}
+}
+
+// oauthHostClientViewToProto maps a REDACTED host client view to its proto
+// message; the secret is never populated, only has_client_secret.
+func oauthHostClientViewToProto(v *service.ProjectOAuthHostClientView) *identitypb.ProjectOAuthHostClient {
+	if v == nil {
+		return nil
+	}
+	return &identitypb.ProjectOAuthHostClient{
+		Provider:        v.Provider,
+		CallbackHost:    v.CallbackHost,
+		ClientId:        v.ClientID,
+		HasClientSecret: v.HasClientSecret,
+	}
+}
+
+// oauthHostClientViewsToProto maps a list of REDACTED host client views in order.
+func oauthHostClientViewsToProto(views []*service.ProjectOAuthHostClientView) []*identitypb.ProjectOAuthHostClient {
+	out := make([]*identitypb.ProjectOAuthHostClient, 0, len(views))
+	for _, v := range views {
+		out = append(out, oauthHostClientViewToProto(v))
 	}
 	return out
 }
@@ -461,7 +531,6 @@ func oauthProviderInputFromProto(c *identitypb.ProjectOAuthProviderConfig) *serv
 	}
 	return &service.ProjectOAuthProviderInput{
 		Provider:                c.Provider,
-		CallbackHost:            c.CallbackHost,
 		ClientID:                c.ClientId,
 		ClientSecret:            c.ClientSecret,
 		NativeAudiences:         c.NativeAudiences,
@@ -494,7 +563,6 @@ func oauthProviderViewToProto(v *service.ProjectOAuthProviderView) *identitypb.P
 	}
 	return &identitypb.ProjectOAuthProviderConfig{
 		Provider:                v.Provider,
-		CallbackHost:            v.CallbackHost,
 		ClientId:                v.ClientID,
 		HasClientSecret:         v.HasClientSecret,
 		NativeAudiences:         v.NativeAudiences,
