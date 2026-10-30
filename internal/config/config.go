@@ -111,10 +111,11 @@ const (
 	// deleter of live accounts.
 	MaxAnonymousRetentionDays = 10000
 
-	// DefaultRateLimitDirectoryPerIP is the LookupUsers per-IP cap per window
+	// DefaultRateLimitDirectoryPerIP is the per-IP cap per window on the
+	// surfaces a project credential authenticates (RateLimitDirectoryPerIP)
 	// when none is configured or the configured value is zero, whether it came
-	// from the environment or a Config built in code: the directory surface is
-	// never unthrottled.
+	// from the environment or a Config built in code: those surfaces are never
+	// unthrottled.
 	DefaultRateLimitDirectoryPerIP = 120
 
 	// DefaultRateLimitSCIMPerIP is the per-IP cap per window on requests
@@ -322,10 +323,16 @@ type Config struct {
 	// operator by presenting this exact value in the
 	// middleware.AdminAPISecretHeader header, compared in constant time.
 	//
-	// Empty (the default) DISABLES the admin RPCs entirely — they return
+	// Empty (the default) DISABLES the admin RPCs — they return
 	// CodeUnimplemented — so a deployer who never sets it cannot have them
-	// reached. Driven by GATEWAY_ADMIN_API_SECRET. Only the postgres driver
-	// has a control plane; the memory driver ignores it.
+	// reached. The one exception is the tenant operations a tenant_operator
+	// project credential authorizes (app.TenantOperatorProcedures): called
+	// with a credential and no secret, they check it, admitting a live one
+	// and refusing any other, so emptying the secret does not shut them off;
+	// revoking the credentials (AdminRevokeProjectCredential, which also
+	// takes this secret) does. Only this secret can mint such a credential.
+	// Driven by GATEWAY_ADMIN_API_SECRET. Only the postgres driver has a
+	// control plane; the memory driver ignores it.
 	//
 	// TODO(redesign): the shared secret is the shipped mechanism. Future
 	// work hardens this with mTLS client-certificate auth and an optional
@@ -1290,11 +1297,14 @@ type Config struct {
 	RateLimitIDVPerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
 	RateLimitBootstrapPerIP int
-	// RateLimitDirectoryPerIP is the per-IP cap per window on LookupUsers
-	// across the HTTP and native gRPC surfaces; unlike the other per-IP caps it
-	// cannot be switched off, so zero selects the default and a negative value
-	// is refused at boot. Each call resolves up to 100 addresses, and one
-	// budget per client IP covers both surfaces.
+	// RateLimitDirectoryPerIP is the per-IP cap per window on each surface a
+	// project credential authenticates: LookupUsers (directory_reader), the
+	// TeammateKeyService (teammate_key_manager) and the tenant operations
+	// called with a tenant_operator credential, across the HTTP and native
+	// gRPC surfaces; unlike the other per-IP caps it cannot be switched off,
+	// so zero selects the default and a negative value is refused at boot.
+	// Each surface has its own budget per client IP, which covers both
+	// transports; a LookupUsers call resolves up to 100 addresses.
 	RateLimitDirectoryPerIP int
 	// RateLimitSCIMPerIP is the per-IP cap per window on every request under
 	// /scim/v2/, authenticated or not, so the SCIM bearer token cannot be

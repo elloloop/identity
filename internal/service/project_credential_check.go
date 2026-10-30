@@ -9,7 +9,16 @@ import (
 const (
 	credentialRefusedSecretMismatch = "secret_mismatch"
 	credentialRefusedRevoked        = "revoked"
+	// credentialRefusedOtherProject is a valid credential presented for a
+	// project other than its own.
+	credentialRefusedOtherProject = "other_project"
 )
+
+// credentialActor is the audit actor of a call a machine credential, not a
+// user, made: "credential:" and the credential's id.
+func credentialActor(cred *AdminProjectCredential) string {
+	return "credential:" + cred.ID
+}
 
 // checkProjectCredential resolves a split "<public id>.<secret>" key to its
 // credential when that credential is of kind. It returns a nil credential

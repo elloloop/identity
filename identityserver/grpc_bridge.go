@@ -37,13 +37,15 @@ import (
 // handler logic: RegisterGRPC and Handler both drive the same
 // *identityconnect.IdentityHandler.
 //
-// The HTTP middleware chain does not run here. Directory and machine limits
-// are enforced from the same instances, preserving budgets across transports.
+// The HTTP middleware chain does not run here. Directory, machine and
+// tenant-operator limits are enforced from the same instances, preserving
+// budgets across transports.
 type grpcBridge struct {
 	identitypb.UnimplementedIdentityServiceServer
 	h              *identityconnect.IdentityHandler
 	directoryLimit middleware.PathLimit
 	machineLimits  map[string]middleware.PathLimit
+	operatorLimits map[string]middleware.PathLimit
 	trustedProxies []*net.IPNet
 	logger         *zap.Logger
 	// trustAuthTime: the host's interceptor owns x-authenticated-auth-time
@@ -66,8 +68,20 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSes
 			machineLimits[procedure] = limit
 		}
 	}
+	operatorLimits := make(map[string]middleware.PathLimit, len(app.TenantOperatorProcedures))
+	for _, procedure := range app.TenantOperatorProcedures {
+		limit, found := middleware.MatchPathLimit(built.RateLimits, procedure)
+		if !found {
+			// app.Build always configures these; reaching here means the
+			// wiring drifted and the procedure runs unthrottled on gRPC.
+			logger.Error("tenant_operator_grpc_unthrottled", zap.String("procedure", procedure))
+			continue
+		}
+		operatorLimits[procedure] = limit
+	}
 	return &grpcBridge{
 		machineLimits:  machineLimits,
+		operatorLimits: operatorLimits,
 		h:              built.ConnectHandler,
 		directoryLimit: directoryLimit,
 		trustedProxies: built.TrustedProxies,
@@ -100,6 +114,30 @@ func (b *grpcBridge) throttle(ctx context.Context, limit middleware.PathLimit) e
 		zap.String("client_ip", clientIP),
 	)
 	return status.Error(codes.ResourceExhausted, "rate limit exceeded")
+}
+
+// throttleTenantOperator charges a call to procedure, one of
+// app.TenantOperatorProcedures, against the tenant-operator budget when it
+// presents a tenant_operator key, as RateLimitMiddleware does on HTTP. A
+// call made with the admin secret alone is not counted.
+func (b *grpcBridge) throttleTenantOperator(ctx context.Context, procedure string) error {
+	limit, ok := b.operatorLimits[procedure]
+	if !ok || !limit.Counts(incomingMetadata(ctx)) {
+		return nil
+	}
+	return b.throttle(ctx, limit)
+}
+
+// incomingMetadata reads the call's incoming metadata by name, as an HTTP
+// header is read: the first value, or "" for none.
+func incomingMetadata(ctx context.Context) func(name string) string {
+	md, _ := metadata.FromIncomingContext(ctx)
+	return func(name string) string {
+		if vals := md.Get(name); len(vals) > 0 {
+			return vals[0]
+		}
+		return ""
+	}
 }
 
 // clientIP attributes a native-gRPC call the way ClientIPMiddleware
@@ -676,22 +714,37 @@ func (b *grpcBridge) AdminCreateTenant(ctx context.Context, in *identitypb.Admin
 }
 
 func (b *grpcBridge) AdminGetTenant(ctx context.Context, in *identitypb.AdminGetTenantRequest) (*identitypb.AdminGetTenantResponse, error) {
+	if err := b.throttleTenantOperator(ctx, identityv1connect.IdentityServiceAdminGetTenantProcedure); err != nil {
+		return nil, err
+	}
 	return invoke(ctx, b, in, b.h.AdminGetTenant)
 }
 
 func (b *grpcBridge) AdminListTenants(ctx context.Context, in *identitypb.AdminListTenantsRequest) (*identitypb.AdminListTenantsResponse, error) {
+	if err := b.throttleTenantOperator(ctx, identityv1connect.IdentityServiceAdminListTenantsProcedure); err != nil {
+		return nil, err
+	}
 	return invoke(ctx, b, in, b.h.AdminListTenants)
 }
 
 func (b *grpcBridge) AdminSuspendTenant(ctx context.Context, in *identitypb.AdminSuspendTenantRequest) (*identitypb.AdminSuspendTenantResponse, error) {
+	if err := b.throttleTenantOperator(ctx, identityv1connect.IdentityServiceAdminSuspendTenantProcedure); err != nil {
+		return nil, err
+	}
 	return invoke(ctx, b, in, b.h.AdminSuspendTenant)
 }
 
 func (b *grpcBridge) AdminRestoreTenant(ctx context.Context, in *identitypb.AdminRestoreTenantRequest) (*identitypb.AdminRestoreTenantResponse, error) {
+	if err := b.throttleTenantOperator(ctx, identityv1connect.IdentityServiceAdminRestoreTenantProcedure); err != nil {
+		return nil, err
+	}
 	return invoke(ctx, b, in, b.h.AdminRestoreTenant)
 }
 
 func (b *grpcBridge) AdminRecoverTenantOwnership(ctx context.Context, in *identitypb.AdminRecoverTenantOwnershipRequest) (*identitypb.AdminRecoverTenantOwnershipResponse, error) {
+	if err := b.throttleTenantOperator(ctx, identityv1connect.IdentityServiceAdminRecoverTenantOwnershipProcedure); err != nil {
+		return nil, err
+	}
 	return invoke(ctx, b, in, b.h.AdminRecoverTenantOwnership)
 }
 
@@ -748,6 +801,9 @@ func (b *grpcBridge) ExportMyData(ctx context.Context, in *identitypb.ExportMyDa
 }
 
 func (b *grpcBridge) GetLoginPolicy(ctx context.Context, in *identitypb.GetLoginPolicyRequest) (*identitypb.GetLoginPolicyResponse, error) {
+	if err := b.throttleTenantOperator(ctx, identityv1connect.IdentityServiceGetLoginPolicyProcedure); err != nil {
+		return nil, err
+	}
 	return invoke(ctx, b, in, b.h.GetLoginPolicy)
 }
 

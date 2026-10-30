@@ -14,3 +14,12 @@ package middleware
 // lives here so the middleware and handler packages share one source of
 // truth and tests don't hardcode the literal.
 const AdminAPISecretHeader = "X-Admin-Secret"
+
+// TenantOperatorKeyHeader carries a tenant_operator project credential
+// ("<public id>.<secret>"). It authorizes the tenant operations
+// (app.TenantOperatorProcedures) on its own project in place of
+// AdminAPISecretHeader; the admin service verifies it on every
+// call. Like the secret it has no middleware, but the rate limit on those
+// calls counts the requests that carry it (PathLimit.Header), so it lives
+// here beside the secret's.
+const TenantOperatorKeyHeader = "X-Tenant-Operator-Key"

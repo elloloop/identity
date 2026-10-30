@@ -41,20 +41,20 @@ func TestAdminTenantReads_Gated(t *testing.T) {
 	ctx := context.Background()
 
 	disabled := newAdminFixture("")
-	if _, err := disabled.svc.AdminGetTenant(ctx, "anything", "proj", "t"); !errors.Is(err, ErrUnimplemented) {
+	if _, err := disabled.svc.AdminGetTenant(ctx, asAdmin("anything"), "proj", "t"); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("AdminGetTenant disabled: err = %v, want ErrUnimplemented", err)
 	}
-	if _, err := disabled.svc.AdminListTenants(ctx, "anything", "proj", 0, ""); !errors.Is(err, ErrUnimplemented) {
+	if _, err := disabled.svc.AdminListTenants(ctx, asAdmin("anything"), "proj", 0, ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("AdminListTenants disabled: err = %v, want ErrUnimplemented", err)
 	}
 
 	f := newAdminFixture(testAdminSecret)
 	seedTenants(f, "proj", 1)
 	for _, presented := range []string{"", "wrong", testAdminSecret + "x"} {
-		if _, err := f.svc.AdminGetTenant(ctx, presented, "proj", "t-000"); !errors.Is(err, ErrPermissionDenied) {
+		if _, err := f.svc.AdminGetTenant(ctx, asAdmin(presented), "proj", "t-000"); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("AdminGetTenant(secret=%q): err = %v, want ErrPermissionDenied", presented, err)
 		}
-		if _, err := f.svc.AdminListTenants(ctx, presented, "proj", 0, ""); !errors.Is(err, ErrPermissionDenied) {
+		if _, err := f.svc.AdminListTenants(ctx, asAdmin(presented), "proj", 0, ""); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("AdminListTenants(secret=%q): err = %v, want ErrPermissionDenied", presented, err)
 		}
 	}
@@ -69,7 +69,7 @@ func TestAdminGetTenant(t *testing.T) {
 		Status: TenantStatusSuspended, CreatedBy: "u-1", CreatedAtMs: 10, UpdatedAtMs: 20,
 	})
 
-	got, err := f.svc.AdminGetTenant(ctx, testAdminSecret, " proj ", " t-1 ")
+	got, err := f.svc.AdminGetTenant(ctx, asAdmin(testAdminSecret), " proj ", " t-1 ")
 	if err != nil {
 		t.Fatalf("AdminGetTenant: %v", err)
 	}
@@ -81,22 +81,22 @@ func TestAdminGetTenant(t *testing.T) {
 		t.Fatalf("AdminGetTenant = %+v, want %+v", *got, want)
 	}
 
-	if _, err := f.svc.AdminGetTenant(ctx, testAdminSecret, "proj", "t-missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.AdminGetTenant(ctx, asAdmin(testAdminSecret), "proj", "t-missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown tenant: err = %v, want ErrNotFound", err)
 	}
-	if _, err := f.svc.AdminGetTenant(ctx, testAdminSecret, "other-proj", "t-1"); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.AdminGetTenant(ctx, asAdmin(testAdminSecret), "other-proj", "t-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another project's tenant: err = %v, want ErrNotFound", err)
 	}
-	if _, err := f.svc.AdminGetTenant(ctx, testAdminSecret, "  ", "t-1"); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.svc.AdminGetTenant(ctx, asAdmin(testAdminSecret), "  ", "t-1"); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("blank project: err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := f.svc.AdminGetTenant(ctx, testAdminSecret, "proj", "  "); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.svc.AdminGetTenant(ctx, asAdmin(testAdminSecret), "proj", "  "); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("blank tenant: err = %v, want ErrInvalidArgument", err)
 	}
 
 	boom := errors.New("boom")
 	f.tenants.getErr = boom
-	if _, err := f.svc.AdminGetTenant(ctx, testAdminSecret, "proj", "t-1"); !errors.Is(err, boom) {
+	if _, err := f.svc.AdminGetTenant(ctx, asAdmin(testAdminSecret), "proj", "t-1"); !errors.Is(err, boom) {
 		t.Fatalf("store error: err = %v, want %v", err, boom)
 	}
 }
@@ -117,7 +117,7 @@ func TestAdminListTenants_PagesNewestFirstThroughEveryStatus(t *testing.T) {
 	cursor := ""
 	pages := 0
 	for {
-		page, err := f.svc.AdminListTenants(ctx, testAdminSecret, "proj", 2, cursor)
+		page, err := f.svc.AdminListTenants(ctx, asAdmin(testAdminSecret), "proj", 2, cursor)
 		if err != nil {
 			t.Fatalf("AdminListTenants page %d: %v", pages, err)
 		}
@@ -157,7 +157,7 @@ func TestAdminListTenants_ExactPageHasNoCursor(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	seedTenants(f, "proj", 3)
 
-	page, err := f.svc.AdminListTenants(context.Background(), testAdminSecret, "proj", 3, "")
+	page, err := f.svc.AdminListTenants(context.Background(), asAdmin(testAdminSecret), "proj", 3, "")
 	if err != nil {
 		t.Fatalf("AdminListTenants: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestAdminListTenants_EmptyProject(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	seedTenants(f, "proj", 2)
 
-	page, err := f.svc.AdminListTenants(context.Background(), testAdminSecret, "no-tenants", 0, "")
+	page, err := f.svc.AdminListTenants(context.Background(), asAdmin(testAdminSecret), "no-tenants", 0, "")
 	if err != nil {
 		t.Fatalf("AdminListTenants: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestAdminListTenants_PageSize(t *testing.T) {
 		{limit: maxTenantPageSize + 1, want: maxTenantPageSize},
 		{limit: 1 << 30, want: maxTenantPageSize},
 	} {
-		page, err := f.svc.AdminListTenants(ctx, testAdminSecret, "proj", tc.limit, "")
+		page, err := f.svc.AdminListTenants(ctx, asAdmin(testAdminSecret), "proj", tc.limit, "")
 		if err != nil {
 			t.Fatalf("limit %d: %v", tc.limit, err)
 		}
@@ -213,7 +213,7 @@ func TestAdminListTenants_RefusesBadArguments(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	seedTenants(f, "proj", 1)
 
-	if _, err := f.svc.AdminListTenants(ctx, testAdminSecret, " ", 0, ""); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.svc.AdminListTenants(ctx, asAdmin(testAdminSecret), " ", 0, ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("blank project: err = %v, want ErrInvalidArgument", err)
 	}
 	for _, cursor := range []string{
@@ -226,14 +226,14 @@ func TestAdminListTenants_RefusesBadArguments(t *testing.T) {
 		base64.RawURLEncoding.EncodeToString([]byte("12.t-\x00-1")),
 		base64.RawURLEncoding.EncodeToString([]byte("12.t-\xff\xfe")),
 	} {
-		if _, err := f.svc.AdminListTenants(ctx, testAdminSecret, "proj", 0, cursor); !errors.Is(err, ErrInvalidArgument) {
+		if _, err := f.svc.AdminListTenants(ctx, asAdmin(testAdminSecret), "proj", 0, cursor); !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("cursor %q: err = %v, want ErrInvalidArgument", cursor, err)
 		}
 	}
 
 	boom := errors.New("boom")
 	f.tenants.getErr = boom
-	if _, err := f.svc.AdminListTenants(ctx, testAdminSecret, "proj", 0, ""); !errors.Is(err, boom) {
+	if _, err := f.svc.AdminListTenants(ctx, asAdmin(testAdminSecret), "proj", 0, ""); !errors.Is(err, boom) {
 		t.Fatalf("store error: err = %v, want %v", err, boom)
 	}
 }
@@ -279,13 +279,13 @@ var statusMoves = []statusMove{
 	{
 		name: "suspend", from: TenantStatusClaimed, to: TenantStatusSuspended, event: audit.EventTenantSuspended,
 		call: func(svc *ControlPlaneAdminService, ctx context.Context, secret, projectID, tenantID, reason string) (*Tenant, error) {
-			return svc.AdminSuspendTenant(ctx, secret, projectID, tenantID, reason, testOperatorIP, testOperatorUA)
+			return svc.AdminSuspendTenant(ctx, asAdmin(secret), projectID, tenantID, reason, testOperatorIP, testOperatorUA)
 		},
 	},
 	{
 		name: "restore", from: TenantStatusSuspended, to: TenantStatusClaimed, event: audit.EventTenantRestored,
 		call: func(svc *ControlPlaneAdminService, ctx context.Context, secret, projectID, tenantID, reason string) (*Tenant, error) {
-			return svc.AdminRestoreTenant(ctx, secret, projectID, tenantID, reason, testOperatorIP, testOperatorUA)
+			return svc.AdminRestoreTenant(ctx, asAdmin(secret), projectID, tenantID, reason, testOperatorIP, testOperatorUA)
 		},
 	},
 }
@@ -468,7 +468,7 @@ func TestAdminTenantStatus_StoreErrors(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Status: TenantStatusClaimed})
 	f.tenants.setErr = boom
-	if _, err := f.svc.AdminSuspendTenant(ctx, testAdminSecret, "proj", "t-1", "why", "", ""); !errors.Is(err, boom) {
+	if _, err := f.svc.AdminSuspendTenant(ctx, asAdmin(testAdminSecret), "proj", "t-1", "why", "", ""); !errors.Is(err, boom) {
 		t.Fatalf("write error: err = %v, want %v", err, boom)
 	}
 	if f.audit.countByEventType(string(audit.EventTenantSuspended)) != 0 {
@@ -477,7 +477,7 @@ func TestAdminTenantStatus_StoreErrors(t *testing.T) {
 
 	f.tenants.setErr = nil
 	f.tenants.getErr = boom
-	if _, err := f.svc.AdminSuspendTenant(ctx, testAdminSecret, "proj", "t-1", "why", "", ""); !errors.Is(err, boom) {
+	if _, err := f.svc.AdminSuspendTenant(ctx, asAdmin(testAdminSecret), "proj", "t-1", "why", "", ""); !errors.Is(err, boom) {
 		t.Fatalf("read error: err = %v, want %v", err, boom)
 	}
 }
@@ -515,7 +515,7 @@ func TestAdminTenantStatus_ConcurrentChange(t *testing.T) {
 		})
 		f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Status: TenantStatusClaimed})
 
-		got, err := f.svc.AdminSuspendTenant(ctx, testAdminSecret, "proj", "t-1", "why", "", "")
+		got, err := f.svc.AdminSuspendTenant(ctx, asAdmin(testAdminSecret), "proj", "t-1", "why", "", "")
 		if !errors.Is(err, tc.wantErr) {
 			t.Fatalf("%s: err = %v, want %v", tc.name, err, tc.wantErr)
 		}

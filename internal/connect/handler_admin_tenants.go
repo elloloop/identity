@@ -9,7 +9,8 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// AdminGetTenant returns a tenant's own record. Operator-only.
+// AdminGetTenant returns a tenant's own record. Operator-only: the admin
+// secret, or a tenant_operator credential of the project.
 func (h *IdentityHandler) AdminGetTenant(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminGetTenantRequest],
@@ -17,14 +18,15 @@ func (h *IdentityHandler) AdminGetTenant(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	t, err := h.controlAdmin.AdminGetTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId)
+	t, err := h.controlAdmin.AdminGetTenant(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.TenantId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.AdminGetTenantResponse{Tenant: tenantToProto(t)}), nil
 }
 
-// AdminListTenants pages through a project's tenants. Operator-only.
+// AdminListTenants pages through a project's tenants. Operator-only: the
+// admin secret, or a tenant_operator credential of the project.
 func (h *IdentityHandler) AdminListTenants(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminListTenantsRequest],
@@ -32,7 +34,7 @@ func (h *IdentityHandler) AdminListTenants(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	page, err := h.controlAdmin.AdminListTenants(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Limit, req.Msg.Cursor)
+	page, err := h.controlAdmin.AdminListTenants(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.Limit, req.Msg.Cursor)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -43,7 +45,8 @@ func (h *IdentityHandler) AdminListTenants(
 	return connect.NewResponse(&identitypb.AdminListTenantsResponse{Tenants: out, NextCursor: page.NextCursor}), nil
 }
 
-// AdminSuspendTenant suspends a claimed tenant. Operator-only.
+// AdminSuspendTenant suspends a claimed tenant. Operator-only: the admin
+// secret, or a tenant_operator credential of the project.
 func (h *IdentityHandler) AdminSuspendTenant(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminSuspendTenantRequest],
@@ -51,7 +54,7 @@ func (h *IdentityHandler) AdminSuspendTenant(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	t, err := h.controlAdmin.AdminSuspendTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason,
+	t, err := h.controlAdmin.AdminSuspendTenant(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason,
 		clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
@@ -59,7 +62,8 @@ func (h *IdentityHandler) AdminSuspendTenant(
 	return connect.NewResponse(&identitypb.AdminSuspendTenantResponse{Tenant: tenantToProto(t)}), nil
 }
 
-// AdminRestoreTenant moves a suspended tenant back to claimed. Operator-only.
+// AdminRestoreTenant moves a suspended tenant back to claimed. Operator-only:
+// the admin secret, or a tenant_operator credential of the project.
 func (h *IdentityHandler) AdminRestoreTenant(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminRestoreTenantRequest],
@@ -67,7 +71,7 @@ func (h *IdentityHandler) AdminRestoreTenant(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	t, err := h.controlAdmin.AdminRestoreTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason,
+	t, err := h.controlAdmin.AdminRestoreTenant(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.Reason,
 		clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
@@ -77,7 +81,8 @@ func (h *IdentityHandler) AdminRestoreTenant(
 
 // AdminRecoverTenantOwnership appoints an owner to a tenant with no owner or
 // admin left who both can sign in and holds an active membership.
-// Operator-only.
+// Operator-only: the admin secret, or a tenant_operator credential of the
+// project.
 func (h *IdentityHandler) AdminRecoverTenantOwnership(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminRecoverTenantOwnershipRequest],
@@ -85,7 +90,7 @@ func (h *IdentityHandler) AdminRecoverTenantOwnership(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	m, err := h.controlAdmin.AdminRecoverTenantOwnership(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.UserId, req.Msg.Reason,
+	m, err := h.controlAdmin.AdminRecoverTenantOwnership(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.UserId, req.Msg.Reason,
 		clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)

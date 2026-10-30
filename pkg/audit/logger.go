@@ -329,9 +329,13 @@ const (
 	// EventTenantSuspended / EventTenantRestored record an operator
 	// suspending a claimed tenant or restoring a suspended one
 	// (AdminSuspendTenant, AdminRestoreTenant), with the operator's IP
-	// address and user agent. The details carry the project id, the tenant id
-	// and the reason the operator gave. A call that finds the tenant already
-	// in the status asked for changes nothing and records nothing.
+	// address and user agent. The actor is "credential:<id>" when a
+	// tenant_operator credential made the call, and empty for the admin
+	// secret. No user is the target, so the target repeats the actor, as in
+	// every record that names no target. The details carry the project id,
+	// the tenant id and the reason the operator gave. A call that finds the
+	// tenant already in the status asked for changes nothing and records
+	// nothing.
 	EventTenantSuspended EventType = "tenant_suspended"
 	EventTenantRestored  EventType = "tenant_restored"
 
@@ -343,12 +347,13 @@ const (
 
 	// EventTenantOwnershipRecovered records an operator appointing an owner
 	// to a tenant that has no owner or admin left who both can sign in and
-	// holds an active membership (AdminRecoverTenantOwnership): target the
-	// appointed owner, the operator's IP and user agent, and the project id,
-	// the tenant id and the reason the operator gave in the details. Only a
-	// call that changed the membership records it: one that finds the
-	// account already an owner, or whose grant a concurrent recovery made
-	// first, records nothing.
+	// holds an active membership (AdminRecoverTenantOwnership): actor the
+	// tenant_operator credential ("credential:<id>") or none for the admin
+	// secret, target the appointed owner, the operator's IP and user agent,
+	// and the project id, the tenant id and the reason the operator gave in
+	// the details. Only a call that changed the membership records it: one
+	// that finds the account already an owner, or whose grant a concurrent
+	// recovery made first, records nothing.
 	EventTenantOwnershipRecovered EventType = "tenant_ownership_recovered"
 
 	// EventDomainJoinSet records a tenant admin turning joining by a domain
@@ -385,15 +390,24 @@ const (
 	// by a tenant owner or admin (RestoreTenantMember), with the caller as
 	// actor, or by an operator's AdminRecoverTenantOwnership or
 	// AdminAddTenantAdmin, which lift it before they write the membership,
-	// with no actor and, for a recovery, the operator's reason in the
-	// details. The target is the person, and the details hold the project
-	// and tenant ids, the role and source, and the status the restore gave
-	// the membership: "active", or "inactive" for a membership through the
+	// with the operator's actor (a recovery's tenant_operator credential,
+	// or none) and, for a recovery, the operator's reason in the details.
+	// The target is the person, and the details hold the project and tenant
+	// ids, the role and source, and the status the restore gave the
+	// membership: "active", or "inactive" for a membership through the
 	// email's domain whose email is not on a domain the tenant has verified.
 	// When it succeeds, an operator's call then writes the membership it was
 	// asked for, an active owner or admin one. Restoring an active member
 	// records nothing.
 	EventTenantMemberRestored EventType = "tenant_member_restored"
+
+	// EventTenantOperatorRefused records a tenant_operator credential of an
+	// active project being refused on a tenant operation, under its own
+	// project: actor the credential ("credential:<id>"), success=false, and a
+	// `reason` detail: secret_mismatch, revoked, or other_project for a call
+	// naming another project. An unknown public id, another kind's
+	// credential and a suspended project's record nothing.
+	EventTenantOperatorRefused EventType = "tenant_operator_refused"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -492,6 +506,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantMemberRemoved:           {},
 	EventTenantMemberSuspended:         {},
 	EventTenantMemberRestored:          {},
+	EventTenantOperatorRefused:         {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

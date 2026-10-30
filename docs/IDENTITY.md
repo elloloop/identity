@@ -209,7 +209,7 @@ GATEWAY_DEFAULT_TENANT_ID           = <string>   # the storage scope the default
 GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS= <csv>      # serving hostnames seeded (verified) on the default project; first is primary
 GATEWAY_DEFAULT_PRODUCT             = <string>   # default "default"; product slug attributed to a request with no X-Product header
 GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN= <bool>     # default true; primary auth-domain (branded links) must be DNS-verified. false lets an unverified is_primary host drive links
-GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane admin RPCs; empty disables them
+GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane admin RPCs; empty disables them, except the tenant operations called with a tenant_operator credential and no secret, which check it (a live one is admitted, any other refused)
 GATEWAY_PUBLIC_EMAIL_DOMAINS        = <csv>      # extra public domains that never auto-form a tenant
 GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS = <int>  # default 30; in-process cache for credential/Host→project resolution; 0 disables
 GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES = <int>  # default 10000; LRU bound on cached resolution keys
@@ -250,7 +250,25 @@ audit trail keeps), and given an owner again with
 person both can sign in and holds an active membership (also with a
 reason). They authenticate via the `GATEWAY_ADMIN_API_SECRET`
 shared secret rather than a user token. With the secret empty (the default) those RPCs return
-`CodeUnimplemented`, so a deployer who never sets it cannot reach them.
+`CodeUnimplemented`, so a deployer who never sets it cannot reach them. The
+one exception is the tenant operations below called with a `tenant_operator`
+credential and no secret: the credential is checked, a live one admitted and
+any other refused with `CodePermissionDenied`.
+
+The tenant operations among them (`AdminGetTenant`, `AdminListTenants`,
+`AdminSuspendTenant`, `AdminRestoreTenant` and
+`AdminRecoverTenantOwnership`), and the operator's `GetLoginPolicy`, also
+accept a `tenant_operator` project credential (`ok_…`), presented in
+`X-Tenant-Operator-Key` in place of the secret, so a service that runs one
+project's tenants never holds the secret that governs every project. It is
+confined to its own project, and it is read uncached on every call, as a
+directory reader's is, so a revocation or a suspended project refuses it
+from the next call. It works with the secret empty too, though minting and
+revoking one take the secret. What it changes is audited with the credential
+as the actor (`credential:<id>`), and its refusals as
+`tenant_operator_refused` under its project. The calls that present it share
+one per-IP budget (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`) on both
+transports.
 
 #### Zero-config first-admin bootstrap
 
@@ -1181,9 +1199,11 @@ before you ship.
       own server interceptor that verifies the bearer token and forwards
       identity's expected metadata (`x-authenticated-user-id`). This keeps
       the bridge a pure transport adapter rather than re-implementing the
-      middleware twice. The one exception is `LookupUsers`: the bridge
-      charges it against the same per-IP limiter the HTTP chain uses, so
-      the directory budget holds whichever transport a caller picks.
+      middleware twice. The exceptions are `LookupUsers`, the tenant
+      operations called with a `tenant_operator` credential, and the agent
+      machine calls (see `docs/embedding.md`): the bridge charges them
+      against the same per-IP limiters the HTTP chain uses, so each budget
+      holds whichever transport a caller picks.
 
     - **Background workers are consumer-controlled.** `New` does no I/O
       beyond construction-time setup (datastore dial, AWS config, OTel init)

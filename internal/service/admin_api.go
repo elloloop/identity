@@ -15,28 +15,6 @@ import (
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
-// ControlPlaneAdminService implements the redesign's control-plane admin
-// RPCs: PLATFORM-operator operations that provision projects, project
-// credentials, project auth-domains, tenants and the first tenant admin —
-// the out-of-band bootstrap a deployer runs before any human can self-serve.
-//
-// It is authenticated DIFFERENTLY from every other service: not by a user
-// JWT but by a shared secret the operator presents on each call. The secret
-// is held here and compared in CONSTANT TIME (crypto/subtle) against the
-// per-request value, so a wrong or missing secret is rejected uniformly and
-// without a timing side-channel. When the configured secret is empty the
-// whole surface is DISABLED — every method returns ErrUnimplemented — so a
-// deployer who never sets GATEWAY_ADMIN_API_SECRET cannot have these RPCs
-// reached.
-//
-// Like the other governance services it is postgres-only: memory have
-// no control plane, so the app constructs no ControlPlaneAdminService and the
-// handler returns Unimplemented.
-//
-// TODO(redesign): the shared secret is the shipped auth mechanism. Future
-// work hardens it with mTLS client-certificate auth and an optional
-// internal-only listener port bound away from the public RPC surface.
-
 // adminPublicIDBytes / adminSecretBytes size the two halves of a minted
 // project credential. The public id is the (non-secret) lookup key; the
 // secret half is the part shown once and stored only as a hash.
@@ -57,15 +35,21 @@ const (
 	// CredentialKindTeammateKeyManager authorizes TeammateKeyService in its
 	// project, presented in X-Teammate-Key-Manager-Key.
 	CredentialKindTeammateKeyManager = "teammate_key_manager"
+	// CredentialKindTenantOperator authorizes the tenant operations
+	// OperatorCredentials names on its own project, in place of the admin
+	// secret, presented in X-Tenant-Operator-Key.
+	CredentialKindTenantOperator = "tenant_operator"
 )
 
 // Credential public-id prefixes, so a key is self-describing at a glance
-// (Stripe-style): pk_ for publishable, sk_ for secret, dk_ for directory.
+// (Stripe-style): pk_ for publishable, sk_ for secret, dk_ for directory,
+// tk_ for a teammate key manager, ok_ for a tenant operator.
 const (
 	publishableKeyPrefix     = "pk_"
 	secretKeyPrefix          = "sk_"
 	directoryReaderKeyPrefix = "dk_"
 	teammateKeyManagerPrefix = "tk_"
+	tenantOperatorKeyPrefix  = "ok_"
 )
 
 // rawKeySeparator joins a credential's public id and secret half in the raw
@@ -194,12 +178,40 @@ type ControlPlaneProjectStore interface {
 	// round-trips back into UpdateProjectConfig. A project that does not exist
 	// surfaces ErrNotFound.
 	GetProjectConfig(ctx context.Context, projectID string) (configJSON string, version int64, err error)
+
+	// DirectoryCredentialStore reads a credential by its public id, uncached,
+	// which is how a tenant_operator credential is checked on every call.
+	DirectoryCredentialStore
 }
 
-// ControlPlaneAdminService provisions control-plane resources on behalf of a
-// platform operator authenticated by a shared secret.
+// ControlPlaneAdminService implements the redesign's control-plane admin
+// RPCs: PLATFORM-operator operations that provision projects, project
+// credentials, project auth-domains, tenants and the first tenant admin —
+// the out-of-band bootstrap a deployer runs before any human can self-serve.
+//
+// It is authenticated DIFFERENTLY from every other service: not by a user
+// JWT but by a shared secret the operator presents on each call. The secret
+// is held here and compared in CONSTANT TIME (crypto/subtle) against the
+// per-request value, so a wrong or missing secret is rejected uniformly and
+// without a timing side-channel. When the configured secret is empty the
+// surface is DISABLED — every method returns ErrUnimplemented — so a deployer
+// who never sets GATEWAY_ADMIN_API_SECRET cannot have these RPCs reached. The
+// one exception is the tenant operations (app.TenantOperatorProcedures) called
+// with a tenant_operator credential and no secret: the credential is checked,
+// a live one admitted and any other refused with ErrPermissionDenied. Only
+// the secret can mint such a credential.
+//
+// Like the other governance services it is postgres-only: the memory driver
+// has no control plane, so the app constructs no ControlPlaneAdminService and
+// the handler returns Unimplemented.
+//
+// TODO(redesign): the shared secret is the shipped auth mechanism. Future
+// work hardens it with mTLS client-certificate auth and an optional
+// internal-only listener port bound away from the public RPC surface.
 type ControlPlaneAdminService struct {
-	// secret is the shared admin secret. Empty disables the whole surface.
+	// secret is the shared admin secret. Empty disables the surface, except
+	// the tenant operations called with a tenant_operator credential and no
+	// secret, as the type doc describes (authorizeTenantOperator).
 	secret string
 	// disableFirstAdminBootstrap closes CreateFirstPlatformAdmin entirely
 	// (GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP): when true the RPC is rejected with
@@ -243,16 +255,17 @@ type ControlPlaneAdminService struct {
 	nowFunc func() int64
 }
 
-// NewControlPlaneAdminService wires the admin service. An empty secret
-// leaves the service constructed but DISABLED: every method returns
-// ErrUnimplemented (so the handler maps it to CodeUnimplemented). A nil
-// logger defaults to a no-op. A nil resolver defaults to net.DefaultResolver,
-// matching DomainService. A nil auditLog defaults to a no-op audit.Logger so
-// blocked-bootstrap recording stays best-effort. A nil policies store leaves
-// the LoginPolicy-authoring RPCs disabled (ErrUnimplemented), matching the
-// memory shape with no governance plane. users is required. nowFunc is injected so
-// the auth-domain verified-at stamp is deterministic in tests; it defaults
-// to wall-clock epoch-millis.
+// NewControlPlaneAdminService wires the admin service. An empty secret leaves
+// the service constructed but DISABLED: every method returns ErrUnimplemented
+// (so the handler maps it to CodeUnimplemented), except the tenant operations
+// given a tenant_operator credential and no secret, which check it (see the
+// type doc). A nil logger defaults to a no-op. A nil resolver defaults to
+// net.DefaultResolver, matching DomainService. A nil auditLog defaults to a
+// no-op audit.Logger so blocked-bootstrap recording stays best-effort. A nil
+// policies store leaves the LoginPolicy-authoring RPCs disabled
+// (ErrUnimplemented), matching the memory shape with no governance plane.
+// users is required. nowFunc is injected so the auth-domain verified-at stamp
+// is deterministic in tests; it defaults to wall-clock epoch-millis.
 func NewControlPlaneAdminService(
 	secret string,
 	disableFirstAdminBootstrap bool,
@@ -293,18 +306,21 @@ func NewControlPlaneAdminService(
 	}
 }
 
-// Enabled reports whether the admin surface is active (a non-empty secret is
-// configured). The handler consults it to return Unimplemented up front
-// without leaking, via the secret check, whether a secret happens to match.
+// Enabled reports whether an admin secret is configured. With none, the
+// secret-only admin RPCs are disabled, but the tenant operations still accept
+// a live tenant_operator credential presented with no secret (see the type
+// doc), so false does not mean the whole admin surface is off.
 func (s *ControlPlaneAdminService) Enabled() bool {
 	return s.secret != ""
 }
 
-// authorize gates every admin RPC. When no secret is configured the surface
-// is disabled (ErrUnimplemented). Otherwise the presented secret must match
-// the configured one in constant time; a blank or mismatched secret is
-// ErrPermissionDenied. The constant-time compare ensures a near-miss secret
-// is indistinguishable, by timing, from a wildly wrong one.
+// authorize gates every admin RPC by the secret (the tenant operations call
+// it through authorizeTenantOperator, unless a tenant_operator credential is
+// presented without a secret). When no secret is configured it returns
+// ErrUnimplemented. Otherwise the presented secret must match the configured
+// one in constant time; a blank or mismatched secret is ErrPermissionDenied.
+// The constant-time compare ensures a near-miss secret is indistinguishable,
+// by timing, from a wildly wrong one.
 func (s *ControlPlaneAdminService) authorize(presented string) error {
 	if s.secret == "" {
 		return ErrUnimplemented
@@ -342,8 +358,8 @@ type MintedCredential struct {
 }
 
 // AdminCreateProjectCredential mints a credential for a project. For a
-// publishable kind it generates a public id only (no secret). For the secret
-// and directory_reader kinds it generates a public id AND a secret half: the
+// publishable kind it generates a public id only (no secret). For every other
+// kind it generates a public id AND a secret half: the
 // secret's hash is stored, and the full "publicID.secret" raw key is returned
 // ONCE — the only time it is ever shown, exactly like an API key. The public
 // id is always the lookup key the project resolver matches on.
@@ -389,8 +405,9 @@ func (s *ControlPlaneAdminService) AdminCreateProjectCredential(ctx context.Cont
 }
 
 // AdminRevokeProjectCredential revokes one of a project's credentials, of any
-// kind. A revoked directory_reader key is refused on its next lookup, which
-// reads the credential uncached. A revoked publishable, secret or mTLS key
+// kind. A revoked directory_reader, teammate_key_manager or tenant_operator
+// key is refused on its next call, which reads the credential uncached. A
+// revoked publishable, secret or mTLS key
 // stops resolving a project once each replica's project-resolution cache
 // expires it, within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS. Revoking an
 // already-revoked credential is a no-op; a credential id the project does not
@@ -653,7 +670,7 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, secr
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.liftSuspension(ctx, projectID, tenantID, userID, "", "", ""); err != nil {
+	if _, err := s.liftSuspension(ctx, tenantOperator{}, projectID, tenantID, userID, "", "", ""); err != nil {
 		return nil, err
 	}
 	m := &TenantMembership{
@@ -709,8 +726,8 @@ type BootstrappedAdmin struct {
 // When password is blank the server generates a strong one and returns it
 // once in GeneratedPassword; when supplied it must satisfy the password
 // strength policy (else ErrWeakPassword → InvalidArgument). Only the bcrypt
-// hash is ever stored. When no control plane is wired (memory have no
-// platform_admins table) it returns ErrUnimplemented.
+// hash is ever stored. When no control plane is wired (the memory driver has
+// no platform_admins table) it returns ErrUnimplemented.
 func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context, secret, email, password string) (*BootstrappedAdmin, error) {
 	if s.admins == nil {
 		return nil, ErrUnimplemented
@@ -837,9 +854,12 @@ func normalizeCredentialKind(kind string) (canonical, prefix string, err error) 
 		return CredentialKindDirectoryReader, directoryReaderKeyPrefix, nil
 	case CredentialKindTeammateKeyManager:
 		return CredentialKindTeammateKeyManager, teammateKeyManagerPrefix, nil
+	case CredentialKindTenantOperator:
+		return CredentialKindTenantOperator, tenantOperatorKeyPrefix, nil
 	default:
-		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q, %q or %q)",
-			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret, CredentialKindDirectoryReader, CredentialKindTeammateKeyManager)
+		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q, %q, %q or %q)",
+			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret, CredentialKindDirectoryReader,
+			CredentialKindTeammateKeyManager, CredentialKindTenantOperator)
 	}
 }
 

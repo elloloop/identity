@@ -239,19 +239,19 @@ func (f *adminFixture) seedMembership(userID, source, role, status string) {
 }
 
 func (f *adminFixture) recover(userID, reason string) (*TenantMembership, error) {
-	return f.svc.AdminRecoverTenantOwnership(context.Background(), testAdminSecret, "proj", "t-1", userID, reason, testOperatorIP, testOperatorUA)
+	return f.svc.AdminRecoverTenantOwnership(context.Background(), asAdmin(testAdminSecret), "proj", "t-1", userID, reason, testOperatorIP, testOperatorUA)
 }
 
 func TestAdminRecoverTenantOwnership_Gated(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	disabled := newAdminFixture("")
-	_, err := disabled.svc.AdminRecoverTenantOwnership(ctx, "anything", "proj", "t-1", "heir", "why", "", "")
+	_, err := disabled.svc.AdminRecoverTenantOwnership(ctx, asAdmin("anything"), "proj", "t-1", "heir", "why", "", "")
 	require.ErrorIs(t, err, ErrUnimplemented)
 
 	f := newRecoveryFixture()
 	for _, presented := range []string{"", "wrong", testAdminSecret + "x"} {
-		_, err := f.svc.AdminRecoverTenantOwnership(ctx, presented, "proj", "t-1", "heir", "why", "", "")
+		_, err := f.svc.AdminRecoverTenantOwnership(ctx, asAdmin(presented), "proj", "t-1", "heir", "why", "", "")
 		require.ErrorIs(t, err, ErrPermissionDenied, presented)
 	}
 
@@ -265,7 +265,7 @@ func TestAdminRecoverTenantOwnership_AppointsAndAudits(t *testing.T) {
 	ctx := context.Background()
 	f := newRecoveryFixture()
 
-	got, err := f.svc.AdminRecoverTenantOwnership(ctx, testAdminSecret, " proj ", " t-1 ", " heir ", "  owner left the company\n", testOperatorIP, testOperatorUA)
+	got, err := f.svc.AdminRecoverTenantOwnership(ctx, asAdmin(testAdminSecret), " proj ", " t-1 ", " heir ", "  owner left the company\n", testOperatorIP, testOperatorUA)
 	require.NoError(t, err)
 	assert.Equal(t, "heir", got.UserID)
 	assert.Equal(t, RoleOwner, got.Role)
@@ -469,7 +469,7 @@ func TestAdminRecoverTenantOwnership_RefusesBadArguments(t *testing.T) {
 	f := newRecoveryFixture()
 	f.tenants.put(&Tenant{ID: "t-latent", ProjectID: "proj", Status: TenantStatusLatent})
 	call := func(projectID, tenantID, userID, reason string) error {
-		_, err := f.svc.AdminRecoverTenantOwnership(ctx, testAdminSecret, projectID, tenantID, userID, reason, "", "")
+		_, err := f.svc.AdminRecoverTenantOwnership(ctx, asAdmin(testAdminSecret), projectID, tenantID, userID, reason, "", "")
 		return err
 	}
 

@@ -21,10 +21,6 @@ const MaxDirectoryLookupEmails = 100
 // allows each part.
 const MaxDirectoryLookupEmailLength = 320
 
-// directoryAuditActorPrefix prefixes the credential id recorded as the actor
-// of a directory lookup: the caller is a machine credential, not a user.
-const directoryAuditActorPrefix = "credential:"
-
 // DirectoryCredentialStore is the read side of the control-plane credential
 // registry the directory lookup authenticates against. The postgres
 // ProjectStore satisfies it; drivers without a control plane have no
@@ -130,7 +126,7 @@ func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string,
 	out := s.directoryUsersInOrder(wanted, found)
 
 	s.audit.Log(ctx, audit.EventDirectoryLookup,
-		audit.WithActor(directoryAuditActorPrefix+cred.ID),
+		audit.WithActor(credentialActor(cred)),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
 			"requested": len(wanted),
@@ -175,7 +171,7 @@ func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret st
 		return cred, nil
 	}
 	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: cred.ProjectID}), audit.EventDirectoryLookup,
-		audit.WithActor(directoryAuditActorPrefix+cred.ID),
+		audit.WithActor(credentialActor(cred)),
 		audit.WithSuccess(false),
 		audit.WithDetails(map[string]any{"reason": reason}),
 	)

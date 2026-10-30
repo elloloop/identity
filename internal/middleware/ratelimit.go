@@ -106,6 +106,18 @@ type PathLimit struct {
 	PathPrefix string
 	Limiter    RateLimiter
 	Tag        string // metric label / log field
+	// Header, when set, confines the limit to requests that carry it: the
+	// credential whose callers it budgets. A request on the path without it
+	// is not counted, so callers authenticated another way keep the budget
+	// they had.
+	Header string
+}
+
+// Counts reports whether a request whose headers header reads is counted
+// against this limit: always, unless the limit names a Header the request
+// does not carry.
+func (pl PathLimit) Counts(header func(name string) string) bool {
+	return pl.Header == "" || header(pl.Header) != ""
 }
 
 // Allow reports whether a request from clientIP has quota left on this
@@ -147,8 +159,8 @@ func MatchPathLimit(limits []PathLimit, path string) (PathLimit, bool) {
 }
 
 // RateLimitMiddleware enforces per-IP+path quotas using the configured
-// PathLimit entries. Requests whose path matches a PathLimit are checked
-// against its limiter; everything else passes through.
+// PathLimit entries. Requests whose path matches a PathLimit, and which it
+// Counts, are checked against its limiter; everything else passes through.
 //
 // The client IP comes from ClientIPHeader (set by ClientIPMiddleware), so
 // this middleware must be installed after it. Rate-limited responses
@@ -161,7 +173,7 @@ func RateLimitMiddleware(limits []PathLimit, logger *zap.Logger) func(http.Handl
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			pl, ok := MatchPathLimit(limits, r.URL.Path)
 			clientIP := r.Header.Get(ClientIPHeader)
-			if !ok || pl.Allow(clientIP, time.Now()) {
+			if !ok || !pl.Counts(r.Header.Get) || pl.Allow(clientIP, time.Now()) {
 				next.ServeHTTP(w, r)
 				return
 			}

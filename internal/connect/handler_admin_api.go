@@ -14,14 +14,26 @@ import (
 // by the shared admin secret in the AdminAPISecretHeader (NOT a user JWT). The
 // handler extracts that header and hands it to the service, which compares it
 // in constant time and — when no secret is configured — returns Unimplemented.
+// The tenant operations (app.TenantOperatorProcedures) also take a
+// tenant_operator credential (middleware.TenantOperatorKeyHeader): presented
+// with no secret, it is checked whether or not a secret is configured.
 //
-// h.controlAdmin is nil on memory (no control plane), which also yields
-// Unimplemented, so the surface is doubly off by default: no control plane OR
-// no configured secret both disable it.
+// h.controlAdmin is nil on memory (no control plane), which yields
+// Unimplemented for every one of them, tenant operations included.
 
 // adminSecret reads the operator's presented admin secret from the request.
 func adminSecret(headers headerReader) string {
 	return headers.Get(middleware.AdminAPISecretHeader)
+}
+
+// operatorCredentials reads what the caller of a tenant operation presents:
+// the admin secret, or a tenant_operator key
+// (middleware.TenantOperatorKeyHeader).
+func operatorCredentials(headers headerReader) service.OperatorCredentials {
+	return service.OperatorCredentials{
+		AdminSecret:       adminSecret(headers),
+		TenantOperatorKey: headers.Get(middleware.TenantOperatorKeyHeader),
+	}
 }
 
 // AdminCreateProject provisions a control-plane project. Operator-only.
@@ -239,7 +251,8 @@ func (h *IdentityHandler) UpsertLoginPolicy(
 }
 
 // GetLoginPolicy reads a tenant's LoginPolicy. The policy field is
-// unset when none exists. Operator-only.
+// unset when none exists. Operator-only: the admin secret, or a
+// tenant_operator credential of the project.
 func (h *IdentityHandler) GetLoginPolicy(
 	ctx context.Context,
 	req *connect.Request[identitypb.GetLoginPolicyRequest],
@@ -247,7 +260,7 @@ func (h *IdentityHandler) GetLoginPolicy(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	policy, err := h.controlAdmin.GetLoginPolicy(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId)
+	policy, err := h.controlAdmin.GetLoginPolicy(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.TenantId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

@@ -95,7 +95,9 @@ type Deps struct {
 	// postgres driver; when nil (together with the tenant/membership stores)
 	// the ControlPlaneAdminService is not constructed and the admin RPCs
 	// return Unimplemented. Even when wired, the surface stays disabled until
-	// Config.AdminAPISecret is set.
+	// Config.AdminAPISecret is set, except the tenant operations called with
+	// a tenant_operator credential and no secret (see
+	// service.ControlPlaneAdminService).
 	ControlPlaneStore service.ControlPlaneProjectStore
 
 	// DirectoryCredentials is the control-plane credential read LookupUsers
@@ -263,6 +265,22 @@ var guardianManagementPaths = []string{
 	"/identity.v1.IdentityService/DeactivateManagedChildAccount",
 	"/identity.v1.IdentityService/ReactivateManagedChildAccount",
 	"/identity.v1.IdentityService/DeleteManagedChildAccount",
+}
+
+// TenantOperatorProcedures are the calls a tenant_operator credential
+// authorizes. A request to one that carries the credential's header
+// (middleware.TenantOperatorKeyHeader) is counted against one per-IP
+// budget for them all, on the HTTP and native gRPC surfaces alike: the
+// credential is read from the database on every call, as a directory
+// reader's is, so the budget bounds what a caller holding a leaked public
+// id can drive. A call made with the admin secret alone is not counted.
+var TenantOperatorProcedures = []string{
+	identityconnectgen.IdentityServiceAdminGetTenantProcedure,
+	identityconnectgen.IdentityServiceAdminListTenantsProcedure,
+	identityconnectgen.IdentityServiceAdminSuspendTenantProcedure,
+	identityconnectgen.IdentityServiceAdminRestoreTenantProcedure,
+	identityconnectgen.IdentityServiceAdminRecoverTenantOwnershipProcedure,
+	identityconnectgen.IdentityServiceGetLoginPolicyProcedure,
 }
 
 // rateLimitWindow is the window every per-IP limiter counts over:
@@ -545,6 +563,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	}
 	if cfg.TeammateKeysEnabled {
 		limits = append(limits, middleware.PathLimit{PathPrefix: "/" + identityconnectgen.TeammateKeyServiceName + "/", Tag: "teammate_key_manager", Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0)})
+	}
+	tenantOperator := middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0)
+	for _, path := range TenantOperatorProcedures {
+		limits = append(limits, middleware.PathLimit{
+			PathPrefix: path, Tag: "tenant_operator", Limiter: tenantOperator,
+			Header: middleware.TenantOperatorKeyHeader,
+		})
 	}
 	for _, path := range guardianManagementPaths {
 		limits = append(limits, middleware.PathLimit{
@@ -1287,12 +1312,14 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 // treats nil as "disabled" and returns CodeUnimplemented.
 //
 // The service is constructed even when no admin secret is configured: in that
-// case it is constructed-but-disabled and every admin RPC returns
-// Unimplemented (the secret check short-circuits on an empty secret). This
-// keeps the "off by default" guarantee in one place — the service's
-// constant-time authorize — rather than splitting it across the wiring. users
-// resolves an account in a named project, as for buildMembershipService; the
-// service requires it, so without one there is no service.
+// case every admin RPC returns Unimplemented (the secret check short-circuits
+// on an empty secret), except the tenant operations called with a
+// tenant_operator credential and no secret (see ControlPlaneAdminService).
+// This keeps the "off by default" guarantee in the service's authorization
+// (authorize, and authorizeTenantOperator for TenantOperatorProcedures) rather
+// than splitting it across the wiring. users resolves an account in a named
+// project, as for buildMembershipService; the service requires it, so without
+// one there is no service.
 func buildControlPlaneAdminService(deps Deps, users service.UserDirectory, auditLog *audit.Logger, logger *zap.Logger) *service.ControlPlaneAdminService {
 	if deps.ControlPlaneStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil || users == nil {
 		return nil

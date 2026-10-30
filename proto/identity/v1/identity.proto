@@ -2195,7 +2195,11 @@ message ListMyTenantsResponse {
 // "X-Admin-Secret" header (constant-time compared against
 // GATEWAY_ADMIN_API_SECRET). When that env var is unset the RPCs are
 // DISABLED and return UNIMPLEMENTED, so a deployer who never configures the
-// secret cannot have them reached.
+// secret cannot have them reached. The one exception is the six tenant
+// operations documented on AdminGetTenant, called with a tenant_operator
+// credential and no X-Admin-Secret: the credential is checked, a live one
+// admitted and any other refused with PERMISSION_DENIED. Only the secret can
+// mint one.
 
 message AdminCreateProjectRequest {
   string name = 1;
@@ -2218,7 +2222,12 @@ message AdminCreateProjectCredentialRequest {
   // project's directory, presented in the X-Directory-Key header), or
   // "teammate_key_manager" (a machine credential whose secret half is shown
   // ONCE and which authorizes only TeammateKeyService in this project,
-  // presented in the X-Teammate-Key-Manager-Key header).
+  // presented in the X-Teammate-Key-Manager-Key header), or
+  // "tenant_operator" (a machine credential whose secret half is shown ONCE
+  // and which authorizes only AdminGetTenant, AdminListTenants,
+  // AdminSuspendTenant, AdminRestoreTenant, AdminRecoverTenantOwnership and
+  // GetLoginPolicy on this project, presented in the X-Tenant-Operator-Key
+  // header in place of the admin secret).
   string kind = 2;
 }
 
@@ -2234,8 +2243,9 @@ message AdminCreateProjectCredentialResponse {
 
 // AdminRevokeProjectCredentialRequest names the credential to revoke by the
 // credential_id AdminCreateProjectCredential returned, together with the
-// project it belongs to. A revoked directory_reader key is refused on its next
-// lookup; a revoked publishable, secret or mTLS key stops selecting its
+// project it belongs to. A revoked directory_reader, teammate_key_manager or
+// tenant_operator key is refused on its next call; a revoked publishable,
+// secret or mTLS key stops selecting its
 // project within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS (default 30s) on
 // each replica, which caches project resolution. The row is kept for audit.
 message AdminRevokeProjectCredentialRequest {
@@ -3689,7 +3699,9 @@ service IdentityService {
   // Control-plane admin (redesign). PLATFORM-operator RPCs that provision
   // projects/tenants/credentials out-of-band. Authenticated by the shared
   // admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
-  // (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
+  // (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The six tenant
+  // operations documented on AdminGetTenant also accept a tenant_operator
+  // credential in "X-Tenant-Operator-Key", whether or not the secret is set.
   rpc AdminCreateProject(AdminCreateProjectRequest) returns (AdminCreateProjectResponse);
   rpc AdminCreateProjectCredential(AdminCreateProjectCredentialRequest) returns (AdminCreateProjectCredentialResponse);
   // Revokes a project credential of any kind. Operator-only, like the other
@@ -3715,18 +3727,41 @@ service IdentityService {
   // Operator-only, like the other Admin* RPCs.
   rpc AdminAddTenantAdmin(AdminAddTenantAdminRequest) returns (AdminAddTenantAdminResponse);
   // Returns one tenant's own record, in any status: never its members,
-  // domains or login policy. Operator-only, like the other Admin* RPCs:
-  // UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED
-  // for a wrong secret. INVALID_ARGUMENT for a blank project_id or
-  // tenant_id, and NOT_FOUND when the project holds no such tenant.
+  // domains or login policy.
+  //
+  // Operator-only, and one of the six tenant operations (with
+  // AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
+  // AdminRecoverTenantOwnership and GetLoginPolicy) that also accept a
+  // tenant_operator project credential, "<public id>.<secret>", in the
+  // X-Tenant-Operator-Key header in place of the admin secret. The
+  // credential authorizes these six alone, and only on its own project:
+  // project_id must name it. It is checked on every call, so a revocation
+  // holds from the next one, and works whether or not
+  // GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
+  // alone is checked. What a credential does is recorded with it as the
+  // actor ("credential:<id>"); a refusal of one that exists is recorded as
+  // tenant_operator_refused. Calls that present the credential share one
+  // budget per client IP, GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window;
+  // calls made with the admin secret alone are not counted. Over the limit
+  // the call is refused before the RPC runs: over HTTP with status 429 and
+  // a Retry-After header of the window in seconds, which Connect clients
+  // surface as UNAVAILABLE; over the native gRPC registration with
+  // RESOURCE_EXHAUSTED and the same value in the "retry-after" response
+  // metadata. UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset and the
+  // call presents X-Admin-Secret or no tenant_operator credential,
+  // PERMISSION_DENIED for a wrong secret or a credential refused for any
+  // reason.
+  //
+  // INVALID_ARGUMENT for a blank project_id or tenant_id, and NOT_FOUND when
+  // the project holds no such tenant.
   rpc AdminGetTenant(AdminGetTenantRequest) returns (AdminGetTenantResponse);
   // Returns one page of a project's tenants, latent, claimed and suspended
   // alike, newest first by creation time, then id: their own records only,
   // never their members, domains or login policy. Pass next_cursor back as
   // cursor for the next page. Paging never repeats or skips a tenant that
   // existed when it began; one created meanwhile may or may not appear.
-  // Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
-  // GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+  // Operator-only, authorized like AdminGetTenant: the admin secret, or a
+  // tenant_operator credential of project_id.
   // INVALID_ARGUMENT for a blank project_id or a cursor that does not
   // decode. A project with no tenants, or one that does not exist, is an
   // empty page.
@@ -3747,9 +3782,9 @@ service IdentityService {
   // controls.
   //
   // A tenant already suspended is returned unchanged and nothing is
-  // recorded, so a retry is safe. Operator-only, like the other Admin*
-  // RPCs: UNIMPLEMENTED when GATEWAY_ADMIN_API_SECRET is unset,
-  // PERMISSION_DENIED for a wrong secret. INVALID_ARGUMENT for a blank id or
+  // recorded, so a retry is safe. Operator-only, authorized like
+  // AdminGetTenant: the admin secret, or a tenant_operator credential of
+  // project_id. INVALID_ARGUMENT for a blank id or
   // reason, NOT_FOUND when the project holds no such tenant,
   // FAILED_PRECONDITION for a latent tenant, which governs nothing yet, and
   // ABORTED when its status changed between the read and the write.
@@ -3765,12 +3800,14 @@ service IdentityService {
   // back none the suspension revoked.
   //
   // A tenant already claimed is returned unchanged and nothing is recorded,
-  // so a retry is safe. Operator-only, with the same refusals as
-  // AdminSuspendTenant: FAILED_PRECONDITION for a latent tenant, and for a
-  // tenant with no creator and no owner or admin, since restoring it would
-  // make it selectable with no one answering for its domain (appoint an
-  // owner with AdminRecoverTenantOwnership, then restore it); ABORTED when
-  // its status changed between the read and the write.
+  // so a retry is safe. Operator-only, authorized like AdminGetTenant: the
+  // admin secret, or a tenant_operator credential of project_id. It has the
+  // same refusals as AdminSuspendTenant: FAILED_PRECONDITION for a
+  // latent tenant, and for a tenant with no creator and no owner or admin,
+  // since restoring it would make it selectable with no one answering for
+  // its domain (appoint an owner with AdminRecoverTenantOwnership, then
+  // restore it); ABORTED when its status changed between the read and the
+  // write.
   rpc AdminRestoreTenant(AdminRestoreTenantRequest) returns (AdminRestoreTenantResponse);
   // AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
   // govern: no owner or admin of it is a person who both can sign in and
@@ -3790,8 +3827,8 @@ service IdentityService {
   // lands. A latent tenant has never had an owner and is
   // FAILED_PRECONDITION. Records the operator's reason, IP and user agent
   // in the audit trail when it appoints; a refusal is not recorded.
-  // Operator-only, like the other Admin* RPCs: UNIMPLEMENTED when
-  // GATEWAY_ADMIN_API_SECRET is unset, PERMISSION_DENIED for a wrong secret.
+  // Operator-only, authorized like AdminGetTenant: the admin secret, or a
+  // tenant_operator credential of project_id.
   // INVALID_ARGUMENT for a blank id, or a reason that is blank, over 500
   // characters or holds a control or invisible formatting character.
   rpc AdminRecoverTenantOwnership(AdminRecoverTenantOwnershipRequest) returns (AdminRecoverTenantOwnershipResponse);
@@ -3817,6 +3854,11 @@ service IdentityService {
   // Operator-only: authenticated by the shared admin secret, like the other
   // Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
   rpc UpsertLoginPolicy(UpsertLoginPolicyRequest) returns (UpsertLoginPolicyResponse);
+  // GetLoginPolicy is authorized like AdminGetTenant: the admin secret, or a
+  // tenant_operator credential of project_id. Writing or deleting a policy
+  // takes the admin secret. The policy is returned whole, sso_connection_json
+  // verbatim, so that field must not hold a secret a tenant_operator
+  // credential's holder should not read.
   rpc GetLoginPolicy(GetLoginPolicyRequest) returns (GetLoginPolicyResponse);
   rpc DeleteLoginPolicy(DeleteLoginPolicyRequest) returns (DeleteLoginPolicyResponse);
 

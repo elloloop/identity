@@ -51,6 +51,12 @@ it, each audited. A suspended member cannot select or administer the
 tenant, nor lift the suspension themselves
 ([Suspending a member](#suspending-a-member)).
 
+**Amended** (2026-10-29): the operator need not hold the secret. A
+`tenant_operator` project credential may suspend, restore and recover a
+tenant of its own project, and read its tenants and login policy, in place
+of the operator secret (migration 0054). Those records name the credential
+as their actor ([Suspension](#suspension), [Ownership](#ownership)).
+
 ## Context
 
 Until now a tenant came into being in one of two ways: auto-formed from the
@@ -241,8 +247,10 @@ not assert:
 
 Suspension is the lever this design relies on to stop a tenant. An operator
 suspends a claimed tenant with `AdminSuspendTenant` and restores it with
-`AdminRestoreTenant`, each with the operator secret and a reason, recorded
-as `tenant_suspended` or `tenant_restored`. Each is a compare-and-set on the
+`AdminRestoreTenant`, each with the operator secret (or a `tenant_operator`
+credential of the tenant's project) and a reason, recorded
+as `tenant_suspended` or `tenant_restored`, with the credential, when one
+was used, as the actor (`credential:<id>`). Each is a compare-and-set on the
 tenant's status: a tenant already in the status asked for is left as it is
 and nothing is recorded, and a latent tenant, which governs nothing, cannot
 be suspended.
@@ -317,9 +325,12 @@ ways, both audited; neither changes any other member's role.
   `role = "owner"`). Once no owner or admin both can sign in and holds an
   active membership, nobody can invite, register a domain or transfer.
   `AdminRecoverTenantOwnership(project_id, tenant_id, user_id, reason)`,
-  with the operator secret, makes an account that could own a tenant (the
+  with the operator secret (or a `tenant_operator` credential of the
+  tenant's project), makes an account that could own a tenant (the
   same rule as a transfer) an active owner, member or not, recorded as
-  `tenant_ownership_recovered` with the reason and the operator's client. It
+  `tenant_ownership_recovered` with the reason and the operator's client
+  (and, when a credential was used, the credential as the actor,
+  `credential:<id>`; a call made with the secret alone names no actor). It
   is refused while any owner or admin who is a person can still sign in and
   holds an active membership (a suspended one does not govern), so an
   operator never appoints an outside account above people who can act. An

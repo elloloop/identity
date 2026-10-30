@@ -33,7 +33,7 @@ func TestUpsertLoginPolicy_AuthorsAndAudits(t *testing.T) {
 	}
 
 	// Round-trips via Get and is observable by the enforcement read path.
-	read, err := f.svc.GetLoginPolicy(ctx, policyAdminSecret, "proj-1", "tenant-1")
+	read, err := f.svc.GetLoginPolicy(ctx, asAdmin(policyAdminSecret), "proj-1", "tenant-1")
 	if err != nil {
 		t.Fatalf("GetLoginPolicy: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestUpsertLoginPolicy_PreservesGovernanceFields(t *testing.T) {
 	}
 
 	// They round-trip through the read path (the enforcement plane sees them).
-	read, err := f.svc.GetLoginPolicy(ctx, policyAdminSecret, "proj-1", "tenant-1")
+	read, err := f.svc.GetLoginPolicy(ctx, asAdmin(policyAdminSecret), "proj-1", "tenant-1")
 	if err != nil {
 		t.Fatalf("GetLoginPolicy: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestLoginPolicy_BadSecretDenied(t *testing.T) {
 	if _, err := f.svc.UpsertLoginPolicy(context.Background(), "wrong", &LoginPolicy{ProjectID: "p", TenantID: "t"}); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("err = %v, want ErrPermissionDenied", err)
 	}
-	if _, err := f.svc.GetLoginPolicy(context.Background(), "wrong", "p", "t"); !errors.Is(err, ErrPermissionDenied) {
+	if _, err := f.svc.GetLoginPolicy(context.Background(), asAdmin("wrong"), "p", "t"); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("get err = %v", err)
 	}
 	if err := f.svc.DeleteLoginPolicy(context.Background(), "wrong", "p", "t"); !errors.Is(err, ErrPermissionDenied) {
@@ -203,7 +203,7 @@ func TestLoginPolicy_UnimplementedWithoutStore(t *testing.T) {
 	if _, err := svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{ProjectID: "p", TenantID: "t"}); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("upsert err = %v, want ErrUnimplemented", err)
 	}
-	if _, err := svc.GetLoginPolicy(context.Background(), policyAdminSecret, "p", "t"); !errors.Is(err, ErrUnimplemented) {
+	if _, err := svc.GetLoginPolicy(context.Background(), asAdmin(policyAdminSecret), "p", "t"); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("get err = %v, want ErrUnimplemented", err)
 	}
 	if err := svc.DeleteLoginPolicy(context.Background(), policyAdminSecret, "p", "t"); !errors.Is(err, ErrUnimplemented) {
@@ -222,7 +222,7 @@ func TestDeleteLoginPolicy_ClearsAndAudits(t *testing.T) {
 	if err := f.svc.DeleteLoginPolicy(ctx, policyAdminSecret, "p", "t"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	got, err := f.svc.GetLoginPolicy(ctx, policyAdminSecret, "p", "t")
+	got, err := f.svc.GetLoginPolicy(ctx, asAdmin(policyAdminSecret), "p", "t")
 	if err != nil {
 		t.Fatalf("get after delete: %v", err)
 	}
