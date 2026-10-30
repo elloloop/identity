@@ -95,7 +95,9 @@ type Deps struct {
 	// postgres driver; when nil (together with the tenant/membership stores)
 	// the ControlPlaneAdminService is not constructed and the admin RPCs
 	// return Unimplemented. Even when wired, the surface stays disabled until
-	// Config.AdminAPISecret is set.
+	// Config.AdminAPISecret is set, except the tenant operations called with
+	// a tenant_operator credential and no secret (see
+	// service.ControlPlaneAdminService).
 	ControlPlaneStore service.ControlPlaneProjectStore
 
 	// DirectoryCredentials is the control-plane credential read LookupUsers

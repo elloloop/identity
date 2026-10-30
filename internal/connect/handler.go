@@ -44,8 +44,11 @@ type IdentityHandler struct {
 	members *service.MembershipService
 	// controlAdmin backs the control-plane admin RPCs (AdminCreateProject and
 	// friends), authenticated by the shared admin secret rather than a user
-	// JWT. nil on memory (no control plane) and when no secret is
-	// configured — both disable the surface (CodeUnimplemented).
+	// JWT. nil on memory (no control plane), which disables the surface
+	// (CodeUnimplemented). With no secret configured it is still built: the
+	// secret-only RPCs return Unimplemented, and the tenant operations called
+	// with a tenant_operator credential and no secret check it (see
+	// service.ControlPlaneAdminService).
 	controlAdmin *service.ControlPlaneAdminService
 	// directory backs LookupUsers, authenticated by a directory_reader
 	// project credential rather than a user JWT. nil when the build has no

@@ -199,11 +199,11 @@ type ControlPlaneProjectStore interface {
 // one exception is the tenant operations (app.TenantOperatorProcedures) called
 // with a tenant_operator credential and no secret: the credential is checked,
 // a live one admitted and any other refused with ErrPermissionDenied. Only
-// the secret can mint one.
+// the secret can mint such a credential.
 //
-// Like the other governance services it is postgres-only: memory have
-// no control plane, so the app constructs no ControlPlaneAdminService and the
-// handler returns Unimplemented.
+// Like the other governance services it is postgres-only: the memory driver
+// has no control plane, so the app constructs no ControlPlaneAdminService and
+// the handler returns Unimplemented.
 //
 // TODO(redesign): the shared secret is the shipped auth mechanism. Future
 // work hardens it with mTLS client-certificate auth and an optional
@@ -308,8 +308,8 @@ func NewControlPlaneAdminService(
 
 // Enabled reports whether an admin secret is configured. With none, the
 // secret-only admin RPCs are disabled, but the tenant operations still accept
-// a live tenant_operator credential, so false does not mean the whole admin
-// surface is off.
+// a live tenant_operator credential presented with no secret (see the type
+// doc), so false does not mean the whole admin surface is off.
 func (s *ControlPlaneAdminService) Enabled() bool {
 	return s.secret != ""
 }
@@ -726,8 +726,8 @@ type BootstrappedAdmin struct {
 // When password is blank the server generates a strong one and returns it
 // once in GeneratedPassword; when supplied it must satisfy the password
 // strength policy (else ErrWeakPassword → InvalidArgument). Only the bcrypt
-// hash is ever stored. When no control plane is wired (memory have no
-// platform_admins table) it returns ErrUnimplemented.
+// hash is ever stored. When no control plane is wired (the memory driver has
+// no platform_admins table) it returns ErrUnimplemented.
 func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context, secret, email, password string) (*BootstrappedAdmin, error) {
 	if s.admins == nil {
 		return nil, ErrUnimplemented
