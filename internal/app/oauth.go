@@ -34,8 +34,8 @@ func buildNativeOAuthVerifier(cfg *config.Config, logger *zap.Logger) *oauth.Nat
 }
 
 // buildOAuthRegistry constructs an oauth.Registry from the gateway
-// configuration: each provider newEnvOAuthProvider builds from it, signing in
-// through its env client.
+// configuration: each provider envOAuthProviders lists, built by
+// newEnvOAuthProvider to sign in through its env client.
 //
 // The returned registry is never nil so the AuthService can call
 // (*Registry).Len() unconditionally.

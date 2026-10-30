@@ -820,9 +820,10 @@ paths:
          secret server-side); AdminDeleteProjectOAuthHostClient removes one, so its
          host reverts to the base client. Neither touches the base provider. A
          server that predates them refuses them and changes nothing: over HTTP it
-         answers UNAUTHENTICATED, as it does not know them as admin-secret calls.
-         Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
-         with no control plane.
+         answers UNAUTHENTICATED, as it does not know them as admin-secret calls,
+         and through an embedder's native gRPC server UNIMPLEMENTED. Operator-only,
+         like the other Admin* RPCs, and UNIMPLEMENTED on a build with no control
+         plane.
       operationId: identity.v1.IdentityService.AdminSetProjectOAuthHostClient
       parameters:
         - name: Connect-Protocol-Version
@@ -10893,9 +10894,10 @@ components:
           title: callback_host
           description: |-
             callback_host is the host of the flow's callback URL: a DNS name with no
-             scheme, port or path, an IDN in its punycode form. A write lower-cases it
-             and drops one trailing dot, and refuses any other character than a-z,
-             0-9, '.' and '-'. Required.
+             scheme, port or path. A write lower-cases it, drops one trailing dot, and
+             requires a hostname of dot-separated labels of a-z, 0-9 and '-', none
+             empty or starting or ending with '-' (an IDN in its punycode form).
+             Required.
         clientId:
           type: string
           title: client_id

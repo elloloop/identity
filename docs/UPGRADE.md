@@ -26,11 +26,13 @@ from that provider. See the `oauth.md` section "A client per auth host".
 - **Admin API (additive):** `AdminSetProjectOAuthHostClient` writes an
   override from a `ProjectOAuthHostClient` (`provider`, `callback_host`,
   `client_id`, `client_secret`; an empty secret keeps the stored one, and Apple
-  takes none), and `AdminDeleteProjectOAuthHostClient` removes one. Neither
+  takes none), and `AdminDeleteProjectOAuthHostClient` removes one. A write's
+  `callback_host` must be an LDH hostname, an IDN in its punycode form. Neither
   touches the base provider. A server that predates them refuses them and
   changes nothing: over HTTP it answers `UNAUTHENTICATED`, because it does not
   know them as admin-secret calls, so during a rolling upgrade that code means
-  the call reached an old replica, not that the admin secret is wrong.
+  the call reached an old replica, not that the admin secret is wrong. Through
+  an embedder's native gRPC server an older build answers `UNIMPLEMENTED`.
   `AdminListProjectOAuthProvidersResponse.host_clients` (2)
   returns the overrides, redacted. Setting or deleting a base provider leaves
   its overrides in place. Writing or removing an override is audited as
@@ -62,8 +64,10 @@ Nothing changes for a project without overrides.
   `(providers []*ProjectOAuthProviderView, hostClients []*ProjectOAuthHostClientView, err error)`.
 - New: `ControlPlaneAdminService.AdminSetProjectOAuthHostClient` and
   `AdminDeleteProjectOAuthHostClient`, with `ProjectOAuthHostClientInput` and
-  `ProjectOAuthHostClientView`; `ProjectOAuthConfig.Hosts` of
-  `ProjectOAuthHostClient`; and `AuthService.WithEnvOAuthProviders`, which
+  `ProjectOAuthHostClientView`; `ProjectOAuthConfig.Hosts`, a
+  `ProjectOAuthHosts` (callback host to that host's `ProjectOAuthHostClients`,
+  each provider key to its `ProjectOAuthHostClient`; only the built-in keys
+  are decoded); and `AuthService.WithEnvOAuthProviders`, which
   takes a `service.EnvOAuthProviderBuilder`. An embedder that supplies its own
   `OAuthRegistry` gets no builder, so an override whose base is an env
   provider is unavailable there.

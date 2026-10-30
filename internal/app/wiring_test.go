@@ -59,6 +59,47 @@ func TestBuildOAuthRegistry(t *testing.T) {
 	}
 }
 
+// An env provider missing any of its required credentials is not configured:
+// neither the registry nor the host-client builder produces it.
+func TestEnvOAuthProviders_PartialCredentialsAreNotConfigured(t *testing.T) {
+	full := func() *config.Config {
+		return &config.Config{
+			GoogleClientID: "google-client", GoogleClientSecret: testCredential("google"),
+			MicrosoftClientID: "microsoft-client", MicrosoftClientSecret: testCredential("microsoft"),
+			GitHubClientID: "github-client", GitHubClientSecret: testCredential("github"),
+			AppleClientID: "apple-client", AppleTeamID: "team", AppleKeyID: "key", ApplePrivateKey: testCredential("apple"),
+		}
+	}
+	for _, tc := range []struct {
+		provider, missing string
+		clear             func(*config.Config)
+	}{
+		{"google", "client id", func(c *config.Config) { c.GoogleClientID = "" }},
+		{"google", "client secret", func(c *config.Config) { c.GoogleClientSecret = "" }},
+		{"microsoft", "client id", func(c *config.Config) { c.MicrosoftClientID = "" }},
+		{"microsoft", "client secret", func(c *config.Config) { c.MicrosoftClientSecret = "" }},
+		{"github", "client id", func(c *config.Config) { c.GitHubClientID = "" }},
+		{"github", "client secret", func(c *config.Config) { c.GitHubClientSecret = "" }},
+		{"apple", "client id", func(c *config.Config) { c.AppleClientID = "" }},
+		{"apple", "team id", func(c *config.Config) { c.AppleTeamID = "" }},
+		{"apple", "key id", func(c *config.Config) { c.AppleKeyID = "" }},
+		{"apple", "private key", func(c *config.Config) { c.ApplePrivateKey = "" }},
+	} {
+		cfg := full()
+		tc.clear(cfg)
+		registry := buildOAuthRegistry(cfg, zap.NewNop())
+		if _, ok := registry.Get(tc.provider); ok {
+			t.Errorf("%s without its %s: registered", tc.provider, tc.missing)
+		}
+		if registry.Len() != 3 {
+			t.Errorf("%s without its %s: registry Len = %d, want the other three", tc.provider, tc.missing, registry.Len())
+		}
+		if _, ok := envOAuthProviderBuilder(cfg)(tc.provider, "host-client", "host-secret"); ok {
+			t.Errorf("%s without its %s: the builder rebuilt it", tc.provider, tc.missing)
+		}
+	}
+}
+
 func TestBuildNativeOAuthVerifier(t *testing.T) {
 	// Disabled → nil verifier (RPC stays off).
 	if v := buildNativeOAuthVerifier(&config.Config{}, nil); v != nil {
@@ -279,5 +320,10 @@ func TestEnvOAuthProviderBuilder(t *testing.T) {
 		if _, ok := build(provider, "c", "s"); ok {
 			t.Errorf("%s: a provider the env does not configure must not be built", provider)
 		}
+	}
+	// A kind the constructor does not know builds nothing, so a provider
+	// listed under a new kind before its constructor exists fails closed.
+	if e, ok := newEnvOAuthProvider(cfg, "acme", "unknown", "c", "s"); ok || e != nil {
+		t.Errorf("an unknown kind built %v, %v; want nil, false", e, ok)
 	}
 }

@@ -18207,9 +18207,10 @@ type ProjectOAuthHostClient struct {
 	// own takes no host client.
 	Provider string `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
 	// callback_host is the host of the flow's callback URL: a DNS name with no
-	// scheme, port or path, an IDN in its punycode form. A write lower-cases it
-	// and drops one trailing dot, and refuses any other character than a-z,
-	// 0-9, '.' and '-'. Required.
+	// scheme, port or path. A write lower-cases it, drops one trailing dot, and
+	// requires a hostname of dot-separated labels of a-z, 0-9 and '-', none
+	// empty or starting or ending with '-' (an IDN in its punycode form).
+	// Required.
 	CallbackHost string `protobuf:"bytes,2,opt,name=callback_host,json=callbackHost,proto3" json:"callback_host,omitempty"`
 	// client_id is the provider client registered for callback_host; for Apple,
 	// the Services ID. Required.

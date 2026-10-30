@@ -482,6 +482,16 @@ func TestParseProjectConfig_OAuth_HostClients_Present(t *testing.T) {
 	assert.Equal(t, "example.b.web", client.ClientID)
 	_, ok = cfg.OAuth.hostClient("auth.a.example", "google")
 	assert.False(t, ok)
+
+	// A key with hyphens and digits, a punycode IDN among them, is found
+	// under that exact key.
+	for _, host := range []string{"auth-2.b.example", "xn--bcher-kva.example", "123.example"} {
+		cfg, err := ParseProjectConfig(`{"oauth":{"hosts":{"` + host + `":{"github":{"client_id":"h","client_secret_enc":"e"}}}}}`)
+		require.NoError(t, err, host)
+		client, ok := cfg.OAuth.hostClient(host, "github")
+		assert.True(t, ok, host)
+		assert.Equal(t, "h", client.ClientID, host)
+	}
 }
 
 // A provider this binary does not know, under a host, is kept unread rather
@@ -506,14 +516,29 @@ func TestParseProjectConfig_OAuth_HostClients_UnknownProviderIgnored(t *testing.
 func TestParseProjectConfig_OAuth_HostClients_Malformed(t *testing.T) {
 	t.Parallel()
 
-	for name, hosts := range map[string]string{
-		"host not an object":     `{"auth.b.example":"x"}`,
-		"built-in not an object": `{"auth.b.example":{"google":["x"]}}`,
-		"built-in non-string id": `{"auth.b.example":{"google":{"client_id":7,"client_secret_enc":"e"}}}`,
-		"hosts not an object":    `["auth.b.example"]`,
+	// The error names the entry that does not decode, by host and provider.
+	for name, tc := range map[string]struct{ hosts, want string }{
+		"host not an object":     {`{"auth.b.example":"x"}`, `oauth.hosts: json: cannot unmarshal string into Go struct field .auth.b.example`},
+		"built-in not an object": {`{"auth.b.example":{"google":["x"]}}`, `oauth.hosts["auth.b.example"].google: `},
+		"built-in non-string id": {`{"auth.b.example":{"google":{"client_id":7,"client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].google: `},
+		"hosts not an object":    {`["auth.b.example"]`, `oauth.hosts: `},
 	} {
-		_, err := ParseProjectConfig(`{"oauth":{"hosts":` + hosts + `}}`)
+		_, err := ParseProjectConfig(`{"oauth":{"hosts":` + tc.hosts + `}}`)
 		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), tc.want, name)
+	}
+}
+
+// A stored host key the write would refuse for its characters alone (not an
+// LDH hostname) still loads: the parse holds a key only to its normalized
+// form, so a key written under a wider rule never takes the project offline.
+func TestParseProjectConfig_OAuth_HostClients_NonLDHKeyLoads(t *testing.T) {
+	t.Parallel()
+
+	for _, host := range []string{"auth_b.example", "auth.b?example", "auth.b\u00e9.example"} {
+		cfg, err := ParseProjectConfig(`{"oauth":{"hosts":{"` + host + `":{"google":{"client_id":"g","client_secret_enc":"e"}}}}}`)
+		require.NoError(t, err, host)
+		assert.Len(t, cfg.OAuth.Hosts, 1, host)
 	}
 }
 
@@ -530,8 +555,6 @@ func TestParseProjectConfig_OAuth_HostClients_Rejected(t *testing.T) {
 		"apple with a secret":  {`{"auth.b.example":{"apple":{"client_id":"a","client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].apple takes no client_secret_enc`},
 		"apple without client": {`{"auth.b.example":{"apple":{}}}`, `oauth.hosts["auth.b.example"].apple requires client_id`},
 		"two trailing dots":    {`{"auth.b.example..":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b.example.."`},
-		"query character":      {`{"auth.b?example":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b?example"`},
-		"control character":    {`{"auth.b\n.example":{"google":{"client_id":"g","client_secret_enc":"e"}}}`, `oauth.hosts key "auth.b\n.example"`},
 	} {
 		_, err := ParseProjectConfig(`{"oauth":{"hosts":` + tc.hosts + `}}`)
 		require.Error(t, err, name)

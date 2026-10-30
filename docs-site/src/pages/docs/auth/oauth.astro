@@ -279,8 +279,8 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
     </li>
     <li>
       Only the built-in provider keys take an override. An env OIDC provider
-      registered under a key of its own takes none; under the default
-      <code>oidc</code> key it can.
+      registered under a key of its own takes none; with the key set to
+      <code>oidc</code> it can.
     </li>
   </ul>
   <p>
@@ -292,7 +292,8 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
     <code>host_clients</code>. A server that predates them refuses them and
     changes nothing: over HTTP it answers <code>UNAUTHENTICATED</code>,
     because it does not know them as admin-secret calls, so during a rolling
-    upgrade that code means the call reached an old replica.
+    upgrade that code means the call reached an old replica; through an
+    embedder's native gRPC server it answers <code>UNIMPLEMENTED</code>.
   </p>
   <p>
     Register each override's client with the callback URL of the flows that
@@ -303,7 +304,7 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
   </p>
   <Code code={`message ProjectOAuthHostClient {
   string provider = 1;           // "google" | "microsoft" | "apple" | "github" | "oidc"
-  string callback_host = 2;      // an ASCII DNS name (an IDN as punycode): no scheme, port or path
+  string callback_host = 2;      // an LDH hostname (an IDN as punycode): no scheme, port or path
   string client_id = 3;          // for Apple, the Services ID
   string client_secret = 4;      // write-only plaintext; empty = keep stored; none for Apple
   bool   has_client_secret = 5;  // read-only (redacted presence)

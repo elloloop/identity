@@ -296,7 +296,8 @@ itself or borrows from the hub.
   the same team; the others are a client id and secret.
 - **An override never enables a provider.** Where the precedence yields
   none, the provider stays unavailable on every host, and where it yields a
-  native-only block (`native_audiences` alone) the hosted flow does.
+  native-only block (`native_audiences` alone), the hosted flow stays
+  unavailable on every host.
 - **A broken override is unavailable** on its host (a secret that will not
   decrypt, or an env base the server cannot rebuild because the embedder
   supplied its own `OAuthRegistry`). It never falls back to the base client,
@@ -312,7 +313,7 @@ itself or borrows from the hub.
 - **Only the built-in provider keys** (`google`, `microsoft`, `apple`,
   `github`, `oidc`) take an override. An env OIDC provider registered under a
   key of its own (`GATEWAY_OAUTH_OIDC_PROVIDER_KEY=okta`, say) takes none;
-  under the default `oidc` key it can. Any other key under a host is kept but
+  with the key set to `oidc` it can. Any other key under a host is kept but
   never read.
 
 Register each override's client with the callback URL of the flows that use
@@ -325,13 +326,15 @@ same reason.
 
 Author them with their own admin RPCs. `AdminSetProjectOAuthHostClient` takes
 a `ProjectOAuthHostClient` (`provider`, `callback_host`, `client_id`,
-`client_secret`; an empty secret keeps the stored one, and Apple takes none),
+`client_secret`; an empty secret keeps the stored one, and Apple takes none;
+`callback_host` must be an LDH hostname, an IDN in its punycode form),
 `AdminDeleteProjectOAuthHostClient` removes one, and
 `AdminListProjectOAuthProviders` returns them, redacted, in `host_clients`.
 A server that predates them refuses them and changes nothing: over HTTP it
 answers `UNAUTHENTICATED`, because it does not know them as admin-secret
 calls, so during a rolling upgrade that code means the call reached an old
-replica. Setting or deleting the base provider leaves its overrides in place.
+replica; through an embedder's native gRPC server it answers
+`UNIMPLEMENTED`. Setting or deleting the base provider leaves its overrides in place.
 
 ### The hosted auth UI (`/auth/`)
 

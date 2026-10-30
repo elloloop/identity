@@ -164,6 +164,8 @@ func TestAdminHostClient_SetRejects(t *testing.T) {
 		"an escape":              {Provider: oauthProviderGoogle, CallbackHost: "auth.b%2eexample", ClientID: "g", ClientSecret: "s"},
 		"an underscore":          {Provider: oauthProviderGoogle, CallbackHost: "auth_b.example", ClientID: "g", ClientSecret: "s"},
 		"a Unicode letter":       {Provider: oauthProviderGoogle, CallbackHost: "auth.b\u00e9.example", ClientID: "g", ClientSecret: "s"},
+		"an empty label":         {Provider: oauthProviderGoogle, CallbackHost: "auth..b.example", ClientID: "g", ClientSecret: "s"},
+		"a leading hyphen":       {Provider: oauthProviderGoogle, CallbackHost: "-auth.b.example", ClientID: "g", ClientSecret: "s"},
 		"apple secret":           {Provider: oauthProviderApple, CallbackHost: hostB, ClientID: "a", ClientSecret: "s"},
 		"no secret, none stored": {Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: "g"},
 		"no client id":           {Provider: oauthProviderGitHub, CallbackHost: hostB, ClientSecret: "s"},
@@ -206,6 +208,76 @@ func TestAdminHostClient_SetRejects(t *testing.T) {
 	}
 }
 
+// newCallbackHost accepts an LDH hostname, a punycode IDN included, in its
+// normalized form, and refuses every other host by its class.
+func TestNewCallbackHost(t *testing.T) {
+	t.Parallel()
+	label63 := strings.Repeat("a", 63)
+	for in, want := range map[string]string{
+		"auth.b.example":         "auth.b.example",
+		" Auth.B.Example. ":      "auth.b.example",
+		"auth-2.b.example":       "auth-2.b.example",
+		"xn--bcher-kva.example":  "xn--bcher-kva.example",
+		"123.example":            "123.example",
+		label63 + ".example":     label63 + ".example",
+		"a.b.c.d.e.example":      "a.b.c.d.e.example",
+		"XN--BCHER-KVA.EXAMPLE.": "xn--bcher-kva.example",
+	} {
+		got, err := newCallbackHost(in)
+		if err != nil || got != want {
+			t.Errorf("newCallbackHost(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	long := strings.Repeat(label63+".", 4)[:254]
+	for name, in := range map[string]string{
+		"an empty label":        "auth..example",
+		"a leading dot":         ".auth.example",
+		"a leading hyphen":      "-auth.example",
+		"a label ending in '-'": "auth-.example",
+		"a 64-character label":  label63 + "a.example",
+		"over 253 characters":   long,
+		"an underscore":         "auth_b.example",
+		"a Unicode letter":      "b\u00fccher.example",
+		"two trailing dots":     "auth.example..",
+		"a port":                "auth.example:8443",
+	} {
+		if got, err := newCallbackHost(in); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("%s: newCallbackHost(%q) = %q, %v; want ErrInvalidArgument", name, in, got, err)
+		}
+	}
+}
+
+// A host client on a hyphenated, numbered or punycode host is stored and
+// listed under that exact host, and the stored config still parses.
+func TestAdminHostClient_SetAcceptsLDHHosts(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	hosts := []string{"123.example", "auth-2.b.example", "xn--bcher-kva.example"}
+	for _, host := range hosts {
+		if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &ProjectOAuthHostClientInput{
+			Provider: oauthProviderGitHub, CallbackHost: host, ClientID: "gh-" + host, ClientSecret: "s",
+		}); err != nil {
+			t.Fatalf("set on %s: %v", host, err)
+		}
+	}
+	_, cfg := storedOAuth(t, f, projectID)
+	_, listed, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
+	if err != nil || len(listed) != len(hosts) {
+		t.Fatalf("host clients = %+v, err = %v", listed, err)
+	}
+	for i, host := range hosts {
+		if c, ok := cfg.hostClient(host, oauthProviderGitHub); !ok || c.ClientID != "gh-"+host {
+			t.Errorf("stored client on %s = %+v, %v", host, c, ok)
+		}
+		if listed[i].CallbackHost != host || listed[i].ClientID != "gh-"+host {
+			t.Errorf("listed[%d] = %+v, want %s", i, listed[i], host)
+		}
+	}
+}
+
 // A stored null where an object belongs (the whole config, "oauth": null,
 // "hosts": null or one host's entry) reads as empty: a host write succeeds
 // and leaves a config that parses.
@@ -235,6 +307,53 @@ func TestAdminHostClient_StoredNulls(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("set base over %s: %v", seed, err)
 		}
+	}
+}
+
+// A host write keeps what it does not read: an unknown provider entry of any
+// shape under its host, and a host key this binary would not write (not an
+// LDH hostname) but still loads. The delete removes such a key; the set
+// refuses to write one.
+func TestAdminHostClient_KeepsWhatItDoesNotRead(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+	const wider = "auth_b.example"
+	seedProjectConfig(t, f, projectID, `{"oauth":{"hosts":{"auth.b.example":{"okta":["x"]},"auth_b.example":{"google":{"client_id":"u","client_secret_enc":"e"}}}}}`)
+	if _, cfg := storedOAuth(t, f, projectID); cfg.Hosts[wider][oauthProviderGoogle].ClientID != "u" {
+		t.Fatalf("a stored non-LDH host key must load: %+v", cfg.Hosts)
+	}
+
+	if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &ProjectOAuthHostClientInput{
+		Provider: oauthProviderGoogle, CallbackHost: hostB, ClientID: hostBGoogle, ClientSecret: "s",
+	}); err != nil {
+		t.Fatalf("set host google: %v", err)
+	}
+	if stored, _ := storedOAuth(t, f, projectID); !strings.Contains(stored, `"okta":["x"]`) {
+		t.Fatalf("the unknown entry under the host was not kept: %s", stored)
+	}
+	if _, hostClients, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); err != nil || len(hostClients) != 2 {
+		t.Fatalf("list: %d host clients, err %v; want the two built-in ones", len(hostClients), err)
+	}
+
+	if err := f.svc.AdminDeleteProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, oauthProviderGoogle, hostB); err != nil {
+		t.Fatalf("delete host google: %v", err)
+	}
+	if stored, _ := storedOAuth(t, f, projectID); !strings.Contains(stored, `"auth.b.example":{"okta":["x"]}`) {
+		t.Fatalf("the host must stay while an unknown entry remains: %s", stored)
+	}
+
+	if _, err := f.svc.AdminSetProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, &ProjectOAuthHostClientInput{
+		Provider: oauthProviderGoogle, CallbackHost: wider, ClientID: "w", ClientSecret: "s",
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("set on a non-LDH host: err = %v, want ErrInvalidArgument", err)
+	}
+	if err := f.svc.AdminDeleteProjectOAuthHostClient(ctx, oauthAdminSecret, projectID, oauthProviderGoogle, wider); err != nil {
+		t.Fatalf("delete on a stored non-LDH host: %v", err)
+	}
+	if stored, _ := storedOAuth(t, f, projectID); strings.Contains(stored, wider) {
+		t.Fatalf("the non-LDH host was not removed: %s", stored)
 	}
 }
 

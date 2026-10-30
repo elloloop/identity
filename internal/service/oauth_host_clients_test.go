@@ -154,38 +154,74 @@ func TestOAuthHostClient_NoEnvBaseNeverEnables(t *testing.T) {
 // A project's own native-only block (native_audiences alone) has no hosted
 // client to swap, so a host client does not give it one: the provider stays
 // unavailable for the hosted flow on the override's host, as on every other.
+// The own block wins over an env base the default project could fall back to,
+// and over a hub base a non-default project could borrow.
 func TestOAuthHostClient_NativeOnlyBaseNeverEnables(t *testing.T) {
-	r := newOAuthResolver("default", oauth.NewRegistry(), false, nil).withSecrets(resolverSecretsKey(), nil)
-	secretEnc := encForProject(t, "host-secret")
-	for _, tc := range []struct {
-		provider string
-		cfg      ProjectOAuthConfig
-		client   ProjectOAuthHostClient
-	}{
-		{
-			oauthProviderGoogle,
-			ProjectOAuthConfig{Google: &ProjectOAuthGoogle{NativeAudiences: []string{"native.example"}}},
-			ProjectOAuthHostClient{ClientID: hostBGoogle, ClientSecretEnc: secretEnc},
-		},
-		{
-			oauthProviderMicrosoft,
-			ProjectOAuthConfig{Microsoft: &ProjectOAuthMicrosoft{NativeAudiences: []string{"native.example"}}},
-			ProjectOAuthHostClient{ClientID: "host-b-microsoft", ClientSecretEnc: secretEnc},
-		},
-		{
-			oauthProviderApple,
-			ProjectOAuthConfig{Apple: &ProjectOAuthApple{NativeAudiences: []string{"native.example"}}},
-			ProjectOAuthHostClient{ClientID: hostBAppleID},
-		},
-	} {
-		if err := tc.cfg.validate(); err != nil {
-			t.Fatalf("%s: the native-only block must be a valid config: %v", tc.provider, err)
+	env := oauth.NewRegistry()
+	env.Register(oauthProviderGoogle, oauth.NewGoogle(oauth.GoogleConfig{ClientID: "env-google", ClientSecret: "s"}))
+	env.Register(oauthProviderMicrosoft, oauth.NewMicrosoft(oauth.MicrosoftConfig{ClientID: "env-microsoft", ClientSecret: "s"}))
+	env.Register(oauthProviderApple, oauth.NewApple(oauth.AppleConfig{ClientID: "example.env.web", TeamID: "TEAM", KeyID: "KEY", PrivateKey: "pem"}))
+	rebuild := func(provider, clientID, clientSecret string) (oauth.Exchanger, bool) {
+		switch provider {
+		case oauthProviderGoogle:
+			return oauth.NewGoogle(oauth.GoogleConfig{ClientID: clientID, ClientSecret: clientSecret}), true
+		case oauthProviderMicrosoft:
+			return oauth.NewMicrosoft(oauth.MicrosoftConfig{ClientID: clientID, ClientSecret: clientSecret}), true
+		case oauthProviderApple:
+			return oauth.NewApple(oauth.AppleConfig{ClientID: clientID, TeamID: "TEAM", KeyID: "KEY", PrivateKey: "pem"}), true
 		}
-		tc.cfg.Hosts = map[string]ProjectOAuthHostClients{hostB: {tc.provider: tc.client}}
-		ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "other", OAuth: tc.cfg})
-		for _, host := range []string{hostA, hostB} {
-			if _, ok := r.exchangerFor(ctx, tc.provider, "https://"+host+"/oauth/callback/"+tc.provider); ok {
-				t.Errorf("%s on %s: a native-only base must stay unavailable for the hosted flow", tc.provider, host)
+		return nil, false
+	}
+	secretEnc := encForProject(t, "host-secret")
+	for _, base := range []struct {
+		name, projectID string
+		env             *oauth.Registry
+		hubSharing      bool
+	}{
+		{"no other base", "other", oauth.NewRegistry(), false},
+		{"over the default project's env base", "default", env, false},
+		{"over a borrowed hub base", "other", env, true},
+	} {
+		r := newOAuthResolver("default", base.env, base.hubSharing, nil).withSecrets(resolverSecretsKey(), nil)
+		r.envProvider = rebuild
+		for _, tc := range []struct {
+			provider string
+			cfg      ProjectOAuthConfig
+			client   ProjectOAuthHostClient
+		}{
+			{
+				oauthProviderGoogle,
+				ProjectOAuthConfig{Google: &ProjectOAuthGoogle{NativeAudiences: []string{"native.example"}}},
+				ProjectOAuthHostClient{ClientID: hostBGoogle, ClientSecretEnc: secretEnc},
+			},
+			{
+				oauthProviderMicrosoft,
+				ProjectOAuthConfig{Microsoft: &ProjectOAuthMicrosoft{NativeAudiences: []string{"native.example"}}},
+				ProjectOAuthHostClient{ClientID: "host-b-microsoft", ClientSecretEnc: secretEnc},
+			},
+			{
+				oauthProviderApple,
+				ProjectOAuthConfig{Apple: &ProjectOAuthApple{NativeAudiences: []string{"native.example"}}},
+				ProjectOAuthHostClient{ClientID: hostBAppleID},
+			},
+		} {
+			if err := tc.cfg.validate(); err != nil {
+				t.Fatalf("%s: the native-only block must be a valid config: %v", tc.provider, err)
+			}
+			tc.cfg.Hosts = ProjectOAuthHosts{hostB: {tc.provider: tc.client}}
+			ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: base.projectID, OAuth: tc.cfg})
+			for _, host := range []string{hostA, hostB} {
+				if _, ok := r.exchangerFor(ctx, tc.provider, "https://"+host+"/oauth/callback/"+tc.provider); ok {
+					t.Errorf("%s, %s on %s: a native-only base must stay unavailable for the hosted flow", base.name, tc.provider, host)
+				}
+			}
+		}
+		if base.env.Len() > 0 {
+			// The same request without the own block reaches the other base,
+			// so the cases above are not unavailable for want of one.
+			ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: base.projectID})
+			if _, ok := r.exchangerFor(ctx, oauthProviderGoogle, callbackOnA); !ok {
+				t.Fatalf("%s: without the own block google must resolve to the other base", base.name)
 			}
 		}
 	}

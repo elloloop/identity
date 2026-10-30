@@ -118,33 +118,46 @@ type ProjectOAuthConfig struct {
 	// Hosts holds the per-host client overrides (ADR-0019), keyed by the host
 	// a flow's callback URL is on and then by provider key: on that host the
 	// provider signs in through this client instead of its base one.
-	Hosts map[string]ProjectOAuthHostClients `json:"hosts,omitempty"`
+	Hosts ProjectOAuthHosts `json:"hosts,omitempty"`
 }
 
+// ProjectOAuthHosts holds a project's host clients (ADR-0019), keyed by the
+// callback host they apply on.
+type ProjectOAuthHosts map[string]ProjectOAuthHostClients
+
 // ProjectOAuthHostClients is one callback host's clients, keyed by provider.
-// Only the built-in provider keys are decoded. Any other key is skipped
-// unread, as an unknown key under "oauth" is, so an entry a newer binary
-// wrote never stops this one loading the project.
 type ProjectOAuthHostClients map[string]ProjectOAuthHostClient
 
-// UnmarshalJSON decodes the built-in provider keys of one host's object.
-func (h *ProjectOAuthHostClients) UnmarshalJSON(data []byte) error {
-	var raw map[string]json.RawMessage
+// UnmarshalJSON decodes each host's clients under the built-in provider keys.
+// Any other provider key is skipped unread, as an unknown key under "oauth"
+// is, so an entry a newer binary wrote never stops this one loading the
+// project. An entry that does not decode is reported by its host and
+// provider, the path validate reports a bad entry by.
+func (h *ProjectOAuthHosts) UnmarshalJSON(data []byte) error {
+	var raw map[string]map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+		return fmt.Errorf("oauth.hosts: %w", err)
 	}
-	clients := ProjectOAuthHostClients{}
-	for provider, value := range raw {
-		if !isOAuthProviderKey(provider) {
-			continue
-		}
-		var client ProjectOAuthHostClient
-		if err := json.Unmarshal(value, &client); err != nil {
-			return fmt.Errorf("%s: %w", provider, err)
-		}
-		clients[provider] = client
+	if raw == nil {
+		*h = nil
+		return nil
 	}
-	*h = clients
+	hosts := make(ProjectOAuthHosts, len(raw))
+	for host, entries := range raw {
+		clients := ProjectOAuthHostClients{}
+		for provider, value := range entries {
+			if !isOAuthProviderKey(provider) {
+				continue
+			}
+			var client ProjectOAuthHostClient
+			if err := json.Unmarshal(value, &client); err != nil {
+				return fmt.Errorf("oauth.hosts[%q].%s: %w", host, provider, err)
+			}
+			clients[provider] = client
+		}
+		hosts[host] = clients
+	}
+	*h = hosts
 	return nil
 }
 

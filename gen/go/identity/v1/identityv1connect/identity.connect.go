@@ -1151,9 +1151,10 @@ type IdentityServiceClient interface {
 	// secret server-side); AdminDeleteProjectOAuthHostClient removes one, so its
 	// host reverts to the base client. Neither touches the base provider. A
 	// server that predates them refuses them and changes nothing: over HTTP it
-	// answers UNAUTHENTICATED, as it does not know them as admin-secret calls.
-	// Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
-	// with no control plane.
+	// answers UNAUTHENTICATED, as it does not know them as admin-secret calls,
+	// and through an embedder's native gRPC server UNIMPLEMENTED. Operator-only,
+	// like the other Admin* RPCs, and UNIMPLEMENTED on a build with no control
+	// plane.
 	AdminSetProjectOAuthHostClient(context.Context, *connect.Request[v1.AdminSetProjectOAuthHostClientRequest]) (*connect.Response[v1.AdminSetProjectOAuthHostClientResponse], error)
 	AdminDeleteProjectOAuthHostClient(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthHostClientRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthHostClientResponse], error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT
@@ -3838,9 +3839,10 @@ type IdentityServiceHandler interface {
 	// secret server-side); AdminDeleteProjectOAuthHostClient removes one, so its
 	// host reverts to the base client. Neither touches the base provider. A
 	// server that predates them refuses them and changes nothing: over HTTP it
-	// answers UNAUTHENTICATED, as it does not know them as admin-secret calls.
-	// Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a build
-	// with no control plane.
+	// answers UNAUTHENTICATED, as it does not know them as admin-secret calls,
+	// and through an embedder's native gRPC server UNIMPLEMENTED. Operator-only,
+	// like the other Admin* RPCs, and UNIMPLEMENTED on a build with no control
+	// plane.
 	AdminSetProjectOAuthHostClient(context.Context, *connect.Request[v1.AdminSetProjectOAuthHostClientRequest]) (*connect.Response[v1.AdminSetProjectOAuthHostClientResponse], error)
 	AdminDeleteProjectOAuthHostClient(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthHostClientRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthHostClientResponse], error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT

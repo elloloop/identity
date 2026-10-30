@@ -261,7 +261,7 @@ func (s *ControlPlaneAdminService) AdminSetProjectOAuthHostClient(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
-	host, err := normalizeCallbackHost(in.CallbackHost)
+	host, err := newCallbackHost(in.CallbackHost)
 	if err != nil {
 		return nil, err
 	}
@@ -366,26 +366,59 @@ func hostClientAuditDetails(projectID, provider, host string) map[string]any {
 // (ADR-0019). A key is valid only if it comes back from this function
 // unchanged, which is what parsing a stored config checks, so a host whose
 // normalized form would normalize again to something else (a doubled
-// trailing dot) is refused rather than stored in a form no parse accepts. So
-// is one with a character outside a-z, 0-9, '.' and '-', since a request's
-// host is an ASCII DNS name (a browser sends an IDN in punycode) and could
-// never match it.
+// trailing dot) is refused rather than stored in a form no parse accepts.
 func normalizeCallbackHost(host string) (string, error) {
 	h, err := normalizeHostname("callback_host", host)
 	if err != nil {
 		return "", err
 	}
-	if again, err := normalizeHostname("callback_host", h); err != nil || again != h || !isDNSName(h) {
+	if again, err := normalizeHostname("callback_host", h); err != nil || again != h {
 		return "", fmt.Errorf("%w: invalid callback_host %q", ErrInvalidArgument, host)
 	}
 	return h, nil
 }
 
-// isDNSName reports whether h holds only a-z, 0-9, '.' and '-'.
-func isDNSName(h string) bool {
-	for _, r := range h {
-		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '.' && r != '-' {
+// newCallbackHost is normalizeCallbackHost for a host client being written,
+// which must also be an LDH hostname (isLDHHostname), an IDN in its punycode
+// form. That catches a typo, a stray URL character, an empty label or a
+// control character at the write, instead of storing a key that silently
+// never applies. A stored config is held only to normalizeCallbackHost, so a
+// key written under a wider rule never stops this binary loading the project,
+// and the delete can always remove it.
+func newCallbackHost(host string) (string, error) {
+	h, err := normalizeCallbackHost(host)
+	if err != nil {
+		return "", err
+	}
+	if !isLDHHostname(h) {
+		return "", fmt.Errorf("%w: invalid callback_host %q: want a hostname of labels of a-z, 0-9 and '-' (an IDN in punycode)", ErrInvalidArgument, host)
+	}
+	return h, nil
+}
+
+// maxHostnameLen and maxLabelLen are the DNS limits on a hostname and on
+// each of its labels (RFC 1035 section 2.3.4).
+const (
+	maxHostnameLen = 253
+	maxLabelLen    = 63
+)
+
+// isLDHHostname reports whether h is an LDH hostname (RFC 1123 section 2.1):
+// at most maxHostnameLen characters of dot-separated labels, each 1 to
+// maxLabelLen characters of a-z, 0-9 and '-' that neither starts nor ends
+// with '-'.
+func isLDHHostname(h string) bool {
+	if len(h) > maxHostnameLen {
+		return false
+	}
+	for _, label := range strings.Split(h, ".") {
+		if label == "" || len(label) > maxLabelLen || label[0] == '-' || label[len(label)-1] == '-' {
 			return false
+		}
+		for i := 0; i < len(label); i++ {
+			if c := label[i]; (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
 		}
 	}
 	return true
