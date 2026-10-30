@@ -338,9 +338,10 @@ reached an old replica; through an embedder's native gRPC server it answers
 `UNIMPLEMENTED`. Setting or deleting the base provider leaves its overrides in place.
 
 A whole-config write (`UpsertProjectConfig`) holds each `oauth.hosts` key it
-adds to the same rule. A key already stored is written back as it is, even
-when the rest of the stored config no longer parses, so a whole-config write
-can still repair such a project.
+adds, under any letter case of `oauth` and `hosts`, to the same rule, in the
+lower-case form the override RPC stores. A key already stored is written back
+as it is, even when the rest of the stored config no longer parses, so a
+whole-config write can still repair such a project.
 
 ### The hosted auth UI (`/auth/`)
 

@@ -23,22 +23,23 @@ from that provider. See the `oauth.md` section "A client per auth host".
   unavailable on that host. It never falls back to the base client.
 - **The hosted page** starts a provider with an override for its own host on
   that host, with no `project_key`.
-- **Admin API (additive):** `AdminSetProjectOAuthHostClient` writes an
-  override from a `ProjectOAuthHostClient` (`provider`, `callback_host`,
-  `client_id`, `client_secret`; an empty secret keeps the stored one, and Apple
-  takes none), and `AdminDeleteProjectOAuthHostClient` removes one. A write's
+- **Admin API (additive):** `AdminSetProjectOAuthHostClient` writes an override
+  from a `ProjectOAuthHostClient` (`provider`, `callback_host`, `client_id`,
+  `client_secret`; an empty secret keeps the stored one, and Apple takes none),
+  and `AdminDeleteProjectOAuthHostClient` removes one. A write's
   `callback_host` must be an LDH hostname: two or more labels of a-z, 0-9 and
   `-`, none starting or ending with `-`, at most 63 characters each and 253 in
   all, an IDN in its punycode form. A whole-config write
-  (`UpsertProjectConfig`) holds each `oauth.hosts` key it adds to the same
-  rule, and writes a key already stored back as it is, even when the rest of
-  the stored config no longer parses. Neither override RPC touches the base
-  provider. A server that predates the override RPCs refuses them and
-  changes nothing: over HTTP it answers `UNAUTHENTICATED`, because it does not
-  know them as admin-secret calls, so during a rolling upgrade that code means
-  the call reached an old replica, not that the admin secret is wrong. Through
-  an embedder's native gRPC server an older build answers `UNIMPLEMENTED`.
-  `AdminListProjectOAuthProvidersResponse.host_clients` (2)
+  (`UpsertProjectConfig`) holds each `oauth.hosts` key it adds, under any
+  letter case of `oauth` and `hosts`, to the same rule in the lower-case form
+  the override RPC stores, and writes a key already stored back as it is, even
+  when the rest of the stored config no longer parses. Neither override RPC
+  touches the base provider. A server that predates the override RPCs refuses
+  them and changes nothing: over HTTP it answers `UNAUTHENTICATED`, because it
+  does not know them as admin-secret calls, so during a rolling upgrade that
+  code means the call reached an old replica, not that the admin secret is
+  wrong. Through an embedder's native gRPC server an older build answers
+  `UNIMPLEMENTED`. `AdminListProjectOAuthProvidersResponse.host_clients` (2)
   returns the overrides, redacted. Setting or deleting a base provider leaves
   its overrides in place. Writing or removing an override is audited as
   `project_oauth_provider_set` or `project_oauth_provider_removed` with a
@@ -48,6 +49,9 @@ from that provider. See the `oauth.md` section "A client per auth host".
   and each built-in provider's override must be complete. An older version
   ignored the key, so a project that already stores an `oauth.hosts` value for
   some other purpose fails to load after the upgrade until it is removed.
+- **`UpsertProjectConfig` refuses data after the config object**
+  (`{…} {}`, say) with `INVALID_ARGUMENT`. The Postgres store already refused
+  such a blob, as an internal error, so no stored config is affected.
 - **Rollout:** register each override's client with the callback URL of the
   flows that use it (`https://<host>/oauth/callback/<provider>` for the hosted
   flow, the app's own `redirect_uri` for the headless flow), and configure an

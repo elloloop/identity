@@ -259,9 +259,10 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
       page and <code>/oauth/start</code> are served on, or the host of the
       app's <code>redirect_uri</code> in the headless flow. The callback
       completes with the client the start used. A key a write adds, through
-      the RPCs below or a whole-config <code>UpsertProjectConfig</code>, is
-      held to the <code>callback_host</code> rule; a key already stored is
-      written back as it is.
+      the RPCs below or a whole-config <code>UpsertProjectConfig</code>, must
+      be what <code>callback_host</code> stores: a lower-case LDH hostname of
+      two or more labels (the rule is in the block below). A whole-config
+      write writes a key already stored back as it is.
     </li>
     <li>
       An override swaps the client and nothing else. The provider is still

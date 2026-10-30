@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/mail"
 	"net/url"
 	"strings"
@@ -1350,7 +1351,9 @@ func (c ProjectCORSConfig) Allowlist() (origin.Allowlist, error) {
 // ProjectConfig. An empty or all-whitespace blob is the zero config (no
 // per-project overrides) — the same meaning the store gives "" by normalising
 // it to "{}". A malformed blob is a configuration error the caller must
-// surface, never silently swallow.
+// surface, never silently swallow; so is anything after the config value,
+// which a check reading the whole text (checkNewHostKeys) would otherwise see
+// differently from this parse.
 func ParseProjectConfig(configJSON string) (ProjectConfig, error) {
 	var cfg ProjectConfig
 	if strings.TrimSpace(configJSON) == "" {
@@ -1359,6 +1362,9 @@ func ParseProjectConfig(configJSON string) (ProjectConfig, error) {
 	dec := json.NewDecoder(strings.NewReader(configJSON))
 	if err := dec.Decode(&cfg); err != nil {
 		return ProjectConfig{}, fmt.Errorf("parse project config: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return ProjectConfig{}, errors.New("parse project config: data after the config value")
 	}
 	if err := cfg.Validate(); err != nil {
 		return ProjectConfig{}, fmt.Errorf("parse project config: %w", err)

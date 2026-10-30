@@ -419,7 +419,8 @@ func checkNewHostKeys(current, next string) error {
 			continue
 		}
 		if h, err := newCallbackHost(host); err != nil || h != host {
-			return fmt.Errorf("%w: oauth.hosts key %q: %s", ErrInvalidArgument, host, callbackHostRule)
+			return fmt.Errorf("%w: oauth.hosts key %q (under any letter case of oauth.hosts): %s",
+				ErrInvalidArgument, host, callbackHostRule)
 		}
 	}
 	return nil
@@ -429,13 +430,13 @@ func checkNewHostKeys(current, next string) error {
 // every spelling of "oauth" and "hosts" that encoding/json reads as that
 // field: it matches a field name case-insensitively and keeps the last
 // duplicate, and a jsonb store reorders an object's keys, so which spelling
-// a later parse reads is not the one a parse of the written text read. Text
-// that is not a JSON object, or a spelling whose value is not one, adds no
-// key.
+// a later parse reads need not be the one a parse of the written text read.
+// Text that is not a JSON object, or a spelling whose value is not one, adds
+// no key.
 func configHostKeys(config string) map[string]bool {
 	keys := map[string]bool{}
-	for _, oauth := range foldedObjects(json.RawMessage(config), "oauth") {
-		for _, hosts := range foldedObjects(oauth, "hosts") {
+	for _, oauth := range foldedValues(json.RawMessage(config), "oauth") {
+		for _, hosts := range foldedValues(oauth, "hosts") {
 			var entries map[string]json.RawMessage
 			if json.Unmarshal(hosts, &entries) != nil {
 				continue
@@ -448,10 +449,11 @@ func configHostKeys(config string) map[string]bool {
 	return keys
 }
 
-// foldedObjects returns the value of every key of the JSON object data that
-// equals field under Unicode case folding, the match encoding/json uses for
-// a field name. Data that is not a JSON object has none.
-func foldedObjects(data json.RawMessage, field string) []json.RawMessage {
+// foldedValues returns the value, of any JSON type, of every key of the JSON
+// object data that equals field under Unicode case folding, the match
+// encoding/json uses for a field name. Data that is not a JSON object has
+// none.
+func foldedValues(data json.RawMessage, field string) []json.RawMessage {
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(data, &obj) != nil {
 		return nil

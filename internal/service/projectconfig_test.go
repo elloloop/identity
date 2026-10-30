@@ -91,6 +91,21 @@ func TestParseProjectConfig_Malformed_Errors(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse project config")
 }
 
+// Anything after the config value is refused, so a check that reads the
+// whole text never sees a config other than the one this parse returns;
+// whitespace around the value is not data.
+func TestParseProjectConfig_DataAfterTheValue_Errors(t *testing.T) {
+	t.Parallel()
+
+	for _, blob := range []string{`{} {}`, `{"oauth":{}} x`, `{}]`, `{}{"oauth":{}}`, `null null`} {
+		_, err := ParseProjectConfig(blob)
+		require.Error(t, err, blob)
+		assert.Contains(t, err.Error(), "parse project config", blob)
+	}
+	_, err := ParseProjectConfig(" \n{\"oauth\":{}}\n\t ")
+	require.NoError(t, err)
+}
+
 func TestParseProjectConfig_Branding(t *testing.T) {
 	t.Parallel()
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -309,6 +310,11 @@ func TestUpsertProjectConfig_HostKeys(t *testing.T) {
 			t.Errorf("a new key %q: err = %v, want ErrInvalidArgument", host, err)
 		}
 	}
+	// Data after the config is refused by the parse, so a check that reads the
+	// whole text cannot be skipped by it.
+	if _, err := f.svc.UpsertProjectConfig(ctx, oauthAdminSecret, projectID, withHosts("auth_b.example")+" {}"); !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("a new key before trailing data: err = %v, want ErrInvalidArgument", err)
+	}
 	if stored, _ := storedOAuth(t, f, projectID); strings.Contains(stored, "hosts") {
 		t.Fatalf("a refused write stored something: %s", stored)
 	}
@@ -341,6 +347,8 @@ func TestUpsertProjectConfig_HostKeysUnderEverySpelling(t *testing.T) {
 		"an OAUTH sibling":          `{"oauth":{"hosts":{"auth_b.example":` + client + `}},"OAUTH":{"hosts":{}}}`,
 		"a folded long s":           `{"oauth":{"ho\u017fts":{"auth_b.example":` + client + `},"hosts":{}}}`,
 		"an unnormalized key there": `{"oauth":{"HOSTS":{"Auth.B.Example":` + client + `},"hosts":{}}}`,
+		"a sole OAUTH spelling":     `{"OAUTH":{"hosts":{"auth_b.example":` + client + `}}}`,
+		"under an Oauth sibling":    `{"oauth":{"hosts":{}},"Oauth":{"hosts":{"auth_b.example":` + client + `}}}`,
 	} {
 		f := newAdminFixture(oauthAdminSecret)
 		projectID := seedOAuthProject(t, f)
@@ -349,6 +357,38 @@ func TestUpsertProjectConfig_HostKeysUnderEverySpelling(t *testing.T) {
 		}
 		if _, err := f.svc.UpsertProjectConfig(context.Background(), oauthAdminSecret, projectID, cfg); !errors.Is(err, ErrInvalidArgument) {
 			t.Errorf("%s: err = %v, want ErrInvalidArgument", name, err)
+		}
+	}
+
+	// A key stored under any spelling is one already stored, so writing the
+	// config back as read succeeds.
+	for _, cfg := range []string{
+		`{"oauth":{"HOSTS":{"auth_b.example":` + client + `}}}`,
+		`{"OAUTH":{"ho\u017fts":{"auth_b.example":` + client + `}}}`,
+	} {
+		f := newAdminFixture(oauthAdminSecret)
+		projectID := seedOAuthProject(t, f)
+		seedProjectConfig(t, f, projectID, cfg)
+		if _, err := f.svc.UpsertProjectConfig(context.Background(), oauthAdminSecret, projectID, cfg); err != nil {
+			t.Errorf("writing back %s: %v", cfg, err)
+		}
+	}
+}
+
+// configHostKeys returns the union of the keys under every spelling of
+// "oauth" and "hosts" that encoding/json reads as that field, whatever order
+// a map hands the spellings over in, and none from text that holds no such
+// object.
+func TestConfigHostKeys(t *testing.T) {
+	t.Parallel()
+	got := configHostKeys(`{"oauth":{"hosts":{"a.example":{}},"HOSTS":{"b.example":{}},"ho\u017fts":{"c.example":{}},"hostz":{"x.example":{}}},` +
+		`"OAUTH":{"Hosts":{"d.example":{}}},"o_auth":{"hosts":{"y.example":{}}}}`)
+	if want := map[string]bool{"a.example": true, "b.example": true, "c.example": true, "d.example": true}; !maps.Equal(got, want) {
+		t.Errorf("configHostKeys = %v, want %v", got, want)
+	}
+	for _, text := range []string{``, `null`, `[]`, `{"oauth":["x"]}`, `{"oauth":{"hosts":[]}}`, `{"oauth":{"hosts":null}}`} {
+		if got := configHostKeys(text); len(got) != 0 {
+			t.Errorf("configHostKeys(%s) = %v, want none", text, got)
 		}
 	}
 }
@@ -377,11 +417,18 @@ func TestUpsertProjectConfig_ReplacesAConfigThatDoesNotParse(t *testing.T) {
 			t.Fatalf("%s: the stored config must not parse", tc.name)
 		}
 		_, err := f.svc.UpsertProjectConfig(ctx, oauthAdminSecret, projectID, tc.write)
-		if tc.ok && err != nil {
-			t.Errorf("%s: %v", tc.name, err)
+		if !tc.ok {
+			if !errors.Is(err, ErrInvalidArgument) {
+				t.Errorf("%s: err = %v, want ErrInvalidArgument", tc.name, err)
+			}
+			continue
 		}
-		if !tc.ok && !errors.Is(err, ErrInvalidArgument) {
-			t.Errorf("%s: err = %v, want ErrInvalidArgument", tc.name, err)
+		if err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+			continue
+		}
+		if stored, _ := storedOAuth(t, f, projectID); stored != tc.write {
+			t.Errorf("%s: stored %s, want the written %s", tc.name, stored, tc.write)
 		}
 	}
 }

@@ -110,9 +110,13 @@ split from their accounts. The products need one pool and a client per host.
    `-`, none starting or ending with `-`, at most 63 characters each and 253
    in all; an IDN in punycode), which catches a typo, an empty label or a
    control character. A whole-config write (`UpsertProjectConfig`) holds each
-   `oauth.hosts` key it adds to the same rule and writes a key already stored
-   back as it is, even when the rest of the stored config no longer parses, so
-   it can still repair such a project. A stored config is held only to the
+   `oauth.hosts` key it adds to the same rule, in the lower-case form the RPC
+   stores. It reads the keys under every letter case of `oauth` and `hosts`,
+   since the JSON parse matches a field name that way and the jsonb store
+   reorders an object's keys, and it refuses data after the config object, so
+   the keys it checks are the ones a later parse can read. It writes a key
+   already stored back as it is, even when the rest of the stored config no
+   longer parses, so it can still repair such a project. A stored config is held only to the
    first rule, so a key written under a wider one never stops a project
    loading, and the delete can always remove it. Setting or deleting the base
    provider leaves its overrides alone.
