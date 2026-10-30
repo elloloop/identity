@@ -41,7 +41,7 @@ func envGoogleBuilder(provider, clientID, clientSecret string) (oauth.Exchanger,
 // hostClientScope scopes a request to projectID with cfg, adding a Google
 // override for hostB whose secret is secretEnc.
 func hostClientScope(projectID string, cfg ProjectOAuthConfig, secretEnc string) context.Context {
-	cfg.Hosts = map[string]ProjectOAuthHostClients{
+	cfg.Hosts = ProjectOAuthHosts{
 		hostB: {oauthProviderGoogle: {ClientID: hostBGoogle, ClientSecretEnc: secretEnc}},
 	}
 	return WithProjectScope(context.Background(), &ProjectScope{ProjectID: projectID, OAuth: cfg})
@@ -230,7 +230,7 @@ func TestOAuthHostClient_NativeOnlyBaseNeverEnables(t *testing.T) {
 // Apple's host client swaps only the Services ID: the base team, key id and
 // key sign for it, on an own base and on an env base alike.
 func TestOAuthHostClient_AppleSwapsOnlyTheServicesID(t *testing.T) {
-	hosts := map[string]ProjectOAuthHostClients{hostB: {oauthProviderApple: {ClientID: hostBAppleID}}}
+	hosts := ProjectOAuthHosts{hostB: {oauthProviderApple: {ClientID: hostBAppleID}}}
 
 	r := newOAuthResolver("default", oauth.NewRegistry(), false, nil).withSecrets(resolverSecretsKey(), nil)
 	own := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "other", OAuth: ProjectOAuthConfig{

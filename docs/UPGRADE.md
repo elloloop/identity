@@ -27,7 +27,11 @@ from that provider. See the `oauth.md` section "A client per auth host".
   override from a `ProjectOAuthHostClient` (`provider`, `callback_host`,
   `client_id`, `client_secret`; an empty secret keeps the stored one, and Apple
   takes none), and `AdminDeleteProjectOAuthHostClient` removes one. A write's
-  `callback_host` must be an LDH hostname, an IDN in its punycode form. Neither
+  `callback_host` must be an LDH hostname: two or more labels of a-z, 0-9 and
+  `-`, none starting or ending with `-`, at most 63 characters each and 253 in
+  all, an IDN in its punycode form. A whole-config write
+  (`UpsertProjectConfig`) holds each `oauth.hosts` key it adds to the same
+  rule, and writes a key already stored back as it is. Neither override RPC
   touches the base provider. A server that predates them refuses them and
   changes nothing: over HTTP it answers `UNAUTHENTICATED`, because it does not
   know them as admin-secret calls, so during a rolling upgrade that code means

@@ -134,7 +134,7 @@ type ProjectOAuthHostClients map[string]ProjectOAuthHostClient
 // project. An entry that does not decode is reported by its host and
 // provider, the path validate reports a bad entry by.
 func (h *ProjectOAuthHosts) UnmarshalJSON(data []byte) error {
-	var raw map[string]map[string]json.RawMessage
+	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return fmt.Errorf("oauth.hosts: %w", err)
 	}
@@ -143,7 +143,11 @@ func (h *ProjectOAuthHosts) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	hosts := make(ProjectOAuthHosts, len(raw))
-	for host, entries := range raw {
+	for host, value := range raw {
+		var entries map[string]json.RawMessage
+		if err := json.Unmarshal(value, &entries); err != nil {
+			return fmt.Errorf("oauth.hosts[%q]: %w", host, err)
+		}
 		clients := ProjectOAuthHostClients{}
 		for provider, value := range entries {
 			if !isOAuthProviderKey(provider) {

@@ -190,6 +190,7 @@ func TestAdminHostClient_SetRejects(t *testing.T) {
 	for name, d := range map[string]struct{ project, provider, host string }{
 		"a bad host":       {projectID, oauthProviderGoogle, "auth.b.example:8443"},
 		"two dots":         {projectID, oauthProviderGoogle, "auth.b.example.."},
+		"a NUL":            {projectID, oauthProviderGoogle, "auth.b\x00.example"},
 		"no host":          {projectID, oauthProviderGoogle, ""},
 		"unknown provider": {projectID, "facebook", hostB},
 		"no project":       {"", oauthProviderGoogle, hostB},
@@ -213,36 +214,40 @@ func TestAdminHostClient_SetRejects(t *testing.T) {
 func TestNewCallbackHost(t *testing.T) {
 	t.Parallel()
 	label63 := strings.Repeat("a", 63)
-	for in, want := range map[string]string{
-		"auth.b.example":         "auth.b.example",
-		" Auth.B.Example. ":      "auth.b.example",
-		"auth-2.b.example":       "auth-2.b.example",
-		"xn--bcher-kva.example":  "xn--bcher-kva.example",
-		"123.example":            "123.example",
-		label63 + ".example":     label63 + ".example",
-		"a.b.c.d.e.example":      "a.b.c.d.e.example",
-		"XN--BCHER-KVA.EXAMPLE.": "xn--bcher-kva.example",
+	// Three 63-character labels and a 61-character one: 253 characters.
+	host253 := strings.Join([]string{label63, label63, label63, strings.Repeat("b", 61)}, ".")
+	for _, tc := range []struct{ in, want string }{
+		{"auth.b.example", "auth.b.example"},
+		{" Auth.B.Example. ", "auth.b.example"},
+		{"auth-2.b.example", "auth-2.b.example"},
+		{"xn--bcher-kva.example", "xn--bcher-kva.example"},
+		{"XN--BCHER-KVA.EXAMPLE.", "xn--bcher-kva.example"},
+		{"123.example", "123.example"},
+		{label63 + ".example", label63 + ".example"},
+		{host253, host253},
+		{host253 + ".", host253},
+		{"a.b.c.d.e.example", "a.b.c.d.e.example"},
 	} {
-		got, err := newCallbackHost(in)
-		if err != nil || got != want {
-			t.Errorf("newCallbackHost(%q) = %q, %v; want %q", in, got, err, want)
+		got, err := newCallbackHost(tc.in)
+		if err != nil || got != tc.want {
+			t.Errorf("newCallbackHost(%q) = %q, %v; want %q", tc.in, got, err, tc.want)
 		}
 	}
-	long := strings.Repeat(label63+".", 4)[:254]
-	for name, in := range map[string]string{
-		"an empty label":        "auth..example",
-		"a leading dot":         ".auth.example",
-		"a leading hyphen":      "-auth.example",
-		"a label ending in '-'": "auth-.example",
-		"a 64-character label":  label63 + "a.example",
-		"over 253 characters":   long,
-		"an underscore":         "auth_b.example",
-		"a Unicode letter":      "b\u00fccher.example",
-		"two trailing dots":     "auth.example..",
-		"a port":                "auth.example:8443",
+	for _, tc := range []struct{ name, in string }{
+		{"an empty label", "auth..example"},
+		{"a leading dot", ".auth.example"},
+		{"a leading hyphen", "-auth.example"},
+		{"a label ending in '-'", "auth-.example"},
+		{"a 64-character label", label63 + "a.example"},
+		{"over 253 characters", "c" + host253},
+		{"a single label", "localhost"},
+		{"an underscore", "auth_b.example"},
+		{"a Unicode letter", "b\u00fccher.example"},
+		{"two trailing dots", "auth.example.."},
+		{"a port", "auth.example:8443"},
 	} {
-		if got, err := newCallbackHost(in); !errors.Is(err, ErrInvalidArgument) {
-			t.Errorf("%s: newCallbackHost(%q) = %q, %v; want ErrInvalidArgument", name, in, got, err)
+		if got, err := newCallbackHost(tc.in); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("%s: newCallbackHost(%q) = %q, %v; want ErrInvalidArgument", tc.name, tc.in, got, err)
 		}
 	}
 }
@@ -275,6 +280,52 @@ func TestAdminHostClient_SetAcceptsLDHHosts(t *testing.T) {
 		if listed[i].CallbackHost != host || listed[i].ClientID != "gh-"+host {
 			t.Errorf("listed[%d] = %+v, want %s", i, listed[i], host)
 		}
+	}
+}
+
+// A whole-config write holds each host key it adds to the host client
+// write's rule, and keeps a key already stored whatever rule it was written
+// under, so a config written back as read never fails on it.
+func TestUpsertProjectConfig_HostKeys(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+	client := `{"github":{"client_id":"h","client_secret_enc":"e"}}`
+	withHosts := func(keys ...string) string {
+		entries := make([]string, 0, len(keys))
+		for _, k := range keys {
+			b, err := json.Marshal(k)
+			if err != nil {
+				t.Fatalf("marshal %q: %v", k, err)
+			}
+			entries = append(entries, string(b)+":"+client)
+		}
+		return `{"oauth":{"hosts":{` + strings.Join(entries, ",") + `}}}`
+	}
+
+	for _, host := range []string{"auth_b.example", "auth.b?example", "auth..b.example", "-auth.b.example", "auth.b\n.example"} {
+		if _, err := f.svc.UpsertProjectConfig(ctx, oauthAdminSecret, projectID, withHosts(host)); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("a new key %q: err = %v, want ErrInvalidArgument", host, err)
+		}
+	}
+	if stored, _ := storedOAuth(t, f, projectID); strings.Contains(stored, "hosts") {
+		t.Fatalf("a refused write stored something: %s", stored)
+	}
+
+	if _, err := f.svc.UpsertProjectConfig(ctx, oauthAdminSecret, projectID, withHosts("auth-2.b.example")); err != nil {
+		t.Fatalf("a new LDH key: %v", err)
+	}
+	const wider = "auth_b.example"
+	seedProjectConfig(t, f, projectID, withHosts(wider))
+	if _, err := f.svc.UpsertProjectConfig(ctx, oauthAdminSecret, projectID, withHosts(wider, "xn--bcher-kva.example")); err != nil {
+		t.Fatalf("a stored non-LDH key written back beside a new LDH one: %v", err)
+	}
+	if _, err := f.svc.UpsertProjectConfig(ctx, oauthAdminSecret, projectID, withHosts(wider, "auth.c?example")); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("a new non-LDH key beside a stored one: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, cfg := storedOAuth(t, f, projectID); len(cfg.Hosts) != 2 {
+		t.Fatalf("hosts = %v, want the stored key and the LDH one", cfg.Hosts)
 	}
 }
 

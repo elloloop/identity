@@ -333,6 +333,11 @@ func (s *ControlPlaneAdminService) AdminDeleteProjectOAuthHostClient(ctx context
 	if err != nil {
 		return err
 	}
+	// No key holds U+0000 (a Postgres jsonb config cannot store one), and the
+	// audit row naming it would be refused by the same jsonb cast.
+	if strings.ContainsRune(host, 0) {
+		return fmt.Errorf("%w: invalid callback_host %q", ErrInvalidArgument, callbackHost)
+	}
 
 	if _, err := s.mutateProjectConfig(ctx, projectID, func(current string) (string, error) {
 		top, oauthSub, err := decodeOAuthSubtree(current)
@@ -379,49 +384,49 @@ func normalizeCallbackHost(host string) (string, error) {
 }
 
 // newCallbackHost is normalizeCallbackHost for a host client being written,
-// which must also be an LDH hostname (isLDHHostname), an IDN in its punycode
-// form. That catches a typo, a stray URL character, an empty label or a
-// control character at the write, instead of storing a key that silently
-// never applies. A stored config is held only to normalizeCallbackHost, so a
-// key written under a wider rule never stops this binary loading the project,
-// and the delete can always remove it.
+// which must also be a bare domain name (isBareDomainName: two or more LDH
+// labels), an IDN in its punycode form. That catches a typo, a stray URL
+// character, an empty label or a control character at the write, instead of
+// storing a key that silently never applies. A stored config is held only to
+// normalizeCallbackHost, so a key written under a wider rule never stops this
+// binary loading the project, and the delete can always remove it.
 func newCallbackHost(host string) (string, error) {
 	h, err := normalizeCallbackHost(host)
 	if err != nil {
 		return "", err
 	}
-	if !isLDHHostname(h) {
-		return "", fmt.Errorf("%w: invalid callback_host %q: want a hostname of labels of a-z, 0-9 and '-' (an IDN in punycode)", ErrInvalidArgument, host)
+	if !isBareDomainName(h) {
+		return "", fmt.Errorf("%w: invalid callback_host %q: %s", ErrInvalidArgument, host, callbackHostRule)
 	}
 	return h, nil
 }
 
-// maxHostnameLen and maxLabelLen are the DNS limits on a hostname and on
-// each of its labels (RFC 1035 section 2.3.4).
-const (
-	maxHostnameLen = 253
-	maxLabelLen    = 63
-)
+// callbackHostRule says, in an error, what a written callback host must be.
+const callbackHostRule = "want a hostname of two or more labels of a-z, 0-9 and '-', none starting or ending " +
+	"with '-', at most 63 characters each and 253 in all (an IDN in punycode)"
 
-// isLDHHostname reports whether h is an LDH hostname (RFC 1123 section 2.1):
-// at most maxHostnameLen characters of dot-separated labels, each 1 to
-// maxLabelLen characters of a-z, 0-9 and '-' that neither starts nor ends
-// with '-'.
-func isLDHHostname(h string) bool {
-	if len(h) > maxHostnameLen {
-		return false
+// checkNewHostKeys holds each oauth.hosts key that next adds to the stored
+// config current to the rule a host client write is held to
+// (newCallbackHost), so a whole-config write cannot store a key the host
+// client RPC would refuse. A key already stored is kept whatever rule it was
+// written under, so writing back a config as read never fails on it. Keys in
+// next are already in normalized form (ParseProjectConfig checked them), so
+// only the bare-domain-name rule remains. A stored config that does not parse
+// has no keys to keep: the write replaces it.
+func checkNewHostKeys(current string, next ProjectOAuthHosts) error {
+	var stored ProjectOAuthHosts
+	if cfg, err := ParseProjectConfig(current); err == nil {
+		stored = cfg.OAuth.Hosts
 	}
-	for _, label := range strings.Split(h, ".") {
-		if label == "" || len(label) > maxLabelLen || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
+	for host := range next {
+		if _, ok := stored[host]; ok {
+			continue
 		}
-		for i := 0; i < len(label); i++ {
-			if c := label[i]; (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
-				return false
-			}
+		if !isBareDomainName(host) {
+			return fmt.Errorf("%w: oauth.hosts key %q: %s", ErrInvalidArgument, host, callbackHostRule)
 		}
 	}
-	return true
+	return nil
 }
 
 // decodeHostClients decodes the oauth subtree's "hosts" object into raw

@@ -327,9 +327,13 @@ same reason.
 Author them with their own admin RPCs. `AdminSetProjectOAuthHostClient` takes
 a `ProjectOAuthHostClient` (`provider`, `callback_host`, `client_id`,
 `client_secret`; an empty secret keeps the stored one, and Apple takes none;
-`callback_host` must be an LDH hostname, an IDN in its punycode form),
-`AdminDeleteProjectOAuthHostClient` removes one, and
-`AdminListProjectOAuthProviders` returns them, redacted, in `host_clients`.
+`callback_host` must be an LDH hostname: two or more labels of a-z, 0-9 and
+`-`, none starting or ending with `-`, at most 63 characters each and 253 in
+all, an IDN in its punycode form), `AdminDeleteProjectOAuthHostClient` removes
+one, and `AdminListProjectOAuthProviders` returns them, redacted, in
+`host_clients`. A whole-config write (`UpsertProjectConfig`) holds each
+`oauth.hosts` key it adds to the same rule; a key already stored is written
+back as it is.
 A server that predates them refuses them and changes nothing: over HTTP it
 answers `UNAUTHENTICATED`, because it does not know them as admin-secret
 calls, so during a rolling upgrade that code means the call reached an old

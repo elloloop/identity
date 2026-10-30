@@ -304,7 +304,7 @@ curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAu
   </p>
   <Code code={`message ProjectOAuthHostClient {
   string provider = 1;           // "google" | "microsoft" | "apple" | "github" | "oidc"
-  string callback_host = 2;      // an LDH hostname (an IDN as punycode): no scheme, port or path
+  string callback_host = 2;      // an LDH hostname of 2+ labels (≤63 chars each, ≤253 in all; an IDN as punycode)
   string client_id = 3;          // for Apple, the Services ID
   string client_secret = 4;      // write-only plaintext; empty = keep stored; none for Apple
   bool   has_client_secret = 5;  // read-only (redacted presence)

@@ -240,7 +240,10 @@ func (s *ControlPlaneAdminService) UpsertProjectConfig(ctx context.Context, secr
 	// A whole-blob replace still routes through the optimistic-concurrency helper
 	// so it is serialized against concurrent config mutators (e.g. an in-flight
 	// OAuth-provider write) rather than blindly clobbering under a lost update.
-	stored, err := s.mutateProjectConfig(ctx, projectID, func(string) (string, error) {
+	stored, err := s.mutateProjectConfig(ctx, projectID, func(current string) (string, error) {
+		if err := checkNewHostKeys(current, cfg.OAuth.Hosts); err != nil {
+			return "", err
+		}
 		return configJSON, nil
 	})
 	if err != nil {

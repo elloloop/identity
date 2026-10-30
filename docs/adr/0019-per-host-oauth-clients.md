@@ -106,12 +106,15 @@ split from their accounts. The products need one pool and a client per host.
    it, and `AdminListProjectOAuthProviders` returns the overrides, redacted, in
    `host_clients`. A host the write would store in a form the resolver could
    never match (a doubled trailing dot, say) is refused, not stored, and the
-   write also requires an LDH hostname (labels of a-z, 0-9 and `-`, none
-   empty or starting or ending with `-`; an IDN in punycode), which catches a
-   typo, an empty label or a control character. A stored config is
-   held only to the first rule, so a key written under a wider one never stops
-   a project loading, and the delete can always remove it. Setting or deleting
-   the base provider leaves its overrides alone.
+   write also requires an LDH hostname (two or more labels of a-z, 0-9 and
+   `-`, none starting or ending with `-`, at most 63 characters each and 253
+   in all; an IDN in punycode), which catches a typo, an empty label or a
+   control character. A whole-config write (`UpsertProjectConfig`) holds each
+   `oauth.hosts` key it adds to the same rule and writes a key already stored
+   back as it is. A stored config is held only to the first rule, so a key
+   written under a wider one never stops a project loading, and the delete can
+   always remove it. Setting or deleting the base provider leaves its
+   overrides alone.
 
    They are separate RPCs, not a `callback_host` field on the provider RPCs,
    because proto3 discards a field it does not know. Sent to a server that

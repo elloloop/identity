@@ -10895,9 +10895,9 @@ components:
           description: |-
             callback_host is the host of the flow's callback URL: a DNS name with no
              scheme, port or path. A write lower-cases it, drops one trailing dot, and
-             requires a hostname of dot-separated labels of a-z, 0-9 and '-', none
-             empty or starting or ending with '-' (an IDN in its punycode form).
-             Required.
+             requires a hostname of two or more labels of a-z, 0-9 and '-', none
+             starting or ending with '-', at most 63 characters each and 253 in all
+             (an IDN in its punycode form). Required.
         clientId:
           type: string
           title: client_id

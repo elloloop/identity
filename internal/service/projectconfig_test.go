@@ -518,7 +518,7 @@ func TestParseProjectConfig_OAuth_HostClients_Malformed(t *testing.T) {
 
 	// The error names the entry that does not decode, by host and provider.
 	for name, tc := range map[string]struct{ hosts, want string }{
-		"host not an object":     {`{"auth.b.example":"x"}`, `oauth.hosts: json: cannot unmarshal string into Go struct field .auth.b.example`},
+		"host not an object":     {`{"auth.b.example":"x"}`, `oauth.hosts["auth.b.example"]: `},
 		"built-in not an object": {`{"auth.b.example":{"google":["x"]}}`, `oauth.hosts["auth.b.example"].google: `},
 		"built-in non-string id": {`{"auth.b.example":{"google":{"client_id":7,"client_secret_enc":"e"}}}`, `oauth.hosts["auth.b.example"].google: `},
 		"hosts not an object":    {`["auth.b.example"]`, `oauth.hosts: `},
