@@ -53,6 +53,7 @@ func TestToConnectError_SentinelMapping(t *testing.T) {
 		{"WeakPassword", service.ErrWeakPassword, connect.CodeInvalidArgument},
 		{"AccountLocked", service.ErrAccountLocked, connect.CodeResourceExhausted},
 		{"TotpRequired", service.ErrTotpRequired, connect.CodeFailedPrecondition},
+		{"PasskeysUnavailable", service.ErrPasskeysUnavailable, connect.CodeFailedPrecondition},
 		{"QrLoginExpired", service.ErrQrLoginExpired, connect.CodeDeadlineExceeded},
 		{"InvalidTotpCode", service.ErrInvalidTotpCode, connect.CodeUnauthenticated},
 		{"NoPasswordSet", service.ErrNoPasswordSet, connect.CodeFailedPrecondition},

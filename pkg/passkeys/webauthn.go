@@ -26,6 +26,8 @@ type Config struct {
 	RPID   string // e.g. "localhost" or "acme.example"
 	RPName string // e.g. "Acme"
 	Origin string // e.g. "https://acme.example" or "http://localhost:9002"
+	// AdditionalOrigins are further origins a ceremony may run on.
+	AdditionalOrigins []string
 }
 
 // RegistrationResult holds the verified credential data after a successful
@@ -59,7 +61,7 @@ func NewWebAuthnService(cfg Config) (*WebAuthnService, error) {
 	wconfig := &webauthn.Config{
 		RPID:          cfg.RPID,
 		RPDisplayName: cfg.RPName,
-		RPOrigins:     []string{cfg.Origin},
+		RPOrigins:     append([]string{cfg.Origin}, cfg.AdditionalOrigins...),
 	}
 
 	wa, err := webauthn.New(wconfig)

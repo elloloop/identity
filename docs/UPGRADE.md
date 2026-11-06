@@ -1,5 +1,19 @@
 # Upgrade guide
 
+## Next — passkey relying parties per host: `GATEWAY_PASSKEY_RELYING_PARTIES`
+
+Nothing changes unless you set it. Set, it chooses the relying party by the
+host a request arrived on (ADR-0020), and the server refuses to start if an
+entry's `rp_id` is not a registrable suffix of its host and of each of its
+origins.
+
+**Once it is set, a host with no entry and no complete project `passkey` block
+is refused** with `FAILED_PRECONDITION`, rather than getting the global
+`GATEWAY_PASSKEY_RP_ID`. List every host that runs a ceremony, including the one
+your existing passkeys were made on, with the same `rp_id` and origin they have
+today, so those keep working. A credential cannot move to a new relying party:
+users moved to one register a new passkey there.
+
 ## Next — teammate keys need a hire grant and take a revoke deadline: `HireGrantService.CreateHireGrant`, `grant_id` and `placement_id` on `RegisterTeammateKey`, `deadline` on `RevokeTeammateKey`, P-256 only, `GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP` (migration 0055; behaviour change behind `GATEWAY_TEAMMATE_KEYS_ENABLED`; `TeammateKeyRepository`, `TeammateKeyService.RevokeTeammateKey` and `jwt.TeammateAccessClaims` change shape (Go API))
 
 A teammate key is now registered with a single-use grant a signed-in person

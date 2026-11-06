@@ -68,14 +68,18 @@ type DefaultProject struct {
 
 // NewProjectResolver builds the middleware. def describes the default
 // project every unresolved request pins to; resolver may be nil (drivers
-// without a control plane). When there is nothing to do — no resolver and
-// no default project — the returned middleware is a no-op pass-through.
+// without a control plane). With no resolver and no default project the
+// returned middleware only records the request's host.
 func NewProjectResolver(def DefaultProject, resolver service.ProjectResolver, logger *zap.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	if resolver == nil && def.ProjectID == "" {
-		return func(next http.Handler) http.Handler { return next }
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				next.ServeHTTP(w, r.WithContext(service.WithRequestHost(r.Context(), requestHost(r))))
+			})
+		}
 	}
 	pr := &ProjectResolver{def: def, resolver: resolver, logger: logger}
 	return pr.middleware
@@ -87,7 +91,8 @@ func (pr *ProjectResolver) middleware(next http.Handler) http.Handler {
 		if !ok {
 			return // resolve already wrote the error response
 		}
-		next.ServeHTTP(w, r.WithContext(service.WithProjectScope(r.Context(), scope)))
+		ctx := service.WithRequestHost(service.WithProjectScope(r.Context(), scope), requestHost(r))
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

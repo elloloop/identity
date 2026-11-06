@@ -1196,6 +1196,10 @@ var (
 	// without that step. Maps to CodeUnavailable: the caller may try again.
 	// The message is generic; the store's error is logged, not returned.
 	ErrUnavailable = errors.New("temporarily unavailable; try again")
+	// ErrPasskeysUnavailable is returned when GATEWAY_PASSKEY_RELYING_PARTIES is
+	// set, has no entry for the request's host, and the project names no relying
+	// party of its own. Maps to CodeFailedPrecondition.
+	ErrPasskeysUnavailable = errors.New("passkeys are not available on this host")
 	// ErrAccessNotAllowed is returned when a project's access mode denies the
 	// authenticating email: an allowlist mode whose list omits the email, a
 	// closed mode, or an unset/unrecognized mode (the default-DENY posture). It
@@ -1525,12 +1529,12 @@ type AuthService struct {
 	// GATEWAY_MINOR_DATA_MINIMIZATION; a no-op when either is off.
 	minorData MinorDataMinimizer
 
-	// passkeyRPCache memoises per-project WebAuthn relying-party instances
-	// keyed by their (rp_id, rp_name, origin) tuple. A project whose
-	// config_json sets a passkey block needs a WebAuthn instance bound to
-	// that RP-ID so a passkey registered under one product's domain validates
-	// under that product's RP-ID; building one per request is wasteful, so we
-	// cache them. Projects with no override share the global s.passkeys.
+	// passkeyRPCache memoises WebAuthn relying-party instances keyed by their
+	// (rp_id, rp_name, origins) tuple. A host or project with its own relying
+	// party needs a WebAuthn instance bound to that RP-ID so a passkey
+	// registered under one product's domain validates under that product's
+	// RP-ID; building one per request is wasteful, so we cache them. Everything
+	// else shares the global s.passkeys.
 	passkeyRPCache   map[string]*passkeys.WebAuthnService
 	passkeyRPCacheMu sync.RWMutex
 

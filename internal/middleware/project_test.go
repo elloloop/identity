@@ -441,3 +441,23 @@ func TestProjectResolver_CarriesTenants(t *testing.T) {
 	require.NotNil(t, resolved.scope)
 	assert.Equal(t, tenants, resolved.scope.Tenants)
 }
+
+// The relying party is chosen from the host, so it is recorded whether or not a
+// project resolves, port stripped and lower-cased.
+func TestProjectResolver_RecordsRequestHost(t *testing.T) {
+	for name, def := range map[string]DefaultProject{
+		"with a default project": {ProjectID: defProjectID, StorageScopeID: defScopeID},
+		"pass-through":           {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var got string
+			next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				got = service.RequestHostFromContext(r.Context())
+			})
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			req.Host = "Auth.Acme.Example:8443"
+			NewProjectResolver(def, nil, nil)(next).ServeHTTP(httptest.NewRecorder(), req)
+			assert.Equal(t, "auth.acme.example", got)
+		})
+	}
+}
