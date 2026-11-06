@@ -3,10 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/elloloop/identity/internal/origin"
 )
 
 func TestPasskeysFor_NoScope_ReturnsGlobal(t *testing.T) {
@@ -206,19 +211,121 @@ func TestPasskeysFor_Unset_EveryHostKeepsTheGlobal(t *testing.T) {
 	assert.Same(t, svc.passkeys, got)
 }
 
-// Every ceremony refuses an unlisted host, including one that began on a listed
-// host and completes on another.
-func TestPasskeyCeremonies_UnlistedHost_AllRefused(t *testing.T) {
+// The begin-login and complete-login refusals answer before any lookup, so a
+// refused host learns nothing about an email or a credential.
+func TestPasskeyLogin_UnlistedHost_Refused(t *testing.T) {
 	t.Parallel()
 	svc := svcWithRelyingParties(t)
 	ctx := WithRequestHost(context.Background(), "auth.other.example")
 
-	_, _, err := svc.BeginPasskeyRegistration(ctx, "user-1", "")
-	require.Error(t, err)
-	_, _, err = svc.BeginPasskeyLogin(ctx, "")
+	_, _, err := svc.BeginPasskeyLogin(ctx, "")
 	require.ErrorIs(t, err, ErrPasskeysUnavailable)
 	_, err = svc.CompletePasskeyLogin(ctx, "challenge", "{}", "", "")
 	require.ErrorIs(t, err, ErrPasskeysUnavailable)
+}
+
+// vectorRelyingParties lists the spec vectors' relying party on one host, and
+// another relying party on a second.
+const vectorRelyingParties = `[
+	{"host":"auth.example.org","rp_id":"example.org","origins":["https://example.org"]},
+	{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example"]}
+]`
+
+// vectorHostSvc is a service with vectorRelyingParties, and the account the spec
+// vectors' credential was made for, signed up on the vectors' host.
+func vectorHostSvc(t *testing.T) (*AuthService, *fakeRepo, string) {
+	t.Helper()
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	svc.cfg.PasskeyRelyingPartiesJSON = vectorRelyingParties
+	require.NoError(t, svc.cfg.ValidatePasskeyRelyingParties())
+	ctx := WithRequestHost(context.Background(), "auth.example.org")
+
+	_, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
+	res, err := svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "My Key", "1.2.3.4", "ua")
+	require.NoError(t, err)
+	return svc, repo, res.User.ID
+}
+
+// A ceremony that begins on a listed host cannot complete on an unlisted one, and
+// neither registration step runs on an unlisted host for a real account.
+func TestPasskeyRegistration_UnlistedHost_Refused(t *testing.T) {
+	t.Parallel()
+	svc, _, userID := vectorHostSvc(t)
+	listed := WithRequestHost(context.Background(), "auth.example.org")
+	unlisted := WithRequestHost(context.Background(), "auth.other.example")
+
+	_, _, err := svc.BeginPasskeyRegistration(unlisted, userID, "Second")
+	require.ErrorIs(t, err, ErrPasskeysUnavailable)
+
+	_, challengeID, err := svc.BeginPasskeyRegistration(listed, userID, "Second")
+	require.NoError(t, err)
+	_, _, err = svc.CompletePasskeyRegistration(unlisted, userID, challengeID, pkRegCredentialJSON(t), "Second", false, "1.2.3.4", "ua")
+	require.ErrorIs(t, err, ErrPasskeysUnavailable)
+}
+
+func TestPasskeySignup_UnlistedHost_Refused(t *testing.T) {
+	t.Parallel()
+	svc, _, rec := newPasskeyVectorSvc(t)
+	svc.cfg.PasskeyRelyingPartiesJSON = vectorRelyingParties
+	require.NoError(t, svc.cfg.ValidatePasskeyRelyingParties())
+	listed := WithRequestHost(context.Background(), "auth.example.org")
+	unlisted := WithRequestHost(context.Background(), "auth.other.example")
+
+	_, _, err := svc.BeginPasskeySignup(unlisted, pkVectorEmail, "My Key")
+	require.ErrorIs(t, err, ErrPasskeysUnavailable)
+
+	_, challengeID, err := svc.BeginPasskeySignup(listed, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	_, err = svc.CompletePasskeySignup(unlisted, challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "My Key", "1.2.3.4", "ua")
+	require.ErrorIs(t, err, ErrPasskeysUnavailable)
+}
+
+// An assertion made for one relying party verifies on its own host and on no other
+// listed host, so naming another host gains nothing.
+func TestPasskeyLogin_AssertionVerifiesOnlyOnItsOwnHost(t *testing.T) {
+	t.Parallel()
+	svc, repo, _ := vectorHostSvc(t)
+	own := WithRequestHost(context.Background(), "auth.example.org")
+	other := WithRequestHost(context.Background(), "auth.acme.example")
+
+	_, challengeID, err := svc.BeginPasskeyLogin(own, pkVectorEmail)
+	require.NoError(t, err)
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkLoginChallengeHex))
+	_, err = svc.CompletePasskeyLogin(other, challengeID, pkAssertionCredentialJSON(t), "1.2.3.4", "ua")
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrPasskeysUnavailable)
+
+	_, challengeID, err = svc.BeginPasskeyLogin(own, pkVectorEmail)
+	require.NoError(t, err)
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkLoginChallengeHex))
+	res, err := svc.CompletePasskeyLogin(own, challengeID, pkAssertionCredentialJSON(t), "1.2.3.4", "ua")
+	require.NoError(t, err)
+	assert.NotEmpty(t, res.AccessToken)
+}
+
+// The refusal is the operator's only signal, so its event and fields are held
+// here, and a Host longer than a DNS name is cut to that length.
+func TestPasskeysFor_Refusal_LogsTheHostBounded(t *testing.T) {
+	t.Parallel()
+	svc := svcWithRelyingParties(t)
+	core, logs := observer.New(zap.WarnLevel)
+	svc.logger = zap.New(core)
+	long := strings.Repeat("a", origin.MaxDNSNameLen+50)
+	ctx := WithProjectScope(WithRequestHost(context.Background(), long), &ProjectScope{ProjectID: "p1"})
+
+	_, err := svc.passkeysFor(ctx)
+	require.ErrorIs(t, err, ErrPasskeysUnavailable)
+
+	entries := logs.FilterMessage("passkey_relying_party_unavailable").All()
+	require.Len(t, entries, 1)
+	fields := entries[0].ContextMap()
+	assert.Equal(t, long[:origin.MaxDNSNameLen], fields["host"])
+	assert.Equal(t, "p1", fields["project_id"])
+	assert.NotEmpty(t, fields["hint"])
 }
 
 // The spec vectors' clientData names https://example.org. A ceremony verifies when

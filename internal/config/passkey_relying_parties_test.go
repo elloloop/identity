@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,10 @@ func TestValidatePasskeyRelyingParties_Refuses(t *testing.T) {
 		"origin with a path":   {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example/"]}]`, "nothing after"},
 		"upper-case origin":    {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://ACME.example"]}]`, "lower-case"},
 		"origin with userinfo": {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://u@acme.example"]}]`, "nothing after"},
+		"wildcard host":        {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://*.acme.example"]}]`, "wildcard"},
+		"unicode host":         {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://bücher.acme.example"]}]`, "punycode"},
+		"empty label":          {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://..acme.example"]}]`, "DNS name"},
+		"unparsable origin":    {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example/%zz"]}]`, "origin"},
 		"default https port":   {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example:443"]}]`, "port"},
 		"default http port":    {`[{"host":"localhost","rp_id":"localhost","origins":["http://localhost:80"]}]`, "port"},
 		"empty port":           {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example:"]}]`, "port"},
@@ -83,4 +88,20 @@ func TestValidate_RefusesABadPasskeyRelyingParty(t *testing.T) {
 	t.Parallel()
 	c := &Config{PasskeyRelyingPartiesJSON: `[{"host":"auth.acme.example","rp_id":"widgets.example","origins":["https://widgets.example"]}]`}
 	require.ErrorContains(t, c.Validate(), "GATEWAY_PASSKEY_RELYING_PARTIES")
+}
+
+func TestPasskeyRelyingPartyHosts_Sorted(t *testing.T) {
+	t.Parallel()
+	c := &Config{PasskeyRelyingPartiesJSON: `[
+		{"host":"auth.widgets.example","rp_id":"widgets.example","origins":["https://widgets.example"]},
+		{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example"]}
+	]`}
+	if err := c.ValidatePasskeyRelyingParties(); err != nil {
+		t.Fatal(err)
+	}
+	got := c.PasskeyRelyingPartyHosts()
+	want := []string{"auth.acme.example", "auth.widgets.example"}
+	if !slices.Equal(got, want) {
+		t.Errorf("hosts = %v, want %v", got, want)
+	}
 }

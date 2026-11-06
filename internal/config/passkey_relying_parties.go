@@ -33,7 +33,7 @@ type PasskeyRelyingParty struct {
 // ValidatePasskeyRelyingParties parses GATEWAY_PASSKEY_RELYING_PARTIES and holds
 // each entry to the rule a browser and a platform authenticator enforce during
 // a ceremony, so a mistake stops the server at boot rather than failing every
-// sign-in on one host. Validate runs it.
+// sign-in on one host.
 func (c *Config) ValidatePasskeyRelyingParties() error {
 	c.passkeyRelyingParties = nil
 	if c.PasskeyRelyingPartiesJSON == "" {
@@ -131,6 +131,9 @@ func ceremonyOriginHost(raw string) (string, error) {
 	}
 	if u.Hostname() == "" || u.Scheme+"://"+strings.ToLower(u.Host) != raw {
 		return "", errors.New("must be a lower-case scheme://host[:port] with nothing after it")
+	}
+	if !origin.IsDNSName(u.Hostname()) && !isLoopbackHost(u.Hostname()) {
+		return "", errors.New("must name its host as a browser reports it: a lower-case DNS name, punycode for an international one, no wildcard")
 	}
 	if !origin.IsSerializedPort(u) {
 		return "", errors.New("must carry its port as a browser does: none when it is the scheme's default, and no leading zeros")

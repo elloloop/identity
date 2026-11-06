@@ -6,10 +6,13 @@ import (
 	"strings"
 )
 
+// MaxDNSNameLen is the longest a DNS name can be.
+const MaxDNSNameLen = 253
+
 // IsDNSName reports whether host is a lower-case DNS name: labels of letters,
 // digits and hyphens, none starting or ending with a hyphen.
 func IsDNSName(host string) bool {
-	if host == "" || len(host) > 253 {
+	if host == "" || len(host) > MaxDNSNameLen {
 		return false
 	}
 	for _, label := range strings.Split(host, ".") {
@@ -51,9 +54,5 @@ func IsSerializedPort(u *url.URL) bool {
 	if !ValidPort(port) || strings.HasPrefix(port, "0") {
 		return false
 	}
-	defaultPort := httpDefaultPort
-	if u.Scheme == httpsScheme {
-		defaultPort = httpsDefaultPort
-	}
-	return port != defaultPort
+	return port != defaultPort(u.Scheme)
 }

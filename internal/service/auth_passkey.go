@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/origin"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/emailaddr"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -505,9 +506,6 @@ func (s *AuthService) withdrawPasskeyIfAddressProven(ctx context.Context, userID
 	return fmt.Errorf("%w: the account's address was proven while registering; sign in again", ErrUnauthenticated)
 }
 
-// maxLoggedHostLen is the longest DNS name; a longer Host is not one.
-const maxLoggedHostLen = 253
-
 // passkeysFor returns the WebAuthn relying-party instance for the request in
 // ctx. The first that applies decides:
 //
@@ -569,8 +567,8 @@ func (s *AuthService) logPasskeysUnavailable(ctx context.Context, scope *Project
 		projectID = scope.ProjectID
 	}
 	host := RequestHostFromContext(ctx)
-	if len(host) > maxLoggedHostLen {
-		host = host[:maxLoggedHostLen]
+	if len(host) > origin.MaxDNSNameLen {
+		host = host[:origin.MaxDNSNameLen]
 	}
 	s.logger.Warn("passkey_relying_party_unavailable",
 		zap.String("host", host),

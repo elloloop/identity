@@ -23,6 +23,10 @@ accepted yet. Passkey ceremonies through native gRPC (`RegisterGRPC`) are refuse
 once the variable is set. A browser origin that calls Identity directly must also
 be in the CORS allowlist.
 
+Credentials do not record their relying party, so if one project serves several, a
+user with a passkey from one can be offered an allow list on another that no
+authenticator can satisfy, and `ListPasskeys` shows both. ADR-0020 says more.
+
 ## Next — teammate keys need a hire grant and take a revoke deadline: `HireGrantService.CreateHireGrant`, `grant_id` and `placement_id` on `RegisterTeammateKey`, `deadline` on `RevokeTeammateKey`, P-256 only, `GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP` (migration 0055; behaviour change behind `GATEWAY_TEAMMATE_KEYS_ENABLED`; `TeammateKeyRepository`, `TeammateKeyService.RevokeTeammateKey` and `jwt.TeammateAccessClaims` change shape (Go API))
 
 A teammate key is now registered with a single-use grant a signed-in person

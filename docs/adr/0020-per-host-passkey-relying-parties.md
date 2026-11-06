@@ -89,4 +89,10 @@ from receiving the global relying party, which belongs to some other product.
   from every relying party in the project, so a user with a passkey for one
   product is offered an allow list on another that no authenticator can satisfy,
   and credential IDs can be correlated across those products. Storing `rp_id` per
-  credential and challenge would close both, and is left for a later change.
+  credential and challenge would close both, and is left for a later change. For
+  the same reason `ListPasskeys` shows such a user every product's passkeys.
+- Project resolution prefers `X-Project-Key` and the relying party prefers `Host`,
+  so a client can pair a listed host with another project's key, and that
+  project's ceremony then runs under the host's relying party rather than the
+  project's block. A listed origin is one the operator trusts, and a credential
+  stays bound to the relying party that made it.
