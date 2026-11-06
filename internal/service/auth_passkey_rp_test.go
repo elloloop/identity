@@ -72,16 +72,11 @@ func TestPasskeysFor_InvalidOverride_FallsBackToGlobal(t *testing.T) {
 	t.Parallel()
 	svc, _ := newAuthSvcWithMailerForRepo(t, newFakeRepo())
 
-	// An empty origin makes NewWebAuthnService fail; we fall back to the
-	// global instance rather than break the ceremony. (The write path
-	// rejects such configs, so this is a defensive fallback.)
+	// With no global origin to inherit, this block cannot build.
 	ctx := WithProjectScope(context.Background(), &ProjectScope{
 		ProjectID: "broken",
 		Passkey:   ProjectPasskeyConfig{RPID: "kids.example.com", Origin: ""},
 	})
-	// RPID set but origin falls back to the global origin, which is valid, so
-	// this actually builds. Use a config that cannot build: blank RP-ID after
-	// fallback is impossible, so instead clear the global to force failure.
 	svc.cfg.PasskeyOrigin = ""
 	got, err := svc.passkeysFor(ctx)
 	require.NoError(t, err)
@@ -209,4 +204,85 @@ func TestPasskeysFor_Unset_EveryHostKeepsTheGlobal(t *testing.T) {
 	got, err := svc.passkeysFor(WithRequestHost(context.Background(), "auth.anything.example"))
 	require.NoError(t, err)
 	assert.Same(t, svc.passkeys, got)
+}
+
+// Every ceremony refuses an unlisted host, including one that began on a listed
+// host and completes on another.
+func TestPasskeyCeremonies_UnlistedHost_AllRefused(t *testing.T) {
+	t.Parallel()
+	svc := svcWithRelyingParties(t)
+	ctx := WithRequestHost(context.Background(), "auth.other.example")
+
+	_, _, err := svc.BeginPasskeyRegistration(ctx, "user-1", "")
+	require.Error(t, err)
+	_, _, err = svc.BeginPasskeyLogin(ctx, "")
+	require.ErrorIs(t, err, ErrPasskeysUnavailable)
+	_, err = svc.CompletePasskeyLogin(ctx, "challenge", "{}", "", "")
+	require.ErrorIs(t, err, ErrPasskeysUnavailable)
+}
+
+// The spec vectors' clientData names https://example.org. A ceremony verifies when
+// that is any of the entry's origins, not only the first.
+func TestPasskeySignup_HostEntry_VerifiesAgainstALaterOrigin(t *testing.T) {
+	t.Parallel()
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	svc.cfg.PasskeyRelyingPartiesJSON = `[{"host":"auth.example.org","rp_id":"example.org","origins":["https://accounts.example.org","https://example.org"]}]`
+	require.NoError(t, svc.cfg.ValidatePasskeyRelyingParties())
+	ctx := WithRequestHost(context.Background(), "auth.example.org")
+
+	_, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
+
+	res, err := svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "My Key", "1.2.3.4", "ua")
+	require.NoError(t, err)
+	require.NotNil(t, res.User)
+}
+
+// A signature made for one relying party does not verify under another, so a
+// spoofed Host gains nothing.
+func TestPasskeySignup_HostEntry_RefusesAnotherOrigin(t *testing.T) {
+	t.Parallel()
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	svc.cfg.PasskeyRelyingPartiesJSON = `[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example"]}]`
+	require.NoError(t, svc.cfg.ValidatePasskeyRelyingParties())
+	ctx := WithRequestHost(context.Background(), "auth.acme.example")
+
+	_, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
+
+	_, err = svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "My Key", "1.2.3.4", "ua")
+	require.Error(t, err)
+}
+
+// Once hosts have relying parties a project block must name its own rp_id and
+// origin, but rp_name is a display name and still comes from the global setting.
+func TestPasskeysFor_PerHost_ProjectBlockInheritsName(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newPasskeyVectorSvc(t)
+	svc.cfg.PasskeyRPName = "Global Name"
+	svc.cfg.PasskeyRelyingPartiesJSON = `[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example"]}]`
+	require.NoError(t, svc.cfg.ValidatePasskeyRelyingParties())
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "widgets",
+		Access:    ProjectAccessConfig{Mode: AccessModeOpen},
+		Passkey:   ProjectPasskeyConfig{RPID: "widgets.example", Origin: "https://widgets.example"},
+	})
+
+	optionsJSON, _, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	var options struct {
+		PublicKey struct {
+			RP struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"rp"`
+		} `json:"publicKey"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(optionsJSON), &options))
+	assert.Equal(t, "widgets.example", options.PublicKey.RP.ID)
+	assert.Equal(t, "Global Name", options.PublicKey.RP.Name)
 }

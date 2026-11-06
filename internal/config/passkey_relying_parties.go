@@ -1,12 +1,12 @@
 package config
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/elloloop/identity/internal/origin"
@@ -24,8 +24,9 @@ type PasskeyRelyingParty struct {
 	// GATEWAY_PASSKEY_RP_NAME.
 	RPName string `json:"rp_name"`
 	// Origins are the origins a ceremony may run on: the pages that run it in a
-	// browser, and https://<rp_id> for a native app, whose platform reports that
-	// origin for itself.
+	// browser, and https://<rp_id> for an Apple native app, whose platform
+	// reports that origin for itself. An Android native app reports an
+	// android:apk-key-hash: origin, which this setting does not accept.
 	Origins []string `json:"origins"`
 }
 
@@ -60,8 +61,18 @@ func (c *Config) PasskeyRelyingPartyForHost(host string) (PasskeyRelyingParty, b
 	return party, ok
 }
 
+// PasskeyRelyingPartyHosts returns the configured hosts in a stable order.
+func (c *Config) PasskeyRelyingPartyHosts() []string {
+	hosts := make([]string, 0, len(c.passkeyRelyingParties))
+	for host := range c.passkeyRelyingParties {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	return hosts
+}
+
 func parsePasskeyRelyingParties(raw string) (map[string]PasskeyRelyingParty, error) {
-	dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
+	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var entries []PasskeyRelyingParty
 	if err := dec.Decode(&entries); err != nil {
@@ -87,7 +98,7 @@ func parsePasskeyRelyingParties(raw string) (map[string]PasskeyRelyingParty, err
 }
 
 func (p PasskeyRelyingParty) validate() error {
-	if p.Host == "" || p.Host != strings.ToLower(p.Host) || !origin.IsDNSName(p.Host) {
+	if !origin.IsDNSName(p.Host) {
 		return fmt.Errorf("host %q must be a lower-case DNS name with no scheme, port or path", p.Host)
 	}
 	if !origin.IsRegistrableSuffix(p.RPID, p.Host) {
@@ -120,6 +131,9 @@ func ceremonyOriginHost(raw string) (string, error) {
 	}
 	if u.Hostname() == "" || u.Scheme+"://"+strings.ToLower(u.Host) != raw {
 		return "", errors.New("must be a lower-case scheme://host[:port] with nothing after it")
+	}
+	if !origin.IsSerializedPort(u) {
+		return "", errors.New("must carry its port as a browser does: none when it is the scheme's default, and no leading zeros")
 	}
 	return u.Hostname(), nil
 }

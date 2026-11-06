@@ -977,6 +977,10 @@ func New(deps Deps) (*Built, error) {
 				"anonymous users would have been reaped while their only credential was still valid"),
 			zap.String("hint", "set GATEWAY_ANONYMOUS_RETENTION_DAYS explicitly to choose the window"))
 	}
+	if deps.Config.PasskeyRelyingPartiesConfigured() {
+		logger.Info("passkey_relying_parties_per_host",
+			zap.Strings("hosts", deps.Config.PasskeyRelyingPartyHosts()))
+	}
 	if defaultAccess.Mode == service.AccessModeClosed || defaultAccess.Mode == "" {
 		logger.Warn("default_project_access_closed",
 			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))

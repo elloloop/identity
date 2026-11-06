@@ -322,7 +322,9 @@ type ProjectBrandingConfig struct {
 	SupportEmail string `json:"support_email"`
 }
 
-// ProjectPasskeyConfig is the per-project WebAuthn relying-party identity.
+// ProjectPasskeyConfig is the per-project WebAuthn relying-party identity. Once
+// GATEWAY_PASSKEY_RELYING_PARTIES is set, RPID and Origin no longer fall back:
+// a block missing either is refused at ceremony time (ADR-0020).
 type ProjectPasskeyConfig struct {
 	// RPID is the WebAuthn relying-party id (an effective domain, no scheme
 	// or port, e.g. "kids.example.com"). Empty falls back to the global

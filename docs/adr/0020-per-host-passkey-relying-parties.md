@@ -41,7 +41,9 @@ from receiving the global relying party, which belongs to some other product.
 
 2. **The key is the host the request arrived on**, the one project resolution
    reads. The `Origin` header cannot be the key: a native app's call to Identity
-   sends none, and a browser's names the page rather than the product.
+   sends none, and a browser's names the page rather than the product. Like
+   project resolution, it reads `Host` and not `X-Forwarded-Host`, which nothing
+   here can trust, so a proxy in front must preserve the public `Host`.
 
 3. **Precedence.** The host's entry, then the project's block, then the global
    settings, and the last only while the variable is unset. Once it is set, a
@@ -52,13 +54,17 @@ from receiving the global relying party, which belongs to some other product.
 
 4. **Checked at boot.** The server refuses to start on: malformed JSON, an unknown
    field, a repeated host, a host that is not a lower-case DNS name, an origin
-   that is not written exactly as a browser reports it, plain `http` other than on
-   loopback, or an `rp_id` that is not a registrable suffix of the host and of
-   every origin. A public suffix is never a valid `rp_id`.
+   that is not written exactly as a browser reports it (an explicit default port
+   included), plain `http` other than on loopback, or an `rp_id` that is not a
+   registrable suffix of the host and of every origin. A public suffix is never a
+   valid `rp_id`.
 
 5. **A list of origins**, because one relying party can have several pages, and
-   a native app's assertion carries `https://<rp_id>` whatever page signed the
-   user in. `pkg/passkeys.Config` gains an additive `AdditionalOrigins`.
+   an Apple native app's assertion carries `https://<rp_id>` whatever page signed
+   the user in. `pkg/passkeys.Config` gains an additive `AdditionalOrigins`.
+   Android native apps report `android:apk-key-hash:<hash>` instead, which has no
+   hostname to check against `rp_id`; this setting refuses that form, so it does
+   not serve them yet.
 
 ## Consequences
 
@@ -68,12 +74,19 @@ from receiving the global relying party, which belongs to some other product.
   party register a new one on the new host; verification of the old one fails on
   the relying-party hash and is reported as a failed sign-in.
 - An operator who sets the variable must list every host that runs a ceremony.
-  An omitted one fails closed, visibly, rather than minting credentials under the
-  wrong domain.
-- A call that did not arrive over HTTP, such as an embedder's native gRPC server,
-  carries no host, and is refused once the variable is set unless its project
-  names a relying party.
-- The `Host` header is client-supplied. It chooses only which options are
-  returned; the browser or platform checks the `rp_id` against the real page or
-  the app's association, and verification checks the origin and the `rp_id` hash,
-  so naming another host gains nothing.
+  An omitted one fails closed rather than minting credentials under the wrong
+  domain, and logs `passkey_relying_party_unavailable` naming the host.
+- A call through an embedder's native gRPC server carries no host and no project
+  scope, so its passkey ceremonies are refused once the variable is set.
+- The `Host` header is client-supplied. It selects the relying party that issues
+  options and the one that verifies. The browser or platform checks the `rp_id`
+  against the real page or the app's association, and verification checks the
+  origin and the `rp_id` hash, so naming another host gains nothing. Each listed
+  origin is one the operator trusts.
+- Challenges and credentials do not record their relying party. A challenge from
+  one host can be presented on another, where the assertion must still match that
+  host's `rp_id` and origins. An account's sign-in options list its credentials
+  from every relying party in the project, so a user with a passkey for one
+  product is offered an allow list on another that no authenticator can satisfy,
+  and credential IDs can be correlated across those products. Storing `rp_id` per
+  credential and challenge would close both, and is left for a later change.

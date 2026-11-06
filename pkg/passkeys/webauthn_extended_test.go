@@ -581,3 +581,41 @@ func TestNewWebAuthnService_MissingOrigin(t *testing.T) {
 		t.Errorf("error = %v, want Origin required", err)
 	}
 }
+
+// The spec vector's clientData names https://example.org. It verifies when that is
+// an additional origin, and not when it is in neither place.
+func TestCompleteRegistration_AdditionalOrigins(t *testing.T) {
+	t.Parallel()
+
+	attObj := mustHex(t, specRegAttestationObjectHex)
+	cdj := mustHex(t, specRegClientDataJSONHex)
+	credID := mustHex(t, specRegCredentialIDHex)
+	challenge := base64.RawURLEncoding.EncodeToString(mustHex(t, specRegChallengeHex))
+	credJSON := buildRegistrationCredentialJSON(t, attObj, cdj, credID, nil)
+
+	listed, err := NewWebAuthnService(Config{
+		RPID:              "example.org",
+		RPName:            "Example",
+		Origin:            "https://accounts.example.org",
+		AdditionalOrigins: []string{"https://example.org"},
+	})
+	if err != nil {
+		t.Fatalf("NewWebAuthnService: %v", err)
+	}
+	if _, err := listed.CompleteRegistration(credJSON, challenge); err != nil {
+		t.Errorf("an additional origin must verify: %v", err)
+	}
+
+	unlisted, err := NewWebAuthnService(Config{
+		RPID:              "example.org",
+		RPName:            "Example",
+		Origin:            "https://accounts.example.org",
+		AdditionalOrigins: []string{"https://other.example.org"},
+	})
+	if err != nil {
+		t.Fatalf("NewWebAuthnService: %v", err)
+	}
+	if _, err := unlisted.CompleteRegistration(credJSON, challenge); err == nil {
+		t.Error("an origin in neither place must not verify")
+	}
+}

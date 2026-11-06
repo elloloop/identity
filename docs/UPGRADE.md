@@ -14,6 +14,15 @@ your existing passkeys were made on, with the same `rp_id` and origin they have
 today, so those keep working. A credential cannot move to a new relying party:
 users moved to one register a new passkey there.
 
+The key is the `Host` header as received, not `X-Forwarded-Host`, so a proxy must
+preserve the public host. A refused host logs
+`passkey_relying_party_unavailable`, and boot logs the configured hosts. A complete
+project block names `rp_id` and `origin`. An Apple native app needs
+`https://<rp_id>` among the origins; an Android native app's origin form is not
+accepted yet. Passkey ceremonies through native gRPC (`RegisterGRPC`) are refused
+once the variable is set. A browser origin that calls Identity directly must also
+be in the CORS allowlist.
+
 ## Next — teammate keys need a hire grant and take a revoke deadline: `HireGrantService.CreateHireGrant`, `grant_id` and `placement_id` on `RegisterTeammateKey`, `deadline` on `RevokeTeammateKey`, P-256 only, `GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP` (migration 0055; behaviour change behind `GATEWAY_TEAMMATE_KEYS_ENABLED`; `TeammateKeyRepository`, `TeammateKeyService.RevokeTeammateKey` and `jwt.TeammateAccessClaims` change shape (Go API))
 
 A teammate key is now registered with a single-use grant a signed-in person

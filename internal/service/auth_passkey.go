@@ -270,6 +270,11 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 // If email is provided, scopes to that user's credentials. Otherwise allows
 // discoverable credentials (usernameless flow).
 func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (string, string, error) {
+	relyingParty, err := s.passkeysFor(ctx)
+	if err != nil {
+		return "", "", err
+	}
+
 	var allowedIDs []string
 	// Looked up by the canonical form accounts are stored under. An address
 	// with no mailbox once canonical names nobody, so it takes the same path
@@ -294,10 +299,6 @@ func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (stri
 		// allow list to prevent email enumeration.
 	}
 
-	relyingParty, err := s.passkeysFor(ctx)
-	if err != nil {
-		return "", "", err
-	}
 	optionsJSON, challengeB64, err := relyingParty.BeginAuthentication(allowedIDs)
 	if err != nil {
 		return "", "", fmt.Errorf("building authentication options: %w", err)
@@ -328,6 +329,11 @@ func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (stri
 func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, credentialJSON, ipAddr, userAgent string) (*LoginResult, error) {
 	if challengeID == "" || credentialJSON == "" {
 		return nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
+	}
+
+	relyingParty, err := s.passkeysFor(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	challenge, err := s.repo(ctx).GetPasskeyChallenge(ctx, challengeID)
@@ -364,10 +370,6 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, errors.New("credential sign_count overflows WebAuthn counter")
 	}
 
-	relyingParty, err := s.passkeysFor(ctx)
-	if err != nil {
-		return nil, err
-	}
 	newSignCount, err := relyingParty.CompleteAuthentication(
 		credentialJSON,
 		challenge.Challenge,
@@ -503,19 +505,23 @@ func (s *AuthService) withdrawPasskeyIfAddressProven(ctx context.Context, userID
 	return fmt.Errorf("%w: the account's address was proven while registering; sign in again", ErrUnauthenticated)
 }
 
+// maxLoggedHostLen is the longest DNS name; a longer Host is not one.
+const maxLoggedHostLen = 253
+
 // passkeysFor returns the WebAuthn relying-party instance for the request in
 // ctx. The first that applies decides:
 //
 //  1. the GATEWAY_PASSKEY_RELYING_PARTIES entry for the request's host, since
 //     one project may serve several products, each on its own domain;
-//  2. the passkey block of the resolved project's config_json. Unless
-//     GATEWAY_PASSKEY_RELYING_PARTIES is set, a field it leaves out is inherited
-//     from the global GATEWAY_PASSKEY_* values;
-//  3. the global s.passkeys, unless GATEWAY_PASSKEY_RELYING_PARTIES is set.
+//  2. the passkey block of the resolved project's config_json, which inherits
+//     a field it leaves out from the global GATEWAY_PASSKEY_* values;
+//  3. the global s.passkeys.
 //
-// An operator who chose relying parties per host has said the global one is some
-// other host's, so anything that would inherit it gets ErrPasskeysUnavailable
-// instead: an unconfigured host never receives another product's RP-ID.
+// An operator who sets GATEWAY_PASSKEY_RELYING_PARTIES has said the global RP-ID
+// is some other host's, so 3 no longer applies and a block must name its own
+// rp_id and origin (rp_name, a display name, is still inherited). Anything else
+// gets ErrPasskeysUnavailable: an unconfigured host never receives another
+// product's RP-ID.
 //
 // With neither setting in play s.passkeys is returned unchanged.
 func (s *AuthService) passkeysFor(ctx context.Context) (*passkeys.WebAuthnService, error) {
@@ -530,7 +536,8 @@ func (s *AuthService) passkeysFor(ctx context.Context) (*passkeys.WebAuthnServic
 			})
 		}
 	}
-	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.Passkey != (ProjectPasskeyConfig{}) {
+	scope := ProjectScopeFromContext(ctx)
+	if scope != nil && scope.Passkey != (ProjectPasskeyConfig{}) {
 		block := scope.Passkey
 		if !perHost || (block.RPID != "" && block.Origin != "") {
 			built, err := s.relyingParty(passkeys.Config{
@@ -541,16 +548,34 @@ func (s *AuthService) passkeysFor(ctx context.Context) (*passkeys.WebAuthnServic
 			if err == nil {
 				return built, nil
 			}
-			// The project-config write path rejects a block that cannot build,
-			// so this is a stored config from before that rule.
+			// A block can pass the write path's checks and still not build: an
+			// rp_id alone, with no global origin to inherit.
 			s.logger.Warn("passkey_rp_override_invalid",
 				zap.String("project_id", scope.ProjectID), zap.Error(err))
 		}
 	}
 	if perHost {
+		s.logPasskeysUnavailable(ctx, scope)
 		return nil, ErrPasskeysUnavailable
 	}
 	return s.passkeys, nil
+}
+
+// logPasskeysUnavailable tells the operator which host lost passkeys, since only
+// the client sees the refusal. The host is client-supplied, so it is bounded.
+func (s *AuthService) logPasskeysUnavailable(ctx context.Context, scope *ProjectScope) {
+	projectID := ""
+	if scope != nil {
+		projectID = scope.ProjectID
+	}
+	host := RequestHostFromContext(ctx)
+	if len(host) > maxLoggedHostLen {
+		host = host[:maxLoggedHostLen]
+	}
+	s.logger.Warn("passkey_relying_party_unavailable",
+		zap.String("host", host),
+		zap.String("project_id", projectID),
+		zap.String("hint", "add the host to GATEWAY_PASSKEY_RELYING_PARTIES, or give its project a passkey block with rp_id and origin"))
 }
 
 // relyingParty returns the memoised WebAuthn instance for cfg.

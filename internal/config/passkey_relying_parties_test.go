@@ -59,6 +59,12 @@ func TestValidatePasskeyRelyingParties_Refuses(t *testing.T) {
 		"origin with a path":   {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example/"]}]`, "nothing after"},
 		"upper-case origin":    {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://ACME.example"]}]`, "lower-case"},
 		"origin with userinfo": {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://u@acme.example"]}]`, "nothing after"},
+		"default https port":   {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example:443"]}]`, "port"},
+		"default http port":    {`[{"host":"localhost","rp_id":"localhost","origins":["http://localhost:80"]}]`, "port"},
+		"empty port":           {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example:"]}]`, "port"},
+		"padded port":          {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example:0443"]}]`, "port"},
+		"port out of range":    {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["https://acme.example:99999"]}]`, "port"},
+		"android origin":       {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["android:apk-key-hash:abc"]}]`, "must be https"},
 		"bare origin":          {`[{"host":"auth.acme.example","rp_id":"acme.example","origins":["acme.example"]}]`, "must be https"},
 	}
 	for name, tc := range tests {
