@@ -114,6 +114,21 @@ type ProjectScope struct {
 
 type projectScopeCtxKey struct{}
 
+type requestHostCtxKey struct{}
+
+// WithRequestHost returns a child context carrying the public host the request
+// arrived on, lower-cased with any port stripped.
+func WithRequestHost(ctx context.Context, host string) context.Context {
+	return context.WithValue(ctx, requestHostCtxKey{}, host)
+}
+
+// RequestHostFromContext returns the host WithRequestHost stored, or "" for a
+// call that did not arrive over HTTP, such as an embedder's native gRPC server.
+func RequestHostFromContext(ctx context.Context) string {
+	host, _ := ctx.Value(requestHostCtxKey{}).(string)
+	return host
+}
+
 // WithProjectScope returns a child context carrying scope. The
 // project-resolution middleware calls this once it has resolved the
 // request's project. A nil scope is a no-op so callers need not branch.

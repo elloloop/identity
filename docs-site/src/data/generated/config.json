@@ -1323,6 +1323,15 @@
     "anchor": "passkeys-webauthn"
   },
   {
+    "name": "GATEWAY_PASSKEY_RELYING_PARTIES",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "chooses the relying party by the request's public auth host: a JSON array of {host, rp_id, rp_name, origins}.",
+    "category": "Passkeys / WebAuthn",
+    "anchor": "passkeys-webauthn"
+  },
+  {
     "name": "GATEWAY_PASSKEY_RP_ID",
     "type": "string",
     "default": "localhost",

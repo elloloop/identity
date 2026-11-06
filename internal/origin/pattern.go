@@ -172,7 +172,12 @@ func EffectivePort(u *url.URL) string {
 	if port := u.Port(); port != "" {
 		return port
 	}
-	if u.Scheme == httpsScheme {
+	return defaultPort(u.Scheme)
+}
+
+// defaultPort is the port a URL of scheme has when it names none.
+func defaultPort(scheme string) string {
+	if scheme == httpsScheme {
 		return httpsDefaultPort
 	}
 	return httpDefaultPort

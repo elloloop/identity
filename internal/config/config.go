@@ -1021,6 +1021,10 @@ type Config struct {
 	PasskeyRPName string
 	// PasskeyOrigin is the allowed origin for passkey ceremonies (scheme + host + port).
 	PasskeyOrigin string
+	// PasskeyRelyingPartiesJSON chooses the relying party by the request's public auth host: a JSON array of {host, rp_id, rp_name, origins}. Unset, every host uses the GATEWAY_PASSKEY_* values above. Set, a host with no entry gets no relying party and its ceremonies are refused, unless its project configures its own.
+	PasskeyRelyingPartiesJSON string
+	// passkeyRelyingParties is PasskeyRelyingPartiesJSON parsed, by host.
+	passkeyRelyingParties map[string]PasskeyRelyingParty
 	// PasskeyChallengeExpirySeconds is the lifetime in seconds of registration / login challenges.
 	PasskeyChallengeExpirySeconds int
 	// PasskeySignupEnabled gates passkey-first signup (the unauthenticated
@@ -1752,6 +1756,7 @@ func loadFromEnv() *Config {
 		PasskeyRPID:                   envStr("GATEWAY_PASSKEY_RP_ID", "localhost"),
 		PasskeyRPName:                 envStr("GATEWAY_PASSKEY_RP_NAME", "Identity"),
 		PasskeyOrigin:                 envStr("GATEWAY_PASSKEY_ORIGIN", "http://localhost:9002"),
+		PasskeyRelyingPartiesJSON:     envStr("GATEWAY_PASSKEY_RELYING_PARTIES", ""),
 		PasskeyChallengeExpirySeconds: envInt("GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS", 300),
 		PasskeySignupEnabled:          envBool("GATEWAY_PASSKEY_SIGNUP_ENABLED", true),
 
@@ -2302,6 +2307,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.ValidateLogExport(); err != nil {
+		return err
+	}
+	if err := c.ValidatePasskeyRelyingParties(); err != nil {
 		return err
 	}
 	if c.removedEnvVarErr != nil {

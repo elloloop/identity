@@ -123,6 +123,7 @@ All config is via environment variables. See `internal/config/config.go` for the
 | `GATEWAY_JWT_KMS_KEYS` | AWS KMS signer: CSV of `kid=arn` entries |
 | `GATEWAY_PASSKEY_RP_ID` | Passkey relying party ID — must match your domain |
 | `GATEWAY_PASSKEY_ORIGIN` | Allowed origin for passkey ceremonies |
+| `GATEWAY_PASSKEY_RELYING_PARTIES` | Relying party per public auth host, a JSON array of `{host, rp_id, rp_name, origins}` checked at startup. Unset, every host uses the two above. Set, a host with no entry and no complete project `passkey` block is refused ([ADR-0020](./docs/adr/0020-per-host-passkey-relying-parties.md)) |
 | `GATEWAY_TOTP_ISSUER` | Name shown in user authenticator apps |
 | `GATEWAY_DEFAULT_PROJECT_EMAIL_SIGNUP` | Who creates the default project's email accounts: `self` (default), `admin` or `off` |
 | `GATEWAY_DEFAULT_PROJECT_USERNAME_SIGNUP` | Who creates the default project's username accounts: `off` (default), `self` or `admin` |

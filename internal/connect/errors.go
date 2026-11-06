@@ -109,6 +109,9 @@ func toConnectError(err error) *connect.Error {
 		// (which would be CodeUnavailable).
 		return connect.NewError(connect.CodeResourceExhausted, err)
 
+	case errors.Is(err, service.ErrPasskeysUnavailable):
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+
 	case errors.Is(err, service.ErrTotpRequired),
 		errors.Is(err, service.ErrSSORequired):
 		// Not really an error — the client must do something else next

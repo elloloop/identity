@@ -100,6 +100,9 @@ middleware that verifies the bearer token and populates
 
 ## Mount surface 2 — native gRPC
 
+Passkey ceremonies are refused on this surface once
+`GATEWAY_PASSKEY_RELYING_PARTIES` is set, because a call here carries no host.
+
 `RegisterGRPC` registers identity on an existing `*grpc.Server`:
 
 ```go

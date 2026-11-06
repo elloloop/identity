@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/origin"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/emailaddr"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -49,7 +51,11 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, devi
 	// fall back to its project-unique username — otherwise the credential is
 	// stored unlabelled and the child cannot tell it apart from any other.
 	entityName := coalesce(user.Email, user.Username)
-	optionsJSON, challengeB64, err := s.passkeysFor(ctx).BeginRegistration(
+	relyingParty, err := s.passkeysFor(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	optionsJSON, challengeB64, err := relyingParty.BeginRegistration(
 		userID, entityName, coalesce(user.Name, entityName), existingIDs,
 	)
 	if err != nil {
@@ -153,7 +159,11 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		return nil, nil, fmt.Errorf("%w: challenge expired", ErrTokenExpired)
 	}
 
-	result, err := s.passkeysFor(ctx).CompleteRegistration(credentialJSON, challenge.Challenge)
+	relyingParty, err := s.passkeysFor(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err := relyingParty.CompleteRegistration(credentialJSON, challenge.Challenge)
 	if err != nil {
 		s.logger.Warn(
 			"passkey_registration_verify_failed",
@@ -261,6 +271,11 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 // If email is provided, scopes to that user's credentials. Otherwise allows
 // discoverable credentials (usernameless flow).
 func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (string, string, error) {
+	relyingParty, err := s.passkeysFor(ctx)
+	if err != nil {
+		return "", "", err
+	}
+
 	var allowedIDs []string
 	// Looked up by the canonical form accounts are stored under. An address
 	// with no mailbox once canonical names nobody, so it takes the same path
@@ -285,7 +300,7 @@ func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (stri
 		// allow list to prevent email enumeration.
 	}
 
-	optionsJSON, challengeB64, err := s.passkeysFor(ctx).BeginAuthentication(allowedIDs)
+	optionsJSON, challengeB64, err := relyingParty.BeginAuthentication(allowedIDs)
 	if err != nil {
 		return "", "", fmt.Errorf("building authentication options: %w", err)
 	}
@@ -315,6 +330,11 @@ func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (stri
 func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, credentialJSON, ipAddr, userAgent string) (*LoginResult, error) {
 	if challengeID == "" || credentialJSON == "" {
 		return nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
+	}
+
+	relyingParty, err := s.passkeysFor(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	challenge, err := s.repo(ctx).GetPasskeyChallenge(ctx, challengeID)
@@ -351,7 +371,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, errors.New("credential sign_count overflows WebAuthn counter")
 	}
 
-	newSignCount, err := s.passkeysFor(ctx).CompleteAuthentication(
+	newSignCount, err := relyingParty.CompleteAuthentication(
 		credentialJSON,
 		challenge.Challenge,
 		cred.PublicKey,
@@ -486,58 +506,100 @@ func (s *AuthService) withdrawPasskeyIfAddressProven(ctx context.Context, userID
 	return fmt.Errorf("%w: the account's address was proven while registering; sign in again", ErrUnauthenticated)
 }
 
-// passkeysFor returns the WebAuthn relying-party instance to use for the
-// request in ctx. When the resolved project's config_json sets a passkey
-// block, a per-project instance bound to that RP-ID/RPName/Origin is used (and
-// memoised) so a passkey registered under one product's domain validates under
-// that product's RP-ID. A project that sets only some fields inherits the rest
-// from the global GATEWAY_PASSKEY_* values. When nothing is overridden — the
-// zero-config case — the global s.passkeys is returned unchanged, keeping
-// today's behaviour byte-for-byte.
+// passkeysFor returns the WebAuthn relying-party instance for the request in
+// ctx. The first that applies decides:
 //
-// Building a per-project instance can fail only on an invalid override (e.g. a
-// malformed origin), which the project-config write path already rejects; if it
-// somehow fails here we fall back to the global instance rather than break the
-// ceremony.
-func (s *AuthService) passkeysFor(ctx context.Context) *passkeys.WebAuthnService {
+//  1. the GATEWAY_PASSKEY_RELYING_PARTIES entry for the request's host, since
+//     one project may serve several products, each on its own domain;
+//  2. the passkey block of the resolved project's config_json, which inherits
+//     a field it leaves out from the global GATEWAY_PASSKEY_* values;
+//  3. the global s.passkeys.
+//
+// An operator who sets GATEWAY_PASSKEY_RELYING_PARTIES has said the global RP-ID
+// is some other host's, so 3 no longer applies and a block must name its own
+// rp_id and origin (rp_name, a display name, is still inherited). Anything else
+// gets ErrPasskeysUnavailable: an unconfigured host never receives another
+// product's RP-ID.
+//
+// With neither setting in play s.passkeys is returned unchanged.
+func (s *AuthService) passkeysFor(ctx context.Context) (*passkeys.WebAuthnService, error) {
+	perHost := s.cfg.PasskeyRelyingPartiesConfigured()
+	if perHost {
+		if party, ok := s.cfg.PasskeyRelyingPartyForHost(RequestHostFromContext(ctx)); ok {
+			return s.relyingParty(passkeys.Config{
+				RPID:              party.RPID,
+				RPName:            coalesce(party.RPName, s.cfg.PasskeyRPName),
+				Origin:            party.Origins[0],
+				AdditionalOrigins: party.Origins[1:],
+			})
+		}
+	}
 	scope := ProjectScopeFromContext(ctx)
-	if scope == nil {
-		return s.passkeys
+	if scope != nil && scope.Passkey != (ProjectPasskeyConfig{}) {
+		block := scope.Passkey
+		if !perHost || (block.RPID != "" && block.Origin != "") {
+			built, err := s.relyingParty(passkeys.Config{
+				RPID:   coalesce(block.RPID, s.cfg.PasskeyRPID),
+				RPName: coalesce(block.RPName, s.cfg.PasskeyRPName),
+				Origin: coalesce(block.Origin, s.cfg.PasskeyOrigin),
+			})
+			if err == nil {
+				return built, nil
+			}
+			// A block can pass the write path's checks and still not build: an
+			// rp_id alone, with no global origin to inherit.
+			s.logger.Warn("passkey_rp_override_invalid",
+				zap.String("project_id", scope.ProjectID), zap.Error(err))
+		}
 	}
-	p := scope.Passkey
-	if p.RPID == "" && p.RPName == "" && p.Origin == "" {
-		return s.passkeys
+	if perHost {
+		s.logPasskeysUnavailable(ctx, scope)
+		return nil, ErrPasskeysUnavailable
 	}
-	cfg := passkeys.Config{
-		RPID:   coalesce(p.RPID, s.cfg.PasskeyRPID),
-		RPName: coalesce(p.RPName, s.cfg.PasskeyRPName),
-		Origin: coalesce(p.Origin, s.cfg.PasskeyOrigin),
+	return s.passkeys, nil
+}
+
+// logPasskeysUnavailable tells the operator which host lost passkeys, since only
+// the client sees the refusal. The host is client-supplied, so it is bounded.
+func (s *AuthService) logPasskeysUnavailable(ctx context.Context, scope *ProjectScope) {
+	projectID := ""
+	if scope != nil {
+		projectID = scope.ProjectID
 	}
-	key := cfg.RPID + "\x00" + cfg.RPName + "\x00" + cfg.Origin
+	host := RequestHostFromContext(ctx)
+	if len(host) > origin.MaxDNSNameLen {
+		host = host[:origin.MaxDNSNameLen]
+	}
+	s.logger.Warn("passkey_relying_party_unavailable",
+		zap.String("host", host),
+		zap.String("project_id", projectID),
+		zap.String("hint", "add the host to GATEWAY_PASSKEY_RELYING_PARTIES, or give its project a passkey block with rp_id and origin"))
+}
+
+// relyingParty returns the memoised WebAuthn instance for cfg.
+func (s *AuthService) relyingParty(cfg passkeys.Config) (*passkeys.WebAuthnService, error) {
+	key := strings.Join(append([]string{cfg.RPID, cfg.RPName, cfg.Origin}, cfg.AdditionalOrigins...), "\x00")
 
 	s.passkeyRPCacheMu.RLock()
 	wa := s.passkeyRPCache[key]
 	s.passkeyRPCacheMu.RUnlock()
 	if wa != nil {
-		return wa
+		return wa, nil
 	}
 
 	built, err := passkeys.NewWebAuthnService(cfg)
 	if err != nil {
-		s.logger.Warn("passkey_rp_override_invalid",
-			zap.String("project_id", scope.ProjectID), zap.Error(err))
-		return s.passkeys
+		return nil, err
 	}
 
 	s.passkeyRPCacheMu.Lock()
+	defer s.passkeyRPCacheMu.Unlock()
 	if s.passkeyRPCache == nil {
 		s.passkeyRPCache = map[string]*passkeys.WebAuthnService{}
 	}
 	if existing := s.passkeyRPCache[key]; existing != nil {
-		built = existing
-	} else {
-		s.passkeyRPCache[key] = built
+		return existing, nil
 	}
-	s.passkeyRPCacheMu.Unlock()
-	return built
+	s.passkeyRPCache[key] = built
+	return built, nil
 }

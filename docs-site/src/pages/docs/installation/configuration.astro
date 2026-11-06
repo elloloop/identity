@@ -396,7 +396,10 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     This lets one deployment brand, say, a kids product and a B2B product
     distinctly, and bind passkeys to each product's own relying-party ID so a
     passkey registered on <code>kids.example.com</code> validates under that
-    product's RP-ID rather than the other's.
+    product's RP-ID rather than the other's. When
+    <code>GATEWAY_PASSKEY_RELYING_PARTIES</code> is set, a host's entry there wins
+    over the block, and a block must name both <code>rp_id</code> and
+    <code>origin</code> (see <a href="/identity/docs/auth/passkey">Passkeys</a>).
   </p>
   <pre><code>{`{
   "branding": {

@@ -79,7 +79,11 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 
 	newUserID := s.newPasskeySignupUserID()
 
-	optionsJSON, challengeB64, err := s.passkeysFor(ctx).BeginRegistration(
+	relyingParty, err := s.passkeysFor(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	optionsJSON, challengeB64, err := relyingParty.BeginRegistration(
 		newUserID, email, email, nil,
 	)
 	if err != nil {
@@ -187,7 +191,11 @@ func (s *AuthService) CompletePasskeySignup(
 	// Verify the attestation BEFORE any account lookup or mutation. This runs
 	// identically whether or not the email exists, so a verification failure
 	// cannot be used as an existence oracle.
-	result, err := s.passkeysFor(ctx).CompleteRegistration(credentialJSON, challenge.Challenge)
+	relyingParty, err := s.passkeysFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result, err := relyingParty.CompleteRegistration(credentialJSON, challenge.Challenge)
 	if err != nil {
 		s.logger.Warn(
 			"passkey_signup_verify_failed",
