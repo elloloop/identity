@@ -1,5 +1,30 @@
 # Upgrade guide
 
+## Next — a refreshed access token carries the sign-in's `auth_time` (migration 0056; behaviour change; `RefreshTokenRecord.AuthTimeMs` (Go API))
+
+A token minted by `RefreshToken` used to carry no `auth_time`: the refresh is
+not a sign-in, so the claim was left out, and a reader that needs a recent
+sign-in (a step-up check comparing `auth_time` with now) refused every
+refreshed token, however recently the person had signed in. Now the refresh
+record remembers when the person authenticated the session, set by the sign-in
+and copied unchanged across rotations, and a refreshed token's `auth_time` is
+that moment. It still ages as it should: a sign-in from an hour ago is an hour
+old on every token refreshed from it.
+
+Nothing changes for a session no sign-in opened. A QR hand-off, an invitation
+or an anonymous session records 0 and its tokens keep carrying no `auth_time`.
+
+**Migration 0056** adds `refresh_tokens.auth_time_ms` (`BIGINT NOT NULL
+DEFAULT 0`; the SQLite driver's 0027 does the same). A row from before the
+migration has 0, so a session that was open when you upgraded keeps
+producing tokens without `auth_time` until the person signs in again; a reader
+that needs a recent sign-in asks for one, as it did before. Down drops the
+column.
+
+`RefreshTokenRecord` gains `AuthTimeMs int64` (epoch ms). A repository
+implementation outside this tree must persist it and return it unchanged; the
+conformance suite's round-trip checks that it does.
+
 ## Next — passkey relying parties per host: `GATEWAY_PASSKEY_RELYING_PARTIES`
 
 Nothing changes unless you set it. Set, it chooses the relying party by the

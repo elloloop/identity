@@ -76,7 +76,8 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, done.AccessToken), "the sign-in behind it, not now")
 }
 
-// A refresh row from before sessions were anchored has no sign-in on record.
+// A refresh row from before the sign-in's time was recorded has no sign-in on
+// record, so its refreshes carry no auth_time.
 func TestAuthTime_UnanchoredRefreshHasNone(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -86,7 +87,10 @@ func TestAuthTime_UnanchoredRefreshHasNone(t *testing.T) {
 	require.NoError(t, err)
 	row, err := repo.FindRefreshTokenByHash(ctx, sha256Hex(login.RefreshToken))
 	require.NoError(t, err)
-	row.SessionStartedAt = 0
+	repo.mu.Lock()
+	repo.refreshTokens[row.NodeID].SessionStartedAt = 0
+	repo.refreshTokens[row.NodeID].AuthTimeMs = 0
+	repo.mu.Unlock()
 
 	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
 	require.NoError(t, err)

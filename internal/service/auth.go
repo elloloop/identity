@@ -921,6 +921,13 @@ type RefreshTokenRecord struct {
 	// session scoped to exactly this session, not the user's others. Empty in
 	// mode=ttl and for legacy rows, where there is no session to revoke.
 	SID string
+	// AuthTimeMs is when the person authenticated the session: the access
+	// token's auth_time claim. A sign-in sets it to its own time and every
+	// rotation copies it unchanged, so a token refreshed from a sign-in still
+	// says when the person signed in. 0 when no sign-in opened the session (a
+	// QR hand-off, an invitation, an anonymous session) and for legacy rows;
+	// such a session's tokens carry no auth_time.
+	AuthTimeMs int64 // epoch ms
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
@@ -2041,7 +2048,7 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 		return "", "", err
 	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, "")
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, authTimeMs, "")
 	if err != nil {
 		return "", "", err
 	}
@@ -2128,19 +2135,24 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 // issueTokensWithSessionStart is the single point every session's token pair
 // is minted (the duplicate-signup decoy signs a token for a subject that does
 // not exist and opens no session). It anchors the session's absolute lifetime at sessionStartedAtMs
-// (<= 0 anchors a new session at now) and stamps authTimeMs as the token's
-// auth_time: the sign-in that opened the session, which only a credential
-// proof may set to now. A session no sign-in vouches for passes 0 and
-// carries no auth_time, so it can never count as a recent sign-in. The
-// refresh path passes the consumed token's SessionStartedAt as the anchor, so
-// the absolute timeout keeps measuring from the original sign-in, and no
-// auth_time: a refresh is not a sign-in, and only the tokens a sign-in issues
-// vouch for one.
+// (<= 0 anchors a new session at now). authTimeMs is the sign-in the gates
+// act on (the DOB and canonical-email gates treat > 0 as a sign-in), which
+// only a credential proof may set to now; a flow that proves no credential
+// passes 0. claimAuthTimeMs is stamped as the token's auth_time: the sign-in
+// that authenticated the session, as OIDC defines the claim. A sign-in passes
+// its own time for both. The refresh path passes the consumed token's
+// SessionStartedAt as the anchor, so the absolute timeout keeps measuring
+// from the original sign-in, 0 for the gates, because a refresh is not a
+// sign-in, and the consumed token's AuthTimeMs as the claim, copied to the new
+// token's record, so a token refreshed from a sign-in still says when the
+// person signed in (a reader that needs a recent sign-in compares auth_time
+// with now, so it ages as it should) while a session no sign-in opened, and a
+// legacy row, still carry none.
 //
 // tenantID becomes the access token's tenant claim. It is a tenant the caller
 // has already checked the user may act in; empty keeps the deployment's
 // default tenant.
-func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, authTimeMs int64, tenantID string) (string, string, error) {
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, authTimeMs, claimAuthTimeMs int64, tenantID string) (string, string, error) {
 	// The verified-email gate's backstop: every path that mints a session (and
 	// any added later) honours it. Sign-ins and refreshes run the audited gate
 	// before reaching here, so this refuses silently.
@@ -2194,7 +2206,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	s.ensureCanonicalEmail(ctx, user, authTimeMs)
 	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
-	claims := s.accessTokenClaims(ctx, user, authTimeMs)
+	claims := s.accessTokenClaims(ctx, user, claimAuthTimeMs)
 	if tenantID != "" {
 		claims.Tenant = tenantID
 	}
@@ -2232,6 +2244,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		LastUsedAt:       now,
 		SessionStartedAt: sessionStart,
 		SID:              sid,
+		AuthTimeMs:       claimAuthTimeMs,
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("storing refresh token: %w", err)
@@ -2742,7 +2755,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// absolute timeout keeps measuring from the original login. A legacy row
 	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
 	// issueTokensWithSessionStart. No auth_time: a rotation is not a sign-in.
-	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, tenantID)
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, tenantID)
 	if err != nil {
 		return nil, "", "", err
 	}
