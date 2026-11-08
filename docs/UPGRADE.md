@@ -18,6 +18,15 @@ refuse every refreshed token and now pass one whose sign-in is inside the
 window, as OpenID Connect's `auth_time` intends. That is a widening: inside the
 window, holding the refresh token is enough to mint a token that passes the
 step-up check, where before only the sign-in's own first access token did.
+Lowering `GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS` is the one way to
+narrow the merge window; the agent window is fixed.
+
+A required date-of-birth step reached from a refresh now continues the
+session's sign-in as one reached from a sign-in always did: its tokens carry
+the sign-in's `auth_time`, its absolute timeout keeps measuring from that
+sign-in instead of restarting at the completion, and a canonical-email rewrite
+it causes is audited as a sign-in's, as the step's own `login_success` audit
+already said.
 
 Nothing changes for a session no sign-in opened. A QR hand-off, an invitation
 or an anonymous session records 0 and its tokens keep carrying no `auth_time`.

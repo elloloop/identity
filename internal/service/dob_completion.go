@@ -232,7 +232,10 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	// Completing the step continues the session it interrupted: the same
 	// sign-in, not a new one. A ticket from a refresh carries the sign-in
 	// behind that session, or none when no sign-in opened it, and the session
-	// it yields carries the same.
+	// it yields carries the same, anchored at that sign-in (none re-anchors at
+	// now). The canonical-email gate sees that sign-in whichever flow the step
+	// interrupted: the step issues its session through the sign-in path and
+	// audits a login_success below, so a rewrite here is a sign-in's.
 	anchor := claims.AuthTime * 1000
 	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, anchor, anchor)
 	if err != nil {

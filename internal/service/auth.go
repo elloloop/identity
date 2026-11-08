@@ -2134,25 +2134,32 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 
 // issueTokensWithSessionStart is the single point every session's token pair
 // is minted (the duplicate-signup decoy signs a token for a subject that does
-// not exist and opens no session). It anchors the session's absolute lifetime at sessionStartedAtMs
-// (<= 0 anchors a new session at now). authTimeMs is the sign-in the gates
-// act on (the DOB and canonical-email gates treat > 0 as a sign-in), which
-// only a credential proof may set to now; a flow that proves no credential
-// passes 0. claimAuthTimeMs is stamped as the token's auth_time: the sign-in
-// that authenticated the session, as OIDC defines the claim. A sign-in passes
-// its own time for both. The refresh path passes the consumed token's
-// SessionStartedAt as the anchor, so the absolute timeout keeps measuring
-// from the original sign-in, 0 for the gates, because a refresh is not a
-// sign-in, and the consumed token's AuthTimeMs as the claim, copied to the new
-// token's record, so a token refreshed from a sign-in still says when the
-// person signed in (a reader that needs a recent sign-in compares auth_time
-// with now, so it ages as it should) while a session no sign-in opened, and a
-// legacy row, still carry none.
+// not exist and opens no session).
+//
+// sessionStartedAtMs anchors the session's absolute lifetime; <= 0 anchors a
+// new session at now. The refresh path passes the consumed token's
+// SessionStartedAt, so the absolute timeout keeps measuring from the original
+// sign-in.
+//
+// signInAtMs is non-zero only when this call completes a credential proof: a
+// sign-in passes its own time, and every other path (a refresh, an anonymous
+// session, a QR hand-off) passes 0. Only the canonical-email gate reads it,
+// as the flag that decides whether a held spelling is worth a warning and
+// whether a rewrite is audited as a sign-in's or a session's.
+//
+// claimAuthTimeMs is the sign-in that authenticated the session, as OIDC
+// defines auth_time. It is stamped as the token's auth_time claim, stored on
+// the new refresh record so the next rotation carries it unchanged, and
+// handed to the DOB completion ticket so that step continues the same
+// sign-in. A sign-in passes its own time; the refresh path passes the consumed
+// record's AuthTimeMs; a flow no sign-in opened passes 0, and its tokens carry
+// no auth_time. A reader that needs a recent sign-in compares the claim with
+// now, so it ages as it should.
 //
 // tenantID becomes the access token's tenant claim. It is a tenant the caller
 // has already checked the user may act in; empty keeps the deployment's
 // default tenant.
-func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, authTimeMs, claimAuthTimeMs int64, tenantID string) (string, string, error) {
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, tenantID string) (string, string, error) {
 	// The verified-email gate's backstop: every path that mints a session (and
 	// any added later) honours it. Sign-ins and refreshes run the audited gate
 	// before reaching here, so this refuses silently.
@@ -2203,7 +2210,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	//
 	// The stored email is moved to its canonical spelling first, so an
 	// address derived from it is derived from the form every lookup uses.
-	s.ensureCanonicalEmail(ctx, user, authTimeMs)
+	s.ensureCanonicalEmail(ctx, user, signInAtMs)
 	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	claims := s.accessTokenClaims(ctx, user, claimAuthTimeMs)

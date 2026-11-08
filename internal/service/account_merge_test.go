@@ -349,6 +349,29 @@ func TestTokens_AuthTimeIsTheSignIn(t *testing.T) {
 	require.ErrorIs(t, err, ErrReauthenticationRequired)
 }
 
+// Inside the merge's recent-sign-in window, a token refreshed from the sign-in
+// passes as the sign-in's own first token did: the refresh is not what is
+// being judged, the sign-in behind it is.
+func TestMergeAccounts_AcceptsATokenRefreshedFromARecentSignIn(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AccountMergeEnabled = true
+	ctx := context.Background()
+	user := seedUser(repo, "recent@example.com", hashPW(t, strongPW), StatusActive)
+	user.EmailVerified = true
+	seedUser(repo, "other@example.com", hashPW(t, strongPW), StatusActive).EmailVerified = true
+
+	login, err := svc.PasswordLogin(ctx, "recent@example.com", strongPW, "203.0.113.10", "agent")
+	require.NoError(t, err)
+	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
+	require.NoError(t, err)
+
+	_, err = svc.MergeAccounts(ctx, user.ID, claims.AuthTime, "other@example.com", strongPW, "203.0.113.10", "agent", false)
+	require.NoError(t, err, "the sign-in behind the refreshed token is recent")
+}
+
 // Two spellings of one Gmail mailbox reach one inbox, so the person gets one
 // notice, not two.
 func TestMergeAccounts_OneNoticeForTwoSpellingsOfOneMailbox(t *testing.T) {
