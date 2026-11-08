@@ -309,13 +309,18 @@ func TestMergeAccounts_RequiresARecentSignIn(t *testing.T) {
 	require.NoError(t, err, "a sign-in within the window is enough")
 }
 
-// auth_time is stamped by a sign-in, and a refresh — not a sign-in — carries
-// none.
+// auth_time is the sign-in's time, and every refresh carries that same time,
+// not the refresh's: the claim says when the person authenticated the session,
+// so a check that needs a recent sign-in ages it as it should and refuses a
+// refreshed token once the sign-in behind it is too old.
 func TestTokens_AuthTimeIsTheSignIn(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
+	svc.cfg.AccountMergeEnabled = true
 	ctx := context.Background()
-	seedUser(repo, "signin@example.com", hashPW(t, strongPW), StatusActive)
+	user := seedUser(repo, "signin@example.com", hashPW(t, strongPW), StatusActive)
+	user.EmailVerified = true
+	seedUser(repo, "other@example.com", hashPW(t, strongPW), StatusActive).EmailVerified = true
 
 	signedInAt := time.Now().Add(-time.Hour)
 	svc.nowFunc = func() time.Time { return signedInAt }
@@ -326,11 +331,45 @@ func TestTokens_AuthTimeIsTheSignIn(t *testing.T) {
 	require.Equal(t, signedInAt.Unix(), claims.AuthTime)
 
 	svc.nowFunc = time.Now
-	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
+	_, access, refresh, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
 	claims, err = jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 	require.NoError(t, err)
-	require.Zero(t, claims.AuthTime, "a refresh is not a sign-in")
+	require.Equal(t, signedInAt.Unix(), claims.AuthTime, "a refresh carries the sign-in, not the refresh")
+
+	_, access, _, err = svc.RefreshToken(ctx, refresh, "", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	claims, err = jwt.VerifyAccessToken(access, svc.signer, "", "", false)
+	require.NoError(t, err)
+	require.Equal(t, signedInAt.Unix(), claims.AuthTime, "and so does the refresh after it")
+
+	// An hour-old sign-in is outside the merge's recent-sign-in window however
+	// fresh the token that carries it.
+	_, err = svc.MergeAccounts(ctx, user.ID, claims.AuthTime, "other@example.com", strongPW, "203.0.113.10", "agent", false)
+	require.ErrorIs(t, err, ErrReauthenticationRequired)
+}
+
+// Inside the merge's recent-sign-in window, a token refreshed from the sign-in
+// passes as the sign-in's own first token did: the refresh is not what is
+// being judged, the sign-in behind it is.
+func TestMergeAccounts_AcceptsATokenRefreshedFromARecentSignIn(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AccountMergeEnabled = true
+	ctx := context.Background()
+	user := seedUser(repo, "recent@example.com", hashPW(t, strongPW), StatusActive)
+	user.EmailVerified = true
+	seedUser(repo, "other@example.com", hashPW(t, strongPW), StatusActive).EmailVerified = true
+
+	login, err := svc.PasswordLogin(ctx, "recent@example.com", strongPW, "203.0.113.10", "agent")
+	require.NoError(t, err)
+	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
+	require.NoError(t, err)
+
+	_, err = svc.MergeAccounts(ctx, user.ID, claims.AuthTime, "other@example.com", strongPW, "203.0.113.10", "agent", false)
+	require.NoError(t, err, "the sign-in behind the refreshed token is recent")
 }
 
 // Two spellings of one Gmail mailbox reach one inbox, so the person gets one

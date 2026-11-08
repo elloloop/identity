@@ -1,5 +1,52 @@
 # Upgrade guide
 
+## Next — a refreshed access token carries the sign-in's `auth_time` (migration 0056; behaviour change; `RefreshTokenRecord.AuthTimeMs` (Go API))
+
+A token minted by `RefreshToken` used to carry no `auth_time`: the refresh is
+not a sign-in, so the claim was left out, and a reader that needs a recent
+sign-in (a step-up check comparing `auth_time` with now) refused every
+refreshed token, however recently the person had signed in. Now the refresh
+record remembers when the person authenticated the session, set by the sign-in
+and copied unchanged across rotations, and a refreshed token's `auth_time` is
+that moment. It still ages as it should: a sign-in from an hour ago is an hour
+old on every token refreshed from it.
+
+Two built-in checks change outcome. `MergeAccounts` needs a sign-in within
+`GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS` (default 300), and agent OAuth
+consent and agent-machine selection need one within 5 minutes: both used to
+refuse every refreshed token and now pass one whose sign-in is inside the
+window, as OpenID Connect's `auth_time` intends. That is a widening: inside the
+window, holding the refresh token is enough to mint a token that passes the
+step-up check, where before only the sign-in's own first access token did.
+Lowering `GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS` is the one way to
+narrow the merge window; the agent window is fixed. A verifier outside this
+repository that took the presence of `auth_time` as proof of a recent sign-in
+must now compare it with now, as the built-in checks do. Accepting an
+invitation proves the mailbox it went to, so it is a sign-in and its session
+carries `auth_time`, as before.
+
+A required date-of-birth step reached from a refresh now continues the
+session's sign-in as one reached from a sign-in always did: its tokens carry
+the sign-in's `auth_time`, its absolute timeout keeps measuring from that
+sign-in instead of restarting at the completion, and a canonical-email rewrite
+it causes is audited as a sign-in's, as the step's own `login_success` audit
+already said.
+
+Nothing changes for a session no sign-in opened. A QR hand-off or an anonymous
+session records 0 and its tokens keep carrying no `auth_time`.
+
+**Migration 0056** adds `refresh_tokens.auth_time_ms` (`BIGINT NOT NULL
+DEFAULT 0`; the SQLite driver's 0027 does the same). A row from before the
+migration has 0, so a session that was open when you upgraded keeps
+producing tokens without `auth_time` until the person signs in again; a reader
+that needs a recent sign-in asks for one, as it did before. Rolling back is
+running the previous release again: the behaviour lives in the binary, and
+the column can stay. Down drops the column.
+
+`RefreshTokenRecord` gains `AuthTimeMs int64` (epoch ms). A repository
+implementation outside this tree must persist it and return it unchanged; the
+conformance suite's round-trip checks that it does.
+
 ## Next — passkey relying parties per host: `GATEWAY_PASSKEY_RELYING_PARTIES`
 
 Nothing changes unless you set it. Set, it chooses the relying party by the

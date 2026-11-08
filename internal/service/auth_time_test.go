@@ -48,7 +48,8 @@ func TestAuthTime_QrHandoffIsNotASignIn(t *testing.T) {
 }
 
 // The required-DOB step continues the session it interrupted: reached from a
-// refresh, it does not turn that refresh into a new sign-in.
+// refresh, it does not turn that refresh into a new sign-in, and keeps the
+// sign-in behind the refresh.
 func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -64,7 +65,11 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	ticket := dobTicketFrom(t, err)
 	done, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
 	require.NoError(t, err)
-	require.Zero(t, authTimeOf(t, svc, done.AccessToken), "a refresh behind it: no sign-in")
+	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, done.AccessToken), "a refresh behind it: the sign-in that opened the session")
+	row, err := repo.FindRefreshTokenByHash(ctx, sha256Hex(done.RefreshToken))
+	require.NoError(t, err)
+	require.Equal(t, signedInAt.UnixMilli(), row.SessionStartedAt, "the absolute timeout keeps measuring from the sign-in")
+	require.Equal(t, signedInAt.UnixMilli(), row.AuthTimeMs, "the next rotation carries the sign-in too")
 
 	seedUser(repo, "dob-signin@example.com", hashPW(t, strongPW), StatusActive)
 	svc.nowFunc = func() time.Time { return signedInAt }
@@ -76,7 +81,54 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, done.AccessToken), "the sign-in behind it, not now")
 }
 
-// A refresh row from before sessions were anchored has no sign-in on record.
+// The required-DOB step reached from a refresh is a sign-in for the
+// canonical-email gate, as the step's own login_success audit already says:
+// a spelling held at sign-in and given up since is rewritten there as a
+// sign-in's.
+func TestAuthTime_DOBCompletionFromARefreshRewritesAsASignIn(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	ctx := context.Background()
+	legacy := legacyGmailAccount(t, repo)
+	holder := seedUser(repo, "firstlast@gmail.com", "", StatusDeactivated)
+	holder.MergedIntoUserID = "someone-else"
+
+	res := providerSignIn(t, svc)
+	require.Equal(t, "first.last@gmail.com", storedUserEmail(t, repo, legacy.ID), "held at sign-in: nothing rewritten")
+	holder.MergedIntoUserID = legacy.ID
+
+	enableAgeGate(t, svc, true)
+	_, _, _, err := svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
+	ticket := dobTicketFrom(t, err)
+	_, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
+	require.NoError(t, err)
+	require.Equal(t, "firstlast@gmail.com", storedUserEmail(t, repo, legacy.ID))
+	require.Equal(t, 1, writer.countByEventTypeAndDetail("email_canonicalized", "source", "sign_in"))
+	require.Equal(t, 0, writer.countByEventTypeAndDetail("email_canonicalized", "source", "session"))
+}
+
+// Accepting an invitation proves the mailbox it went to: a sign-in, so its
+// session carries auth_time and a refresh keeps it.
+func TestAuthTime_AcceptedInvitationIsASignIn(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := context.Background()
+	token := seedInvitedUser(t, repo, "invitee@example.com")
+	acceptedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	svc.nowFunc = func() time.Time { return acceptedAt }
+	res, err := svc.AcceptInvitation(ctx, token, accessTestPassword, "Invitee", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	svc.nowFunc = time.Now
+	require.Equal(t, acceptedAt.Unix(), authTimeOf(t, svc, res.AccessToken))
+
+	_, access, _, err := svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	require.Equal(t, acceptedAt.Unix(), authTimeOf(t, svc, access), "the refresh keeps the acceptance")
+}
+
+// A refresh row from before the sign-in's time was recorded has no sign-in on
+// record, so its refreshes carry no auth_time, whether or not it has a
+// session-start anchor.
 func TestAuthTime_UnanchoredRefreshHasNone(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -86,11 +138,36 @@ func TestAuthTime_UnanchoredRefreshHasNone(t *testing.T) {
 	require.NoError(t, err)
 	row, err := repo.FindRefreshTokenByHash(ctx, sha256Hex(login.RefreshToken))
 	require.NoError(t, err)
-	row.SessionStartedAt = 0
+	repo.mu.Lock()
+	repo.refreshTokens[row.NodeID].SessionStartedAt = 0
+	repo.refreshTokens[row.NodeID].AuthTimeMs = 0
+	repo.mu.Unlock()
 
 	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Zero(t, authTimeOf(t, svc, access))
+}
+
+// A row anchored before migration 0056 has a session start but no sign-in's
+// time on record: its refreshes carry no auth_time until the person signs in
+// again, which is what every refreshed token did before the migration.
+func TestAuthTime_LegacyAnchoredRowHasNone(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := context.Background()
+	seedUser(repo, "legacy-anchored@example.com", hashPW(t, strongPW), StatusActive)
+	login, err := svc.PasswordLogin(ctx, "legacy-anchored@example.com", strongPW, "203.0.113.10", "agent")
+	require.NoError(t, err)
+	row, err := repo.FindRefreshTokenByHash(ctx, sha256Hex(login.RefreshToken))
+	require.NoError(t, err)
+	repo.mu.Lock()
+	require.NotZero(t, repo.refreshTokens[row.NodeID].SessionStartedAt, "the anchor stays")
+	repo.refreshTokens[row.NodeID].AuthTimeMs = 0
+	repo.mu.Unlock()
+
+	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	require.Zero(t, authTimeOf(t, svc, access), "no sign-in on record")
 }
 
 // Completing a required password change continues the sign-in that proved

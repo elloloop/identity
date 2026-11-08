@@ -44,7 +44,7 @@ import { Code } from "astro-expressive-code/components";
   "tenant": "local",           // GATEWAY_DEFAULT_TENANT_ID, or a tenant chosen on RefreshToken
   "role": "admin",             // "admin" | "member" | "guest"
   "sid": "sess_01HZ...",       // session ID
-  "auth_time": 1730000000,     // sign-in time; absent on refreshed, QR and anonymous tokens
+  "auth_time": 1730000000,     // sign-in time, kept across refreshes; absent when no sign-in opened the session (QR, anonymous, sessions older than this release)
   "kind": "agent",             // only on an agent account's token; absent for a person
   "iat": 1730000000,
   "exp": 1730000900

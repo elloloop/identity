@@ -211,9 +211,12 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 				// sid links the refresh token to its mode=session access session;
 				// it must round-trip so a timeout breach can revoke that session.
 				sid := fmt.Sprintf("sid-%d", i)
+				// AuthTimeMs is the sign-in's time, copied across rotations like
+				// the anchor; it must come back exactly as stored.
+				authTime := c.createdAt - 2
 				if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
 					TokenHash: h, UserID: uid, ExpiresAt: c.expiresAt, CreatedAt: c.createdAt, LastUsedAt: c.createdAt,
-					SessionStartedAt: sessionStart, SID: sid,
+					SessionStartedAt: sessionStart, SID: sid, AuthTimeMs: authTime,
 				}); err != nil {
 					t.Fatalf("%s: CreateRefreshToken: %v", c.name, err)
 				}
@@ -232,6 +235,9 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 				}
 				if got.SID != sid {
 					t.Errorf("%s: SID round-trip = %q, want %q", c.name, got.SID, sid)
+				}
+				if got.AuthTimeMs != authTime {
+					t.Errorf("%s: AuthTimeMs round-trip = %d, want %d", c.name, got.AuthTimeMs, authTime)
 				}
 			}
 		})

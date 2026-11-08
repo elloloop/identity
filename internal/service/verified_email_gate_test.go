@@ -196,7 +196,7 @@ func TestIssueTokensWithSessionStart_VerifiedEmailBackstop(t *testing.T) {
 	svc.cfg.AuthRequireVerifiedEmail = true
 	user := seedUser(repo, "backstop@example.com", "", StatusActive)
 
-	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", sessionGateSignIn, 0, 0, "")
+	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", sessionGateSignIn, 0, 0, 0, "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Zero(t, writer.countByEventType("login_failure"))
 }

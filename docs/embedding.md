@@ -140,8 +140,9 @@ metadata. Two rules it must follow, both of them load-bearing:
    including any a later identity release starts reading.
 
 `MergeAccounts` also reads `x-authenticated-auth-time`, the token's
-`auth_time` claim (epoch seconds, present only on a token a sign-in
-issued). Forward it from the verified token, after deleting any value the
+`auth_time` claim (epoch seconds, the session's sign-in; a refresh keeps
+it, a QR hand-off or anonymous session has none). Forward it from the
+verified token, after deleting any value the
 client sent, **and** set `Options.GRPCTrustAuthTime`: until you do, the
 bridge drops the key, so an interceptor written before it existed cannot let
 a client vouch for its own sign-in, and every merge over native gRPC is
