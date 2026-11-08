@@ -48,7 +48,8 @@ func TestAuthTime_QrHandoffIsNotASignIn(t *testing.T) {
 }
 
 // The required-DOB step continues the session it interrupted: reached from a
-// refresh, it does not turn that refresh into a new sign-in.
+// refresh, it does not turn that refresh into a new sign-in, and keeps the
+// sign-in behind the refresh.
 func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -64,7 +65,7 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	ticket := dobTicketFrom(t, err)
 	done, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
 	require.NoError(t, err)
-	require.Zero(t, authTimeOf(t, svc, done.AccessToken), "a refresh behind it: no sign-in")
+	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, done.AccessToken), "a refresh behind it: the sign-in that opened the session")
 
 	seedUser(repo, "dob-signin@example.com", hashPW(t, strongPW), StatusActive)
 	svc.nowFunc = func() time.Time { return signedInAt }
@@ -77,7 +78,8 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 }
 
 // A refresh row from before the sign-in's time was recorded has no sign-in on
-// record, so its refreshes carry no auth_time.
+// record, so its refreshes carry no auth_time, whether or not it has a
+// session-start anchor.
 func TestAuthTime_UnanchoredRefreshHasNone(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -95,6 +97,28 @@ func TestAuthTime_UnanchoredRefreshHasNone(t *testing.T) {
 	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Zero(t, authTimeOf(t, svc, access))
+}
+
+// A row anchored before migration 0056 has a session start but no sign-in's
+// time on record: its refreshes carry no auth_time until the person signs in
+// again, which is what every refreshed token did before the migration.
+func TestAuthTime_LegacyAnchoredRowHasNone(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := context.Background()
+	seedUser(repo, "legacy-anchored@example.com", hashPW(t, strongPW), StatusActive)
+	login, err := svc.PasswordLogin(ctx, "legacy-anchored@example.com", strongPW, "203.0.113.10", "agent")
+	require.NoError(t, err)
+	row, err := repo.FindRefreshTokenByHash(ctx, sha256Hex(login.RefreshToken))
+	require.NoError(t, err)
+	repo.mu.Lock()
+	require.NotZero(t, repo.refreshTokens[row.NodeID].SessionStartedAt, "the anchor stays")
+	repo.refreshTokens[row.NodeID].AuthTimeMs = 0
+	repo.mu.Unlock()
+
+	_, access, _, err := svc.RefreshToken(ctx, login.RefreshToken, "", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	require.Zero(t, authTimeOf(t, svc, access), "no sign-in on record")
 }
 
 // Completing a required password change continues the sign-in that proved

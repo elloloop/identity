@@ -11,6 +11,14 @@ and copied unchanged across rotations, and a refreshed token's `auth_time` is
 that moment. It still ages as it should: a sign-in from an hour ago is an hour
 old on every token refreshed from it.
 
+Two built-in checks change outcome. `MergeAccounts` needs a sign-in within
+`GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS` (default 300), and agent OAuth
+consent and agent-machine selection need one within 5 minutes: both used to
+refuse every refreshed token and now pass one whose sign-in is inside the
+window, as OpenID Connect's `auth_time` intends. That is a widening: inside the
+window, holding the refresh token is enough to mint a token that passes the
+step-up check, where before only the sign-in's own first access token did.
+
 Nothing changes for a session no sign-in opened. A QR hand-off, an invitation
 or an anonymous session records 0 and its tokens keep carrying no `auth_time`.
 

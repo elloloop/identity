@@ -2191,7 +2191,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// written. Like the product gate it lives here, at the chokepoint, so
 	// every session-issuing path — initial login, refresh, and any path
 	// added later — is covered by construction.
-	if err := s.enforceDOBRequired(ctx, user, authTimeMs, ipAddr, userAgent, gate); err != nil {
+	if err := s.enforceDOBRequired(ctx, user, claimAuthTimeMs, ipAddr, userAgent, gate); err != nil {
 		return "", "", err
 	}
 
@@ -2634,7 +2634,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// issueTokensWithSessionStart (so nothing is bypassed); this early pass
 	// exists only so the refusal is non-destructive and the client can
 	// complete the step and rotate normally.
-	if err := s.enforceDOBRequired(ctx, timeoutUser, 0, ipAddr, userAgent, sessionGateRefresh); err != nil {
+	if err := s.enforceDOBRequired(ctx, timeoutUser, record.AuthTimeMs, ipAddr, userAgent, sessionGateRefresh); err != nil {
 		return nil, "", "", err
 	}
 
@@ -2754,7 +2754,8 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// Propagate the session-start anchor UNCHANGED across the rotation so the
 	// absolute timeout keeps measuring from the original login. A legacy row
 	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
-	// issueTokensWithSessionStart. No auth_time: a rotation is not a sign-in.
+	// issueTokensWithSessionStart. The sign-in's auth_time is carried over
+	// unchanged too; the gates get 0 because a rotation is not a sign-in.
 	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, tenantID)
 	if err != nil {
 		return nil, "", "", err
