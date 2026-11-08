@@ -500,7 +500,12 @@ jobs:
 
   agent-consent-browser:
     name: Delegated consent build and browser
-    runs-on: ubuntu-latest
+    # Pinned, not latest: `playwright install --with-deps` only knows the
+    # Ubuntu releases its version was built for, and GitHub moves
+    # ubuntu-latest ahead of them (26.04 broke Playwright 1.56.1 on
+    # 2026-11-08). Move this with the Playwright pin in
+    # examples/agent-delegation/consent/package.json.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
       run:
