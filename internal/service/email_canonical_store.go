@@ -152,21 +152,22 @@ const (
 // sign-in reaches it, a provider sign-in that found the account by its
 // provider id included, and so does a refresh of an older session. It never
 // fails the token: a canonical spelling another account holds is left for an
-// operator to merge, and logged once per sign-in (authTimeMs > 0), not on
-// every refresh.
-func (s *AuthService) ensureCanonicalEmail(ctx context.Context, u *User, authTimeMs int64) {
+// operator to merge, and logged once per sign-in (signInAtMs > 0), not on
+// every refresh. signInAtMs is the chokepoint's sign-in flag, never the
+// token's auth_time claim, which a refresh carries too.
+func (s *AuthService) ensureCanonicalEmail(ctx context.Context, u *User, signInAtMs int64) {
 	rw, err := storeCanonicalEmail(ctx, s.repo(ctx), u, s.nowMs())
 	switch {
 	case errors.Is(err, errCanonicalEmailNotRewritable):
 	case errors.Is(err, errCanonicalEmailHeld):
-		if authTimeMs > 0 {
+		if signInAtMs > 0 {
 			s.logger.Warn("email_canonical_form_held", zap.String("project_id", s.projectID(ctx)), zap.String("user_id", u.ID))
 		}
 	case err != nil:
 		s.logger.Warn("email_canonicalize_failed", zap.String("project_id", s.projectID(ctx)), zap.String("user_id", u.ID), zap.Error(err))
 	case rw.Rewritten:
 		source := canonicalSourceSignIn
-		if authTimeMs <= 0 {
+		if signInAtMs <= 0 {
 			source = canonicalSourceSession
 		}
 		auditEmailCanonicalized(ctx, s.audit, u.ID, u.ID, source, rw)

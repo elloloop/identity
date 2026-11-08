@@ -925,8 +925,9 @@ type RefreshTokenRecord struct {
 	// token's auth_time claim. A sign-in sets it to its own time and every
 	// rotation copies it unchanged, so a token refreshed from a sign-in still
 	// says when the person signed in. 0 when no sign-in opened the session (a
-	// QR hand-off, an invitation, an anonymous session) and for legacy rows;
-	// such a session's tokens carry no auth_time.
+	// QR hand-off, an anonymous session) and for legacy rows; such a
+	// session's tokens carry no auth_time. Accepting an invitation proves the
+	// mailbox it went to, so it is a sign-in and sets it.
 	AuthTimeMs int64 // epoch ms
 }
 
@@ -2141,11 +2142,13 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 // SessionStartedAt, so the absolute timeout keeps measuring from the original
 // sign-in.
 //
-// signInAtMs is non-zero only when this call completes a credential proof: a
-// sign-in passes its own time, and every other path (a refresh, an anonymous
-// session, a QR hand-off) passes 0. Only the canonical-email gate reads it,
-// as the flag that decides whether a held spelling is worth a warning and
-// whether a rewrite is audited as a sign-in's or a session's.
+// signInAtMs is non-zero when this call completes a credential proof (a
+// sign-in passes its own time) or a step the sign-in path finishes for the
+// session it interrupted (the DOB step passes the sign-in behind it); a
+// refresh, an anonymous session and a QR hand-off pass 0. Only the
+// canonical-email gate reads it, as the flag that decides whether a held
+// spelling is worth a warning and whether a rewrite is audited as a sign-in's
+// or a session's.
 //
 // claimAuthTimeMs is the sign-in that authenticated the session, as OIDC
 // defines auth_time. It is stamped as the token's auth_time claim, stored on

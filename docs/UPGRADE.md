@@ -19,7 +19,11 @@ window, as OpenID Connect's `auth_time` intends. That is a widening: inside the
 window, holding the refresh token is enough to mint a token that passes the
 step-up check, where before only the sign-in's own first access token did.
 Lowering `GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS` is the one way to
-narrow the merge window; the agent window is fixed.
+narrow the merge window; the agent window is fixed. A verifier outside this
+repository that took the presence of `auth_time` as proof of a recent sign-in
+must now compare it with now, as the built-in checks do. Accepting an
+invitation proves the mailbox it went to, so it is a sign-in and its session
+carries `auth_time`, as before.
 
 A required date-of-birth step reached from a refresh now continues the
 session's sign-in as one reached from a sign-in always did: its tokens carry
@@ -28,15 +32,16 @@ sign-in instead of restarting at the completion, and a canonical-email rewrite
 it causes is audited as a sign-in's, as the step's own `login_success` audit
 already said.
 
-Nothing changes for a session no sign-in opened. A QR hand-off, an invitation
-or an anonymous session records 0 and its tokens keep carrying no `auth_time`.
+Nothing changes for a session no sign-in opened. A QR hand-off or an anonymous
+session records 0 and its tokens keep carrying no `auth_time`.
 
 **Migration 0056** adds `refresh_tokens.auth_time_ms` (`BIGINT NOT NULL
 DEFAULT 0`; the SQLite driver's 0027 does the same). A row from before the
 migration has 0, so a session that was open when you upgraded keeps
 producing tokens without `auth_time` until the person signs in again; a reader
-that needs a recent sign-in asks for one, as it did before. Down drops the
-column.
+that needs a recent sign-in asks for one, as it did before. Rolling back is
+running the previous release again: the behaviour lives in the binary, and
+the column can stay. Down drops the column.
 
 `RefreshTokenRecord` gains `AuthTimeMs int64` (epoch ms). A repository
 implementation outside this tree must persist it and return it unchanged; the

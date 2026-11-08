@@ -66,6 +66,10 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	done, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, done.AccessToken), "a refresh behind it: the sign-in that opened the session")
+	row, err := repo.FindRefreshTokenByHash(ctx, sha256Hex(done.RefreshToken))
+	require.NoError(t, err)
+	require.Equal(t, signedInAt.UnixMilli(), row.SessionStartedAt, "the absolute timeout keeps measuring from the sign-in")
+	require.Equal(t, signedInAt.UnixMilli(), row.AuthTimeMs, "the next rotation carries the sign-in too")
 
 	seedUser(repo, "dob-signin@example.com", hashPW(t, strongPW), StatusActive)
 	svc.nowFunc = func() time.Time { return signedInAt }
@@ -75,6 +79,51 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	done, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, done.AccessToken), "the sign-in behind it, not now")
+}
+
+// The required-DOB step reached from a refresh is a sign-in for the
+// canonical-email gate, as the step's own login_success audit already says:
+// a spelling held at sign-in and given up since is rewritten there as a
+// sign-in's.
+func TestAuthTime_DOBCompletionFromARefreshRewritesAsASignIn(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	ctx := context.Background()
+	legacy := legacyGmailAccount(t, repo)
+	holder := seedUser(repo, "firstlast@gmail.com", "", StatusDeactivated)
+	holder.MergedIntoUserID = "someone-else"
+
+	res := providerSignIn(t, svc)
+	require.Equal(t, "first.last@gmail.com", storedUserEmail(t, repo, legacy.ID), "held at sign-in: nothing rewritten")
+	holder.MergedIntoUserID = legacy.ID
+
+	enableAgeGate(t, svc, true)
+	_, _, _, err := svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
+	ticket := dobTicketFrom(t, err)
+	_, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
+	require.NoError(t, err)
+	require.Equal(t, "firstlast@gmail.com", storedUserEmail(t, repo, legacy.ID))
+	require.Equal(t, 1, writer.countByEventTypeAndDetail("email_canonicalized", "source", "sign_in"))
+	require.Equal(t, 0, writer.countByEventTypeAndDetail("email_canonicalized", "source", "session"))
+}
+
+// Accepting an invitation proves the mailbox it went to: a sign-in, so its
+// session carries auth_time and a refresh keeps it.
+func TestAuthTime_AcceptedInvitationIsASignIn(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := context.Background()
+	token := seedInvitedUser(t, repo, "invitee@example.com")
+	acceptedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	svc.nowFunc = func() time.Time { return acceptedAt }
+	res, err := svc.AcceptInvitation(ctx, token, accessTestPassword, "Invitee", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	svc.nowFunc = time.Now
+	require.Equal(t, acceptedAt.Unix(), authTimeOf(t, svc, res.AccessToken))
+
+	_, access, _, err := svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
+	require.NoError(t, err)
+	require.Equal(t, acceptedAt.Unix(), authTimeOf(t, svc, access), "the refresh keeps the acceptance")
 }
 
 // A refresh row from before the sign-in's time was recorded has no sign-in on
