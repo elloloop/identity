@@ -1,5 +1,41 @@
 # Upgrade guide
 
+## Next — structured refusal logging (`auth_refused`, `rpc_refused`) and stable `reason` codes (additive; no migration; `pkg/jwt.PeekClaims` and `pkg/jwt` error sentinels)
+
+Bearer authentication, session revocation checks, project-scope checks,
+agent-machine and delegated OAuth RPCs, `RefreshToken` (including tenant
+selection), and `MergeAccounts` now emit structured warning log lines on every
+refusal and stamp the same `reason` code onto the `request` access log line:
+
+- **Middleware refusals (`msg: "auth_refused"`):** `missing_bearer`,
+  `token_malformed`, `token_signature`, `token_expired`, `token_issuer`,
+  `token_audience`, `token_purpose_rejected`, `token_tenant_rejected`,
+  `token_tenant_lookup`, `session_lookup_failed`, `session_revoked`, and
+  `token_project_mismatch`.
+- **Service refusals (`msg: "rpc_refused"`):** `unauthenticated`,
+  `session_lookup_failed`, `session_revoked`, `session_project_mismatch`,
+  `sign_in_not_recent`, `machine_not_found`, `machine_revoked`,
+  `challenge_expired`, `signature_invalid`, `key_invalid`,
+  `refresh_token_invalid`, `refresh_token_expired`, `refresh_session_revoked`,
+  `not_a_member`, `tenant_suspended`, `tenant_selection_disabled`,
+  `merge_same_user`, and `merge_target_invalid`.
+- **Structured fields:** every refusal line includes `reason`, `host` (the
+  normalized `Host` header, for example `auth.example.com`), and
+  `request_project_id` (the project resolved for the request from `Host`,
+  `X-Project-Key`, or the default project) alongside non-secret claims and
+  timing metadata (`project_id`, `tenant_id`, `user_id`, `session_id`,
+  `issuer`, `auth_time_age_s`, `max_age_s`, `expiry_age_s`, `trace_id`). Raw
+  tokens, refresh tokens, cookies, authorization codes, challenge signatures,
+  and passwords are never logged.
+- **`pkg/jwt` additions:** `jwt.PeekClaims(token)` base64url-decodes the JWT
+  payload segment without verifying the signature so middleware refusal logs
+  can include non-secret claim identifiers (`iss`, `pid`, `tid`, `sub`, `sid`,
+  `auth_time`, `exp`) when a token fails verification. `VerifyToken` and
+  `VerifyAccessToken` wrap stable sentinel errors (`jwt.ErrTokenMalformed`,
+  `jwt.ErrTokenSignature`, `jwt.ErrTokenExpired`, `jwt.ErrTokenIssuer`,
+  `jwt.ErrTokenAudience`, `jwt.ErrTokenPurposeRejected`) for `errors.Is`
+  classification.
+
 ## Next — a project's own reset and verification link base: `branding.email_link_base_url` (additive; no migration; a stored value is now validated; a native sign-in's mail is now the project's)
 
 The link base changes nothing unless you set it; a native sign-in's
