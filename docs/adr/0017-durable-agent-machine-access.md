@@ -104,7 +104,8 @@ verification both refuse control access; resources must not cache admission.
 Owner management RPCs list, select and revoke machines without exposing private material. Selection is revision-fenced and requires recent human sign-in.
 Removing an already connected agent revokes that child permanently. Returning
 to default-all cannot recreate it. Explicit replacement uses a newly authorized
-machine connection; it never changes a terminal grant back to active. Machine
+machine connection; it never changes a terminal grant back to active, except as
+the 2026-11-09 amendment above describes for the owner's own renewal. Machine
 revocation cascades to every child. A native client must respect returned revoked
 state and stop rather than silently replacing the connection.
 

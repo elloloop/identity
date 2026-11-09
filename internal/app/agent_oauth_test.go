@@ -48,6 +48,13 @@ type agentOAuthHTTPFixture struct {
 
 func newAgentOAuthHTTPFixture(t *testing.T) *agentOAuthHTTPFixture {
 	t.Helper()
+	return newAgentOAuthHTTPFixtureWithDB(t, func(repo *memory.Repo) service.DB { return repo })
+}
+
+// newAgentOAuthHTTPFixtureWithDB is newAgentOAuthHTTPFixture with the graph DB the
+// app (and its audit logger) writes to wrapped by db, so a test can observe writes.
+func newAgentOAuthHTTPFixtureWithDB(t *testing.T, db func(*memory.Repo) service.DB) *agentOAuthHTTPFixture {
+	t.Helper()
 	ctx := context.Background()
 	cfg := newTestConfig()
 	cfg.DefaultProjectID = config.DefaultProjectIDFallback
@@ -65,7 +72,7 @@ func newAgentOAuthHTTPFixture(t *testing.T) *agentOAuthHTTPFixture {
 	signer := jwttest.NewSigner(t, "delegation-test-key")
 	pk, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: "localhost", RPName: "Identity test", Origin: "http://localhost:9002"})
 	require.NoError(t, err)
-	built, err := New(Deps{Config: cfg, Logger: zap.NewNop(), Signer: signer, Repo: repo, DB: repo, Passkeys: pk, TOTPKey: []byte("01234567890123456789012345678901"), TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH")})
+	built, err := New(Deps{Config: cfg, Logger: zap.NewNop(), Signer: signer, Repo: repo, DB: db(repo), Passkeys: pk, TOTPKey: []byte("01234567890123456789012345678901"), TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH")})
 	require.NoError(t, err)
 	server := httptest.NewServer(built.Handler)
 	t.Cleanup(server.Close)

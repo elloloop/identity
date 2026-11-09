@@ -23,6 +23,22 @@ func runMachineKeyChallenges(t *testing.T, driver Driver) {
 			challenge := &service.AgentMachineChallenge{ID: "challenge", MachineID: fixture.machine.ID, Operation: service.AgentMachineRoster, Binding: strings.Repeat("a", 64), PublicKey: strings.Repeat("b", 64), Message: "issuer/project/machine/operation/nonce", CreatedAtMs: now, ExpiresAtMs: now + service.AgentMachineChallengeLifetimeMs}
 			return fixture, challenge
 		}
+		t.Run("ARenewedRegistrationDropsTheOldKeysChallenges", func(t *testing.T) {
+			f, c := fresh(t)
+			require.NoError(t, f.repo.CreateAgentMachineChallenge(ctx, c))
+			f.renew(ctx, t, 3, "renewed-machine-key")
+			// The challenge issued to the retired key is gone, and one is issued to
+			// the renewed registration.
+			gone, err := f.repo.GetAgentMachineChallenge(ctx, c.ID)
+			require.NoError(t, err)
+			require.Nil(t, gone)
+			next := *c
+			next.ID, next.PublicKey = "challenge-renewed", f.machine.PublicKey
+			require.NoError(t, f.repo.CreateAgentMachineChallenge(ctx, &next))
+			stored, err := f.repo.GetAgentMachineChallenge(ctx, next.ID)
+			require.NoError(t, err)
+			require.Equal(t, &next, stored)
+		})
 		t.Run("AtomicConsumptionAndIsolation", func(t *testing.T) {
 			f, c := fresh(t)
 			require.NoError(t, f.repo.CreateAgentMachineChallenge(ctx, c))

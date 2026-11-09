@@ -81,7 +81,8 @@ RPC capability, separate from the browser OAuth flow above.</p>
 <p>The signed-in owner calls <code>RegisterAgentMachine</code> with exact bounds
 and the engine's Ed25519 public key (64 lowercase hex characters). The engine
 creates and protects the private key locally; Identity never receives it. Persist
-the request ID and key pair before sending. Identical retries recover the result.
+the request ID and key pair before sending. Identical retries recover the result,
+until the registration is revoked and renewed: a retired key is then refused.
 Omitted selection includes all current and future owned agents; Team and
 application permissions still apply.</p>
 <p>The engine key can discover eligible agents and register their separate public
