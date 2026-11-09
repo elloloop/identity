@@ -9,9 +9,77 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/elloloop/identity/pkg/audit"
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
 )
+
+// Stable reason codes emitted on rpc_refused warnings across agent-machine and
+// agent-OAuth RPCs.
+const (
+	ReasonUnauthenticated        = "unauthenticated"
+	ReasonSessionLookupFailed    = "session_lookup_failed"
+	ReasonSessionRevoked         = "session_revoked"
+	ReasonSessionProjectMismatch = "session_project_mismatch"
+	ReasonSignInNotRecent        = "sign_in_not_recent"
+	ReasonMachineNotFound        = "machine_not_found"
+	ReasonMachineRevoked         = "machine_revoked"
+	ReasonChallengeExpired       = "challenge_expired"
+	ReasonSignatureInvalid       = "signature_invalid"
+	ReasonKeyInvalid             = "key_invalid"
+)
+
+func (s *AgentOAuthService) recordHumanRefusal(ctx context.Context, human AgentOAuthHuman, reason string, extra ...zap.Field) {
+	reqProjectID := s.auth.projectID(ctx)
+	projectID := reqProjectID
+	tenantID := s.auth.tenantID(ctx)
+	if info := RefusalInfoFromContext(ctx); info != nil {
+		if info.ProjectID != "" {
+			projectID = info.ProjectID
+		}
+		if info.TenantID != "" {
+			tenantID = info.TenantID
+		}
+	}
+	fields := make([]zap.Field, 0, len(extra)+6)
+	fields = append(fields,
+		zap.String("request_project_id", reqProjectID),
+		zap.String("project_id", projectID),
+		zap.String("tenant_id", tenantID),
+	)
+	if human.UserID != "" {
+		fields = append(fields, zap.String("user_id", human.UserID))
+	}
+	if human.SID != "" {
+		fields = append(fields, zap.String("session_id", human.SID))
+	}
+	if human.AuthTime > 0 {
+		fields = append(fields, zap.Int64("auth_time_age_s", s.auth.nowMs()/1000-human.AuthTime))
+	}
+	fields = append(fields, extra...)
+	RecordRefusal(ctx, s.auth.logger, "rpc_refused", reason, fields...)
+}
+
+func (s *AgentOAuthService) recordMachineRefusal(ctx context.Context, machine *AgentMachine, reason string, extra ...zap.Field) {
+	reqProjectID := s.auth.projectID(ctx)
+	fields := make([]zap.Field, 0, len(extra)+5)
+	fields = append(fields,
+		zap.String("request_project_id", reqProjectID),
+		zap.String("project_id", reqProjectID),
+		zap.String("tenant_id", s.auth.tenantID(ctx)),
+	)
+	if machine != nil {
+		if machine.OwnerID != "" {
+			fields = append(fields, zap.String("user_id", machine.OwnerID))
+		}
+		if machine.RegistrationSID != "" {
+			fields = append(fields, zap.String("session_id", machine.RegistrationSID))
+		}
+	}
+	fields = append(fields, extra...)
+	RecordRefusal(ctx, s.auth.logger, "rpc_refused", reason, fields...)
+}
 
 type AgentMachineRegistration struct {
 	ID, ClientID, Resource, DisplayName, PublicKey string
@@ -66,6 +134,9 @@ func (s *AgentOAuthService) RegisterMachine(ctx context.Context, human AgentOAut
 		return nil, err
 	}
 	machine := &AgentMachine{ID: input.ID, OwnerID: human.UserID, ClientID: input.ClientID, ClientRevision: client.Revision, Resource: input.Resource, Product: product, Scopes: slices.Clone(input.Scopes), DisplayName: input.DisplayName, PublicKey: input.PublicKey, RegistrationSID: human.SID, AllAgents: input.AllAgents, AgentIDs: slices.Clone(input.AgentIDs), ExcludedAgentIDs: slices.Clone(input.ExcludedAgentIDs), CreatedAtMs: s.auth.nowMs(), Revision: 1}
+	if !validMachinePublicKey(input.PublicKey) {
+		s.recordHumanRefusal(ctx, human, ReasonKeyInvalid)
+	}
 	if err = ValidateAgentMachine(machine); err != nil {
 		return nil, err
 	}
@@ -105,6 +176,14 @@ func (s *AgentOAuthService) SelectMachineAgents(ctx context.Context, human Agent
 		return nil, ErrInvalidArgument
 	}
 	saved, err := repo.MutateAgentMachine(ctx, id, AgentMachineMutation{Operation: AgentMachineSelect, OwnerID: human.UserID, AtMs: s.auth.nowMs(), ExpectedRevision: revision, AllAgents: all, AgentIDs: ids, ExcludedAgentIDs: excluded})
+	if errors.Is(err, ErrNotFound) {
+		s.recordHumanRefusal(ctx, human, ReasonMachineNotFound)
+		if errors.Is(err, ErrPermissionDenied) {
+			err = ErrPermissionDenied
+		}
+	} else if errors.Is(err, ErrAgentOAuthGrant) || errors.Is(err, ErrPermissionDenied) {
+		s.recordHumanRefusal(ctx, human, ReasonMachineRevoked)
+	}
 	if err == nil {
 		s.auth.audit.Log(ctx, audit.EventAgentMachineSelection, audit.WithActor(human.UserID), audit.WithTarget(id), audit.WithSuccess(true))
 	}
@@ -123,6 +202,14 @@ func (s *AgentOAuthService) RevokeMachine(ctx context.Context, human AgentOAuthH
 		return ErrInvalidArgument
 	}
 	_, err = repo.MutateAgentMachine(ctx, id, AgentMachineMutation{Operation: AgentMachineRevoke, OwnerID: human.UserID, AtMs: s.auth.nowMs()})
+	if errors.Is(err, ErrNotFound) {
+		s.recordHumanRefusal(ctx, human, ReasonMachineNotFound)
+		if errors.Is(err, ErrPermissionDenied) {
+			err = ErrPermissionDenied
+		}
+	} else if errors.Is(err, ErrAgentOAuthGrant) || errors.Is(err, ErrPermissionDenied) {
+		s.recordHumanRefusal(ctx, human, ReasonMachineRevoked)
+	}
 	if err == nil {
 		s.auth.audit.Log(ctx, audit.EventAgentMachineRevoked, audit.WithActor(human.UserID), audit.WithTarget(id), audit.WithSuccess(true))
 	}
@@ -143,13 +230,16 @@ func (s *AgentOAuthService) invalidateMachine(ctx context.Context, machine *Agen
 }
 
 func (s *AgentOAuthService) ExchangeMachine(ctx context.Context, id, agent string, proof AgentMachineProof) (*AgentOAuthTokens, error) {
-	_, _, grant, err := s.machineAccess(ctx, AgentMachineChallengeRequest{MachineID: id, AgentID: agent, Operation: AgentMachineExchange}, proof)
+	machine, _, grant, err := s.machineAccess(ctx, AgentMachineChallengeRequest{MachineID: id, AgentID: agent, Operation: AgentMachineExchange}, proof)
 	if err != nil {
 		return nil, err
 	}
 	now := s.auth.nowMs()
 	authority, _, err := s.admittedAuthority(ctx, grant)
 	if err != nil {
+		if errors.Is(err, ErrAgentOAuthGrant) {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
+		}
 		return nil, err
 	}
 	expires := now + int64(s.auth.cfg.AgentOAuthAccessSeconds)*time.Second.Milliseconds()
@@ -209,6 +299,11 @@ func (s *AgentOAuthService) MachineAgents(ctx context.Context, id string, proof 
 		return nil, err
 	}
 	if !current.ValidMachine(current.Machine) || current.Fingerprint() != authority.Fingerprint() {
+		if current.Machine == nil {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineNotFound)
+		} else {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
+		}
 		return nil, ErrAgentOAuthGrant
 	}
 	return out, nil

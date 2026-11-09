@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -25,7 +26,10 @@ func (r *Repo) CreateAgentMachineChallenge(_ context.Context, input *service.Age
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	machine := r.agentMachines[input.MachineID]
-	if machine == nil || machine.RevokedAtMs != 0 {
+	if machine == nil {
+		return errors.Join(service.ErrAgentOAuthGrant, service.ErrNotFound)
+	}
+	if machine.RevokedAtMs != 0 {
 		return service.ErrAgentOAuthGrant
 	}
 	if r.agentMachineChallenges == nil {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"slices"
 )
@@ -110,7 +111,10 @@ type AgentMachineMutation struct {
 }
 
 func ApplyAgentMachineMutation(current *AgentMachine, mutation AgentMachineMutation) (*AgentMachine, error) {
-	if current == nil || mutation.OwnerID == "" || mutation.OwnerID != current.OwnerID {
+	if current == nil {
+		return nil, errors.Join(ErrPermissionDenied, ErrNotFound)
+	}
+	if mutation.OwnerID == "" || mutation.OwnerID != current.OwnerID {
 		return nil, ErrPermissionDenied
 	}
 	if mutation.AtMs <= 0 {

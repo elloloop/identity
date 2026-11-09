@@ -17,6 +17,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
+	"go.uber.org/zap"
 )
 
 const (
@@ -178,11 +179,14 @@ func (s *AgentOAuthService) Start(ctx context.Context, input AgentOAuthStart) (*
 
 func (s *AgentOAuthService) human(ctx context.Context, human AgentOAuthHuman, recent bool) (*User, error) {
 	if human.UserID == "" || human.SID == "" {
+		s.recordHumanRefusal(ctx, human, ReasonUnauthenticated)
 		return nil, ErrAgentOAuthReauthenticationRequired
 	}
 	if recent {
 		age := s.auth.nowMs()/1000 - human.AuthTime
-		if human.AuthTime <= 0 || age < -int64(authTimeClockSkew.Seconds()) || age > int64(config.AgentOAuthRecentSignIn.Seconds()) {
+		maxAge := int64(config.AgentOAuthRecentSignIn.Seconds())
+		if human.AuthTime <= 0 || age < -int64(authTimeClockSkew.Seconds()) || age > maxAge {
+			s.recordHumanRefusal(ctx, human, ReasonSignInNotRecent, zap.Int64("max_age_s", maxAge))
 			return nil, ErrAgentOAuthReauthenticationRequired
 		}
 	}
@@ -191,16 +195,49 @@ func (s *AgentOAuthService) human(ctx context.Context, human AgentOAuthHuman, re
 		return nil, err
 	}
 	if !isEligibleAgentOwner(user) {
+		if user == nil && s.isSessionProjectMismatch(ctx, human.SID) {
+			s.recordHumanRefusal(ctx, human, ReasonSessionProjectMismatch)
+			return nil, ErrAgentOAuthReauthenticationRequired
+		}
 		return nil, ErrPermissionDenied
 	}
 	session, err := s.base.WithProject(s.auth.projectID(ctx)).GetSessionBySid(ctx, human.SID)
 	if err != nil {
+		s.recordHumanRefusal(ctx, human, ReasonSessionLookupFailed)
 		return nil, err
 	}
-	if session == nil || session.UserID != human.UserID || session.RevokedAtMs != 0 {
+	if session == nil {
+		if s.isSessionProjectMismatch(ctx, human.SID) {
+			s.recordHumanRefusal(ctx, human, ReasonSessionProjectMismatch)
+		} else {
+			s.recordHumanRefusal(ctx, human, ReasonSessionRevoked)
+		}
+		return nil, ErrAgentOAuthReauthenticationRequired
+	}
+	if session.UserID != human.UserID || session.RevokedAtMs != 0 {
+		s.recordHumanRefusal(ctx, human, ReasonSessionRevoked)
 		return nil, ErrAgentOAuthReauthenticationRequired
 	}
 	return user, nil
+}
+
+func (s *AgentOAuthService) isSessionProjectMismatch(ctx context.Context, sid string) bool {
+	reqProjectID := s.auth.projectID(ctx)
+	if info := RefusalInfoFromContext(ctx); info != nil && info.ProjectID != "" && info.ProjectID != reqProjectID {
+		return true
+	}
+	if sid == "" {
+		return false
+	}
+	if defProjectID := s.auth.cfg.DefaultProjectID; defProjectID != "" && defProjectID != reqProjectID {
+		if rec, err := s.base.WithProject(defProjectID).GetSessionBySid(ctx, sid); err == nil && rec != nil {
+			return true
+		}
+	}
+	if rec, err := s.base.GetSessionBySid(ctx, sid); err == nil && rec != nil {
+		return true
+	}
+	return false
 }
 
 func (s *AgentOAuthService) admitOwner(ctx context.Context, user *User, product string) error {

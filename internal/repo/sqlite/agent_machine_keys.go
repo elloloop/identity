@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -30,7 +31,7 @@ func (r *sqliteRepository) CreateAgentMachineChallenge(ctx context.Context, inpu
 	var revoked int64
 	err = tx.QueryRow(ctx, `SELECT revoked_at_ms FROM agent_machines WHERE project_id=$1 AND id=$2`, r.projectID, input.MachineID).Scan(&revoked)
 	if noRows(err) {
-		return service.ErrAgentOAuthGrant
+		return errors.Join(service.ErrAgentOAuthGrant, service.ErrNotFound)
 	}
 	if err != nil {
 		return err
