@@ -212,6 +212,9 @@ type TokenTenants struct {
 	Default string
 	// Selectable resolves a selected tenant. nil accepts only Default.
 	Selectable TenantLookup
+	// ExpectedIssuer, when non-empty, requires verified tokens to carry a
+	// matching "iss" claim.
+	ExpectedIssuer string
 	// Logger records a failed read of a selected tenant, which answers the
 	// request 503; nil records nothing. The token itself is never logged.
 	Logger *zap.Logger
@@ -256,8 +259,11 @@ func verifyRequestToken(ctx context.Context, token string, kp jwtpkg.KeyProvider
 	if err != nil {
 		return nil, err
 	}
+	if tenants.ExpectedIssuer != "" && claims.Issuer != tenants.ExpectedIssuer {
+		return claims, fmt.Errorf("%w: token iss=%q expected=%q", jwtpkg.ErrTokenIssuer, claims.Issuer, tenants.ExpectedIssuer)
+	}
 	if err := tenants.accept(ctx, claims); err != nil {
-		return nil, err
+		return claims, err
 	}
 	return claims, nil
 }
@@ -308,6 +314,7 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expectedAudienc
 					case err == nil:
 						setAuthHeaders(r, claims)
 					case errors.Is(err, errTokenTenantLookup):
+						recordTokenRefusal(r, tenants.Logger, token, claims, err)
 						writeTokenRefusal(w, err)
 						return
 					}
@@ -319,6 +326,7 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expectedAudienc
 			// Require auth for non-exempt paths.
 			token := extractBearerToken(r)
 			if token == "" {
+				recordAuthRefusal(r, tenants.Logger, ReasonMissingBearer, nil)
 				w.Header().Set("Content-Type", "application/json")
 				http.Error(w, `{"code":"unauthenticated","message":"Missing Authorization header"}`, http.StatusUnauthorized)
 				return
@@ -326,6 +334,7 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expectedAudienc
 
 			claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience)
 			if err != nil {
+				recordTokenRefusal(r, tenants.Logger, token, claims, err)
 				writeTokenRefusal(w, err)
 				return
 			}
@@ -382,6 +391,12 @@ func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
 	}
 	if claims.AuthTime > 0 {
 		r.Header.Set(AuthenticatedAuthTimeHeader, strconv.FormatInt(claims.AuthTime, 10))
+	}
+	if info := service.RefusalInfoFromContext(r.Context()); info != nil {
+		info.UserID = claims.Sub
+		info.SessionID = claims.SID
+		info.TenantID = claims.Tenant
+		info.ProjectID = claims.Project
 	}
 }
 

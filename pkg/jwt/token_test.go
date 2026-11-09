@@ -371,3 +371,59 @@ func TestClaims_KindRoundTrip(t *testing.T) {
 	assert.Empty(t, claims.Kind)
 	assert.NotContains(t, Claims{Sub: "u"}.ClaimsMap(time.Now(), time.Minute), "kind")
 }
+
+func TestPeekClaims(t *testing.T) {
+	t.Parallel()
+	s := newMemSigner(t, "test-kid")
+	tok, err := s.SignAccessToken(context.Background(), Claims{
+		Sub:      "user-peek",
+		Project:  "proj-acme",
+		Tenant:   "tenant-acme",
+		SID:      "sid-peek",
+		Issuer:   "https://auth.example.com",
+		Audience: []string{"https://api.example.com"},
+		Purpose:  "dob_completion",
+		AuthTime: 1_700_000_123,
+	}, 15*time.Minute)
+	require.NoError(t, err)
+
+	got, ok := PeekClaims(tok)
+	require.True(t, ok)
+	assert.Equal(t, "user-peek", got.Sub)
+	assert.Equal(t, "proj-acme", got.Project)
+	assert.Equal(t, "tenant-acme", got.Tenant)
+	assert.Equal(t, "sid-peek", got.SID)
+	assert.Equal(t, "https://auth.example.com", got.Issuer)
+	assert.Equal(t, []string{"https://api.example.com"}, got.Audience)
+	assert.Equal(t, "dob_completion", got.Purpose)
+	assert.Equal(t, int64(1_700_000_123), got.AuthTime)
+	assert.True(t, got.ExpiresAt > got.IssuedAt)
+
+	// pid/tid aliases and single-string aud also decode cleanly.
+	aliasTok := b64([]byte(`{"alg":"RS256"}`)) + "." +
+		b64([]byte(`{"sub":"u-alias","pid":"p-alias","tid":"t-alias","aud":"single-aud","exp":1700009999}`)) + ".sig"
+	gotAlias, ok := PeekClaims(aliasTok)
+	require.True(t, ok)
+	assert.Equal(t, "u-alias", gotAlias.Sub)
+	assert.Equal(t, "p-alias", gotAlias.Project)
+	assert.Equal(t, "t-alias", gotAlias.Tenant)
+	assert.Equal(t, []string{"single-aud"}, gotAlias.Audience)
+	assert.Equal(t, int64(1_700_009_999), gotAlias.ExpiresAt)
+
+	for _, malformed := range []string{
+		"",
+		"not-a-jwt",
+		"two.parts",
+		"four.parts.here.extra",
+		".empty-header.sig",
+		"hdr..sig",
+		"hdr.!!!not-base64!!!.sig",
+		"hdr." + b64([]byte(`not-json`)) + ".sig",
+		"hdr." + b64([]byte(`"string-not-object"`)) + ".sig",
+		"hdr." + b64([]byte(`null`)) + ".sig",
+	} {
+		claims, ok := PeekClaims(malformed)
+		assert.False(t, ok, "malformed token %q must return ok=false", malformed)
+		assert.Nil(t, claims)
+	}
+}

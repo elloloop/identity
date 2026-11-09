@@ -393,6 +393,7 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expected
 				if token := extractBearerToken(r); token != "" {
 					claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience)
 					if errors.Is(err, errTokenTenantLookup) {
+						recordTokenRefusal(r, tenants.Logger, token, claims, err)
 						writeTokenRefusal(w, err)
 						return
 					}
@@ -418,12 +419,14 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expected
 			}
 			token := extractBearerToken(r)
 			if token == "" {
+				recordAuthRefusal(r, tenants.Logger, ReasonMissingBearer, nil)
 				w.Header().Set("Content-Type", "application/json")
 				http.Error(w, `{"code":"unauthenticated","message":"Missing Authorization header"}`, http.StatusUnauthorized)
 				return
 			}
 			claims, err := verifyRequestToken(r.Context(), token, kp, tenants, expectedAudience, requireAudience)
 			if err != nil {
+				recordTokenRefusal(r, tenants.Logger, token, claims, err)
 				writeTokenRefusal(w, err)
 				return
 			}
@@ -433,11 +436,13 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, tenants TokenTenants, expected
 			if claims.SID != "" {
 				state, lookupErr := cache.Lookup(r.Context(), claims.SID)
 				if lookupErr != nil {
+					recordAuthRefusal(r, tenants.Logger, ReasonSessionLookupFailed, claims)
 					w.Header().Set("Content-Type", "application/json")
 					http.Error(w, `{"code":"unavailable","message":"Session lookup failed"}`, http.StatusServiceUnavailable)
 					return
 				}
 				if state != SessionStateActive {
+					recordAuthRefusal(r, tenants.Logger, ReasonSessionRevoked, claims)
 					w.Header().Set("Content-Type", "application/json")
 					http.Error(w, `{"code":"unauthenticated","message":"Session revoked"}`, http.StatusUnauthorized)
 					return

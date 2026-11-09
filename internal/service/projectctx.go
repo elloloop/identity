@@ -119,6 +119,9 @@ type requestHostCtxKey struct{}
 // WithRequestHost returns a child context carrying the public host the request
 // arrived on, lower-cased with any port stripped.
 func WithRequestHost(ctx context.Context, host string) context.Context {
+	if info := RefusalInfoFromContext(ctx); info != nil && host != "" {
+		info.Host = host
+	}
 	return context.WithValue(ctx, requestHostCtxKey{}, host)
 }
 
@@ -135,6 +138,9 @@ func RequestHostFromContext(ctx context.Context) string {
 func WithProjectScope(ctx context.Context, scope *ProjectScope) context.Context {
 	if scope == nil {
 		return ctx
+	}
+	if info := RefusalInfoFromContext(ctx); info != nil && scope.ProjectID != "" {
+		info.RequestProjectID = scope.ProjectID
 	}
 	return context.WithValue(ctx, projectScopeCtxKey{}, scope)
 }

@@ -1,15 +1,40 @@
 package jwt
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jws"
 	jwtoken "github.com/lestrrat-go/jwx/v2/jwt"
+)
+
+var (
+	// ErrTokenMalformed reports a token that is not a structurally valid
+	// access token (unparseable JWS/JWT, missing kid, wrong typ profile,
+	// or missing required sub/exp claims).
+	ErrTokenMalformed = errors.New("token malformed")
+	// ErrTokenSignature reports a token whose signing key is unknown or
+	// whose cryptographic signature verification failed.
+	ErrTokenSignature = errors.New("token signature invalid")
+	// ErrTokenExpired reports a token whose exp claim is in the past.
+	ErrTokenExpired = errors.New("token expired")
+	// ErrTokenIssuer reports a token whose iss claim does not match the
+	// expected issuer.
+	ErrTokenIssuer = errors.New("token issuer mismatch")
+	// ErrTokenAudience reports a token whose aud claim is missing or does
+	// not match the expected audience.
+	ErrTokenAudience = errors.New("token audience mismatch")
+	// ErrTokenPurposeRejected reports a single-purpose bearer ticket
+	// presented where a session access token is required (or with the
+	// wrong purpose).
+	ErrTokenPurposeRejected = errors.New("token purpose rejected")
 )
 
 // Claims holds the fields embedded in an access token.
@@ -181,7 +206,7 @@ func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expected
 		return nil, err
 	}
 	if claims.Purpose != "" {
-		return nil, fmt.Errorf("token has purpose=%q and authenticates no request", claims.Purpose)
+		return nil, fmt.Errorf("%w: token has purpose=%q and authenticates no request", ErrTokenPurposeRejected, claims.Purpose)
 	}
 	return claims, nil
 }
@@ -202,9 +227,58 @@ func VerifyPurposeToken(
 		return nil, err
 	}
 	if claims.Purpose != wantPurpose {
-		return nil, fmt.Errorf("token purpose=%q, want %q", claims.Purpose, wantPurpose)
+		return nil, fmt.Errorf("%w: token purpose=%q, want %q", ErrTokenPurposeRejected, claims.Purpose, wantPurpose)
 	}
 	return claims, nil
+}
+
+// PeekClaims decodes only the base64url JSON payload segment of a compact JWT
+// without touching cryptographic keys or secret material, returning the
+// non-secret claims needed for refusal diagnostics (sub, iss, project/pid,
+// tenant/tid, sid, purpose, kind, aud, auth_time, iat, exp). It returns
+// (nil, false) when tokenStr is not a three-segment compact token or its
+// payload segment is not a valid base64url JSON object.
+//
+// Callers MUST NOT treat the returned claims as verified.
+func PeekClaims(tokenStr string) (*Claims, bool) {
+	if len(tokenStr) == 0 || len(tokenStr) > maxDelegatedAccessTokenBytes || strings.ContainsAny(tokenStr, " \t\r\n") {
+		return nil, false
+	}
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
+		return nil, false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	dec.UseNumber()
+	var m map[string]any
+	if err := dec.Decode(&m); err != nil || m == nil {
+		return nil, false
+	}
+	str := func(keys ...string) string {
+		for _, k := range keys {
+			if s, ok := m[k].(string); ok && s != "" {
+				return s
+			}
+		}
+		return ""
+	}
+	return &Claims{
+		Sub:       str("sub"),
+		Issuer:    str("iss"),
+		Project:   str("project", "pid"),
+		Tenant:    str("tenant", "tid"),
+		SID:       str("sid"),
+		Purpose:   str("purpose"),
+		Kind:      str("kind"),
+		Audience:  stringSliceClaim(m["aud"]),
+		AuthTime:  numericClaim(m["auth_time"]),
+		IssuedAt:  numericClaim(m["iat"]),
+		ExpiresAt: numericClaim(m["exp"]),
+	}, true
 }
 
 // verifyToken is the shared signature/claims verification both entry points
@@ -227,15 +301,15 @@ func verifyTokenProfile(tokenStr string, kp KeyProvider, expectedTenant, expecte
 		jwtoken.WithValidate(true),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("verifying token: %w", err)
+		return nil, fmt.Errorf("%w: verifying token: %w", classifyParseError(tokenBytes, err), err)
 	}
 
 	exp := tok.Expiration()
 	if exp.IsZero() {
-		return nil, errors.New("token missing or zero expiration")
+		return nil, fmt.Errorf("%w: token missing or zero expiration", ErrTokenMalformed)
 	}
 	if time.Now().UTC().After(exp) {
-		return nil, errors.New("token expired")
+		return nil, fmt.Errorf("%w: token expired", ErrTokenExpired)
 	}
 
 	claims := &Claims{}
@@ -251,7 +325,7 @@ func verifyTokenProfile(tokenStr string, kp KeyProvider, expectedTenant, expecte
 	// from ever passing as an authenticated user in a deployment that
 	// leaves audience checking unconfigured.
 	if claims.Sub == "" {
-		return nil, errors.New("token missing sub claim")
+		return nil, fmt.Errorf("%w: token missing sub claim", ErrTokenMalformed)
 	}
 	if v, ok := tok.Get("email"); ok {
 		claims.Email, _ = v.(string)
@@ -305,7 +379,7 @@ func verifyTokenProfile(tokenStr string, kp KeyProvider, expectedTenant, expecte
 	if expectedAudience != "" {
 		if len(claims.Audience) == 0 {
 			if requireAudience {
-				return nil, fmt.Errorf("audience missing: expected=%q", expectedAudience)
+				return nil, fmt.Errorf("%w: audience missing: expected=%q", ErrTokenAudience, expectedAudience)
 			}
 		} else {
 			matched := false
@@ -316,7 +390,7 @@ func verifyTokenProfile(tokenStr string, kp KeyProvider, expectedTenant, expecte
 				}
 			}
 			if !matched {
-				return nil, fmt.Errorf("audience mismatch: token aud=%v expected=%q", claims.Audience, expectedAudience)
+				return nil, fmt.Errorf("%w: audience mismatch: token aud=%v expected=%q", ErrTokenAudience, claims.Audience, expectedAudience)
 			}
 		}
 	}
@@ -431,31 +505,69 @@ func numericClaim(v any) int64 {
 	}
 }
 
+func stringSliceClaim(v any) []string {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return nil
+		}
+		return []string{val}
+	case []string:
+		return val
+	case []any:
+		out := make([]string, 0, len(val))
+		for _, item := range val {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func classifyParseError(tokenBytes []byte, err error) error {
+	if errors.Is(err, jwtoken.ErrTokenExpired()) {
+		return ErrTokenExpired
+	}
+	if errors.Is(err, jwtoken.ErrInvalidIssuedAt()) || errors.Is(err, jwtoken.ErrTokenNotYetValid()) {
+		return ErrTokenMalformed
+	}
+	if _, parseErr := jwtoken.ParseInsecure(tokenBytes); parseErr != nil {
+		return ErrTokenMalformed
+	}
+	return ErrTokenSignature
+}
+
 func verificationKey(tokenBytes []byte, kp KeyProvider, profile string) (jwk.Key, error) {
 	typ, err := tokenType(tokenBytes)
 	if err != nil {
-		return nil, fmt.Errorf("parsing token headers: %w", err)
+		return nil, fmt.Errorf("%w: parsing token headers: %w", ErrTokenMalformed, err)
 	}
 	if (profile == DelegatedAccessTokenType && typ != DelegatedAccessTokenType) || (profile == "JWT" && typ != "" && typ != "JWT") {
-		return nil, errors.New("token profile mismatch")
+		return nil, fmt.Errorf("%w: token profile mismatch", ErrTokenMalformed)
 	}
 
 	kid, err := extractKID(tokenBytes)
 	if err != nil {
-		return nil, fmt.Errorf("parsing token headers: %w", err)
+		return nil, fmt.Errorf("%w: parsing token headers: %w", ErrTokenMalformed, err)
 	}
 	if kid == "" {
-		return nil, errors.New("token missing kid header")
+		return nil, fmt.Errorf("%w: token missing kid header", ErrTokenMalformed)
 	}
 
 	pub, ok := kp.Get(kid)
 	if !ok {
-		return nil, fmt.Errorf("unknown signing key kid=%s", kid)
+		return nil, fmt.Errorf("%w: unknown signing key kid=%s", ErrTokenSignature, kid)
 	}
 
 	key, err := jwk.FromRaw(pub)
 	if err != nil {
-		return nil, fmt.Errorf("converting public key: %w", err)
+		return nil, fmt.Errorf("%w: converting public key: %w", ErrTokenSignature, err)
 	}
 	if err := key.Set(jwk.KeyIDKey, kid); err != nil {
 		return nil, fmt.Errorf("setting kid: %w", err)
