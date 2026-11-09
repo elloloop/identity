@@ -982,20 +982,31 @@ type IdentityServiceClient interface {
 	SetPrimaryAuthDomain(context.Context, *connect.Request[v1.SetPrimaryAuthDomainRequest]) (*connect.Response[v1.SetPrimaryAuthDomainResponse], error)
 	// AdminCreateTenant creates a tenant of project_id, claimed at once, with
 	// the name and primary_domain given, and records tenant_created with the
-	// operator's IP address and user agent. Operator-only, authorized like
-	// AdminGetTenant: the admin secret, or a tenant_operator credential of
-	// project_id. INVALID_ARGUMENT for a blank project_id.
+	// operator's IP address and user agent. Each call creates a new tenant, so
+	// a retry after a lost response makes a second one. Operator-only,
+	// authorized like AdminGetTenant: the admin secret, or a tenant_operator
+	// credential of project_id. INVALID_ARGUMENT for a blank project_id.
 	AdminCreateTenant(context.Context, *connect.Request[v1.AdminCreateTenantRequest]) (*connect.Response[v1.AdminCreateTenantResponse], error)
 	// AdminAddTenantAdmin makes user_id an owner or admin of the tenant (role
 	// "owner", the default, or "admin"), with an active membership: one that
 	// is suspended is restored first, and the lift is audited as a restore.
-	// It sets the role it is given, so it can lower an owner, and it judges
-	// neither the account nor who governs the tenant. Records
-	// tenant_admin_added with the operator's IP address and user agent.
-	// Operator-only, authorized like AdminGetTenant: the admin secret, or a
-	// tenant_operator credential of project_id. Called with a credential,
 	// tenant_id and user_id must be a tenant and an account of project_id,
-	// else NOT_FOUND. INVALID_ARGUMENT for a blank id or any other role.
+	// else NOT_FOUND. Records tenant_admin_added with the operator's IP
+	// address and user agent, the role, and the role and status the
+	// membership had before, if any. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id.
+	//
+	// With the admin secret it sets the role it is given on any tenant, so it
+	// can lower an owner, and judges neither the account nor who governs the
+	// tenant. A tenant_operator credential only appoints a tenant's first
+	// governor, under AdminRecoverTenantOwnership's rules: FAILED_PRECONDITION
+	// for a latent tenant, for an account that may not own a tenant (not an
+	// active, signed-up person with a verified email), and while any owner or
+	// admin who is a person can sign in and holds an active membership. When
+	// user_id already is such an owner or admin at the role asked for, it
+	// returns that membership unchanged and records nothing, so a retry is
+	// safe. INVALID_ARGUMENT for a blank id or any other role.
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy.
@@ -3681,20 +3692,31 @@ type IdentityServiceHandler interface {
 	SetPrimaryAuthDomain(context.Context, *connect.Request[v1.SetPrimaryAuthDomainRequest]) (*connect.Response[v1.SetPrimaryAuthDomainResponse], error)
 	// AdminCreateTenant creates a tenant of project_id, claimed at once, with
 	// the name and primary_domain given, and records tenant_created with the
-	// operator's IP address and user agent. Operator-only, authorized like
-	// AdminGetTenant: the admin secret, or a tenant_operator credential of
-	// project_id. INVALID_ARGUMENT for a blank project_id.
+	// operator's IP address and user agent. Each call creates a new tenant, so
+	// a retry after a lost response makes a second one. Operator-only,
+	// authorized like AdminGetTenant: the admin secret, or a tenant_operator
+	// credential of project_id. INVALID_ARGUMENT for a blank project_id.
 	AdminCreateTenant(context.Context, *connect.Request[v1.AdminCreateTenantRequest]) (*connect.Response[v1.AdminCreateTenantResponse], error)
 	// AdminAddTenantAdmin makes user_id an owner or admin of the tenant (role
 	// "owner", the default, or "admin"), with an active membership: one that
 	// is suspended is restored first, and the lift is audited as a restore.
-	// It sets the role it is given, so it can lower an owner, and it judges
-	// neither the account nor who governs the tenant. Records
-	// tenant_admin_added with the operator's IP address and user agent.
-	// Operator-only, authorized like AdminGetTenant: the admin secret, or a
-	// tenant_operator credential of project_id. Called with a credential,
 	// tenant_id and user_id must be a tenant and an account of project_id,
-	// else NOT_FOUND. INVALID_ARGUMENT for a blank id or any other role.
+	// else NOT_FOUND. Records tenant_admin_added with the operator's IP
+	// address and user agent, the role, and the role and status the
+	// membership had before, if any. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id.
+	//
+	// With the admin secret it sets the role it is given on any tenant, so it
+	// can lower an owner, and judges neither the account nor who governs the
+	// tenant. A tenant_operator credential only appoints a tenant's first
+	// governor, under AdminRecoverTenantOwnership's rules: FAILED_PRECONDITION
+	// for a latent tenant, for an account that may not own a tenant (not an
+	// active, signed-up person with a verified email), and while any owner or
+	// admin who is a person can sign in and holds an active membership. When
+	// user_id already is such an owner or admin at the role asked for, it
+	// returns that membership unchanged and records nothing, so a retry is
+	// safe. INVALID_ARGUMENT for a blank id or any other role.
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy.

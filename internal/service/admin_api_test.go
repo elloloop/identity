@@ -775,7 +775,7 @@ func TestControlPlaneAdmin_CreateTenant_ClaimedAndNormalized(t *testing.T) {
 	if got := f.audit.clientsOf(string(audit.EventTenantCreated)); !reflect.DeepEqual(got, [][2]string{{testOperatorIP, testOperatorUA}}) {
 		t.Fatalf("tenant_created clients = %v", got)
 	}
-	if got := f.audit.detailsOf(string(audit.EventTenantCreated)); !reflect.DeepEqual(got, []map[string]any{{"project_id": "proj-1", "tenant_id": id}}) {
+	if got := f.audit.detailsOf(string(audit.EventTenantCreated)); !reflect.DeepEqual(got, []map[string]any{{"project_id": "proj-1", "tenant_id": id, "primary_domain": "acme.com"}}) {
 		t.Fatalf("tenant_created details = %v", got)
 	}
 }
@@ -802,10 +802,18 @@ func TestControlPlaneAdmin_CreateTenant_RequiresProjectID(t *testing.T) {
 	}
 }
 
+// seedGrantTarget gives the fixture a claimed tenant and an active account of
+// projectID, which AdminAddTenantAdmin requires.
+func (f *adminFixture) seedGrantTarget(projectID, tenantID, userID string) {
+	f.tenants.ensure(projectID, tenantID)
+	f.users.set(projectID, &User{ID: userID, Email: userID + "@example.test", Status: StatusActive, EmailVerified: true})
+}
+
 func TestControlPlaneAdmin_AddTenantAdmin_DefaultsOwner(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(testAdminSecret)
 	ctx := context.Background()
+	f.seedGrantTarget("proj-1", "tenant-1", "user-1")
 
 	m, err := f.svc.AdminAddTenantAdmin(ctx, asAdmin(testAdminSecret), "proj-1", "tenant-1", "user-1", "", testOperatorIP, testOperatorUA)
 	if err != nil {
@@ -835,6 +843,7 @@ func TestControlPlaneAdmin_AddTenantAdmin_DefaultsOwner(t *testing.T) {
 func TestControlPlaneAdmin_AddTenantAdmin_AdminRoleAllowed(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(testAdminSecret)
+	f.seedGrantTarget("p", "t", "u")
 	m, err := f.svc.AdminAddTenantAdmin(context.Background(), asAdmin(testAdminSecret), "p", "t", "u", "ADMIN", "", "")
 	if err != nil {
 		t.Fatalf("AdminAddTenantAdmin(admin): %v", err)
@@ -849,6 +858,33 @@ func TestControlPlaneAdmin_AddTenantAdmin_RejectsMemberRole(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	if _, err := f.svc.AdminAddTenantAdmin(context.Background(), asAdmin(testAdminSecret), "p", "t", "u", RoleMember, "", ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("member role: err = %v, want ErrInvalidArgument (bootstraps administration only)", err)
+	}
+}
+
+// The tenant and the account must be the project's, whoever calls: a grant
+// naming another project's tenant or account, or one that does not exist,
+// is ErrNotFound and writes nothing.
+func TestControlPlaneAdmin_AddTenantAdmin_NamesTheProjectsTenantAndAccount(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newAdminFixture(testAdminSecret)
+	f.seedGrantTarget("p", "t", "u")
+	f.seedGrantTarget("other", "t-other", "u-other")
+	for name, ref := range map[string]struct{ tenant, user string }{
+		"another project's tenant":  {"t-other", "u"},
+		"another project's account": {"t", "u-other"},
+		"no such tenant":            {"t-none", "u"},
+		"no such account":           {"t", "u-none"},
+	} {
+		if _, err := f.svc.AdminAddTenantAdmin(ctx, asAdmin(testAdminSecret), "p", ref.tenant, ref.user, RoleOwner, "", ""); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s: err = %v, want ErrNotFound", name, err)
+		}
+		if m, _ := f.members.GetMembership(ctx, "p", ref.tenant, ref.user); m != nil {
+			t.Fatalf("%s: wrote %+v", name, m)
+		}
+	}
+	if n := f.audit.countByEventType(string(audit.EventTenantAdminAdded)); n != 0 {
+		t.Fatalf("refused grants recorded %d tenant_admin_added", n)
 	}
 }
 
@@ -1173,6 +1209,7 @@ func TestControlPlaneAdmin_StoreErrorsPropagate(t *testing.T) {
 	})
 	t.Run("add tenant admin", func(t *testing.T) {
 		f := newAdminFixture(testAdminSecret)
+		f.seedGrantTarget("p", "t", "u")
 		f.members.upsertErr = wantErr
 		if _, err := f.svc.AdminAddTenantAdmin(ctx, asAdmin(testAdminSecret), "p", "t", "u", RoleOwner, "", ""); !errors.Is(err, wantErr) {
 			t.Fatalf("err = %v, want %v", err, wantErr)

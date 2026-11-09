@@ -51,6 +51,8 @@ type projectAuditEntry struct {
 	project string
 	event   string
 	actor   string
+	// client is the record's IP address and user agent.
+	client  [2]string
 	details map[string]any
 }
 
@@ -63,10 +65,12 @@ func (w *projectAuditWriter) ExecuteAtomic(_ context.Context, projectID, _ strin
 			continue
 		}
 		actor, _ := op.Data["2"].(string)
+		ip, _ := op.Data["4"].(string)
+		ua, _ := op.Data["5"].(string)
 		raw, _ := op.Data["7"].(string)
 		var details map[string]any
 		_ = json.Unmarshal([]byte(raw), &details)
-		w.entries = append(w.entries, projectAuditEntry{project: projectID, event: et, actor: actor, details: details})
+		w.entries = append(w.entries, projectAuditEntry{project: projectID, event: et, actor: actor, client: [2]string{ip, ua}, details: details})
 	}
 	return &graph.CommitResult{}, nil
 }

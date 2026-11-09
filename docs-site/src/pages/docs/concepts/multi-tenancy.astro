@@ -503,12 +503,12 @@ Both:
     active membership, returns its membership and records nothing, so a
     retry is safe. A
     refused recovery is not audited. <code>AdminAddTenantAdmin</code>, which
-    provisions a tenant's first admins, makes none of these checks: it
-    records each grant as <code>tenant_admin_added</code>, and a suspension
-    it lifts as a restore, so the same admin secret can make anyone an owner
-    or admin of any tenant, lowering an owner included, and a
-    <code>tenant_operator</code> credential can do so with any account of
-    its own Project.
+    provisions a tenant's first admins, makes none of these checks when the
+    admin secret calls it: the secret can make any account of the Project an
+    owner or admin of any of its tenants, lowering an owner included. A
+    <code>tenant_operator</code> credential's call is held to recovery's
+    rules (below). Each grant is recorded as <code>tenant_admin_added</code>,
+    and a suspension it lifts as a restore.
   </p>
   <p>
     Recovery treats a deactivated or suspended account, and an owner or
@@ -524,10 +524,12 @@ Both:
 
   <h3 id="tenant-operator-credential">A credential for one Project's tenants</h3>
   <p>
-    The admin secret governs every Project. A service that runs one
-    Project's tenants, such as a support console, can hold a
+    The admin secret governs every Project. A service that runs or
+    provisions one Project's tenants can hold a
     <code>tenant_operator</code> credential of that Project instead, which an
-    operator mints with the secret:
+    operator mints with the secret. Whoever holds one can also create the
+    Project's tenants and appoint their first owners, so mint it only for a
+    service trusted with that:
   </p>
   <Code
     code={`AdminCreateProjectCredential(project_id, kind="tenant_operator")
@@ -550,24 +552,48 @@ Both:
   <p>
     With it, the service provisions its Project's tenants itself: it creates
     one, claimed at once, and makes an account of the Project its first
-    owner, each recorded with the credential as the actor:
+    owner or admin, each recorded with the credential as the actor:
   </p>
   <Code
     code={`AdminCreateTenant(project_id, name="Acme", primary_domain="acme.example")
-  -> { tenant_id }                     # claimed; recorded as tenant_created
+  -> { tenant_id }             # claimed; recorded as tenant_created
+  -> INVALID_ARGUMENT          # a blank project_id
 AdminAddTenantAdmin(project_id, tenant_id, user_id, role="owner")
-  -> { membership: { role: "owner", source: "added", ... } }   # recorded as tenant_admin_added
-  -> NOT_FOUND                         # the tenant or the account is not the Project's
-  -> INVALID_ARGUMENT                  # a blank id, or a role other than owner or admin`}
+  -> { membership: { role: "owner", source: "added", ... } }   # recorded as tenant_admin_added;
+                               #   asked again, the same membership, recorded once
+  -> FAILED_PRECONDITION       # an owner or admin who is a person can still sign in
+                               #   and holds an active membership, the account
+                               #   cannot own a tenant, or latent
+  -> NOT_FOUND                 # the tenant or the account is not the Project's
+  -> INVALID_ARGUMENT          # a blank id, or a role other than owner or admin
+Both:
+  -> UNIMPLEMENTED             # GATEWAY_ADMIN_API_SECRET is unset and the call
+                               #   presents X-Admin-Secret or no
+                               #   X-Tenant-Operator-Key
+  -> PERMISSION_DENIED         # a wrong X-Admin-Secret, or a refused
+                               #   X-Tenant-Operator-Key`}
     lang="bash"
   />
   <p>
-    A tenant it creates is trusted as one the admin secret creates: its
-    name appears in the tenant's invitation emails, and its primary domain
-    is taken as given. <code>AdminAddTenantAdmin</code> sets the role it is
-    asked for on any tenant of the Project, governed or not, lowering an
-    owner included. So hold the credential as carefully as the secret for
-    that Project's tenants.
+    The credential appoints only a tenant's first governor, under
+    recovery's rules: the tenant is claimed or suspended, the account is a
+    person who could own a tenant, and nobody who can govern the tenant
+    remains. It never overrides or lowers an owner or admin who can act;
+    further admins come from the owner it appointed, by invitation. The
+    account must already be one of the Project's, signed up with a verified
+    email: find its id with <code>LookupUsers</code> and a
+    <code>directory_reader</code> credential. <code>AdminCreateTenant</code>
+    is not idempotent, so keep the <code>tenant_id</code> it returns before
+    you retry; a tenant whose grant failed waits, ownerless, for the grant
+    to be retried.
+  </p>
+  <p>
+    A tenant it creates is trusted as one the admin secret creates. Its name
+    appears in the tenant's invitation emails, and its primary domain is
+    taken as given, unverified: a change of the tenant's status revokes the
+    agent grants and machines of the Project's accounts on that domain, as
+    for any tenant. Nothing but the per-IP budget below bounds how many
+    tenants it creates.
   </p>
   <ul>
     <li>

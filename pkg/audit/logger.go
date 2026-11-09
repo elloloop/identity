@@ -331,17 +331,21 @@ const (
 	// (CreateTenant) is actor and target; a refused attempt over the creation
 	// limit is logged with success=false and a `reason` detail, so a burst of
 	// attempts is visible. An operator's AdminCreateTenant records the
-	// operator's IP address and user agent, with the actor "credential:<id>"
-	// when a tenant_operator credential made the call and none for the admin
-	// secret.
+	// operator's IP address and user agent and, when one was given, the
+	// tenant's primary_domain, with the actor "credential:<id>" when a
+	// tenant_operator credential made the call and none for the admin secret.
+	// It names no target, so its target repeats its actor.
 	EventTenantCreated EventType = "tenant_created"
 
 	// EventTenantAdminAdded records an operator making an account an owner or
 	// admin of a tenant (AdminAddTenantAdmin): actor the tenant_operator
 	// credential ("credential:<id>") or none for the admin secret, target the
-	// account, the operator's IP address and user agent, and the project id,
-	// the tenant id and the role granted in the details. Every grant that
-	// succeeds records it, a repeated one included.
+	// account, the operator's IP address and user agent, and in the details
+	// the project id, the tenant id, the role granted and, when the account
+	// held a membership already, its previous_role and previous_status, so a
+	// grant that lowers an owner shows as one. Every grant that writes the
+	// membership records it; a credential's retry that finds the grant
+	// already made records nothing.
 	EventTenantAdminAdded EventType = "tenant_admin_added"
 
 	// EventTenantSuspended / EventTenantRestored record an operator

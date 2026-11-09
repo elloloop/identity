@@ -124,11 +124,24 @@ func TestRedesign_ControlPlaneAdmin_ProvisioningFlow(t *testing.T) {
 	}
 
 	// 5. Bootstrap the first tenant admin as an owner (source=added). The
-	// membership row FK-references a real user, so sign one up first (the
-	// realistic flow: an operator bootstraps an existing human as the first
-	// tenant admin so they can then self-serve).
-	bootstrapUser := signupMembershipUser(t, h, fmt.Sprintf("operator-bootstrap-%d@example-corp.com", unique))
-	bootstrapUserID := bootstrapUser.userID
+	// account must be the new project's, so open the project to sign-up and
+	// sign one up on its host first (the realistic flow: an operator
+	// bootstraps an existing human as the first tenant admin so they can
+	// then self-serve).
+	_, version, err := h.Stores.controlPlane.GetProjectConfig(ctx, newProjectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	if _, _, err := h.Stores.controlPlane.UpdateProjectConfig(ctx, newProjectID, version, `{"access":{"mode":"open"}}`); err != nil {
+		t.Fatalf("UpdateProjectConfig: %v", err)
+	}
+	signup, err := h.ClientWithHost(adminHost, nil).PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email: fmt.Sprintf("operator-bootstrap-%d@example-corp.com", unique), Password: validPassword,
+	}))
+	if err != nil {
+		t.Fatalf("PasswordSignup on the new project's host: %v", err)
+	}
+	bootstrapUserID := signup.Msg.GetUser().GetId()
 	adminResp, err := admin.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
 		ProjectId: newProjectID,
 		TenantId:  newTenantID,

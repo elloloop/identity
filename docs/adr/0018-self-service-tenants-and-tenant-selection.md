@@ -58,9 +58,10 @@ of the operator secret (migration 0054). Those records name the credential
 as their actor ([Suspension](#suspension), [Ownership](#ownership)).
 
 **Amended** (2026-11-10): the credential may also create a tenant of its
-project (`AdminCreateTenant`) and make an account of the project a tenant's
-owner or admin (`AdminAddTenantAdmin`), so a service provisions its
-project's tenants without the secret. Both calls are now audited, as
+project (`AdminCreateTenant`) and appoint a tenant's first owner or admin
+(`AdminAddTenantAdmin`), so a service provisions its project's tenants
+without the secret. Its grant is held to recovery's rules, so it never
+overrides people who can govern. Both calls are now audited, as
 `tenant_created` and `tenant_admin_added`, with the credential, when one was
 used, as the actor ([Ownership](#ownership)).
 
@@ -355,12 +356,26 @@ ways, both audited; neither changes any other member's role.
   owner reactivated after a recovery is an owner again beside the appointed
   one, so the operator first makes sure the account will not come back.
 
-Recovery does not reuse `AdminAddTenantAdmin`. That RPC provisions: it
-records only the grant (`tenant_admin_added`), checks neither the account's
-fitness nor who governs the tenant, and sets the role it is given, so it can
-lower an owner. A `tenant_operator` credential's grant must name a tenant and
-an account of its own project; the secret's is not checked. Recovery is the
-lever for a tenant whose governance has failed, and it is narrow on purpose.
+Recovery does not reuse `AdminAddTenantAdmin`. With the operator secret,
+that RPC provisions: it records the grant (`tenant_admin_added`, with the
+role the membership had before), checks neither the account's fitness nor who
+governs the tenant, and sets the role it is given, so it can lower an owner.
+Recovery is the lever for a tenant whose governance has failed, and it is
+narrow on purpose. Either way the tenant and the account must be the
+project's.
+
+A `tenant_operator` credential's `AdminAddTenantAdmin` is held to recovery's
+rules (a claimed or suspended tenant, an account fit to own one, nobody left
+who can govern it), with the role it is given and no reason: it appoints the
+first governor of a tenant the credential created, or of one whose governance
+failed, and a retry of a grant that landed changes nothing. Two alternatives
+were rejected. Letting the credential set any role, as the secret does, would
+let whoever holds it, including credentials minted when the kind could not
+appoint at all, take over or lower the owners of every tenant in the project.
+A separate credential kind for provisioning would split one operator's
+authority over one project's tenants across two keys, when appointing a first
+governor under recovery's rules adds nothing recovery did not already allow
+beyond the choice of role and the tenants the credential creates itself.
 
 It stays closed while an admin can act, even one who will not. When every
 owner is gone and the admins left cannot be reached or refuse, the remedy is

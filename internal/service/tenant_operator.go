@@ -35,7 +35,9 @@ type tenantOperator struct {
 	// names nobody.
 	actor string
 	// projectBound is set for a tenant_operator credential, which acts on
-	// its own project alone; the admin secret governs every project.
+	// its own project alone and appoints a tenant's governors only under
+	// recovery's rules (appointableGovernors); the admin secret governs every
+	// project and every tenant in it.
 	projectBound bool
 }
 

@@ -263,7 +263,10 @@ The tenant operations among them (`AdminGetTenant`, `AdminListTenants`,
 service that runs one project's tenants, creating them and appointing their
 first owners included, never holds the secret that governs every project.
 It is confined to its own project: each call must name it, and the tenant
-and account an `AdminAddTenantAdmin` names must be the project's. It is read
+and account an `AdminAddTenantAdmin` names must be the project's, whoever
+calls it. Its `AdminAddTenantAdmin` appoints only a tenant's first owner or
+admin, under `AdminRecoverTenantOwnership`'s rules, so it never overrides or
+lowers people who can govern. It is read
 uncached on every call, as a directory reader's is, so a revocation or a
 suspended project refuses it from the next call. It works with the secret
 empty too, though minting and revoking one take the secret. What it changes

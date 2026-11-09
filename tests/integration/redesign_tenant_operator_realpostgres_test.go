@@ -156,6 +156,32 @@ func TestRedesign_TenantOperatorCredential(t *testing.T) {
 		t.Fatalf("tenant_admin_added target and role = %v, want [%s owner]", targets, ownerID)
 	}
 
+	// The credential appoints only a first governor: a retry of the grant
+	// returns the membership and records nothing more, and it can neither
+	// lower the owner it appointed nor touch a tenant someone governs.
+	retried, err := operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: h.ProjectID, TenantId: provisionedID, UserId: ownerID, Role: service.RoleOwner,
+	}))
+	if err != nil || retried.Msg.GetMembership().GetId() != addedResp.Msg.GetMembership().GetId() {
+		t.Fatalf("retried AdminAddTenantAdmin = %+v (%v), want the same membership", retried, err)
+	}
+	_, err = operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: h.ProjectID, TenantId: provisionedID, UserId: ownerID, Role: service.RoleAdmin,
+	}))
+	requireConnectCode(t, "AdminAddTenantAdmin lowering the owner it appointed", err, connect.CodeFailedPrecondition)
+	_, err = operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: h.ProjectID, TenantId: tenantID, UserId: ownerID, Role: service.RoleAdmin,
+	}))
+	requireConnectCode(t, "AdminAddTenantAdmin on a tenant its owner governs", err, connect.CodeFailedPrecondition)
+	if mem, err := h.Stores.memberships.GetMembership(ctx, h.ProjectID, tenantID, ownerID); err != nil || mem == nil || mem.Role != service.RoleOwner {
+		t.Fatalf("the governed tenant's owner membership = %+v (%v), want it unchanged", mem, err)
+	}
+	if grants := pollAuditColumn(t, 1, `
+		SELECT id FROM audit_events WHERE project_id = $1 AND event_type = $2`,
+		h.ProjectID, string(audit.EventTenantAdminAdded)); len(grants) != 1 {
+		t.Fatalf("tenant_admin_added records = %d, want only the first grant's", len(grants))
+	}
+
 	other, err := admin.AdminCreateProject(ctx, connect.NewRequest(&identitypb.AdminCreateProjectRequest{
 		Name: "Another Project", StorageScopeId: fmt.Sprintf("operator-other-%d", unique),
 	}))

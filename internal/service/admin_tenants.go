@@ -200,8 +200,8 @@ func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, caller Operat
 // the first verifier; so does a tenant an operator made with
 // AdminCreateTenant and never gave an admin, and a tenant whose owners and
 // admins were all deleted. The operator appoints an owner with
-// AdminRecoverTenantOwnership, which is audited, or adds an admin with
-// AdminAddTenantAdmin, and restores the tenant then. A tenant claimed by a
+// AdminRecoverTenantOwnership or adds an admin with AdminAddTenantAdmin, each
+// audited, and restores the tenant then. A tenant claimed by a
 // domain's verification has the owner or admin who verified it.
 func (s *ControlPlaneAdminService) requireAnswerable(ctx context.Context, t *Tenant) error {
 	if t.CreatedBy != "" {

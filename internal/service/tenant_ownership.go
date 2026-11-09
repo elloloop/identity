@@ -15,9 +15,10 @@ var (
 	// signed-up person, or its email is unverified. Mapped to
 	// CodeFailedPrecondition.
 	ErrIneligibleTenantOwner = errors.New("this account cannot own a tenant")
-	// ErrTenantStillGoverned is returned by AdminRecoverTenantOwnership
-	// while the tenant still has an owner or admin who is a person, can sign
-	// in and holds an active membership: an owner transfers the ownership,
+	// ErrTenantStillGoverned is returned by AdminRecoverTenantOwnership,
+	// and by a tenant_operator credential's AdminAddTenantAdmin, while the
+	// tenant still has an owner or admin who is a person, can sign in and
+	// holds an active membership: an owner transfers the ownership,
 	// and an admin invites a new owner, instead. A suspended tenant refuses
 	// both, so the operator restores it first. Mapped to
 	// CodeFailedPrecondition.
@@ -205,30 +206,15 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	if t.Status != TenantStatusClaimed && t.Status != TenantStatusSuspended {
-		return nil, fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
-	}
-	governors, err := s.governorsWhoCanSignIn(ctx, projectID, tenantID)
+	governors, err := s.appointableGovernors(ctx, projectID, t)
 	if err != nil {
 		return nil, err
 	}
-	for _, m := range governors {
-		if m.UserID == userID && m.Role == RoleOwner {
-			return m, nil
-		}
+	if held := governingAs(governors, userID, RoleOwner); held != nil {
+		return held, nil
 	}
-	user, err := s.users.GetUserInProject(ctx, projectID, userID)
-	if err != nil {
+	if err := s.admitAppointment(ctx, projectID, governors, userID); err != nil {
 		return nil, err
-	}
-	if user == nil {
-		return nil, fmt.Errorf("%w: user", ErrNotFound)
-	}
-	if err := requireEligibleTenantOwner(user); err != nil {
-		return nil, err
-	}
-	if len(governors) > 0 {
-		return nil, ErrTenantStillGoverned
 	}
 
 	restored, err := s.liftSuspension(ctx, op, projectID, tenantID, userID, reason, ip, ua)
@@ -255,6 +241,62 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 			}))
 	}
 	return m, nil
+}
+
+// appointableGovernors starts an operator's appointment of a governor of t, a
+// tenant of projectID, under recovery's rules: t must be claimed or suspended
+// (a latent tenant has never had a governor, ErrTenantStatusConflict). It
+// returns who can govern t now (governorsWhoCanSignIn). An appointment
+// governingAs finds already made is returned unchanged, recording nothing, so
+// a retry after a lost response gets the first answer; any other is judged
+// by admitAppointment.
+func (s *ControlPlaneAdminService) appointableGovernors(ctx context.Context, projectID string, t *Tenant) ([]*TenantMembership, error) {
+	if t.Status != TenantStatusClaimed && t.Status != TenantStatusSuspended {
+		return nil, fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
+	}
+	return s.governorsWhoCanSignIn(ctx, projectID, t.ID)
+}
+
+// governingAs returns the membership with which userID is one of governors at
+// role, or nil.
+func governingAs(governors []*TenantMembership, userID, role string) *TenantMembership {
+	for _, m := range governors {
+		if m.UserID == userID && m.Role == role {
+			return m
+		}
+	}
+	return nil
+}
+
+// admitAppointment applies the rest of recovery's rules: userID must be an
+// account of projectID that may own a tenant (requireEligibleTenantOwner),
+// and none of governors may remain (ErrTenantStillGoverned), so an
+// appointment never overrides or lowers people who can act.
+func (s *ControlPlaneAdminService) admitAppointment(ctx context.Context, projectID string, governors []*TenantMembership, userID string) error {
+	user, err := s.projectAccount(ctx, projectID, userID)
+	if err != nil {
+		return err
+	}
+	if err := requireEligibleTenantOwner(user); err != nil {
+		return err
+	}
+	if len(governors) > 0 {
+		return ErrTenantStillGoverned
+	}
+	return nil
+}
+
+// projectAccount reads userID in projectID; an account the project does not
+// hold is ErrNotFound.
+func (s *ControlPlaneAdminService) projectAccount(ctx context.Context, projectID, userID string) (*User, error) {
+	user, err := s.users.GetUserInProject(ctx, projectID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, fmt.Errorf("%w: user", ErrNotFound)
+	}
+	return user, nil
 }
 
 // liftSuspension is an operator's restore of userID's membership of the
