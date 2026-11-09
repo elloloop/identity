@@ -31,9 +31,12 @@ func (s *AuthService) emailTokenExpiry() time.Duration {
 // auth-domain, links are built on that branded hostname
 // (https://<primary-auth-domain>) so a user sees a URL on the product's
 // own domain. Otherwise it falls back to the configured GATEWAY_APP_BASE_URL
-// (or a localhost dev default). Every emailed link is built on it unless a
-// deployment-wide variable gives that kind of link a page of its own (see
-// emailLinkPageURL and tenantInvitationLink).
+// (or a localhost dev default). Every emailed link is built on it unless
+// that kind of link has a page of its own: a reset or verification link when
+// a link base resolves (the product's or the project's
+// branding.email_link_base_url, else GATEWAY_EMAIL_LINK_BASE_URL; see
+// emailLinkPageURL), a tenant invitation when
+// GATEWAY_TENANT_INVITATION_PAGE_URL is set (see tenantInvitationLink).
 func appBaseURL(ctx context.Context, cfg *config.Config) string {
 	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.PrimaryAuthDomain != "" {
 		return "https://" + scope.PrimaryAuthDomain

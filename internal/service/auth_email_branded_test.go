@@ -91,24 +91,7 @@ func TestEmails_BrandedByNamedProduct(t *testing.T) {
 			ProductName: "Acme Kids", EmailFrom: "no-reply@kids.acme.example", EmailFromName: "Acme Kids",
 		}}},
 	})
-	senders := []struct {
-		name string
-		send func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error
-	}{
-		{"RequestPasswordReset", func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
-			seedUser(repo, "alice@test.com", "x", "active")
-			return svc.RequestPasswordReset(ctx, "alice@test.com", params)
-		}},
-		{"SendEmailVerification", func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
-			user := seedUser(repo, "alice@test.com", "x", "active")
-			return svc.SendEmailVerification(ctx, user.ID, params)
-		}},
-		{"PasswordSignup", func(svc *AuthService, _ *fakeRepo, params EmailLinkParams) error {
-			_, err := svc.PasswordSignup(ctx, "alice@test.com", "Str0ng!Pass1", "Alice", "", 0, "", params)
-			return err
-		}},
-	}
-	for _, sender := range senders {
+	for _, sender := range linkParamSenders(ctx) {
 		for _, tc := range []struct {
 			name, product, wantFrom, wantName string
 		}{
@@ -151,24 +134,7 @@ func TestEmails_LinkOnTheProjectsOwnBase(t *testing.T) {
 			EmailLinkBaseURL: "https://signin.kids.acme.example",
 		}}},
 	})
-	senders := []struct {
-		name, page string
-		send       func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error
-	}{
-		{"RequestPasswordReset", emailLinkPageResetPassword, func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
-			seedUser(repo, "alice@test.com", "x", "active")
-			return svc.RequestPasswordReset(ctx, "alice@test.com", params)
-		}},
-		{"SendEmailVerification", emailLinkPageVerifyEmail, func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
-			user := seedUser(repo, "alice@test.com", "x", "active")
-			return svc.SendEmailVerification(ctx, user.ID, params)
-		}},
-		{"PasswordSignup", emailLinkPageVerifyEmail, func(svc *AuthService, _ *fakeRepo, params EmailLinkParams) error {
-			_, err := svc.PasswordSignup(ctx, "alice@test.com", "Str0ng!Pass1", "Alice", "", 0, "", params)
-			return err
-		}},
-	}
-	for _, sender := range senders {
+	for _, sender := range linkParamSenders(ctx) {
 		for _, tc := range []struct {
 			name, product, wantPage string
 		}{
@@ -199,5 +165,31 @@ func TestEmails_LinkOnTheProjectsOwnBase(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// linkParamSender sends one of the emails that take EmailLinkParams, for the
+// request in the context it was made with, and names the page its link opens.
+type linkParamSender struct {
+	name, page string
+	send       func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error
+}
+
+// linkParamSenders are every call that mails a reset or verification link
+// built from EmailLinkParams, each sending for the request in ctx.
+func linkParamSenders(ctx context.Context) []linkParamSender {
+	return []linkParamSender{
+		{"RequestPasswordReset", emailLinkPageResetPassword, func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
+			seedUser(repo, "alice@test.com", "x", "active")
+			return svc.RequestPasswordReset(ctx, "alice@test.com", params)
+		}},
+		{"SendEmailVerification", emailLinkPageVerifyEmail, func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
+			user := seedUser(repo, "alice@test.com", "x", "active")
+			return svc.SendEmailVerification(ctx, user.ID, params)
+		}},
+		{"PasswordSignup", emailLinkPageVerifyEmail, func(svc *AuthService, _ *fakeRepo, params EmailLinkParams) error {
+			_, err := svc.PasswordSignup(ctx, "alice@test.com", "Str0ng!Pass1", "Alice", "", 0, "", params)
+			return err
+		}},
 	}
 }

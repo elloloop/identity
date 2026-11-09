@@ -101,6 +101,10 @@ type AdminProject struct {
 	// so native sign-up issues account addresses exactly as the
 	// middleware-resolved paths do.
 	Accounts ProjectAccountsConfig
+	// Branding is the project's parsed config_json email branding, so the
+	// verification email a native sign-in sends comes from the project's
+	// sender and links to its link base, as on the middleware-resolved paths.
+	Branding ProjectBrandingConfig
 }
 
 // AdminProjectCredential is the credential row an operator mints. Only the

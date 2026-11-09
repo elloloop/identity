@@ -11,8 +11,9 @@ import (
 // resolvedBranding is the effective transactional-email branding for a single
 // send: the branding of the product the email is for (config_json
 // products.<slug>.branding), over the request's per-project branding
-// (config_json branding.*), over the global GATEWAY_EMAIL_BRAND_* defaults,
-// which themselves fall back to today's byte-compatible behaviour. It is the
+// (config_json branding.*), over the global defaults (GATEWAY_EMAIL_BRAND_*,
+// and GATEWAY_EMAIL_LINK_BASE_URL for the link base), which themselves fall
+// back to today's byte-compatible behaviour. It is the
 // single place the "per-product, per-project, global default, legacy"
 // precedence is decided so every email send path stays consistent.
 type resolvedBranding struct {

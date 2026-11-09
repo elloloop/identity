@@ -634,6 +634,17 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 	suspMiss, err := store.ActiveProjectByID(ctx, suspID)
 	require.NoError(t, err)
 	require.Nil(t, suspMiss, "a suspended project must not resolve for native login")
+	// Its email branding comes along, so a native sign-in's mail is the project's.
+	brandedID, err := store.createProject(ctx, &Project{
+		StorageScopeID: "scope-branded-native", Name: "Branded",
+		ConfigJSON: `{"branding":{"email_from":"no-reply@acme.test","email_link_base_url":"https://signin.acme.test"}}`,
+	})
+	require.NoError(t, err)
+	branded, err := store.ActiveProjectByID(ctx, brandedID)
+	require.NoError(t, err)
+	require.NotNil(t, branded)
+	require.Equal(t, "no-reply@acme.test", branded.Branding.EmailFrom)
+	require.Equal(t, "https://signin.acme.test", branded.Branding.EmailLinkBaseURL)
 
 	// ── credential round-trip ───────────────────────────────────────
 	credID, err := store.createProjectCredential(ctx, &ProjectCredential{

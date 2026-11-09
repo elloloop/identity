@@ -387,7 +387,7 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
     <strong>global defaults</strong> — a single server serving two products
     overrides them per project (see below).
   </p>
-  <h3 id="per-project-branding">Per-project branding (one server, two products)</h3>
+  <h3>Per-project branding (one server, two products)</h3>
   <p>
     A project's <code>config_json</code> may carry a <code>branding</code> and a
     <code>passkey</code> block that override the global defaults for requests
@@ -501,15 +501,20 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.app/auth,https://*.preview
   <p>
     When each project's pages live on a domain of their own, set
     <code>email_link_base_url</code> in the project's
-    <a href="#per-project-branding">branding</a> block instead, or as well. A
-    project's base wins over the variable for that project's links, and a
-    product's <code>branding</code> block can set one for the emails that name
-    the product (per-field precedence <em>product → project →
-    <code>GATEWAY_EMAIL_LINK_BASE_URL</code> → primary auth domain</em>). It
-    takes the same values as the variable, and a project config that holds
-    any other value is refused. The page there redeems the token against the
-    project that sent it, so it must call Identity on a host that resolves to
-    that project.
+    <a href="#per-project-branding-one-server-two-products">branding</a> block
+    instead, or as well. A project's base wins over the variable for that
+    project's links, and a product's <code>branding</code> block can set one
+    for the emails that name the product (per-field precedence <em>product →
+    project → <code>GATEWAY_EMAIL_LINK_BASE_URL</code> → primary auth
+    domain</em>). Set the project's base too whenever its pages are not at the
+    variable's: the emails that name no product, including the ones listed
+    below, use it. It takes the same values as the variable (a plain
+    <code>http</code> loopback base is for local development), and a project
+    config that holds any other value is refused. The page there redeems the
+    token against the project that sent it, so it must call Identity on a host
+    that resolves to that project, and its origin must be admitted for that
+    project, by the project's <code>cors.allowed_origins</code> or by
+    <code>GATEWAY_ALLOWED_ORIGINS</code>.
   </p>
   <p>
     The three calls that send these emails, <code>RequestPasswordReset</code>,

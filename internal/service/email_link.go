@@ -82,8 +82,8 @@ func (s *AuthService) checkEmailLinkParams(p EmailLinkParams) (emailLink, error)
 	return emailLink{product: product, returnTo: returnTo}, nil
 }
 
-// emailLinkURL is the link to page that an email for the request in ctx,
-// branded brand, carries: token plus the checked link parameters.
+// emailLinkURL is the link an email carries to page, on brand's link base or
+// else the request's app base, with token and the checked link parameters.
 func (s *AuthService) emailLinkURL(ctx context.Context, brand resolvedBranding, page, token string, link emailLink) string {
 	return buildEmailLink(s.emailLinkPageURL(ctx, brand, page), token, link)
 }

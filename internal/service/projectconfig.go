@@ -27,10 +27,11 @@ type ProjectConfig struct {
 	CORS ProjectCORSConfig `json:"cors"`
 
 	// Branding holds the project's transactional-email branding. Every field
-	// is optional; an unset field falls back to the global
-	// GATEWAY_EMAIL_BRAND_* default (and, when that too is unset, to today's
-	// byte-compatible output). This lets one server brand two products
-	// (e.g. a kids app and a B2B app) distinctly.
+	// is optional; an unset field falls back to the global default
+	// (GATEWAY_EMAIL_BRAND_*, and GATEWAY_EMAIL_LINK_BASE_URL for the link
+	// base) and, when that too is unset, to today's byte-compatible output.
+	// This lets one server brand two products (e.g. a kids app and a B2B app)
+	// distinctly.
 	Branding ProjectBrandingConfig `json:"branding"`
 
 	// Passkey holds the project's WebAuthn relying-party identity. When set,
@@ -326,9 +327,9 @@ type ProjectBrandingConfig struct {
 	// project's password-reset and email-verification links (e.g.
 	// "https://signin.kids.example.com"): the links become
 	// <base>/reset-password?token=… and <base>/verify-email?token=…. Empty
-	// falls back to the global GATEWAY_EMAIL_LINK_BASE_URL, else /auth/… on
-	// the project's primary auth domain. It takes the same values as that
-	// variable.
+	// falls back (in a product's block, to the project's base first) to the
+	// global GATEWAY_EMAIL_LINK_BASE_URL, else /auth/… on the project's
+	// primary auth domain. It takes the same values as that variable.
 	EmailLinkBaseURL string `json:"email_link_base_url"`
 }
 
@@ -1102,7 +1103,8 @@ type ProjectProductConfig struct {
 	// Branding overrides the project's branding block, field by field, on the
 	// password-reset and email-verification emails a request names this
 	// product for (their `product` field). An empty field falls back to the
-	// project's branding, then the GATEWAY_EMAIL_BRAND_* defaults.
+	// project's branding, then the global defaults (GATEWAY_EMAIL_BRAND_*,
+	// and GATEWAY_EMAIL_LINK_BASE_URL for the link base).
 	Branding ProjectBrandingConfig `json:"branding"`
 }
 

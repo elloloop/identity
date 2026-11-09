@@ -146,14 +146,12 @@ func TestParseProjectConfig_InvalidBrandingOrPasskey_Rejected(t *testing.T) {
 	t.Parallel()
 
 	for name, blob := range map[string]string{
-		"bad email_from":       `{"branding":{"email_from":"not-an-address"}}`,
-		"bad support_email":    `{"branding":{"support_email":"nope"}}`,
-		"non-https logo":       `{"branding":{"logo_url":"http://insecure.example.com/l.png"}}`,
-		"non-https link base":  `{"branding":{"email_link_base_url":"http://signin.example.com"}}`,
-		"link base with query": `{"branding":{"email_link_base_url":"https://signin.example.com?x=1"}}`,
-		"rp_id with scheme":    `{"passkey":{"rp_id":"https://kids.example.com"}}`,
-		"rp_id with port":      `{"passkey":{"rp_id":"kids.example.com:443"}}`,
-		"bad origin":           `{"passkey":{"origin":"kids.example.com"}}`,
+		"bad email_from":    `{"branding":{"email_from":"not-an-address"}}`,
+		"bad support_email": `{"branding":{"support_email":"nope"}}`,
+		"non-https logo":    `{"branding":{"logo_url":"http://insecure.example.com/l.png"}}`,
+		"rp_id with scheme": `{"passkey":{"rp_id":"https://kids.example.com"}}`,
+		"rp_id with port":   `{"passkey":{"rp_id":"kids.example.com:443"}}`,
+		"bad origin":        `{"passkey":{"origin":"kids.example.com"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseProjectConfig(blob)

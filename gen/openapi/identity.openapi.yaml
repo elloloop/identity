@@ -11636,13 +11636,14 @@ components:
          address matching the supplied `email`. If no account matches, the
          request silently succeeds (no enumeration).
 
-         The emailed link is <page>?token=<token>, where <page> is the link base +
-         "/reset-password" when one is set (the named product's
+         The emailed link is <page>?token=<token>, where <page> is the link base
+         + "/reset-password" when one is set (the named product's
          branding.email_link_base_url, else the project's, else
-         GATEWAY_EMAIL_LINK_BASE_URL), else "/auth/reset-password" on the project's
-         primary auth domain (or GATEWAY_APP_BASE_URL). The link also carries `&product=<product>` and
-         `&redirect=<return_to>`, URL-encoded, when the request sets them, so the
-         page can present the right product and send the user back afterwards.
+         GATEWAY_EMAIL_LINK_BASE_URL), else "/auth/reset-password" on the
+         project's primary auth domain (or GATEWAY_APP_BASE_URL). The link also
+         carries `&product=<product>` and `&redirect=<return_to>`, URL-encoded,
+         when the request sets them, so the page can present the right product
+         and send the user back afterwards.
          The same rule builds the verification link of PasswordSignup and
          SendEmailVerification ("/verify-email").
     identity.v1.RequestPasswordResetResponse:
