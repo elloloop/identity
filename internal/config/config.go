@@ -1154,13 +1154,14 @@ type Config struct {
 	// and email-verification links, for deployments that serve those pages
 	// outside identity (e.g. a sign-in hub). When set, the links are
 	// <base>/reset-password?token=… and <base>/verify-email?token=… for every
-	// project, ahead of a project's primary auth domain. When empty they stay
-	// on <primary auth domain or GATEWAY_APP_BASE_URL>/auth/…. Magic-link,
-	// email-change and invitation links are unaffected (a tenant invitation's
-	// page is TenantInvitationPageURL). Must be an absolute https URL (http
-	// only for a loopback host) without userinfo, query, fragment, space or
-	// other character a URL must percent-encode; a path prefix is kept.
-	// Driven by GATEWAY_EMAIL_LINK_BASE_URL.
+	// project that sets no branding.email_link_base_url of its own, ahead of
+	// the project's primary auth domain. When empty they stay on <primary
+	// auth domain or GATEWAY_APP_BASE_URL>/auth/…. Magic-link, email-change
+	// and invitation links are unaffected (a tenant invitation's page is
+	// TenantInvitationPageURL). Must be an absolute https URL (http only for
+	// a loopback host) without userinfo, query, fragment, space or other
+	// character a URL must percent-encode; a path prefix is kept. Driven by
+	// GATEWAY_EMAIL_LINK_BASE_URL.
 	EmailLinkBaseURL string
 
 	// TenantInvitationPageURL is the page a tenant-invitation email links to,
@@ -2430,45 +2431,53 @@ func (c *Config) Validate() error {
 
 // validateEmailLinkBaseURL fails boot on a GATEWAY_EMAIL_LINK_BASE_URL that
 // would put a broken or downgradeable link into every reset and verification
-// email (validateEmailedLinkURL). Empty is valid and keeps the links on the
+// email (ValidateEmailedLinkURL). Empty is valid and keeps the links on the
 // app base.
 func (c *Config) validateEmailLinkBaseURL() error {
-	return validateEmailedLinkURL("GATEWAY_EMAIL_LINK_BASE_URL", c.EmailLinkBaseURL)
+	return validateEmailedLinkVar("GATEWAY_EMAIL_LINK_BASE_URL", c.EmailLinkBaseURL)
 }
 
 // validateTenantInvitationPageURL fails boot on a
 // GATEWAY_TENANT_INVITATION_PAGE_URL that would put a broken or downgradeable
-// link into every tenant-invitation email (validateEmailedLinkURL). Empty is
+// link into every tenant-invitation email (ValidateEmailedLinkURL). Empty is
 // valid and keeps the link on the app base.
 func (c *Config) validateTenantInvitationPageURL() error {
-	return validateEmailedLinkURL("GATEWAY_TENANT_INVITATION_PAGE_URL", c.TenantInvitationPageURL)
+	return validateEmailedLinkVar("GATEWAY_TENANT_INVITATION_PAGE_URL", c.TenantInvitationPageURL)
 }
 
-// validateEmailedLinkURL checks the value of the variable name, a URL that
-// emailed links are built on: it must be an absolute https URL (http only for
+// validateEmailedLinkVar is ValidateEmailedLinkURL for the variable name.
+func validateEmailedLinkVar(name, raw string) error {
+	if err := ValidateEmailedLinkURL(raw); err != nil {
+		return fmt.Errorf("config: %s: %w", name, err)
+	}
+	return nil
+}
+
+// ValidateEmailedLinkURL checks raw, a URL that emailed links are built on,
+// wherever it is configured: it must be an absolute https URL (http only for
 // a loopback host), and carry no userinfo, query or fragment, since the link
 // appends its own path or "?token=…" to it, nor any character
-// mustBePercentEncoded names. Empty is valid.
-func validateEmailedLinkURL(name, raw string) error {
+// mustBePercentEncoded names. Empty is valid. The error never echoes a
+// password the URL carries.
+func ValidateEmailedLinkURL(raw string) error {
 	if raw == "" {
 		return nil
 	}
 	u, err := parseHTTPSOrLoopbackURL(raw)
 	if err != nil {
-		return fmt.Errorf("config: %s: %w", name, err)
+		return err
 	}
 	// url.Parse records a bare trailing "?" (ForceQuery) but drops a bare
 	// trailing "#", which would still put the page and token in the fragment.
 	if u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") {
-		return fmt.Errorf("config: %s %q must not carry userinfo, a query or a fragment",
-			name, origin.Redact(raw))
+		return fmt.Errorf("url %q must not carry userinfo, a query or a fragment", origin.Redact(raw))
 	}
 	// The link is the value as written plus "?token=…", so a space, a quote
 	// or another character a URL must percent-encode would break it or end it
 	// early in a mail client.
 	if strings.ContainsFunc(raw, mustBePercentEncoded) {
-		return fmt.Errorf("config: %s %q must percent-encode spaces, quotes and other characters a URL cannot carry as they are",
-			name, origin.Redact(raw))
+		return fmt.Errorf("url %q must percent-encode spaces, quotes and other characters a URL cannot carry as they are",
+			origin.Redact(raw))
 	}
 	return nil
 }

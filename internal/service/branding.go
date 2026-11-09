@@ -23,6 +23,7 @@ type resolvedBranding struct {
 	primaryColor    string
 	supportEmail    string
 	listUnsubscribe string
+	linkBaseURL     string
 }
 
 // resolveBranding computes the effective branding for an email sent for
@@ -30,9 +31,10 @@ type resolvedBranding struct {
 // request in ctx.
 //
 // Precedence per field: the project's value for product (when set) >
-// per-project value > global default (GATEWAY_EMAIL_BRAND_*) > legacy. For the
-// From address the legacy fallback is GATEWAY_SMTP_FROM, preserving today's
-// output for a zero-config deployment.
+// per-project value > global default (GATEWAY_EMAIL_BRAND_*, and
+// GATEWAY_EMAIL_LINK_BASE_URL for the link base) > legacy. For the From
+// address the legacy fallback is GATEWAY_SMTP_FROM, preserving today's output
+// for a zero-config deployment.
 func resolveBranding(ctx context.Context, cfg *config.Config, product string) resolvedBranding {
 	var p, prod ProjectBrandingConfig
 	if scope := ProjectScopeFromContext(ctx); scope != nil {
@@ -61,6 +63,7 @@ func resolveBranding(ctx context.Context, cfg *config.Config, product string) re
 		primaryColor:    pick(prod.PrimaryColor, p.PrimaryColor, cfg.EmailBrandPrimaryColor),
 		supportEmail:    pick(prod.SupportEmail, p.SupportEmail, cfg.EmailBrandSupportEmail),
 		listUnsubscribe: cfg.EmailListUnsubscribe,
+		linkBaseURL:     pick(prod.EmailLinkBaseURL, p.EmailLinkBaseURL, cfg.EmailLinkBaseURL),
 	}
 }
 

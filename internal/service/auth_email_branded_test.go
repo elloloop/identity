@@ -135,3 +135,69 @@ func TestEmails_BrandedByNamedProduct(t *testing.T) {
 		}
 	}
 }
+
+// TestEmails_LinkOnTheProjectsOwnBase: a project's branding.email_link_base_url
+// places every reset and verification link it sends ahead of
+// GATEWAY_EMAIL_LINK_BASE_URL, and a named product's ahead of the project's;
+// the From address follows the same branding.
+func TestEmails_LinkOnTheProjectsOwnBase(t *testing.T) {
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "acme", PrimaryAuthDomain: "auth.acme.example",
+		Access: ProjectAccessConfig{Mode: AccessModeOpen},
+		Branding: ProjectBrandingConfig{
+			EmailFrom: "no-reply@acme.example", EmailLinkBaseURL: "https://signin.acme.example/",
+		},
+		Products: ProjectProductsConfig{"kids": {Branding: ProjectBrandingConfig{
+			EmailLinkBaseURL: "https://signin.kids.acme.example",
+		}}},
+	})
+	senders := []struct {
+		name, page string
+		send       func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error
+	}{
+		{"RequestPasswordReset", emailLinkPageResetPassword, func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
+			seedUser(repo, "alice@test.com", "x", "active")
+			return svc.RequestPasswordReset(ctx, "alice@test.com", params)
+		}},
+		{"SendEmailVerification", emailLinkPageVerifyEmail, func(svc *AuthService, repo *fakeRepo, params EmailLinkParams) error {
+			user := seedUser(repo, "alice@test.com", "x", "active")
+			return svc.SendEmailVerification(ctx, user.ID, params)
+		}},
+		{"PasswordSignup", emailLinkPageVerifyEmail, func(svc *AuthService, _ *fakeRepo, params EmailLinkParams) error {
+			_, err := svc.PasswordSignup(ctx, "alice@test.com", "Str0ng!Pass1", "Alice", "", 0, "", params)
+			return err
+		}},
+	}
+	for _, sender := range senders {
+		for _, tc := range []struct {
+			name, product, wantPage string
+		}{
+			{"project", "", "https://signin.acme.example/" + sender.page + "?token="},
+			{"named product", "kids", "https://signin.kids.acme.example/" + sender.page + "?token="},
+		} {
+			t.Run(sender.name+"/"+tc.name, func(t *testing.T) {
+				svc, repo, rec := newAuthSvcWithMailer(t)
+				svc.cfg.EmailLinkBaseURL = "https://signin.example"
+
+				if err := sender.send(svc, repo, EmailLinkParams{Product: tc.product}); err != nil {
+					t.Fatalf("%s: %v", sender.name, err)
+				}
+				sent := rec.Sent()
+				if len(sent) != 1 {
+					t.Fatalf("expected 1 email, got %d", len(sent))
+				}
+				text := sent[0].Text
+				want := tc.wantPage + extractTokenFromLink(t, text)
+				if tc.product != "" {
+					want += "&product=" + tc.product
+				}
+				if got := linkInBody(t, text, "https://"); got != want {
+					t.Fatalf("link = %q, want %q", got, want)
+				}
+				if sent[0].From != "no-reply@acme.example" {
+					t.Errorf("From = %q, want the project's no-reply@acme.example", sent[0].From)
+				}
+			})
+		}
+	}
+}

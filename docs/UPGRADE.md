@@ -1,5 +1,37 @@
 # Upgrade guide
 
+## Next — a project's own reset and verification link base: `branding.email_link_base_url` (additive; no migration; a stored value is now validated)
+
+Nothing changes unless you set it. A project's `branding` block, and a
+product's `branding` block under `products`, can name the base URL of the
+pages that redeem its password-reset and email-verification links, as
+`GATEWAY_EMAIL_LINK_BASE_URL` does for the whole server. For that project's
+emails, or a request that names that product, it wins over the variable:
+the precedence is product, then project, then `GATEWAY_EMAIL_LINK_BASE_URL`,
+then `/auth/…` on the project's primary auth domain (or
+`GATEWAY_APP_BASE_URL`). A server whose projects each serve those pages on
+their own domain could not say so before: the one variable sent every
+project's links to the same place.
+
+The value takes the variable's rules: an absolute `https` URL (`http` only for
+a loopback host) with no userinfo, query or fragment, and nothing a URL must
+percent-encode left bare. `UpsertProjectConfig` refuses any other value with
+`invalid_argument`. **Before the roll, check that no stored project config
+already holds the key**, in `branding` or in a product's `branding`: an
+earlier release ignored it as unknown, and this one refuses to resolve a
+project whose value does not pass, so its requests fail until the config is
+fixed.
+
+The page at the base redeems the token through `ConfirmPasswordReset` or
+`VerifyEmail` against the project that sent it, so it must call Identity on a
+host that resolves to that project, and that project's CORS allow-list must
+admit the page's origin.
+
+Rolling back is running the previous release again. It ignores the key, so
+the project's new links go back to `GATEWAY_EMAIL_LINK_BASE_URL` or the
+primary auth domain; a link already sent keeps working wherever its page is
+still served, since the token does not name the host.
+
 ## Next — a refreshed access token carries the sign-in's `auth_time` (migration 0056; behaviour change; `RefreshTokenRecord.AuthTimeMs` (Go API))
 
 A token minted by `RefreshToken` used to carry no `auth_time`: the refresh is

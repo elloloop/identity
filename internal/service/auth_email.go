@@ -161,7 +161,7 @@ func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string
 	brand := resolveBranding(ctx, s.cfg, link.product)
 	html, text, err := email.Render(email.TemplatePasswordReset, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
-		"Link":      s.emailLinkURL(ctx, emailLinkPageResetPassword, rawToken, link),
+		"Link":      s.emailLinkURL(ctx, brand, emailLinkPageResetPassword, rawToken, link),
 		"ExpiresIn": formatExpiresIn(expiry),
 	}))
 	if err != nil {
@@ -356,7 +356,7 @@ func (s *AuthService) mailEmailVerification(ctx context.Context, user *User, lin
 	brand := resolveBranding(ctx, s.cfg, link.product)
 	html, text, err := email.Render(email.TemplateEmailVerification, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
-		"Link":      s.emailLinkURL(ctx, emailLinkPageVerifyEmail, rawToken, link),
+		"Link":      s.emailLinkURL(ctx, brand, emailLinkPageVerifyEmail, rawToken, link),
 		"ExpiresIn": formatExpiresIn(expiry),
 	}))
 	if err != nil {
