@@ -661,6 +661,13 @@ func (f *fakeMembershipStore) GetActiveTenantForUser(_ context.Context, projectI
 	return f.activeTenant(m, projectID, userID, emailDomain), nil
 }
 
+func (f *fakeMembershipStore) GetTenantStatus(ctx context.Context, projectID, tenantID string) (string, error) {
+	if f.tenants == nil {
+		return "", nil
+	}
+	return f.tenants.GetTenantStatus(ctx, projectID, tenantID)
+}
+
 func (f *fakeMembershipStore) activeTenant(m *TenantMembership, projectID, userID, emailDomain string) *UserTenant {
 	if f.tenants == nil || m.ProjectID != projectID || m.UserID != userID || m.Status != MembershipStatusActive {
 		return nil
