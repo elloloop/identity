@@ -2534,8 +2534,68 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*User,
 // Empty tenantID keeps the default tenant. The selection is not remembered:
 // the next refresh that names no tenant returns to the default, and
 // switching tenants is a refresh naming another.
+// #nosec G101 -- stable log reason identifiers, not credentials.
+const (
+	ReasonRefreshTokenInvalid     = "refresh_token_invalid"
+	ReasonRefreshTokenExpired     = "refresh_token_expired"
+	ReasonRefreshSessionRevoked   = "refresh_session_revoked"
+	ReasonNotAMember              = "not_a_member"
+	ReasonTenantSuspended         = "tenant_suspended"
+	ReasonTenantSelectionDisabled = "tenant_selection_disabled"
+)
+
+func (s *AuthService) recordAuthRefusal(ctx context.Context, record *RefreshTokenRecord, selectedTenantID, reason string, extra ...zap.Field) {
+	reqProjectID := s.projectID(ctx)
+	projectID := reqProjectID
+	tenantID := selectedTenantID
+	if tenantID == "" {
+		tenantID = s.tenantID(ctx)
+	}
+	userID := ""
+	sessionID := ""
+	if info := RefusalInfoFromContext(ctx); info != nil {
+		if info.ProjectID != "" {
+			projectID = info.ProjectID
+		}
+		if selectedTenantID == "" && info.TenantID != "" {
+			tenantID = info.TenantID
+		}
+		if info.UserID != "" {
+			userID = info.UserID
+		}
+		if info.SessionID != "" {
+			sessionID = info.SessionID
+		}
+	}
+	if record != nil {
+		if record.UserID != "" {
+			userID = record.UserID
+		}
+		if record.SID != "" {
+			sessionID = record.SID
+		}
+	}
+	fields := []zap.Field{
+		zap.String("request_project_id", reqProjectID),
+		zap.String("project_id", projectID),
+		zap.String("tenant_id", tenantID),
+	}
+	if userID != "" {
+		fields = append(fields, zap.String("user_id", userID))
+	}
+	if sessionID != "" {
+		fields = append(fields, zap.String("session_id", sessionID))
+	}
+	if record != nil && record.AuthTimeMs > 0 {
+		fields = append(fields, zap.Int64("auth_time_age_s", (s.nowMs()-record.AuthTimeMs)/1000))
+	}
+	fields = append(fields, extra...)
+	RecordRefusal(ctx, s.logger, "rpc_refused", reason, fields...)
+}
+
 func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantID, ipAddr, userAgent string) (*User, string, string, error) {
 	if rawRefreshToken == "" {
+		s.recordAuthRefusal(ctx, nil, "", ReasonRefreshTokenInvalid)
 		return nil, "", "", fmt.Errorf("%w: missing refresh token", ErrUnauthenticated)
 	}
 	tenantID, err := s.selectedTenant(ctx, tenantID)
@@ -2549,6 +2609,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 		return nil, "", "", fmt.Errorf("querying refresh token: %w", err)
 	}
 	if record == nil {
+		s.recordAuthRefusal(ctx, nil, tenantID, ReasonRefreshTokenInvalid)
 		return nil, "", "", fmt.Errorf("%w: invalid refresh token", ErrUnauthenticated)
 	}
 
@@ -2575,6 +2636,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "refresh_token_replay"}),
 		)
+		s.recordAuthRefusal(ctx, record, tenantID, ReasonRefreshSessionRevoked)
 		return nil, "", "", fmt.Errorf("%w: refresh token replay", ErrUnauthenticated)
 	}
 
@@ -2583,6 +2645,8 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 		// A deployer may set the JWT expiry longer than the refresh TTL in
 		// mode=session, so the access session must die with its refresh token.
 		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "refresh_token_expired")
+		s.recordAuthRefusal(ctx, record, tenantID, ReasonRefreshTokenExpired,
+			zap.Int64("expiry_age_s", (s.nowMs()-record.ExpiresAt)/1000))
 		return nil, "", "", fmt.Errorf("%w: refresh token expired", ErrTokenExpired)
 	}
 
@@ -2597,6 +2661,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 		return nil, "", "", err
 	}
 	if timeoutUser == nil {
+		s.recordAuthRefusal(ctx, record, tenantID, ReasonRefreshSessionRevoked)
 		return nil, "", "", fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.enforceSessionTimeout(ctx, timeoutUser.Email, s.nowMs(), record.SessionStartedAt, record.LastUsedAt); err != nil {
@@ -2605,6 +2670,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 		// token minted alongside it is still valid until its natural expiry, so
 		// revoke the matching access session (scoped to this sid) too.
 		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "session_timeout")
+		s.recordAuthRefusal(ctx, record, tenantID, ReasonRefreshSessionRevoked)
 		return nil, "", "", err
 	}
 
@@ -2684,6 +2750,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// token, below.
 	statusErr := s.checkAccountStatus(ctx, timeoutUser, ipAddr, userAgent, sessionGateRefresh)
 	if errors.Is(statusErr, ErrAccountLocked) {
+		s.recordAuthRefusal(ctx, record, tenantID, ReasonRefreshSessionRevoked)
 		return nil, "", "", statusErr
 	}
 
@@ -2720,6 +2787,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// and gets ErrUnauthenticated.
 	if err := s.repo(ctx).ConsumeRefreshTokenByHash(ctx, tokenHash, s.nowMs()); err != nil {
 		if errors.Is(err, ErrUnauthenticated) {
+			s.recordAuthRefusal(ctx, record, tenantID, ReasonRefreshSessionRevoked)
 			return nil, "", "", fmt.Errorf("%w: refresh token already consumed", ErrUnauthenticated)
 		}
 		return nil, "", "", fmt.Errorf("consuming refresh token: %w", err)
@@ -2733,6 +2801,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// refusal.
 	if statusErr != nil {
 		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "account_not_active")
+		s.recordAuthRefusal(ctx, record, tenantID, ReasonRefreshSessionRevoked)
 		return nil, "", "", statusErr
 	}
 
@@ -2815,6 +2884,7 @@ func notTenantIDRune(r rune) bool {
 // TenantSelectionRefusedError.
 func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, session *RefreshTokenRecord, tenantID string) error {
 	if s.tenantSelection == nil {
+		s.recordAuthRefusal(ctx, session, tenantID, ReasonTenantSelectionDisabled)
 		return &TenantSelectionRefusedError{Reason: TenantSelectionNotEnabled, Err: ErrTenantSelectionDisabled}
 	}
 	projectID := s.projectID(ctx)
@@ -2823,12 +2893,33 @@ func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, sess
 		return s.tenantSelectionUnavailable(projectID, tenantID, err)
 	}
 	if t == nil || !actsInTenant(user, t) {
+		reason := ReasonNotAMember
+		if t == nil && s.isSuspendedTenant(ctx, projectID, tenantID) {
+			reason = ReasonTenantSuspended
+		}
+		s.recordAuthRefusal(ctx, session, tenantID, reason)
 		return &TenantSelectionRefusedError{
 			Reason: TenantSelectionNotAMember,
 			Err:    fmt.Errorf("%w: not an active member of that tenant", ErrPermissionDenied),
 		}
 	}
 	return s.checkSelectedTenantPolicy(ctx, projectID, user, session, tenantID)
+}
+
+func (s *AuthService) isSuspendedTenant(ctx context.Context, projectID, tenantID string) bool {
+	if s.governance != nil && s.governance.Tenants != nil {
+		if status, err := s.governance.Tenants.GetTenantStatus(ctx, projectID, tenantID); err == nil && status == TenantStatusSuspended {
+			return true
+		}
+	}
+	if sr, ok := s.tenantSelection.(interface {
+		GetTenantStatus(ctx context.Context, projectID, tenantID string) (string, error)
+	}); ok {
+		if status, err := sr.GetTenantStatus(ctx, projectID, tenantID); err == nil && status == TenantStatusSuspended {
+			return true
+		}
+	}
+	return false
 }
 
 // tenantSelectionUnavailable refuses a selection that could not be checked.

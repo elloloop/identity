@@ -144,17 +144,63 @@ var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in
 // second factor protects — enrolled two-step, or a policy requiring one —
 // cannot be merged by its password alone. The deployment must have turned
 // merging on (GATEWAY_ACCOUNT_MERGE_ENABLED).
+const (
+	ReasonMergeSameUser      = "merge_same_user"
+	ReasonMergeTargetInvalid = "merge_target_invalid"
+)
+
+func (s *AuthService) recordMergeRefusal(ctx context.Context, survivorID string, authTimeSec int64, reason string, extra ...zap.Field) {
+	reqProjectID := s.projectID(ctx)
+	projectID := reqProjectID
+	tenantID := s.tenantID(ctx)
+	userID := survivorID
+	sessionID := ""
+	if info := RefusalInfoFromContext(ctx); info != nil {
+		if info.ProjectID != "" {
+			projectID = info.ProjectID
+		}
+		if info.TenantID != "" {
+			tenantID = info.TenantID
+		}
+		if userID == "" && info.UserID != "" {
+			userID = info.UserID
+		}
+		if info.SessionID != "" {
+			sessionID = info.SessionID
+		}
+	}
+	fields := []zap.Field{
+		zap.String("request_project_id", reqProjectID),
+		zap.String("project_id", projectID),
+		zap.String("tenant_id", tenantID),
+	}
+	if userID != "" {
+		fields = append(fields, zap.String("user_id", userID))
+	}
+	if sessionID != "" {
+		fields = append(fields, zap.String("session_id", sessionID))
+	}
+	if authTimeSec > 0 {
+		fields = append(fields, zap.Int64("auth_time_age_s", s.nowMs()/1000-authTimeSec))
+	}
+	fields = append(fields, extra...)
+	RecordRefusal(ctx, s.logger, "rpc_refused", reason, fields...)
+}
+
 func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, authTimeSec int64, otherIdentifier, otherPassword, ipAddr, userAgent string, takeAddress bool) (*User, error) {
 	if !s.cfg.AccountMergeEnabled {
 		return nil, ErrAccountMergeDisabled
 	}
 	if survivorID == "" {
+		s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonUnauthenticated)
 		return nil, ErrUnauthenticated
 	}
 	// The account that is kept proves itself as freshly as the other one: a
 	// session is not enough, a recent sign-in is. Before any password check,
 	// so a stale session learns nothing about the other account.
 	if !s.recentlyAuthenticated(authTimeSec) {
+		s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonSignInNotRecent,
+			zap.Int64("max_age_s", int64(s.cfg.AccountMergeReauthMaxAge().Seconds())))
 		return nil, ErrReauthenticationRequired
 	}
 	repo := s.repo(ctx)
@@ -163,32 +209,46 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, auth
 		return nil, err
 	}
 	if survivor == nil {
+		s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonUnauthenticated)
 		return nil, ErrUnauthenticated
 	}
 	// The caller's own account is checked before any password is, so an
 	// account that could never be a survivor gets no answer about the other
 	// account's password.
 	if err := checkSurvivor(ctx, repo, survivor); err != nil {
+		if errors.Is(err, ErrMergeRefused) {
+			s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonMergeTargetInvalid)
+		}
 		return nil, err
 	}
 	if survivor.ExternalID != "" {
+		s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonMergeTargetInvalid)
 		return nil, errIDPManaged
 	}
 	other, decision, err := s.verifyPasswordCredential(ctx, otherIdentifier, otherPassword, ipAddr, userAgent)
 	if err != nil {
+		s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonMergeTargetInvalid)
 		return nil, err
 	}
 	if other.ExternalID != "" {
+		s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonMergeTargetInvalid)
 		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "idp_managed")
 		return nil, errIDPManaged
 	}
 	if other.TotpRequired || decision.RequireSecondFactor {
+		s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonMergeTargetInvalid)
 		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "second_factor_required")
 		return nil, fmt.Errorf("%w: the other account requires a second factor; turn two-step verification off there first", ErrMergeRefused)
 	}
 	s.resetFailedLogin(ctx, other)
 	merged, retired, err := mergeAccounts(ctx, repo, survivor, other, takeAddress, s.nowMs())
 	if err != nil {
+		switch {
+		case survivor.ID == other.ID:
+			s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonMergeSameUser)
+		case errors.Is(err, ErrMergeRefused), errors.Is(err, ErrMergeConflict):
+			s.recordMergeRefusal(ctx, survivorID, authTimeSec, ReasonMergeTargetInvalid)
+		}
 		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, err.Error())
 		return nil, err
 	}
