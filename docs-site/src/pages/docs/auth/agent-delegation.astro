@@ -81,7 +81,8 @@ RPC capability, separate from the browser OAuth flow above.</p>
 <p>The signed-in owner calls <code>RegisterAgentMachine</code> with exact bounds
 and the engine's Ed25519 public key (64 lowercase hex characters). The engine
 creates and protects the private key locally; Identity never receives it. Persist
-the request ID and key pair before sending. Identical retries recover the result.
+the request ID and key pair before sending. Identical retries recover the result,
+until the registration is revoked and renewed: a retired key is then refused.
 Omitted selection includes all current and future owned agents; Team and
 application permissions still apply.</p>
 <p>The engine key can discover eligible agents and register their separate public
@@ -102,12 +103,21 @@ HTTP 429 with a <code>Retry-After</code> header.</p>
 until <code>next_offset</code> is -1, even when a filtered page is empty. Its proof
 is bound to that page offset. Keep all private keys outside agent workspaces;
 pass each agent only its own access token. New eligible agents can enroll after
-the owner's human session ends. Existing agent keys cannot be silently replaced.</p>
+the owner's human session ends. Existing agent keys cannot be silently replaced;
+only a machine's renewal (below) lets an agent present a fresh one.</p>
 <p>Owners list, select and revoke connections with <code>ListAgentMachines</code>,
 <code>SelectAgentMachineAgents</code> and <code>RevokeAgentMachine</code>.
 Selection changes require recent human sign-in and an expected revision.
-Excluded or revoked child grants never reconnect through default-all. Machine
-revocation stops all children. Replacement requires a newly authorized connection.
+Excluded or revoked child grants never reconnect through default-all; the one
+exception is a child the machine's own revocation ended, after its renewal. Machine
+revocation stops all children. The same owner may register the machine again
+under its installation id with an engine key it has never held, on a recent
+sign-in; the registration is replaced, and only the children that revocation ended
+may be ensured again, each under a fresh agent key and under the renewed
+registration's own selection; agents with no earlier delegation enroll as usual.
+An owner's own revocation renews the same way, and a selection the owner
+narrowed after the old registration does not carry over: present the selection
+you mean. Any other replacement requires a newly authorized connection.
 Human signout alone does not revoke this kind; ownership, status, security,
 client and policy loss still do. Resources keep introspecting on every request.
 Resources authenticate with their dedicated project/resource HTTP Basic

@@ -20,10 +20,32 @@ func (r *Repo) CreateAgentMachine(_ context.Context, input *service.AgentMachine
 		return nil, service.ErrAgentOAuthGrant
 	}
 	if initial := r.agentMachineRegistrations[input.ID]; initial != nil {
-		if !service.SameAgentMachineRegistration(initial, input) {
-			return nil, service.ErrAlreadyExists
+		if service.SameAgentMachineRegistration(initial, input) {
+			return r.agentMachines[input.ID].Clone(), nil
 		}
-		return r.agentMachines[input.ID].Clone(), nil
+		current := r.agentMachines[input.ID]
+		// A revoked registration is replaced when the same owner registers the
+		// installation again with a key it has never held (service.RenewedAgentMachine).
+		renewed, err := service.RenewedAgentMachine(current, input)
+		if err != nil {
+			return nil, err
+		}
+		for id, c := range r.agentMachineChallenges {
+			if c.MachineID == input.ID {
+				delete(r.agentMachineChallenges, id)
+			}
+		}
+		if current.RenewedAfterRevokedAtMs != 0 {
+			for _, child := range r.agentAuthorizations {
+				if child.MachineID == input.ID && child.RevokedAtMs == current.RenewedAfterRevokedAtMs {
+					child.RevokedAtMs = current.RevokedAtMs
+					child.Revision++
+				}
+			}
+		}
+		r.agentMachineRegistrations[input.ID] = input.Clone()
+		r.agentMachines[input.ID] = renewed
+		return renewed.Clone(), nil
 	}
 	r.agentMachineRegistrations[input.ID] = input.Clone()
 	r.agentMachines[input.ID] = input.Clone()
@@ -112,6 +134,18 @@ func (r *Repo) EnsureAgentMachineDelegation(_ context.Context, id string, candid
 	}
 	for _, child := range r.agentAuthorizations {
 		if child.MachineID == id && child.AgentID == candidate.AgentID {
+			if renewed, renews, renewErr := service.RenewedAgentMachineDelegation(m, child, candidate); renews {
+				if renewErr != nil {
+					return nil, renewErr
+				}
+				for _, other := range r.agentAuthorizations {
+					if other != child && other.MachineID == id && other.MachinePublicKey == candidate.MachinePublicKey {
+						return nil, service.ErrAlreadyExists
+					}
+				}
+				r.agentAuthorizations[child.ID] = renewed
+				return renewed.Clone(), nil
+			}
 			if !a.Valid(child) || child.MachinePublicKey != candidate.MachinePublicKey {
 				return nil, service.ErrAgentOAuthGrant
 			}

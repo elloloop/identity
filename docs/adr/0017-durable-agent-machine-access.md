@@ -5,6 +5,29 @@
 Accepted; disabled by default. This is an issuer capability, not a claim that
 any particular application's engine, machine policy or permissions are enabled.
 
+**Amended** (2026-11-09): a revoked registration no longer stays revoked for its
+owner. Revocation also follows governance (a project, tenant, domain, client or
+owner change, see migrations 0041, 0042 and 0046), and every registered
+installation of a project went dark on a routine configuration change with no
+way back but a new installation. Now the same owner, on a recent sign-in,
+registers the installation again under its id with an engine key it has never
+held: the registration is replaced in place (next revision, no revocation), the
+record remembers the revocation it recovered from and every key it has retired,
+and the challenges issued to the old key are dropped. Another owner, a
+registration still active, or any key the installation has held — which is what
+an exact replay of an earlier registration presents — still conflicts; an exact
+replay of the current revoked registration still returns the revoked record. The
+children that revocation ended come back one by one, in place, as each is
+ensured again under an agent key the delegation has never held and under the
+renewed registration's own agent selection; a child ended at any other time,
+such as by the owner excluding the agent, stays ended. An owner's own
+revocation is renewable the same way, since the renewal is itself the owner's
+fresh, recent sign-in. The in-memory, sqlite and postgres stores apply the one
+eligibility rule in `service.RenewedAgentMachine` and
+`service.RenewedAgentMachineDelegation`; each performs the writes a renewal
+implies (the old key's challenges dropped, delegations left at an earlier
+recovered revocation moved to the latest) in its own transaction.
+
 ## Context
 
 A supervised native agent must continue after its owner's browser session ends.
@@ -84,7 +107,8 @@ verification both refuse control access; resources must not cache admission.
 Owner management RPCs list, select and revoke machines without exposing private material. Selection is revision-fenced and requires recent human sign-in.
 Removing an already connected agent revokes that child permanently. Returning
 to default-all cannot recreate it. Explicit replacement uses a newly authorized
-machine connection; it never changes a terminal grant back to active. Machine
+machine connection; it never changes a terminal grant back to active, except as
+the 2026-11-09 amendment above describes for the owner's own renewal. Machine
 revocation cascades to every child. A native client must respect returned revoked
 state and stop rather than silently replacing the connection.
 

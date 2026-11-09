@@ -2,12 +2,20 @@ package app
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/elloloop/identity/internal/graph"
+	"github.com/elloloop/identity/internal/repo/memory"
+
+	"github.com/elloloop/identity/pkg/audit"
 
 	"connectrpc.com/connect"
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
@@ -16,16 +24,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// observedDB records every audit write the app makes while forwarding nothing:
+// the memory store's ExecuteAtomic keeps no graph state.
+type observedDB struct {
+	service.DB
+	writes *captureNodeWriter
+}
+
+func (d *observedDB) ExecuteAtomic(ctx context.Context, projectID, tenant string, ops []graph.Operation) (*graph.CommitResult, error) {
+	return d.writes.ExecuteAtomic(ctx, projectID, tenant, ops)
+}
+
 func newAgentMachineFixture(t *testing.T) *agentOAuthHTTPFixture {
 	t.Helper()
 	f := newAgentOAuthHTTPFixture(t)
+	enableMachineClient(t, f)
+	return f
+}
+
+// newAgentMachineFixtureObserved is newAgentMachineFixture with the audit writes captured.
+func newAgentMachineFixtureObserved(t *testing.T) (*agentOAuthHTTPFixture, *captureNodeWriter) {
+	t.Helper()
+	writes := &captureNodeWriter{}
+	f := newAgentOAuthHTTPFixtureWithDB(t, func(repo *memory.Repo) service.DB { return &observedDB{DB: repo, writes: writes} })
+	enableMachineClient(t, f)
+	return f, writes
+}
+
+func enableMachineClient(t *testing.T, f *agentOAuthHTTPFixture) {
+	t.Helper()
 	f.cfg.AgentMachineEnabled = true
 	client, err := f.repo.GetOAuthClient(t.Context(), f.clientID)
 	require.NoError(t, err)
 	client.Registration.GrantTypes = append(client.Registration.GrantTypes, service.OAuthGrantAgentMachine)
 	_, err = f.repo.UpdateOAuthClient(t.Context(), client.ID, client.Revision, &client.Registration, time.Now().UnixMilli())
 	require.NoError(t, err)
-	return f
 }
 
 func TestMachineHTTPUnattendedExchangeAfterHumanSessionEnds(t *testing.T) {
@@ -81,6 +114,72 @@ func TestMachineHTTPSelectionRevokeAndNoAutomaticResurrection(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.client.ListAgentMachineAgents(t.Context(), connect.NewRequest(&identitypb.ListAgentMachineAgentsRequest{MachineId: machine.MachineId}))
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
+}
+
+// A revoked machine registers again under its installation id with a new engine
+// key, enrols its agents again under fresh agent keys, and exchanges; what the
+// revocation ended stays ended, and the audit log tells the renewal apart.
+func TestMachineHTTPRevokedMachineRegistersAgainWithNewKeysAndExchanges(t *testing.T) {
+	f, writes := newAgentMachineFixtureObserved(t)
+	first, machine, keys := registerTestMachine(t, f)
+	before := exchangeTestMachine(t, f, machine.MachineId, keys, f.agent)
+	revoke := connect.NewRequest(&identitypb.RevokeAgentMachineRequest{MachineId: machine.MachineId})
+	revoke.Header().Set("Authorization", "Bearer "+f.token)
+	_, err := f.client.RevokeAgentMachine(t.Context(), revoke)
+	require.NoError(t, err)
+	// The retired engine key never registers again, whatever else the request says.
+	retired := connect.NewRequest(&identitypb.RegisterAgentMachineRequest{
+		MachineId: first.MachineId, ClientId: first.ClientId, Resource: first.Resource, Scopes: first.Scopes,
+		DisplayName: "Renamed desktop", EnginePublicKey: first.EnginePublicKey,
+	})
+	retired.Header().Set("Authorization", "Bearer "+f.token)
+	_, err = f.client.RegisterAgentMachine(t.Context(), retired)
+	require.Equal(t, connect.CodeAlreadyExists, connect.CodeOf(err))
+	// The same owner registers the installation again with a new engine key.
+	_, renewed, fresh := registerTestMachine(t, f)
+	require.Equal(t, machine.MachineId, renewed.MachineId)
+	require.Greater(t, renewed.Revision, machine.Revision)
+	// The agent's old key, which the revocation ended, is refused; a fresh one enrols,
+	// and the delegation exchanges again.
+	oldAgentKey := keys.agents[f.agent]
+	oldProof := machineHTTPProof(t, f, &identitypb.CreateAgentMachineChallengeRequest{MachineId: machine.MachineId, AgentUserId: f.agent, AgentPublicKey: hex.EncodeToString(oldAgentKey.Public().(ed25519.PublicKey)), Operation: identitypb.AgentMachineOperation_AGENT_MACHINE_OPERATION_ENROLL_AGENT}, fresh.engine)
+	_, err = f.client.RegisterAgentMachineAgentKey(t.Context(), connect.NewRequest(&identitypb.RegisterAgentMachineAgentKeyRequest{MachineId: machine.MachineId, AgentUserId: f.agent, AgentPublicKey: hex.EncodeToString(oldAgentKey.Public().(ed25519.PublicKey)), Proof: oldProof}))
+	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
+	after := exchangeTestMachine(t, f, machine.MachineId, fresh, f.agent)
+	_, inactive := f.post(t, agentOAuthIntrospectPath, url.Values{"token": {before.AccessToken}}, true)
+	require.Equal(t, false, inactive["active"])
+	_, active := f.post(t, agentOAuthIntrospectPath, url.Values{"token": {after.AccessToken}}, true)
+	require.Equal(t, true, active["active"])
+	// The first registration's audit event carries no renewal details; the renewal's
+	// names the revocation it recovered from and its revision. The log is written
+	// asynchronously.
+	registeredDetails := func() []map[string]any {
+		out := make([]map[string]any, 0, 2)
+		for _, write := range writes.all() {
+			if write.eventType != string(audit.EventAgentMachineRegistered) {
+				continue
+			}
+			details := map[string]any{}
+			if raw, _ := write.data[fieldDetails].(string); raw != "" {
+				require.NoError(t, json.Unmarshal([]byte(raw), &details))
+			}
+			out = append(out, details)
+		}
+		return out
+	}
+	require.Eventually(t, func() bool { return len(registeredDetails()) == 2 }, 5*time.Second, 20*time.Millisecond)
+	var plain, renewal map[string]any
+	for _, details := range registeredDetails() {
+		if _, ok := details["renewed_after_revoked_at_ms"]; ok {
+			renewal = details
+		} else {
+			plain = details
+		}
+	}
+	require.NotNil(t, plain)
+	require.NotNil(t, renewal)
+	require.NotZero(t, renewal["renewed_after_revoked_at_ms"])
+	require.EqualValues(t, renewed.Revision, renewal["revision"])
 }
 
 func TestMachineHTTPRegistrationRecoveryAndBounds(t *testing.T) {

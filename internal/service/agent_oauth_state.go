@@ -55,6 +55,9 @@ type AgentAuthorization struct {
 	CodeUsedAtMs     int64
 	SessionID        string
 	RevokedAtMs      int64
+	// RetiredMachinePublicKeys are the agent keys this delegation held before each
+	// renewal (RenewedAgentMachineDelegation), oldest first; none of them returns.
+	RetiredMachinePublicKeys []string
 }
 
 func (r *AgentAuthorization) Clone() *AgentAuthorization {
@@ -63,6 +66,7 @@ func (r *AgentAuthorization) Clone() *AgentAuthorization {
 	}
 	out := *r
 	out.Scopes = slices.Clone(r.Scopes)
+	out.RetiredMachinePublicKeys = slices.Clone(r.RetiredMachinePublicKeys)
 	return &out
 }
 

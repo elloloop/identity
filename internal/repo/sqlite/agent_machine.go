@@ -65,10 +65,16 @@ func (r *sqliteRepository) CreateAgentMachine(ctx context.Context, input *servic
 		if err = json.Unmarshal(data, &original); err != nil {
 			return nil, err
 		}
-		if !service.SameAgentMachineRegistration(&original, input) {
-			return nil, service.ErrAlreadyExists
+		if service.SameAgentMachineRegistration(&original, input) {
+			return current, tx.Commit(ctx)
 		}
-		return current, tx.Commit(ctx)
+		// A revoked registration is replaced when the same owner registers the
+		// installation again with a key it has never held (service.RenewedAgentMachine).
+		renewed, renewErr := service.RenewedAgentMachine(current, input)
+		if renewErr != nil {
+			return nil, renewErr
+		}
+		return r.replaceRevokedAgentMachine(ctx, tx, current, renewed, input)
 	}
 	data, err := json.Marshal(input)
 	if err != nil {
@@ -220,6 +226,16 @@ func (r *sqliteRepository) EnsureAgentMachineDelegation(ctx context.Context, id 
 		return nil, err
 	}
 	if existing != nil {
+		// The revocation that ended this delegation is the one the machine
+		// registered again after (CreateAgentMachine): the delegation is renewed
+		// for the new registration, under a new agent key. One ended at another
+		// time, such as by the owner excluding the agent, stays ended.
+		if renewed, renews, renewErr := service.RenewedAgentMachineDelegation(machine, existing, candidate); renews {
+			if renewErr != nil {
+				return nil, renewErr
+			}
+			return r.renewRevokedAgentDelegation(ctx, tx, renewed)
+		}
 		if !a.Valid(existing) || existing.MachinePublicKey != candidate.MachinePublicKey {
 			return nil, service.ErrAgentOAuthGrant
 		}
@@ -234,4 +250,54 @@ func (r *sqliteRepository) EnsureAgentMachineDelegation(ctx context.Context, id 
 		return nil, wrapErr("EnsureAgentMachineDelegation", err)
 	}
 	return candidate.Clone(), tx.Commit(ctx)
+}
+
+// replaceRevokedAgentMachine stores renewed (service.RenewedAgentMachine) over
+// current, the revoked registration of the same installation id: the row takes
+// the renewed record, keeps input as the registration presented so its replay is
+// recognised, and the challenges issued to the old key are dropped. Delegations
+// the revocation ended stay ended until each is ensured again for the renewal.
+func (r *sqliteRepository) replaceRevokedAgentMachine(ctx context.Context, tx *tx, current, renewed, input *service.AgentMachine) (*service.AgentMachine, error) {
+	data, err := json.Marshal(renewed)
+	if err != nil {
+		return nil, err
+	}
+	// registration_json keeps the request as presented, so a replay of this
+	// renewal reads as the same registration.
+	requested, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE agent_machines SET owner_id=$3,client_id=$4,data_json=$5,registration_json=$6,revision=$7,revoked_at_ms=0 WHERE project_id=$1 AND id=$2`,
+		r.projectID, renewed.ID, renewed.OwnerID, renewed.ClientID, string(data), string(requested), renewed.Revision); err != nil {
+		return nil, wrapErr("CreateAgentMachine", err)
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM agent_machine_challenges WHERE project_id=$1 AND machine_id=$2`, r.projectID, renewed.ID); err != nil {
+		return nil, wrapErr("CreateAgentMachine", err)
+	}
+	// A delegation left at the revocation this registration had itself recovered
+	// from, never ensured again since, follows to the latest one, so it is not
+	// stranded behind two renewals.
+	if current.RenewedAfterRevokedAtMs != 0 {
+		if _, err = tx.Exec(ctx, `UPDATE agent_authorizations SET revoked_at_ms=$3,revision=revision+1 WHERE project_id=$1 AND machine_id=$2 AND revoked_at_ms=$4`,
+			r.projectID, renewed.ID, current.RevokedAtMs, current.RenewedAfterRevokedAtMs); err != nil {
+			return nil, wrapErr("CreateAgentMachine", err)
+		}
+	}
+	return renewed, tx.Commit(ctx)
+}
+
+// renewRevokedAgentDelegation stores renewed (service.RenewedAgentMachineDelegation)
+// over the delegation it replaces, in place: the row keeps its id and takes the
+// candidate's key and terms with the next revision and no revocation.
+func (r *sqliteRepository) renewRevokedAgentDelegation(ctx context.Context, tx *tx, renewed *service.AgentAuthorization) (*service.AgentAuthorization, error) {
+	data, err := json.Marshal(renewed)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE agent_authorizations SET client_id=$3,owner_id=$4,agent_id=$5,machine_id=$6,data_json=$7,revision=$8,revoked_at_ms=0,expires_at_ms=0 WHERE project_id=$1 AND id=$2`,
+		r.projectID, renewed.ID, renewed.ClientID, renewed.OwnerID, renewed.AgentID, renewed.MachineID, string(data), renewed.Revision); err != nil {
+		return nil, wrapErr("EnsureAgentMachineDelegation", err)
+	}
+	return renewed, tx.Commit(ctx)
 }

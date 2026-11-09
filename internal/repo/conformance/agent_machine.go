@@ -16,7 +16,9 @@ type machineFixture struct {
 	repo    service.AgentMachineRepository
 	oauth   service.AgentOAuthRepository
 	machine *service.AgentMachine
-	agent   string
+	// origin is the registration as first presented; a renewal starts from it.
+	origin *service.AgentMachine
+	agent  string
 }
 
 func seedAgentMachine(ctx context.Context, t *testing.T, base service.Repository) machineFixture {
@@ -41,7 +43,7 @@ func seedAgentMachine(ctx context.Context, t *testing.T, base service.Repository
 	stored, err := repo.CreateAgentMachine(ctx, m, a.Fingerprint())
 	require.NoError(t, err)
 	require.Equal(t, m, stored)
-	return machineFixture{base: base, repo: repo, oauth: oauth, machine: m, agent: agent}
+	return machineFixture{base: base, repo: repo, oauth: oauth, machine: m, origin: m.Clone(), agent: agent}
 }
 
 func (f machineFixture) candidate(ctx context.Context, t *testing.T, id string) (*service.AgentAuthorization, string) {
@@ -50,6 +52,33 @@ func (f machineFixture) candidate(ctx context.Context, t *testing.T, id string) 
 	require.NoError(t, err)
 	now := time.Now().UnixMilli()
 	return &service.AgentAuthorization{ID: id, MachineID: f.machine.ID, MachinePublicKey: agentOAuthHash(f.agent), ClientID: f.machine.ClientID, ClientRevision: f.machine.ClientRevision, Resource: f.machine.Resource, Product: f.machine.Product, Scopes: []string{"read"}, OwnerID: f.machine.OwnerID, AgentID: f.agent, SessionID: "machine-session", Decision: service.AgentAuthorizationApproved, CreatedAtMs: now, ConsentAtMs: now, Revision: 1}, a.Fingerprint()
+}
+
+// ensureWithKey ensures the delegation for the fixture's agent under its own
+// agent key, as an engine does after the machine registered again.
+func (f machineFixture) ensureWithKey(ctx context.Context, t *testing.T, id, key string) *service.AgentAuthorization {
+	t.Helper()
+	candidate, fingerprint := f.candidate(ctx, t, id)
+	candidate.MachinePublicKey = key
+	grant, err := f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
+	require.NoError(t, err)
+	return grant
+}
+
+// renew revokes the fixture's machine at CreatedAtMs+offset and registers it
+// again with the key named, keeping the renewed record as the fixture's machine.
+func (f *machineFixture) renew(ctx context.Context, t *testing.T, offset int64, key string) {
+	t.Helper()
+	_, err := f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineRevoke, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + offset})
+	require.NoError(t, err)
+	renewed := f.origin.Clone()
+	renewed.PublicKey = agentOAuthHash(key)
+	renewed.CreatedAtMs = f.machine.CreatedAtMs + offset + 1
+	a, err := f.oauth.AgentOAuthAuthority(ctx, renewed.OwnerID, "", renewed.RegistrationSID, renewed.ClientID)
+	require.NoError(t, err)
+	got, err := f.repo.CreateAgentMachine(ctx, renewed, a.Fingerprint())
+	require.NoError(t, err)
+	f.machine = got
 }
 
 func (f machineFixture) ensure(ctx context.Context, t *testing.T, id string) *service.AgentAuthorization {
@@ -110,6 +139,216 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			got, err = f.repo.CreateAgentMachine(ctx, retry, a.Fingerprint())
 			require.NoError(t, err)
 			require.Equal(t, revoked, got)
+			// The revoked key never comes back, whatever else the request changes.
+			sameKey := f.machine.Clone()
+			sameKey.RegistrationSID = "fresh-sid"
+			sameKey.DisplayName = "renamed"
+			_, err = f.repo.CreateAgentMachine(ctx, sameKey, a.Fingerprint())
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+			// The same owner registers the revoked installation again with a new key:
+			// the registration is replaced, remembering the revocation it recovered from.
+			renewed := f.machine.Clone()
+			renewed.RegistrationSID = "fresh-sid"
+			renewed.PublicKey = agentOAuthHash("renewed-machine-key")
+			renewed.CreatedAtMs = f.machine.CreatedAtMs + 10
+			got, err = f.repo.CreateAgentMachine(ctx, renewed, a.Fingerprint())
+			require.NoError(t, err)
+			require.Equal(t, renewed.PublicKey, got.PublicKey)
+			require.Zero(t, got.RevokedAtMs)
+			require.Equal(t, revoked.Revision+1, got.Revision)
+			require.Equal(t, revoked.RevokedAtMs, got.RenewedAfterRevokedAtMs)
+			stored, err := f.repo.GetAgentMachine(ctx, f.machine.ID)
+			require.NoError(t, err)
+			require.Equal(t, got, stored)
+			// A replay of the renewal is the renewal; a different key on the active
+			// registration is still refused.
+			got, err = f.repo.CreateAgentMachine(ctx, renewed, a.Fingerprint())
+			require.NoError(t, err)
+			require.Equal(t, stored, got)
+			renewed.PublicKey = agentOAuthHash("renewed-again")
+			_, err = f.repo.CreateAgentMachine(ctx, renewed, a.Fingerprint())
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+		})
+
+		t.Run("RevokedMachineRegistersAgainAndDelegatesAnew", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			before := f.ensure(ctx, t, "key-before")
+			revoked, err := f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineRevoke, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + 3})
+			require.NoError(t, err)
+			ended, err := f.repo.GetAgentMachineDelegation(ctx, f.machine.ID, f.agent)
+			require.NoError(t, err)
+			require.Equal(t, revoked.RevokedAtMs, ended.RevokedAtMs)
+			renewed := f.machine.Clone()
+			renewed.PublicKey = agentOAuthHash("renewed-machine-key")
+			renewed.CreatedAtMs = f.machine.CreatedAtMs + 10
+			a, err := f.oauth.AgentOAuthAuthority(ctx, renewed.OwnerID, "", renewed.RegistrationSID, renewed.ClientID)
+			require.NoError(t, err)
+			got, err := f.repo.CreateAgentMachine(ctx, renewed, a.Fingerprint())
+			require.NoError(t, err)
+			f.machine = got
+			// The delegation the revocation ended stays ended until it is ensured again,
+			// and then comes back in place for the renewed registration.
+			still, err := f.repo.GetAgentMachineDelegation(ctx, got.ID, f.agent)
+			require.NoError(t, err)
+			require.NotZero(t, still.RevokedAtMs)
+			// The ended delegation's own key never comes back; a new agent key renews it.
+			sameKey, fingerprint := f.candidate(ctx, t, "key-after")
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, got.ID, sameKey, got.PublicKey, fingerprint)
+			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
+			again := f.ensureWithKey(ctx, t, "key-after", agentOAuthHash("renewed-agent-key"))
+			require.Equal(t, before.ID, again.ID)
+			require.Zero(t, again.RevokedAtMs)
+			require.Equal(t, ended.Revision+1, again.Revision)
+			stored, err := f.repo.GetAgentMachineDelegation(ctx, got.ID, f.agent)
+			require.NoError(t, err)
+			require.Equal(t, again, stored)
+			// After one more revocation and renewal, neither agent key the delegation
+			// ever held returns; a third one renews it.
+			f.renew(ctx, t, 30, "third-machine-key")
+			for _, retired := range []string{before.MachinePublicKey, again.MachinePublicKey} {
+				candidate, fingerprint := f.candidate(ctx, t, "key-third")
+				candidate.MachinePublicKey = retired
+				_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
+				require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
+			}
+			third := f.ensureWithKey(ctx, t, "key-third", agentOAuthHash("third-agent-key"))
+			require.Equal(t, before.ID, third.ID)
+			require.Equal(t, []string{before.MachinePublicKey, again.MachinePublicKey}, third.RetiredMachinePublicKeys)
+		})
+
+		t.Run("ARetiredKeyNeverReturns", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			first := f.origin.Clone()
+			f.renew(ctx, t, 3, "second-key")
+			f.renew(ctx, t, 20, "third-key")
+			revoked, err := f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineRevoke, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + 40})
+			require.NoError(t, err)
+			a, err := f.oauth.AgentOAuthAuthority(ctx, first.OwnerID, "", first.RegistrationSID, first.ClientID)
+			require.NoError(t, err)
+			// An exact replay of the first registration presents a retired key: refused,
+			// as is any request with a key the installation has held; the record stands.
+			_, err = f.repo.CreateAgentMachine(ctx, first, a.Fingerprint())
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+			stale := f.origin.Clone()
+			stale.PublicKey = agentOAuthHash("second-key")
+			stale.CreatedAtMs = f.machine.CreatedAtMs + 50
+			_, err = f.repo.CreateAgentMachine(ctx, stale, a.Fingerprint())
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+			stored, err := f.repo.GetAgentMachine(ctx, f.machine.ID)
+			require.NoError(t, err)
+			require.Equal(t, revoked, stored)
+			require.Equal(t, []string{first.PublicKey, agentOAuthHash("second-key")}, stored.RetiredPublicKeys)
+		})
+
+		t.Run("AnotherOwnerNeverTakesARevokedInstallationId", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			other, err := f.base.CreateUser(ctx, &service.User{Email: "other-owner@example.test", Kind: service.UserKindPerson, Status: service.StatusActive})
+			require.NoError(t, err)
+			_, err = f.base.CreateSession(ctx, &service.SessionRecord{SID: "other-sid", UserID: other, CreatedAtMs: 100})
+			require.NoError(t, err)
+			revoked, err := f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineRevoke, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + 3})
+			require.NoError(t, err)
+			taken := f.origin.Clone()
+			taken.OwnerID, taken.RegistrationSID = other, "other-sid"
+			taken.PublicKey = agentOAuthHash("other-key")
+			taken.CreatedAtMs = f.machine.CreatedAtMs + 10
+			a, err := f.oauth.AgentOAuthAuthority(ctx, other, "", "other-sid", taken.ClientID)
+			require.NoError(t, err)
+			_, err = f.repo.CreateAgentMachine(ctx, taken, a.Fingerprint())
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+			stored, err := f.repo.GetAgentMachine(ctx, f.machine.ID)
+			require.NoError(t, err)
+			require.Equal(t, revoked, stored)
+		})
+
+		t.Run("AnExcludedDelegationStaysEndedAcrossARenewal", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			f.ensure(ctx, t, "key-before")
+			// The owner excludes the agent, which ends its delegation at the exclusion's
+			// time, then returns to default-all, which never recreates it.
+			excluded, err := f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineSelect, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + 2, ExpectedRevision: f.machine.Revision, AllAgents: true, ExcludedAgentIDs: []string{f.agent}})
+			require.NoError(t, err)
+			ended, err := f.repo.GetAgentMachineDelegation(ctx, f.machine.ID, f.agent)
+			require.NoError(t, err)
+			require.NotZero(t, ended.RevokedAtMs)
+			_, err = f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineSelect, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + 3, ExpectedRevision: excluded.Revision, AllAgents: true})
+			require.NoError(t, err)
+			// The machine is revoked and renewed with default-all: the delegation the
+			// owner ended was not ended by that revocation, so it stays ended, with its
+			// own time, whatever key the agent presents.
+			f.renew(ctx, t, 5, "renewed-machine-key")
+			candidate, fingerprint := f.candidate(ctx, t, "key-after")
+			candidate.MachinePublicKey = agentOAuthHash("fresh-agent-key")
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
+			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
+			still, err := f.repo.GetAgentMachineDelegation(ctx, f.machine.ID, f.agent)
+			require.NoError(t, err)
+			require.Equal(t, ended, still)
+		})
+
+		t.Run("ARenewedDelegationNeverTakesASiblingsKey", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			first := f.agent
+			f.ensureWithKey(ctx, t, "first-before", agentOAuthHash("first-key"))
+			second, err := f.base.CreateUser(ctx, &service.User{Kind: service.UserKindAgent, Status: service.StatusActive, OwnerUserID: f.machine.OwnerID})
+			require.NoError(t, err)
+			f.agent = second
+			f.ensureWithKey(ctx, t, "second-before", agentOAuthHash("second-key"))
+			f.renew(ctx, t, 3, "renewed-machine-key")
+			f.agent = first
+			sibling := f.ensureWithKey(ctx, t, "first-after", agentOAuthHash("first-key-2"))
+			// The second agent's renewal with the first agent's current key is refused,
+			// and the first agent's delegation is untouched.
+			f.agent = second
+			candidate, fingerprint := f.candidate(ctx, t, "second-after")
+			candidate.MachinePublicKey = sibling.MachinePublicKey
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+			kept, err := f.repo.GetAgentMachineDelegation(ctx, f.machine.ID, first)
+			require.NoError(t, err)
+			require.Equal(t, sibling, kept)
+		})
+
+		t.Run("ADelegationSkippedBetweenTwoRenewalsIsNotStranded", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			first := f.agent
+			f.ensure(ctx, t, "first-before")
+			second, err := f.base.CreateUser(ctx, &service.User{Kind: service.UserKindAgent, Status: service.StatusActive, OwnerUserID: f.machine.OwnerID})
+			require.NoError(t, err)
+			f.agent = second
+			f.ensureWithKey(ctx, t, "second-before", agentOAuthHash("second-key"))
+			f.renew(ctx, t, 3, "renewed-once")
+			// Only the first agent is ensured again before the next revocation.
+			f.agent = first
+			f.ensureWithKey(ctx, t, "first-after", agentOAuthHash("first-key-2"))
+			f.renew(ctx, t, 20, "renewed-twice")
+			f.agent = second
+			again := f.ensureWithKey(ctx, t, "second-after", agentOAuthHash("second-key-2"))
+			require.Zero(t, again.RevokedAtMs)
+			stored, err := f.repo.GetAgentMachineDelegation(ctx, f.machine.ID, second)
+			require.NoError(t, err)
+			require.Equal(t, again, stored)
+		})
+
+		t.Run("ARenewedRegistrationKeepsItsOwnSelection", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			f.ensure(ctx, t, "key-before")
+			_, err := f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineRevoke, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + 3})
+			require.NoError(t, err)
+			// The owner registers again but leaves this agent out: the renewed
+			// registration's own selection decides, and the old delegation stays ended.
+			renewed := f.machine.Clone()
+			renewed.PublicKey = agentOAuthHash("renewed-machine-key")
+			renewed.CreatedAtMs = f.machine.CreatedAtMs + 10
+			renewed.ExcludedAgentIDs = []string{f.agent}
+			a, err := f.oauth.AgentOAuthAuthority(ctx, renewed.OwnerID, "", renewed.RegistrationSID, renewed.ClientID)
+			require.NoError(t, err)
+			got, err := f.repo.CreateAgentMachine(ctx, renewed, a.Fingerprint())
+			require.NoError(t, err)
+			f.machine = got
+			candidate, fingerprint := f.candidate(ctx, t, "key-after")
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
+			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
 		})
 
 		t.Run("AgentKeysAreImmutableDistinctAndProjectScoped", func(t *testing.T) {
