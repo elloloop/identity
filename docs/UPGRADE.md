@@ -2,8 +2,10 @@
 
 ## Next — a project's own reset and verification link base: `branding.email_link_base_url` (additive; no migration; a stored value is now validated; a native sign-in's mail is now the project's)
 
-Nothing changes unless you set it. A project's `branding` block, and a
-product's `branding` block under `products`, can name the base URL of the
+The link base changes nothing unless you set it; a native sign-in's
+verification email now uses the project's existing branding (below). A
+project's `branding` block, and a product's `branding` block under
+`products`, can name the base URL of the
 pages that redeem its password-reset and email-verification links, as
 `GATEWAY_EMAIL_LINK_BASE_URL` does for the whole server. For that project's
 emails, or a request that names that product, it wins over the variable:
@@ -24,9 +26,12 @@ refuses any other value with `invalid_argument`.
 **Before the roll, check that no stored project config already holds the
 key**, in `branding` or in a product's `branding`. An earlier release ignored
 it as unknown; this one refuses to resolve a project whose value does not
-pass, so every request to that project fails with `unavailable` and logs
-`project_resolve_by_host_failed` or `project_resolve_by_key_failed`, naming
-the project and the field, until the config is fixed. On Postgres:
+pass, until the config is fixed: a request resolved to that project by Host
+or key fails with `unavailable` and logs `project_resolve_by_host_failed` or
+`project_resolve_by_key_failed`, naming the project and the field; a native
+sign-in for a product mapped to it fails with `internal`; and with
+`GATEWAY_SCIM_ENABLED`, a project named by `GATEWAY_SCIM_PROJECT_ID` stops
+the server from starting. On Postgres:
 
 ```sql
 SELECT id FROM projects
@@ -53,9 +58,12 @@ A native sign-in (`NativeOAuthLogin`) resolves its project from the product
 rather than the Host, and its scope now carries the project's `branding`
 block: the verification email it sends for an unverified address comes from
 the project's sender, with the project's name and link base, where it used to
-fall back to the server-wide defaults. `service.AdminProject` gains
-`Branding` (Go API); a `NativeOAuthProjectStore` outside this tree must fill
-it from the project's config to keep that mail branded.
+fall back to the server-wide defaults. With no link base set, its link still
+falls back to `GATEWAY_APP_BASE_URL` rather than the primary auth domain,
+which the native scope does not carry, so set the project's base.
+`service.AdminProject` gains `Branding` (Go API); a `NativeOAuthProjectStore`
+outside this tree must fill it from the project's config to keep that mail
+branded.
 
 Rolling back is running the previous release again. It ignores the key, so
 the project's new links go back to `GATEWAY_EMAIL_LINK_BASE_URL` or the

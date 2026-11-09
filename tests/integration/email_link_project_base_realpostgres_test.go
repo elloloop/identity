@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	serverLinkBase  = "https://signin.example.test"
 	projectLinkBase = "https://signin.acme.example.test"
 	projectFrom     = "no-reply@acme.example.test"
 )
@@ -24,13 +23,13 @@ const (
 // the project's own sender. Each token redeems against the same project, on its
 // own host, which is what the page at that base calls.
 func TestEmailLink_ProjectBase_OverTheWire(t *testing.T) {
-	h := startRedesignHarnessWith(t, func(cfg *config.Config) { cfg.EmailLinkBaseURL = serverLinkBase })
+	h := startRedesignHarnessWith(t, func(cfg *config.Config) { cfg.EmailLinkBaseURL = hubBase })
 	ctx := context.Background()
 	admin := h.adminClient(harnessAdminSecret)
 
 	if _, err := admin.UpsertProjectConfig(ctx, connect.NewRequest(&identitypb.UpsertProjectConfigRequest{
 		ProjectId:  h.ProjectID,
-		ConfigJson: `{"access":{"mode":"open"},"branding":{"email_link_base_url":"https://signin.acme.example.test?x=1"}}`,
+		ConfigJson: `{"access":{"mode":"open"},"branding":{"email_link_base_url":"` + projectLinkBase + `?x=1"}}`,
 	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("UpsertProjectConfig with a query on the link base: %v, want InvalidArgument", err)
 	}

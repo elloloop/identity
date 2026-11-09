@@ -40,9 +40,9 @@ type ProjectScope struct {
 	CORSAllowedOrigins origin.Allowlist
 
 	// Branding is the project's transactional-email branding, parsed from
-	// its config_json. Empty fields fall back to the global
-	// GATEWAY_EMAIL_BRAND_* defaults so a zero-config project's mail is
-	// byte-compatible with today's.
+	// its config_json. Empty fields fall back to the global defaults
+	// (resolveBranding) so a zero-config project's mail is byte-compatible
+	// with today's.
 	Branding ProjectBrandingConfig
 
 	// Passkey is the project's WebAuthn relying-party identity, parsed from
