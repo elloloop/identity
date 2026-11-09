@@ -112,8 +112,10 @@ revocation stops all children. The same owner may register the machine again
 under its installation id with an engine key it has never held, on a recent
 sign-in; the registration is replaced, and only the children that revocation ended
 may be ensured again, each under a fresh agent key and under the renewed
-registration's own selection. Any other replacement requires a newly authorized
-connection.
+registration's own selection; agents with no earlier delegation enroll as usual.
+An owner's own revocation renews the same way, and a selection the owner
+narrowed after the old registration does not carry over: present the selection
+you mean. Any other replacement requires a newly authorized connection.
 Human signout alone does not revoke this kind; ownership, status, security,
 client and policy loss still do. Resources keep introspecting on every request.
 Resources authenticate with their dedicated project/resource HTTP Basic

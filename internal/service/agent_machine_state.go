@@ -218,6 +218,13 @@ func RenewedAgentMachine(current, input *AgentMachine) (*AgentMachine, error) {
 // renews is false when existing was ended at any other time, such as by the owner
 // excluding the agent, and the caller applies its usual rules; it is true with
 // ErrAgentOAuthGrant when the key is the one just revoked or a retired one.
+//
+// The equality of the two times is load-bearing: a machine's revocation stamps
+// its still-active delegations with its own revoked_at_ms (migration 0042 and
+// its sqlite twin), and nothing else writes that value to a delegation, so it is
+// the mark of the delegations that revocation ended. The stores keep it true
+// across renewals by moving delegations left at an earlier recovered revocation
+// to the latest one (replaceRevokedAgentMachine).
 func RenewedAgentMachineDelegation(machine *AgentMachine, existing, candidate *AgentAuthorization) (renewed *AgentAuthorization, renews bool, err error) {
 	if machine == nil || existing == nil || candidate == nil || existing.RevokedAtMs == 0 ||
 		machine.RenewedAfterRevokedAtMs == 0 || existing.RevokedAtMs != machine.RenewedAfterRevokedAtMs {

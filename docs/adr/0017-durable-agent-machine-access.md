@@ -23,7 +23,10 @@ renewed registration's own agent selection; a child ended at any other time,
 such as by the owner excluding the agent, stays ended. An owner's own
 revocation is renewable the same way, since the renewal is itself the owner's
 fresh, recent sign-in. The in-memory, sqlite and postgres stores apply the one
-rule in `service.RenewedAgentMachine` and `service.RenewedAgentMachineDelegation`.
+eligibility rule in `service.RenewedAgentMachine` and
+`service.RenewedAgentMachineDelegation`; each performs the writes a renewal
+implies (the old key's challenges dropped, delegations left at an earlier
+recovered revocation moved to the latest) in its own transaction.
 
 ## Context
 
