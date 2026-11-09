@@ -118,6 +118,81 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>identity_service_shutting_down</code></td><td>Received SIGTERM/SIGINT</td></tr>
   </table>
 
+  <h3>Refusal events (<code>auth_refused</code> and <code>rpc_refused</code>)</h3>
+  <p>
+    When bearer authentication, session validation, project scope checks,
+    agent-machine or delegated OAuth checks, refresh-token rotation, tenant
+    selection, or account merging refuses a request, Identity emits a
+    structured warning log line (<code>msg: "auth_refused"</code> at the
+    middleware layer or <code>msg: "rpc_refused"</code> at the service layer)
+    and attaches the same <code>reason</code> code to the request's final
+    <code>msg: "request"</code> access log line. Raw access tokens, refresh
+    tokens, cookies, authorization codes, challenge signatures, and passwords
+    are never logged; when a bearer JWT fails verification,
+    <code>pkg/jwt.PeekClaims</code> base64url-decodes only the payload segment
+    to extract non-secret claim identifiers for operator diagnosis.
+  </p>
+
+  <h4>Structured refusal fields</h4>
+  <table>
+    <tr><th>Field</th><th>Meaning</th></tr>
+    <tr><td><code>msg</code></td><td><code>auth_refused</code> (middleware) or <code>rpc_refused</code> (service)</td></tr>
+    <tr><td><code>reason</code></td><td>Stable machine-readable refusal reason code (tables below)</td></tr>
+    <tr><td><code>host</code></td><td>Normalized request <code>Host</code> header (for example <code>auth.example.com</code>)</td></tr>
+    <tr><td><code>request_project_id</code></td><td>Project resolved for the inbound request (from <code>Host</code>, <code>X-Project-Key</code>, or the default project)</td></tr>
+    <tr><td><code>project_id</code></td><td>Project claim (<code>pid</code>) on the token or session</td></tr>
+    <tr><td><code>tenant_id</code></td><td>Tenant claim (<code>tid</code>) on the token or requested tenant selection</td></tr>
+    <tr><td><code>user_id</code></td><td>Subject (<code>sub</code>) or caller account ID when known</td></tr>
+    <tr><td><code>session_id</code></td><td>Session ID (<code>sid</code>) when present on the token or refresh record</td></tr>
+    <tr><td><code>issuer</code></td><td>Token issuer (<code>iss</code>) when present on a rejected bearer token</td></tr>
+    <tr><td><code>auth_time_age_s</code></td><td>Age in seconds since the session's recorded sign-in (<code>auth_time</code>)</td></tr>
+    <tr><td><code>max_age_s</code></td><td>Configured step-up re-authentication window in seconds (on <code>sign_in_not_recent</code>)</td></tr>
+    <tr><td><code>expiry_age_s</code></td><td>Seconds elapsed since token or refresh record expiration</td></tr>
+    <tr><td><code>path</code></td><td>HTTP/Connect request path (middleware refusals and request access log)</td></tr>
+    <tr><td><code>remote_addr</code></td><td>Client address (middleware refusals and request access log)</td></tr>
+    <tr><td><code>trace_id</code></td><td>W3C trace ID from the request context when present</td></tr>
+  </table>
+
+  <h4>Bearer middleware reason codes (<code>auth_refused</code>)</h4>
+  <table>
+    <tr><th><code>reason</code></th><th>When emitted</th></tr>
+    <tr><td><code>missing_bearer</code></td><td>Protected endpoint called without a <code>Bearer</code> token in <code>Authorization</code></td></tr>
+    <tr><td><code>token_malformed</code></td><td>Bearer token is not a three-segment JWT or its header/payload cannot be decoded</td></tr>
+    <tr><td><code>token_signature</code></td><td>JWT signing algorithm, key ID (<code>kid</code>), or cryptographic signature is invalid</td></tr>
+    <tr><td><code>token_expired</code></td><td>JWT <code>exp</code> is in the past or <code>nbf</code> is in the future</td></tr>
+    <tr><td><code>token_issuer</code></td><td>JWT <code>iss</code> does not match the configured issuer</td></tr>
+    <tr><td><code>token_audience</code></td><td>JWT <code>aud</code> does not contain the configured audience</td></tr>
+    <tr><td><code>token_purpose_rejected</code></td><td>Non-access token (for example a pre-auth MFA token with <code>purpose != ""</code>) presented as a bearer access token</td></tr>
+    <tr><td><code>token_tenant_rejected</code></td><td>JWT <code>tid</code> is empty or is not an active selectable tenant in the token's project</td></tr>
+    <tr><td><code>token_tenant_lookup</code></td><td>Selectable tenant status lookup failed (returns <code>503</code>)</td></tr>
+    <tr><td><code>session_lookup_failed</code></td><td>Revocation store read failed in <code>mode=session</code> (returns <code>503</code>)</td></tr>
+    <tr><td><code>session_revoked</code></td><td>JWT <code>sid</code> is missing, unknown, revoked, or belongs to another user in <code>mode=session</code></td></tr>
+    <tr><td><code>token_project_mismatch</code></td><td>JWT <code>pid</code> does not match the request's resolved project (<code>request_project_id</code>)</td></tr>
+  </table>
+
+  <h4>Service refusal reason codes (<code>rpc_refused</code>)</h4>
+  <table>
+    <tr><th><code>reason</code></th><th>When emitted</th></tr>
+    <tr><td><code>unauthenticated</code></td><td>Caller identity or session ID is missing, or the caller account no longer exists</td></tr>
+    <tr><td><code>session_lookup_failed</code></td><td>Session lookup failed while verifying human session authority</td></tr>
+    <tr><td><code>session_revoked</code></td><td>Caller's session is missing or revoked when managing delegated OAuth or agent machines</td></tr>
+    <tr><td><code>session_project_mismatch</code></td><td>Caller's session was minted in a different project than <code>request_project_id</code></td></tr>
+    <tr><td><code>sign_in_not_recent</code></td><td>Caller's sign-in (<code>auth_time</code>) is older than the required step-up window (<code>max_age_s</code>)</td></tr>
+    <tr><td><code>machine_not_found</code></td><td>Agent machine ID is malformed or does not exist in the project</td></tr>
+    <tr><td><code>machine_revoked</code></td><td>Agent machine or delegated grant is revoked, unconfigured for the resource, or its owner is no longer admitted</td></tr>
+    <tr><td><code>challenge_expired</code></td><td>Agent machine challenge ID is malformed, missing, expired, or already consumed</td></tr>
+    <tr><td><code>signature_invalid</code></td><td>Agent machine proof signature or challenge binding fails Ed25519 verification</td></tr>
+    <tr><td><code>key_invalid</code></td><td>Agent machine or enrolled agent Ed25519 public key is malformed or duplicates the machine key</td></tr>
+    <tr><td><code>refresh_token_invalid</code></td><td>Refresh token is empty or does not match any stored record</td></tr>
+    <tr><td><code>refresh_token_expired</code></td><td>Refresh token has passed its <code>ExpiresAt</code> timestamp</td></tr>
+    <tr><td><code>refresh_session_revoked</code></td><td>Refresh token was already consumed (replay), breached session idle/absolute timeout, or belongs to a locked/inactive account</td></tr>
+    <tr><td><code>not_a_member</code></td><td>Caller is not an active member of the tenant named on <code>RefreshToken</code></td></tr>
+    <tr><td><code>tenant_suspended</code></td><td>Tenant named on <code>RefreshToken</code> is suspended</td></tr>
+    <tr><td><code>tenant_selection_disabled</code></td><td><code>RefreshToken</code> named a tenant while tenant selection is disabled on the server</td></tr>
+    <tr><td><code>merge_same_user</code></td><td><code>MergeAccounts</code> attempted to merge an account into itself</td></tr>
+    <tr><td><code>merge_target_invalid</code></td><td><code>MergeAccounts</code> survivor or target account failed credential or merge-eligibility checks</td></tr>
+  </table>
+
   <h2>Health endpoints</h2>
   <Code code={`# Liveness — always returns 200 if the process is up.
 curl -sf http://localhost/health
