@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — a revoked machine registers again under its installation id (behaviour change; no migration; `AgentMachine.RenewedAfterRevokedAtMs` (Go API))
+## Next — a revoked machine registers again under its installation id (behaviour change; no migration; `AgentMachine.RenewedAfterRevokedAtMs`, `AgentMachine.RetiredPublicKeys`, `AgentAuthorization.RetiredMachinePublicKeys` (Go API))
 
 A machine registration that governance revoked — a change of the project's
 configuration or status, of a tenant's status or domains, of the owner's
@@ -14,23 +14,33 @@ Now the same owner registers the installation again with a new key, on a sign-in
 recent enough for `RegisterAgentMachine` as before: the registration is
 replaced in place (next revision, no revocation, the challenges issued to the
 old key dropped), and the record remembers the revocation it recovered from
-(`RenewedAfterRevokedAtMs`). Nothing else changes hands: another owner, a
-registration that is still active, or the revoked key itself (whatever else the
-request changes) is refused with `already_exists` as before, and an exact replay
-of a revoked registration still returns the revoked record.
+(`RenewedAfterRevokedAtMs`) and every engine key it has retired
+(`RetiredPublicKeys`). Nothing else changes hands: another owner, a registration
+that is still active, or any key the installation has ever held (whatever else
+the request changes, and however many renewals ago the key was retired) is refused
+with `already_exists`; so is an exact replay of an earlier registration, since it
+presents a retired key. An exact replay of the current revoked registration
+still returns the revoked record. An owner's own `RevokeAgentMachine` is
+renewable the same way, since the renewal is the owner's fresh, recent sign-in.
+The renewed registration's agent selection is the one the request presents; a
+selection the owner narrowed after the old registration does not carry over, so
+present the selection you mean.
 
 The delegations that same revocation ended come back only when each is ensured
 again for the renewed registration (`EnsureAgentMachineDelegation`): a
 delegation whose `revoked_at_ms` equals the revocation the machine recovered
-from is renewed in place (same id, next revision) under a new agent key; its
-revoked key is refused. One ended at any other time, such as by the owner
-excluding the agent, stays ended, and the renewed registration's own agent
-selection decides who may connect at all. A delegation not ensured again before
-the machine is revoked and renewed once more follows to the latest revocation,
-so it is never stranded behind an earlier renewal.
+from is renewed in place (same id, next revision) under an agent key it has
+never held; the key it held, and every key it retired before
+(`RetiredMachinePublicKeys`), is refused with `permission_denied`, so each agent
+generates a fresh key after its machine registers again. One ended at any other
+time, such as by the owner excluding the agent, stays ended, and the renewed
+registration's own agent selection decides who may connect at all. A delegation
+not ensured again before the machine is revoked and renewed once more follows to
+the latest revocation, so it is never stranded behind an earlier renewal.
 
-Outside verifiers see `agent_machine_registered` audited for the renewal as for
-a first registration. Rolling back is running the previous release again: a
+Outside verifiers see `agent_machine_registered` audited for the renewal with
+`renewed_after_revoked_at_ms` and `revision` in its details, which a first
+registration lacks. Rolling back is running the previous release again: a
 renewed registration keeps working (the row is an ordinary active machine); a
 machine revoked after the rollback waits for this release to come back.
 

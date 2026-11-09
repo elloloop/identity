@@ -202,6 +202,63 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			stored, err := f.repo.GetAgentMachineDelegation(ctx, got.ID, f.agent)
 			require.NoError(t, err)
 			require.Equal(t, again, stored)
+			// After one more revocation and renewal, neither agent key the delegation
+			// ever held returns; a third one renews it.
+			f.renew(ctx, t, 30, "third-machine-key")
+			for _, retired := range []string{before.MachinePublicKey, again.MachinePublicKey} {
+				candidate, fingerprint := f.candidate(ctx, t, "key-third")
+				candidate.MachinePublicKey = retired
+				_, err = f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
+				require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
+			}
+			third := f.ensureWithKey(ctx, t, "key-third", agentOAuthHash("third-agent-key"))
+			require.Equal(t, before.ID, third.ID)
+			require.Equal(t, []string{before.MachinePublicKey, again.MachinePublicKey}, third.RetiredMachinePublicKeys)
+		})
+
+		t.Run("ARetiredKeyNeverReturns", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			first := f.origin.Clone()
+			f.renew(ctx, t, 3, "second-key")
+			f.renew(ctx, t, 20, "third-key")
+			revoked, err := f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineRevoke, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + 40})
+			require.NoError(t, err)
+			a, err := f.oauth.AgentOAuthAuthority(ctx, first.OwnerID, "", first.RegistrationSID, first.ClientID)
+			require.NoError(t, err)
+			// An exact replay of the first registration presents a retired key: refused,
+			// as is any request with a key the installation has held; the record stands.
+			_, err = f.repo.CreateAgentMachine(ctx, first, a.Fingerprint())
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+			stale := f.origin.Clone()
+			stale.PublicKey = agentOAuthHash("second-key")
+			stale.CreatedAtMs = f.machine.CreatedAtMs + 50
+			_, err = f.repo.CreateAgentMachine(ctx, stale, a.Fingerprint())
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+			stored, err := f.repo.GetAgentMachine(ctx, f.machine.ID)
+			require.NoError(t, err)
+			require.Equal(t, revoked, stored)
+			require.Equal(t, []string{first.PublicKey, agentOAuthHash("second-key")}, stored.RetiredPublicKeys)
+		})
+
+		t.Run("AnotherOwnerNeverTakesARevokedInstallationId", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			other, err := f.base.CreateUser(ctx, &service.User{Email: "other-owner@example.test", Kind: service.UserKindPerson, Status: service.StatusActive})
+			require.NoError(t, err)
+			_, err = f.base.CreateSession(ctx, &service.SessionRecord{SID: "other-sid", UserID: other, CreatedAtMs: 100})
+			require.NoError(t, err)
+			revoked, err := f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineRevoke, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + 3})
+			require.NoError(t, err)
+			taken := f.origin.Clone()
+			taken.OwnerID, taken.RegistrationSID = other, "other-sid"
+			taken.PublicKey = agentOAuthHash("other-key")
+			taken.CreatedAtMs = f.machine.CreatedAtMs + 10
+			a, err := f.oauth.AgentOAuthAuthority(ctx, other, "", "other-sid", taken.ClientID)
+			require.NoError(t, err)
+			_, err = f.repo.CreateAgentMachine(ctx, taken, a.Fingerprint())
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
+			stored, err := f.repo.GetAgentMachine(ctx, f.machine.ID)
+			require.NoError(t, err)
+			require.Equal(t, revoked, stored)
 		})
 
 		t.Run("ADelegationSkippedBetweenTwoRenewalsIsNotStranded", func(t *testing.T) {

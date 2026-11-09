@@ -38,6 +38,9 @@ type AgentMachine struct {
 	// A delegation the same revocation ended may be ensured again for it; one
 	// the owner ended by excluding the agent may not.
 	RenewedAfterRevokedAtMs int64
+	// RetiredPublicKeys are the engine keys every earlier registration of this
+	// installation id held, oldest first. None of them registers again.
+	RetiredPublicKeys []string
 }
 
 func (m *AgentMachine) Clone() *AgentMachine {
@@ -48,6 +51,7 @@ func (m *AgentMachine) Clone() *AgentMachine {
 	copy.Scopes = slices.Clone(m.Scopes)
 	copy.AgentIDs = slices.Clone(m.AgentIDs)
 	copy.ExcludedAgentIDs = slices.Clone(m.ExcludedAgentIDs)
+	copy.RetiredPublicKeys = slices.Clone(m.RetiredPublicKeys)
 	return &copy
 }
 
@@ -186,5 +190,45 @@ func SameAgentMachineRegistration(a, b *AgentMachine) bool {
 	left.CreatedAtMs, right.CreatedAtMs = 0, 0
 	left.RegistrationSID, right.RegistrationSID = "", ""
 	left.RenewedAfterRevokedAtMs, right.RenewedAfterRevokedAtMs = 0, 0
+	left.RetiredPublicKeys, right.RetiredPublicKeys = nil, nil
 	return reflect.DeepEqual(left, right)
+}
+
+// RenewedAgentMachine is the registration that replaces current, a revoked
+// registration of an installation id, when input is the same owner's new
+// registration with an engine key the installation has never held. It is the one
+// rule every store applies in CreateAgentMachine after an exact replay of the
+// current registration has been recognised. ErrAlreadyExists otherwise: current is
+// still active, input is another owner's, or its key is the current or a retired
+// one, which is what an exact replay of an earlier registration presents.
+func RenewedAgentMachine(current, input *AgentMachine) (*AgentMachine, error) {
+	if current == nil || input == nil || current.RevokedAtMs == 0 || current.OwnerID != input.OwnerID ||
+		current.PublicKey == input.PublicKey || slices.Contains(current.RetiredPublicKeys, input.PublicKey) {
+		return nil, ErrAlreadyExists
+	}
+	renewed := input.Clone()
+	renewed.Revision, renewed.RevokedAtMs, renewed.RenewedAfterRevokedAtMs = current.Revision+1, 0, current.RevokedAtMs
+	renewed.RetiredPublicKeys = append(slices.Clone(current.RetiredPublicKeys), current.PublicKey)
+	return renewed, nil
+}
+
+// RenewedAgentMachineDelegation is the delegation that replaces existing, in
+// place, when the revocation machine registered again after is the one that ended
+// existing and candidate presents an agent key the delegation has never held.
+// renews is false when existing was ended at any other time, such as by the owner
+// excluding the agent, and the caller applies its usual rules; it is true with
+// ErrAgentOAuthGrant when the key is the one just revoked or a retired one.
+func RenewedAgentMachineDelegation(machine *AgentMachine, existing, candidate *AgentAuthorization) (renewed *AgentAuthorization, renews bool, err error) {
+	if machine == nil || existing == nil || candidate == nil || existing.RevokedAtMs == 0 ||
+		machine.RenewedAfterRevokedAtMs == 0 || existing.RevokedAtMs != machine.RenewedAfterRevokedAtMs {
+		return nil, false, nil
+	}
+	if candidate.MachinePublicKey == existing.MachinePublicKey ||
+		slices.Contains(existing.RetiredMachinePublicKeys, candidate.MachinePublicKey) {
+		return nil, true, ErrAgentOAuthGrant
+	}
+	renewed = candidate.Clone()
+	renewed.ID, renewed.Revision, renewed.RevokedAtMs, renewed.ExpiresAtMs = existing.ID, existing.Revision+1, 0, 0
+	renewed.RetiredMachinePublicKeys = append(slices.Clone(existing.RetiredMachinePublicKeys), existing.MachinePublicKey)
+	return renewed, true, nil
 }

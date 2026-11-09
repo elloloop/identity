@@ -5,6 +5,26 @@
 Accepted; disabled by default. This is an issuer capability, not a claim that
 any particular application's engine, machine policy or permissions are enabled.
 
+**Amended** (2026-11-09): a revoked registration no longer stays revoked for its
+owner. Revocation also follows governance (a project, tenant, domain, client or
+owner change, see migrations 0041, 0042 and 0046), and every registered
+installation of a project went dark on a routine configuration change with no
+way back but a new installation. Now the same owner, on a recent sign-in,
+registers the installation again under its id with an engine key it has never
+held: the registration is replaced in place (next revision, no revocation), the
+record remembers the revocation it recovered from and every key it has retired,
+and the challenges issued to the old key are dropped. Another owner, a
+registration still active, or any key the installation has held — which is what
+an exact replay of an earlier registration presents — still conflicts; an exact
+replay of the current revoked registration still returns the revoked record. The
+children that revocation ended come back one by one, in place, as each is
+ensured again under an agent key the delegation has never held and under the
+renewed registration's own agent selection; a child ended at any other time,
+such as by the owner excluding the agent, stays ended. An owner's own
+revocation is renewable the same way, since the renewal is itself the owner's
+fresh, recent sign-in. The in-memory, sqlite and postgres stores apply the one
+rule in `service.RenewedAgentMachine` and `service.RenewedAgentMachineDelegation`.
+
 ## Context
 
 A supervised native agent must continue after its owner's browser session ends.
@@ -33,23 +53,16 @@ The signed-in owner registers only its public key, encoded as 64 lowercase hex
 characters. Identity never receives a private key. Identical registration retries
 recover the original/current record; changed input with the same ID conflicts.
 Source SID and time are audit provenance and may change between authenticated
-retries. A revoked registration stays revoked for everyone but its owner: the
-same owner, on a recent sign-in, registers the installation again with a new
-key and the registration is replaced in place, remembering the revocation it
-recovered from; another owner, or a registration still active, conflicts. A
-lost response never justifies silently registering a new machine ID or
-replacing its key.
+retries. Revoked registrations stay revoked. A lost response never justifies
+silently registering a new machine ID or replacing its key.
 
 The engine key authenticates orchestration only: paginated discovery of selected
 active owned agents, public-key enrollment for those agents, and resource-bound
 machine introspection. Each agent on each machine has a separate locally generated
 Ed25519 pair. `RegisterAgentMachineAgentKey` creates one durable delegation binding
 the agent's public key; exact repeats recover that delegation, changed keys
-conflict, and a revoked child is never replaced automatically: only the
-delegations the machine's own revocation ended come back, one by one, when
-each is ensured again for the renewed registration, under that registration's
-agent selection. Keys cannot be shared between agents on a machine or with its
-engine key.
+conflict, and a revoked child is never replaced automatically. Keys cannot be
+shared between agents on a machine or with its engine key.
 
 `CreateAgentMachineChallenge` returns the exact UTF-8 message to sign. It includes
 a versioned domain, configured issuer, project, machine, agent, operation, request

@@ -71,7 +71,13 @@ func (s *AgentOAuthService) RegisterMachine(ctx context.Context, human AgentOAut
 	}
 	saved, err := repo.CreateAgentMachine(ctx, machine, authority.Fingerprint())
 	if err == nil {
-		s.auth.audit.Log(ctx, audit.EventAgentMachineRegistered, audit.WithActor(human.UserID), audit.WithTarget(saved.ID), audit.WithSuccess(true))
+		options := []audit.Option{audit.WithActor(human.UserID), audit.WithTarget(saved.ID), audit.WithSuccess(true)}
+		if saved.RenewedAfterRevokedAtMs != 0 {
+			options = append(options, audit.WithDetails(map[string]any{
+				"renewed_after_revoked_at_ms": saved.RenewedAfterRevokedAtMs, "revision": saved.Revision,
+			}))
+		}
+		s.auth.audit.Log(ctx, audit.EventAgentMachineRegistered, options...)
 	}
 	return saved, err
 }
