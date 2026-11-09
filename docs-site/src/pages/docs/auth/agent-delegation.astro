@@ -107,7 +107,11 @@ the owner's human session ends. Existing agent keys cannot be silently replaced.
 <code>SelectAgentMachineAgents</code> and <code>RevokeAgentMachine</code>.
 Selection changes require recent human sign-in and an expected revision.
 Excluded or revoked child grants never reconnect through default-all. Machine
-revocation stops all children. Replacement requires a newly authorized connection.
+revocation stops all children. The same owner may register the machine again
+under its installation id with a new key, on a recent sign-in; the registration is
+replaced, and only the children that revocation ended may be ensured again, under
+the renewed registration's own selection. Any other replacement requires a newly
+authorized connection.
 Human signout alone does not revoke this kind; ownership, status, security,
 client and policy loss still do. Resources keep introspecting on every request.
 Resources authenticate with their dedicated project/resource HTTP Basic

@@ -33,16 +33,23 @@ The signed-in owner registers only its public key, encoded as 64 lowercase hex
 characters. Identity never receives a private key. Identical registration retries
 recover the original/current record; changed input with the same ID conflicts.
 Source SID and time are audit provenance and may change between authenticated
-retries. Revoked registrations stay revoked. A lost response never justifies
-silently registering a new machine ID or replacing its key.
+retries. A revoked registration stays revoked for everyone but its owner: the
+same owner, on a recent sign-in, registers the installation again with a new
+key and the registration is replaced in place, remembering the revocation it
+recovered from; another owner, or a registration still active, conflicts. A
+lost response never justifies silently registering a new machine ID or
+replacing its key.
 
 The engine key authenticates orchestration only: paginated discovery of selected
 active owned agents, public-key enrollment for those agents, and resource-bound
 machine introspection. Each agent on each machine has a separate locally generated
 Ed25519 pair. `RegisterAgentMachineAgentKey` creates one durable delegation binding
 the agent's public key; exact repeats recover that delegation, changed keys
-conflict, and a revoked child is never replaced automatically. Keys cannot be
-shared between agents on a machine or with its engine key.
+conflict, and a revoked child is never replaced automatically: only the
+delegations the machine's own revocation ended come back, one by one, when
+each is ensured again for the renewed registration, under that registration's
+agent selection. Keys cannot be shared between agents on a machine or with its
+engine key.
 
 `CreateAgentMachineChallenge` returns the exact UTF-8 message to sign. It includes
 a versioned domain, configured issuer, project, machine, agent, operation, request

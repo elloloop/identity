@@ -33,6 +33,11 @@ type AgentMachine struct {
 	CreatedAtMs      int64
 	Revision         int64
 	RevokedAtMs      int64
+	// RenewedAfterRevokedAtMs is the RevokedAtMs of the registration this one
+	// replaced under the same installation id, or zero for a first registration.
+	// A delegation the same revocation ended may be ensured again for it; one
+	// the owner ended by excluding the agent may not.
+	RenewedAfterRevokedAtMs int64
 }
 
 func (m *AgentMachine) Clone() *AgentMachine {
@@ -180,5 +185,6 @@ func SameAgentMachineRegistration(a, b *AgentMachine) bool {
 	left.ExcludedAgentIDs, right.ExcludedAgentIDs = nil, nil
 	left.CreatedAtMs, right.CreatedAtMs = 0, 0
 	left.RegistrationSID, right.RegistrationSID = "", ""
+	left.RenewedAfterRevokedAtMs, right.RenewedAfterRevokedAtMs = 0, 0
 	return reflect.DeepEqual(left, right)
 }

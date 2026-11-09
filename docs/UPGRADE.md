@@ -1,5 +1,35 @@
 # Upgrade guide
 
+## Next — a revoked machine registers again under its installation id (behaviour change; no migration; `AgentMachine.RenewedAfterRevokedAtMs` (Go API))
+
+A machine registration that governance revoked — a change of the project's
+configuration or status, of a tenant's status or domains, of the owner's
+account, of the OAuth client, or a guardian edge removed — could not come
+back: `RegisterAgentMachine` for the same installation id answered
+`already_exists` unless the request repeated the revoked registration exactly,
+and that replay returned the revoked record. Every installation a routine
+configuration change touched had to be set up again as a new machine.
+
+Now the same owner registers the installation again with a new key, on a sign-in
+recent enough for `RegisterAgentMachine` as before: the registration is
+replaced in place (next revision, no revocation, the challenges issued to the
+old key dropped), and the record remembers the revocation it recovered from
+(`RenewedAfterRevokedAtMs`). Nothing else changes hands: another owner, or a
+registration that is still active, is refused with `already_exists` as before,
+and an exact replay of a revoked registration still returns the revoked record.
+
+The delegations that same revocation ended come back only when each is ensured
+again for the renewed registration (`EnsureAgentMachineDelegation`): a
+delegation whose `revoked_at_ms` equals the revocation the machine recovered
+from is renewed in place (same id, next revision); one ended at any other time,
+such as by the owner excluding the agent, stays ended, and the renewed
+registration's own agent selection decides who may connect at all.
+
+Outside verifiers see `agent_machine_registered` audited for the renewal as for
+a first registration. Rolling back is running the previous release again: a
+renewed registration keeps working (the row is an ordinary active machine); a
+machine revoked after the rollback waits for this release to come back.
+
 ## Next — a project's own reset and verification link base: `branding.email_link_base_url` (additive; no migration; a stored value is now validated; a native sign-in's mail is now the project's)
 
 The link base changes nothing unless you set it; a native sign-in's
