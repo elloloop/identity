@@ -692,6 +692,28 @@ func TestNativeOAuthLogin_ProductFallsBackToProjectID(t *testing.T) {
 	assert.Equal(t, "fb@example.com", res.User.Email)
 }
 
+// TestResolveNativeProject_CarriesProjectBranding: native sign-in resolves its
+// project from the product rather than the Host, and the scope it builds holds
+// the project's email branding, so a verification email it sends comes from
+// the project's sender and links to the project's link base.
+func TestResolveNativeProject_CarriesProjectBranding(t *testing.T) {
+	branding := ProjectBrandingConfig{EmailFrom: "no-reply@acme.example", EmailLinkBaseURL: "https://signin.acme.example"}
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+		"proj-branded": {ID: "proj-branded", StorageScopeID: "scope-branded", Branding: branding},
+	}}
+	svc := newNativeTestAuthService(t, newFakeRepo(), newNativeTokenSigner(t), projects, func(cfg *config.Config) {
+		cfg.EmailLinkBaseURL = "https://signin.example"
+	})
+
+	scope, err := svc.resolveNativeProject(context.Background(), "proj-branded")
+	require.NoError(t, err)
+	assert.Equal(t, branding, scope.Branding)
+
+	brand := resolveBranding(WithProjectScope(context.Background(), scope), svc.cfg, "")
+	assert.Equal(t, "no-reply@acme.example", brand.from)
+	assert.Equal(t, "https://signin.acme.example", brand.linkBaseURL)
+}
+
 func TestNativeOAuthLogin_TotpRequired_ReturnsSecondFactorChallenge(t *testing.T) {
 	repo := newFakeRepo()
 	// Pre-existing TOTP-enrolled user with the provider email.

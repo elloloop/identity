@@ -13,9 +13,10 @@ import (
 // The pages that redeem an emailed token, and the query parameters of the link
 // to them. Together they are the contract with whatever serves those pages: the
 // app at the app base URL (under appAuthPathPrefix); for a password reset or an
-// email verification, the sign-in hub at GATEWAY_EMAIL_LINK_BASE_URL when set;
-// for a tenant invitation, the page at GATEWAY_TENANT_INVITATION_PAGE_URL when
-// set.
+// email verification, the sign-in hub at the email's link base when one is set
+// (resolveBranding: the product's or the project's branding.email_link_base_url,
+// else GATEWAY_EMAIL_LINK_BASE_URL); for a tenant invitation, the page at
+// GATEWAY_TENANT_INVITATION_PAGE_URL when set.
 const (
 	emailLinkPageResetPassword = "reset-password"
 	emailLinkPageVerifyEmail   = "verify-email"
@@ -81,18 +82,18 @@ func (s *AuthService) checkEmailLinkParams(p EmailLinkParams) (emailLink, error)
 	return emailLink{product: product, returnTo: returnTo}, nil
 }
 
-// emailLinkURL is the link to page that an email for the request in ctx
-// carries: token plus the checked link parameters.
-func (s *AuthService) emailLinkURL(ctx context.Context, page, token string, link emailLink) string {
-	return buildEmailLink(s.emailLinkPageURL(ctx, page), token, link)
+// emailLinkURL is the link an email carries to page, on brand's link base or
+// else the request's app base, with token and the checked link parameters.
+func (s *AuthService) emailLinkURL(ctx context.Context, brand resolvedBranding, page, token string, link emailLink) string {
+	return buildEmailLink(s.emailLinkPageURL(ctx, brand, page), token, link)
 }
 
-// emailLinkPageURL locates page. GATEWAY_EMAIL_LINK_BASE_URL, when set, wins
-// over everything — including a project's primary auth domain, because the
-// deployment serves these pages from that one place; otherwise the page is
-// under /auth/ on the request's app base URL.
-func (s *AuthService) emailLinkPageURL(ctx context.Context, page string) string {
-	if base := strings.TrimRight(s.cfg.EmailLinkBaseURL, "/"); base != "" {
+// emailLinkPageURL locates page. The email's link base, when one resolved,
+// wins over a project's primary auth domain, because whoever set it serves
+// these pages there; otherwise the page is under /auth/ on the request's app
+// base URL.
+func (s *AuthService) emailLinkPageURL(ctx context.Context, brand resolvedBranding, page string) string {
+	if base := strings.TrimRight(brand.linkBaseURL, "/"); base != "" {
 		return base + "/" + page
 	}
 	return appBaseURL(ctx, s.cfg) + appAuthPathPrefix + page

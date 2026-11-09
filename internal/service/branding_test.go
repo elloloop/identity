@@ -135,6 +135,36 @@ func TestResolveBranding_ProductWithoutBrandingIsProjectBranding(t *testing.T) {
 	}
 }
 
+// TestResolveBranding_LinkBase: the link base resolves like every other
+// field, product over project over GATEWAY_EMAIL_LINK_BASE_URL, and stays
+// empty when none is set so the link keeps the app base.
+func TestResolveBranding_LinkBase(t *testing.T) {
+	t.Parallel()
+
+	scope := func(project, kids string) context.Context {
+		return WithProjectScope(context.Background(), &ProjectScope{
+			ProjectID: "p",
+			Branding:  ProjectBrandingConfig{EmailLinkBaseURL: project},
+			Products:  ProjectProductsConfig{"kids": {Branding: ProjectBrandingConfig{EmailLinkBaseURL: kids}}},
+		})
+	}
+	for _, tc := range []struct {
+		name, global, project, kids, product, want string
+	}{
+		{"none", "", "", "", "kids", ""},
+		{"global", "https://signin.example", "", "", "kids", "https://signin.example"},
+		{"project over global", "https://signin.example", "https://signin.acme.example", "", "kids", "https://signin.acme.example"},
+		{"product over project", "https://signin.example", "https://signin.acme.example", "https://signin.kids.acme.example", "kids", "https://signin.kids.acme.example"},
+		{"unnamed product gets the project's", "https://signin.example", "https://signin.acme.example", "https://signin.kids.acme.example", "", "https://signin.acme.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &config.Config{EmailLinkBaseURL: tc.global}
+			assert.Equal(t, tc.want, resolveBranding(scope(tc.project, tc.kids), cfg, tc.product).linkBaseURL)
+		})
+	}
+}
+
 func TestBranding_ApplyTo_SetsHeadersOnlyWhenConfigured(t *testing.T) {
 	t.Parallel()
 

@@ -70,14 +70,19 @@ func TestBuildEmailLink(t *testing.T) {
 	}
 }
 
-// TestEmailLinkPageURL covers where a link points: GATEWAY_EMAIL_LINK_BASE_URL
-// (trailing slash trimmed, path prefix kept) ahead of everything, including a
-// project's primary auth domain; otherwise /auth/ on the request's app base.
+// TestEmailLinkPageURL covers where a link points: the project's
+// branding.email_link_base_url, then GATEWAY_EMAIL_LINK_BASE_URL (trailing
+// slash trimmed, path prefix kept), either ahead of a project's primary auth
+// domain; otherwise /auth/ on the request's app base.
 func TestEmailLinkPageURL(t *testing.T) {
 	t.Parallel()
 
-	branded := WithProjectScope(context.Background(),
-		&ProjectScope{ProjectID: "p", PrimaryAuthDomain: "auth.acme.example"})
+	project := func(linkBase string) context.Context {
+		return WithProjectScope(context.Background(), &ProjectScope{
+			ProjectID: "p", PrimaryAuthDomain: "auth.acme.example",
+			Branding: ProjectBrandingConfig{EmailLinkBaseURL: linkBase},
+		})
+	}
 	cases := []struct {
 		name string
 		base string
@@ -85,18 +90,22 @@ func TestEmailLinkPageURL(t *testing.T) {
 		want string
 	}{
 		{"no base, no project", "", context.Background(), "https://app.example/auth/verify-email"},
-		{"no base, branded project", "", branded, "https://auth.acme.example/auth/verify-email"},
+		{"no base, branded project", "", project(""), "https://auth.acme.example/auth/verify-email"},
 		{"base", "https://signin.example", context.Background(), "https://signin.example/verify-email"},
 		{"base with trailing slash", "https://signin.example/", context.Background(), "https://signin.example/verify-email"},
 		{"base with path prefix", "https://acme.example/account", context.Background(), "https://acme.example/account/verify-email"},
-		{"base beats branded project", "https://signin.example", branded, "https://signin.example/verify-email"},
+		{"base beats branded project", "https://signin.example", project(""), "https://signin.example/verify-email"},
 		{"loopback base", "http://localhost:3000", context.Background(), "http://localhost:3000/verify-email"},
+		{"project base beats branded project", "", project("https://signin.acme.example"), "https://signin.acme.example/verify-email"},
+		{"project base beats base", "https://signin.example", project("https://signin.acme.example/"), "https://signin.acme.example/verify-email"},
+		{"project base with path prefix", "", project("https://acme.example/account"), "https://acme.example/account/verify-email"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			s := &AuthService{cfg: &config.Config{AppBaseURL: "https://app.example", EmailLinkBaseURL: tc.base}}
-			if got := s.emailLinkPageURL(tc.ctx, emailLinkPageVerifyEmail); got != tc.want {
+			cfg := &config.Config{AppBaseURL: "https://app.example", EmailLinkBaseURL: tc.base}
+			s := &AuthService{cfg: cfg}
+			if got := s.emailLinkPageURL(tc.ctx, resolveBranding(tc.ctx, cfg, ""), emailLinkPageVerifyEmail); got != tc.want {
 				t.Fatalf("emailLinkPageURL = %q, want %q", got, tc.want)
 			}
 		})

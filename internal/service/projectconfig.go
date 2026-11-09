@@ -27,10 +27,11 @@ type ProjectConfig struct {
 	CORS ProjectCORSConfig `json:"cors"`
 
 	// Branding holds the project's transactional-email branding. Every field
-	// is optional; an unset field falls back to the global
-	// GATEWAY_EMAIL_BRAND_* default (and, when that too is unset, to today's
-	// byte-compatible output). This lets one server brand two products
-	// (e.g. a kids app and a B2B app) distinctly.
+	// is optional; an unset field falls back to the global default
+	// (GATEWAY_EMAIL_BRAND_*, and GATEWAY_EMAIL_LINK_BASE_URL for the link
+	// base) and, when that too is unset, to today's byte-compatible output.
+	// This lets one server brand two products (e.g. a kids app and a B2B app)
+	// distinctly.
 	Branding ProjectBrandingConfig `json:"branding"`
 
 	// Passkey holds the project's WebAuthn relying-party identity. When set,
@@ -293,7 +294,8 @@ func (c ProjectOAuthConfig) nativeAudiences(provider string) []string {
 // ProjectBrandingConfig is the per-project transactional-email branding.
 // All fields are optional. ProductName/LogoURL/PrimaryColor/SupportEmail are
 // threaded into email template data; EmailFrom/EmailFromName build the SMTP
-// From header; SupportEmail also drives the Reply-To header.
+// From header; SupportEmail also drives the Reply-To header; EmailLinkBaseURL
+// places the reset and verification links.
 type ProjectBrandingConfig struct {
 	// ProductName is the human-facing product name shown in email bodies
 	// (e.g. "Acme Kids"). Empty falls back to the global default.
@@ -320,6 +322,15 @@ type ProjectBrandingConfig struct {
 	// drives the Reply-To header and is shown in email footers. Empty omits
 	// Reply-To.
 	SupportEmail string `json:"support_email"`
+
+	// EmailLinkBaseURL is the base URL of the pages that redeem this
+	// project's password-reset and email-verification links (e.g.
+	// "https://signin.kids.example.com"): the links become
+	// <base>/reset-password?token=… and <base>/verify-email?token=…. Empty
+	// falls back (in a product's block, to the project's base first) to the
+	// global GATEWAY_EMAIL_LINK_BASE_URL, else /auth/… on the project's
+	// primary auth domain. It takes the same values as that variable.
+	EmailLinkBaseURL string `json:"email_link_base_url"`
 }
 
 // ProjectPasskeyConfig is the per-project WebAuthn relying-party identity. Once
@@ -577,6 +588,9 @@ func (b ProjectBrandingConfig) validate() error {
 		if err := validateHTTPSURL(b.LogoURL, "branding.logo_url"); err != nil {
 			return err
 		}
+	}
+	if err := config.ValidateEmailedLinkURL(b.EmailLinkBaseURL); err != nil {
+		return fmt.Errorf("branding.email_link_base_url: %w", err)
 	}
 	return nil
 }
@@ -1089,7 +1103,8 @@ type ProjectProductConfig struct {
 	// Branding overrides the project's branding block, field by field, on the
 	// password-reset and email-verification emails a request names this
 	// product for (their `product` field). An empty field falls back to the
-	// project's branding, then the GATEWAY_EMAIL_BRAND_* defaults.
+	// project's branding, then the global defaults (GATEWAY_EMAIL_BRAND_*,
+	// and GATEWAY_EMAIL_LINK_BASE_URL for the link base).
 	Branding ProjectBrandingConfig `json:"branding"`
 }
 

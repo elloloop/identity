@@ -31,9 +31,12 @@ func (s *AuthService) emailTokenExpiry() time.Duration {
 // auth-domain, links are built on that branded hostname
 // (https://<primary-auth-domain>) so a user sees a URL on the product's
 // own domain. Otherwise it falls back to the configured GATEWAY_APP_BASE_URL
-// (or a localhost dev default). Every emailed link is built on it unless a
-// deployment-wide variable gives that kind of link a page of its own (see
-// emailLinkPageURL and tenantInvitationLink).
+// (or a localhost dev default). Every emailed link is built on it unless
+// that kind of link has a page of its own: a reset or verification link when
+// a link base resolves (the product's or the project's
+// branding.email_link_base_url, else GATEWAY_EMAIL_LINK_BASE_URL; see
+// emailLinkPageURL), a tenant invitation when
+// GATEWAY_TENANT_INVITATION_PAGE_URL is set (see tenantInvitationLink).
 func appBaseURL(ctx context.Context, cfg *config.Config) string {
 	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.PrimaryAuthDomain != "" {
 		return "https://" + scope.PrimaryAuthDomain
@@ -161,7 +164,7 @@ func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string
 	brand := resolveBranding(ctx, s.cfg, link.product)
 	html, text, err := email.Render(email.TemplatePasswordReset, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
-		"Link":      s.emailLinkURL(ctx, emailLinkPageResetPassword, rawToken, link),
+		"Link":      s.emailLinkURL(ctx, brand, emailLinkPageResetPassword, rawToken, link),
 		"ExpiresIn": formatExpiresIn(expiry),
 	}))
 	if err != nil {
@@ -356,7 +359,7 @@ func (s *AuthService) mailEmailVerification(ctx context.Context, user *User, lin
 	brand := resolveBranding(ctx, s.cfg, link.product)
 	html, text, err := email.Render(email.TemplateEmailVerification, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
-		"Link":      s.emailLinkURL(ctx, emailLinkPageVerifyEmail, rawToken, link),
+		"Link":      s.emailLinkURL(ctx, brand, emailLinkPageVerifyEmail, rawToken, link),
 		"ExpiresIn": formatExpiresIn(expiry),
 	}))
 	if err != nil {

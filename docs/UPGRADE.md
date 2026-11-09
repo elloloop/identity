@@ -1,5 +1,76 @@
 # Upgrade guide
 
+## Next — a project's own reset and verification link base: `branding.email_link_base_url` (additive; no migration; a stored value is now validated; a native sign-in's mail is now the project's)
+
+The link base changes nothing unless you set it; a native sign-in's
+verification email now uses the project's existing branding (below). A
+project's `branding` block, and a product's `branding` block under
+`products`, can name the base URL of the
+pages that redeem its password-reset and email-verification links, as
+`GATEWAY_EMAIL_LINK_BASE_URL` does for the whole server. For that project's
+emails, or a request that names that product, it wins over the variable:
+the precedence is product, then project, then `GATEWAY_EMAIL_LINK_BASE_URL`,
+then `/auth/…` on the project's primary auth domain (or
+`GATEWAY_APP_BASE_URL`). A server whose projects each serve those pages on
+their own domain could not say so before: the one variable sent every
+project's links to the same place. Set the project's base, not only its
+products', when its pages are not at the variable's: an email that names no
+product, such as the verification email a sign-in refused under
+`GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` sends, uses the project's.
+
+The value takes the variable's rules: an absolute `https` URL (`http` only for
+a loopback host, for local development) with no userinfo, query or fragment,
+and nothing a URL must percent-encode left bare. `UpsertProjectConfig`
+refuses any other value with `invalid_argument`.
+
+**Before the roll, check that no stored project config already holds the
+key**, in `branding` or in a product's `branding`. An earlier release ignored
+it as unknown; this one refuses to resolve a project whose value does not
+pass, until the config is fixed: a request resolved to that project by Host
+or key fails with `unavailable` and logs `project_resolve_by_host_failed` or
+`project_resolve_by_key_failed`, naming the project and the field; a native
+sign-in for a product mapped to it fails with `internal`; and with
+`GATEWAY_SCIM_ENABLED`, a project named by `GATEWAY_SCIM_PROJECT_ID` stops
+the server from starting. On Postgres:
+
+```sql
+SELECT id FROM projects
+WHERE config_json -> 'branding' ? 'email_link_base_url'
+   OR EXISTS (
+     SELECT 1 FROM jsonb_each(CASE WHEN jsonb_typeof(config_json -> 'products') = 'object'
+                                   THEN config_json -> 'products' ELSE '{}'::jsonb END) AS p(slug, v)
+     WHERE v -> 'branding' ? 'email_link_base_url');
+```
+
+Confirm each value it finds passes the rules above, or remove it. **Set the
+key only once every replica runs this release**: an older replica ignores it,
+so it keeps sending that project's links to the variable or the primary auth
+domain, and its `UpsertProjectConfig` stores a value this release would
+refuse to resolve.
+
+The page at the base redeems the token through `ConfirmPasswordReset` or
+`VerifyEmail` against the project that sent it, so it must call Identity on a
+host that resolves to that project, and its origin must be admitted for that
+project, by the project's `cors.allowed_origins` or by
+`GATEWAY_ALLOWED_ORIGINS`.
+
+A native sign-in (`NativeOAuthLogin`) resolves its project from the product
+rather than the Host, and its scope now carries the project's `branding`
+block: the verification email it sends for an unverified address comes from
+the project's sender, with the project's name and link base, where it used to
+fall back to the server-wide defaults. With no link base set, its link still
+falls back to `GATEWAY_APP_BASE_URL` rather than the primary auth domain,
+which the native scope does not carry, so set the project's base.
+`service.AdminProject` gains `Branding` (Go API); a `NativeOAuthProjectStore`
+outside this tree must fill it from the project's config to keep that mail
+branded.
+
+Rolling back is running the previous release again. It ignores the key, so
+the project's new links go back to `GATEWAY_EMAIL_LINK_BASE_URL` or the
+primary auth domain, and a native sign-in's verification email goes back to
+the server-wide defaults; a link already sent keeps working wherever its page
+is still served, since the token does not name the host.
+
 ## Next — a refreshed access token carries the sign-in's `auth_time` (migration 0056; behaviour change; `RefreshTokenRecord.AuthTimeMs` (Go API))
 
 A token minted by `RefreshToken` used to carry no `auth_time`: the refresh is

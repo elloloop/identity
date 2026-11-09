@@ -115,7 +115,8 @@ func TestParseProjectConfig_Branding(t *testing.T) {
 		"email_from_name":"Acme Kids",
 		"logo_url":"https://kids.example.com/logo.png",
 		"primary_color":"#1a73e8",
-		"support_email":"help@kids.example.com"
+		"support_email":"help@kids.example.com",
+		"email_link_base_url":"https://signin.kids.example.com"
 	}}`)
 	require.NoError(t, err)
 	assert.Equal(t, "Acme Kids", cfg.Branding.ProductName)
@@ -124,6 +125,7 @@ func TestParseProjectConfig_Branding(t *testing.T) {
 	assert.Equal(t, "https://kids.example.com/logo.png", cfg.Branding.LogoURL)
 	assert.Equal(t, "#1a73e8", cfg.Branding.PrimaryColor)
 	assert.Equal(t, "help@kids.example.com", cfg.Branding.SupportEmail)
+	assert.Equal(t, "https://signin.kids.example.com", cfg.Branding.EmailLinkBaseURL)
 }
 
 func TestParseProjectConfig_Passkey(t *testing.T) {
@@ -154,6 +156,55 @@ func TestParseProjectConfig_InvalidBrandingOrPasskey_Rejected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseProjectConfig(blob)
 			require.Error(t, err, "expected %s to be rejected", name)
+		})
+	}
+}
+
+// TestParseProjectConfig_EmailLinkBaseURL_RefusedLikeTheVariable: a project's
+// or a product's link base is held to GATEWAY_EMAIL_LINK_BASE_URL's rules, and
+// the refusal names the field without echoing a password the URL carries.
+func TestParseProjectConfig_EmailLinkBaseURL_RefusedLikeTheVariable(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ name, blob, field, want string }{
+		{"loopback http accepted", `{"branding":{"email_link_base_url":"http://localhost:3000"}}`, "", ""},
+		{"path prefix accepted", `{"branding":{"email_link_base_url":"https://example.com/account/"}}`, "", ""},
+		{
+			"plain http", `{"branding":{"email_link_base_url":"http://signin.example.com"}}`,
+			"branding.email_link_base_url", "must use https",
+		},
+		{
+			"relative", `{"branding":{"email_link_base_url":"/reset"}}`,
+			"branding.email_link_base_url", "must be absolute",
+		},
+		{
+			"fragment", `{"branding":{"email_link_base_url":"https://signin.example.com#"}}`,
+			"branding.email_link_base_url", "must not carry",
+		},
+		{
+			"space", `{"branding":{"email_link_base_url":"https://signin.example.com/a b"}}`,
+			"branding.email_link_base_url", "must percent-encode",
+		},
+		{
+			"password", `{"branding":{"email_link_base_url":"https://admin:hunter2@signin.example.com"}}`,
+			"branding.email_link_base_url", "must not carry",
+		},
+		{
+			"product's", `{"products":{"kids":{"branding":{"email_link_base_url":"https://signin.example.com?x=1"}}}}`,
+			"products.kids.branding.email_link_base_url", "must not carry",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParseProjectConfig(tc.blob)
+			if tc.field == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.field)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.NotContains(t, err.Error(), "hunter2")
 		})
 	}
 }
