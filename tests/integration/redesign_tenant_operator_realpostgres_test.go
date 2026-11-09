@@ -29,11 +29,12 @@ func (h *RedesignHarness) tenantOperatorClient(rawKey string) identityconnectgen
 
 // TestRedesign_TenantOperatorCredential drives a tenant_operator credential
 // over the wire against a real Postgres. Minted with the admin secret, it
-// reads, lists, suspends and restores its own project's tenants and reads
-// their login policy, and its changes name it as their actor. It is refused
-// another project's tenants and every operator call outside the six, and a
-// revocation holds from the next call. The refusals of the credential are
-// recorded under its project with their reasons.
+// reads, lists, suspends and restores its own project's tenants, reads their
+// login policy, creates a tenant and makes an account of the project its
+// owner, and its changes name it as their actor. It is refused another
+// project, a tenant of another project, and every operator call outside the
+// tenant operations, and a revocation holds from the next call. The refusals
+// of the credential are recorded under its project with their reasons.
 func TestRedesign_TenantOperatorCredential(t *testing.T) {
 	h := startSelfServiceHarness(t)
 	ctx := context.Background()
@@ -118,29 +119,106 @@ func TestRedesign_TenantOperatorCredential(t *testing.T) {
 		}
 	}
 
+	createdResp, err := operator.AdminCreateTenant(ctx, connect.NewRequest(&identitypb.AdminCreateTenantRequest{
+		ProjectId: h.ProjectID, Name: "Acme Provisioned", PrimaryDomain: fmt.Sprintf("provisioned-%d.example", unique),
+	}))
+	if err != nil {
+		t.Fatalf("AdminCreateTenant with the credential: %v", err)
+	}
+	provisionedID := createdResp.Msg.GetTenantId()
+	provisioned, err := h.Stores.tenants.GetTenant(ctx, h.ProjectID, provisionedID)
+	if err != nil || provisioned == nil || provisioned.Status != service.TenantStatusClaimed {
+		t.Fatalf("provisioned tenant = %+v (%v), want a claimed tenant of the project", provisioned, err)
+	}
+	ownerID := signup.Msg.GetUser().GetId()
+	addedResp, err := operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: h.ProjectID, TenantId: provisionedID, UserId: ownerID, Role: service.RoleOwner,
+	}))
+	if err != nil {
+		t.Fatalf("AdminAddTenantAdmin with the credential: %v", err)
+	}
+	if m := addedResp.Msg.GetMembership(); m.GetUserId() != ownerID || m.GetRole() != service.RoleOwner {
+		t.Fatalf("AdminAddTenantAdmin membership = %+v, want %s as owner", m, ownerID)
+	}
+	mem, err := h.Stores.memberships.GetMembership(ctx, h.ProjectID, provisionedID, ownerID)
+	if err != nil || mem == nil || mem.Role != service.RoleOwner || mem.Status != service.MembershipStatusActive || mem.Source != service.MembershipSourceAdded {
+		t.Fatalf("stored membership = %+v (%v), want an active added owner", mem, err)
+	}
+	for _, event := range []audit.EventType{audit.EventTenantCreated, audit.EventTenantAdminAdded} {
+		if actors := waitForAuditActors(t, h.ProjectID, event, provisionedID, 1); len(actors) != 1 || actors[0] != actor {
+			t.Fatalf("%s actors = %v, want [%s]", event, actors, actor)
+		}
+	}
+	if targets := pollAuditColumn(t, 1, `
+		SELECT target || ' ' || (details->>'role') FROM audit_events
+		 WHERE project_id = $1 AND event_type = $2 AND details->>'tenant_id' = $3`,
+		h.ProjectID, string(audit.EventTenantAdminAdded), provisionedID); len(targets) != 1 || targets[0] != ownerID+" owner" {
+		t.Fatalf("tenant_admin_added target and role = %v, want [%s owner]", targets, ownerID)
+	}
+
+	// The credential appoints only a first governor: a retry of the grant
+	// returns the membership and records nothing more, and it can neither
+	// lower the owner it appointed nor touch a tenant someone governs.
+	retried, err := operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: h.ProjectID, TenantId: provisionedID, UserId: ownerID, Role: service.RoleOwner,
+	}))
+	if err != nil || retried.Msg.GetMembership().GetId() != addedResp.Msg.GetMembership().GetId() {
+		t.Fatalf("retried AdminAddTenantAdmin = %+v (%v), want the same membership", retried, err)
+	}
+	_, err = operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: h.ProjectID, TenantId: provisionedID, UserId: ownerID, Role: service.RoleAdmin,
+	}))
+	requireConnectCode(t, "AdminAddTenantAdmin lowering the owner it appointed", err, connect.CodeFailedPrecondition)
+	_, err = operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: h.ProjectID, TenantId: tenantID, UserId: ownerID, Role: service.RoleAdmin,
+	}))
+	requireConnectCode(t, "AdminAddTenantAdmin on a tenant its owner governs", err, connect.CodeFailedPrecondition)
+	if mem, err := h.Stores.memberships.GetMembership(ctx, h.ProjectID, tenantID, ownerID); err != nil || mem == nil || mem.Role != service.RoleOwner {
+		t.Fatalf("the governed tenant's owner membership = %+v (%v), want it unchanged", mem, err)
+	}
+	if grants := pollAuditColumn(t, 1, `
+		SELECT id FROM audit_events WHERE project_id = $1 AND event_type = $2`,
+		h.ProjectID, string(audit.EventTenantAdminAdded)); len(grants) != 1 {
+		t.Fatalf("tenant_admin_added records = %d, want only the first grant's", len(grants))
+	}
+
 	other, err := admin.AdminCreateProject(ctx, connect.NewRequest(&identitypb.AdminCreateProjectRequest{
 		Name: "Another Project", StorageScopeId: fmt.Sprintf("operator-other-%d", unique),
 	}))
 	if err != nil {
 		t.Fatalf("AdminCreateProject: %v", err)
 	}
+	otherProjectID := other.Msg.GetProjectId()
+	otherTenant, err := admin.AdminCreateTenant(ctx, connect.NewRequest(&identitypb.AdminCreateTenantRequest{
+		ProjectId: otherProjectID, Name: "Other Tenant", PrimaryDomain: fmt.Sprintf("other-%d.example", unique),
+	}))
+	if err != nil {
+		t.Fatalf("AdminCreateTenant in another project with the secret: %v", err)
+	}
 	_, err = operator.AdminListTenants(ctx, connect.NewRequest(&identitypb.AdminListTenantsRequest{
-		ProjectId: other.Msg.GetProjectId(),
+		ProjectId: otherProjectID,
 	}))
 	requireConnectCode(t, "AdminListTenants of another project", err, connect.CodePermissionDenied)
-
 	_, err = operator.AdminCreateTenant(ctx, connect.NewRequest(&identitypb.AdminCreateTenantRequest{
-		ProjectId: h.ProjectID, Name: "Not Mine", PrimaryDomain: fmt.Sprintf("not-mine-%d.example", unique),
+		ProjectId: otherProjectID, Name: "Not Mine", PrimaryDomain: fmt.Sprintf("not-mine-%d.example", unique),
 	}))
-	requireConnectCode(t, "AdminCreateTenant with the credential", err, connect.CodePermissionDenied)
+	requireConnectCode(t, "AdminCreateTenant in another project", err, connect.CodePermissionDenied)
+	_, err = operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: otherProjectID, TenantId: otherTenant.Msg.GetTenantId(), UserId: ownerID,
+	}))
+	requireConnectCode(t, "AdminAddTenantAdmin in another project", err, connect.CodePermissionDenied)
+	_, err = operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: h.ProjectID, TenantId: otherTenant.Msg.GetTenantId(), UserId: ownerID,
+	}))
+	requireConnectCode(t, "AdminAddTenantAdmin naming another project's tenant", err, connect.CodeNotFound)
+	if m, err := h.Stores.memberships.GetMembership(ctx, h.ProjectID, otherTenant.Msg.GetTenantId(), ownerID); err != nil || m != nil {
+		t.Fatalf("a refused grant wrote %+v (%v)", m, err)
+	}
+
 	_, err = operator.AdminCreateProjectCredential(ctx, connect.NewRequest(&identitypb.AdminCreateProjectCredentialRequest{
 		ProjectId: h.ProjectID, Kind: service.CredentialKindTenantOperator,
 	}))
 	requireConnectCode(t, "AdminCreateProjectCredential with the credential", err, connect.CodePermissionDenied)
-	_, err = operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
-		ProjectId: h.ProjectID, TenantId: tenantID, UserId: signup.Msg.GetUser().GetId(),
-	}))
-	requireConnectCode(t, "AdminAddTenantAdmin with the credential", err, connect.CodePermissionDenied)
 	_, err = operator.DeleteLoginPolicy(ctx, connect.NewRequest(&identitypb.DeleteLoginPolicyRequest{
 		ProjectId: h.ProjectID, TenantId: tenantID,
 	}))
@@ -155,9 +233,18 @@ func TestRedesign_TenantOperatorCredential(t *testing.T) {
 		ProjectId: h.ProjectID, TenantId: tenantID,
 	}))
 	requireConnectCode(t, "AdminGetTenant with a revoked credential", err, connect.CodePermissionDenied)
+	_, err = operator.AdminCreateTenant(ctx, connect.NewRequest(&identitypb.AdminCreateTenantRequest{
+		ProjectId: h.ProjectID, Name: "After Revocation", PrimaryDomain: fmt.Sprintf("revoked-%d.example", unique),
+	}))
+	requireConnectCode(t, "AdminCreateTenant with a revoked credential", err, connect.CodePermissionDenied)
+	_, err = operator.AdminAddTenantAdmin(ctx, connect.NewRequest(&identitypb.AdminAddTenantAdminRequest{
+		ProjectId: h.ProjectID, TenantId: tenantID, UserId: ownerID, Role: service.RoleAdmin,
+	}))
+	requireConnectCode(t, "AdminAddTenantAdmin with a revoked credential", err, connect.CodePermissionDenied)
 
-	reasons := waitForTenantOperatorRefusals(t, h.ProjectID, actor, 2)
-	if want := []string{"other_project", "revoked"}; fmt.Sprint(reasons) != fmt.Sprint(want) {
+	reasons := waitForTenantOperatorRefusals(t, h.ProjectID, actor, 6)
+	want := []string{"other_project", "other_project", "other_project", "revoked", "revoked", "revoked"}
+	if fmt.Sprint(reasons) != fmt.Sprint(want) {
 		t.Fatalf("tenant_operator_refused reasons = %v, want %v", reasons, want)
 	}
 }

@@ -256,19 +256,25 @@ credential and no secret: the credential is checked, a live one admitted and
 any other refused with `CodePermissionDenied`.
 
 The tenant operations among them (`AdminGetTenant`, `AdminListTenants`,
-`AdminSuspendTenant`, `AdminRestoreTenant` and
-`AdminRecoverTenantOwnership`), and the operator's `GetLoginPolicy`, also
-accept a `tenant_operator` project credential (`ok_…`), presented in
-`X-Tenant-Operator-Key` in place of the secret, so a service that runs one
-project's tenants never holds the secret that governs every project. It is
-confined to its own project, and it is read uncached on every call, as a
-directory reader's is, so a revocation or a suspended project refuses it
-from the next call. It works with the secret empty too, though minting and
-revoking one take the secret. What it changes is audited with the credential
-as the actor (`credential:<id>`), and its refusals as
-`tenant_operator_refused` under its project. The calls that present it share
-one per-IP budget (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`) on both
-transports.
+`AdminSuspendTenant`, `AdminRestoreTenant`, `AdminRecoverTenantOwnership`,
+`AdminCreateTenant` and `AdminAddTenantAdmin`), and the operator's
+`GetLoginPolicy`, also accept a `tenant_operator` project credential
+(`ok_…`), presented in `X-Tenant-Operator-Key` in place of the secret, so a
+service that runs one project's tenants, creating them and appointing their
+first owners included, never holds the secret that governs every project.
+It is confined to its own project: each call must name it, and the tenant
+and account an `AdminAddTenantAdmin` names must be the project's, whoever
+calls it. Its `AdminAddTenantAdmin` appoints only a tenant's first owner or
+admin, under `AdminRecoverTenantOwnership`'s rules, so it never overrides or
+lowers people who can govern. It is read
+uncached on every call, as a directory reader's is, so a revocation or a
+suspended project refuses it from the next call. It works with the secret
+empty too, though minting and revoking one take the secret. What it changes
+is audited with the credential as the actor (`credential:<id>`), a
+creation as `tenant_created` and a grant as `tenant_admin_added`, and its
+refusals as `tenant_operator_refused` under its project. The calls that
+present it share one per-IP budget (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`)
+on both transports.
 
 #### Zero-config first-admin bootstrap
 

@@ -266,10 +266,16 @@ func handlerSecretsKey() []byte {
 	return key
 }
 
+// newAdminControlSvc is an operator service whose tenant store reads every id
+// as one claimed tenant and whose project, the first one AdminCreateProject
+// mints, holds the account user-1.
 func newAdminControlSvc(secret string) (*service.ControlPlaneAdminService, *adminControlStore, *connectMembershipStore) {
 	store := &adminControlStore{}
 	members := &connectMembershipStore{}
-	svc := service.NewControlPlaneAdminService(secret, false, handlerSecretsKey(), store, &connectTenantStore{}, members, nil, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"user-1": {ID: "user-1", Email: "user-1@example.test", Status: service.StatusActive, EmailVerified: true},
+	}}
+	svc := service.NewControlPlaneAdminService(secret, false, handlerSecretsKey(), store, claimedTenantStore(), members, users, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return svc, store, members
 }
 
@@ -497,7 +503,8 @@ func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
 
 	// connectTenantStore mints no id, so the admin supplies the tenant id
 	// explicitly (the handler-layer assertion is the secret gate + wiring,
-	// not the tenant store's id generation — that is the e2e's job).
+	// not the tenant store's id generation — that is the e2e's job). The
+	// store reads it as its one claimed tenant.
 	admin, err := client.AdminAddTenantAdmin(ctx,
 		withAdminSecret(&identitypb.AdminAddTenantAdminRequest{
 			ProjectId: proj.Msg.GetProjectId(),

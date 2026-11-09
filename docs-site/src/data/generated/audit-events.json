@@ -78,6 +78,7 @@
   "teammate_key_manager_refused",
   "teammate_key_registered",
   "teammate_key_revoked",
+  "tenant_admin_added",
   "tenant_created",
   "tenant_joined_by_domain",
   "tenant_member_removed",

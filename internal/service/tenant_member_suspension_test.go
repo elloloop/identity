@@ -345,18 +345,31 @@ func TestAdminAddTenantAdmin_LiftsASuspension(t *testing.T) {
 	f := newRecoveryFixture()
 	f.seedMembership("heir", MembershipSourceInvited, RoleMember, MembershipStatusSuspended)
 
-	got, err := f.svc.AdminAddTenantAdmin(context.Background(), testAdminSecret, "proj", "t-1", "heir", RoleAdmin)
+	got, err := f.svc.AdminAddTenantAdmin(context.Background(), asAdmin(testAdminSecret), "proj", "t-1", "heir", RoleAdmin, testOperatorIP, testOperatorUA)
 	require.NoError(t, err)
 	assert.Equal(t, MembershipStatusActive, got.Status)
 	stored, _ := f.members.GetMembership(context.Background(), "proj", "t-1", "heir")
 	assert.Equal(t, MembershipStatusActive, stored.Status)
 	assert.Equal(t, RoleAdmin, stored.Role)
 	requireOperatorRestore(t, f, RoleMember, MembershipSourceInvited, MembershipStatusActive, "")
+	assert.Equal(t, [][2]string{{testOperatorIP, testOperatorUA}}, f.audit.clientsOf(string(audit.EventTenantMemberRestored)),
+		"the lift records the operator's client")
 
-	// A grant to an active member lifts nothing and records no lift.
-	_, err = f.svc.AdminAddTenantAdmin(context.Background(), testAdminSecret, "proj", "t-1", "heir", RoleOwner)
+	// A grant to an active member lifts nothing and records no lift. The
+	// grant records the role and status the membership had.
+	_, err = f.svc.AdminAddTenantAdmin(context.Background(), asAdmin(testAdminSecret), "proj", "t-1", "heir", RoleOwner, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, 1, f.audit.countByEventType(string(audit.EventTenantMemberRestored)))
+	grants := f.audit.detailsOf(string(audit.EventTenantAdminAdded))
+	require.Len(t, grants, 2)
+	assert.Equal(t, map[string]any{
+		"project_id": "proj", "tenant_id": "t-1", "role": RoleAdmin,
+		"previous_role": RoleMember, "previous_status": MembershipStatusSuspended,
+	}, grants[0])
+	assert.Equal(t, map[string]any{
+		"project_id": "proj", "tenant_id": "t-1", "role": RoleOwner,
+		"previous_role": RoleAdmin, "previous_status": MembershipStatusActive,
+	}, grants[1])
 }
 
 // A caller suspended while their domain's check is in flight gains no

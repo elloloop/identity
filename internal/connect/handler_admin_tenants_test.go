@@ -272,17 +272,21 @@ func withTenantOperatorKey[T any](msg *T, rawKey string) *connect.Request[T] {
 
 // A tenant_operator key in its header authorizes the tenant operations of its
 // own project and nothing else: another project, and every other operator
-// call, which reads only the admin secret, are refused.
+// call, which reads only the admin secret, are refused. Creating a tenant and
+// adding its admin are tenant operations; the admin must be granted on a
+// tenant of the key's project.
 func TestTenantOperatorKey_Handler(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := &adminTenantStore{tenants: []*service.Tenant{
 		{ID: "t-1", ProjectID: testProjectID, Name: "Alpha", Status: service.TenantStatusClaimed, CreatedBy: "u-1"},
+		{ID: "t-other", ProjectID: "other", Name: "Other", Status: service.TenantStatusClaimed, CreatedBy: "u-2"},
 	}}
 	users := &connectUserDirectory{byID: map[string]*service.User{
 		"heir": {ID: "heir", Email: "heir@example.test", Status: service.StatusActive, EmailVerified: true},
 	}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), &adminControlStore{}, store, &connectMembershipStore{}, users, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	members := &connectMembershipStore{}
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), &adminControlStore{}, store, members, users, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	minted, err := svc.AdminCreateProjectCredential(ctx, handlerAdminSecret, testProjectID, service.CredentialKindTenantOperator)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
@@ -308,13 +312,33 @@ func TestTenantOperatorKey_Handler(t *testing.T) {
 	if _, err := client.AdminRecoverTenantOwnership(ctx, withTenantOperatorKey(&identitypb.AdminRecoverTenantOwnershipRequest{ProjectId: testProjectID, TenantId: "t-1", UserId: "heir", Reason: "why"}, key)); err != nil {
 		t.Fatalf("AdminRecoverTenantOwnership: %v", err)
 	}
+	if _, err := client.AdminCreateTenant(ctx, withTenantOperatorKey(&identitypb.AdminCreateTenantRequest{ProjectId: testProjectID, Name: "New", PrimaryDomain: "new.example"}, key)); err != nil {
+		t.Fatalf("AdminCreateTenant: %v", err)
+	}
+	added, err := client.AdminAddTenantAdmin(ctx, withTenantOperatorKey(&identitypb.AdminAddTenantAdminRequest{ProjectId: testProjectID, TenantId: "t-1", UserId: "heir", Role: service.RoleAdmin}, key))
+	if err != nil {
+		t.Fatalf("AdminAddTenantAdmin: %v", err)
+	}
+	if m := added.Msg.GetMembership(); m.GetUserId() != "heir" || m.GetTenantId() != "t-1" || m.GetRole() != service.RoleAdmin {
+		t.Fatalf("AdminAddTenantAdmin membership = %+v", m)
+	}
+	members.upserted = nil
 
 	_, err = client.AdminGetTenant(ctx, withTenantOperatorKey(&identitypb.AdminGetTenantRequest{ProjectId: "other", TenantId: "t-1"}, key))
 	requireCode(t, err, connect.CodePermissionDenied)
 	_, err = client.AdminGetTenant(ctx, withTenantOperatorKey(&identitypb.AdminGetTenantRequest{ProjectId: testProjectID, TenantId: "t-1"}, minted.PublicID+".wrong"))
 	requireCode(t, err, connect.CodePermissionDenied)
-	_, err = client.AdminCreateTenant(ctx, withTenantOperatorKey(&identitypb.AdminCreateTenantRequest{ProjectId: testProjectID, Name: "New", PrimaryDomain: "new.example"}, key))
+	_, err = client.AdminCreateTenant(ctx, withTenantOperatorKey(&identitypb.AdminCreateTenantRequest{ProjectId: "other", Name: "New", PrimaryDomain: "new.example"}, key))
 	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminAddTenantAdmin(ctx, withTenantOperatorKey(&identitypb.AdminAddTenantAdminRequest{ProjectId: "other", TenantId: "t-other", UserId: "heir"}, key))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminAddTenantAdmin(ctx, withTenantOperatorKey(&identitypb.AdminAddTenantAdminRequest{ProjectId: testProjectID, TenantId: "t-other", UserId: "heir"}, key))
+	requireCode(t, err, connect.CodeNotFound)
+	_, err = client.AdminAddTenantAdmin(ctx, withTenantOperatorKey(&identitypb.AdminAddTenantAdminRequest{ProjectId: testProjectID, TenantId: "t-1", UserId: "nobody"}, key))
+	requireCode(t, err, connect.CodeNotFound)
+	if members.upserted != nil {
+		t.Fatalf("a refused AdminAddTenantAdmin wrote %+v", members.upserted)
+	}
 	_, err = client.AdminCreateProjectCredential(ctx, withTenantOperatorKey(&identitypb.AdminCreateProjectCredentialRequest{ProjectId: testProjectID, Kind: service.CredentialKindTenantOperator}, key))
 	requireCode(t, err, connect.CodePermissionDenied)
 	_, err = client.UpsertLoginPolicy(ctx, withTenantOperatorKey(&identitypb.UpsertLoginPolicyRequest{ProjectId: testProjectID, TenantId: "t-1"}, key))

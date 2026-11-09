@@ -340,7 +340,7 @@ func TestBuildRateLimits_DirectoryLookupLimited(t *testing.T) {
 	assertQuotaExhausts(t, handler, path, "9.9.9.9", 2)
 }
 
-// The six tenant-operator procedures share one per-IP budget, drawn only by
+// The tenant-operator procedures share one per-IP budget, drawn only by
 // requests that present a tenant_operator key: a caller holding the admin
 // secret alone is not newly throttled, and a guessed key cannot be tried at
 // line rate.
@@ -372,7 +372,7 @@ func TestBuildRateLimits_TenantOperatorLimited(t *testing.T) {
 	}
 	require.Equal(t, http.StatusOK, serve(first, true))
 	require.Equal(t, http.StatusOK, serve(second, true))
-	assert.Equal(t, http.StatusTooManyRequests, serve(first, true), "the six share one budget")
+	assert.Equal(t, http.StatusTooManyRequests, serve(first, true), "the tenant operations share one budget")
 	assert.Equal(t, http.StatusTooManyRequests, serve(second, true))
 	assert.Equal(t, http.StatusOK, serve(second, false), "the admin secret's callers stay unthrottled")
 }

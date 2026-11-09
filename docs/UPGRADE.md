@@ -1,5 +1,89 @@
 # Upgrade guide
 
+## Next — a `tenant_operator` credential creates its project's tenants and appoints their first owner: `AdminCreateTenant` and `AdminAddTenantAdmin` (behaviour change for existing `tenant_operator` credentials and for `AdminAddTenantAdmin`; no migration; both calls now audited; the two methods take `service.OperatorCredentials` and the operator's client (Go API))
+
+A service holding a `tenant_operator` credential could run its project's
+tenants but not make one: creating a tenant and appointing its first owner
+took the admin secret, which governs every project. Both calls now accept the
+credential too, on its own project alone.
+
+- **Credentials already minted gain both calls on upgrade.** The previous
+  release documented the kind as accepted on six calls and nowhere else. From
+  this release every live `tenant_operator` credential, wherever it is held,
+  can also create claimed tenants in its project and appoint a tenant's first
+  owner or admin. There is no narrower kind. Before upgrading, review which
+  services hold one, and revoke with `AdminRevokeProjectCredential` any whose
+  holder should not create tenants.
+- **An empty secret no longer closes these two calls.** With
+  `GATEWAY_ADMIN_API_SECRET` unset, `AdminCreateTenant` and
+  `AdminAddTenantAdmin` used to return `UNIMPLEMENTED` whatever was presented;
+  now, like the other tenant operations, they accept every live
+  `tenant_operator` credential. To cut the credentials off, revoke them, which
+  takes the secret: set it again first if it was emptied.
+- **Present it** in `X-Tenant-Operator-Key` on
+  `AdminCreateTenant(project_id, name, primary_domain)` and
+  `AdminAddTenantAdmin(project_id, tenant_id, user_id, role)`, as on the other
+  tenant operations. Each must name the credential's own `project_id`: another
+  project is `PERMISSION_DENIED` and recorded as `tenant_operator_refused` with
+  the reason `other_project`, and a revoked credential is refused from the next
+  call.
+- **A credential appoints only a tenant's first governor.** Its
+  `AdminAddTenantAdmin` is held to `AdminRecoverTenantOwnership`'s rules: the
+  tenant must be claimed or suspended, the account an active, signed-up person
+  with a verified email, and no owner or admin who is a person may still be
+  able to sign in with an active membership; otherwise `FAILED_PRECONDITION`,
+  and nothing is written. So it can stand up a tenant it created, or one nobody
+  governs any more, but never override or lower people who can act. A retry
+  of a grant that landed returns the membership unchanged and records nothing.
+  Further admins come from the tenant's own owner, by invitation. The admin
+  secret's `AdminAddTenantAdmin` keeps setting any role on any tenant.
+- **`AdminAddTenantAdmin` names the project's own tenant and account,
+  whoever calls it (behaviour change for the secret).** A `tenant_id` or
+  `user_id` the project does not hold is now `NOT_FOUND`, and nothing is
+  written. Before, the secret's call wrote a membership naming another
+  project's tenant or account, which no one could use, or failed with
+  `INTERNAL` for an id that exists nowhere. If you provision a tenant's first
+  admin with the secret, sign the account up in that tenant's project.
+- **A tenant the credential creates is trusted as one the secret creates.** It
+  is claimed at once, its name appears in the tenant's invitation emails, and
+  its primary domain is taken as given, unverified: when the tenant's status
+  changes, the agent grants and machines of the project's accounts on that
+  domain are revoked, as for any tenant. `AdminCreateTenant` is not idempotent:
+  each call makes a new tenant, so keep the returned `tenant_id` before you
+  retry. The only bound on how many tenants a credential creates is the
+  per-IP budget below.
+- **Both calls are audited, whichever credential makes them.**
+  `AdminCreateTenant` records `tenant_created` with the project and tenant ids
+  and the `primary_domain`, and `AdminAddTenantAdmin` a new event,
+  `tenant_admin_added`, with the account as the target and the `role`, plus the
+  `previous_role` and `previous_status` of a membership the account already
+  held, so a grant that lowers an owner shows as one. Each carries the
+  operator's IP address and user agent and names the credential as the actor
+  (`credential:<credential id>`), or no actor for the admin secret. Before,
+  neither call was audited. A `tenant_created` record used to mean a person
+  creating a tenant they own; an operator's names no target, so its target
+  repeats its actor. The `tenant_member_restored` of a suspension a grant
+  lifts now carries the operator's actor, IP address and user agent.
+- **Rate limit:** calls that present the header spend the per-IP budget the
+  other tenant operations share (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`), on
+  HTTP and an embedding host's native gRPC registration alike. Calls made with
+  the secret alone are not counted.
+
+Rolling back is running the previous release again: it refuses the credential
+on these two calls, accepts a secret's grant that names another project's
+tenant or account, and records neither call; the tenants and memberships the
+credential made are ordinary rows and stay.
+
+### Go API
+
+- `ControlPlaneAdminService.AdminCreateTenant(ctx, caller, projectID, name,
+  primaryDomain, ip, ua)` and `AdminAddTenantAdmin(ctx, caller, projectID,
+  tenantID, userID, role, ip, ua)` take a `service.OperatorCredentials` in
+  place of the secret string, and the operator's client IP and user agent.
+- `app.TenantOperatorProcedures` lists `AdminCreateTenant` and
+  `AdminAddTenantAdmin`.
+- New: `audit.EventTenantAdminAdded`.
+
 ## Next — a revoked machine registers again under its installation id (behaviour change; no migration; `AgentMachine.RenewedAfterRevokedAtMs`, `AgentMachine.RetiredPublicKeys`, `AgentAuthorization.RetiredMachinePublicKeys` (Go API))
 
 A machine registration that governance revoked — a change of the project's

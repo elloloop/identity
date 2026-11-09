@@ -206,7 +206,16 @@ func (f *fakeTenantStore) ensure(projectID, tenantID string) {
 	}
 }
 
+// CreateTenant stores t, minting an id as the postgres store does when t
+// carries none; createErr fails it.
 func (f *fakeTenantStore) CreateTenant(_ context.Context, t *Tenant) (string, error) {
+	if f.createErr != nil {
+		return "", f.createErr
+	}
+	if t.ID == "" {
+		f.nextID++
+		t.ID = "tenant-" + strconv.Itoa(f.nextID)
+	}
 	f.put(t)
 	return t.ID, nil
 }

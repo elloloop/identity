@@ -190,7 +190,8 @@ func authDomainToProto(d *service.AdminProjectAuthDomain) *identitypb.ProjectAut
 	}
 }
 
-// AdminCreateTenant provisions a tenant under a project. Operator-only.
+// AdminCreateTenant provisions a tenant under a project. Operator-only: the
+// admin secret, or a tenant_operator credential of the project.
 func (h *IdentityHandler) AdminCreateTenant(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminCreateTenantRequest],
@@ -198,14 +199,17 @@ func (h *IdentityHandler) AdminCreateTenant(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	tenantID, err := h.controlAdmin.AdminCreateTenant(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Name, req.Msg.PrimaryDomain)
+	tenantID, err := h.controlAdmin.AdminCreateTenant(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.Name, req.Msg.PrimaryDomain,
+		clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.AdminCreateTenantResponse{TenantId: tenantID}), nil
 }
 
-// AdminAddTenantAdmin bootstraps the first tenant administrator. Operator-only.
+// AdminAddTenantAdmin bootstraps the first tenant administrator.
+// Operator-only: the admin secret, or a tenant_operator credential of the
+// project.
 func (h *IdentityHandler) AdminAddTenantAdmin(
 	ctx context.Context,
 	req *connect.Request[identitypb.AdminAddTenantAdminRequest],
@@ -213,7 +217,8 @@ func (h *IdentityHandler) AdminAddTenantAdmin(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	m, err := h.controlAdmin.AdminAddTenantAdmin(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.UserId, req.Msg.Role)
+	m, err := h.controlAdmin.AdminAddTenantAdmin(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.UserId, req.Msg.Role,
+		clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
