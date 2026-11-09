@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"sort"
 
 	"github.com/elloloop/identity/internal/service"
@@ -103,7 +104,7 @@ func (r *Repo) EnsureAgentMachineDelegation(_ context.Context, id string, candid
 	defer r.mu.Unlock()
 	m := r.agentMachines[id]
 	if m == nil {
-		return nil, service.ErrAgentOAuthGrant
+		return nil, errors.Join(service.ErrAgentOAuthGrant, service.ErrNotFound)
 	}
 	a := r.oauthAuthorityLocked(m.OwnerID, candidate.AgentID, "", m.ClientID)
 	a.Machine = m.Clone()

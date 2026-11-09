@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -115,7 +116,7 @@ func (r *pgRepository) MutateAgentMachine(ctx context.Context, id string, mutati
 		return nil, err
 	}
 	if initial == nil {
-		return nil, service.ErrPermissionDenied
+		return nil, errors.Join(service.ErrPermissionDenied, service.ErrNotFound)
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -129,7 +130,7 @@ func (r *pgRepository) MutateAgentMachine(ctx context.Context, id string, mutati
 	}
 	current, err := scanAgentMachine(tx.QueryRow(ctx, `SELECT `+agentMachineColumns+` FROM agent_machines WHERE project_id=$1 AND id=$2 FOR UPDATE`, r.projectID, id))
 	if noRows(err) {
-		return nil, service.ErrPermissionDenied
+		return nil, errors.Join(service.ErrPermissionDenied, service.ErrNotFound)
 	}
 	if err != nil {
 		return nil, err
@@ -186,7 +187,7 @@ func (r *pgRepository) EnsureAgentMachineDelegation(ctx context.Context, id stri
 		return nil, err
 	}
 	if initial == nil {
-		return nil, service.ErrAgentOAuthGrant
+		return nil, errors.Join(service.ErrAgentOAuthGrant, service.ErrNotFound)
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -200,7 +201,7 @@ func (r *pgRepository) EnsureAgentMachineDelegation(ctx context.Context, id stri
 	}
 	machine, err := scanAgentMachine(tx.QueryRow(ctx, `SELECT `+agentMachineColumns+` FROM agent_machines WHERE project_id=$1 AND id=$2 FOR UPDATE`, r.projectID, id))
 	if noRows(err) {
-		return nil, service.ErrAgentOAuthGrant
+		return nil, errors.Join(service.ErrAgentOAuthGrant, service.ErrNotFound)
 	}
 	if err != nil {
 		return nil, err

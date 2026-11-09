@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -117,7 +118,7 @@ func (r *sqliteRepository) MutateAgentMachine(ctx context.Context, id string, mu
 		return nil, err
 	}
 	if initial == nil {
-		return nil, service.ErrPermissionDenied
+		return nil, errors.Join(service.ErrPermissionDenied, service.ErrNotFound)
 	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -133,7 +134,7 @@ func (r *sqliteRepository) MutateAgentMachine(ctx context.Context, id string, mu
 	}
 	current, err := scanAgentMachine(tx.QueryRow(ctx, `SELECT `+agentMachineColumns+` FROM agent_machines WHERE project_id=$1 AND id=$2`, r.projectID, id))
 	if noRows(err) {
-		return nil, service.ErrPermissionDenied
+		return nil, errors.Join(service.ErrPermissionDenied, service.ErrNotFound)
 	}
 	if err != nil {
 		return nil, err
@@ -190,7 +191,7 @@ func (r *sqliteRepository) EnsureAgentMachineDelegation(ctx context.Context, id 
 		return nil, err
 	}
 	if initial == nil {
-		return nil, service.ErrAgentOAuthGrant
+		return nil, errors.Join(service.ErrAgentOAuthGrant, service.ErrNotFound)
 	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -206,7 +207,7 @@ func (r *sqliteRepository) EnsureAgentMachineDelegation(ctx context.Context, id 
 	}
 	machine, err := scanAgentMachine(tx.QueryRow(ctx, `SELECT `+agentMachineColumns+` FROM agent_machines WHERE project_id=$1 AND id=$2`, r.projectID, id))
 	if noRows(err) {
-		return nil, service.ErrAgentOAuthGrant
+		return nil, errors.Join(service.ErrAgentOAuthGrant, service.ErrNotFound)
 	}
 	if err != nil {
 		return nil, err

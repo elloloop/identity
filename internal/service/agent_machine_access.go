@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"slices"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -18,6 +19,7 @@ func (s *AgentOAuthService) currentMachine(ctx context.Context, id, agent string
 		return nil, AgentOAuthAuthority{}, err
 	}
 	if !validOAuthClientID(id) {
+		s.recordMachineRefusal(ctx, nil, ReasonMachineNotFound)
 		return nil, AgentOAuthAuthority{}, ErrUnauthenticated
 	}
 	authority, err := repo.AgentMachineAuthority(ctx, id, agent)
@@ -26,16 +28,20 @@ func (s *AgentOAuthService) currentMachine(ctx context.Context, id, agent string
 	}
 	machine := authority.Machine
 	if machine == nil {
+		s.recordMachineRefusal(ctx, nil, ReasonMachineNotFound)
 		return nil, authority, ErrUnauthenticated
 	}
 	if !authority.ValidMachine(machine) {
+		s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
 		return nil, authority, ErrAgentOAuthGrant
 	}
 	if !s.resourceConfigured(ctx, machine.Resource) {
+		s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
 		return nil, authority, s.invalidateMachine(ctx, machine)
 	}
 	if err = s.admitOwner(ctx, authority.Owner, machine.Product); err != nil {
 		if isAgentOAuthAdmissionRefusal(err) {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
 			return nil, authority, s.invalidateMachine(ctx, machine)
 		}
 		return nil, authority, err
@@ -49,8 +55,13 @@ func (s *AgentOAuthService) challengeSigner(ctx context.Context, request AgentMa
 		return nil, authority, "", nil, err
 	}
 	if request.Operation == AgentMachineEnroll {
+		if request.PublicKey == machine.PublicKey {
+			s.recordMachineRefusal(ctx, machine, ReasonKeyInvalid)
+			return nil, authority, "", nil, ErrPermissionDenied
+		}
 		agent := authority.Agent
-		if agent == nil || !agent.IsAgent() || !isActiveStatus(agent.Status) || agent.OwnerUserID != machine.OwnerID || !machine.Allows(agent.ID) || request.PublicKey == machine.PublicKey {
+		if agent == nil || !agent.IsAgent() || !isActiveStatus(agent.Status) || agent.OwnerUserID != machine.OwnerID || !machine.Allows(agent.ID) {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
 			return nil, authority, "", nil, ErrPermissionDenied
 		}
 	}
@@ -66,16 +77,25 @@ func (s *AgentOAuthService) challengeSigner(ctx context.Context, request AgentMa
 		return nil, authority, "", nil, err
 	}
 	if grant == nil {
+		s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
 		return nil, authority, "", nil, ErrAgentOAuthGrant
 	}
 	admitted, _, err := s.admittedAuthority(ctx, grant)
 	if err != nil {
+		if errors.Is(err, ErrAgentOAuthGrant) {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
+		}
 		return nil, authority, "", nil, err
 	}
 	return admitted.Machine, admitted, grant.MachinePublicKey, grant, nil
 }
 
 func (s *AgentOAuthService) CreateMachineChallenge(ctx context.Context, request AgentMachineChallengeRequest) (*AgentMachineChallenge, error) {
+	if request.Operation == AgentMachineEnroll && validOAuthClientID(request.MachineID) && validOAuthClientID(request.AgentID) && !validMachinePublicKey(request.PublicKey) {
+		if _, err := s.machineRepo(ctx); err == nil {
+			s.recordMachineRefusal(ctx, nil, ReasonKeyInvalid)
+		}
+	}
 	binding, err := request.binding()
 	if err != nil {
 		return nil, err
@@ -106,12 +126,24 @@ func (s *AgentOAuthService) CreateMachineChallenge(ctx context.Context, request 
 		return nil, err
 	}
 	if err = repo.CreateAgentMachineChallenge(ctx, challenge); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineNotFound)
+			return nil, ErrAgentOAuthGrant
+		}
+		if errors.Is(err, ErrAgentOAuthGrant) {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
+		}
 		return nil, err
 	}
 	return challenge, nil
 }
 
 func (s *AgentOAuthService) machineAccess(ctx context.Context, request AgentMachineChallengeRequest, proof AgentMachineProof) (*AgentMachine, AgentOAuthAuthority, *AgentAuthorization, error) {
+	if request.Operation == AgentMachineEnroll && validOAuthClientID(request.MachineID) && validOAuthClientID(request.AgentID) && !validMachinePublicKey(request.PublicKey) {
+		if _, err := s.machineRepo(ctx); err == nil {
+			s.recordMachineRefusal(ctx, nil, ReasonKeyInvalid)
+		}
+	}
 	binding, err := request.binding()
 	if err != nil {
 		return nil, AgentOAuthAuthority{}, nil, err
@@ -120,7 +152,12 @@ func (s *AgentOAuthService) machineAccess(ctx context.Context, request AgentMach
 	if err != nil {
 		return nil, authority, nil, err
 	}
-	if !validOAuthClientID(proof.ChallengeID) || len(proof.Signature) != ed25519.SignatureSize {
+	if len(proof.Signature) != ed25519.SignatureSize {
+		s.recordMachineRefusal(ctx, machine, ReasonSignatureInvalid)
+		return nil, authority, nil, ErrUnauthenticated
+	}
+	if !validOAuthClientID(proof.ChallengeID) {
+		s.recordMachineRefusal(ctx, machine, ReasonChallengeExpired)
 		return nil, authority, nil, ErrUnauthenticated
 	}
 	repo, err := s.machineRepo(ctx)
@@ -131,7 +168,13 @@ func (s *AgentOAuthService) machineAccess(ctx context.Context, request AgentMach
 	if err != nil {
 		return nil, authority, nil, err
 	}
-	if challenge == nil || challenge.PublicKey != key || challenge.MachineID != request.MachineID || challenge.AgentID != request.AgentID || challenge.Operation != request.Operation || !verifyMachineSignature(challenge, proof, binding, s.auth.nowMs()) {
+	now := s.auth.nowMs()
+	if challenge == nil || !ValidAgentMachineChallenge(challenge) || challenge.CreatedAtMs > now || challenge.ExpiresAtMs <= now {
+		s.recordMachineRefusal(ctx, machine, ReasonChallengeExpired)
+		return nil, authority, nil, ErrUnauthenticated
+	}
+	if challenge.PublicKey != key || challenge.MachineID != request.MachineID || challenge.AgentID != request.AgentID || challenge.Operation != request.Operation || !verifyMachineSignature(challenge, proof, binding, now) {
+		s.recordMachineRefusal(ctx, machine, ReasonSignatureInvalid)
 		return nil, authority, nil, ErrUnauthenticated
 	}
 	consumed, err := repo.ConsumeAgentMachineChallenge(ctx, challenge.ID, s.auth.nowMs())
@@ -139,6 +182,7 @@ func (s *AgentOAuthService) machineAccess(ctx context.Context, request AgentMach
 		return nil, authority, nil, err
 	}
 	if !consumed {
+		s.recordMachineRefusal(ctx, machine, ReasonChallengeExpired)
 		return nil, authority, nil, ErrUnauthenticated
 	}
 	return machine, authority, grant, nil
@@ -157,9 +201,17 @@ func (s *AgentOAuthService) RegisterMachineAgentKey(ctx context.Context, id, age
 	}
 	grant, err := repo.EnsureAgentMachineDelegation(ctx, id, proposal, machine.PublicKey, authority.Fingerprint())
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineNotFound)
+			return nil, ErrAgentOAuthGrant
+		}
+		if errors.Is(err, ErrAgentOAuthGrant) {
+			s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
+		}
 		return nil, err
 	}
 	if grant.RevokedAtMs != 0 {
+		s.recordMachineRefusal(ctx, machine, ReasonMachineRevoked)
 		return nil, ErrAgentOAuthGrant
 	}
 	fingerprint := sha256.Sum256([]byte(key))
