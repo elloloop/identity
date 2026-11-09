@@ -160,7 +160,7 @@ func TestMachineHTTPRevokedMachineRegistersAgainWithNewKeysAndExchanges(t *testi
 				continue
 			}
 			details := map[string]any{}
-			if raw, _ := write.data["7"].(string); raw != "" {
+			if raw, _ := write.data[fieldDetails].(string); raw != "" {
 				require.NoError(t, json.Unmarshal([]byte(raw), &details))
 			}
 			out = append(out, details)

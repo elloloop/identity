@@ -103,11 +103,13 @@ HTTP 429 with a <code>Retry-After</code> header.</p>
 until <code>next_offset</code> is -1, even when a filtered page is empty. Its proof
 is bound to that page offset. Keep all private keys outside agent workspaces;
 pass each agent only its own access token. New eligible agents can enroll after
-the owner's human session ends. Existing agent keys cannot be silently replaced.</p>
+the owner's human session ends. Existing agent keys cannot be silently replaced;
+only a machine's renewal (below) lets an agent present a fresh one.</p>
 <p>Owners list, select and revoke connections with <code>ListAgentMachines</code>,
 <code>SelectAgentMachineAgents</code> and <code>RevokeAgentMachine</code>.
 Selection changes require recent human sign-in and an expected revision.
-Excluded or revoked child grants never reconnect through default-all. Machine
+Excluded or revoked child grants never reconnect through default-all; the one
+exception is a child the machine's own revocation ended, after its renewal. Machine
 revocation stops all children. The same owner may register the machine again
 under its installation id with an engine key it has never held, on a recent
 sign-in; the registration is replaced, and only the children that revocation ended

@@ -151,8 +151,11 @@ func ApplyAgentMachineMutation(current *AgentMachine, mutation AgentMachineMutat
 }
 
 // Stores lock current owner/agent/client authority before the machine and child
-// grant. Ensure never replaces a revoked child. Registration repeats may return
-// the identical record only; a changed engine key or selection is a conflict.
+// grant. Registration repeats return the identical record only; a changed engine
+// key or selection on an active registration is a conflict, and a revoked
+// registration is replaced only as RenewedAgentMachine allows. Ensure replaces a
+// revoked child only as RenewedAgentMachineDelegation allows: the child the
+// machine's recovered revocation ended, under a key it has never held.
 type AgentMachineRepository interface {
 	CreateAgentMachine(context.Context, *AgentMachine, string) (*AgentMachine, error)
 	GetAgentMachine(context.Context, string) (*AgentMachine, error)
