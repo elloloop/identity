@@ -145,6 +145,14 @@ var tenantOperatorCalls = map[string]func(ctx context.Context, c identitypb.Iden
 		_, err := c.AdminRecoverTenantOwnership(ctx, &identitypb.AdminRecoverTenantOwnershipRequest{TenantId: "t"}, opts...)
 		return err
 	},
+	identityconnectgen.IdentityServiceAdminCreateTenantProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
+		_, err := c.AdminCreateTenant(ctx, &identitypb.AdminCreateTenantRequest{}, opts...)
+		return err
+	},
+	identityconnectgen.IdentityServiceAdminAddTenantAdminProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
+		_, err := c.AdminAddTenantAdmin(ctx, &identitypb.AdminAddTenantAdminRequest{TenantId: "t"}, opts...)
+		return err
+	},
 	identityconnectgen.IdentityServiceGetLoginPolicyProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
 		_, err := c.GetLoginPolicy(ctx, &identitypb.GetLoginPolicyRequest{}, opts...)
 		return err
@@ -153,7 +161,7 @@ var tenantOperatorCalls = map[string]func(ctx context.Context, c identitypb.Iden
 
 // Every tenant operation spends the tenant-operator budget on native gRPC
 // when it presents a key, because the bridge throttles each one by hand
-// (the HTTP middleware does not run there). A seventh procedure added to
+// (the HTTP middleware does not run there). A procedure added to
 // app.TenantOperatorProcedures fails this test until it has a case here.
 func TestRegisterGRPC_EveryTenantOperationThrottled(t *testing.T) {
 	t.Parallel()

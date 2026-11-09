@@ -687,6 +687,9 @@ func (b *grpcBridge) AdminAddProjectAuthDomain(ctx context.Context, in *identity
 }
 
 func (b *grpcBridge) AdminAddTenantAdmin(ctx context.Context, in *identitypb.AdminAddTenantAdminRequest) (*identitypb.AdminAddTenantAdminResponse, error) {
+	if err := b.throttleTenantOperator(ctx, identityv1connect.IdentityServiceAdminAddTenantAdminProcedure); err != nil {
+		return nil, err
+	}
 	return invoke(ctx, b, in, b.h.AdminAddTenantAdmin)
 }
 
@@ -710,6 +713,9 @@ func (b *grpcBridge) AdminCreateProjectCredential(ctx context.Context, in *ident
 }
 
 func (b *grpcBridge) AdminCreateTenant(ctx context.Context, in *identitypb.AdminCreateTenantRequest) (*identitypb.AdminCreateTenantResponse, error) {
+	if err := b.throttleTenantOperator(ctx, identityv1connect.IdentityServiceAdminCreateTenantProcedure); err != nil {
+		return nil, err
+	}
 	return invoke(ctx, b, in, b.h.AdminCreateTenant)
 }
 

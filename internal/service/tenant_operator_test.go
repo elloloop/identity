@@ -24,8 +24,9 @@ func asTenantOperator(rawKey string) OperatorCredentials {
 
 // tenantOperatorFixture is an operator service configured with an admin
 // secret (possibly none) whose audit records keep the project they were
-// written under, holding a tenant_operator key of "proj" and the recovery
-// fixture's tenant t-1 there, which a person created.
+// written under, holding a tenant_operator key of "proj", the recovery
+// fixture's tenant t-1 there, which a person created, and "aide", an account
+// of "proj" that belongs to no tenant.
 type tenantOperatorFixture struct {
 	*adminFixture
 	records *projectAuditWriter
@@ -36,6 +37,7 @@ func newTenantOperatorFixture(t *testing.T, adminSecret string) *tenantOperatorF
 	t.Helper()
 	f := newRecoveryFixture()
 	f.tenants.put(&Tenant{ID: "t-1", ProjectID: "proj", Name: "Acme", Status: TenantStatusClaimed, CreatedBy: "gone", UpdatedAtMs: 7})
+	f.users.set("proj", &User{ID: "aide", Email: "a@example.test", Status: StatusActive, EmailVerified: true})
 	key, err := f.svc.AdminCreateProjectCredential(context.Background(), testAdminSecret, "proj", CredentialKindTenantOperator)
 	require.NoError(t, err)
 	auditLog, records := newProjectScopedAuditLog()
@@ -78,6 +80,23 @@ var tenantOperations = []struct {
 		_, err := svc.AdminRecoverTenantOwnership(context.Background(), caller, project, "t-1", "heir", "why", testOperatorIP, testOperatorUA)
 		return err
 	}},
+	{"AdminCreateTenant", func(svc *ControlPlaneAdminService, caller OperatorCredentials, project string) error {
+		_, err := svc.AdminCreateTenant(context.Background(), caller, project, "Acme East", "east.example", testOperatorIP, testOperatorUA)
+		return err
+	}},
+	{"AdminAddTenantAdmin", func(svc *ControlPlaneAdminService, caller OperatorCredentials, project string) error {
+		_, err := svc.AdminAddTenantAdmin(context.Background(), caller, project, "t-1", "aide", RoleAdmin, testOperatorIP, testOperatorUA)
+		return err
+	}},
+}
+
+// requireNothingCreated fails unless the fixture still holds only the
+// tenants it was given, n of them, and "aide" holds no membership.
+func (f *tenantOperatorFixture) requireNothingCreated(t *testing.T, n int, msgAndArgs ...any) {
+	t.Helper()
+	assert.Len(t, f.tenants.byID, n, msgAndArgs...)
+	m, _ := f.members.GetMembership(context.Background(), "proj", "t-1", "aide")
+	assert.Nil(t, m, msgAndArgs...)
 }
 
 // A tenant_operator key of the project does each tenant operation, and the
@@ -96,8 +115,16 @@ func TestTenantOperator_AuthorizesTheTenantOperations(t *testing.T) {
 	heir, _ := f.members.GetMembership(ctx, "proj", "t-1", "heir")
 	assert.Equal(t, RoleOwner, heir.Role)
 	assert.Equal(t, MembershipStatusActive, heir.Status)
+	aide, _ := f.members.GetMembership(ctx, "proj", "t-1", "aide")
+	require.NotNil(t, aide)
+	assert.Equal(t, RoleAdmin, aide.Role)
+	assert.Equal(t, MembershipSourceAdded, aide.Source)
+	page, err := f.svc.AdminListTenants(ctx, asTenantOperator(f.key.RawKey), "proj", 0, "")
+	require.NoError(t, err)
+	require.Len(t, page.Tenants, 2)
 	for _, event := range []audit.EventType{
 		audit.EventTenantSuspended, audit.EventTenantRestored, audit.EventTenantOwnershipRecovered, audit.EventTenantMemberRestored,
+		audit.EventTenantCreated, audit.EventTenantAdminAdded,
 	} {
 		records := f.records.byEvent(string(event))
 		require.Len(t, records, 1, event)
@@ -105,6 +132,16 @@ func TestTenantOperator_AuthorizesTheTenantOperations(t *testing.T) {
 		assert.Equal(t, f.actor(), records[0].actor, event)
 	}
 	assert.Empty(t, f.records.byEvent(string(audit.EventTenantOperatorRefused)))
+	created := f.records.byEvent(string(audit.EventTenantCreated))[0]
+	var createdID string
+	for _, tn := range page.Tenants {
+		if tn.ID != "t-1" {
+			createdID = tn.ID
+		}
+	}
+	assert.Equal(t, map[string]any{"project_id": "proj", "tenant_id": createdID}, created.details)
+	assert.Equal(t, map[string]any{"project_id": "proj", "tenant_id": "t-1", "role": RoleAdmin},
+		f.records.byEvent(string(audit.EventTenantAdminAdded))[0].details)
 }
 
 // The admin secret's changes name no actor, as before.
@@ -134,6 +171,9 @@ func TestTenantOperator_ConfinedToItsProject(t *testing.T) {
 	other, _ := f.tenants.GetTenant(ctx, "other", "t-1")
 	assert.Equal(t, TenantStatusClaimed, other.Status)
 	assert.Zero(t, f.tenants.writes)
+	f.requireNothingCreated(t, 2)
+	assert.Empty(t, f.records.byEvent(string(audit.EventTenantCreated)))
+	assert.Empty(t, f.records.byEvent(string(audit.EventTenantAdminAdded)))
 	refusals := f.records.byEvent(string(audit.EventTenantOperatorRefused))
 	require.Len(t, refusals, len(tenantOperations))
 	for _, r := range refusals {
@@ -180,6 +220,7 @@ func TestTenantOperator_RefusesABadKey(t *testing.T) {
 			require.ErrorIs(t, err, errTenantOperatorRefused, "%s: %s", name, op.name)
 		}
 		assert.Zero(t, f.tenants.writes, name)
+		f.requireNothingCreated(t, 1, name)
 		refusals := f.records.byEvent(string(audit.EventTenantOperatorRefused))
 		if tc.reason == "" {
 			assert.Empty(t, refusals, name)
@@ -199,9 +240,64 @@ func TestTenantOperator_RevocationHoldsFromTheNextCall(t *testing.T) {
 	f := newTenantOperatorFixture(t, testAdminSecret)
 	_, err := f.svc.AdminGetTenant(ctx, asTenantOperator(f.key.RawKey), "proj", "t-1")
 	require.NoError(t, err)
+	_, err = f.svc.AdminCreateTenant(ctx, asTenantOperator(f.key.RawKey), "proj", "Before", "before.example", "", "")
+	require.NoError(t, err)
 	require.NoError(t, f.svc.AdminRevokeProjectCredential(ctx, testAdminSecret, "proj", f.key.ID))
 	_, err = f.svc.AdminGetTenant(ctx, asTenantOperator(f.key.RawKey), "proj", "t-1")
 	require.ErrorIs(t, err, errTenantOperatorRefused)
+	_, err = f.svc.AdminCreateTenant(ctx, asTenantOperator(f.key.RawKey), "proj", "After", "after.example", "", "")
+	require.ErrorIs(t, err, errTenantOperatorRefused)
+	_, err = f.svc.AdminAddTenantAdmin(ctx, asTenantOperator(f.key.RawKey), "proj", "t-1", "aide", RoleOwner, "", "")
+	require.ErrorIs(t, err, errTenantOperatorRefused)
+	f.requireNothingCreated(t, 2, "only the tenant made before the revocation")
+	assert.Len(t, f.records.byEvent(string(audit.EventTenantCreated)), 1)
+	assert.Empty(t, f.records.byEvent(string(audit.EventTenantAdminAdded)))
+}
+
+// A key's AdminAddTenantAdmin must name a tenant and an account of its own
+// project, so it writes no membership that reaches another project. The
+// admin secret is not held to it.
+func TestTenantOperator_AddTenantAdminStaysInItsProject(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newTenantOperatorFixture(t, testAdminSecret)
+	f.tenants.put(&Tenant{ID: "t-other", ProjectID: "other", Status: TenantStatusClaimed})
+	f.users.set("other", &User{ID: "outsider", Email: "o@example.test", Status: StatusActive, EmailVerified: true})
+	for name, ref := range map[string]struct{ tenant, user string }{
+		"another project's tenant":  {"t-other", "aide"},
+		"another project's account": {"t-1", "outsider"},
+		"no such account":           {"t-1", "nobody"},
+		"no such tenant":            {"t-none", "aide"},
+	} {
+		_, err := f.svc.AdminAddTenantAdmin(ctx, asTenantOperator(f.key.RawKey), "proj", ref.tenant, ref.user, RoleOwner, "", "")
+		require.ErrorIs(t, err, ErrNotFound, name)
+		m, _ := f.members.GetMembership(ctx, "proj", ref.tenant, ref.user)
+		assert.Nil(t, m, name)
+	}
+	assert.Empty(t, f.records.byEvent(string(audit.EventTenantAdminAdded)))
+
+	_, err := f.svc.AdminAddTenantAdmin(ctx, asAdmin(testAdminSecret), "proj", "t-1", "outsider", RoleOwner, "", "")
+	require.NoError(t, err)
+	m, _ := f.members.GetMembership(ctx, "proj", "t-1", "outsider")
+	require.NotNil(t, m)
+	assert.Equal(t, RoleOwner, m.Role)
+}
+
+// A failed read of the tenant or the account is the store's error.
+func TestTenantOperator_AddTenantAdminReadErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	boom := errors.New("read failed")
+	f := newTenantOperatorFixture(t, testAdminSecret)
+	f.tenants.getErr = boom
+	_, err := f.svc.AdminAddTenantAdmin(ctx, asTenantOperator(f.key.RawKey), "proj", "t-1", "aide", RoleOwner, "", "")
+	require.ErrorIs(t, err, boom)
+
+	f = newTenantOperatorFixture(t, testAdminSecret)
+	f.users.getErr = boom
+	_, err = f.svc.AdminAddTenantAdmin(ctx, asTenantOperator(f.key.RawKey), "proj", "t-1", "aide", RoleOwner, "", "")
+	require.ErrorIs(t, err, boom)
+	f.requireNothingCreated(t, 1)
 }
 
 // When an admin secret is presented it alone is checked: a wrong one is
@@ -236,7 +332,7 @@ func TestTenantOperator_WorksWithoutAnAdminSecret(t *testing.T) {
 		_, err := f.svc.AdminGetTenant(ctx, caller, "proj", "t-1")
 		require.ErrorIs(t, err, ErrUnimplemented, "%+v", caller)
 	}
-	_, err := f.svc.AdminCreateTenant(ctx, f.key.RawKey, "proj", "New", "new.example")
+	_, err := f.svc.AdminCreateProjectCredential(ctx, f.key.RawKey, "proj", CredentialKindTenantOperator)
 	require.ErrorIs(t, err, ErrUnimplemented, "a key is not the admin secret of any other operator call")
 }
 

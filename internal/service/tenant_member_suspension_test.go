@@ -345,7 +345,7 @@ func TestAdminAddTenantAdmin_LiftsASuspension(t *testing.T) {
 	f := newRecoveryFixture()
 	f.seedMembership("heir", MembershipSourceInvited, RoleMember, MembershipStatusSuspended)
 
-	got, err := f.svc.AdminAddTenantAdmin(context.Background(), testAdminSecret, "proj", "t-1", "heir", RoleAdmin)
+	got, err := f.svc.AdminAddTenantAdmin(context.Background(), asAdmin(testAdminSecret), "proj", "t-1", "heir", RoleAdmin, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, MembershipStatusActive, got.Status)
 	stored, _ := f.members.GetMembership(context.Background(), "proj", "t-1", "heir")
@@ -354,7 +354,7 @@ func TestAdminAddTenantAdmin_LiftsASuspension(t *testing.T) {
 	requireOperatorRestore(t, f, RoleMember, MembershipSourceInvited, MembershipStatusActive, "")
 
 	// A grant to an active member lifts nothing and records no lift.
-	_, err = f.svc.AdminAddTenantAdmin(context.Background(), testAdminSecret, "proj", "t-1", "heir", RoleOwner)
+	_, err = f.svc.AdminAddTenantAdmin(context.Background(), asAdmin(testAdminSecret), "proj", "t-1", "heir", RoleOwner, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, 1, f.audit.countByEventType(string(audit.EventTenantMemberRestored)))
 }

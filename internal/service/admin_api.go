@@ -634,20 +634,31 @@ func normalizeAuthHostname(hostname string) (string, error) {
 // An operator-created tenant is seeded CLAIMED, not latent: the operator
 // vouches for it out-of-band, so it is immediately authoritative (its
 // login policy and membership apply) without a domain-verification round.
-func (s *ControlPlaneAdminService) AdminCreateTenant(ctx context.Context, secret, projectID, name, primaryDomain string) (string, error) {
-	if err := s.authorize(secret); err != nil {
+// caller presents the admin secret or a tenant_operator credential of the
+// project. The creation is audited as EventTenantCreated with the operator's
+// actor, ip and ua.
+func (s *ControlPlaneAdminService) AdminCreateTenant(ctx context.Context, caller OperatorCredentials, projectID, name, primaryDomain, ip, ua string) (string, error) {
+	op, err := s.authorizeTenantOperator(ctx, caller, projectID)
+	if err != nil {
 		return "", err
 	}
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
 		return "", fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
-	return s.tenants.CreateTenant(ctx, &Tenant{
+	id, err := s.tenants.CreateTenant(ctx, &Tenant{
 		ProjectID:     projectID,
 		Name:          strings.TrimSpace(name),
 		PrimaryDomain: strings.ToLower(strings.TrimSpace(primaryDomain)),
 		Status:        TenantStatusClaimed,
 	})
+	if err != nil {
+		return "", err
+	}
+	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantCreated,
+		audit.WithActor(op.actor), audit.WithIP(ip), audit.WithUserAgent(ua), audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"project_id": projectID, "tenant_id": id}))
+	return id, nil
 }
 
 // AdminAddTenantAdmin makes a user an owner/admin of a tenant (source=added),
@@ -657,12 +668,17 @@ func (s *ControlPlaneAdminService) AdminCreateTenant(ctx context.Context, secret
 // tenant — and may be admin; plain member is rejected (this RPC bootstraps
 // administration, not ordinary membership). The membership written is
 // active: a suspended one is restored first (liftSuspension), which audits
-// the lift as EventTenantMemberRestored.
-func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, secret, projectID, tenantID, userID, role string) (*TenantMembership, error) {
-	if err := s.authorize(secret); err != nil {
+// the lift as EventTenantMemberRestored. caller presents the admin secret or
+// a tenant_operator credential of the project; a credential's call must
+// also name a tenant and an account of that project (requireProjectMember).
+// The grant is audited as EventTenantAdminAdded with the operator's actor,
+// ip and ua.
+func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, caller OperatorCredentials, projectID, tenantID, userID, role, ip, ua string) (*TenantMembership, error) {
+	op, err := s.authorizeTenantOperator(ctx, caller, projectID)
+	if err != nil {
 		return nil, err
 	}
-	projectID, tenantID, err := requireTenantRef(projectID, tenantID)
+	projectID, tenantID, err = requireTenantRef(projectID, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +690,12 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, secr
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.liftSuspension(ctx, tenantOperator{}, projectID, tenantID, userID, "", "", ""); err != nil {
+	if op.projectBound {
+		if err := s.requireProjectMember(ctx, projectID, tenantID, userID); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := s.liftSuspension(ctx, op, projectID, tenantID, userID, "", ip, ua); err != nil {
 		return nil, err
 	}
 	m := &TenantMembership{
@@ -690,7 +711,32 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, secr
 		return nil, err
 	}
 	m.ID = id
+	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantAdminAdded,
+		audit.WithActor(op.actor), audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
+		audit.WithSuccess(true), audit.WithDetails(map[string]any{
+			"project_id": projectID,
+			"tenant_id":  tenantID,
+			"role":       role,
+		}))
 	return m, nil
+}
+
+// requireProjectMember refuses, with ErrNotFound, a tenant or an account that
+// projectID does not hold, so a tenant_operator credential writes no
+// membership that names another project's tenant or account. The admin
+// secret governs every project and is not held to it.
+func (s *ControlPlaneAdminService) requireProjectMember(ctx context.Context, projectID, tenantID, userID string) error {
+	if _, err := s.getTenant(ctx, projectID, tenantID); err != nil {
+		return err
+	}
+	user, err := s.users.GetUserInProject(ctx, projectID, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return fmt.Errorf("%w: user", ErrNotFound)
+	}
+	return nil
 }
 
 // BootstrappedAdmin is the result of CreateFirstPlatformAdmin: the created

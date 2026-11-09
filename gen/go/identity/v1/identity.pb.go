@@ -14956,9 +14956,10 @@ type AdminCreateProjectCredentialRequest struct {
 	// presented in the X-Teammate-Key-Manager-Key header), or
 	// "tenant_operator" (a machine credential whose secret half is shown ONCE
 	// and which authorizes only AdminGetTenant, AdminListTenants,
-	// AdminSuspendTenant, AdminRestoreTenant, AdminRecoverTenantOwnership and
-	// GetLoginPolicy on this project, presented in the X-Tenant-Operator-Key
-	// header in place of the admin secret).
+	// AdminSuspendTenant, AdminRestoreTenant, AdminRecoverTenantOwnership,
+	// AdminCreateTenant, AdminAddTenantAdmin and GetLoginPolicy on this
+	// project, presented in the X-Tenant-Operator-Key header in place of the
+	// admin secret).
 	Kind          string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

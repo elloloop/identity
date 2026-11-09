@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -480,10 +481,10 @@ func TestControlPlaneAdmin_DisabledWhenSecretEmpty(t *testing.T) {
 	if err := f.svc.AdminRevokeProjectCredential(ctx, "anything", "proj", "cred"); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("AdminRevokeProjectCredential: err = %v, want ErrUnimplemented", err)
 	}
-	if _, err := f.svc.AdminCreateTenant(ctx, "anything", "proj", "Acme", "acme.com"); !errors.Is(err, ErrUnimplemented) {
+	if _, err := f.svc.AdminCreateTenant(ctx, asAdmin("anything"), "proj", "Acme", "acme.com", "", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("AdminCreateTenant: err = %v, want ErrUnimplemented", err)
 	}
-	if _, err := f.svc.AdminAddTenantAdmin(ctx, "anything", "proj", "t", "u", RoleOwner); !errors.Is(err, ErrUnimplemented) {
+	if _, err := f.svc.AdminAddTenantAdmin(ctx, asAdmin("anything"), "proj", "t", "u", RoleOwner, "", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("AdminAddTenantAdmin: err = %v, want ErrUnimplemented", err)
 	}
 
@@ -517,10 +518,10 @@ func TestControlPlaneAdmin_WrongOrMissingSecretDenied(t *testing.T) {
 		if err := f.svc.AdminRevokeProjectCredential(ctx, presented, "proj", "cred"); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("AdminRevokeProjectCredential(secret=%q): err = %v, want ErrPermissionDenied", presented, err)
 		}
-		if _, err := f.svc.AdminCreateTenant(ctx, presented, "proj", "Acme", "acme.com"); !errors.Is(err, ErrPermissionDenied) {
+		if _, err := f.svc.AdminCreateTenant(ctx, asAdmin(presented), "proj", "Acme", "acme.com", "", ""); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("AdminCreateTenant(secret=%q): err = %v, want ErrPermissionDenied", presented, err)
 		}
-		if _, err := f.svc.AdminAddTenantAdmin(ctx, presented, "proj", "t", "u", RoleOwner); !errors.Is(err, ErrPermissionDenied) {
+		if _, err := f.svc.AdminAddTenantAdmin(ctx, asAdmin(presented), "proj", "t", "u", RoleOwner, "", ""); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("AdminAddTenantAdmin(secret=%q): err = %v, want ErrPermissionDenied", presented, err)
 		}
 	}
@@ -752,7 +753,7 @@ func TestControlPlaneAdmin_CreateTenant_ClaimedAndNormalized(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	ctx := context.Background()
 
-	id, err := f.svc.AdminCreateTenant(ctx, testAdminSecret, "proj-1", "  Acme Inc  ", "  Acme.COM ")
+	id, err := f.svc.AdminCreateTenant(ctx, asAdmin(testAdminSecret), "proj-1", "  Acme Inc  ", "  Acme.COM ", testOperatorIP, testOperatorUA)
 	if err != nil {
 		t.Fatalf("AdminCreateTenant: %v", err)
 	}
@@ -766,12 +767,37 @@ func TestControlPlaneAdmin_CreateTenant_ClaimedAndNormalized(t *testing.T) {
 	if stored.Name != "Acme Inc" || stored.PrimaryDomain != "acme.com" {
 		t.Fatalf("tenant fields not normalized: %+v", stored)
 	}
+
+	// The admin secret names no actor; the operator's client is kept.
+	if n := f.audit.countByEventTypeActorTarget(string(audit.EventTenantCreated), "", ""); n != 1 {
+		t.Fatalf("tenant_created with no actor recorded %d times, want 1", n)
+	}
+	if got := f.audit.clientsOf(string(audit.EventTenantCreated)); !reflect.DeepEqual(got, [][2]string{{testOperatorIP, testOperatorUA}}) {
+		t.Fatalf("tenant_created clients = %v", got)
+	}
+	if got := f.audit.detailsOf(string(audit.EventTenantCreated)); !reflect.DeepEqual(got, []map[string]any{{"project_id": "proj-1", "tenant_id": id}}) {
+		t.Fatalf("tenant_created details = %v", got)
+	}
+}
+
+// A creation the store refuses records nothing.
+func TestControlPlaneAdmin_CreateTenant_StoreErrorRecordsNothing(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	boom := errors.New("insert failed")
+	f.tenants.createErr = boom
+	if _, err := f.svc.AdminCreateTenant(context.Background(), asAdmin(testAdminSecret), "proj-1", "Acme", "acme.com", "", ""); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want %v", err, boom)
+	}
+	if n := f.audit.countByEventType(string(audit.EventTenantCreated)); n != 0 {
+		t.Fatalf("a failed creation recorded %d tenant_created", n)
+	}
 }
 
 func TestControlPlaneAdmin_CreateTenant_RequiresProjectID(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(testAdminSecret)
-	if _, err := f.svc.AdminCreateTenant(context.Background(), testAdminSecret, "  ", "Acme", "acme.com"); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.svc.AdminCreateTenant(context.Background(), asAdmin(testAdminSecret), "  ", "Acme", "acme.com", "", ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("blank project id: err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -781,7 +807,7 @@ func TestControlPlaneAdmin_AddTenantAdmin_DefaultsOwner(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	ctx := context.Background()
 
-	m, err := f.svc.AdminAddTenantAdmin(ctx, testAdminSecret, "proj-1", "tenant-1", "user-1", "")
+	m, err := f.svc.AdminAddTenantAdmin(ctx, asAdmin(testAdminSecret), "proj-1", "tenant-1", "user-1", "", testOperatorIP, testOperatorUA)
 	if err != nil {
 		t.Fatalf("AdminAddTenantAdmin: %v", err)
 	}
@@ -792,12 +818,24 @@ func TestControlPlaneAdmin_AddTenantAdmin_DefaultsOwner(t *testing.T) {
 	if stored == nil || stored.Role != RoleOwner {
 		t.Fatalf("stored membership = %+v", stored)
 	}
+
+	// The admin secret names no actor; the target is the account granted.
+	if n := f.audit.countByEventTypeActorTarget(string(audit.EventTenantAdminAdded), "", "user-1"); n != 1 {
+		t.Fatalf("tenant_admin_added for user-1 with no actor recorded %d times, want 1", n)
+	}
+	if got := f.audit.clientsOf(string(audit.EventTenantAdminAdded)); !reflect.DeepEqual(got, [][2]string{{testOperatorIP, testOperatorUA}}) {
+		t.Fatalf("tenant_admin_added clients = %v", got)
+	}
+	want := []map[string]any{{"project_id": "proj-1", "tenant_id": "tenant-1", "role": RoleOwner}}
+	if got := f.audit.detailsOf(string(audit.EventTenantAdminAdded)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("tenant_admin_added details = %v, want %v", got, want)
+	}
 }
 
 func TestControlPlaneAdmin_AddTenantAdmin_AdminRoleAllowed(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(testAdminSecret)
-	m, err := f.svc.AdminAddTenantAdmin(context.Background(), testAdminSecret, "p", "t", "u", "ADMIN")
+	m, err := f.svc.AdminAddTenantAdmin(context.Background(), asAdmin(testAdminSecret), "p", "t", "u", "ADMIN", "", "")
 	if err != nil {
 		t.Fatalf("AdminAddTenantAdmin(admin): %v", err)
 	}
@@ -809,7 +847,7 @@ func TestControlPlaneAdmin_AddTenantAdmin_AdminRoleAllowed(t *testing.T) {
 func TestControlPlaneAdmin_AddTenantAdmin_RejectsMemberRole(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(testAdminSecret)
-	if _, err := f.svc.AdminAddTenantAdmin(context.Background(), testAdminSecret, "p", "t", "u", RoleMember); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.svc.AdminAddTenantAdmin(context.Background(), asAdmin(testAdminSecret), "p", "t", "u", RoleMember, "", ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("member role: err = %v, want ErrInvalidArgument (bootstraps administration only)", err)
 	}
 }
@@ -824,7 +862,7 @@ func TestControlPlaneAdmin_AddTenantAdmin_RequiresIDs(t *testing.T) {
 		{"p", "t", ""},
 	}
 	for _, c := range cases {
-		if _, err := f.svc.AdminAddTenantAdmin(ctx, testAdminSecret, c.projectID, c.tenantID, c.userID, RoleOwner); !errors.Is(err, ErrInvalidArgument) {
+		if _, err := f.svc.AdminAddTenantAdmin(ctx, asAdmin(testAdminSecret), c.projectID, c.tenantID, c.userID, RoleOwner, "", ""); !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("ids %+v: err = %v, want ErrInvalidArgument", c, err)
 		}
 	}
@@ -1136,8 +1174,11 @@ func TestControlPlaneAdmin_StoreErrorsPropagate(t *testing.T) {
 	t.Run("add tenant admin", func(t *testing.T) {
 		f := newAdminFixture(testAdminSecret)
 		f.members.upsertErr = wantErr
-		if _, err := f.svc.AdminAddTenantAdmin(ctx, testAdminSecret, "p", "t", "u", RoleOwner); !errors.Is(err, wantErr) {
+		if _, err := f.svc.AdminAddTenantAdmin(ctx, asAdmin(testAdminSecret), "p", "t", "u", RoleOwner, "", ""); !errors.Is(err, wantErr) {
 			t.Fatalf("err = %v, want %v", err, wantErr)
+		}
+		if n := f.audit.countByEventType(string(audit.EventTenantAdminAdded)); n != 0 {
+			t.Fatalf("a failed grant recorded %d tenant_admin_added", n)
 		}
 	})
 	t.Run("create first platform admin", func(t *testing.T) {

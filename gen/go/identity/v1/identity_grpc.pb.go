@@ -596,7 +596,7 @@ type IdentityServiceClient interface {
 	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
 	// projects/tenants/credentials out-of-band. Authenticated by the shared
 	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
-	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The six tenant
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The tenant
 	// operations documented on AdminGetTenant also accept a tenant_operator
 	// credential in "X-Tenant-Operator-Key", whether or not the secret is set.
 	AdminCreateProject(ctx context.Context, in *AdminCreateProjectRequest, opts ...grpc.CallOption) (*AdminCreateProjectResponse, error)
@@ -617,23 +617,34 @@ type IdentityServiceClient interface {
 	// project's primary serving host, atomically demoting the current primary in
 	// the same transaction. Only a verified domain may be promoted.
 	SetPrimaryAuthDomain(ctx context.Context, in *SetPrimaryAuthDomainRequest, opts ...grpc.CallOption) (*SetPrimaryAuthDomainResponse, error)
+	// AdminCreateTenant creates a tenant of project_id, claimed at once, with
+	// the name and primary_domain given, and records tenant_created with the
+	// operator's IP address and user agent. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id. INVALID_ARGUMENT for a blank project_id.
 	AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error)
 	// AdminAddTenantAdmin makes user_id an owner or admin of the tenant (role
 	// "owner", the default, or "admin"), with an active membership: one that
 	// is suspended is restored first, and the lift is audited as a restore.
-	// Operator-only, like the other Admin* RPCs.
+	// It sets the role it is given, so it can lower an owner, and it judges
+	// neither the account nor who governs the tenant. Records
+	// tenant_admin_added with the operator's IP address and user agent.
+	// Operator-only, authorized like AdminGetTenant: the admin secret, or a
+	// tenant_operator credential of project_id. Called with a credential,
+	// tenant_id and user_id must be a tenant and an account of project_id,
+	// else NOT_FOUND. INVALID_ARGUMENT for a blank id or any other role.
 	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy.
 	//
-	// Operator-only, and one of the six tenant operations (with
+	// Operator-only, and one of the tenant operations (with
 	// AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
-	// AdminRecoverTenantOwnership and GetLoginPolicy) that also accept a
-	// tenant_operator project credential, "<public id>.<secret>", in the
-	// X-Tenant-Operator-Key header in place of the admin secret. The
-	// credential authorizes these six alone, and only on its own project:
-	// project_id must name it. It is checked on every call, so a revocation
-	// holds from the next one, and works whether or not
+	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin and
+	// GetLoginPolicy) that also accept a tenant_operator project credential,
+	// "<public id>.<secret>", in the X-Tenant-Operator-Key header in place of
+	// the admin secret. The credential authorizes these alone, and only on
+	// its own project: project_id must name it. It is checked on every call,
+	// so a revocation holds from the next one, and works whether or not
 	// GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
 	// alone is checked. What a credential does is recorded with it as the
 	// actor ("credential:<id>"); a refusal of one that exists is recorded as
@@ -2934,7 +2945,7 @@ type IdentityServiceServer interface {
 	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
 	// projects/tenants/credentials out-of-band. Authenticated by the shared
 	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
-	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The six tenant
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set. The tenant
 	// operations documented on AdminGetTenant also accept a tenant_operator
 	// credential in "X-Tenant-Operator-Key", whether or not the secret is set.
 	AdminCreateProject(context.Context, *AdminCreateProjectRequest) (*AdminCreateProjectResponse, error)
@@ -2955,23 +2966,34 @@ type IdentityServiceServer interface {
 	// project's primary serving host, atomically demoting the current primary in
 	// the same transaction. Only a verified domain may be promoted.
 	SetPrimaryAuthDomain(context.Context, *SetPrimaryAuthDomainRequest) (*SetPrimaryAuthDomainResponse, error)
+	// AdminCreateTenant creates a tenant of project_id, claimed at once, with
+	// the name and primary_domain given, and records tenant_created with the
+	// operator's IP address and user agent. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id. INVALID_ARGUMENT for a blank project_id.
 	AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error)
 	// AdminAddTenantAdmin makes user_id an owner or admin of the tenant (role
 	// "owner", the default, or "admin"), with an active membership: one that
 	// is suspended is restored first, and the lift is audited as a restore.
-	// Operator-only, like the other Admin* RPCs.
+	// It sets the role it is given, so it can lower an owner, and it judges
+	// neither the account nor who governs the tenant. Records
+	// tenant_admin_added with the operator's IP address and user agent.
+	// Operator-only, authorized like AdminGetTenant: the admin secret, or a
+	// tenant_operator credential of project_id. Called with a credential,
+	// tenant_id and user_id must be a tenant and an account of project_id,
+	// else NOT_FOUND. INVALID_ARGUMENT for a blank id or any other role.
 	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy.
 	//
-	// Operator-only, and one of the six tenant operations (with
+	// Operator-only, and one of the tenant operations (with
 	// AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
-	// AdminRecoverTenantOwnership and GetLoginPolicy) that also accept a
-	// tenant_operator project credential, "<public id>.<secret>", in the
-	// X-Tenant-Operator-Key header in place of the admin secret. The
-	// credential authorizes these six alone, and only on its own project:
-	// project_id must name it. It is checked on every call, so a revocation
-	// holds from the next one, and works whether or not
+	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin and
+	// GetLoginPolicy) that also accept a tenant_operator project credential,
+	// "<public id>.<secret>", in the X-Tenant-Operator-Key header in place of
+	// the admin secret. The credential authorizes these alone, and only on
+	// its own project: project_id must name it. It is checked on every call,
+	// so a revocation holds from the next one, and works whether or not
 	// GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
 	// alone is checked. What a credential does is recorded with it as the
 	// actor ("credential:<id>"); a refusal of one that exists is recorded as

@@ -326,11 +326,23 @@ const (
 	EventAgentTransferDeclined  EventType = "agent_transfer_declined"
 	EventAgentTransferCancelled EventType = "agent_transfer_cancelled"
 
-	// EventTenantCreated records a person creating a tenant they own
-	// (CreateTenant): actor and target the creator, with the new tenant's id
-	// in the details. A refused attempt over the creation limit is logged with
-	// success=false and a `reason` detail, so a burst of attempts is visible.
+	// EventTenantCreated records a tenant being created, with the project and
+	// the new tenant's ids in the details. A person creating a tenant they own
+	// (CreateTenant) is actor and target; a refused attempt over the creation
+	// limit is logged with success=false and a `reason` detail, so a burst of
+	// attempts is visible. An operator's AdminCreateTenant records the
+	// operator's IP address and user agent, with the actor "credential:<id>"
+	// when a tenant_operator credential made the call and none for the admin
+	// secret.
 	EventTenantCreated EventType = "tenant_created"
+
+	// EventTenantAdminAdded records an operator making an account an owner or
+	// admin of a tenant (AdminAddTenantAdmin): actor the tenant_operator
+	// credential ("credential:<id>") or none for the admin secret, target the
+	// account, the operator's IP address and user agent, and the project id,
+	// the tenant id and the role granted in the details. Every grant that
+	// succeeds records it, a repeated one included.
+	EventTenantAdminAdded EventType = "tenant_admin_added"
 
 	// EventTenantSuspended / EventTenantRestored record an operator
 	// suspending a claimed tenant or restoring a suspended one
@@ -396,8 +408,9 @@ const (
 	// by a tenant owner or admin (RestoreTenantMember), with the caller as
 	// actor, or by an operator's AdminRecoverTenantOwnership or
 	// AdminAddTenantAdmin, which lift it before they write the membership,
-	// with the operator's actor (a recovery's tenant_operator credential,
-	// or none) and, for a recovery, the operator's reason in the details.
+	// with the operator's actor (the tenant_operator credential, or none for
+	// the admin secret), IP address and user agent and, for a recovery, the
+	// operator's reason in the details.
 	// The target is the person, and the details hold the project and tenant
 	// ids, the role and source, and the status the restore gave the
 	// membership: "active", or "inactive" for a membership through the
@@ -505,6 +518,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventAgentTransferDeclined:         {},
 	EventAgentTransferCancelled:        {},
 	EventTenantCreated:                 {},
+	EventTenantAdminAdded:              {},
 	EventTenantSuspended:               {},
 	EventTenantRestored:                {},
 	EventTenantOwnershipTransferred:    {},

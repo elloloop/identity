@@ -57,6 +57,13 @@ tenant of its own project, and read its tenants and login policy, in place
 of the operator secret (migration 0054). Those records name the credential
 as their actor ([Suspension](#suspension), [Ownership](#ownership)).
 
+**Amended** (2026-11-10): the credential may also create a tenant of its
+project (`AdminCreateTenant`) and make an account of the project a tenant's
+owner or admin (`AdminAddTenantAdmin`), so a service provisions its
+project's tenants without the secret. Both calls are now audited, as
+`tenant_created` and `tenant_admin_added`, with the credential, when one was
+used, as the actor ([Ownership](#ownership)).
+
 ## Context
 
 Until now a tenant came into being in one of two ways: auto-formed from the
@@ -348,10 +355,12 @@ ways, both audited; neither changes any other member's role.
   owner reactivated after a recovery is an owner again beside the appointed
   one, so the operator first makes sure the account will not come back.
 
-Recovery does not reuse `AdminAddTenantAdmin`. That RPC provisions: it is
-not audited, checks neither the account nor who governs the tenant, and
-sets the role it is given, so it can lower an owner. Recovery is the lever
-for a tenant whose governance has failed, and it is narrow on purpose.
+Recovery does not reuse `AdminAddTenantAdmin`. That RPC provisions: it
+records only the grant (`tenant_admin_added`), checks neither the account's
+fitness nor who governs the tenant, and sets the role it is given, so it can
+lower an owner. A `tenant_operator` credential's grant must name a tenant and
+an account of its own project; the secret's is not checked. Recovery is the
+lever for a tenant whose governance has failed, and it is narrow on purpose.
 
 It stays closed while an admin can act, even one who will not. When every
 owner is gone and the admins left cannot be reached or refuse, the remedy is

@@ -34,6 +34,9 @@ type tenantOperator struct {
 	// credential's (credentialActor), or empty for the admin secret, which
 	// names nobody.
 	actor string
+	// projectBound is set for a tenant_operator credential, which acts on
+	// its own project alone; the admin secret governs every project.
+	projectBound bool
 }
 
 // authorizeTenantOperator admits a tenant operation on projectID: the admin
@@ -71,5 +74,5 @@ func (s *ControlPlaneAdminService) authorizeTenantOperator(ctx context.Context, 
 	if projectID == "" {
 		return tenantOperator{}, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
-	return tenantOperator{actor: credentialActor(cred)}, nil
+	return tenantOperator{actor: credentialActor(cred), projectBound: true}, nil
 }
