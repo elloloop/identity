@@ -68,11 +68,10 @@ func (r *pgRepository) CreateAgentMachine(ctx context.Context, input *service.Ag
 		if service.SameAgentMachineRegistration(&original, input) {
 			return current, tx.Commit(ctx)
 		}
-		// A registration its governance revoked (a project, tenant, domain, client
-		// or owner change) is replaced when the same owner registers the installation
-		// again with a new key on a fresh sign-in. Another owner, or a registration
-		// still active, never takes the id over.
-		if current.RevokedAtMs == 0 || current.OwnerID != input.OwnerID {
+		// A revoked registration is replaced when the same owner registers the
+		// installation again with a new key on a fresh sign-in. Another owner, a
+		// registration still active, or the revoked key itself never comes back.
+		if current.RevokedAtMs == 0 || current.OwnerID != input.OwnerID || current.PublicKey == input.PublicKey {
 			return nil, service.ErrAlreadyExists
 		}
 		return r.replaceRevokedAgentMachine(ctx, tx, current, input)
@@ -225,10 +224,13 @@ func (r *pgRepository) EnsureAgentMachineDelegation(ctx context.Context, id stri
 	if existing != nil {
 		// The revocation that ended this delegation is the one the machine
 		// registered again after (CreateAgentMachine): the delegation is renewed
-		// for the new registration. One the owner ended by excluding the agent
-		// carries another time and stays ended.
+		// for the new registration, under a new agent key. One ended at another
+		// time, such as by the owner excluding the agent, stays ended.
 		if existing.RevokedAtMs != 0 && machine.RenewedAfterRevokedAtMs != 0 &&
 			existing.RevokedAtMs == machine.RenewedAfterRevokedAtMs {
+			if existing.MachinePublicKey == candidate.MachinePublicKey {
+				return nil, service.ErrAgentOAuthGrant
+			}
 			return r.renewRevokedAgentDelegation(ctx, tx, existing, candidate)
 		}
 		if !a.Valid(existing) || existing.MachinePublicKey != candidate.MachinePublicKey {
@@ -271,6 +273,15 @@ func (r *pgRepository) replaceRevokedAgentMachine(ctx context.Context, tx pgx.Tx
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM agent_machine_challenges WHERE project_id=$1 AND machine_id=$2`, r.projectID, renewed.ID); err != nil {
 		return nil, wrapPgErr("CreateAgentMachine", err)
+	}
+	// A delegation left at the revocation this registration had itself recovered
+	// from, never ensured again since, follows to the latest one, so it is not
+	// stranded behind two renewals.
+	if current.RenewedAfterRevokedAtMs != 0 {
+		if _, err = tx.Exec(ctx, `UPDATE agent_authorizations SET revoked_at_ms=$3,revision=revision+1 WHERE project_id=$1 AND machine_id=$2 AND revoked_at_ms=$4`,
+			r.projectID, renewed.ID, current.RevokedAtMs, current.RenewedAfterRevokedAtMs); err != nil {
+			return nil, wrapPgErr("CreateAgentMachine", err)
+		}
 	}
 	return renewed, tx.Commit(ctx)
 }

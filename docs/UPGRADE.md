@@ -14,16 +14,20 @@ Now the same owner registers the installation again with a new key, on a sign-in
 recent enough for `RegisterAgentMachine` as before: the registration is
 replaced in place (next revision, no revocation, the challenges issued to the
 old key dropped), and the record remembers the revocation it recovered from
-(`RenewedAfterRevokedAtMs`). Nothing else changes hands: another owner, or a
-registration that is still active, is refused with `already_exists` as before,
-and an exact replay of a revoked registration still returns the revoked record.
+(`RenewedAfterRevokedAtMs`). Nothing else changes hands: another owner, a
+registration that is still active, or the revoked key itself (whatever else the
+request changes) is refused with `already_exists` as before, and an exact replay
+of a revoked registration still returns the revoked record.
 
 The delegations that same revocation ended come back only when each is ensured
 again for the renewed registration (`EnsureAgentMachineDelegation`): a
 delegation whose `revoked_at_ms` equals the revocation the machine recovered
-from is renewed in place (same id, next revision); one ended at any other time,
-such as by the owner excluding the agent, stays ended, and the renewed
-registration's own agent selection decides who may connect at all.
+from is renewed in place (same id, next revision) under a new agent key; its
+revoked key is refused. One ended at any other time, such as by the owner
+excluding the agent, stays ended, and the renewed registration's own agent
+selection decides who may connect at all. A delegation not ensured again before
+the machine is revoked and renewed once more follows to the latest revocation,
+so it is never stranded behind an earlier renewal.
 
 Outside verifiers see `agent_machine_registered` audited for the renewal as for
 a first registration. Rolling back is running the previous release again: a

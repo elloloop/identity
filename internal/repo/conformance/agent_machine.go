@@ -16,7 +16,9 @@ type machineFixture struct {
 	repo    service.AgentMachineRepository
 	oauth   service.AgentOAuthRepository
 	machine *service.AgentMachine
-	agent   string
+	// origin is the registration as first presented; a renewal starts from it.
+	origin *service.AgentMachine
+	agent  string
 }
 
 func seedAgentMachine(ctx context.Context, t *testing.T, base service.Repository) machineFixture {
@@ -41,7 +43,7 @@ func seedAgentMachine(ctx context.Context, t *testing.T, base service.Repository
 	stored, err := repo.CreateAgentMachine(ctx, m, a.Fingerprint())
 	require.NoError(t, err)
 	require.Equal(t, m, stored)
-	return machineFixture{base: base, repo: repo, oauth: oauth, machine: m, agent: agent}
+	return machineFixture{base: base, repo: repo, oauth: oauth, machine: m, origin: m.Clone(), agent: agent}
 }
 
 func (f machineFixture) candidate(ctx context.Context, t *testing.T, id string) (*service.AgentAuthorization, string) {
@@ -50,6 +52,33 @@ func (f machineFixture) candidate(ctx context.Context, t *testing.T, id string) 
 	require.NoError(t, err)
 	now := time.Now().UnixMilli()
 	return &service.AgentAuthorization{ID: id, MachineID: f.machine.ID, MachinePublicKey: agentOAuthHash(f.agent), ClientID: f.machine.ClientID, ClientRevision: f.machine.ClientRevision, Resource: f.machine.Resource, Product: f.machine.Product, Scopes: []string{"read"}, OwnerID: f.machine.OwnerID, AgentID: f.agent, SessionID: "machine-session", Decision: service.AgentAuthorizationApproved, CreatedAtMs: now, ConsentAtMs: now, Revision: 1}, a.Fingerprint()
+}
+
+// ensureWithKey ensures the delegation for the fixture's agent under its own
+// agent key, as an engine does after the machine registered again.
+func (f machineFixture) ensureWithKey(ctx context.Context, t *testing.T, id, key string) *service.AgentAuthorization {
+	t.Helper()
+	candidate, fingerprint := f.candidate(ctx, t, id)
+	candidate.MachinePublicKey = key
+	grant, err := f.repo.EnsureAgentMachineDelegation(ctx, f.machine.ID, candidate, f.machine.PublicKey, fingerprint)
+	require.NoError(t, err)
+	return grant
+}
+
+// renew revokes the fixture's machine at CreatedAtMs+offset and registers it
+// again with the key named, keeping the renewed record as the fixture's machine.
+func (f *machineFixture) renew(ctx context.Context, t *testing.T, offset int64, key string) {
+	t.Helper()
+	_, err := f.repo.MutateAgentMachine(ctx, f.machine.ID, service.AgentMachineMutation{Operation: service.AgentMachineRevoke, OwnerID: f.machine.OwnerID, AtMs: f.machine.CreatedAtMs + offset})
+	require.NoError(t, err)
+	renewed := f.origin.Clone()
+	renewed.PublicKey = agentOAuthHash(key)
+	renewed.CreatedAtMs = f.machine.CreatedAtMs + offset + 1
+	a, err := f.oauth.AgentOAuthAuthority(ctx, renewed.OwnerID, "", renewed.RegistrationSID, renewed.ClientID)
+	require.NoError(t, err)
+	got, err := f.repo.CreateAgentMachine(ctx, renewed, a.Fingerprint())
+	require.NoError(t, err)
+	f.machine = got
 }
 
 func (f machineFixture) ensure(ctx context.Context, t *testing.T, id string) *service.AgentAuthorization {
@@ -110,6 +139,12 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			got, err = f.repo.CreateAgentMachine(ctx, retry, a.Fingerprint())
 			require.NoError(t, err)
 			require.Equal(t, revoked, got)
+			// The revoked key never comes back, whatever else the request changes.
+			sameKey := f.machine.Clone()
+			sameKey.RegistrationSID = "fresh-sid"
+			sameKey.DisplayName = "renamed"
+			_, err = f.repo.CreateAgentMachine(ctx, sameKey, a.Fingerprint())
+			require.ErrorIs(t, err, service.ErrAlreadyExists)
 			// The same owner registers the revoked installation again with a new key:
 			// the registration is replaced, remembering the revocation it recovered from.
 			renewed := f.machine.Clone()
@@ -126,7 +161,7 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			require.NoError(t, err)
 			require.Equal(t, got, stored)
 			// A replay of the renewal is the renewal; a different key on the active
-			// registration, or another owner, is still refused.
+			// registration is still refused.
 			got, err = f.repo.CreateAgentMachine(ctx, renewed, a.Fingerprint())
 			require.NoError(t, err)
 			require.Equal(t, stored, got)
@@ -156,11 +191,36 @@ func RunAgentMachineConformance(t *testing.T, driver Driver) {
 			still, err := f.repo.GetAgentMachineDelegation(ctx, got.ID, f.agent)
 			require.NoError(t, err)
 			require.NotZero(t, still.RevokedAtMs)
-			again := f.ensure(ctx, t, "key-after")
+			// The ended delegation's own key never comes back; a new agent key renews it.
+			sameKey, fingerprint := f.candidate(ctx, t, "key-after")
+			_, err = f.repo.EnsureAgentMachineDelegation(ctx, got.ID, sameKey, got.PublicKey, fingerprint)
+			require.ErrorIs(t, err, service.ErrAgentOAuthGrant)
+			again := f.ensureWithKey(ctx, t, "key-after", agentOAuthHash("renewed-agent-key"))
 			require.Equal(t, before.ID, again.ID)
 			require.Zero(t, again.RevokedAtMs)
 			require.Equal(t, ended.Revision+1, again.Revision)
 			stored, err := f.repo.GetAgentMachineDelegation(ctx, got.ID, f.agent)
+			require.NoError(t, err)
+			require.Equal(t, again, stored)
+		})
+
+		t.Run("ADelegationSkippedBetweenTwoRenewalsIsNotStranded", func(t *testing.T) {
+			f := seedAgentMachine(ctx, t, driver.NewRepo(t))
+			first := f.agent
+			f.ensure(ctx, t, "first-before")
+			second, err := f.base.CreateUser(ctx, &service.User{Kind: service.UserKindAgent, Status: service.StatusActive, OwnerUserID: f.machine.OwnerID})
+			require.NoError(t, err)
+			f.agent = second
+			f.ensureWithKey(ctx, t, "second-before", agentOAuthHash("second-key"))
+			f.renew(ctx, t, 3, "renewed-once")
+			// Only the first agent is ensured again before the next revocation.
+			f.agent = first
+			f.ensureWithKey(ctx, t, "first-after", agentOAuthHash("first-key-2"))
+			f.renew(ctx, t, 20, "renewed-twice")
+			f.agent = second
+			again := f.ensureWithKey(ctx, t, "second-after", agentOAuthHash("second-key-2"))
+			require.Zero(t, again.RevokedAtMs)
+			stored, err := f.repo.GetAgentMachineDelegation(ctx, f.machine.ID, second)
 			require.NoError(t, err)
 			require.Equal(t, again, stored)
 		})
