@@ -377,20 +377,38 @@ RestoreTenantMember(tenant_id, user_id)
     in and calls <code>AcceptTenantInvitation</code> with the token.
   </p>
   <p id="invited-sign-up">
-    An invitee with no account yet signs up on that page. On a project whose
-    <code>access.mode</code> is <code>invite</code>, which refuses self-signup,
-    a pending invitation is what lets that account be created: a sign-in that
-    proves the address (an OAuth provider that verified it, or a redeemed
-    emailed code or link) creates the account when a tenant of the project
-    that is claimed or latent holds a pending, unexpired invitation to it, and
-    an emailed code is sent to such an address. The account joins no tenant
-    until it accepts the invitation. A password sign-up proves nothing about
-    the address and is still refused, as is everyone the deny layer turns
-    away, and <code>accounts.email_signup</code> set to <code>admin</code> or
-    <code>off</code> still closes self-created email accounts. Postgres
-    deployments only: the memory and SQLite drivers keep no tenant
-    invitations.
+    An invitee with no account yet signs up on that page. A project whose
+    <code>access.mode</code> is <code>invite</code> refuses self-signup, so it
+    creates that account only when it sets
+    <code>access.admit_tenant_invitations</code> (off by default; for the
+    env-configured default project,
+    <code>GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS</code>). Then a
+    sign-in that proves the address, through an OAuth provider that verified it
+    or a redeemed emailed code or link, creates the account when a pending,
+    unexpired invitation names it, and an emailed code is sent to such an
+    address.
   </p>
+  <ul>
+    <li>
+      Only invitations from a claimed or latent tenant that was not made through
+      self-service <code>CreateTenant</code> count, so a person who makes a
+      tenant cannot invite others into the project.
+    </li>
+    <li>
+      A password sign-up is still refused, as is every address the deny layer
+      turns away. <code>accounts.email_signup</code> set to <code>admin</code>
+      or <code>off</code>, and <code>GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false</code>
+      for codes and links, still close it.
+    </li>
+    <li>
+      The account joins no tenant until it accepts the invitation. Revoking or
+      expiring the invitation afterwards leaves an account that signs in but
+      belongs to no tenant; suspend or delete it to remove access.
+    </li>
+    <li>
+      Postgres only: the memory and SQLite drivers keep no tenant invitations.
+    </li>
+  </ul>
 
   <h2 id="operating-tenants">Operating tenants</h2>
   <p>

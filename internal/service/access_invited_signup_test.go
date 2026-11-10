@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const inviteOnlyJSON = `{"access":{"mode":"invite"}}`
+const inviteOnlyJSON = `{"access":{"mode":"invite","admit_tenant_invitations":true}}`
 
 type invitationSpec struct {
 	projectID string
@@ -101,7 +101,7 @@ func TestInviteOnly_InvitationLookupFailureRefuses(t *testing.T) {
 func TestInviteOnly_DenyLayerRefusesAnInvitedAddress(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo).WithOpenInvitations(invitationsWith(pending("new@gmail.com")))
-	ctx := accessScope(t, `{"access":{"mode":"invite","block_public_email_domains":true}}`)
+	ctx := accessScope(t, `{"access":{"mode":"invite","admit_tenant_invitations":true,"block_public_email_domains":true}}`)
 
 	require.ErrorIs(t, invitedOAuthSignIn(ctx, svc, "new@gmail.com"), ErrSignupByInvitationOnly)
 	u, _ := repo.FindUserByEmail(context.Background(), "new@gmail.com")
@@ -111,11 +111,51 @@ func TestInviteOnly_DenyLayerRefusesAnInvitedAddress(t *testing.T) {
 func TestInviteOnly_AdminOnlyEmailAccountsStayClosedToInvitedSignup(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo).WithOpenInvitations(invitationsWith(pending("new@example.com")))
-	cfg, err := ParseProjectConfig(`{"access":{"mode":"invite"},"accounts":{"email_signup":"admin"}}`)
+	cfg, err := ParseProjectConfig(`{"access":{"mode":"invite","admit_tenant_invitations":true},"accounts":{"email_signup":"admin"}}`)
 	require.NoError(t, err)
 	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-a", Access: cfg.Access, Accounts: cfg.Accounts})
 
 	require.ErrorIs(t, invitedOAuthSignIn(ctx, svc, "new@example.com"), ErrSignupByInvitationOnly)
+}
+
+func TestInviteOnly_InvitationsAdmitNobodyUnlessTheProjectOptsIn(t *testing.T) {
+	ctx := accessScope(t, `{"access":{"mode":"invite"}}`)
+	oauthRepo := newFakeRepo()
+	oauth := newTestAuthService(t, oauthRepo).WithOpenInvitations(invitationsWith(pending("new@example.com")))
+	require.ErrorIs(t, invitedOAuthSignIn(ctx, oauth, "new@example.com"), ErrSignupByInvitationOnly)
+	u, _ := oauthRepo.FindUserByEmail(context.Background(), "new@example.com")
+	assert.Nil(t, u)
+
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.WithOpenInvitations(invitationsWith(pending("new@example.com")))
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, "new@example.com"))
+	assert.Empty(t, rec.Sent(), "no code without the opt-in")
+	seedEmailLoginCode(t, repo, "new@example.com", "123456")
+	_, err := svc.VerifyEmailLoginCode(ctx, "new@example.com", "123456", "1.2.3.4", "a")
+	require.ErrorIs(t, err, ErrSignupByInvitationOnly)
+}
+
+func TestInviteOnly_NoCodeWhereRedemptionCouldNotCreateTheAccount(t *testing.T) {
+	svc, _, rec := newAuthSvcWithMailer(t)
+	svc.WithOpenInvitations(invitationsWith(pending("new@example.com")))
+	cfg, err := ParseProjectConfig(`{"access":{"mode":"invite","admit_tenant_invitations":true},"accounts":{"email_signup":"admin"}}`)
+	require.NoError(t, err)
+	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-a", Access: cfg.Access, Accounts: cfg.Accounts})
+
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, "new@example.com"))
+	assert.Empty(t, rec.Sent(), "email_signup admin: an invited address with no account gets no code")
+}
+
+func TestParseProjectConfig_AdmitTenantInvitationsNeedsInviteMode(t *testing.T) {
+	for _, mode := range []string{AccessModeOpen, AccessModeClosed} {
+		_, err := ParseProjectConfig(`{"access":{"mode":"` + mode + `","admit_tenant_invitations":true}}`)
+		require.Error(t, err, mode)
+	}
+	_, err := ParseProjectConfig(`{"access":{"mode":"allowlist","allowed_domains":["example.com"],"admit_tenant_invitations":true}}`)
+	require.Error(t, err)
+	cfg, err := ParseProjectConfig(inviteOnlyJSON)
+	require.NoError(t, err)
+	assert.True(t, cfg.Access.AdmitTenantInvitations)
 }
 
 func TestInviteOnly_PasswordSignupIsNotAdmittedByAnInvitation(t *testing.T) {

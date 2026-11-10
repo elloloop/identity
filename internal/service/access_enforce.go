@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/pkg/audit"
 
 	"go.uber.org/zap"
 )
@@ -22,38 +23,62 @@ func (s *AuthService) enforceProjectAccessSignup(ctx context.Context, email cano
 
 // enforceProjectAccessProvenSignup gates an account creation for an address
 // whose owner has just proven they hold it (a provider that verified it, or a
-// redeemed emailed code). It is enforceProjectAccessSignup, except that an
-// invite-only project also admits an address a pending tenant invitation names:
-// the invitation is the project letting that person in, and the account is
-// what accepting it needs. The deny layer and the project's email_signup rule
-// still apply; an address with no open invitation is refused exactly as
-// before, so the answer says nothing about invitations it does not admit.
+// redeemed emailed code or link). It is enforceProjectAccessSignup, except that
+// an invite project with access.admit_tenant_invitations on also admits the
+// address an open invitation names (openInvitationFor). Every refusal is the
+// one an uninvited address gets.
 func (s *AuthService) enforceProjectAccessProvenSignup(ctx context.Context, email canonicalEmail) error {
 	err := s.enforceProjectAccessSignup(ctx, email)
-	if !errors.Is(err, ErrSignupByInvitationOnly) || s.openInvitations == nil {
+	if !errors.Is(err, ErrSignupByInvitationOnly) {
 		return err
 	}
 	scope := ProjectScopeFromContext(ctx)
-	if scope.Access.mode() != AccessModeInvite || scope.Access.denies(s.cfg, email) {
+	if scope.Access.denies(s.cfg, email) {
 		return err
 	}
-	projectID := s.projectID(ctx)
-	inv, lookupErr := s.openInvitations.OpenInvitationForEmail(ctx, projectID, string(email), s.nowMs())
-	if lookupErr != nil {
-		s.logger.Warn("signup_invitation_lookup_failed", zap.String("project_id", projectID), zap.Error(lookupErr))
-		return err
-	}
+	inv := s.openInvitationFor(ctx, scope, email)
 	if inv == nil {
 		return err
 	}
-	if signupErr := s.enforceEmailSelfSignup(ctx, scope); signupErr != nil {
-		return signupErr
-	}
+	projectID := s.projectID(ctx)
+	domain := emailDomain(string(email))
 	s.logger.Info("signup_admitted_by_tenant_invitation",
 		zap.String("project_id", projectID),
 		zap.String("invitation_id", inv.ID),
-		zap.String("email_domain", emailDomain(string(email))))
+		zap.String("email_domain", domain))
+	s.audit.Log(ctx, audit.EventSignupAdmittedByInvitation,
+		audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{
+			"project_id":    projectID,
+			"invitation_id": inv.ID,
+			"tenant_id":     inv.TenantID,
+			"invited_by":    inv.InvitedBy,
+			"email_domain":  domain,
+		}))
 	return nil
+}
+
+// openInvitationFor is the open tenant invitation that lets an invite project
+// create email's account, or nil: the project opted in
+// (access.admit_tenant_invitations), lets people create their own email
+// accounts (accounts.email_signup self), and a tenant not created through
+// self-service holds a pending, unexpired invitation to the address. Both the
+// code send and its redemption ask it, so a code goes only where redeeming it
+// creates the account. A lookup error is "none": both callers fail closed.
+func (s *AuthService) openInvitationFor(ctx context.Context, scope *ProjectScope, email canonicalEmail) *TenantInvitation {
+	if s.openInvitations == nil || !scope.Access.AdmitTenantInvitations || scope.Accounts.emailSignup() != SignupSelf {
+		return nil
+	}
+	projectID := s.projectID(ctx)
+	inv, err := s.openInvitations.OpenInvitationForEmail(ctx, projectID, string(email), s.nowMs())
+	if err != nil {
+		s.logger.Warn("signup_invitation_lookup_failed",
+			zap.String("project_id", projectID),
+			zap.String("email_domain", emailDomain(string(email))),
+			zap.Error(err))
+		return nil
+	}
+	return inv
 }
 
 // enforceProjectAccessLogin gates a LOGIN or invitation acceptance by an
@@ -224,9 +249,10 @@ func (s *AuthService) enforceEmailSelfSignup(ctx context.Context, scope *Project
 // this — they fail fast, since their access check is DB-free and leaks nothing.)
 //
 // It gates spam/SMTP-abuse — a closed or off-list allowlist project must not
-// emit credential mail to arbitrary addresses. Invite mode may send only to an
-// already-provisioned user, because self-signup is denied at redemption anyway
-// and an OTP to a stranger would be undeliverable spam.
+// emit credential mail to arbitrary addresses. Invite mode sends to an
+// already-provisioned user, and to an address whose redemption would create the
+// account (openInvitationFor); a code to anyone else would be undeliverable
+// spam, since redemption refuses it.
 //
 // It fails CLOSED: no permit → no send, and a user-existence lookup error also
 // suppresses the send.
@@ -251,9 +277,11 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email canonicalE
 		// under — otherwise a real user requesting with non-canonical casing/dots
 		// would miss and have their OTP silently dropped. The caller canonicalized
 		// once; the type carries that guarantee here. Mirrors the allowlist branch.
-		// An address a pending tenant invitation names gets one too: redeeming it
-		// proves the mailbox, which is what creates that account.
-		return s.userExists(ctx, email) || s.openInvitationExists(ctx, email)
+		// Both lookups run for every address, so the time the decision takes
+		// does not tell an account from an invitation from neither.
+		exists := s.userExists(ctx, email)
+		invited := s.openInvitationFor(ctx, scope, email) != nil
+		return exists || invited
 	default:
 		// AccessModeClosed and any unset/unrecognized mode: never send.
 		return false
@@ -270,20 +298,6 @@ func (s *AuthService) selfSignupOrExisting(ctx context.Context, scope *ProjectSc
 		return true
 	}
 	return s.userExists(ctx, email)
-}
-
-// openInvitationExists reports whether a pending tenant invitation names
-// email, treating a lookup error as "none" so the send fails closed.
-func (s *AuthService) openInvitationExists(ctx context.Context, email canonicalEmail) bool {
-	if s.openInvitations == nil {
-		return false
-	}
-	inv, err := s.openInvitations.OpenInvitationForEmail(ctx, s.projectID(ctx), string(email), s.nowMs())
-	if err != nil {
-		s.logger.Warn("access_send_invitation_lookup_failed", zap.Error(err))
-		return false
-	}
-	return inv != nil
 }
 
 // userExists treats a lookup error as "does not exist" so the caller fails

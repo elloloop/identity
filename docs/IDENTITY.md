@@ -673,9 +673,10 @@ keeping them separate when reading a config.
 
 **`access.mode` answers "who may enter"** — `open`, `allowlist`, `invite`, or
 `closed`. Under `invite` an account is created only by an admin invitation,
-or for an address a pending tenant invitation names once its owner proves it
-(an OAuth provider that verified it, or a redeemed emailed code or link); a
-password self-signup is refused. It **fails DENY**: an unset, empty, or unrecognized mode denies
+or, when the project sets `access.admit_tenant_invitations` (off by default),
+for an address a pending invitation from a tenant not made through
+self-service names, once its owner proves it (an OAuth provider that verified
+it, or a redeemed emailed code or link). It **fails DENY**: an unset, empty, or unrecognized mode denies
 everyone, so a project nobody has explicitly opened cannot authenticate
 anyone. `allowed_emails` / `allowed_domains` belong to `allowlist` mode and
 are rejected with any other mode, where they would be inert.
@@ -770,6 +771,13 @@ For the env-configured default project the same policy is
 `GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS`, and
 `GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS`, validated identically — a deployment
 cannot express a policy a project could not.
+
+**`access.admit_tenant_invitations`** (`GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS`
+for the default project) is valid only with mode `invite` and off by default.
+It lets a proven sign-in create the account a pending invitation names, from a
+tenant not made through self-service `CreateTenant`; the account joins no
+tenant until it accepts, and outlives a later revocation. Postgres only. See
+the multi-tenancy docs, "invited sign-up".
 
 ## Onboarding flows
 

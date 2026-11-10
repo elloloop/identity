@@ -1422,9 +1422,9 @@ type AuthService struct {
 	// tenant a refresh selects (WithTenantSelection). nil refuses every
 	// selection.
 	tenantSelection UserTenantReader
-	// openInvitations finds the tenant invitation that lets an invite-only
-	// project create an account for a proven address (WithOpenInvitations).
-	// nil admits no such account.
+	// openInvitations finds the tenant invitation that lets an invite project
+	// with access.admit_tenant_invitations create an account for a proven
+	// address. nil admits no such account.
 	openInvitations    OpenInvitationReader
 	signer             jwt.Signer
 	passkeys           *passkeys.WebAuthnService
@@ -1603,10 +1603,9 @@ func (s *AuthService) WithTenantSelection(r UserTenantReader) *AuthService {
 	return s
 }
 
-// WithOpenInvitations wires the reader an invite-only project's sign-up
-// consults, and returns the service for chaining. app.New passes the postgres
-// invitation store; without one (memory, SQLite) an invite-only project
-// creates no account at sign-up, as before invitations existed.
+// WithOpenInvitations wires the reader an invite project with
+// access.admit_tenant_invitations consults at sign-up, and returns the service
+// for chaining. Without one no invitation admits an account.
 func (s *AuthService) WithOpenInvitations(r OpenInvitationReader) *AuthService {
 	s.openInvitations = r
 	return s

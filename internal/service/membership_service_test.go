@@ -96,9 +96,9 @@ func (f *fakeInvitationStore) CreateInvitation(_ context.Context, inv *TenantInv
 	return id, nil
 }
 
-// OpenInvitationForEmail mirrors the postgres lookup except its tenant-status
-// filter: the fake keeps no tenants, so that filter is the postgres store's,
-// tested there.
+// OpenInvitationForEmail mirrors the postgres lookup except its tenant
+// filters (status, not self-service): the fake keeps no tenants, so those are
+// the postgres store's, tested there.
 func (f *fakeInvitationStore) OpenInvitationForEmail(_ context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error) {
 	if f.getErr != nil {
 		return nil, f.getErr

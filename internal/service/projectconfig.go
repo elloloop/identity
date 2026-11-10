@@ -768,6 +768,14 @@ type ProjectAccessConfig struct {
 	// layer is actually configured (otherwise they are inert — validate
 	// rejects them).
 	ExemptEmails []string `json:"exempt_emails"`
+
+	// AdmitTenantInvitations lets an invite project create the account a
+	// pending invitation names, once its owner proves the address (an OAuth
+	// provider that verified it, or a redeemed emailed code or link). Only
+	// invitations from tenants that were not created through self-service
+	// CreateTenant admit anyone, so a person cannot make a tenant and invite
+	// others into the project. Valid with mode invite only; off by default.
+	AdmitTenantInvitations bool `json:"admit_tenant_invitations"`
 }
 
 // hasDenyLayer reports whether any deny rule is configured. It is what makes
@@ -837,6 +845,7 @@ func NewDefaultProjectAccess(cfg *config.Config) (ProjectAccessConfig, error) {
 		BlockPublicEmailDomains: cfg.DefaultProjectBlockPublicEmailDomains,
 		BlockedDomains:          cfg.DefaultProjectBlockedEmailDomainList(),
 		ExemptEmails:            cfg.DefaultProjectExemptEmailList(),
+		AdmitTenantInvitations:  cfg.DefaultProjectAdmitTenantInvitations,
 	})
 }
 
@@ -886,6 +895,9 @@ func (a ProjectAccessConfig) validate() error {
 	default:
 		return fmt.Errorf("access.mode %q must be one of %q, %q, %q, %q", a.Mode,
 			AccessModeOpen, AccessModeAllowlist, AccessModeInvite, AccessModeClosed)
+	}
+	if a.AdmitTenantInvitations && a.mode() != AccessModeInvite {
+		return fmt.Errorf("access: admit_tenant_invitations is only valid with mode %q (mode is %q)", AccessModeInvite, a.Mode)
 	}
 	return a.validateDenyLayer()
 }
@@ -991,6 +1003,7 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 		out.AllowedDomains = canonicalizeDomains(a.AllowedDomains)
 	}
 	out.BlockPublicEmailDomains = a.BlockPublicEmailDomains
+	out.AdmitTenantInvitations = a.AdmitTenantInvitations
 	if len(a.BlockedDomains) > 0 {
 		out.BlockedDomains = canonicalizeDomains(a.BlockedDomains)
 	}

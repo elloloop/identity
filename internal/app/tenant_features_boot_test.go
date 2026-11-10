@@ -51,6 +51,10 @@ func TestNew_RefusesTenantSwitchesWithoutTheirStores(t *testing.T) {
 	for name, on := range map[string]func(*config.Config){
 		"GATEWAY_TENANT_SELECTION_ENABLED":     func(c *config.Config) { c.TenantSelectionEnabled = true },
 		"GATEWAY_SELF_SERVICE_TENANTS_ENABLED": func(c *config.Config) { c.SelfServiceTenantsEnabled = true },
+		"GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS": func(c *config.Config) {
+			c.DefaultProjectAccessMode = "invite"
+			c.DefaultProjectAdmitTenantInvitations = true
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := newTestConfig()
@@ -63,7 +67,7 @@ func TestNew_RefusesTenantSwitchesWithoutTheirStores(t *testing.T) {
 }
 
 func TestCheckTenantFeatures_EachStoreIsRequired(t *testing.T) {
-	cfg := &config.Config{TenantSelectionEnabled: true, SelfServiceTenantsEnabled: true}
+	cfg := &config.Config{TenantSelectionEnabled: true, SelfServiceTenantsEnabled: true, DefaultProjectAdmitTenantInvitations: true}
 	require.NoError(t, checkTenantFeatures(governanceDeps(cfg), zap.NewNop()))
 	for name, drop := range map[string]func(*Deps){
 		"no invitation store": func(d *Deps) { d.InvitationStore = nil },
@@ -85,6 +89,7 @@ func TestCheckTenantFeatures_LogsBootState(t *testing.T) {
 		cfg := &config.Config{
 			TenantSelectionEnabled: true, TenantStatusCacheTTLSeconds: 45,
 			SelfServiceTenantsEnabled: true, SelfServiceTenantsMaxPerUser: 4, SelfServiceTenantsWindowSeconds: 600,
+			DefaultProjectAdmitTenantInvitations: true,
 		}
 		require.NoError(t, checkTenantFeatures(governanceDeps(cfg), zap.New(core)))
 
@@ -97,6 +102,8 @@ func TestCheckTenantFeatures_LogsBootState(t *testing.T) {
 		assert.Equal(t, 10*time.Minute, selfService[0].ContextMap()["window"])
 		assert.Zero(t, logs.FilterMessage("tenant_selection_disabled").Len())
 		assert.Zero(t, logs.FilterMessage("self_service_tenants_disabled").Len())
+		assert.Equal(t, 1, logs.FilterMessage("invited_signup_enabled").Len())
+		assert.Zero(t, logs.FilterMessage("invited_signup_disabled").Len())
 	})
 
 	t.Run("disabled", func(t *testing.T) {
@@ -113,6 +120,10 @@ func TestCheckTenantFeatures_LogsBootState(t *testing.T) {
 				"%s: another project can turn self-service on only where CreateTenant is served", name)
 			assert.Zero(t, logs.FilterMessage("tenant_selection_enabled").Len(), name)
 			assert.Zero(t, logs.FilterMessage("self_service_tenants_enabled").Len(), name)
+			invited := logs.FilterMessage("invited_signup_disabled").All()
+			require.Len(t, invited, 1, name)
+			assert.Equal(t, name == "postgres", invited[0].ContextMap()["other_projects_may_enable"], name)
+			assert.Zero(t, logs.FilterMessage("invited_signup_enabled").Len(), name)
 		}
 	})
 }

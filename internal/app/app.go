@@ -959,6 +959,7 @@ func New(deps Deps) (*Built, error) {
 			"default project access config (check GATEWAY_DEFAULT_PROJECT_ACCESS_MODE, "+
 				"GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS, GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS, "+
+				"GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS): %w", err,
 		)
@@ -1215,6 +1216,16 @@ func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
 	} else {
 		logger.Info("tenant_selection_disabled",
 			zap.String("hint", "set GATEWAY_TENANT_SELECTION_ENABLED=true (postgres only) once every replica runs this release and resource servers accept a selected tenant"))
+	}
+	if cfg.DefaultProjectAdmitTenantInvitations && !membershipServiceServed(deps) {
+		return errors.New("app: GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS needs the tenant, membership and invitation stores, which only the postgres driver provides")
+	}
+	if cfg.DefaultProjectAdmitTenantInvitations {
+		logger.Info("invited_signup_enabled")
+	} else {
+		logger.Info("invited_signup_disabled",
+			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)),
+			zap.String("hint", "set GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS=true (postgres only, access mode invite) for the default project; other projects set access.admit_tenant_invitations in their config_json"))
 	}
 	if cfg.SelfServiceTenantsEnabled {
 		logger.Info("self_service_tenants_enabled",

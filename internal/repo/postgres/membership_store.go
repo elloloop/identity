@@ -1067,7 +1067,8 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 // pending at nowMs (expiring no earlier, as AcceptTenantInvitation reads
 // expiry) and addressed to email (canonical, compared under
 // service.FoldEmail, as CreateInvitation stores it), in a tenant that can
-// still take members, or (nil, nil). Uses tenant_invitations_pending_email_idx.
+// still take members and was not created through self-service CreateTenant
+// (tenants.created_by empty), or (nil, nil). Uses tenant_invitations_pending_email_idx.
 func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*service.TenantInvitation, error) {
 	if projectID == "" || email == "" {
 		return nil, nil
@@ -1078,7 +1079,7 @@ func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID,
 		JOIN tenants t ON t.project_id = i.project_id AND t.id = i.tenant_id
 		WHERE i.project_id = $1 AND lower(i.email COLLATE "C") = $2
 		  AND i.status = 'pending' AND i.expires_at_ms >= $3
-		  AND t.status IN ('claimed', 'latent')
+		  AND t.status IN ('claimed', 'latent') AND t.created_by = ''
 		ORDER BY i.created_at_ms DESC, i.id DESC
 		LIMIT 1`
 	v, err := scanInvitation(s.pool.QueryRow(ctx, q, projectID, service.FoldEmail(email), nowMs))

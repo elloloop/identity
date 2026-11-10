@@ -1,35 +1,50 @@
 # Upgrade guide
 
-## Next — an invite-only project creates the account a tenant invitation names (migration 0058; behaviour change for `access.mode: invite`; `InvitationStore.OpenInvitationForEmail`, `AuthService.WithOpenInvitations` (Go API))
+## Next — an invite project can let a tenant invitation create the invitee's account: `access.admit_tenant_invitations` and `GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS` (off by default; migration 0058; additive audit event `signup_admitted_by_invitation`; `InvitationStore.OpenInvitationForEmail`, `AuthService.WithOpenInvitations` (Go API))
 
-A tenant invitation could only be accepted by someone already signed in, and
-an `invite` project refused to create the account, so a person with no account
-could not accept one.
+A tenant invitation is accepted by a signed-in account, but an `invite` project
+refuses to create one, so a person invited to a tenant who had no account yet
+could not accept. A project can now opt in to creating that account.
 
-- **An invited address gets its account on an `invite` project.** A sign-in
-  that proves the address, through an OAuth provider that verified it or a
-  redeemed emailed code or link, creates the account when a claimed or latent
-  tenant of the project holds a pending, unexpired invitation to it, and the
-  emailed code is now sent to such an address. The account joins no tenant
-  until it calls `AcceptTenantInvitation`. A password sign-up is still
-  refused, as is any address the deny layer refuses, and
-  `accounts.email_signup` `admin` or `off` still closes self-created email
-  accounts. An address with no open invitation is refused exactly as before.
-  Each admission logs `signup_admitted_by_tenant_invitation` with the project,
-  the invitation id and the address's domain.
-- **Postgres only.** `app.New` passes the Postgres invitation store; the
-  memory and SQLite drivers keep no tenant invitations, so nothing changes
-  there. An embedder that builds `AuthService` itself calls
-  `WithOpenInvitations` with its `InvitationStore`.
+- **Nothing changes until a project opts in.** `access.admit_tenant_invitations`
+  in a project's `config_json` (or `GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS=true`
+  for the env-configured default project) is `false` by default and valid only
+  with `access.mode: invite`; with any other mode the config is rejected (the
+  default project's refuses to boot). It needs the Postgres driver, which alone
+  keeps tenant invitations: the default project's switch on another driver
+  refuses to boot. The boot logs `invited_signup_enabled` or
+  `invited_signup_disabled`.
+- **What it admits.** With it on, a sign-in that proves the address, through an
+  OAuth provider that verified it or a redeemed emailed code or link, creates
+  the account when a tenant of the project holds a pending, unexpired invitation
+  to it, and the emailed code is sent to such an address. The tenant must be
+  claimed or latent and must **not** have been made through self-service
+  `CreateTenant` (`tenants.created_by` empty): a person who makes a tenant
+  cannot invite others into the project this way. Tenants an operator or the
+  admin API created, and domain tenants, qualify.
+- **What it still refuses.** A password sign-up; any address the deny layer
+  refuses; `accounts.email_signup` `admin` or `off` (no code is sent then
+  either); `GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false` for code and link
+  sign-up. An address with no qualifying invitation is refused with the same
+  `PERMISSION_DENIED` as before, and the code-send decision runs the same
+  lookups for every address.
+- **The account outlives the invitation.** It joins no tenant until it calls
+  `AcceptTenantInvitation`. Revoking or expiring the invitation afterwards
+  leaves an account that can still sign in under `invite` (as every existing
+  account can) but belongs to no tenant; suspend or delete it to remove access.
+- **Audit.** Each admission records `signup_admitted_by_invitation` with the
+  project, invitation, tenant and inviter ids and the address's domain, and
+  logs `signup_admitted_by_tenant_invitation`.
 - **Migration 0058** adds `tenant_invitations_pending_email_idx` on
   `(project_id, lower(email COLLATE "C")) WHERE status = 'pending'`, which the
-  lookup reads. It takes `SHARE` on `tenant_invitations` while it builds, which
-  blocks invitation writes but not reads; `lock_timeout` bounds the wait to
+  lookup reads. It takes `SHARE` on `tenant_invitations` while it builds,
+  blocking invitation writes but not reads; `lock_timeout` bounds the wait to
   acquire it. To build it without blocking writes, run
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS tenant_invitations_pending_email_idx ON tenant_invitations (project_id, lower(email COLLATE "C")) WHERE status = 'pending';`
   before upgrading; the migration then does nothing.
-- **`InvitationStore` gains `OpenInvitationForEmail`** (Go API): an embedder
-  with its own implementation adds it.
+- **Go API.** `InvitationStore` gains `OpenInvitationForEmail`; an embedder with
+  its own implementation adds it, and one that builds `AuthService` itself calls
+  `WithOpenInvitations` with its store.
 
 ## Next — an operator adds a tenant's members, and a `tenant_operator` credential restores the tenants credentials created: `AdminAddTenantMember` (migration 0057; behaviour change for existing `tenant_operator` credentials and for a credential's `AdminRestoreTenant`; additive RPC and audit event; `MembershipStore.AddMember`, `Tenant.CreatorOperatorKind` (Go API))
 

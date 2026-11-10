@@ -1013,6 +1013,14 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	_, err = raw.Exec(ctx, `UPDATE tenants SET status = 'suspended' WHERE project_id = $1 AND id = $2`, projectID, second)
 	require.NoError(t, err)
 	require.Equal(t, pending, open(projectID, "new@acme.com").ID, "a suspended tenant's invitation admits nobody")
+
+	const selfService = "tenant-self-service"
+	_, err = raw.Exec(ctx, `INSERT INTO tenants (id, project_id, status, created_by, created_at_ms, updated_at_ms) VALUES ($1, $2, 'claimed', 'user-who-made-it', 1, 1)`, selfService, projectID)
+	require.NoError(t, err)
+	invite(selfService, "made@acme.com", "open-self-service", now+86_400_000)
+	require.Nil(t, open(projectID, "made@acme.com"), "a self-service tenant's invitation admits nobody")
+	invite(selfService, "new@acme.com", "open-self-service-newer", now+86_400_000)
+	require.Equal(t, pending, open(projectID, "new@acme.com").ID, "nor outranks an operator tenant's")
 }
 
 // TestPendingEmailIndexMigrationRoundTrip: 0058 adds the index the open
