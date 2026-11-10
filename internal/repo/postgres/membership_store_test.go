@@ -981,8 +981,10 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	require.Nil(t, open(projectID, "new@acme.com"), "no invitation")
 
 	expired := invite(tenantID, "late@acme.com", "open-expired", now-1)
-	require.Nil(t, open(projectID, "late@acme.com"), "expired at the instant asked about")
+	require.Nil(t, open(projectID, "late@acme.com"), "expired before the instant asked about")
 	require.NotEmpty(t, expired)
+	edge := invite(tenantID, "edge@acme.com", "open-edge", now)
+	require.Equal(t, edge, open(projectID, "edge@acme.com").ID, "expiring at the instant still open, as acceptance reads it")
 
 	revoked := invite(tenantID, "gone@acme.com", "open-revoked", now+86_400_000)
 	require.NoError(t, is.SetInvitationStatus(ctx, projectID, revoked, service.InvitationStatusRevoked, 0))

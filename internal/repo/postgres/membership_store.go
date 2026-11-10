@@ -1064,7 +1064,8 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 }
 
 // OpenInvitationForEmail returns the newest invitation in projectID still
-// pending at nowMs and addressed to email (canonical, compared under
+// pending at nowMs (expiring no earlier, as AcceptTenantInvitation reads
+// expiry) and addressed to email (canonical, compared under
 // service.FoldEmail, as CreateInvitation stores it), in a tenant that can
 // still take members, or (nil, nil). Uses tenant_invitations_pending_email_idx.
 func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*service.TenantInvitation, error) {
@@ -1076,7 +1077,7 @@ func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID,
 		FROM tenant_invitations i
 		JOIN tenants t ON t.project_id = i.project_id AND t.id = i.tenant_id
 		WHERE i.project_id = $1 AND lower(i.email COLLATE "C") = $2
-		  AND i.status = 'pending' AND i.expires_at_ms > $3
+		  AND i.status = 'pending' AND i.expires_at_ms >= $3
 		  AND t.status IN ('claimed', 'latent')
 		ORDER BY i.created_at_ms DESC, i.id DESC
 		LIMIT 1`
