@@ -62,6 +62,7 @@ func TestAuthMiddleware_OperatorRPCs_Exempt(t *testing.T) {
 		"SetPrimaryAuthDomain",
 		"AdminCreateTenant",
 		"AdminAddTenantAdmin",
+		"AdminAddTenantMember",
 		"AdminGetTenant",
 		"AdminListTenants",
 		"AdminSuspendTenant",

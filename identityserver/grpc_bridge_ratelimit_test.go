@@ -153,6 +153,10 @@ var tenantOperatorCalls = map[string]func(ctx context.Context, c identitypb.Iden
 		_, err := c.AdminAddTenantAdmin(ctx, &identitypb.AdminAddTenantAdminRequest{TenantId: "t"}, opts...)
 		return err
 	},
+	identityconnectgen.IdentityServiceAdminAddTenantMemberProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
+		_, err := c.AdminAddTenantMember(ctx, &identitypb.AdminAddTenantMemberRequest{TenantId: "t"}, opts...)
+		return err
+	},
 	identityconnectgen.IdentityServiceGetLoginPolicyProcedure: func(ctx context.Context, c identitypb.IdentityServiceClient, opts ...grpc.CallOption) error {
 		_, err := c.GetLoginPolicy(ctx, &identitypb.GetLoginPolicyRequest{}, opts...)
 		return err

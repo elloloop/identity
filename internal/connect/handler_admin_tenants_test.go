@@ -323,6 +323,22 @@ func TestTenantOperatorKey_Handler(t *testing.T) {
 		t.Fatalf("AdminAddTenantAdmin membership = %+v", m)
 	}
 	members.upserted = nil
+	joined, err := client.AdminAddTenantMember(ctx, withTenantOperatorKey(&identitypb.AdminAddTenantMemberRequest{ProjectId: testProjectID, TenantId: "t-1", UserId: "heir"}, key))
+	if err != nil {
+		t.Fatalf("AdminAddTenantMember: %v", err)
+	}
+	if m := joined.Msg.GetMembership(); m.GetUserId() != "heir" || m.GetTenantId() != "t-1" || m.GetRole() != service.RoleMember {
+		t.Fatalf("AdminAddTenantMember membership = %+v", m)
+	}
+	_, err = client.AdminAddTenantMember(ctx, withTenantOperatorKey(&identitypb.AdminAddTenantMemberRequest{ProjectId: "other", TenantId: "t-other", UserId: "heir"}, key))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminAddTenantMember(ctx, withTenantOperatorKey(&identitypb.AdminAddTenantMemberRequest{ProjectId: testProjectID, TenantId: "t-1", UserId: "nobody"}, key))
+	requireCode(t, err, connect.CodeNotFound)
+	members.changeErr = service.ErrRemovedFromTenant
+	_, err = client.AdminAddTenantMember(ctx, withTenantOperatorKey(&identitypb.AdminAddTenantMemberRequest{ProjectId: testProjectID, TenantId: "t-1", UserId: "heir"}, key))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+	members.changeErr = nil
+	members.upserted = nil
 
 	_, err = client.AdminGetTenant(ctx, withTenantOperatorKey(&identitypb.AdminGetTenantRequest{ProjectId: "other", TenantId: "t-1"}, key))
 	requireCode(t, err, connect.CodePermissionDenied)

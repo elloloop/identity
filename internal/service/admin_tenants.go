@@ -118,9 +118,8 @@ func (s *ControlPlaneAdminService) AdminSuspendTenant(ctx context.Context, calle
 // AdminRestoreTenant moves a suspended tenant back to claimed, recording
 // reason, and the operator's ip and ua, in the audit trail. Restoring a
 // claimed tenant changes nothing and records nothing; restoring a latent one
-// is ErrTenantStatusConflict, and so is restoring a suspended tenant that
-// shows no sign of ever having been claimed (wasClaimed). caller is as for
-// AdminSuspendTenant.
+// is ErrTenantStatusConflict, and so is restoring a suspended tenant that no
+// one answers for (requireAnswerable). caller is as for AdminSuspendTenant.
 func (s *ControlPlaneAdminService) AdminRestoreTenant(ctx context.Context, caller OperatorCredentials, projectID, tenantID, reason, ip, ua string) (*Tenant, error) {
 	return s.moveTenant(ctx, caller, tenantMove{
 		projectID: projectID, tenantID: tenantID, reason: reason, ip: ip, ua: ua,
@@ -131,12 +130,13 @@ func (s *ControlPlaneAdminService) AdminRestoreTenant(ctx context.Context, calle
 
 // tenantMove is one operator change of a tenant's status: the tenant, why,
 // who asked from where, the move, and the event that records it. admit, when
-// set, may refuse a tenant in from before it is moved.
+// set, may refuse a tenant in from before it is moved, given the operator who
+// moves it.
 type tenantMove struct {
 	projectID, tenantID, reason, ip, ua string
 	from, to                            string
 	event                               audit.EventType
-	admit                               func(context.Context, *Tenant) error
+	admit                               func(context.Context, tenantOperator, *Tenant) error
 }
 
 // moveTenant moves a tenant from one status to another for an operator and
@@ -167,7 +167,7 @@ func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, caller Operat
 		return nil, fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
 	}
 	if m.admit != nil {
-		if err := m.admit(ctx, t); err != nil {
+		if err := m.admit(ctx, op, t); err != nil {
 			return nil, err
 		}
 	}
@@ -201,10 +201,13 @@ func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, caller Operat
 // AdminCreateTenant and never gave an admin, and a tenant whose owners and
 // admins were all deleted. The operator appoints an owner with
 // AdminRecoverTenantOwnership or adds an admin with AdminAddTenantAdmin, each
-// audited, and restores the tenant then. A tenant claimed by a
-// domain's verification has the owner or admin who verified it.
-func (s *ControlPlaneAdminService) requireAnswerable(ctx context.Context, t *Tenant) error {
-	if t.CreatedBy != "" {
+// audited, and restores the tenant then. A tenant claimed by a domain's
+// verification has the owner or admin who verified it. The exception is a
+// tenant_operator credential, op, restoring a tenant a credential created
+// (CreatorOperatorKind): whoever holds the project's credentials answers
+// for the tenants they made, so it needs no owner or admin.
+func (s *ControlPlaneAdminService) requireAnswerable(ctx context.Context, op tenantOperator, t *Tenant) error {
+	if t.CreatedBy != "" || (op.isCredential() && t.CreatorOperatorKind == OperatorKindTenantOperator) {
 		return nil
 	}
 	members, err := s.memberships.ListMembershipsForTenant(ctx, t.ProjectID, t.ID)

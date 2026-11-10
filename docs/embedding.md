@@ -210,10 +210,10 @@ itself, from the same per-IP budgets the HTTP surface uses:
   (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`).
 - The tenant operations (`AdminGetTenant`, `AdminListTenants`,
   `AdminSuspendTenant`, `AdminRestoreTenant`, `AdminRecoverTenantOwnership`,
-  `AdminCreateTenant`, `AdminAddTenantAdmin` and `GetLoginPolicy`) when the
-  call presents `X-Tenant-Operator-Key`, one budget across them all
-  (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`). A call made with the admin secret
-  alone is not counted.
+  `AdminCreateTenant`, `AdminAddTenantAdmin`, `AdminAddTenantMember` and
+  `GetLoginPolicy`) when the call presents `X-Tenant-Operator-Key`, one
+  budget across them all (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`). A call made
+  with the admin secret alone is not counted.
 - The agent machine calls, whenever agent OAuth serves them, from the
   `GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP` and
   `GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP` budgets, except

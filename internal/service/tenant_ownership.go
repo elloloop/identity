@@ -23,6 +23,17 @@ var (
 	// both, so the operator restores it first. Mapped to
 	// CodeFailedPrecondition.
 	ErrTenantStillGoverned = errors.New("the tenant still has an owner or admin who can sign in")
+	// ErrIneligibleTenantMember is returned by AdminAddTenantMember for an
+	// account that may not be added to a tenant: it is not an active,
+	// signed-up person, or its email is unverified
+	// (requireEligibleTenantMember). Mapped to CodeFailedPrecondition.
+	ErrIneligibleTenantMember = errors.New("this account cannot be added to a tenant")
+	// ErrMemberRefusedByTenant is returned by AdminAddTenantMember for a
+	// person whose membership the tenant suspended, or whom its owners or
+	// admins removed: an operator's addition does not override them, and an
+	// owner or admin restores or invites the person instead. Mapped to
+	// CodeFailedPrecondition.
+	ErrMemberRefusedByTenant = errors.New("the tenant suspended or removed this person; an owner or admin must restore or invite them")
 )
 
 // OwnershipTransfer is the result of TransferTenantOwnership: the new
@@ -130,8 +141,7 @@ const (
 // judgeTenantOwner applies the one rule for who may own a tenant: an
 // active, permanent person (an anonymous account is swept by retention, an
 // agent cannot hold what it would own, a merged account is gone) whose email
-// is verified, since an owner sends the tenant's invitations. CreateTenant
-// holds its caller to it, and a transfer or a recovery the new owner.
+// is verified, since an owner sends the tenant's invitations.
 func judgeTenantOwner(u *User) tenantOwnerFitness {
 	switch {
 	case !isActivePerson(u):
@@ -140,6 +150,23 @@ func judgeTenantOwner(u *User) tenantOwnerFitness {
 		return ownerEmailUnverified
 	default:
 		return fitToOwnTenant
+	}
+}
+
+// requireEligibleTenantMember refuses, with ErrIneligibleTenantMember, an
+// account an operator may not add to a tenant: one that is not an active,
+// permanent person (isActivePerson), since an anonymous account is swept by
+// retention and an agent acts through its owner, or one whose email is
+// unverified, since an operator finds the person by their address and an
+// address nobody has proven could put a stranger in the tenant.
+func requireEligibleTenantMember(u *User) error {
+	switch {
+	case !isActivePerson(u):
+		return fmt.Errorf("%w: the account is not an active person's", ErrIneligibleTenantMember)
+	case !u.EmailVerified:
+		return fmt.Errorf("%w: the account's email is unverified", ErrIneligibleTenantMember)
+	default:
+		return nil
 	}
 }
 
@@ -244,17 +271,25 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 }
 
 // appointableGovernors starts an operator's appointment of a governor of t, a
-// tenant of projectID, under recovery's rules: t must be claimed or suspended
-// (a latent tenant has never had a governor, ErrTenantStatusConflict). It
-// returns who can govern t now (governorsWhoCanSignIn). An appointment
-// governingAs finds already made is returned unchanged, recording nothing, so
-// a retry after a lost response gets the first answer; any other is judged
-// by admitAppointment.
+// tenant of projectID, under recovery's rules: t must be governable
+// (requireGovernable), and it returns who can govern t now
+// (governorsWhoCanSignIn), the set governingAs and admitAppointment judge the
+// appointment against.
 func (s *ControlPlaneAdminService) appointableGovernors(ctx context.Context, projectID string, t *Tenant) ([]*TenantMembership, error) {
-	if t.Status != TenantStatusClaimed && t.Status != TenantStatusSuspended {
-		return nil, fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
+	if err := requireGovernable(t); err != nil {
+		return nil, err
 	}
 	return s.governorsWhoCanSignIn(ctx, projectID, t.ID)
+}
+
+// requireGovernable refuses, with ErrTenantStatusConflict, a latent tenant,
+// which has never been governed and which no operator therefore staffs. A
+// claimed or suspended tenant is governable.
+func requireGovernable(t *Tenant) error {
+	if t.Status != TenantStatusClaimed && t.Status != TenantStatusSuspended {
+		return fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
+	}
+	return nil
 }
 
 // governingAs returns the membership with which userID is one of governors at

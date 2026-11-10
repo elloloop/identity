@@ -194,6 +194,18 @@ type MembershipStore interface {
 	// and true when this call wrote it. A suspended membership is
 	// ErrMemberSuspended.
 	JoinByDomain(ctx context.Context, projectID, tenantID, userID, domainID string) (joined *TenantMembership, changed bool, err error)
+	// AddMember makes userID an active member of the tenant, role member and
+	// source MembershipSourceAdded: an operator's addition. A user who holds
+	// an active membership already, of any role and source, keeps it
+	// unchanged, so the addition never lowers a role or changes a source; a
+	// membership that has ended (inactive or pending) becomes an active
+	// member one. It refuses a suspended membership with ErrMemberSuspended
+	// and a user with a removal record with ErrRemovedFromTenant, and does
+	// not clear the record. Both are decided under the membership's lock
+	// where the write is, so a concurrent removal or suspension is ordered
+	// against it. Returns the membership as it stands, and whether this call
+	// wrote it.
+	AddMember(ctx context.Context, projectID, tenantID, userID string) (m *TenantMembership, added bool, err error)
 	// IsRemoved reports whether userID has a removal record in the tenant:
 	// an owner or admin removed them, and no membership from another source
 	// has let them back in since.

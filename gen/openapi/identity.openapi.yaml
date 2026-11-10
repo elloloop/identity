@@ -314,6 +314,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.AdminAddTenantAdminResponse'
+  /identity.v1.IdentityService/AdminAddTenantMember:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminAddTenantMember
+      description: |-
+        AdminAddTenantMember makes user_id an active member of the tenant (role
+         "member", source "added"), whether or not the tenant has owners and
+         admins of its own. user_id must be an account of project_id (else
+         NOT_FOUND), and the tenant claimed or suspended (FAILED_PRECONDITION for
+         a latent tenant). A person who already holds an active membership of the
+         tenant, of any role and source, keeps it unchanged: it is returned and
+         nothing is recorded, before the account is judged, so the call never
+         lowers a role and a retry gets the first answer; one through the email's
+         domain stays bound to the domain. Anyone else must be an active,
+         signed-up person with a verified email (else FAILED_PRECONDITION). A
+         membership that has ended becomes an active member one.
+         FAILED_PRECONDITION for a person whose membership the tenant suspended,
+         or whom its owners or admins removed: the operator does not override
+         them. Records tenant_member_added with the operator's IP address and
+         user agent when it writes. Operator-only, authorized like
+         AdminGetTenant: the admin secret, or a tenant_operator credential of
+         project_id, each held to these rules. INVALID_ARGUMENT for a blank id.
+      operationId: identity.v1.IdentityService.AdminAddTenantMember
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminAddTenantMemberRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminAddTenantMemberResponse'
   /identity.v1.IdentityService/AdminCreateProject:
     post:
       tags:
@@ -548,11 +601,12 @@ paths:
       description: |-
         Operator-only, and one of the tenant operations (with
          AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
-         AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin and
-         GetLoginPolicy) that also accept a tenant_operator project credential,
-         "<public id>.<secret>", in the X-Tenant-Operator-Key header in place of
-         the admin secret. The credential authorizes these alone, and only on
-         its own project: project_id must name it. It is checked on every call,
+         AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin,
+         AdminAddTenantMember and GetLoginPolicy) that also accept a
+         tenant_operator project credential, "<public id>.<secret>", in the
+         X-Tenant-Operator-Key header in place of the admin secret. The
+         credential authorizes these alone, and only on its own project:
+         project_id must name it. It is checked on every call,
          so a revocation holds from the next one, and works whether or not
          GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
          alone is checked. What a credential does is recorded with it as the
@@ -763,7 +817,10 @@ paths:
          since restoring it would make it selectable with no one answering for
          its domain (appoint an owner with AdminRecoverTenantOwnership, then
          restore it); ABORTED when its status changed between the read and the
-         write.
+         write. The one exception: a tenant_operator credential restores a tenant
+         that a tenant_operator credential of the project created with
+         AdminCreateTenant even when it has no owner or admin, since the
+         credential's holder answers for the tenants it makes.
       operationId: identity.v1.IdentityService.AdminRestoreTenant
       parameters:
         - name: Connect-Protocol-Version
@@ -6943,6 +7000,28 @@ components:
           $ref: '#/components/schemas/identity.v1.TenantMembership'
       title: AdminAddTenantAdminResponse
       additionalProperties: false
+    identity.v1.AdminAddTenantMemberRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+        userId:
+          type: string
+          title: user_id
+      title: AdminAddTenantMemberRequest
+      additionalProperties: false
+    identity.v1.AdminAddTenantMemberResponse:
+      type: object
+      properties:
+        membership:
+          title: membership
+          $ref: '#/components/schemas/identity.v1.TenantMembership'
+      title: AdminAddTenantMemberResponse
+      additionalProperties: false
     identity.v1.AdminCreateProjectCredentialRequest:
       type: object
       properties:
@@ -6964,9 +7043,9 @@ components:
              "tenant_operator" (a machine credential whose secret half is shown ONCE
              and which authorizes only AdminGetTenant, AdminListTenants,
              AdminSuspendTenant, AdminRestoreTenant, AdminRecoverTenantOwnership,
-             AdminCreateTenant, AdminAddTenantAdmin and GetLoginPolicy on this
-             project, presented in the X-Tenant-Operator-Key header in place of the
-             admin secret).
+             AdminCreateTenant, AdminAddTenantAdmin, AdminAddTenantMember and
+             GetLoginPolicy on this project, presented in the X-Tenant-Operator-Key
+             header in place of the admin secret).
       title: AdminCreateProjectCredentialRequest
       additionalProperties: false
     identity.v1.AdminCreateProjectCredentialResponse:

@@ -648,10 +648,11 @@ func (s *ControlPlaneAdminService) AdminCreateTenant(ctx context.Context, caller
 		return "", fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
 	t := &Tenant{
-		ProjectID:     projectID,
-		Name:          strings.TrimSpace(name),
-		PrimaryDomain: strings.ToLower(strings.TrimSpace(primaryDomain)),
-		Status:        TenantStatusClaimed,
+		ProjectID:           projectID,
+		Name:                strings.TrimSpace(name),
+		PrimaryDomain:       strings.ToLower(strings.TrimSpace(primaryDomain)),
+		Status:              TenantStatusClaimed,
+		CreatorOperatorKind: op.kind,
 	}
 	id, err := s.tenants.CreateTenant(ctx, t)
 	if err != nil {
@@ -707,7 +708,7 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, call
 	if err != nil {
 		return nil, err
 	}
-	if op.projectBound {
+	if op.isCredential() {
 		governors, err := s.appointableGovernors(ctx, projectID, t)
 		if err != nil {
 			return nil, err

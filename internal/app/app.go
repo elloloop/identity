@@ -282,6 +282,7 @@ var TenantOperatorProcedures = []string{
 	identityconnectgen.IdentityServiceAdminRecoverTenantOwnershipProcedure,
 	identityconnectgen.IdentityServiceAdminCreateTenantProcedure,
 	identityconnectgen.IdentityServiceAdminAddTenantAdminProcedure,
+	identityconnectgen.IdentityServiceAdminAddTenantMemberProcedure,
 	identityconnectgen.IdentityServiceGetLoginPolicyProcedure,
 }
 

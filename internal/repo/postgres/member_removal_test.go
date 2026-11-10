@@ -295,6 +295,64 @@ func TestMembershipStore_RemovalRacingAJoin(t *testing.T) {
 	}
 }
 
+// TestMembershipStore_RemovalRacingAnAddition: a removal racing an
+// operator's addition leaves the person outside the tenant with the removal
+// standing, whichever goes first. An addition that read the ended membership
+// before the removal deleted it must not insert it again: the membership
+// lock orders the two.
+func TestMembershipStore_RemovalRacingAnAddition(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping addition race test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	f := newJoinFixture(ctx, t, dsn)
+
+	const rounds = 20
+	for round := range rounds {
+		// Each round starts from an ended membership with no removal.
+		_, err := f.ms.UpsertMembership(ctx, &service.TenantMembership{
+			ProjectID: f.projectID, TenantID: f.tenantID, UserID: f.user,
+			Source: service.MembershipSourceAdded, Role: service.RoleMember, Status: service.MembershipStatusInactive,
+		})
+		require.NoError(t, err)
+		require.False(t, f.removed(ctx, t))
+
+		var wg sync.WaitGroup
+		var addErr, removeErrOut error
+		start := make(chan struct{})
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _, addErr = f.ms.AddMember(ctx, f.projectID, f.tenantID, f.user)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			removeErrOut = removeErr(ctx, f.ms, f.projectID, f.tenantID, f.user)
+		}()
+		close(start)
+		wg.Wait()
+
+		require.NoError(t, removeErrOut, "round %d", round)
+		if addErr != nil {
+			require.ErrorIs(t, addErr, service.ErrRemovedFromTenant, "round %d", round)
+		}
+		require.Nil(t, f.held(ctx, t), "round %d: the person is not a member", round)
+		require.True(t, f.removed(ctx, t), "round %d: the removal stands", round)
+
+		// Clear the removal for the next round, as a grant from another
+		// source does.
+		_, _, err = f.ms.GrantMembership(ctx, &service.TenantMembership{
+			ProjectID: f.projectID, TenantID: f.tenantID, UserID: f.user,
+			Source: service.MembershipSourceInvited, Role: service.RoleMember,
+		})
+		require.NoError(t, err)
+	}
+}
+
 // TestTenantMemberRemovalsMigrationRoundTrip: 0052 adds the removal table
 // and its user index, and its down migration drops them; 51 → 52 → 51 → 52.
 func TestTenantMemberRemovalsMigrationRoundTrip(t *testing.T) {

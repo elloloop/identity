@@ -1,5 +1,91 @@
 # Upgrade guide
 
+## Next — an operator adds a tenant's members, and a `tenant_operator` credential restores the tenants credentials created: `AdminAddTenantMember` (migration 0057; behaviour change for existing `tenant_operator` credentials and for a credential's `AdminRestoreTenant`; additive RPC and audit event; `MembershipStore.AddMember`, `Tenant.CreatorOperatorKind` (Go API))
+
+A service holding a `tenant_operator` credential could create its project's
+tenants and appoint their first owner, but every other member had to be
+invited by that owner, and a tenant it created and suspended before anyone
+governed it could not be restored. Both now work, on its own project alone.
+
+- **Credentials already minted gain `AdminAddTenantMember` on upgrade, and it
+  reaches tenants that have their own owners.** Unlike the first-governor
+  appointment, which a credential may make only where nobody governs, an
+  addition works on any claimed or suspended tenant of the project: tenants
+  with active owners and admins, and tenants people created themselves. A
+  credential's holder can make any signed-up person of the project with a
+  verified email a member of any of them without their owners' invitation.
+  It cannot raise anyone, lower anyone, or let back in a person the tenant
+  suspended or removed. Before upgrading, review which services hold a
+  credential, and revoke with `AdminRevokeProjectCredential` any whose holder
+  should not add people to the project's tenants. An empty
+  `GATEWAY_ADMIN_API_SECRET` does not close the call, as it closes none of
+  the tenant operations.
+- **`AdminAddTenantMember(project_id, tenant_id, user_id)`** makes the
+  account an active member of the tenant (role `member`, source `added`). It
+  takes the admin secret or a `tenant_operator` credential in
+  `X-Tenant-Operator-Key`, refused another project exactly as the other
+  tenant operations are, and spends their shared per-IP budget
+  (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`) on HTTP and native gRPC. The
+  account must be one of the project's (else `NOT_FOUND`) and the tenant
+  claimed or suspended (`FAILED_PRECONDITION` for a latent one).
+- **An active member is returned unchanged.** A person who already holds an
+  active membership, of any role and source, keeps it: the call returns it
+  and records nothing, before it judges the account, so a retry gets the
+  first answer. A membership through the email's domain stays one, bound to
+  the domain as before. Anyone else must be an active, signed-up person with
+  a verified email, else `FAILED_PRECONDITION`, whose message says which.
+- **It never overrides the tenant's owners and admins.** A person whose
+  membership the tenant suspended, or whom its owners or admins removed, is
+  `FAILED_PRECONDITION`, and the suspension or removal stands; only the
+  tenant's owners and admins restore or invite them. The admin secret is held
+  to the same rule. A membership that has ended (inactive) comes back as an
+  active member one, not at its earlier role. The store decides under the
+  membership's lock, so a concurrent removal or suspension is ordered against
+  the addition.
+- **Audited** as `tenant_member_added`, a new event: the credential as the
+  actor (`credential:<credential id>`) or none for the admin secret, the
+  person as the target, the operator's IP address and user agent, and the
+  project and tenant ids and the role in the details, with the
+  `previous_role` and `previous_status` of an ended membership it renews. A
+  call that changes nothing records nothing.
+- **A credential restores a tenant a credential created, with nobody
+  governing it.** Migration 0057 adds `tenants.creator_operator_kind`:
+  `AdminCreateTenant` now records whether the admin secret (`admin_secret`) or
+  a `tenant_operator` credential made the tenant. `AdminRestoreTenant` called
+  with a `tenant_operator` credential restores a suspended tenant whose
+  record is `tenant_operator` even when it has no creator, owner or admin,
+  audited as `tenant_restored` like any restore. The admin secret, and a
+  credential on any other tenant, still need a creator, owner or admin. The
+  record is not returned on the `Tenant` message.
+- **Tenants created before this release have no record**, so a credential
+  cannot restore one of them that nobody governs: appoint its first owner
+  with `AdminAddTenantAdmin`, which a credential may do on a suspended tenant
+  nobody governs, then restore it.
+- **Migration 0057** adds the column with a constant default and its `CHECK`
+  `NOT VALID`, so neither rewrites nor scans `tenants`; each takes `ACCESS
+  EXCLUSIVE` only for a catalog change, and a 10s `lock_timeout` bounds the
+  wait for it. **Run it before any replica of this release serves traffic**
+  (or set `GATEWAY_POSTGRES_AUTO_MIGRATE`): until it has run, this release
+  fails every tenant read and `AdminCreateTenant` on the missing column. If
+  the lock times out, the migration rolls back and version 57 is recorded
+  dirty: run `identity migrate force 56`, then `identity migrate` again. An
+  earlier release ignores the column, so replicas of both can run during a
+  roll; a tenant an earlier replica creates is unrecorded. To roll back, run
+  the previous release first, then the down migration, which drops the
+  column and what this release recorded.
+
+A caller of the admin secret's other operator RPCs sees no change.
+
+### Go API
+
+- New: `ControlPlaneAdminService.AdminAddTenantMember(ctx, caller, projectID,
+  tenantID, userID, ip, ua)`, `MembershipStore.AddMember`, which a custom
+  store implements with the lock and refusals the postgres store's doc
+  describes, `Tenant.CreatorOperatorKind`, `service.OperatorKindAdminSecret`
+  and `service.OperatorKindTenantOperator`, `service.ErrIneligibleTenantMember`,
+  `service.ErrMemberRefusedByTenant`, and `audit.EventTenantMemberAdded`.
+- `app.TenantOperatorProcedures` lists `AdminAddTenantMember`.
+
 ## Next — a `tenant_operator` credential creates its project's tenants and appoints their first owner: `AdminCreateTenant` and `AdminAddTenantAdmin` (behaviour change for existing `tenant_operator` credentials and for `AdminAddTenantAdmin`; no migration; both calls now audited; the two methods take `service.OperatorCredentials` and the operator's client (Go API))
 
 A service holding a `tenant_operator` credential could run its project's
