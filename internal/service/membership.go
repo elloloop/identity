@@ -266,6 +266,19 @@ type InvitationStore interface {
 	// ListInvitationsForTenant returns every invitation in a tenant,
 	// newest first.
 	ListInvitationsForTenant(ctx context.Context, projectID, tenantID string) ([]*TenantInvitation, error)
+	OpenInvitationReader
+}
+
+// OpenInvitationReader finds the invitation that lets an invite-only project
+// create an account for an address.
+type OpenInvitationReader interface {
+	// OpenInvitationForEmail returns the newest invitation in the project
+	// still pending at nowMs (unexpired as AcceptTenantInvitation reads it),
+	// addressed to email (canonical form), in a tenant that can still take
+	// members (claimed or latent) and was not created through self-service
+	// CreateTenant (its CreatedBy is empty), from an inviter who is still an
+	// active owner or admin of that tenant, or (nil, nil).
+	OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error)
 }
 
 // InvitationLimits bounds how many invitations InvitationStore.CreateInvitation

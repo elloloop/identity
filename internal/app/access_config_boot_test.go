@@ -101,3 +101,18 @@ func TestNew_ValidDefaultProjectDenyLayer_Boots(t *testing.T) {
 	built.Start()
 	t.Cleanup(built.Stop)
 }
+
+// admit_tenant_invitations is valid with mode invite only, so the default
+// project's switch on any other mode stops the boot, naming its variable.
+func TestNew_DefaultProjectAdmitTenantInvitationsNeedsInviteMode(t *testing.T) {
+	_, err := New(bootDeps(t, &config.Config{
+		DefaultProjectAccessMode:             "open",
+		DefaultProjectAdmitTenantInvitations: true,
+	}))
+	if err == nil {
+		t.Fatal("expected New to fail on admit_tenant_invitations without mode invite")
+	}
+	if !strings.Contains(err.Error(), "GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS") {
+		t.Errorf("boot error does not name the variable: %v", err)
+	}
+}

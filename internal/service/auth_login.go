@@ -831,7 +831,7 @@ func (s *AuthService) OAuthLogin(
 		return nil, fmt.Errorf("%w: provider returned an email with no usable mailbox", ErrUnauthenticated)
 	}
 
-	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail)
+	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail, params.IPAddr, params.UserAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -996,7 +996,7 @@ func (s *AuthService) verifyOAuthExchange(
 // Returns (user, isNewUser, error). isNewUser is true only when a new
 // User row was created (not when an existing user got a fresh provider
 // link).
-func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Identity, email canonicalEmail) (*User, bool, error) {
+func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Identity, email canonicalEmail, ipAddr, userAgent string) (*User, bool, error) {
 	now := s.nowMs()
 	emailStr := string(email)
 
@@ -1016,6 +1016,8 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		name:          identity.Name,
 		avatarURL:     identity.AvatarURL,
 		emailVerified: ProofCarriesTo(identity.Email, emailStr),
+		ipAddr:        ipAddr,
+		userAgent:     userAgent,
 	})
 	if err != nil {
 		return nil, false, err
@@ -1089,6 +1091,10 @@ type resolveOrCreateOpts struct {
 	name          string
 	avatarURL     string
 	emailVerified bool
+	// ipAddr and userAgent are the sign-in's client, for the audit record of
+	// an account an invitation admitted.
+	ipAddr    string
+	userAgent string
 }
 
 // resolveOrCreateUserByEmail is the single by-email account resolver: it looks
@@ -1118,8 +1124,15 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	}
 
 	// Creating a NEW account is a self-signup access check — an invite-only or
-	// closed project (or a non-matching allowlist) denies JIT provisioning here.
-	if err := s.enforceProjectAccessSignup(ctx, email); err != nil {
+	// closed project (or a non-matching allowlist) denies JIT provisioning here,
+	// unless the caller proved the address and a tenant invitation admits it.
+	var admittedBy *TenantInvitation
+	if opts.emailVerified {
+		admittedBy, err = s.enforceProjectAccessProvenSignup(ctx, email)
+	} else {
+		err = s.enforceProjectAccessSignup(ctx, email)
+	}
+	if err != nil {
 		return nil, false, err
 	}
 
@@ -1153,9 +1166,16 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	}
 	newUser.ID = userID
 
-	// Best-effort: auto-form a company tenant from the email domain. Only on
-	// a genuinely new account (a raced/existing user returned above).
-	s.maybeAutoFormTenant(ctx, newUser)
+	// An account an invitation admitted joins only that invitation's tenant,
+	// when it accepts, so it skips domain auto-formation and its domain
+	// membership. Any other genuinely new account (a raced/existing user
+	// returned above) auto-forms a company tenant from its email domain,
+	// best-effort.
+	if admittedBy != nil {
+		s.recordInvitedSignup(ctx, newUser, admittedBy, opts.ipAddr, opts.userAgent)
+	} else {
+		s.maybeAutoFormTenant(ctx, newUser)
+	}
 
 	// Best-effort: emit a user.created lifecycle event. No-op when eventing
 	// is disabled.

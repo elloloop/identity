@@ -672,7 +672,11 @@ A project's `access` block answers two separate questions, and it is worth
 keeping them separate when reading a config.
 
 **`access.mode` answers "who may enter"** — `open`, `allowlist`, `invite`, or
-`closed`. It **fails DENY**: an unset, empty, or unrecognized mode denies
+`closed`. Under `invite` an account is created only by an admin invitation,
+or, when the project sets `access.admit_tenant_invitations` (off by default),
+for an address a pending invitation from a tenant not made through
+self-service names, once its owner proves it (an OAuth provider that verified
+it, or a redeemed emailed code or link). It **fails DENY**: an unset, empty, or unrecognized mode denies
 everyone, so a project nobody has explicitly opened cannot authenticate
 anyone. `allowed_emails` / `allowed_domains` belong to `allowlist` mode and
 are rejected with any other mode, where they would be inert.
@@ -767,6 +771,23 @@ For the env-configured default project the same policy is
 `GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS`, and
 `GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS`, validated identically — a deployment
 cannot express a policy a project could not.
+
+**`access.admit_tenant_invitations`** (`GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS`
+for the default project) is valid only with mode `invite` and off by default.
+It lets a proven sign-in create the account a pending invitation names, from a
+tenant not made through self-service `CreateTenant` whose inviter is still an
+active owner or admin there. That trust filter (`tenants.created_by` empty)
+admits operator- and admin-API-created tenants, and also tenants auto-formed
+from an email domain and claimed by DNS verification, whose owners and admins
+then decide who gets in. Turning it on delegates admission along a chain:
+an operator, or a `tenant_operator` credential, creates a tenant and appoints
+its first owner; that owner can make others admins; and every active owner or
+admin of such a tenant can then bring new accounts into the project by
+inviting them. The account joins no tenant, not even its email
+domain's, until it accepts, and outlives a later revocation. Postgres only:
+per-project `config_json` lives only in the Postgres control plane, and the
+default project's variable refuses to boot on memory or SQLite. See the
+multi-tenancy docs, "invited sign-up".
 
 ## Onboarding flows
 

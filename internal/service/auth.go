@@ -1421,7 +1421,11 @@ type AuthService struct {
 	// tenantSelection answers whether a user may act in a tenant, for the
 	// tenant a refresh selects (WithTenantSelection). nil refuses every
 	// selection.
-	tenantSelection    UserTenantReader
+	tenantSelection UserTenantReader
+	// openInvitations finds the tenant invitation that lets an invite project
+	// with access.admit_tenant_invitations create an account for a proven
+	// address. nil admits no such account.
+	openInvitations    OpenInvitationReader
 	signer             jwt.Signer
 	passkeys           *passkeys.WebAuthnService
 	audit              *audit.Logger
@@ -1596,6 +1600,14 @@ func (s *AuthService) WithTenantAutoFormer(af TenantAutoFormStore) *AuthService 
 // ErrTenantSelectionDisabled, inside a TenantSelectionRefusedError.
 func (s *AuthService) WithTenantSelection(r UserTenantReader) *AuthService {
 	s.tenantSelection = r
+	return s
+}
+
+// WithOpenInvitations wires the reader an invite project with
+// access.admit_tenant_invitations consults at sign-up, and returns the service
+// for chaining. Without one no invitation admits an account.
+func (s *AuthService) WithOpenInvitations(r OpenInvitationReader) *AuthService {
+	s.openInvitations = r
 	return s
 }
 

@@ -422,6 +422,15 @@ type Config struct {
 	// than run a rule that can never fire.
 	DefaultProjectBlockPublicEmailDomains bool
 
+	// DefaultProjectAdmitTenantInvitations lets the default project, on access
+	// mode invite, create the account a pending tenant invitation names once
+	// its owner proves the address. Set via
+	// GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS; off by default. It
+	// REQUIRES GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=invite and the postgres
+	// driver, which alone keeps tenant invitations; the server refuses to boot
+	// otherwise.
+	DefaultProjectAdmitTenantInvitations bool
+
 	// DefaultProjectBlockedEmailDomains is the comma-separated list of extra
 	// email domains refused on the default project, in addition to the
 	// consumer mailbox providers the public-domain switch already covers. Set via
@@ -1598,6 +1607,7 @@ func loadFromEnv() *Config {
 		// mode, and a deployment that has not asked for it must keep exactly
 		// the access its mode already grants.
 		DefaultProjectBlockPublicEmailDomains: envBool("GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS", false),
+		DefaultProjectAdmitTenantInvitations:  envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS", false),
 		DefaultProjectBlockedEmailDomains:     envStr("GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS", ""),
 		DefaultProjectExemptEmails:            envStr("GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS", ""),
 		RequireVerifiedAuthDomain:             envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),

@@ -36,6 +36,7 @@ type fakeInvitationStore struct {
 	getErr     error
 	setErr     error
 	listErr    error
+	openErr    error
 	nextID     int
 }
 
@@ -94,6 +95,31 @@ func (f *fakeInvitationStore) CreateInvitation(_ context.Context, inv *TenantInv
 	inv.Role = role
 	inv.Status = InvitationStatusPending
 	return id, nil
+}
+
+// OpenInvitationForEmail mirrors the postgres lookup except its tenant and
+// inviter filters: the fake keeps no tenants or memberships, so those are the
+// postgres store's, tested there.
+func (f *fakeInvitationStore) OpenInvitationForEmail(_ context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error) {
+	if f.openErr != nil {
+		return nil, f.openErr
+	}
+	var newest *TenantInvitation
+	for _, inv := range f.byID {
+		if inv.ProjectID != projectID || FoldEmail(inv.Email) != FoldEmail(email) ||
+			inv.Status != InvitationStatusPending || (inv.ExpiresAtMs != 0 && inv.ExpiresAtMs < nowMs) {
+			continue
+		}
+		if newest == nil || inv.CreatedAtMs > newest.CreatedAtMs ||
+			(inv.CreatedAtMs == newest.CreatedAtMs && inv.ID > newest.ID) {
+			newest = inv
+		}
+	}
+	if newest == nil {
+		return nil, nil
+	}
+	out := *newest
+	return &out, nil
 }
 
 func (f *fakeInvitationStore) GetInvitationByTokenHash(_ context.Context, projectID, tokenHash string) (*TenantInvitation, error) {

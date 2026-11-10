@@ -522,6 +522,15 @@
     "anchor": "projects-and-tenancy"
   },
   {
+    "name": "GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "lets the default project, on access mode invite, create the account a pending tenant invitation names once its owner proves the address.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
     "name": "GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS",
     "type": "string",
     "default": "",

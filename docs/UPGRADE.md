@@ -1,5 +1,67 @@
 # Upgrade guide
 
+## Next — an invite project can let a tenant invitation create the invitee's account: `access.admit_tenant_invitations` and `GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS` (off by default; migration 0058; additive audit event `signup_admitted_by_invitation`; `InvitationStore.OpenInvitationForEmail`, `AuthService.WithOpenInvitations` (Go API))
+
+A tenant invitation is accepted by a signed-in account, but an `invite` project
+refuses to create one, so a person invited to a tenant who had no account yet
+could not accept. A project can now opt in to creating that account.
+
+- **Nothing changes until a project opts in.** `access.admit_tenant_invitations`
+  in a project's `config_json` (or `GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS=true`
+  for the env-configured default project) is `false` by default and valid only
+  with `access.mode: invite`; with any other mode the config is rejected (the
+  default project's refuses to boot). It needs the Postgres driver, which alone
+  keeps tenant invitations: the default project's switch on another driver
+  refuses to boot. The boot logs `invited_signup_enabled` or
+  `invited_signup_disabled`.
+- **What it admits.** With it on, a sign-in that proves the address, through an
+  OAuth provider that verified it or a redeemed emailed code or link, creates
+  the account when a tenant of the project holds a pending, unexpired invitation
+  to it, and the emailed code is sent to such an address. The tenant must be
+  claimed or latent and must **not** have been made through self-service
+  `CreateTenant` (`tenants.created_by` empty): a person who makes a tenant
+  cannot invite others into the project this way. That leaves tenants an
+  operator or the admin API created, and also tenants formed from an email
+  domain and claimed by DNS verification: on those, whoever is an owner or
+  admin decides who gets in. The inviter must still be an active owner or admin
+  of the tenant when the invitee signs in, with an account that can sign in
+  and is a person (not deactivated, merged away, anonymous or an agent); an
+  invitation from someone since removed, demoted, suspended or deactivated
+  admits nobody. An invitation with no expiry
+  (`expires_at_ms` 0) counts, as `AcceptTenantInvitation` reads it.
+- **What it still refuses.** A password sign-up, a passkey sign-up and the
+  anonymous-account upgrade, none of which proves the address before the
+  account exists; any address the deny layer refuses; `accounts.email_signup` `admin` or `off`; and, for code and link
+  sign-up, `GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false`. In each case no code is
+  sent to an invited address that has no account. An address with no qualifying invitation is refused with the same
+  `PERMISSION_DENIED` as before, and the code-send decision runs the same
+  lookups for every address.
+- **The account outlives the invitation.** It joins no tenant until it calls
+  `AcceptTenantInvitation`: an account an invitation admitted skips domain
+  auto-formation, so it does not join the tenant that verified its email
+  domain either. Revoking or expiring the invitation afterwards leaves an
+  account that can still sign in under `invite` (as every existing account
+  can) but belongs to no tenant; suspend or delete it to remove access.
+- **Audit.** Once the account exists, each admission records
+  `signup_admitted_by_invitation` (target the new account, the sign-in's IP
+  address and user agent; the project, invitation, tenant and inviter ids and
+  the address's domain in the details) and logs
+  `signup_admitted_by_tenant_invitation`.
+- **Do not roll migration 0044 down and up on a project that uses this.** Its
+  down migration drops `tenants.created_by`; re-adding it fills every row with
+  `''`, so every self-service tenant would then count as operator-made and its
+  invitations would admit accounts.
+- **Migration 0058** adds `tenant_invitations_pending_email_idx` on
+  `(project_id, lower(email COLLATE "C")) WHERE status = 'pending'`, which the
+  lookup reads. It takes `SHARE` on `tenant_invitations` while it builds,
+  blocking invitation writes but not reads; `lock_timeout` bounds the wait to
+  acquire it. To build it without blocking writes, run
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS tenant_invitations_pending_email_idx ON tenant_invitations (project_id, lower(email COLLATE "C")) WHERE status = 'pending';`
+  before upgrading; the migration then does nothing.
+- **Go API.** `InvitationStore` gains `OpenInvitationForEmail`; an embedder with
+  its own implementation adds it, and one that builds `AuthService` itself calls
+  `WithOpenInvitations` with its store.
+
 ## Next — an operator adds a tenant's members, and a `tenant_operator` credential restores the tenants credentials created: `AdminAddTenantMember` (migration 0057; behaviour change for existing `tenant_operator` credentials and for a credential's `AdminRestoreTenant`; additive RPC and audit event; `MembershipStore.AddMember`, `Tenant.CreatorOperatorKind` (Go API))
 
 A service holding a `tenant_operator` credential could create its project's

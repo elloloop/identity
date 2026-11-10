@@ -1063,6 +1063,38 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	return id, nil
 }
 
+// OpenInvitationForEmail implements service.OpenInvitationReader. The inviter's
+// users row is under row-level security (migration 0016), so the query runs on
+// a connection bound to projectID rather than to this store's own project.
+// Uses tenant_invitations_pending_email_idx.
+func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*service.TenantInvitation, error) {
+	if projectID == "" || email == "" {
+		return nil, nil
+	}
+	const q = `SELECT i.id, i.project_id, i.tenant_id, i.token_hash, i.email, i.invited_by, i.role, i.status,
+		i.expires_at_ms, i.accepted_at_ms, i.created_at_ms
+		FROM tenant_invitations i
+		JOIN tenants t ON t.project_id = i.project_id AND t.id = i.tenant_id
+		JOIN tenant_memberships m ON m.project_id = i.project_id AND m.tenant_id = i.tenant_id
+		  AND m.user_id = i.invited_by AND m.status = 'active' AND m.role IN ('owner', 'admin')
+		JOIN users u ON u.project_id = i.project_id AND u.id = i.invited_by
+		  AND lower(u.status) IN ('', 'active', 'pending_deletion')
+		  AND u.kind <> 'agent' AND NOT u.is_anonymous AND u.merged_into_user_id = ''
+		WHERE i.project_id = $1 AND lower(i.email COLLATE "C") = $2
+		  AND i.status = 'pending' AND (i.expires_at_ms = 0 OR i.expires_at_ms >= $3)
+		  AND t.status IN ('claimed', 'latent') AND t.created_by = ''
+		ORDER BY i.created_at_ms DESC, i.id DESC
+		LIMIT 1`
+	v, err := scanInvitation(s.pool.forProject(projectID).QueryRow(ctx, q, projectID, service.FoldEmail(email), nowMs))
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapPgErr("OpenInvitationForEmail", err)
+	}
+	return v, nil
+}
+
 // GetInvitationByTokenHash resolves an invitation by its hashed token
 // within a project, or (nil, nil).
 func (s *InvitationStore) GetInvitationByTokenHash(ctx context.Context, projectID, tokenHash string) (*service.TenantInvitation, error) {

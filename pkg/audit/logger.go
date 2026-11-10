@@ -357,6 +357,14 @@ const (
 	// active member records nothing.
 	EventTenantMemberAdded EventType = "tenant_member_added"
 
+	// EventSignupAdmittedByInvitation records an invite project having
+	// created an account because a pending tenant invitation names the address
+	// its owner proved (access.admit_tenant_invitations). It is written once
+	// the account exists: no actor, target the new account, the sign-in's IP
+	// address and user agent, and the project id, the invitation, tenant and
+	// inviter ids and the address's domain in the details.
+	EventSignupAdmittedByInvitation EventType = "signup_admitted_by_invitation"
+
 	// EventTenantSuspended / EventTenantRestored record an operator
 	// suspending a claimed tenant or restoring a suspended one
 	// (AdminSuspendTenant, AdminRestoreTenant), with the operator's IP
@@ -533,6 +541,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantCreated:                 {},
 	EventTenantAdminAdded:              {},
 	EventTenantMemberAdded:             {},
+	EventSignupAdmittedByInvitation:    {},
 	EventTenantSuspended:               {},
 	EventTenantRestored:                {},
 	EventTenantOwnershipTransferred:    {},

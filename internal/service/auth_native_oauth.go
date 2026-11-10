@@ -167,7 +167,7 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		return nil, fmt.Errorf("%w: provider returned an email with no usable mailbox", ErrUnauthenticated)
 	}
 
-	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail)
+	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail, params.IPAddr, params.UserAgent)
 	if err != nil {
 		return nil, err
 	}

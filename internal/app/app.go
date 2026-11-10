@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -798,6 +799,7 @@ func New(deps Deps) (*Built, error) {
 		// A nil reader refuses every tenant selection: the switch is off,
 		// or the driver has no governance stores (memory, SQLite).
 		WithTenantSelection(tenantGov.selection).
+		WithOpenInvitations(deps.InvitationStore).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
@@ -956,6 +958,7 @@ func New(deps Deps) (*Built, error) {
 		// died holding only GATEWAY_* variables.
 		return nil, fmt.Errorf(
 			"default project access config (check GATEWAY_DEFAULT_PROJECT_ACCESS_MODE, "+
+				"GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS, "+
 				"GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS, GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS, "+
@@ -1214,6 +1217,20 @@ func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
 	} else {
 		logger.Info("tenant_selection_disabled",
 			zap.String("hint", "set GATEWAY_TENANT_SELECTION_ENABLED=true (postgres only) once every replica runs this release and resource servers accept a selected tenant"))
+	}
+	if cfg.DefaultProjectAdmitTenantInvitations && !membershipServiceServed(deps) {
+		return errors.New("app: GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS needs the tenant, membership and invitation stores, which only the postgres driver provides")
+	}
+	switch {
+	case cfg.DefaultProjectAdmitTenantInvitations:
+		logger.Info("invited_signup_enabled")
+	case strings.EqualFold(strings.TrimSpace(cfg.DefaultProjectAccessMode), "invite"):
+		logger.Info("invited_signup_disabled",
+			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)),
+			zap.String("hint", "set GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS=true (postgres only) to let the default project create the account a tenant invitation names; other projects set access.admit_tenant_invitations in their config_json"))
+	default:
+		logger.Info("invited_signup_disabled",
+			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)))
 	}
 	if cfg.SelfServiceTenantsEnabled {
 		logger.Info("self_service_tenants_enabled",
