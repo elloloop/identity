@@ -39,8 +39,9 @@ func TestAdminAddTenantMember_AddsAnActiveMember(t *testing.T) {
 }
 
 // A person who already holds an active membership keeps it, whatever its
-// role and source: the call returns it and records nothing, so it never
-// lowers a role and a retry is safe.
+// role and source, and before their account is judged: the call returns it
+// and records nothing, so it never lowers a role and a retry gets the first
+// answer. gone, an owner since deactivated, gets the membership back too.
 func TestAdminAddTenantMember_KeepsAnActiveMembership(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -52,6 +53,7 @@ func TestAdminAddTenantMember_KeepsAnActiveMembership(t *testing.T) {
 	for _, tc := range []struct{ user, role, source string }{
 		{"boss", RoleOwner, MembershipSourceCreated},
 		{"heir", RoleMember, MembershipSourceDomain},
+		{"gone", RoleOwner, MembershipSourceCreated},
 	} {
 		m, err := f.svc.AdminAddTenantMember(ctx, key, "proj", "t-1", tc.user, "", "")
 		require.NoError(t, err, tc.user)
@@ -83,7 +85,25 @@ func TestAdminAddTenantMember_RenewsAnEndedMembership(t *testing.T) {
 	assert.Equal(t, RoleMember, m.Role)
 	assert.Equal(t, MembershipSourceAdded, m.Source)
 	assert.Equal(t, MembershipStatusActive, m.Status)
-	assert.Len(t, f.records.byEvent(string(audit.EventTenantMemberAdded)), 1)
+	records := f.records.byEvent(string(audit.EventTenantMemberAdded))
+	require.Len(t, records, 1)
+	assert.Equal(t, map[string]any{
+		"project_id": "proj", "tenant_id": "t-1", "role": RoleMember,
+		"previous_role": RoleAdmin, "previous_status": MembershipStatusInactive,
+	}, records[0].details, "a renewal records what it renewed")
+}
+
+// A suspended tenant takes members as a claimed one does, ready for its
+// restore.
+func TestAdminAddTenantMember_ASuspendedTenantTakesMembers(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newTenantOperatorFixture(t, testAdminSecret)
+	_, err := f.svc.AdminSuspendTenant(ctx, asAdmin(testAdminSecret), "proj", "t-1", "hold", "", "")
+	require.NoError(t, err)
+	m, err := f.svc.AdminAddTenantMember(ctx, asTenantOperator(f.key.RawKey), "proj", "t-1", "aide", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, MembershipStatusActive, m.Status)
 }
 
 // The operator does not override the tenant's owners and admins: a person
@@ -142,6 +162,8 @@ func TestAdminAddTenantMember_RefusesWhatItMayNotAdd(t *testing.T) {
 		_, err := f.svc.AdminAddTenantMember(ctx, asTenantOperator(f.key.RawKey), "proj", tc.tenant, tc.user, "", "")
 		require.ErrorIs(t, err, tc.want, name)
 	}
+	_, err := f.svc.AdminAddTenantMember(ctx, asTenantOperator(f.key.RawKey), "proj", "t-2", "unverified", "", "")
+	require.ErrorContains(t, err, "unverified", "the refusal says which part of the rule failed")
 	f.requireNothingCreated(t, 4)
 	assert.Empty(t, f.records.byEvent(string(audit.EventTenantMemberAdded)))
 }
@@ -155,43 +177,4 @@ func TestAdminAddTenantMember_StoreError(t *testing.T) {
 	_, err := f.svc.AdminAddTenantMember(context.Background(), asTenantOperator(f.key.RawKey), "proj", "t-2", "aide", "", "")
 	require.ErrorIs(t, err, boom)
 	assert.Empty(t, f.records.byEvent(string(audit.EventTenantMemberAdded)))
-}
-
-// A tenant records what authorized its creation, and a key restores a
-// suspended tenant a key created though nobody governs it. The admin secret,
-// and a key on a tenant the secret or no operator created, keep the old
-// refusal.
-func TestAdminRestoreTenant_AKeyRestoresTheTenantsKeysCreated(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	f := newTenantOperatorFixture(t, testAdminSecret)
-	key := asTenantOperator(f.key.RawKey)
-	byKey, err := f.svc.AdminCreateTenant(ctx, key, "proj", "Made by a key", "", "", "")
-	require.NoError(t, err)
-	bySecret, err := f.svc.AdminCreateTenant(ctx, asAdmin(testAdminSecret), "proj", "Made by the secret", "", "", "")
-	require.NoError(t, err)
-	stored, _ := f.tenants.GetTenant(ctx, "proj", byKey)
-	assert.Equal(t, CredentialKindTenantOperator, stored.CreatorCredentialKind)
-	stored, _ = f.tenants.GetTenant(ctx, "proj", bySecret)
-	assert.Equal(t, CreatorAdminSecret, stored.CreatorCredentialKind)
-	f.tenants.put(&Tenant{ID: "t-unmarked", ProjectID: "proj", Status: TenantStatusSuspended})
-	for _, id := range []string{byKey, bySecret} {
-		_, err := f.svc.AdminSuspendTenant(ctx, key, "proj", id, "hold", "", "")
-		require.NoError(t, err)
-	}
-
-	_, err = f.svc.AdminRestoreTenant(ctx, asAdmin(testAdminSecret), "proj", byKey, "lifted", "", "")
-	require.ErrorIs(t, err, ErrTenantStatusConflict, "the admin secret's rule is unchanged")
-	for _, id := range []string{bySecret, "t-unmarked"} {
-		_, err := f.svc.AdminRestoreTenant(ctx, key, "proj", id, "lifted", "", "")
-		require.ErrorIs(t, err, ErrTenantStatusConflict, id)
-	}
-
-	restored, err := f.svc.AdminRestoreTenant(ctx, key, "proj", byKey, "lifted", testOperatorIP, testOperatorUA)
-	require.NoError(t, err)
-	assert.Equal(t, TenantStatusClaimed, restored.Status)
-	records := f.records.byEvent(string(audit.EventTenantRestored))
-	require.Len(t, records, 1)
-	assert.Equal(t, f.actor(), records[0].actor)
-	assert.Equal(t, map[string]any{"project_id": "proj", "tenant_id": byKey, "reason": "lifted"}, records[0].details)
 }

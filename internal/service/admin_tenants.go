@@ -204,10 +204,10 @@ func (s *ControlPlaneAdminService) moveTenant(ctx context.Context, caller Operat
 // audited, and restores the tenant then. A tenant claimed by a domain's
 // verification has the owner or admin who verified it. The exception is a
 // tenant_operator credential, op, restoring a tenant a credential created
-// (CreatorCredentialKind): whoever holds the project's credentials answers
+// (CreatorOperatorKind): whoever holds the project's credentials answers
 // for the tenants they made, so it needs no owner or admin.
 func (s *ControlPlaneAdminService) requireAnswerable(ctx context.Context, op tenantOperator, t *Tenant) error {
-	if t.CreatedBy != "" || (op.isCredential() && t.CreatorCredentialKind == CredentialKindTenantOperator) {
+	if t.CreatedBy != "" || (op.isCredential() && t.CreatorOperatorKind == OperatorKindTenantOperator) {
 		return nil
 	}
 	members, err := s.memberships.ListMembershipsForTenant(ctx, t.ProjectID, t.ID)

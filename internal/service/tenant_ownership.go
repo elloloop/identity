@@ -25,8 +25,8 @@ var (
 	ErrTenantStillGoverned = errors.New("the tenant still has an owner or admin who can sign in")
 	// ErrIneligibleTenantMember is returned by AdminAddTenantMember for an
 	// account that may not be added to a tenant: it is not an active,
-	// signed-up person, or its email is unverified (judgeTenantOwner's
-	// rule). Mapped to CodeFailedPrecondition.
+	// signed-up person, or its email is unverified
+	// (requireEligibleTenantMember). Mapped to CodeFailedPrecondition.
 	ErrIneligibleTenantMember = errors.New("this account cannot be added to a tenant")
 	// ErrMemberRefusedByTenant is returned by AdminAddTenantMember for a
 	// person whose membership the tenant suspended, or whom its owners or
@@ -141,8 +141,7 @@ const (
 // judgeTenantOwner applies the one rule for who may own a tenant: an
 // active, permanent person (an anonymous account is swept by retention, an
 // agent cannot hold what it would own, a merged account is gone) whose email
-// is verified, since an owner sends the tenant's invitations. CreateTenant
-// holds its caller to it, and a transfer or a recovery the new owner.
+// is verified, since an owner sends the tenant's invitations.
 func judgeTenantOwner(u *User) tenantOwnerFitness {
 	switch {
 	case !isActivePerson(u):
@@ -151,6 +150,23 @@ func judgeTenantOwner(u *User) tenantOwnerFitness {
 		return ownerEmailUnverified
 	default:
 		return fitToOwnTenant
+	}
+}
+
+// requireEligibleTenantMember refuses, with ErrIneligibleTenantMember, an
+// account an operator may not add to a tenant: one that is not an active,
+// permanent person (isActivePerson), since an anonymous account is swept by
+// retention and an agent acts through its owner, or one whose email is
+// unverified, since an operator finds the person by their address and an
+// address nobody has proven could put a stranger in the tenant.
+func requireEligibleTenantMember(u *User) error {
+	switch {
+	case !isActivePerson(u):
+		return fmt.Errorf("%w: the account is not an active person's", ErrIneligibleTenantMember)
+	case !u.EmailVerified:
+		return fmt.Errorf("%w: the account's email is unverified", ErrIneligibleTenantMember)
+	default:
+		return nil
 	}
 }
 
@@ -266,9 +282,9 @@ func (s *ControlPlaneAdminService) appointableGovernors(ctx context.Context, pro
 	return s.governorsWhoCanSignIn(ctx, projectID, t.ID)
 }
 
-// requireGovernable refuses, with ErrTenantStatusConflict, a tenant an
-// operator may not appoint to or add members to: a latent one, which has
-// never been governed. A claimed or suspended tenant is governable.
+// requireGovernable refuses, with ErrTenantStatusConflict, a latent tenant,
+// which has never been governed and which no operator therefore staffs. A
+// claimed or suspended tenant is governable.
 func requireGovernable(t *Tenant) error {
 	if t.Status != TenantStatusClaimed && t.Status != TenantStatusSuspended {
 		return fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)

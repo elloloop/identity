@@ -139,8 +139,8 @@ type connectMembershipStore struct {
 	upserted *service.TenantMembership
 	// active is what ListActiveTenantsForUser returns.
 	active []*service.UserTenant
-	// changeErr, when set, is what SuspendMembership, RestoreMembership and
-	// AddMember return.
+	// changeErr, when set, is the store's answer to a change of a
+	// membership's status.
 	changeErr error
 }
 

@@ -530,8 +530,10 @@ Both:
     provisions one Project's tenants can hold a
     <code>tenant_operator</code> credential of that Project instead, which an
     operator mints with the secret. Whoever holds one can also create the
-    Project's tenants and appoint their first owners, so mint it only for a
-    service trusted with that:
+    Project's tenants, appoint their first owners, and add any signed-up
+    person of the Project as a member of any of its tenants, including
+    tenants with owners of their own, so mint it only for a service trusted
+    with that:
   </p>
   <Code
     code={`AdminCreateProjectCredential(project_id, kind="tenant_operator")
@@ -593,10 +595,14 @@ All three:
     remains. It never overrides or lowers an owner or admin who can act;
     further owners and admins come from the governor it appointed, by
     invitation (an admin it appoints invites the owner). It adds members
-    itself: <code>AdminAddTenantMember</code> never changes a membership
-    already active, so it cannot lower anyone, and it never lets back in a
+    itself, and unlike the appointment, an addition works on a tenant that
+    already has its own owners and admins, without their invitation.
+    <code>AdminAddTenantMember</code> returns a membership already active
+    unchanged, whatever its role and source, so it cannot lower anyone, and
+    one through the email's domain stays bound to it. It never lets back in a
     person the tenant suspended or removed, whom only the tenant's owners and
-    admins restore or invite. Either account must already be one of the
+    admins restore or invite. The admin secret's <code>AdminAddTenantMember</code>
+    follows the same rules. Either account must already be one of the
     Project's, signed up with a verified email: find its id with
     <code>LookupUsers</code> and a <code>directory_reader</code>
     credential. <code>AdminCreateTenant</code>
@@ -614,11 +620,14 @@ All three:
   </p>
   <p>
     A tenant records whether a credential or the admin secret created it.
-    The credential may restore a suspended tenant a credential created even
-    when nobody governs it yet, since the credential's holder answers for
-    the tenants it makes; restoring any other tenant with no creator, owner
-    or admin is still refused, with the secret too. A tenant created before
-    that record was kept has none: appoint its owner first.
+    Only a <code>tenant_operator</code> credential may restore a suspended
+    tenant a credential created while nobody governs it, since the
+    credential's holder answers for the tenants it makes. The admin secret
+    is held to the old rule even for those tenants, and every other tenant
+    with no creator, owner or admin is refused whoever calls: appoint an
+    owner first. That includes a tenant created before the record was kept.
+    The record is not returned by <code>AdminGetTenant</code>; a refused
+    restore means an owner is needed first.
   </p>
   <ul>
     <li>

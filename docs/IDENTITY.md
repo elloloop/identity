@@ -265,12 +265,16 @@ secret, so a service that runs one project's tenants, creating them,
 appointing their first owners and adding their members included, never
 holds the secret that governs every project.
 It is confined to its own project: each call must name it, and the tenant
-and account an `AdminAddTenantAdmin` names must be the project's, whoever
-calls it. Its `AdminAddTenantAdmin` appoints only a tenant's first owner or
+and account an `AdminAddTenantAdmin` or `AdminAddTenantMember` names must
+be the project's, whoever calls it. Its `AdminAddTenantAdmin` appoints only a tenant's first owner or
 admin, under `AdminRecoverTenantOwnership`'s rules, so it never overrides or
 lowers people who can govern. `AdminAddTenantMember`, with either
-credential, adds an active member and never changes a membership already
-active, nor overrides a suspension or removal the tenant made. A credential
+credential, adds an active member to any claimed or suspended tenant of the
+project, governed ones included, without their owners' invitation; it never
+changes a membership already active, nor lets back in a person the tenant
+suspended or removed. So whoever holds a credential can put any signed-up
+person of the project into any of its tenants: mint one only for a service
+trusted with that, and revoke it if it leaks. A credential
 restores a suspended tenant a credential created even when nobody governs
 it; every other restore still needs a creator, owner or admin. It is read
 uncached on every call, as a directory reader's is, so a revocation or a

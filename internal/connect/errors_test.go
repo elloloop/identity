@@ -280,6 +280,8 @@ func TestToConnectErrorSelfServiceTenants(t *testing.T) {
 		service.ErrDomainAttemptsLimited:      connect.CodeResourceExhausted,
 		service.ErrTenantStillGoverned:        connect.CodeFailedPrecondition,
 		service.ErrIneligibleTenantOwner:      connect.CodeFailedPrecondition,
+		service.ErrIneligibleTenantMember:     connect.CodeFailedPrecondition,
+		service.ErrMemberRefusedByTenant:      connect.CodeFailedPrecondition,
 	} {
 		if got := connect.CodeOf(toConnectError(err)); got != want {
 			t.Errorf("toConnectError(%v) code = %v, want %v", err, got, want)

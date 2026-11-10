@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
@@ -146,7 +147,8 @@ func TestTenantStore_ListTenantsPlanWalksThePagingIndex(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	scratch := createScratchDatabase(ctx, t, dsn)
-	migrateToVersion(t, scratch, 49)
+	// The queries are this release's, so they plan against its whole schema.
+	require.NoError(t, withMigrator(t, scratch, func(m *migrate.Migrate) error { return m.Up() }))
 	raw, err := pgx.Connect(ctx, scratch)
 	require.NoError(t, err)
 	defer func() { _ = raw.Close(ctx) }()

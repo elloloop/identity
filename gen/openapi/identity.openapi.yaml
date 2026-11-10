@@ -321,19 +321,22 @@ paths:
       summary: AdminAddTenantMember
       description: |-
         AdminAddTenantMember makes user_id an active member of the tenant (role
-         "member", source "added"). user_id must be an account of project_id
-         (else NOT_FOUND) that is an active, signed-up person's with a verified
-         email (else FAILED_PRECONDITION), and the tenant claimed or suspended
-         (FAILED_PRECONDITION for a latent tenant). A person who already holds an
-         active membership of the tenant, of any role, keeps it unchanged: it is
-         returned and nothing is recorded, so the call never lowers a role and a
-         retry is safe. A membership that has ended becomes an active member one.
+         "member", source "added"), whether or not the tenant has owners and
+         admins of its own. user_id must be an account of project_id (else
+         NOT_FOUND), and the tenant claimed or suspended (FAILED_PRECONDITION for
+         a latent tenant). A person who already holds an active membership of the
+         tenant, of any role and source, keeps it unchanged: it is returned and
+         nothing is recorded, before the account is judged, so the call never
+         lowers a role and a retry gets the first answer; one through the email's
+         domain stays bound to the domain. Anyone else must be an active,
+         signed-up person with a verified email (else FAILED_PRECONDITION). A
+         membership that has ended becomes an active member one.
          FAILED_PRECONDITION for a person whose membership the tenant suspended,
          or whom its owners or admins removed: the operator does not override
          them. Records tenant_member_added with the operator's IP address and
          user agent when it writes. Operator-only, authorized like
          AdminGetTenant: the admin secret, or a tenant_operator credential of
-         project_id. INVALID_ARGUMENT for a blank id.
+         project_id, each held to these rules. INVALID_ARGUMENT for a blank id.
       operationId: identity.v1.IdentityService.AdminAddTenantMember
       parameters:
         - name: Connect-Protocol-Version

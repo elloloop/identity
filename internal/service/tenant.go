@@ -83,20 +83,22 @@ type Tenant struct {
 	// empty on a tenant made any other way. Provenance only, never a foreign
 	// key: deleting that user leaves it in place.
 	CreatedBy string
-	// CreatorCredentialKind is what authorized the AdminCreateTenant that
-	// made the tenant: CreatorAdminSecret or CredentialKindTenantOperator,
-	// and empty on a tenant made any other way or before it was recorded.
-	// A tenant_operator credential of the project may restore a suspended
-	// tenant a credential created even when nobody governs it.
-	CreatorCredentialKind string
-	CreatedAtMs           int64
-	UpdatedAtMs           int64
+	// CreatorOperatorKind is the OperatorKind that authorized the
+	// AdminCreateTenant that made the tenant, empty on a tenant made any
+	// other way or before it was recorded. A tenant_operator credential's
+	// holder answers for the tenants a credential made, so a credential may
+	// restore one nobody governs (requireAnswerable).
+	CreatorOperatorKind string
+	CreatedAtMs         int64
+	UpdatedAtMs         int64
 }
 
-// CreatorAdminSecret is the CreatorCredentialKind of a tenant the admin
-// secret created, beside CredentialKindTenantOperator for one a
-// tenant_operator credential created.
-const CreatorAdminSecret = "admin_secret"
+// What authorizes an operator call: the admin secret, or a tenant_operator
+// credential of the call's project.
+const (
+	OperatorKindAdminSecret    = "admin_secret"
+	OperatorKindTenantOperator = CredentialKindTenantOperator
+)
 
 // OwnedTenantRequest asks TenantStore.CreateOwnedTenant for a tenant owned
 // by the user who creates it.

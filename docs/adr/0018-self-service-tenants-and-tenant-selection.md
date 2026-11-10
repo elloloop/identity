@@ -66,10 +66,11 @@ overrides people who can govern. Both calls are now audited, as
 used, as the actor ([Ownership](#ownership)).
 
 **Amended** (2026-11-10): the credential, and the secret, may add a person
-of the project as an active member (`AdminAddTenantMember`): an active
-membership of any role is kept as it is, and a person the tenant suspended
-or removed is refused, so an operator neither lowers anyone nor overrides
-the tenant's owners and admins. A tenant records what authorized the
+of the project as an active member (`AdminAddTenantMember`), to a governed
+tenant too, without its owners' invitation. An active membership of any
+role is kept as it is, and a person the tenant suspended or removed is
+refused, so an operator lowers no one and reverses no suspension or removal
+the tenant's owners and admins made. A tenant records what authorized the
 `AdminCreateTenant` that made it (migration 0057), and a credential may
 restore a suspended tenant a credential created even when nobody governs it
 ([Suspension](#suspension)).
@@ -307,7 +308,7 @@ operator appoints an owner with `AdminRecoverTenantOwnership` (or adds an
 admin with `AdminAddTenantAdmin`): a latent tenant suspended in SQL looks
 like that, and restoring it would make it selectable without anyone having
 verified its domain. The exception is a tenant a `tenant_operator`
-credential created, which the tenant records (`creator_credential_kind`):
+credential created, which the tenant records (`creator_operator_kind`):
 a credential of the project restores it with nobody governing it, since
 the credential's holder vouched for it at creation and the restore is
 audited under that credential. The secret keeps the rule, and so does a

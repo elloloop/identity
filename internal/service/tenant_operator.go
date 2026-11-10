@@ -34,19 +34,16 @@ type tenantOperator struct {
 	// credential's (credentialActor), or empty for the admin secret, which
 	// names nobody.
 	actor string
-	// kind is what authorized the operation: CreatorAdminSecret, or
-	// CredentialKindTenantOperator for a credential, which acts on its own
-	// project alone, appoints a tenant's governors only under recovery's
-	// rules (appointableGovernors) and restores the tenants credentials
-	// created (requireAnswerable). AdminCreateTenant keeps it on the tenant
-	// it creates (Tenant.CreatorCredentialKind).
+	// kind is what authorized the operation, an OperatorKind. A credential
+	// is narrower than the admin secret: it acts on its own project alone
+	// and appoints a tenant's governors only under recovery's rules.
 	kind string
 }
 
 // isCredential reports whether a tenant_operator credential, not the admin
 // secret, authorized the operation.
 func (op tenantOperator) isCredential() bool {
-	return op.kind == CredentialKindTenantOperator
+	return op.kind == OperatorKindTenantOperator
 }
 
 // authorizeTenantOperator admits a tenant operation on projectID: the admin
@@ -61,7 +58,7 @@ func (s *ControlPlaneAdminService) authorizeTenantOperator(ctx context.Context, 
 		if err := s.authorize(caller.AdminSecret); err != nil {
 			return tenantOperator{}, err
 		}
-		return tenantOperator{kind: CreatorAdminSecret}, nil
+		return tenantOperator{kind: OperatorKindAdminSecret}, nil
 	}
 	publicID, secret, ok := strings.Cut(caller.TenantOperatorKey, rawKeySeparator)
 	if !ok || publicID == "" || secret == "" {
@@ -87,5 +84,5 @@ func (s *ControlPlaneAdminService) authorizeTenantOperator(ctx context.Context, 
 	if projectID == "" {
 		return tenantOperator{}, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
-	return tenantOperator{actor: credentialActor(cred), kind: CredentialKindTenantOperator}, nil
+	return tenantOperator{actor: credentialActor(cred), kind: OperatorKindTenantOperator}, nil
 }

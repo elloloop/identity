@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/elloloop/identity/internal/service"
@@ -508,5 +509,57 @@ func TestDomainStore_SetDomainStatusNeverUnverifies(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, service.DomainStatusVerified, kept.Status, "%s never replaces verified", status)
 		require.Equal(t, verified.UpdatedAtMs, kept.UpdatedAtMs, "nor is anything written")
+	}
+}
+
+// TestTenantStore_CreatorOperatorKind: a tenant keeps what authorized its
+// creation, empty by default, and the column takes no other value.
+func TestTenantStore_CreatorOperatorKind(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping tenant creator kind test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	projects, tenants, _ := newTenantDomainStores(ctx, t, dsn)
+	projectID, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-creator", Name: "Creator"})
+	require.NoError(t, err)
+
+	for _, kind := range []string{service.CredentialKindTenantOperator, service.OperatorKindAdminSecret, ""} {
+		id, err := tenants.CreateTenant(ctx, &service.Tenant{ProjectID: projectID, Status: service.TenantStatusClaimed, CreatorOperatorKind: kind})
+		require.NoError(t, err, kind)
+		got, err := tenants.GetTenant(ctx, projectID, id)
+		require.NoError(t, err, kind)
+		require.Equal(t, kind, got.CreatorOperatorKind)
+	}
+	_, err = tenants.CreateTenant(ctx, &service.Tenant{ProjectID: projectID, Status: service.TenantStatusClaimed, CreatorOperatorKind: "secret"})
+	require.Error(t, err, "the CHECK refuses another kind")
+}
+
+// TestTenantCreatorOperatorKindMigrationRoundTrip: 0057 adds the column
+// and its CHECK, and its down migration drops them.
+func TestTenantCreatorOperatorKindMigrationRoundTrip(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	scratch := createScratchDatabase(ctx, t, dsn)
+	raw, err := pgx.Connect(ctx, scratch)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close(ctx) }()
+
+	hasColumn := func() bool {
+		t.Helper()
+		var n int
+		require.NoError(t, raw.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = 'tenants' AND column_name = 'creator_operator_kind'`).Scan(&n))
+		return n == 1
+	}
+	for _, version := range []uint{56, 57, 56, 57} {
+		migrateToVersion(t, scratch, version)
+		require.Equal(t, version == 57, hasColumn(), "version %d", version)
 	}
 }
