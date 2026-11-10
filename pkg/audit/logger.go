@@ -348,6 +348,15 @@ const (
 	// already made records nothing.
 	EventTenantAdminAdded EventType = "tenant_admin_added"
 
+	// EventTenantMemberAdded records an operator making a person an active
+	// member of a tenant (AdminAddTenantMember): actor the tenant_operator
+	// credential ("credential:<id>") or none for the admin secret, target the
+	// person, the operator's IP address and user agent, and the project id,
+	// the tenant id and the role, "member", in the details. Only a call that
+	// writes the membership records it: one that finds the person already an
+	// active member records nothing.
+	EventTenantMemberAdded EventType = "tenant_member_added"
+
 	// EventTenantSuspended / EventTenantRestored record an operator
 	// suspending a claimed tenant or restoring a suspended one
 	// (AdminSuspendTenant, AdminRestoreTenant), with the operator's IP
@@ -523,6 +532,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventAgentTransferCancelled:        {},
 	EventTenantCreated:                 {},
 	EventTenantAdminAdded:              {},
+	EventTenantMemberAdded:             {},
 	EventTenantSuspended:               {},
 	EventTenantRestored:                {},
 	EventTenantOwnershipTransferred:    {},

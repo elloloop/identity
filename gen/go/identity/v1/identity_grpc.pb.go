@@ -165,6 +165,7 @@ const (
 	IdentityService_SetPrimaryAuthDomain_FullMethodName              = "/identity.v1.IdentityService/SetPrimaryAuthDomain"
 	IdentityService_AdminCreateTenant_FullMethodName                 = "/identity.v1.IdentityService/AdminCreateTenant"
 	IdentityService_AdminAddTenantAdmin_FullMethodName               = "/identity.v1.IdentityService/AdminAddTenantAdmin"
+	IdentityService_AdminAddTenantMember_FullMethodName              = "/identity.v1.IdentityService/AdminAddTenantMember"
 	IdentityService_AdminGetTenant_FullMethodName                    = "/identity.v1.IdentityService/AdminGetTenant"
 	IdentityService_AdminListTenants_FullMethodName                  = "/identity.v1.IdentityService/AdminListTenants"
 	IdentityService_AdminSuspendTenant_FullMethodName                = "/identity.v1.IdentityService/AdminSuspendTenant"
@@ -645,16 +646,32 @@ type IdentityServiceClient interface {
 	// returns that membership unchanged and records nothing, so a retry is
 	// safe. INVALID_ARGUMENT for a blank id or any other role.
 	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
+	// AdminAddTenantMember makes user_id an active member of the tenant (role
+	// "member", source "added"). user_id must be an account of project_id
+	// (else NOT_FOUND) that is an active, signed-up person's with a verified
+	// email (else FAILED_PRECONDITION), and the tenant claimed or suspended
+	// (FAILED_PRECONDITION for a latent tenant). A person who already holds an
+	// active membership of the tenant, of any role, keeps it unchanged: it is
+	// returned and nothing is recorded, so the call never lowers a role and a
+	// retry is safe. A membership that has ended becomes an active member one.
+	// FAILED_PRECONDITION for a person whose membership the tenant suspended,
+	// or whom its owners or admins removed: the operator does not override
+	// them. Records tenant_member_added with the operator's IP address and
+	// user agent when it writes. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id. INVALID_ARGUMENT for a blank id.
+	AdminAddTenantMember(ctx context.Context, in *AdminAddTenantMemberRequest, opts ...grpc.CallOption) (*AdminAddTenantMemberResponse, error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy.
 	//
 	// Operator-only, and one of the tenant operations (with
 	// AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
-	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin and
-	// GetLoginPolicy) that also accept a tenant_operator project credential,
-	// "<public id>.<secret>", in the X-Tenant-Operator-Key header in place of
-	// the admin secret. The credential authorizes these alone, and only on
-	// its own project: project_id must name it. It is checked on every call,
+	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin,
+	// AdminAddTenantMember and GetLoginPolicy) that also accept a
+	// tenant_operator project credential, "<public id>.<secret>", in the
+	// X-Tenant-Operator-Key header in place of the admin secret. The
+	// credential authorizes these alone, and only on its own project:
+	// project_id must name it. It is checked on every call,
 	// so a revocation holds from the next one, and works whether or not
 	// GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
 	// alone is checked. What a credential does is recorded with it as the
@@ -726,7 +743,10 @@ type IdentityServiceClient interface {
 	// since restoring it would make it selectable with no one answering for
 	// its domain (appoint an owner with AdminRecoverTenantOwnership, then
 	// restore it); ABORTED when its status changed between the read and the
-	// write.
+	// write. The one exception: a tenant_operator credential restores a tenant
+	// that a tenant_operator credential of the project created with
+	// AdminCreateTenant even when it has no owner or admin, since the
+	// credential's holder answers for the tenants it makes.
 	AdminRestoreTenant(ctx context.Context, in *AdminRestoreTenantRequest, opts ...grpc.CallOption) (*AdminRestoreTenantResponse, error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it is a person who both can sign in and
@@ -2311,6 +2331,16 @@ func (c *identityServiceClient) AdminAddTenantAdmin(ctx context.Context, in *Adm
 	return out, nil
 }
 
+func (c *identityServiceClient) AdminAddTenantMember(ctx context.Context, in *AdminAddTenantMemberRequest, opts ...grpc.CallOption) (*AdminAddTenantMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminAddTenantMemberResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminAddTenantMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AdminGetTenant(ctx context.Context, in *AdminGetTenantRequest, opts ...grpc.CallOption) (*AdminGetTenantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminGetTenantResponse)
@@ -3005,16 +3035,32 @@ type IdentityServiceServer interface {
 	// returns that membership unchanged and records nothing, so a retry is
 	// safe. INVALID_ARGUMENT for a blank id or any other role.
 	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
+	// AdminAddTenantMember makes user_id an active member of the tenant (role
+	// "member", source "added"). user_id must be an account of project_id
+	// (else NOT_FOUND) that is an active, signed-up person's with a verified
+	// email (else FAILED_PRECONDITION), and the tenant claimed or suspended
+	// (FAILED_PRECONDITION for a latent tenant). A person who already holds an
+	// active membership of the tenant, of any role, keeps it unchanged: it is
+	// returned and nothing is recorded, so the call never lowers a role and a
+	// retry is safe. A membership that has ended becomes an active member one.
+	// FAILED_PRECONDITION for a person whose membership the tenant suspended,
+	// or whom its owners or admins removed: the operator does not override
+	// them. Records tenant_member_added with the operator's IP address and
+	// user agent when it writes. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id. INVALID_ARGUMENT for a blank id.
+	AdminAddTenantMember(context.Context, *AdminAddTenantMemberRequest) (*AdminAddTenantMemberResponse, error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy.
 	//
 	// Operator-only, and one of the tenant operations (with
 	// AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
-	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin and
-	// GetLoginPolicy) that also accept a tenant_operator project credential,
-	// "<public id>.<secret>", in the X-Tenant-Operator-Key header in place of
-	// the admin secret. The credential authorizes these alone, and only on
-	// its own project: project_id must name it. It is checked on every call,
+	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin,
+	// AdminAddTenantMember and GetLoginPolicy) that also accept a
+	// tenant_operator project credential, "<public id>.<secret>", in the
+	// X-Tenant-Operator-Key header in place of the admin secret. The
+	// credential authorizes these alone, and only on its own project:
+	// project_id must name it. It is checked on every call,
 	// so a revocation holds from the next one, and works whether or not
 	// GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
 	// alone is checked. What a credential does is recorded with it as the
@@ -3086,7 +3132,10 @@ type IdentityServiceServer interface {
 	// since restoring it would make it selectable with no one answering for
 	// its domain (appoint an owner with AdminRecoverTenantOwnership, then
 	// restore it); ABORTED when its status changed between the read and the
-	// write.
+	// write. The one exception: a tenant_operator credential restores a tenant
+	// that a tenant_operator credential of the project created with
+	// AdminCreateTenant even when it has no owner or admin, since the
+	// credential's holder answers for the tenants it makes.
 	AdminRestoreTenant(context.Context, *AdminRestoreTenantRequest) (*AdminRestoreTenantResponse, error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it is a person who both can sign in and
@@ -3648,6 +3697,9 @@ func (UnimplementedIdentityServiceServer) AdminCreateTenant(context.Context, *Ad
 }
 func (UnimplementedIdentityServiceServer) AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminAddTenantAdmin not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminAddTenantMember(context.Context, *AdminAddTenantMemberRequest) (*AdminAddTenantMemberResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminAddTenantMember not implemented")
 }
 func (UnimplementedIdentityServiceServer) AdminGetTenant(context.Context, *AdminGetTenantRequest) (*AdminGetTenantResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminGetTenant not implemented")
@@ -6370,6 +6422,24 @@ func _IdentityService_AdminAddTenantAdmin_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_AdminAddTenantMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminAddTenantMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminAddTenantMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminAddTenantMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminAddTenantMember(ctx, req.(*AdminAddTenantMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AdminGetTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminGetTenantRequest)
 	if err := dec(in); err != nil {
@@ -7392,6 +7462,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminAddTenantAdmin",
 			Handler:    _IdentityService_AdminAddTenantAdmin_Handler,
+		},
+		{
+			MethodName: "AdminAddTenantMember",
+			Handler:    _IdentityService_AdminAddTenantMember_Handler,
 		},
 		{
 			MethodName: "AdminGetTenant",

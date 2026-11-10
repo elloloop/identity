@@ -473,6 +473,9 @@ const (
 	// IdentityServiceAdminAddTenantAdminProcedure is the fully-qualified name of the IdentityService's
 	// AdminAddTenantAdmin RPC.
 	IdentityServiceAdminAddTenantAdminProcedure = "/identity.v1.IdentityService/AdminAddTenantAdmin"
+	// IdentityServiceAdminAddTenantMemberProcedure is the fully-qualified name of the IdentityService's
+	// AdminAddTenantMember RPC.
+	IdentityServiceAdminAddTenantMemberProcedure = "/identity.v1.IdentityService/AdminAddTenantMember"
 	// IdentityServiceAdminGetTenantProcedure is the fully-qualified name of the IdentityService's
 	// AdminGetTenant RPC.
 	IdentityServiceAdminGetTenantProcedure = "/identity.v1.IdentityService/AdminGetTenant"
@@ -1008,16 +1011,32 @@ type IdentityServiceClient interface {
 	// returns that membership unchanged and records nothing, so a retry is
 	// safe. INVALID_ARGUMENT for a blank id or any other role.
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
+	// AdminAddTenantMember makes user_id an active member of the tenant (role
+	// "member", source "added"). user_id must be an account of project_id
+	// (else NOT_FOUND) that is an active, signed-up person's with a verified
+	// email (else FAILED_PRECONDITION), and the tenant claimed or suspended
+	// (FAILED_PRECONDITION for a latent tenant). A person who already holds an
+	// active membership of the tenant, of any role, keeps it unchanged: it is
+	// returned and nothing is recorded, so the call never lowers a role and a
+	// retry is safe. A membership that has ended becomes an active member one.
+	// FAILED_PRECONDITION for a person whose membership the tenant suspended,
+	// or whom its owners or admins removed: the operator does not override
+	// them. Records tenant_member_added with the operator's IP address and
+	// user agent when it writes. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id. INVALID_ARGUMENT for a blank id.
+	AdminAddTenantMember(context.Context, *connect.Request[v1.AdminAddTenantMemberRequest]) (*connect.Response[v1.AdminAddTenantMemberResponse], error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy.
 	//
 	// Operator-only, and one of the tenant operations (with
 	// AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
-	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin and
-	// GetLoginPolicy) that also accept a tenant_operator project credential,
-	// "<public id>.<secret>", in the X-Tenant-Operator-Key header in place of
-	// the admin secret. The credential authorizes these alone, and only on
-	// its own project: project_id must name it. It is checked on every call,
+	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin,
+	// AdminAddTenantMember and GetLoginPolicy) that also accept a
+	// tenant_operator project credential, "<public id>.<secret>", in the
+	// X-Tenant-Operator-Key header in place of the admin secret. The
+	// credential authorizes these alone, and only on its own project:
+	// project_id must name it. It is checked on every call,
 	// so a revocation holds from the next one, and works whether or not
 	// GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
 	// alone is checked. What a credential does is recorded with it as the
@@ -1089,7 +1108,10 @@ type IdentityServiceClient interface {
 	// since restoring it would make it selectable with no one answering for
 	// its domain (appoint an owner with AdminRecoverTenantOwnership, then
 	// restore it); ABORTED when its status changed between the read and the
-	// write.
+	// write. The one exception: a tenant_operator credential restores a tenant
+	// that a tenant_operator credential of the project created with
+	// AdminCreateTenant even when it has no owner or admin, since the
+	// credential's holder answers for the tenants it makes.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it is a person who both can sign in and
@@ -2093,6 +2115,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantAdmin")),
 			connect.WithClientOptions(opts...),
 		),
+		adminAddTenantMember: connect.NewClient[v1.AdminAddTenantMemberRequest, v1.AdminAddTenantMemberResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminAddTenantMemberProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantMember")),
+			connect.WithClientOptions(opts...),
+		),
 		adminGetTenant: connect.NewClient[v1.AdminGetTenantRequest, v1.AdminGetTenantResponse](
 			httpClient,
 			baseURL+IdentityServiceAdminGetTenantProcedure,
@@ -2388,6 +2416,7 @@ type identityServiceClient struct {
 	setPrimaryAuthDomain              *connect.Client[v1.SetPrimaryAuthDomainRequest, v1.SetPrimaryAuthDomainResponse]
 	adminCreateTenant                 *connect.Client[v1.AdminCreateTenantRequest, v1.AdminCreateTenantResponse]
 	adminAddTenantAdmin               *connect.Client[v1.AdminAddTenantAdminRequest, v1.AdminAddTenantAdminResponse]
+	adminAddTenantMember              *connect.Client[v1.AdminAddTenantMemberRequest, v1.AdminAddTenantMemberResponse]
 	adminGetTenant                    *connect.Client[v1.AdminGetTenantRequest, v1.AdminGetTenantResponse]
 	adminListTenants                  *connect.Client[v1.AdminListTenantsRequest, v1.AdminListTenantsResponse]
 	adminSuspendTenant                *connect.Client[v1.AdminSuspendTenantRequest, v1.AdminSuspendTenantResponse]
@@ -3144,6 +3173,11 @@ func (c *identityServiceClient) AdminAddTenantAdmin(ctx context.Context, req *co
 	return c.adminAddTenantAdmin.CallUnary(ctx, req)
 }
 
+// AdminAddTenantMember calls identity.v1.IdentityService.AdminAddTenantMember.
+func (c *identityServiceClient) AdminAddTenantMember(ctx context.Context, req *connect.Request[v1.AdminAddTenantMemberRequest]) (*connect.Response[v1.AdminAddTenantMemberResponse], error) {
+	return c.adminAddTenantMember.CallUnary(ctx, req)
+}
+
 // AdminGetTenant calls identity.v1.IdentityService.AdminGetTenant.
 func (c *identityServiceClient) AdminGetTenant(ctx context.Context, req *connect.Request[v1.AdminGetTenantRequest]) (*connect.Response[v1.AdminGetTenantResponse], error) {
 	return c.adminGetTenant.CallUnary(ctx, req)
@@ -3718,16 +3752,32 @@ type IdentityServiceHandler interface {
 	// returns that membership unchanged and records nothing, so a retry is
 	// safe. INVALID_ARGUMENT for a blank id or any other role.
 	AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error)
+	// AdminAddTenantMember makes user_id an active member of the tenant (role
+	// "member", source "added"). user_id must be an account of project_id
+	// (else NOT_FOUND) that is an active, signed-up person's with a verified
+	// email (else FAILED_PRECONDITION), and the tenant claimed or suspended
+	// (FAILED_PRECONDITION for a latent tenant). A person who already holds an
+	// active membership of the tenant, of any role, keeps it unchanged: it is
+	// returned and nothing is recorded, so the call never lowers a role and a
+	// retry is safe. A membership that has ended becomes an active member one.
+	// FAILED_PRECONDITION for a person whose membership the tenant suspended,
+	// or whom its owners or admins removed: the operator does not override
+	// them. Records tenant_member_added with the operator's IP address and
+	// user agent when it writes. Operator-only, authorized like
+	// AdminGetTenant: the admin secret, or a tenant_operator credential of
+	// project_id. INVALID_ARGUMENT for a blank id.
+	AdminAddTenantMember(context.Context, *connect.Request[v1.AdminAddTenantMemberRequest]) (*connect.Response[v1.AdminAddTenantMemberResponse], error)
 	// Returns one tenant's own record, in any status: never its members,
 	// domains or login policy.
 	//
 	// Operator-only, and one of the tenant operations (with
 	// AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
-	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin and
-	// GetLoginPolicy) that also accept a tenant_operator project credential,
-	// "<public id>.<secret>", in the X-Tenant-Operator-Key header in place of
-	// the admin secret. The credential authorizes these alone, and only on
-	// its own project: project_id must name it. It is checked on every call,
+	// AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin,
+	// AdminAddTenantMember and GetLoginPolicy) that also accept a
+	// tenant_operator project credential, "<public id>.<secret>", in the
+	// X-Tenant-Operator-Key header in place of the admin secret. The
+	// credential authorizes these alone, and only on its own project:
+	// project_id must name it. It is checked on every call,
 	// so a revocation holds from the next one, and works whether or not
 	// GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
 	// alone is checked. What a credential does is recorded with it as the
@@ -3799,7 +3849,10 @@ type IdentityServiceHandler interface {
 	// since restoring it would make it selectable with no one answering for
 	// its domain (appoint an owner with AdminRecoverTenantOwnership, then
 	// restore it); ABORTED when its status changed between the read and the
-	// write.
+	// write. The one exception: a tenant_operator credential restores a tenant
+	// that a tenant_operator credential of the project created with
+	// AdminCreateTenant even when it has no owner or admin, since the
+	// credential's holder answers for the tenants it makes.
 	AdminRestoreTenant(context.Context, *connect.Request[v1.AdminRestoreTenantRequest]) (*connect.Response[v1.AdminRestoreTenantResponse], error)
 	// AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
 	// govern: no owner or admin of it is a person who both can sign in and
@@ -4799,6 +4852,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantAdmin")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceAdminAddTenantMemberHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminAddTenantMemberProcedure,
+		svc.AdminAddTenantMember,
+		connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantMember")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAdminGetTenantHandler := connect.NewUnaryHandler(
 		IdentityServiceAdminGetTenantProcedure,
 		svc.AdminGetTenant,
@@ -5237,6 +5296,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminCreateTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminAddTenantAdminProcedure:
 			identityServiceAdminAddTenantAdminHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminAddTenantMemberProcedure:
+			identityServiceAdminAddTenantMemberHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminGetTenantProcedure:
 			identityServiceAdminGetTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminListTenantsProcedure:
@@ -5876,6 +5937,10 @@ func (UnimplementedIdentityServiceHandler) AdminCreateTenant(context.Context, *c
 
 func (UnimplementedIdentityServiceHandler) AdminAddTenantAdmin(context.Context, *connect.Request[v1.AdminAddTenantAdminRequest]) (*connect.Response[v1.AdminAddTenantAdminResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminAddTenantAdmin is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminAddTenantMember(context.Context, *connect.Request[v1.AdminAddTenantMemberRequest]) (*connect.Response[v1.AdminAddTenantMemberResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminAddTenantMember is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) AdminGetTenant(context.Context, *connect.Request[v1.AdminGetTenantRequest]) (*connect.Response[v1.AdminGetTenantResponse], error) {

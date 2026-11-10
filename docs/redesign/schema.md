@@ -314,6 +314,7 @@ signed-in user creates it `claimed`, as its owner (`CreateTenant`, 0044).
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
 | `created_by` | TEXT | N | 0044. Default `''`. The user who created the tenant with `CreateTenant`; `''` for an auto-formed or operator-created tenant. Not an FK, like `invited_by`. |
+| `creator_credential_kind` | TEXT | N | 0057. Default `''`. `CHECK IN ('','admin_secret','tenant_operator')`. What authorized the `AdminCreateTenant` that made the tenant; `''` for a tenant made any other way or before 0057. A `tenant_operator` credential restores a suspended `tenant_operator`-made tenant that nobody governs. |
 
 - **PK:** `id`.
 - **Unique:** none beyond PK (no domain uniqueness on tenant).

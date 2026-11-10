@@ -38,13 +38,13 @@ func NewTenantStore(r *pgRepository) *TenantStore {
 
 const tenantColumns = `
 	id, project_id, name, primary_domain, status, created_by,
-	created_at_ms, updated_at_ms`
+	creator_credential_kind, created_at_ms, updated_at_ms`
 
 func scanTenant(row pgx.Row) (*service.Tenant, error) {
 	var t service.Tenant
 	if err := row.Scan(
 		&t.ID, &t.ProjectID, &t.Name, &t.PrimaryDomain, &t.Status, &t.CreatedBy,
-		&t.CreatedAtMs, &t.UpdatedAtMs,
+		&t.CreatorCredentialKind, &t.CreatedAtMs, &t.UpdatedAtMs,
 	); err != nil {
 		return nil, err
 	}
@@ -78,12 +78,12 @@ func (s *TenantStore) CreateTenant(ctx context.Context, t *service.Tenant) (stri
 	const q = `
 		INSERT INTO tenants (
 			id, project_id, name, primary_domain, status, created_by,
-			created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+			creator_credential_kind, created_at_ms, updated_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 	if _, err := s.pool.Exec(
 		ctx, q,
 		id, t.ProjectID, t.Name, t.PrimaryDomain, status, t.CreatedBy,
-		t.CreatedAtMs, t.UpdatedAtMs,
+		t.CreatorCredentialKind, t.CreatedAtMs, t.UpdatedAtMs,
 	); err != nil {
 		return "", wrapPgErr("CreateTenant", err)
 	}

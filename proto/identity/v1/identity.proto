@@ -2228,9 +2228,9 @@ message AdminCreateProjectCredentialRequest {
   // "tenant_operator" (a machine credential whose secret half is shown ONCE
   // and which authorizes only AdminGetTenant, AdminListTenants,
   // AdminSuspendTenant, AdminRestoreTenant, AdminRecoverTenantOwnership,
-  // AdminCreateTenant, AdminAddTenantAdmin and GetLoginPolicy on this
-  // project, presented in the X-Tenant-Operator-Key header in place of the
-  // admin secret).
+  // AdminCreateTenant, AdminAddTenantAdmin, AdminAddTenantMember and
+  // GetLoginPolicy on this project, presented in the X-Tenant-Operator-Key
+  // header in place of the admin secret).
   string kind = 2;
 }
 
@@ -2346,6 +2346,16 @@ message AdminAddTenantAdminRequest {
 }
 
 message AdminAddTenantAdminResponse {
+  TenantMembership membership = 1;
+}
+
+message AdminAddTenantMemberRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+}
+
+message AdminAddTenantMemberResponse {
   TenantMembership membership = 1;
 }
 
@@ -3820,16 +3830,32 @@ service IdentityService {
   // returns that membership unchanged and records nothing, so a retry is
   // safe. INVALID_ARGUMENT for a blank id or any other role.
   rpc AdminAddTenantAdmin(AdminAddTenantAdminRequest) returns (AdminAddTenantAdminResponse);
+  // AdminAddTenantMember makes user_id an active member of the tenant (role
+  // "member", source "added"). user_id must be an account of project_id
+  // (else NOT_FOUND) that is an active, signed-up person's with a verified
+  // email (else FAILED_PRECONDITION), and the tenant claimed or suspended
+  // (FAILED_PRECONDITION for a latent tenant). A person who already holds an
+  // active membership of the tenant, of any role, keeps it unchanged: it is
+  // returned and nothing is recorded, so the call never lowers a role and a
+  // retry is safe. A membership that has ended becomes an active member one.
+  // FAILED_PRECONDITION for a person whose membership the tenant suspended,
+  // or whom its owners or admins removed: the operator does not override
+  // them. Records tenant_member_added with the operator's IP address and
+  // user agent when it writes. Operator-only, authorized like
+  // AdminGetTenant: the admin secret, or a tenant_operator credential of
+  // project_id. INVALID_ARGUMENT for a blank id.
+  rpc AdminAddTenantMember(AdminAddTenantMemberRequest) returns (AdminAddTenantMemberResponse);
   // Returns one tenant's own record, in any status: never its members,
   // domains or login policy.
   //
   // Operator-only, and one of the tenant operations (with
   // AdminListTenants, AdminSuspendTenant, AdminRestoreTenant,
-  // AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin and
-  // GetLoginPolicy) that also accept a tenant_operator project credential,
-  // "<public id>.<secret>", in the X-Tenant-Operator-Key header in place of
-  // the admin secret. The credential authorizes these alone, and only on
-  // its own project: project_id must name it. It is checked on every call,
+  // AdminRecoverTenantOwnership, AdminCreateTenant, AdminAddTenantAdmin,
+  // AdminAddTenantMember and GetLoginPolicy) that also accept a
+  // tenant_operator project credential, "<public id>.<secret>", in the
+  // X-Tenant-Operator-Key header in place of the admin secret. The
+  // credential authorizes these alone, and only on its own project:
+  // project_id must name it. It is checked on every call,
   // so a revocation holds from the next one, and works whether or not
   // GATEWAY_ADMIN_API_SECRET is set. When X-Admin-Secret is presented it
   // alone is checked. What a credential does is recorded with it as the
@@ -3901,7 +3927,10 @@ service IdentityService {
   // since restoring it would make it selectable with no one answering for
   // its domain (appoint an owner with AdminRecoverTenantOwnership, then
   // restore it); ABORTED when its status changed between the read and the
-  // write.
+  // write. The one exception: a tenant_operator credential restores a tenant
+  // that a tenant_operator credential of the project created with
+  // AdminCreateTenant even when it has no owner or admin, since the
+  // credential's holder answers for the tenants it makes.
   rpc AdminRestoreTenant(AdminRestoreTenantRequest) returns (AdminRestoreTenantResponse);
   // AdminRecoverTenantOwnership appoints an owner to a tenant nobody can
   // govern: no owner or admin of it is a person who both can sign in and

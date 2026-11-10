@@ -227,6 +227,24 @@ func (h *IdentityHandler) AdminAddTenantAdmin(
 	}), nil
 }
 
+// AdminAddTenantMember makes an account an active member of a tenant.
+// Operator-only: the admin secret, or a tenant_operator credential of the
+// project.
+func (h *IdentityHandler) AdminAddTenantMember(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminAddTenantMemberRequest],
+) (*connect.Response[identitypb.AdminAddTenantMemberResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	m, err := h.controlAdmin.AdminAddTenantMember(ctx, operatorCredentials(req.Header()), req.Msg.ProjectId, req.Msg.TenantId, req.Msg.UserId,
+		clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminAddTenantMemberResponse{Membership: membershipToProto(m)}), nil
+}
+
 // UpsertLoginPolicy authors a tenant's LoginPolicy (the policy the
 // login path enforces). Operator-only.
 func (h *IdentityHandler) UpsertLoginPolicy(

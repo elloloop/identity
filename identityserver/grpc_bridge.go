@@ -693,6 +693,13 @@ func (b *grpcBridge) AdminAddTenantAdmin(ctx context.Context, in *identitypb.Adm
 	return invoke(ctx, b, in, b.h.AdminAddTenantAdmin)
 }
 
+func (b *grpcBridge) AdminAddTenantMember(ctx context.Context, in *identitypb.AdminAddTenantMemberRequest) (*identitypb.AdminAddTenantMemberResponse, error) {
+	if err := b.throttleTenantOperator(ctx, identityv1connect.IdentityServiceAdminAddTenantMemberProcedure); err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.AdminAddTenantMember)
+}
+
 func (b *grpcBridge) AdminCreateProject(ctx context.Context, in *identitypb.AdminCreateProjectRequest) (*identitypb.AdminCreateProjectResponse, error) {
 	return invoke(ctx, b, in, b.h.AdminCreateProject)
 }

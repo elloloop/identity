@@ -23,6 +23,17 @@ var (
 	// both, so the operator restores it first. Mapped to
 	// CodeFailedPrecondition.
 	ErrTenantStillGoverned = errors.New("the tenant still has an owner or admin who can sign in")
+	// ErrIneligibleTenantMember is returned by AdminAddTenantMember for an
+	// account that may not be added to a tenant: it is not an active,
+	// signed-up person, or its email is unverified (judgeTenantOwner's
+	// rule). Mapped to CodeFailedPrecondition.
+	ErrIneligibleTenantMember = errors.New("this account cannot be added to a tenant")
+	// ErrMemberRefusedByTenant is returned by AdminAddTenantMember for a
+	// person whose membership the tenant suspended, or whom its owners or
+	// admins removed: an operator's addition does not override them, and an
+	// owner or admin restores or invites the person instead. Mapped to
+	// CodeFailedPrecondition.
+	ErrMemberRefusedByTenant = errors.New("the tenant suspended or removed this person; an owner or admin must restore or invite them")
 )
 
 // OwnershipTransfer is the result of TransferTenantOwnership: the new
@@ -244,17 +255,25 @@ func (s *ControlPlaneAdminService) AdminRecoverTenantOwnership(ctx context.Conte
 }
 
 // appointableGovernors starts an operator's appointment of a governor of t, a
-// tenant of projectID, under recovery's rules: t must be claimed or suspended
-// (a latent tenant has never had a governor, ErrTenantStatusConflict). It
-// returns who can govern t now (governorsWhoCanSignIn). An appointment
-// governingAs finds already made is returned unchanged, recording nothing, so
-// a retry after a lost response gets the first answer; any other is judged
-// by admitAppointment.
+// tenant of projectID, under recovery's rules: t must be governable
+// (requireGovernable), and it returns who can govern t now
+// (governorsWhoCanSignIn), the set governingAs and admitAppointment judge the
+// appointment against.
 func (s *ControlPlaneAdminService) appointableGovernors(ctx context.Context, projectID string, t *Tenant) ([]*TenantMembership, error) {
-	if t.Status != TenantStatusClaimed && t.Status != TenantStatusSuspended {
-		return nil, fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
+	if err := requireGovernable(t); err != nil {
+		return nil, err
 	}
 	return s.governorsWhoCanSignIn(ctx, projectID, t.ID)
+}
+
+// requireGovernable refuses, with ErrTenantStatusConflict, a tenant an
+// operator may not appoint to or add members to: a latent one, which has
+// never been governed. A claimed or suspended tenant is governable.
+func requireGovernable(t *Tenant) error {
+	if t.Status != TenantStatusClaimed && t.Status != TenantStatusSuspended {
+		return fmt.Errorf("%w: the tenant is %s", ErrTenantStatusConflict, t.Status)
+	}
+	return nil
 }
 
 // governingAs returns the membership with which userID is one of governors at

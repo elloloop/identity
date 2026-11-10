@@ -54,7 +54,7 @@ func (f *tenantOperatorFixture) actor() string {
 
 // tenantOperations are the operator calls a tenant_operator key authorizes,
 // each made on tenant t-1 of project, but for the grant of t-2's first
-// admin and the creation of a tenant.
+// admin and the creation of a tenant. AdminAddTenantMember adds aide to t-1.
 var tenantOperations = []struct {
 	name string
 	call func(svc *ControlPlaneAdminService, caller OperatorCredentials, project string) error
@@ -91,6 +91,10 @@ var tenantOperations = []struct {
 		_, err := svc.AdminAddTenantAdmin(context.Background(), caller, project, "t-2", "aide", RoleAdmin, testOperatorIP, testOperatorUA)
 		return err
 	}},
+	{"AdminAddTenantMember", func(svc *ControlPlaneAdminService, caller OperatorCredentials, project string) error {
+		_, err := svc.AdminAddTenantMember(context.Background(), caller, project, "t-1", "aide", testOperatorIP, testOperatorUA)
+		return err
+	}},
 }
 
 // requireNothingCreated fails unless the fixture still holds only the
@@ -124,12 +128,16 @@ func TestTenantOperator_AuthorizesTheTenantOperations(t *testing.T) {
 	require.NotNil(t, aide)
 	assert.Equal(t, RoleAdmin, aide.Role)
 	assert.Equal(t, MembershipSourceAdded, aide.Source)
+	member, _ := f.members.GetMembership(ctx, "proj", "t-1", "aide")
+	require.NotNil(t, member)
+	assert.Equal(t, RoleMember, member.Role)
+	assert.Equal(t, MembershipStatusActive, member.Status)
 	page, err := f.svc.AdminListTenants(ctx, asTenantOperator(f.key.RawKey), "proj", 0, "")
 	require.NoError(t, err)
 	require.Len(t, page.Tenants, 3)
 	for _, event := range []audit.EventType{
 		audit.EventTenantSuspended, audit.EventTenantRestored, audit.EventTenantOwnershipRecovered, audit.EventTenantMemberRestored,
-		audit.EventTenantCreated, audit.EventTenantAdminAdded,
+		audit.EventTenantCreated, audit.EventTenantAdminAdded, audit.EventTenantMemberAdded,
 	} {
 		records := f.records.byEvent(string(event))
 		require.Len(t, records, 1, event)
@@ -149,6 +157,11 @@ func TestTenantOperator_AuthorizesTheTenantOperations(t *testing.T) {
 	added := f.records.byEvent(string(audit.EventTenantAdminAdded))[0]
 	assert.Equal(t, map[string]any{"project_id": "proj", "tenant_id": "t-2", "role": RoleAdmin}, added.details)
 	assert.Equal(t, [2]string{testOperatorIP, testOperatorUA}, added.client)
+	joined := f.records.byEvent(string(audit.EventTenantMemberAdded))[0]
+	assert.Equal(t, map[string]any{"project_id": "proj", "tenant_id": "t-1", "role": RoleMember}, joined.details)
+	assert.Equal(t, [2]string{testOperatorIP, testOperatorUA}, joined.client)
+	stored, _ = f.tenants.GetTenant(ctx, "proj", createdID)
+	assert.Equal(t, CredentialKindTenantOperator, stored.CreatorCredentialKind, "the tenant records the credential made it")
 }
 
 // The admin secret's changes name no actor, as before.

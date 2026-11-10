@@ -426,6 +426,8 @@ AdminRestoreTenant(project_id, tenant_id, reason="dispute settled")
   -> FAILED_PRECONDITION                       # latent, or no creator, owner or admin:
                                                #   appoint an owner with
                                                #   AdminRecoverTenantOwnership first
+                                               #   (a credential restores a tenant
+                                               #   a credential created)
 Both:
   -> ABORTED                                   # its status changed meanwhile; read it again
   -> INVALID_ARGUMENT                          # a blank id, or a reason that is blank, over 500
@@ -539,20 +541,21 @@ Both:
   <p>
     The service presents <code>raw_key</code> in the
     <code>X-Tenant-Operator-Key</code> header, in place of
-    <code>X-Admin-Secret</code>, on eight calls:
+    <code>X-Admin-Secret</code>, on nine calls:
     <code>AdminGetTenant</code>, <code>AdminListTenants</code>,
     <code>AdminSuspendTenant</code>, <code>AdminRestoreTenant</code>,
     <code>AdminRecoverTenantOwnership</code>,
-    <code>AdminCreateTenant</code>, <code>AdminAddTenantAdmin</code> and
-    <code>GetLoginPolicy</code>. Each must name the credential's own
+    <code>AdminCreateTenant</code>, <code>AdminAddTenantAdmin</code>,
+    <code>AdminAddTenantMember</code> and <code>GetLoginPolicy</code>. Each must name the credential's own
     <code>project_id</code>. No other call accepts it: creating Projects or
     credentials, and writing or deleting a login policy, still take the
     admin secret.
   </p>
   <p>
     With it, the service provisions its Project's tenants itself: it creates
-    one, claimed at once, and makes an account of the Project its first
-    owner or admin, each recorded with the credential as the actor:
+    one, claimed at once, makes an account of the Project its first owner or
+    admin, and adds the Project's people as members, each recorded with the
+    credential as the actor:
   </p>
   <Code
     code={`AdminCreateTenant(project_id, name="Acme", primary_domain="acme.example")
@@ -566,7 +569,16 @@ AdminAddTenantAdmin(project_id, tenant_id, user_id, role="owner")
                                #   cannot own a tenant, or latent
   -> NOT_FOUND                 # the tenant or the account is not the Project's
   -> INVALID_ARGUMENT          # a blank id, or a role other than owner or admin
-Both:
+AdminAddTenantMember(project_id, tenant_id, user_id)
+  -> { membership: { role: "member", source: "added", ... } }  # recorded as tenant_member_added;
+                               #   an active member already, of any role: that
+                               #   membership, unchanged, recorded nothing
+  -> FAILED_PRECONDITION       # the tenant suspended or removed the person, the
+                               #   account is not a person with a verified email,
+                               #   or latent
+  -> NOT_FOUND                 # the tenant or the account is not the Project's
+  -> INVALID_ARGUMENT          # a blank id
+All three:
   -> UNIMPLEMENTED             # GATEWAY_ADMIN_API_SECRET is unset and the call
                                #   presents X-Admin-Secret or no
                                #   X-Tenant-Operator-Key
@@ -579,10 +591,15 @@ Both:
     recovery's rules: the tenant is claimed or suspended, the account is a
     person who could own a tenant, and nobody who can govern the tenant
     remains. It never overrides or lowers an owner or admin who can act;
-    further admins come from the owner it appointed, by invitation. The
-    account must already be one of the Project's, signed up with a verified
-    email: find its id with <code>LookupUsers</code> and a
-    <code>directory_reader</code> credential. <code>AdminCreateTenant</code>
+    further owners and admins come from the governor it appointed, by
+    invitation (an admin it appoints invites the owner). It adds members
+    itself: <code>AdminAddTenantMember</code> never changes a membership
+    already active, so it cannot lower anyone, and it never lets back in a
+    person the tenant suspended or removed, whom only the tenant's owners and
+    admins restore or invite. Either account must already be one of the
+    Project's, signed up with a verified email: find its id with
+    <code>LookupUsers</code> and a <code>directory_reader</code>
+    credential. <code>AdminCreateTenant</code>
     is not idempotent, so keep the <code>tenant_id</code> it returns before
     you retry; a tenant whose grant failed waits, ownerless, for the grant
     to be retried.
@@ -594,6 +611,14 @@ Both:
     agent grants and machines of the Project's accounts on that domain, as
     for any tenant. Nothing but the per-IP budget below bounds how many
     tenants it creates.
+  </p>
+  <p>
+    A tenant records whether a credential or the admin secret created it.
+    The credential may restore a suspended tenant a credential created even
+    when nobody governs it yet, since the credential's holder answers for
+    the tenants it makes; restoring any other tenant with no creator, owner
+    or admin is still refused, with the secret too. A tenant created before
+    that record was kept has none: appoint its owner first.
   </p>
   <ul>
     <li>
@@ -607,6 +632,7 @@ Both:
       What it changes is recorded with the credential as the actor,
       <code>credential:&lt;credential_id&gt;</code>: the
       <code>tenant_created</code>, <code>tenant_admin_added</code>,
+      <code>tenant_member_added</code>,
       <code>tenant_suspended</code>, <code>tenant_restored</code> and
       <code>tenant_ownership_recovered</code> records, and the
       <code>tenant_member_restored</code> of a suspension a recovery or a
@@ -623,7 +649,7 @@ Both:
     <li>
       Calls that present it share one budget per client IP,
       <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code> (default 120) per
-      <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window, across the eight
+      <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window, across the nine
       calls and across HTTP and native gRPC, so a guessed secret cannot be
       tried at line rate. Calls made with the admin secret alone are not
       counted. The setting is shared with the <code>LookupUsers</code>,
@@ -632,7 +658,7 @@ Both:
       raising it raises those too.
     </li>
     <li>
-      An empty <code>GATEWAY_ADMIN_API_SECRET</code> does not close these eight
+      An empty <code>GATEWAY_ADMIN_API_SECRET</code> does not close these nine
       calls: they keep accepting every live <code>tenant_operator</code>
       credential. To cut the credentials off, revoke them with
       <code>AdminRevokeProjectCredential</code>, which takes the secret: set

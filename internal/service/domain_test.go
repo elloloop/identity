@@ -507,6 +507,40 @@ func (f *fakeMembershipStore) JoinByDomain(ctx context.Context, projectID, tenan
 	})
 }
 
+// AddMember mirrors the postgres store: an active membership is kept as it
+// is, a suspended one is ErrMemberSuspended, a removal stands as
+// ErrRemovedFromTenant, and anything else becomes an active, added member
+// one.
+func (f *fakeMembershipStore) AddMember(_ context.Context, projectID, tenantID, userID string) (*TenantMembership, bool, error) {
+	if f.upsertErr != nil {
+		return nil, false, f.upsertErr
+	}
+	k := f.key(projectID, tenantID, userID)
+	if m, ok := f.byKey[k]; ok {
+		switch m.Status {
+		case MembershipStatusActive:
+			out := *m
+			return &out, false, nil
+		case MembershipStatusSuspended:
+			return nil, false, ErrMemberSuspended
+		}
+	}
+	if f.removed[k] {
+		return nil, false, ErrRemovedFromTenant
+	}
+	id := "mem-" + k
+	if m, ok := f.byKey[k]; ok {
+		id = m.ID
+	}
+	added := &TenantMembership{
+		ID: id, ProjectID: projectID, TenantID: tenantID, UserID: userID,
+		Source: MembershipSourceAdded, Role: RoleMember, Status: MembershipStatusActive,
+	}
+	stored := *added
+	f.byKey[k] = &stored
+	return added, true, nil
+}
+
 func (f *fakeMembershipStore) IsRemoved(_ context.Context, projectID, tenantID, userID string) (bool, error) {
 	if f.removedErr != nil {
 		return false, f.removedErr

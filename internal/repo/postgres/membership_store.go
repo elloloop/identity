@@ -309,6 +309,69 @@ func (s *MembershipStore) JoinByDomain(ctx context.Context, projectID, tenantID,
 	return joined, changed, nil
 }
 
+// addMemberQuery is AddMember's write of a membership the user does not hold
+// actively: a new one, or one that has ended, becomes an active member one
+// from an operator's addition.
+const addMemberQuery = `
+		INSERT INTO tenant_memberships (
+			id, project_id, tenant_id, user_id, source, role, status,
+			created_at_ms, updated_at_ms
+		) VALUES ($1, $2, $3, $4, 'added', 'member', 'active', $5, $5)
+		ON CONFLICT (project_id, tenant_id, user_id) DO UPDATE SET
+			source        = 'added',
+			role          = 'member',
+			status        = 'active',
+			updated_at_ms = EXCLUDED.updated_at_ms
+		RETURNING ` + membershipColumns
+
+// AddMember makes userID an active member of the tenant, role member and
+// source added, unless they hold an active membership already, which is
+// returned unchanged. One transaction takes the membership's lock, then
+// reads the membership and the removal record, so a concurrent removal,
+// suspension or grant either waits for the addition or is seen by it. A
+// suspended membership is service.ErrMemberSuspended and a removal record
+// service.ErrRemovedFromTenant; neither is changed. Returns the membership
+// and whether this call wrote it.
+func (s *MembershipStore) AddMember(ctx context.Context, projectID, tenantID, userID string) (*service.TenantMembership, bool, error) {
+	if projectID == "" || tenantID == "" || userID == "" {
+		return nil, false, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, wrapPgErr("AddMember", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockMembership(ctx, tx, "AddMember", projectID, tenantID, userID); err != nil {
+		return nil, false, err
+	}
+	held, err := scanMembership(tx.QueryRow(ctx, `SELECT `+membershipColumns+`
+		FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`, projectID, tenantID, userID))
+	switch {
+	case err == nil && held.Status == service.MembershipStatusActive:
+		return held, false, nil
+	case err == nil && held.Status == service.MembershipStatusSuspended:
+		return nil, false, service.ErrMemberSuspended
+	case err != nil && !noRows(err):
+		return nil, false, wrapPgErr("AddMember(read)", err)
+	}
+	removed, err := isRemoved(ctx, tx, projectID, tenantID, userID)
+	if err != nil {
+		return nil, false, wrapPgErr("AddMember(removal)", err)
+	}
+	if removed {
+		return nil, false, service.ErrRemovedFromTenant
+	}
+	added, err := scanMembership(tx.QueryRow(ctx, addMemberQuery, newID(), projectID, tenantID, userID, nowMs()))
+	if err != nil {
+		return nil, false, wrapPgErr("AddMember", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, wrapPgErr("AddMember(commit)", err)
+	}
+	return added, true, nil
+}
+
 // IsRemoved reports whether userID has a removal record in the tenant: an
 // owner or admin removed them, and no one has let them back in since.
 func (s *MembershipStore) IsRemoved(ctx context.Context, projectID, tenantID, userID string) (bool, error) {

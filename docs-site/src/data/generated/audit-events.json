@@ -81,6 +81,7 @@
   "tenant_admin_added",
   "tenant_created",
   "tenant_joined_by_domain",
+  "tenant_member_added",
   "tenant_member_removed",
   "tenant_member_restored",
   "tenant_member_suspended",

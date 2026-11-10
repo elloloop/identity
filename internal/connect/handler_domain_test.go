@@ -139,8 +139,8 @@ type connectMembershipStore struct {
 	upserted *service.TenantMembership
 	// active is what ListActiveTenantsForUser returns.
 	active []*service.UserTenant
-	// changeErr, when set, is what SuspendMembership and RestoreMembership
-	// return.
+	// changeErr, when set, is what SuspendMembership, RestoreMembership and
+	// AddMember return.
 	changeErr error
 }
 
@@ -184,6 +184,23 @@ func (s *connectMembershipStore) JoinByDomain(ctx context.Context, projectID, te
 		ProjectID: projectID, TenantID: tenantID, UserID: userID,
 		Source: service.MembershipSourceDomain, Role: service.RoleMember, Status: service.MembershipStatusActive,
 	})
+}
+
+// AddMember adds userID as an active member, unless member stands for them,
+// which is returned unchanged; changeErr, when set, is what it returns.
+func (s *connectMembershipStore) AddMember(_ context.Context, projectID, tenantID, userID string) (*service.TenantMembership, bool, error) {
+	if s.changeErr != nil {
+		return nil, false, s.changeErr
+	}
+	if s.member != nil && s.member.UserID == userID {
+		return s.member, false, nil
+	}
+	m := &service.TenantMembership{
+		ID: "mem-" + userID, ProjectID: projectID, TenantID: tenantID, UserID: userID,
+		Source: service.MembershipSourceAdded, Role: service.RoleMember, Status: service.MembershipStatusActive,
+	}
+	s.upserted = m
+	return m, true, nil
 }
 
 func (s *connectMembershipStore) IsRemoved(context.Context, string, string, string) (bool, error) {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -652,6 +653,9 @@ func (s *ControlPlaneAdminService) AdminCreateTenant(ctx context.Context, caller
 		Name:          strings.TrimSpace(name),
 		PrimaryDomain: strings.ToLower(strings.TrimSpace(primaryDomain)),
 		Status:        TenantStatusClaimed,
+		// A tenant_operator credential's tenant can later be restored by a
+		// credential with nobody governing it (requireAnswerable).
+		CreatorCredentialKind: op.kind,
 	}
 	id, err := s.tenants.CreateTenant(ctx, t)
 	if err != nil {
@@ -707,7 +711,7 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, call
 	if err != nil {
 		return nil, err
 	}
-	if op.projectBound {
+	if op.isCredential() {
 		governors, err := s.appointableGovernors(ctx, projectID, t)
 		if err != nil {
 			return nil, err
@@ -753,6 +757,68 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, call
 	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantAdminAdded,
 		audit.WithActor(op.actor), audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
 		audit.WithSuccess(true), audit.WithDetails(details))
+	return m, nil
+}
+
+// AdminAddTenantMember makes userID an active member of a tenant of the
+// project (role member, source added), as an operator adds a person without
+// an invitation. userID must be an account of the project that is an
+// active, signed-up person with a verified email (judgeTenantOwner's rule),
+// else ErrIneligibleTenantMember, and the tenant claimed or suspended
+// (requireGovernable). A person who already holds an active membership, of
+// any role and source, keeps it: it is returned unchanged and nothing is
+// recorded, so the call never lowers a role and a retry is safe. A person
+// the tenant suspended or removed is ErrMemberRefusedByTenant, decided where
+// the membership is written (MembershipStore.AddMember): an operator does
+// not override the tenant's owners and admins. caller presents the admin
+// secret or a tenant_operator credential of the project. A membership
+// written is audited as EventTenantMemberAdded with the operator's actor,
+// ip and ua.
+func (s *ControlPlaneAdminService) AdminAddTenantMember(ctx context.Context, caller OperatorCredentials, projectID, tenantID, userID, ip, ua string) (*TenantMembership, error) {
+	op, err := s.authorizeTenantOperator(ctx, caller, projectID)
+	if err != nil {
+		return nil, err
+	}
+	projectID, tenantID, err = requireTenantRef(projectID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("%w: missing user_id", ErrInvalidArgument)
+	}
+	t, err := s.getTenant(ctx, projectID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireGovernable(t); err != nil {
+		return nil, err
+	}
+	user, err := s.projectAccount(ctx, projectID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if judgeTenantOwner(user) != fitToOwnTenant {
+		return nil, ErrIneligibleTenantMember
+	}
+	m, added, err := s.memberships.AddMember(ctx, projectID, tenantID, userID)
+	switch {
+	case errors.Is(err, ErrMemberSuspended):
+		return nil, fmt.Errorf("%w: their membership is suspended", ErrMemberRefusedByTenant)
+	case errors.Is(err, ErrRemovedFromTenant):
+		return nil, fmt.Errorf("%w: an owner or admin removed them", ErrMemberRefusedByTenant)
+	case err != nil:
+		return nil, err
+	}
+	if added {
+		s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: projectID}), audit.EventTenantMemberAdded,
+			audit.WithActor(op.actor), audit.WithTarget(userID), audit.WithIP(ip), audit.WithUserAgent(ua),
+			audit.WithSuccess(true), audit.WithDetails(map[string]any{
+				"project_id": projectID,
+				"tenant_id":  tenantID,
+				"role":       m.Role,
+			}))
+	}
 	return m, nil
 }
 

@@ -312,6 +312,9 @@ func TestAdminRPCs_NilService_ReturnUnimplemented(t *testing.T) {
 
 	_, err = client.AdminAddTenantAdmin(ctx, withAdminSecret(&identitypb.AdminAddTenantAdminRequest{ProjectId: "p", TenantId: "t", UserId: "u"}, handlerAdminSecret))
 	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = client.AdminAddTenantMember(ctx, withAdminSecret(&identitypb.AdminAddTenantMemberRequest{ProjectId: "p", TenantId: "t", UserId: "u"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
 }
 
 // ── secret configured but unset on this build (empty secret) → Unimplemented

@@ -240,7 +240,8 @@ On boot, the postgres driver seeds the default `Project` (mapped onto the
 (seeded verified, since they are deployer-owned). Additional projects,
 credentials, and tenants are provisioned out-of-band by a platform
 operator through the control-plane admin RPCs (`AdminCreateProject`,
-`AdminCreateProjectCredential`, `AdminCreateTenant`, `AdminAddTenantAdmin`),
+`AdminCreateProjectCredential`, `AdminCreateTenant`, `AdminAddTenantAdmin`,
+`AdminAddTenantMember`),
 and read back with `AdminGetTenant` and `AdminListTenants` (a tenant's own
 record, never its members or domains; every status, newest first, paged by
 an opaque cursor, 50 by default and at most 200), and suspended and restored
@@ -257,21 +258,27 @@ any other refused with `CodePermissionDenied`.
 
 The tenant operations among them (`AdminGetTenant`, `AdminListTenants`,
 `AdminSuspendTenant`, `AdminRestoreTenant`, `AdminRecoverTenantOwnership`,
-`AdminCreateTenant` and `AdminAddTenantAdmin`), and the operator's
-`GetLoginPolicy`, also accept a `tenant_operator` project credential
-(`ok_…`), presented in `X-Tenant-Operator-Key` in place of the secret, so a
-service that runs one project's tenants, creating them and appointing their
-first owners included, never holds the secret that governs every project.
+`AdminCreateTenant`, `AdminAddTenantAdmin` and `AdminAddTenantMember`), and
+the operator's `GetLoginPolicy`, also accept a `tenant_operator` project
+credential (`ok_…`), presented in `X-Tenant-Operator-Key` in place of the
+secret, so a service that runs one project's tenants, creating them,
+appointing their first owners and adding their members included, never
+holds the secret that governs every project.
 It is confined to its own project: each call must name it, and the tenant
 and account an `AdminAddTenantAdmin` names must be the project's, whoever
 calls it. Its `AdminAddTenantAdmin` appoints only a tenant's first owner or
 admin, under `AdminRecoverTenantOwnership`'s rules, so it never overrides or
-lowers people who can govern. It is read
+lowers people who can govern. `AdminAddTenantMember`, with either
+credential, adds an active member and never changes a membership already
+active, nor overrides a suspension or removal the tenant made. A credential
+restores a suspended tenant a credential created even when nobody governs
+it; every other restore still needs a creator, owner or admin. It is read
 uncached on every call, as a directory reader's is, so a revocation or a
 suspended project refuses it from the next call. It works with the secret
 empty too, though minting and revoking one take the secret. What it changes
 is audited with the credential as the actor (`credential:<id>`), a
-creation as `tenant_created` and a grant as `tenant_admin_added`, and its
+creation as `tenant_created`, a grant as `tenant_admin_added` and an
+addition as `tenant_member_added`, and its
 refusals as `tenant_operator_refused` under its project. The calls that
 present it share one per-IP budget (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`)
 on both transports.
