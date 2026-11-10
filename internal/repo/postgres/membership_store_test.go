@@ -960,8 +960,19 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	require.NoError(t, truncateAll(ctx, dsn))
-	ms, is, projectID, tenantID, owner, other := newMembershipFixture(ctx, t, dsn)
+	ms, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
 	now := nowMs()
+	people, err := New(ctx, Config{DSN: dsn, MaxConns: 2, ConnTimeout: 5 * time.Second, ProjectID: projectID})
+	require.NoError(t, err)
+	t.Cleanup(people.Close)
+	person := func(addr string) string {
+		t.Helper()
+		created := time.Now()
+		id, err := people.CreateUser(ctx, &service.User{Email: addr, Status: service.StatusActive, CreatedAt: created, UpdatedAt: created})
+		require.NoError(t, err)
+		return id
+	}
+	owner, other := person("owner@acme.com"), person("other@acme.com")
 
 	member := func(tenant, user, role, status string) {
 		t.Helper()
@@ -1051,6 +1062,27 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	require.Nil(t, open(projectID, "byother@acme.com"), "nor once the inviter is no longer active there")
 	inviteAs("", tenantID, "nobody@acme.com", "open-no-inviter", now+86_400_000)
 	require.Nil(t, open(projectID, "nobody@acme.com"), "an invitation with no inviter admits nobody")
+
+	for name, change := range map[string]string{
+		"deactivated":   `UPDATE users SET status = 'deactivated' WHERE id = $1`,
+		"merged away":   `UPDATE users SET status = 'deactivated', merged_into_user_id = 'survivor' WHERE id = $1`,
+		"an agent":      `UPDATE users SET kind = 'agent', owner_user_id = 'some-person' WHERE id = $1`,
+		"anonymous":     `UPDATE users SET is_anonymous = TRUE WHERE id = $1`,
+		"pending purge": `UPDATE users SET status = 'pending_deletion' WHERE id = $1`,
+	} {
+		admin := person(fmt.Sprintf("admin-%d@acme.com", time.Now().UnixNano()))
+		member(tenantID, admin, service.RoleAdmin, service.MembershipStatusActive)
+		addr := fmt.Sprintf("invitee-%d@acme.com", time.Now().UnixNano())
+		inviteAs(admin, tenantID, addr, "open-"+addr, now+86_400_000)
+		require.NotNil(t, open(projectID, addr), "%s: admitted before the change", name)
+		_, err := raw.Exec(ctx, change, admin)
+		require.NoError(t, err, name)
+		if name == "pending purge" {
+			require.NotNil(t, open(projectID, addr), "an inviter pending deletion still signs in, so still admits")
+			continue
+		}
+		require.Nil(t, open(projectID, addr), "an inviter who is %s admits nobody, though the membership stays active", name)
+	}
 }
 
 // TestPendingEmailIndexMigrationRoundTrip: 0058 adds the index the open
@@ -1089,4 +1121,44 @@ func TestPendingEmailIndexMigrationRoundTrip(t *testing.T) {
 	require.NoError(t, tx.QueryRow(ctx, `EXPLAIN (FORMAT TEXT) SELECT id FROM tenant_invitations
 		WHERE project_id = 'p' AND lower(email COLLATE "C") = 'a@example.com' AND status = 'pending'`).Scan(&plan))
 	require.Contains(t, plan, "tenant_invitations_pending_email_idx")
+}
+
+// TestInvitationStore_OpenInvitationForEmailUnderRLS: the inviter's users row
+// is under row-level security, and an invitation store's pool is bound to the
+// server's own project, so the lookup binds its connection to the project it
+// is asked about. Run as a role row-level security applies to, an invitation
+// in another project than the store's is still found.
+func TestInvitationStore_OpenInvitationForEmailUnderRLS(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	ms, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+	people, err := New(ctx, Config{DSN: dsn, MaxConns: 2, ConnTimeout: 5 * time.Second, ProjectID: projectID})
+	require.NoError(t, err)
+	t.Cleanup(people.Close)
+	now := time.Now()
+	owner, err := people.CreateUser(ctx, &service.User{Email: "rls-owner@acme.com", Status: service.StatusActive, CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	_, err = ms.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: projectID, TenantID: tenantID, UserID: owner,
+		Source: service.MembershipSourceAdded, Role: service.RoleOwner, Status: service.MembershipStatusActive,
+	})
+	require.NoError(t, err)
+	id, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+		ProjectID: projectID, TenantID: tenantID, Email: "rls-new@acme.com", InvitedBy: owner,
+		TokenHash: "rls-open", ExpiresAtMs: now.UnixMilli() + 86_400_000,
+	}, unlimitedInvitations)
+	require.NoError(t, err)
+
+	bound, err := New(ctx, Config{DSN: provisionRLSAppRole(ctx, t, dsn), MaxConns: 2, ConnTimeout: 5 * time.Second, ProjectID: "control-plane"})
+	require.NoError(t, err)
+	t.Cleanup(bound.Close)
+	got, err := NewInvitationStore(bound).OpenInvitationForEmail(ctx, projectID, "rls-new@acme.com", now.UnixMilli())
+	require.NoError(t, err)
+	require.NotNil(t, got, "the lookup reads the inviter's row in the project it was asked about")
+	require.Equal(t, id, got.ID)
 }

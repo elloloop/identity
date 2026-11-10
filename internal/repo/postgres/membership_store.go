@@ -1063,13 +1063,10 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	return id, nil
 }
 
-// OpenInvitationForEmail returns the newest invitation in projectID still
-// pending at nowMs (unexpired as AcceptTenantInvitation reads expiry: 0 never
-// expires) and addressed to email (canonical, compared under
-// service.FoldEmail, as CreateInvitation stores it), in a tenant that can
-// still take members and was not created through self-service CreateTenant
-// (tenants.created_by empty), from an inviter who is still an active owner or
-// admin of that tenant, or (nil, nil). Uses tenant_invitations_pending_email_idx.
+// OpenInvitationForEmail implements service.OpenInvitationReader. The inviter's
+// users row is under row-level security (migration 0016), so the query runs on
+// a connection bound to projectID rather than to this store's own project.
+// Uses tenant_invitations_pending_email_idx.
 func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*service.TenantInvitation, error) {
 	if projectID == "" || email == "" {
 		return nil, nil
@@ -1080,12 +1077,15 @@ func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID,
 		JOIN tenants t ON t.project_id = i.project_id AND t.id = i.tenant_id
 		JOIN tenant_memberships m ON m.project_id = i.project_id AND m.tenant_id = i.tenant_id
 		  AND m.user_id = i.invited_by AND m.status = 'active' AND m.role IN ('owner', 'admin')
+		JOIN users u ON u.project_id = i.project_id AND u.id = i.invited_by
+		  AND lower(u.status) IN ('', 'active', 'pending_deletion')
+		  AND u.kind <> 'agent' AND NOT u.is_anonymous AND u.merged_into_user_id = ''
 		WHERE i.project_id = $1 AND lower(i.email COLLATE "C") = $2
 		  AND i.status = 'pending' AND (i.expires_at_ms = 0 OR i.expires_at_ms >= $3)
 		  AND t.status IN ('claimed', 'latent') AND t.created_by = ''
 		ORDER BY i.created_at_ms DESC, i.id DESC
 		LIMIT 1`
-	v, err := scanInvitation(s.pool.QueryRow(ctx, q, projectID, service.FoldEmail(email), nowMs))
+	v, err := scanInvitation(s.pool.forProject(projectID).QueryRow(ctx, q, projectID, service.FoldEmail(email), nowMs))
 	if noRows(err) {
 		return nil, nil
 	}

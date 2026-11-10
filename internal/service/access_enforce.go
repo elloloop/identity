@@ -39,7 +39,7 @@ func (s *AuthService) enforceProjectAccessProvenSignup(ctx context.Context, emai
 
 // recordInvitedSignup logs and audits an account an invitation admitted, once
 // it exists.
-func (s *AuthService) recordInvitedSignup(ctx context.Context, user *User, inv *TenantInvitation) {
+func (s *AuthService) recordInvitedSignup(ctx context.Context, user *User, inv *TenantInvitation, ipAddr, userAgent string) {
 	projectID := s.projectID(ctx)
 	domain := emailDomain(user.Email)
 	s.logger.Info("signup_admitted_by_tenant_invitation",
@@ -49,6 +49,8 @@ func (s *AuthService) recordInvitedSignup(ctx context.Context, user *User, inv *
 		zap.String("email_domain", domain))
 	s.audit.Log(ctx, audit.EventSignupAdmittedByInvitation,
 		audit.WithTarget(user.ID),
+		audit.WithIP(ipAddr),
+		audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
 			"project_id":    projectID,
@@ -62,10 +64,10 @@ func (s *AuthService) recordInvitedSignup(ctx context.Context, user *User, inv *
 // openInvitationFor is the open tenant invitation that lets an invite project
 // create email's account, or nil: the project opted in
 // (access.admit_tenant_invitations), lets people create their own email
-// accounts (accounts.email_signup self), and the store finds a qualifying
-// invitation (InvitationStore.OpenInvitationForEmail). Both the code send and
-// its redemption ask it, so a code goes only where redeeming it creates the
-// account. A lookup error is "none": both callers fail closed.
+// accounts (accounts.email_signup self), and OpenInvitationReader finds one.
+// Sending a code and redeeming it ask the same question, so a code goes only
+// where redeeming it creates the account. A lookup error is "none", which
+// fails closed.
 func (s *AuthService) openInvitationFor(ctx context.Context, scope *ProjectScope, email canonicalEmail) *TenantInvitation {
 	if s.openInvitations == nil || !scope.Access.AdmitTenantInvitations || scope.Accounts.emailSignup() != SignupSelf {
 		return nil

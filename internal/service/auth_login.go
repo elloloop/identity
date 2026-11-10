@@ -831,7 +831,7 @@ func (s *AuthService) OAuthLogin(
 		return nil, fmt.Errorf("%w: provider returned an email with no usable mailbox", ErrUnauthenticated)
 	}
 
-	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail)
+	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail, params.IPAddr, params.UserAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -996,7 +996,7 @@ func (s *AuthService) verifyOAuthExchange(
 // Returns (user, isNewUser, error). isNewUser is true only when a new
 // User row was created (not when an existing user got a fresh provider
 // link).
-func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Identity, email canonicalEmail) (*User, bool, error) {
+func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Identity, email canonicalEmail, ipAddr, userAgent string) (*User, bool, error) {
 	now := s.nowMs()
 	emailStr := string(email)
 
@@ -1016,6 +1016,8 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		name:          identity.Name,
 		avatarURL:     identity.AvatarURL,
 		emailVerified: ProofCarriesTo(identity.Email, emailStr),
+		ipAddr:        ipAddr,
+		userAgent:     userAgent,
 	})
 	if err != nil {
 		return nil, false, err
@@ -1089,6 +1091,10 @@ type resolveOrCreateOpts struct {
 	name          string
 	avatarURL     string
 	emailVerified bool
+	// ipAddr and userAgent are the sign-in's client, for the audit record of
+	// an account an invitation admitted.
+	ipAddr    string
+	userAgent string
 }
 
 // resolveOrCreateUserByEmail is the single by-email account resolver: it looks
@@ -1166,7 +1172,7 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	// returned above) auto-forms a company tenant from its email domain,
 	// best-effort.
 	if admittedBy != nil {
-		s.recordInvitedSignup(ctx, newUser, admittedBy)
+		s.recordInvitedSignup(ctx, newUser, admittedBy, opts.ipAddr, opts.userAgent)
 	} else {
 		s.maybeAutoFormTenant(ctx, newUser)
 	}

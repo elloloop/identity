@@ -45,6 +45,7 @@ func pending(email string) invitationSpec {
 func invitedOAuthSignIn(ctx context.Context, svc *AuthService, email string) error {
 	_, err := svc.OAuthLogin(ctx, OAuthLoginParams{
 		Code: fakeOAuthCode(email, "N", "", "google"), Provider: "google", RedirectURI: "https://app/cb",
+		IPAddr: "203.0.113.9", UserAgent: "invited-test",
 	})
 	return err
 }
@@ -96,7 +97,7 @@ func TestInviteOnly_OAuthSignupWithoutAnInvitationReaderIsRefused(t *testing.T) 
 
 func TestInviteOnly_InvitationLookupFailureRefuses(t *testing.T) {
 	store := invitationsWith(pending("new@example.com"))
-	store.getErr = errors.New("database unavailable")
+	store.openErr = errors.New("database unavailable")
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo).WithOpenInvitations(store)
 
@@ -213,6 +214,7 @@ func TestInviteOnly_AdmissionIsAuditedAfterTheAccountExists(t *testing.T) {
 	u, _ := repo.FindUserByEmail(context.Background(), "new@example.com")
 	require.NotNil(t, u)
 	assert.Equal(t, 1, w.countByEventTypeActorTarget(string(audit.EventSignupAdmittedByInvitation), "", u.ID))
+	assert.Equal(t, [][2]string{{"203.0.113.9", "invited-test"}}, w.clientsOf(string(audit.EventSignupAdmittedByInvitation)))
 	admitted := logs.FilterMessage("signup_admitted_by_tenant_invitation").All()
 	require.Len(t, admitted, 1)
 	assert.Equal(t, u.ID, admitted[0].ContextMap()["user_id"])

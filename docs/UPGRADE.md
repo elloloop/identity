@@ -24,11 +24,14 @@ could not accept. A project can now opt in to creating that account.
   operator or the admin API created, and also tenants formed from an email
   domain and claimed by DNS verification: on those, whoever is an owner or
   admin decides who gets in. The inviter must still be an active owner or admin
-  of the tenant when the invitee signs in; an invitation from someone since
-  removed, demoted or suspended admits nobody. An invitation with no expiry
+  of the tenant when the invitee signs in, with an account that can sign in
+  and is a person (not deactivated, merged away, anonymous or an agent); an
+  invitation from someone since removed, demoted, suspended or deactivated
+  admits nobody. An invitation with no expiry
   (`expires_at_ms` 0) counts, as `AcceptTenantInvitation` reads it.
-- **What it still refuses.** A password sign-up; any address the deny layer
-  refuses; `accounts.email_signup` `admin` or `off`; and, for code and link
+- **What it still refuses.** A password sign-up, a passkey sign-up and the
+  anonymous-account upgrade, none of which proves the address before the
+  account exists; any address the deny layer refuses; `accounts.email_signup` `admin` or `off`; and, for code and link
   sign-up, `GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false`. In each case no code is
   sent to an invited address that has no account. An address with no qualifying invitation is refused with the same
   `PERMISSION_DENIED` as before, and the code-send decision runs the same
@@ -40,9 +43,10 @@ could not accept. A project can now opt in to creating that account.
   account that can still sign in under `invite` (as every existing account
   can) but belongs to no tenant; suspend or delete it to remove access.
 - **Audit.** Once the account exists, each admission records
-  `signup_admitted_by_invitation` (target the new account; the project,
-  invitation, tenant and inviter ids and the address's domain in the details)
-  and logs `signup_admitted_by_tenant_invitation`.
+  `signup_admitted_by_invitation` (target the new account, the sign-in's IP
+  address and user agent; the project, invitation, tenant and inviter ids and
+  the address's domain in the details) and logs
+  `signup_admitted_by_tenant_invitation`.
 - **Do not roll migration 0044 down and up on a project that uses this.** Its
   down migration drops `tenants.created_by`; re-adding it fills every row with
   `''`, so every self-service tenant would then count as operator-made and its

@@ -123,7 +123,16 @@ func TestCheckTenantFeatures_LogsBootState(t *testing.T) {
 			invited := logs.FilterMessage("invited_signup_disabled").All()
 			require.Len(t, invited, 1, name)
 			assert.Equal(t, name == "postgres", invited[0].ContextMap()["other_projects_may_enable"], name)
+			assert.NotContains(t, invited[0].ContextMap(), "hint", "%s: no hint where the default project is not invite-only", name)
 			assert.Zero(t, logs.FilterMessage("invited_signup_enabled").Len(), name)
 		}
+	})
+
+	t.Run("disabled on an invite-only default project", func(t *testing.T) {
+		core, logs := observer.New(zapcore.InfoLevel)
+		require.NoError(t, checkTenantFeatures(governanceDeps(&config.Config{DefaultProjectAccessMode: "invite"}), zap.New(core)))
+		invited := logs.FilterMessage("invited_signup_disabled").All()
+		require.Len(t, invited, 1)
+		assert.Contains(t, invited[0].ContextMap()["hint"], "GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS")
 	})
 }

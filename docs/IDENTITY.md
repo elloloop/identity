@@ -779,7 +779,11 @@ tenant not made through self-service `CreateTenant` whose inviter is still an
 active owner or admin there. That trust filter (`tenants.created_by` empty)
 admits operator- and admin-API-created tenants, and also tenants auto-formed
 from an email domain and claimed by DNS verification, whose owners and admins
-then decide who gets in. The account joins no tenant, not even its email
+then decide who gets in. Turning it on delegates admission along a chain:
+an operator, or a `tenant_operator` credential, creates a tenant and appoints
+its first owner; that owner can make others admins; and every active owner or
+admin of such a tenant can then bring new accounts into the project by
+inviting them. The account joins no tenant, not even its email
 domain's, until it accepts, and outlives a later revocation. Postgres only:
 per-project `config_json` lives only in the Postgres control plane, and the
 default project's variable refuses to boot on memory or SQLite. See the

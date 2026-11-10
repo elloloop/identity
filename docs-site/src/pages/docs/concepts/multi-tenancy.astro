@@ -395,11 +395,11 @@ RestoreTenantMember(tenant_id, user_id)
       tenant cannot invite others into the project. Tenants formed from an
       email domain and claimed by DNS verification do count: their owners and
       admins decide who gets in. The inviter must still be an active owner or
-      admin of the tenant.
+      admin of the tenant, with an account that can sign in and is a person.
     </li>
     <li>
-      A password sign-up is still refused, as is every address the deny layer
-      turns away. <code>accounts.email_signup</code> set to <code>admin</code>
+      A password sign-up, a passkey sign-up and the anonymous-account upgrade
+      are still refused, as is every address the deny layer turns away. <code>accounts.email_signup</code> set to <code>admin</code>
       or <code>off</code>, and <code>GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false</code>
       for codes and links, still close it, and no code is sent then.
     </li>
@@ -408,6 +408,10 @@ RestoreTenantMember(tenant_id, user_id)
       tenant that verified its email domain. Revoking or expiring the invitation
       afterwards leaves an account that signs in but belongs to no tenant;
       suspend or delete it to remove access.
+    </li>
+    <li>
+      Each admission is audited as <code>signup_admitted_by_invitation</code>
+      once the account exists, naming the invitation, tenant and inviter.
     </li>
     <li>
       Postgres only: the memory and SQLite drivers keep no tenant invitations.

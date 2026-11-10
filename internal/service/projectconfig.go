@@ -771,10 +771,9 @@ type ProjectAccessConfig struct {
 
 	// AdmitTenantInvitations lets an invite project create the account a
 	// pending invitation names, once its owner proves the address (an OAuth
-	// provider that verified it, or a redeemed emailed code or link). Only
-	// invitations from tenants that were not created through self-service
-	// CreateTenant admit anyone, so a person cannot make a tenant and invite
-	// others into the project. Valid with mode invite only; off by default.
+	// provider that verified it, or a redeemed emailed code or link). Which
+	// invitations qualify is OpenInvitationReader's contract. Valid with mode
+	// invite only; off by default.
 	AdmitTenantInvitations bool `json:"admit_tenant_invitations"`
 }
 

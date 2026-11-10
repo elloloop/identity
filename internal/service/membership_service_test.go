@@ -36,6 +36,7 @@ type fakeInvitationStore struct {
 	getErr     error
 	setErr     error
 	listErr    error
+	openErr    error
 	nextID     int
 }
 
@@ -100,8 +101,8 @@ func (f *fakeInvitationStore) CreateInvitation(_ context.Context, inv *TenantInv
 // inviter filters: the fake keeps no tenants or memberships, so those are the
 // postgres store's, tested there.
 func (f *fakeInvitationStore) OpenInvitationForEmail(_ context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
+	if f.openErr != nil {
+		return nil, f.openErr
 	}
 	var newest *TenantInvitation
 	for _, inv := range f.byID {

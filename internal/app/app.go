@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -1220,12 +1221,16 @@ func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
 	if cfg.DefaultProjectAdmitTenantInvitations && !membershipServiceServed(deps) {
 		return errors.New("app: GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS needs the tenant, membership and invitation stores, which only the postgres driver provides")
 	}
-	if cfg.DefaultProjectAdmitTenantInvitations {
+	switch {
+	case cfg.DefaultProjectAdmitTenantInvitations:
 		logger.Info("invited_signup_enabled")
-	} else {
+	case strings.EqualFold(strings.TrimSpace(cfg.DefaultProjectAccessMode), "invite"):
 		logger.Info("invited_signup_disabled",
 			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)),
-			zap.String("hint", "set GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS=true (postgres only, access mode invite) for the default project; other projects set access.admit_tenant_invitations in their config_json"))
+			zap.String("hint", "set GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS=true (postgres only) to let the default project create the account a tenant invitation names; other projects set access.admit_tenant_invitations in their config_json"))
+	default:
+		logger.Info("invited_signup_disabled",
+			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)))
 	}
 	if cfg.SelfServiceTenantsEnabled {
 		logger.Info("self_service_tenants_enabled",

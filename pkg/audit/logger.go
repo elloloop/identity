@@ -357,12 +357,12 @@ const (
 	// active member records nothing.
 	EventTenantMemberAdded EventType = "tenant_member_added"
 
-	// EventSignupAdmittedByInvitation records an invite project creating an
-	// account because a pending tenant invitation names the address its owner
-	// proved (access.admit_tenant_invitations): no actor, as the account does
-	// not exist yet, and the project id, the invitation, tenant and inviter
-	// ids and the address's domain in the details. The account's own
-	// creation is recorded by the sign-in it came from.
+	// EventSignupAdmittedByInvitation records an invite project having
+	// created an account because a pending tenant invitation names the address
+	// its owner proved (access.admit_tenant_invitations). It is written once
+	// the account exists: no actor, target the new account, the sign-in's IP
+	// address and user agent, and the project id, the invitation, tenant and
+	// inviter ids and the address's domain in the details.
 	EventSignupAdmittedByInvitation EventType = "signup_admitted_by_invitation"
 
 	// EventTenantSuspended / EventTenantRestored record an operator
