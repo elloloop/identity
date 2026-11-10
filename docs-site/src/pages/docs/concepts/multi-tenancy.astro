@@ -376,6 +376,21 @@ RestoreTenantMember(tenant_id, user_id)
     invitation links</a>). That page, which your app serves, signs the invitee
     in and calls <code>AcceptTenantInvitation</code> with the token.
   </p>
+  <p id="invited-sign-up">
+    An invitee with no account yet signs up on that page. On a project whose
+    <code>access.mode</code> is <code>invite</code>, which refuses self-signup,
+    a pending invitation is what lets that account be created: a sign-in that
+    proves the address (an OAuth provider that verified it, or a redeemed
+    emailed code or link) creates the account when a tenant of the project
+    that is claimed or latent holds a pending, unexpired invitation to it, and
+    an emailed code is sent to such an address. The account joins no tenant
+    until it accepts the invitation. A password sign-up proves nothing about
+    the address and is still refused, as is everyone the deny layer turns
+    away, and <code>accounts.email_signup</code> set to <code>admin</code> or
+    <code>off</code> still closes self-created email accounts. Postgres
+    deployments only: the memory and SQLite drivers keep no tenant
+    invitations.
+  </p>
 
   <h2 id="operating-tenants">Operating tenants</h2>
   <p>

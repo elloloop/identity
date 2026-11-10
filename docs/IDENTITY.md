@@ -672,7 +672,10 @@ A project's `access` block answers two separate questions, and it is worth
 keeping them separate when reading a config.
 
 **`access.mode` answers "who may enter"** — `open`, `allowlist`, `invite`, or
-`closed`. It **fails DENY**: an unset, empty, or unrecognized mode denies
+`closed`. Under `invite` an account is created only by an admin invitation,
+or for an address a pending tenant invitation names once its owner proves it
+(an OAuth provider that verified it, or a redeemed emailed code or link); a
+password self-signup is refused. It **fails DENY**: an unset, empty, or unrecognized mode denies
 everyone, so a project nobody has explicitly opened cannot authenticate
 anyone. `allowed_emails` / `allowed_domains` belong to `allowlist` mode and
 are rejected with any other mode, where they would be inert.

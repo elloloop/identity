@@ -798,6 +798,7 @@ func New(deps Deps) (*Built, error) {
 		// A nil reader refuses every tenant selection: the switch is off,
 		// or the driver has no governance stores (memory, SQLite).
 		WithTenantSelection(tenantGov.selection).
+		WithOpenInvitations(deps.InvitationStore).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).

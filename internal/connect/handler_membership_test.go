@@ -62,6 +62,10 @@ func (s *connectInvitationStore) SetInvitationStatus(_ context.Context, _, invit
 	return nil
 }
 
+func (s *connectInvitationStore) OpenInvitationForEmail(_ context.Context, _, _ string, _ int64) (*service.TenantInvitation, error) {
+	return nil, nil
+}
+
 func (s *connectInvitationStore) ListInvitationsForTenant(_ context.Context, _, _ string) ([]*service.TenantInvitation, error) {
 	return s.listResp, nil
 }

@@ -96,6 +96,27 @@ func (f *fakeInvitationStore) CreateInvitation(_ context.Context, inv *TenantInv
 	return id, nil
 }
 
+func (f *fakeInvitationStore) OpenInvitationForEmail(_ context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	var newest *TenantInvitation
+	for _, inv := range f.byID {
+		if inv.ProjectID != projectID || FoldEmail(inv.Email) != FoldEmail(email) ||
+			inv.Status != InvitationStatusPending || inv.ExpiresAtMs <= nowMs {
+			continue
+		}
+		if newest == nil || inv.CreatedAtMs > newest.CreatedAtMs {
+			newest = inv
+		}
+	}
+	if newest == nil {
+		return nil, nil
+	}
+	out := *newest
+	return &out, nil
+}
+
 func (f *fakeInvitationStore) GetInvitationByTokenHash(_ context.Context, projectID, tokenHash string) (*TenantInvitation, error) {
 	if f.getErr != nil {
 		return nil, f.getErr

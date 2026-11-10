@@ -1,5 +1,36 @@
 # Upgrade guide
 
+## Next — an invite-only project creates the account a tenant invitation names (migration 0058; behaviour change for `access.mode: invite`; `InvitationStore.OpenInvitationForEmail`, `AuthService.WithOpenInvitations` (Go API))
+
+A tenant invitation could only be accepted by someone already signed in, and
+an `invite` project refused to create the account, so a person with no account
+could not accept one.
+
+- **An invited address gets its account on an `invite` project.** A sign-in
+  that proves the address, through an OAuth provider that verified it or a
+  redeemed emailed code or link, creates the account when a claimed or latent
+  tenant of the project holds a pending, unexpired invitation to it, and the
+  emailed code is now sent to such an address. The account joins no tenant
+  until it calls `AcceptTenantInvitation`. A password sign-up is still
+  refused, as is any address the deny layer refuses, and
+  `accounts.email_signup` `admin` or `off` still closes self-created email
+  accounts. An address with no open invitation is refused exactly as before.
+  Each admission logs `signup_admitted_by_tenant_invitation` with the project,
+  the invitation id and the address's domain.
+- **Postgres only.** `app.New` passes the Postgres invitation store; the
+  memory and SQLite drivers keep no tenant invitations, so nothing changes
+  there. An embedder that builds `AuthService` itself calls
+  `WithOpenInvitations` with its `InvitationStore`.
+- **Migration 0058** adds `tenant_invitations_pending_email_idx` on
+  `(project_id, lower(email COLLATE "C")) WHERE status = 'pending'`, which the
+  lookup reads. It takes `SHARE` on `tenant_invitations` while it builds, which
+  blocks invitation writes but not reads; `lock_timeout` bounds the wait to
+  acquire it. To build it without blocking writes, run
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS tenant_invitations_pending_email_idx ON tenant_invitations (project_id, lower(email COLLATE "C")) WHERE status = 'pending';`
+  before upgrading; the migration then does nothing.
+- **`InvitationStore` gains `OpenInvitationForEmail`** (Go API): an embedder
+  with its own implementation adds it.
+
 ## Next — an operator adds a tenant's members, and a `tenant_operator` credential restores the tenants credentials created: `AdminAddTenantMember` (migration 0057; behaviour change for existing `tenant_operator` credentials and for a credential's `AdminRestoreTenant`; additive RPC and audit event; `MembershipStore.AddMember`, `Tenant.CreatorOperatorKind` (Go API))
 
 A service holding a `tenant_operator` credential could create its project's

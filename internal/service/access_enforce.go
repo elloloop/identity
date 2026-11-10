@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/elloloop/identity/internal/config"
@@ -17,6 +18,42 @@ import (
 // "open" is not by itself a guarantee of admission.
 func (s *AuthService) enforceProjectAccessSignup(ctx context.Context, email canonicalEmail) error {
 	return s.enforceProjectAccess(ctx, email, true)
+}
+
+// enforceProjectAccessProvenSignup gates an account creation for an address
+// whose owner has just proven they hold it (a provider that verified it, or a
+// redeemed emailed code). It is enforceProjectAccessSignup, except that an
+// invite-only project also admits an address a pending tenant invitation names:
+// the invitation is the project letting that person in, and the account is
+// what accepting it needs. The deny layer and the project's email_signup rule
+// still apply; an address with no open invitation is refused exactly as
+// before, so the answer says nothing about invitations it does not admit.
+func (s *AuthService) enforceProjectAccessProvenSignup(ctx context.Context, email canonicalEmail) error {
+	err := s.enforceProjectAccessSignup(ctx, email)
+	if !errors.Is(err, ErrSignupByInvitationOnly) || s.openInvitations == nil {
+		return err
+	}
+	scope := ProjectScopeFromContext(ctx)
+	if scope.Access.mode() != AccessModeInvite || scope.Access.denies(s.cfg, email) {
+		return err
+	}
+	projectID := s.projectID(ctx)
+	inv, lookupErr := s.openInvitations.OpenInvitationForEmail(ctx, projectID, string(email), s.nowMs())
+	if lookupErr != nil {
+		s.logger.Warn("signup_invitation_lookup_failed", zap.String("project_id", projectID), zap.Error(lookupErr))
+		return err
+	}
+	if inv == nil {
+		return err
+	}
+	if signupErr := s.enforceEmailSelfSignup(ctx, scope); signupErr != nil {
+		return signupErr
+	}
+	s.logger.Info("signup_admitted_by_tenant_invitation",
+		zap.String("project_id", projectID),
+		zap.String("invitation_id", inv.ID),
+		zap.String("email_domain", emailDomain(string(email))))
+	return nil
 }
 
 // enforceProjectAccessLogin gates a LOGIN or invitation acceptance by an
@@ -214,7 +251,9 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email canonicalE
 		// under — otherwise a real user requesting with non-canonical casing/dots
 		// would miss and have their OTP silently dropped. The caller canonicalized
 		// once; the type carries that guarantee here. Mirrors the allowlist branch.
-		return s.userExists(ctx, email)
+		// An address a pending tenant invitation names gets one too: redeeming it
+		// proves the mailbox, which is what creates that account.
+		return s.userExists(ctx, email) || s.openInvitationExists(ctx, email)
 	default:
 		// AccessModeClosed and any unset/unrecognized mode: never send.
 		return false
@@ -231,6 +270,20 @@ func (s *AuthService) selfSignupOrExisting(ctx context.Context, scope *ProjectSc
 		return true
 	}
 	return s.userExists(ctx, email)
+}
+
+// openInvitationExists reports whether a pending tenant invitation names
+// email, treating a lookup error as "none" so the send fails closed.
+func (s *AuthService) openInvitationExists(ctx context.Context, email canonicalEmail) bool {
+	if s.openInvitations == nil {
+		return false
+	}
+	inv, err := s.openInvitations.OpenInvitationForEmail(ctx, s.projectID(ctx), string(email), s.nowMs())
+	if err != nil {
+		s.logger.Warn("access_send_invitation_lookup_failed", zap.Error(err))
+		return false
+	}
+	return inv != nil
 }
 
 // userExists treats a lookup error as "does not exist" so the caller fails

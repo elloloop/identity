@@ -1118,8 +1118,13 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	}
 
 	// Creating a NEW account is a self-signup access check — an invite-only or
-	// closed project (or a non-matching allowlist) denies JIT provisioning here.
-	if err := s.enforceProjectAccessSignup(ctx, email); err != nil {
+	// closed project (or a non-matching allowlist) denies JIT provisioning here,
+	// unless the caller proved the address and a tenant invitation names it.
+	gate := s.enforceProjectAccessSignup
+	if opts.emailVerified {
+		gate = s.enforceProjectAccessProvenSignup
+	}
+	if err := gate(ctx, email); err != nil {
 		return nil, false, err
 	}
 

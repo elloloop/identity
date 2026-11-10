@@ -1421,7 +1421,11 @@ type AuthService struct {
 	// tenantSelection answers whether a user may act in a tenant, for the
 	// tenant a refresh selects (WithTenantSelection). nil refuses every
 	// selection.
-	tenantSelection    UserTenantReader
+	tenantSelection UserTenantReader
+	// openInvitations finds the tenant invitation that lets an invite-only
+	// project create an account for a proven address (WithOpenInvitations).
+	// nil admits no such account.
+	openInvitations    OpenInvitationReader
 	signer             jwt.Signer
 	passkeys           *passkeys.WebAuthnService
 	audit              *audit.Logger
@@ -1596,6 +1600,15 @@ func (s *AuthService) WithTenantAutoFormer(af TenantAutoFormStore) *AuthService 
 // ErrTenantSelectionDisabled, inside a TenantSelectionRefusedError.
 func (s *AuthService) WithTenantSelection(r UserTenantReader) *AuthService {
 	s.tenantSelection = r
+	return s
+}
+
+// WithOpenInvitations wires the reader an invite-only project's sign-up
+// consults, and returns the service for chaining. app.New passes the postgres
+// invitation store; without one (memory, SQLite) an invite-only project
+// creates no account at sign-up, as before invitations existed.
+func (s *AuthService) WithOpenInvitations(r OpenInvitationReader) *AuthService {
+	s.openInvitations = r
 	return s
 }
 

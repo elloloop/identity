@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/elloloop/identity/internal/service"
@@ -944,4 +945,108 @@ func TestMembershipStore_AddMember(t *testing.T) {
 
 	_, _, err = ms.AddMember(ctx, projectID, tenantID, "")
 	require.ErrorIs(t, err, service.ErrInvalidArgument)
+}
+
+// TestInvitationStore_OpenInvitationForEmail: the lookup an invite-only
+// sign-up makes returns only an invitation still pending and unexpired, to the
+// address under FoldEmail, in the project asked about, in a tenant that can
+// still take members, and the newest when several qualify.
+func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping open invitation lookup test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+	now := nowMs()
+
+	invite := func(tenant, email, tokenHash string, expiresAtMs int64) string {
+		t.Helper()
+		id, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+			ProjectID: projectID, TenantID: tenant, Email: email,
+			TokenHash: tokenHash, ExpiresAtMs: expiresAtMs,
+		}, unlimitedInvitations)
+		require.NoError(t, err)
+		return id
+	}
+	open := func(project, email string) *service.TenantInvitation {
+		t.Helper()
+		inv, err := is.OpenInvitationForEmail(ctx, project, email, now)
+		require.NoError(t, err)
+		return inv
+	}
+
+	require.Nil(t, open(projectID, "new@acme.com"), "no invitation")
+
+	expired := invite(tenantID, "late@acme.com", "open-expired", now-1)
+	require.Nil(t, open(projectID, "late@acme.com"), "expired at the instant asked about")
+	require.NotEmpty(t, expired)
+
+	revoked := invite(tenantID, "gone@acme.com", "open-revoked", now+86_400_000)
+	require.NoError(t, is.SetInvitationStatus(ctx, projectID, revoked, service.InvitationStatusRevoked, 0))
+	require.Nil(t, open(projectID, "gone@acme.com"), "revoked")
+
+	accepted := invite(tenantID, "done@acme.com", "open-accepted", now+86_400_000)
+	require.NoError(t, is.SetInvitationStatus(ctx, projectID, accepted, service.InvitationStatusAccepted, 0))
+	require.Nil(t, open(projectID, "done@acme.com"), "accepted")
+
+	pending := invite(tenantID, "new@acme.com", "open-pending", now+86_400_000)
+	got := open(projectID, "NEW@acme.com")
+	require.NotNil(t, got, "ASCII case names the same address")
+	require.Equal(t, pending, got.ID)
+	require.Nil(t, open(projectID, "other@acme.com"), "another address")
+	require.Nil(t, open("another-project", "new@acme.com"), "another project")
+
+	raw, err := pgx.Connect(ctx, dsn)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close(context.Background()) }()
+	const second = "tenant-second"
+	_, err = raw.Exec(ctx, `INSERT INTO tenants (id, project_id, status, created_at_ms, updated_at_ms) VALUES ($1, $2, 'claimed', 1, 1)`, second, projectID)
+	require.NoError(t, err)
+	newer := invite(second, "new@acme.com", "open-newer", now+86_400_000)
+	require.Equal(t, newer, open(projectID, "new@acme.com").ID, "the newest of two open invitations")
+
+	_, err = raw.Exec(ctx, `UPDATE tenants SET status = 'suspended' WHERE project_id = $1 AND id = $2`, projectID, second)
+	require.NoError(t, err)
+	require.Equal(t, pending, open(projectID, "new@acme.com").ID, "a suspended tenant's invitation admits nobody")
+}
+
+// TestPendingEmailIndexMigrationRoundTrip: 0058 adds the index the open
+// invitation lookup reads, the planner uses it for that lookup, and the down
+// migration drops it.
+func TestPendingEmailIndexMigrationRoundTrip(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	scratch := createScratchDatabase(ctx, t, dsn)
+	raw, err := pgx.Connect(ctx, scratch)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close(ctx) }()
+
+	hasIndex := func() bool {
+		t.Helper()
+		var n int
+		require.NoError(t, raw.QueryRow(ctx, `SELECT count(*) FROM pg_indexes
+			WHERE tablename = 'tenant_invitations' AND indexname = 'tenant_invitations_pending_email_idx'`).Scan(&n))
+		return n == 1
+	}
+	for _, version := range []uint{57, 58, 57, 58} {
+		migrateToVersion(t, scratch, version)
+		require.Equal(t, version == 58, hasIndex(), "version %d", version)
+	}
+
+	tx, err := raw.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `SET LOCAL enable_seqscan = off`)
+	require.NoError(t, err)
+	var plan string
+	require.NoError(t, tx.QueryRow(ctx, `EXPLAIN (FORMAT TEXT) SELECT id FROM tenant_invitations
+		WHERE project_id = 'p' AND lower(email COLLATE "C") = 'a@example.com' AND status = 'pending'`).Scan(&plan))
+	require.Contains(t, plan, "tenant_invitations_pending_email_idx")
 }
