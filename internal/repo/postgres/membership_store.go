@@ -1064,11 +1064,12 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 }
 
 // OpenInvitationForEmail returns the newest invitation in projectID still
-// pending at nowMs (expiring no earlier, as AcceptTenantInvitation reads
-// expiry) and addressed to email (canonical, compared under
+// pending at nowMs (unexpired as AcceptTenantInvitation reads expiry: 0 never
+// expires) and addressed to email (canonical, compared under
 // service.FoldEmail, as CreateInvitation stores it), in a tenant that can
 // still take members and was not created through self-service CreateTenant
-// (tenants.created_by empty), or (nil, nil). Uses tenant_invitations_pending_email_idx.
+// (tenants.created_by empty), from an inviter who is still an active owner or
+// admin of that tenant, or (nil, nil). Uses tenant_invitations_pending_email_idx.
 func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*service.TenantInvitation, error) {
 	if projectID == "" || email == "" {
 		return nil, nil
@@ -1077,8 +1078,10 @@ func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID,
 		i.expires_at_ms, i.accepted_at_ms, i.created_at_ms
 		FROM tenant_invitations i
 		JOIN tenants t ON t.project_id = i.project_id AND t.id = i.tenant_id
+		JOIN tenant_memberships m ON m.project_id = i.project_id AND m.tenant_id = i.tenant_id
+		  AND m.user_id = i.invited_by AND m.status = 'active' AND m.role IN ('owner', 'admin')
 		WHERE i.project_id = $1 AND lower(i.email COLLATE "C") = $2
-		  AND i.status = 'pending' AND i.expires_at_ms >= $3
+		  AND i.status = 'pending' AND (i.expires_at_ms = 0 OR i.expires_at_ms >= $3)
 		  AND t.status IN ('claimed', 'latent') AND t.created_by = ''
 		ORDER BY i.created_at_ms DESC, i.id DESC
 		LIMIT 1`

@@ -1119,12 +1119,14 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 
 	// Creating a NEW account is a self-signup access check — an invite-only or
 	// closed project (or a non-matching allowlist) denies JIT provisioning here,
-	// unless the caller proved the address and a tenant invitation names it.
-	gate := s.enforceProjectAccessSignup
+	// unless the caller proved the address and a tenant invitation admits it.
+	var admittedBy *TenantInvitation
 	if opts.emailVerified {
-		gate = s.enforceProjectAccessProvenSignup
+		admittedBy, err = s.enforceProjectAccessProvenSignup(ctx, email)
+	} else {
+		err = s.enforceProjectAccessSignup(ctx, email)
 	}
-	if err := gate(ctx, email); err != nil {
+	if err != nil {
 		return nil, false, err
 	}
 
@@ -1158,9 +1160,16 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	}
 	newUser.ID = userID
 
-	// Best-effort: auto-form a company tenant from the email domain. Only on
-	// a genuinely new account (a raced/existing user returned above).
-	s.maybeAutoFormTenant(ctx, newUser)
+	// An account an invitation admitted joins only that invitation's tenant,
+	// when it accepts, so it skips domain auto-formation and its domain
+	// membership. Any other genuinely new account (a raced/existing user
+	// returned above) auto-forms a company tenant from its email domain,
+	// best-effort.
+	if admittedBy != nil {
+		s.recordInvitedSignup(ctx, newUser, admittedBy)
+	} else {
+		s.maybeAutoFormTenant(ctx, newUser)
+	}
 
 	// Best-effort: emit a user.created lifecycle event. No-op when eventing
 	// is disabled.

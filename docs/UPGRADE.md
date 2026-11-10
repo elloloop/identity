@@ -20,21 +20,33 @@ could not accept. A project can now opt in to creating that account.
   to it, and the emailed code is sent to such an address. The tenant must be
   claimed or latent and must **not** have been made through self-service
   `CreateTenant` (`tenants.created_by` empty): a person who makes a tenant
-  cannot invite others into the project this way. Tenants an operator or the
-  admin API created, and domain tenants, qualify.
+  cannot invite others into the project this way. That leaves tenants an
+  operator or the admin API created, and also tenants formed from an email
+  domain and claimed by DNS verification: on those, whoever is an owner or
+  admin decides who gets in. The inviter must still be an active owner or admin
+  of the tenant when the invitee signs in; an invitation from someone since
+  removed, demoted or suspended admits nobody. An invitation with no expiry
+  (`expires_at_ms` 0) counts, as `AcceptTenantInvitation` reads it.
 - **What it still refuses.** A password sign-up; any address the deny layer
-  refuses; `accounts.email_signup` `admin` or `off` (no code is sent then
-  either); `GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false` for code and link
-  sign-up. An address with no qualifying invitation is refused with the same
+  refuses; `accounts.email_signup` `admin` or `off`; and, for code and link
+  sign-up, `GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false`. In each case no code is
+  sent to an invited address that has no account. An address with no qualifying invitation is refused with the same
   `PERMISSION_DENIED` as before, and the code-send decision runs the same
   lookups for every address.
 - **The account outlives the invitation.** It joins no tenant until it calls
-  `AcceptTenantInvitation`. Revoking or expiring the invitation afterwards
-  leaves an account that can still sign in under `invite` (as every existing
-  account can) but belongs to no tenant; suspend or delete it to remove access.
-- **Audit.** Each admission records `signup_admitted_by_invitation` with the
-  project, invitation, tenant and inviter ids and the address's domain, and
-  logs `signup_admitted_by_tenant_invitation`.
+  `AcceptTenantInvitation`: an account an invitation admitted skips domain
+  auto-formation, so it does not join the tenant that verified its email
+  domain either. Revoking or expiring the invitation afterwards leaves an
+  account that can still sign in under `invite` (as every existing account
+  can) but belongs to no tenant; suspend or delete it to remove access.
+- **Audit.** Once the account exists, each admission records
+  `signup_admitted_by_invitation` (target the new account; the project,
+  invitation, tenant and inviter ids and the address's domain in the details)
+  and logs `signup_admitted_by_tenant_invitation`.
+- **Do not roll migration 0044 down and up on a project that uses this.** Its
+  down migration drops `tenants.created_by`; re-adding it fills every row with
+  `''`, so every self-service tenant would then count as operator-made and its
+  invitations would admit accounts.
 - **Migration 0058** adds `tenant_invitations_pending_email_idx` on
   `(project_id, lower(email COLLATE "C")) WHERE status = 'pending'`, which the
   lookup reads. It takes `SHARE` on `tenant_invitations` while it builds,

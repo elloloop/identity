@@ -950,7 +950,8 @@ func TestMembershipStore_AddMember(t *testing.T) {
 // TestInvitationStore_OpenInvitationForEmail: the lookup an invite-only
 // sign-up makes returns only an invitation still pending and unexpired, to the
 // address under FoldEmail, in the project asked about, in a tenant that can
-// still take members, and the newest when several qualify.
+// still take members and was not made through self-service, from an inviter
+// still an active owner or admin there, and the newest when several qualify.
 func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -959,18 +960,31 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	require.NoError(t, truncateAll(ctx, dsn))
-	_, is, projectID, tenantID, _, _ := newMembershipFixture(ctx, t, dsn)
+	ms, is, projectID, tenantID, owner, other := newMembershipFixture(ctx, t, dsn)
 	now := nowMs()
 
-	invite := func(tenant, email, tokenHash string, expiresAtMs int64) string {
+	member := func(tenant, user, role, status string) {
+		t.Helper()
+		_, err := ms.UpsertMembership(ctx, &service.TenantMembership{
+			ProjectID: projectID, TenantID: tenant, UserID: user,
+			Source: service.MembershipSourceAdded, Role: role, Status: status,
+		})
+		require.NoError(t, err)
+	}
+	inviteAs := func(inviter, tenant, email, tokenHash string, expiresAtMs int64) string {
 		t.Helper()
 		id, err := is.CreateInvitation(ctx, &service.TenantInvitation{
-			ProjectID: projectID, TenantID: tenant, Email: email,
+			ProjectID: projectID, TenantID: tenant, Email: email, InvitedBy: inviter,
 			TokenHash: tokenHash, ExpiresAtMs: expiresAtMs,
 		}, unlimitedInvitations)
 		require.NoError(t, err)
 		return id
 	}
+	invite := func(tenant, email, tokenHash string, expiresAtMs int64) string {
+		t.Helper()
+		return inviteAs(owner, tenant, email, tokenHash, expiresAtMs)
+	}
+	member(tenantID, owner, service.RoleOwner, service.MembershipStatusActive)
 	open := func(project, email string) *service.TenantInvitation {
 		t.Helper()
 		inv, err := is.OpenInvitationForEmail(ctx, project, email, now)
@@ -1007,6 +1021,11 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	const second = "tenant-second"
 	_, err = raw.Exec(ctx, `INSERT INTO tenants (id, project_id, status, created_at_ms, updated_at_ms) VALUES ($1, $2, 'claimed', 1, 1)`, second, projectID)
 	require.NoError(t, err)
+	member(second, owner, service.RoleOwner, service.MembershipStatusActive)
+	never := invite(tenantID, "forever@acme.com", "open-forever", now+86_400_000)
+	_, err = raw.Exec(ctx, `UPDATE tenant_invitations SET expires_at_ms = 0 WHERE id = $1`, never)
+	require.NoError(t, err)
+	require.Equal(t, never, open(projectID, "forever@acme.com").ID, "0 never expires, as acceptance reads it")
 	newer := invite(second, "new@acme.com", "open-newer", now+86_400_000)
 	require.Equal(t, newer, open(projectID, "new@acme.com").ID, "the newest of two open invitations")
 
@@ -1017,10 +1036,21 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	const selfService = "tenant-self-service"
 	_, err = raw.Exec(ctx, `INSERT INTO tenants (id, project_id, status, created_by, created_at_ms, updated_at_ms) VALUES ($1, $2, 'claimed', 'user-who-made-it', 1, 1)`, selfService, projectID)
 	require.NoError(t, err)
+	member(selfService, owner, service.RoleOwner, service.MembershipStatusActive)
 	invite(selfService, "made@acme.com", "open-self-service", now+86_400_000)
 	require.Nil(t, open(projectID, "made@acme.com"), "a self-service tenant's invitation admits nobody")
 	invite(selfService, "new@acme.com", "open-self-service-newer", now+86_400_000)
 	require.Equal(t, pending, open(projectID, "new@acme.com").ID, "nor outranks an operator tenant's")
+
+	member(tenantID, other, service.RoleMember, service.MembershipStatusActive)
+	inviteAs(other, tenantID, "byother@acme.com", "open-by-other", now+86_400_000)
+	require.Nil(t, open(projectID, "byother@acme.com"), "an inviter who is a plain member admits nobody")
+	member(tenantID, other, service.RoleAdmin, service.MembershipStatusActive)
+	require.NotNil(t, open(projectID, "byother@acme.com"), "an active admin's invitation admits")
+	member(tenantID, other, service.RoleAdmin, service.MembershipStatusInactive)
+	require.Nil(t, open(projectID, "byother@acme.com"), "nor once the inviter is no longer active there")
+	inviteAs("", tenantID, "nobody@acme.com", "open-no-inviter", now+86_400_000)
+	require.Nil(t, open(projectID, "nobody@acme.com"), "an invitation with no inviter admits nobody")
 }
 
 // TestPendingEmailIndexMigrationRoundTrip: 0058 adds the index the open

@@ -775,9 +775,15 @@ cannot express a policy a project could not.
 **`access.admit_tenant_invitations`** (`GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS`
 for the default project) is valid only with mode `invite` and off by default.
 It lets a proven sign-in create the account a pending invitation names, from a
-tenant not made through self-service `CreateTenant`; the account joins no
-tenant until it accepts, and outlives a later revocation. Postgres only. See
-the multi-tenancy docs, "invited sign-up".
+tenant not made through self-service `CreateTenant` whose inviter is still an
+active owner or admin there. That trust filter (`tenants.created_by` empty)
+admits operator- and admin-API-created tenants, and also tenants auto-formed
+from an email domain and claimed by DNS verification, whose owners and admins
+then decide who gets in. The account joins no tenant, not even its email
+domain's, until it accepts, and outlives a later revocation. Postgres only:
+per-project `config_json` lives only in the Postgres control plane, and the
+default project's variable refuses to boot on memory or SQLite. See the
+multi-tenancy docs, "invited sign-up".
 
 ## Onboarding flows
 

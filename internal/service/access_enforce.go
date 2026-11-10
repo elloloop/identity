@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/elloloop/identity/internal/config"
@@ -23,30 +22,33 @@ func (s *AuthService) enforceProjectAccessSignup(ctx context.Context, email cano
 
 // enforceProjectAccessProvenSignup gates an account creation for an address
 // whose owner has just proven they hold it (a provider that verified it, or a
-// redeemed emailed code or link). It is enforceProjectAccessSignup, except that
-// an invite project with access.admit_tenant_invitations on also admits the
-// address an open invitation names (openInvitationFor). Every refusal is the
-// one an uninvited address gets.
-func (s *AuthService) enforceProjectAccessProvenSignup(ctx context.Context, email canonicalEmail) error {
-	err := s.enforceProjectAccessSignup(ctx, email)
-	if !errors.Is(err, ErrSignupByInvitationOnly) {
-		return err
-	}
+// redeemed emailed code or link). On an invite project with
+// access.admit_tenant_invitations, the address an open invitation names
+// (openInvitationFor) and the deny layer does not refuse is admitted, and the
+// invitation is returned for the caller to record once the account exists.
+// Every other address gets enforceProjectAccessSignup's answer.
+func (s *AuthService) enforceProjectAccessProvenSignup(ctx context.Context, email canonicalEmail) (*TenantInvitation, error) {
 	scope := ProjectScopeFromContext(ctx)
-	if scope.Access.denies(s.cfg, email) {
-		return err
+	if scope != nil && scope.Access.mode() == AccessModeInvite && !scope.Access.denies(s.cfg, email) {
+		if inv := s.openInvitationFor(ctx, scope, email); inv != nil {
+			return inv, nil
+		}
 	}
-	inv := s.openInvitationFor(ctx, scope, email)
-	if inv == nil {
-		return err
-	}
+	return nil, s.enforceProjectAccessSignup(ctx, email)
+}
+
+// recordInvitedSignup logs and audits an account an invitation admitted, once
+// it exists.
+func (s *AuthService) recordInvitedSignup(ctx context.Context, user *User, inv *TenantInvitation) {
 	projectID := s.projectID(ctx)
-	domain := emailDomain(string(email))
+	domain := emailDomain(user.Email)
 	s.logger.Info("signup_admitted_by_tenant_invitation",
 		zap.String("project_id", projectID),
+		zap.String("user_id", user.ID),
 		zap.String("invitation_id", inv.ID),
 		zap.String("email_domain", domain))
 	s.audit.Log(ctx, audit.EventSignupAdmittedByInvitation,
+		audit.WithTarget(user.ID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
 			"project_id":    projectID,
@@ -55,16 +57,15 @@ func (s *AuthService) enforceProjectAccessProvenSignup(ctx context.Context, emai
 			"invited_by":    inv.InvitedBy,
 			"email_domain":  domain,
 		}))
-	return nil
 }
 
 // openInvitationFor is the open tenant invitation that lets an invite project
 // create email's account, or nil: the project opted in
 // (access.admit_tenant_invitations), lets people create their own email
-// accounts (accounts.email_signup self), and a tenant not created through
-// self-service holds a pending, unexpired invitation to the address. Both the
-// code send and its redemption ask it, so a code goes only where redeeming it
-// creates the account. A lookup error is "none": both callers fail closed.
+// accounts (accounts.email_signup self), and the store finds a qualifying
+// invitation (InvitationStore.OpenInvitationForEmail). Both the code send and
+// its redemption ask it, so a code goes only where redeeming it creates the
+// account. A lookup error is "none": both callers fail closed.
 func (s *AuthService) openInvitationFor(ctx context.Context, scope *ProjectScope, email canonicalEmail) *TenantInvitation {
 	if s.openInvitations == nil || !scope.Access.AdmitTenantInvitations || scope.Accounts.emailSignup() != SignupSelf {
 		return nil
@@ -250,9 +251,9 @@ func (s *AuthService) enforceEmailSelfSignup(ctx context.Context, scope *Project
 //
 // It gates spam/SMTP-abuse — a closed or off-list allowlist project must not
 // emit credential mail to arbitrary addresses. Invite mode sends to an
-// already-provisioned user, and to an address whose redemption would create the
-// account (openInvitationFor); a code to anyone else would be undeliverable
-// spam, since redemption refuses it.
+// already-provisioned user, and, while passwordless sign-up is on, to an
+// address whose redemption would create the account (openInvitationFor); a code
+// to anyone else would be undeliverable spam, since redemption refuses it.
 //
 // It fails CLOSED: no permit → no send, and a user-existence lookup error also
 // suppresses the send.
@@ -280,7 +281,7 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email canonicalE
 		// Both lookups run for every address, so the time the decision takes
 		// does not tell an account from an invitation from neither.
 		exists := s.userExists(ctx, email)
-		invited := s.openInvitationFor(ctx, scope, email) != nil
+		invited := s.cfg.PasswordlessSignupEnabled && s.openInvitationFor(ctx, scope, email) != nil
 		return exists || invited
 	default:
 		// AccessModeClosed and any unset/unrecognized mode: never send.

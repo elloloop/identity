@@ -392,18 +392,22 @@ RestoreTenantMember(tenant_id, user_id)
     <li>
       Only invitations from a claimed or latent tenant that was not made through
       self-service <code>CreateTenant</code> count, so a person who makes a
-      tenant cannot invite others into the project.
+      tenant cannot invite others into the project. Tenants formed from an
+      email domain and claimed by DNS verification do count: their owners and
+      admins decide who gets in. The inviter must still be an active owner or
+      admin of the tenant.
     </li>
     <li>
       A password sign-up is still refused, as is every address the deny layer
       turns away. <code>accounts.email_signup</code> set to <code>admin</code>
       or <code>off</code>, and <code>GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false</code>
-      for codes and links, still close it.
+      for codes and links, still close it, and no code is sent then.
     </li>
     <li>
-      The account joins no tenant until it accepts the invitation. Revoking or
-      expiring the invitation afterwards leaves an account that signs in but
-      belongs to no tenant; suspend or delete it to remove access.
+      The account joins no tenant until it accepts the invitation, not even the
+      tenant that verified its email domain. Revoking or expiring the invitation
+      afterwards leaves an account that signs in but belongs to no tenant;
+      suspend or delete it to remove access.
     </li>
     <li>
       Postgres only: the memory and SQLite drivers keep no tenant invitations.

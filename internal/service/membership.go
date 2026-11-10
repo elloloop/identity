@@ -273,10 +273,11 @@ type InvitationStore interface {
 // create an account for an address.
 type OpenInvitationReader interface {
 	// OpenInvitationForEmail returns the newest invitation in the project
-	// still pending at nowMs (expiring at or after it), addressed to email
-	// (canonical form), in a tenant that can still take members (claimed or
-	// latent) and was not created through self-service CreateTenant (its
-	// CreatedBy is empty), or (nil, nil).
+	// still pending at nowMs (unexpired as AcceptTenantInvitation reads it),
+	// addressed to email (canonical form), in a tenant that can still take
+	// members (claimed or latent) and was not created through self-service
+	// CreateTenant (its CreatedBy is empty), from an inviter who is still an
+	// active owner or admin of that tenant, or (nil, nil).
 	OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error)
 }
 

@@ -8,6 +8,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/elloloop/identity/pkg/audit"
 )
 
 const inviteOnlyJSON = `{"access":{"mode":"invite","admit_tenant_invitations":true}}`
@@ -193,4 +198,42 @@ func TestInviteOnly_EmailCodeSentToAndRedeemedByAnInvitedAddress(t *testing.T) {
 	rec.Reset()
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "stranger@example.com"))
 	assert.Empty(t, rec.Sent(), "an address with no invitation and no account still gets nothing")
+}
+
+func TestInviteOnly_AdmissionIsAuditedAfterTheAccountExists(t *testing.T) {
+	repo := newFakeRepo()
+	w := newRecordingAuditWriter()
+	core, logs := observer.New(zapcore.InfoLevel)
+	svc := newTestAuthService(t, repo).WithOpenInvitations(invitationsWith(pending("new@example.com")))
+	svc.audit = audit.NewLogger(w, "test-tenant", nil)
+	svc.logger = zap.New(core)
+
+	require.NoError(t, invitedOAuthSignIn(accessScope(t, inviteOnlyJSON), svc, "new@example.com"))
+
+	u, _ := repo.FindUserByEmail(context.Background(), "new@example.com")
+	require.NotNil(t, u)
+	assert.Equal(t, 1, w.countByEventTypeActorTarget(string(audit.EventSignupAdmittedByInvitation), "", u.ID))
+	admitted := logs.FilterMessage("signup_admitted_by_tenant_invitation").All()
+	require.Len(t, admitted, 1)
+	assert.Equal(t, u.ID, admitted[0].ContextMap()["user_id"])
+	assert.Equal(t, "example.com", admitted[0].ContextMap()["email_domain"])
+	assert.Zero(t, logs.FilterMessage("project_access_denied").Len(), "an admission is not first logged as a refusal")
+}
+
+func TestInviteOnly_RefusedSignupIsNotAudited(t *testing.T) {
+	w := newRecordingAuditWriter()
+	svc := newTestAuthService(t, newFakeRepo()).WithOpenInvitations(invitationsWith())
+	svc.audit = audit.NewLogger(w, "test-tenant", nil)
+
+	require.ErrorIs(t, invitedOAuthSignIn(accessScope(t, inviteOnlyJSON), svc, "new@example.com"), ErrSignupByInvitationOnly)
+	assert.NotContains(t, w.events, string(audit.EventSignupAdmittedByInvitation))
+}
+
+func TestInviteOnly_NoCodeWhilePasswordlessSignupIsOff(t *testing.T) {
+	svc, _, rec := newAuthSvcWithMailer(t)
+	svc.cfg.PasswordlessSignupEnabled = false
+	svc.WithOpenInvitations(invitationsWith(pending("new@example.com")))
+
+	require.NoError(t, svc.RequestEmailLoginCode(accessScope(t, inviteOnlyJSON), "new@example.com"))
+	assert.Empty(t, rec.Sent(), "redemption would refuse an unknown address, so no code goes")
 }
