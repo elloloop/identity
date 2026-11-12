@@ -232,10 +232,11 @@ const (
 	// The tenant's login policy requires a verified phone number
 	// (LoginPolicy.require_verified_phone) and the account has none, or none
 	// of the countries the policy names. The code is FAILED_PRECONDITION with
-	// the stable `phone_verification_required` token. The refresh token was
-	// not consumed: refresh without tenant_id, verify a phone with that
-	// session (RequestPhoneVerification, VerifyPhoneCode), then select the
-	// tenant again.
+	// the stable `phone_verification_required` token, and the detail's
+	// phone_calling_codes names those countries. The refresh token was not
+	// consumed: refresh without tenant_id, verify a phone with that session
+	// (RequestPhoneVerification, VerifyPhoneCode), then select the tenant
+	// again.
 	TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED TenantSelectionRefusal = 5
 )
 
@@ -5700,10 +5701,16 @@ func (x *RefreshTokenResponse) GetRefreshToken() string {
 // retry with it, without tenant_id or once the reason is gone. Only this
 // detail says so; see RefreshTokenRequest.tenant_id.
 type TenantSelectionRefusedDetails struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Reason        TenantSelectionRefusal `protobuf:"varint,1,opt,name=reason,proto3,enum=identity.v1.TenantSelectionRefusal" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Reason TenantSelectionRefusal `protobuf:"varint,1,opt,name=reason,proto3,enum=identity.v1.TenantSelectionRefusal" json:"reason,omitempty"`
+	// phone_calling_codes, on a PHONE_VERIFICATION_REQUIRED refusal, are the
+	// country calling codes the tenant accepts a verified phone number of
+	// (LoginPolicy.phone_calling_codes), as digits without the '+' (e.g.
+	// "91"), in the policy's order, so an app can offer only those countries.
+	// Empty there means a number of any country; empty on every other reason.
+	PhoneCallingCodes []string `protobuf:"bytes,2,rep,name=phone_calling_codes,json=phoneCallingCodes,proto3" json:"phone_calling_codes,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *TenantSelectionRefusedDetails) Reset() {
@@ -5741,6 +5748,13 @@ func (x *TenantSelectionRefusedDetails) GetReason() TenantSelectionRefusal {
 		return x.Reason
 	}
 	return TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED
+}
+
+func (x *TenantSelectionRefusedDetails) GetPhoneCallingCodes() []string {
+	if x != nil {
+		return x.PhoneCallingCodes
+	}
+	return nil
 }
 
 type LogoutRequest struct {
@@ -24037,9 +24051,10 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x14RefreshTokenResponse\x12%\n" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
-	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\"\\\n" +
+	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\"\x8c\x01\n" +
 	"\x1dTenantSelectionRefusedDetails\x12;\n" +
-	"\x06reason\x18\x01 \x01(\x0e2#.identity.v1.TenantSelectionRefusalR\x06reason\"4\n" +
+	"\x06reason\x18\x01 \x01(\x0e2#.identity.v1.TenantSelectionRefusalR\x06reason\x12.\n" +
+	"\x13phone_calling_codes\x18\x02 \x03(\tR\x11phoneCallingCodes\"4\n" +
 	"\rLogoutRequest\x12#\n" +
 	"\rrefresh_token\x18\x01 \x01(\tR\frefreshToken\"\x10\n" +
 	"\x0eLogoutResponse\"I\n" +

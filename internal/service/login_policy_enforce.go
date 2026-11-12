@@ -104,7 +104,10 @@ func (s *AuthService) checkSelectedTenantPolicy(ctx context.Context, projectID s
 	// is what it verifies the phone with before selecting again.
 	if policy.RequireVerifiedPhone && !phoneSatisfies(user, policy) {
 		s.logPhoneRuleRefusal(ctx, projectID, tenantID)
-		return &TenantSelectionRefusedError{Reason: TenantSelectionPhoneRequired, Err: ErrPhoneVerificationRequired}
+		return &TenantSelectionRefusedError{
+			Reason: TenantSelectionPhoneRequired, Err: ErrPhoneVerificationRequired,
+			PhoneCallingCodes: policy.PhoneCallingCodes,
+		}
 	}
 	return nil
 }

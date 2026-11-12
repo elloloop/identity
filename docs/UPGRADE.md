@@ -1,5 +1,23 @@
 # Upgrade guide
 
+## Next — a refusal for a missing phone names the countries the tenant accepts: `TenantSelectionRefusedDetails.phone_calling_codes` (additive error-detail field)
+
+A `RefreshToken` that selects a tenant requiring a verified phone
+(`TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED`) said only that a
+phone was missing, so an app could not tell which countries' numbers the
+tenant would accept until the account had verified one and been refused again.
+
+- **What changes.** The refusal's `TenantSelectionRefusedDetails` now carries
+  `phone_calling_codes`: the tenant's `LoginPolicy.phone_calling_codes`, as
+  digits without the `+`, in the policy's order. Empty means the tenant
+  accepts a verified number of any country. Every other refusal reason
+  carries none.
+- **Nothing else changes.** The code, the stable `phone_verification_required`
+  token and the unspent refresh token are as before. A client that does not
+  read the field is unaffected.
+- **Go API.** `service.TenantSelectionRefusedError` gains `PhoneCallingCodes`,
+  and `service.LoginPolicy` gains `CallingCodes()`.
+
 ## Next — a local deployment can capture phone codes by email: `GATEWAY_SMS_PROVIDER=local_capture`, `GATEWAY_TEMPLATEMSG_PROVIDER=local_capture` (off by default; new email template `phone_code_capture`)
 
 A local stack has no SMS or messaging account, so it could not finish the

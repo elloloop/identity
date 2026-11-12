@@ -12875,6 +12875,17 @@ components:
         reason:
           title: reason
           $ref: '#/components/schemas/identity.v1.TenantSelectionRefusal'
+        phoneCallingCodes:
+          type: array
+          items:
+            type: string
+          title: phone_calling_codes
+          description: |-
+            phone_calling_codes, on a PHONE_VERIFICATION_REQUIRED refusal, are the
+             country calling codes the tenant accepts a verified phone number of
+             (LoginPolicy.phone_calling_codes), as digits without the '+' (e.g.
+             "91"), in the policy's order, so an app can offer only those countries.
+             Empty there means a number of any country; empty on every other reason.
       title: TenantSelectionRefusedDetails
       additionalProperties: false
       description: |-

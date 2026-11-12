@@ -887,9 +887,11 @@ turn nothing on that the deployment lacks:
   years), after that long.
 
 A tenant can require a verified phone (`LoginPolicy.require_verified_phone`,
-optionally under some calling codes): until the account has one, a selection of the
-tenant is refused and no token for it is minted. The account still signs in
-and verifies a phone with that unselected session.
+optionally under some calling codes): until the account has one, a selection
+of the tenant is refused and no token for it is minted. The refusal's
+`TenantSelectionRefusedDetails.phone_calling_codes` names the calling codes
+the tenant accepts (empty for any), so an app can offer only those. The
+account still signs in and verifies a phone with that unselected session.
 
 ## Onboarding flows
 

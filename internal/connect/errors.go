@@ -270,7 +270,8 @@ func dobRequiredConnectError(err error) *connect.Error {
 func tenantSelectionRefusedConnectError(refusal *service.TenantSelectionRefusedError) *connect.Error {
 	cerr := toConnectError(refusal.Err)
 	if detail, err := connect.NewErrorDetail(&identitypb.TenantSelectionRefusedDetails{
-		Reason: tenantSelectionRefusalToProto(refusal.Reason),
+		Reason:            tenantSelectionRefusalToProto(refusal.Reason),
+		PhoneCallingCodes: refusal.PhoneCallingCodes,
 	}); err == nil {
 		cerr.AddDetail(detail)
 	}

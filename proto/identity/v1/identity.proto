@@ -877,6 +877,12 @@ message RefreshTokenResponse {
 // detail says so; see RefreshTokenRequest.tenant_id.
 message TenantSelectionRefusedDetails {
   TenantSelectionRefusal reason = 1;
+  // phone_calling_codes, on a PHONE_VERIFICATION_REQUIRED refusal, are the
+  // country calling codes the tenant accepts a verified phone number of
+  // (LoginPolicy.phone_calling_codes), as digits without the '+' (e.g.
+  // "91"), in the policy's order, so an app can offer only those countries.
+  // Empty there means a number of any country; empty on every other reason.
+  repeated string phone_calling_codes = 2;
 }
 
 // TenantSelectionRefusal says why RefreshToken refused a tenant selection.
@@ -906,10 +912,11 @@ enum TenantSelectionRefusal {
   // The tenant's login policy requires a verified phone number
   // (LoginPolicy.require_verified_phone) and the account has none, or none
   // of the countries the policy names. The code is FAILED_PRECONDITION with
-  // the stable `phone_verification_required` token. The refresh token was
-  // not consumed: refresh without tenant_id, verify a phone with that
-  // session (RequestPhoneVerification, VerifyPhoneCode), then select the
-  // tenant again.
+  // the stable `phone_verification_required` token, and the detail's
+  // phone_calling_codes names those countries. The refresh token was not
+  // consumed: refresh without tenant_id, verify a phone with that session
+  // (RequestPhoneVerification, VerifyPhoneCode), then select the tenant
+  // again.
   TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED = 5;
 }
 
