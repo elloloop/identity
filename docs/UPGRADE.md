@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — phone verification per project: its own switch, one account per number, accepted countries, a message channel, and a tenant that requires a verified phone: `phone.*` in a project's config, `LoginPolicy.require_verified_phone` (all off by default; migration 0061; additive RPC `RemovePhone`, `LoginPolicy` / `UpsertLoginPolicyRequest` fields, `TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED`; additive audit event `phone_removed`; new package `pkg/templatemsg`; two `Repository` methods (Go API))
+## Next — phone verification per project: its own switch, one account per number, accepted countries, a message channel, and a tenant that requires a verified phone: `phone.*` in a project's config, `LoginPolicy.require_verified_phone` (all off by default; migration 0060; additive RPC `RemovePhone`, `LoginPolicy` / `UpsertLoginPolicyRequest` fields, `TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED`; additive audit event `phone_removed`; new package `pkg/templatemsg`; two `Repository` methods (Go API))
 
 Phone verification was one switch for the whole deployment
 (`GATEWAY_SMS_ENABLED`), a number could sit on any number of accounts, every
@@ -70,7 +70,7 @@ setting, and none changes until it is set.
   removing the phone ends access at the next refresh. `phone_calling_codes`
   without `require_verified_phone` is rejected. Writing a login policy still
   needs the admin secret; a tenant operator credential can read it only.
-- **Migration 0061** adds `phone_number_claims` (SQLite: 0030), new and empty,
+- **Migration 0060** adds `phone_number_claims` (SQLite: 0029), new and empty,
   and two constant-default columns on `login_policies`
   (`require_verified_phone`, `phone_calling_codes`).
 - **Go API.** `service.Repository` gains `ClaimPhoneNumber` and
@@ -78,7 +78,7 @@ setting, and none changes until it is set.
   `RemovePhone`; `service.LoginPolicy` gains `RequireVerifiedPhone` and
   `PhoneCallingCodes`.
 
-## Next — a recovery email signs in to its account, and holds the account's recovery settings: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0060; additive `ListRecoveryEmailsResponse.hold_until` and error detail `RecoveryHoldDetails`; additive audit event `recovery_email_sign_in`; two `Repository` methods (Go API))
+## Next — a recovery email signs in to its account, and holds the account's recovery settings: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive `ListRecoveryEmailsResponse.hold_until` and error detail `RecoveryHoldDetails`; additive audit event `recovery_email_sign_in`; two `Repository` methods (Go API))
 
 A project whose accounts sign in by emailed code had no way back in for a
 person who lost their primary mailbox: the email change and the account merge
@@ -118,8 +118,8 @@ both ask for a password. A recovery email can now be that way.
   sign-in. It starts when the code is accepted, before any second factor.
 - **One more read on every emailed-code or link sign-in**: whether the proved
   address is a recovery email.
-- **Migration 0060** adds `user_recovery_emails.last_sign_in_at_ms` (SQLite:
-  0029), a constant-default column on a table 0059 created.
+- **Migration 0059** gives `user_recovery_emails` its `last_sign_in_at_ms`
+  (SQLite: 0028).
 - **Go API.** `service.Repository` gains `FindRecoveryEmailHolder` and
   `MarkRecoveryEmailSignIn`; `AuthService.ListRecoveryEmails` also returns the
   hold's end.

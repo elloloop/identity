@@ -1,4 +1,4 @@
--- 0030_add_phone_claims.up.sql
+-- 0029_add_phone_claims.up.sql
 --
 -- phone_number_claims is which account holds a verified phone number in a
 -- project that keeps numbers unique (phone.unique): one account per

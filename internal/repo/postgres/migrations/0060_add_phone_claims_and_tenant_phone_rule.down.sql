@@ -1,4 +1,4 @@
--- 0061_add_phone_claims_and_tenant_phone_rule.down.sql
+-- 0060_add_phone_claims_and_tenant_phone_rule.down.sql
 --
 -- Drops the phone claims and every tenant's phone rule. Verified numbers stay
 -- on their accounts; nothing keeps them unique afterwards, and a tenant that

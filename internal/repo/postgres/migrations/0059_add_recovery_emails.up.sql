@@ -9,6 +9,11 @@
 -- and every insert here takes the same per-address advisory lock and checks
 -- the other table inside it.
 --
+-- last_sign_in_at_ms is when the address last signed in to its account (0 =
+-- never). A sign-in by a recovery email starts a hold on the account's
+-- recovery settings, measured from the latest of these, so the hold needs no
+-- column of its own and follows the project's configured length.
+--
 -- recovery_email_codes is the emailed code that proves an address before a
 -- row is stored: at most one live code per user, as phone_verification_codes.
 --
@@ -22,7 +27,8 @@ CREATE TABLE user_recovery_emails (
     user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     email          TEXT NOT NULL CHECK (email <> ''),
     email_fold     TEXT COLLATE "C" GENERATED ALWAYS AS (lower(email COLLATE "C")) STORED,
-    verified_at_ms BIGINT NOT NULL
+    verified_at_ms BIGINT NOT NULL,
+    last_sign_in_at_ms BIGINT NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX user_recovery_emails_project_email_fold_uidx
     ON user_recovery_emails (project_id, email_fold);

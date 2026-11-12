@@ -2,15 +2,17 @@
 --
 -- Recovery emails: additional addresses an account has proved it controls.
 -- user_recovery_emails holds one row per proved address, unique per project
--- under the same ASCII fold as users.email; recovery_email_codes is the
--- emailed code that proves an address before a row is stored, at most one
--- live code per user.
+-- under the same ASCII fold as users.email, with when it last signed in to
+-- its account (0 = never), from which a hold on the account's recovery
+-- settings is measured; recovery_email_codes is the emailed code that proves
+-- an address before a row is stored, at most one live code per user.
 CREATE TABLE user_recovery_emails (
     id             TEXT PRIMARY KEY,
     project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     email          TEXT NOT NULL CHECK (email <> ''),
-    verified_at_ms INTEGER NOT NULL
+    verified_at_ms INTEGER NOT NULL,
+    last_sign_in_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX user_recovery_emails_project_email_uidx ON user_recovery_emails (project_id, lower(email));
 CREATE INDEX user_recovery_emails_project_user_idx ON user_recovery_emails (project_id, user_id, verified_at_ms, id);

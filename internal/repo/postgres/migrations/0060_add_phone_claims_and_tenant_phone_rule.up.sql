@@ -1,4 +1,4 @@
--- 0061_add_phone_claims_and_tenant_phone_rule.up.sql
+-- 0060_add_phone_claims_and_tenant_phone_rule.up.sql
 --
 -- phone_number_claims is which account holds a verified phone number in a
 -- project that keeps numbers unique (phone.unique). Its primary key is the
