@@ -5,8 +5,9 @@
 // its placeholders. A Sender delivers one Message (a verification code) to
 // a phone number.
 //
-// This package ships no provider: an embedder supplies a Sender for the
-// provider it uses, and a deployment without one has no message channel.
+// NewWhatsAppCloud sends through the WhatsApp Business Cloud API, and an
+// embedder may supply a Sender for any other provider; a deployment with
+// neither has no message channel.
 package templatemsg
 
 import (

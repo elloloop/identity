@@ -114,8 +114,9 @@ type Options struct {
 
 	// TemplateMessageSender delivers phone verification codes as
 	// messaging-app template messages, for projects whose phone.channels
-	// lists "message". nil leaves that channel unavailable: the server
-	// ships no provider for it.
+	// lists "message". nil builds one from GATEWAY_TEMPLATEMSG_* (the
+	// WhatsApp Business Cloud API), and leaves the channel unavailable when
+	// no provider is named.
 	TemplateMessageSender templatemsg.Sender
 
 	// OAuthRegistry holds the per-provider exchangers. nil builds one

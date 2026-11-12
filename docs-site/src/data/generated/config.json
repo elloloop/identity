@@ -2070,6 +2070,60 @@
     "anchor": "agent-accounts"
   },
   {
+    "name": "GATEWAY_TEMPLATEMSG_PROVIDER",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "selects the template-message backend: \"whatsapp_cloud\" (the WhatsApp Business Cloud API).",
+    "category": "Phone / SMS verification",
+    "anchor": "phone-sms-verification"
+  },
+  {
+    "name": "GATEWAY_TEMPLATEMSG_WHATSAPP_ACCESS_TOKEN",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the WhatsApp Business Cloud API access token, a system user's token with the whatsapp_business_messaging permission (provider \"whatsapp_cloud\").",
+    "category": "Phone / SMS verification",
+    "anchor": "phone-sms-verification"
+  },
+  {
+    "name": "GATEWAY_TEMPLATEMSG_WHATSAPP_API_VERSION",
+    "type": "string",
+    "default": "v26.0",
+    "required": false,
+    "description": "is the Graph API version called, such as v26.0 (provider \"whatsapp_cloud\").",
+    "category": "Phone / SMS verification",
+    "anchor": "phone-sms-verification"
+  },
+  {
+    "name": "GATEWAY_TEMPLATEMSG_WHATSAPP_CODE_BUTTON",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "says the templates have a one-time-password (copy code) button, as authentication templates do, so each send gives the button the code too (provider \"whatsapp_cloud\").",
+    "category": "Phone / SMS verification",
+    "anchor": "phone-sms-verification"
+  },
+  {
+    "name": "GATEWAY_TEMPLATEMSG_WHATSAPP_LANGUAGE",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the template language code, such as en_US, used for a project whose phone.message_language is empty (provider \"whatsapp_cloud\").",
+    "category": "Phone / SMS verification",
+    "anchor": "phone-sms-verification"
+  },
+  {
+    "name": "GATEWAY_TEMPLATEMSG_WHATSAPP_PHONE_NUMBER_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the id of the business phone number messages are sent from, as WhatsApp Manager shows it, not the number itself (provider \"whatsapp_cloud\").",
+    "category": "Phone / SMS verification",
+    "anchor": "phone-sms-verification"
+  },
+  {
     "name": "GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT",
     "type": "integer",
     "default": "100",

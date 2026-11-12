@@ -168,8 +168,9 @@ type Deps struct {
 
 	// TemplateMessageSender delivers phone verification codes as
 	// messaging-app template messages, the "message" channel a project's
-	// phone.channels may list. nil (the default) leaves that channel
-	// unavailable; this server ships no provider for it.
+	// phone.channels may list. If nil, New constructs the one
+	// GATEWAY_TEMPLATEMSG_PROVIDER names, and none when it names no
+	// provider, which leaves the channel unavailable.
 	TemplateMessageSender templatemsg.Sender
 
 	// OAuthRegistry holds the per-provider Exchangers used for OAuth
@@ -1042,7 +1043,7 @@ func New(deps Deps) (*Built, error) {
 
 // outboundSenders are the transports New hands the services: mail, with
 // whether its Send reports delivery (buildEmailTransport), SMS, and template
-// messages (nil when the embedder wired none, which leaves that channel
+// messages (nil when no provider is wired, which leaves that channel
 // unavailable).
 type outboundSenders struct {
 	mailer       email.Transport
@@ -1052,7 +1053,8 @@ type outboundSenders struct {
 }
 
 // buildOutboundSenders takes each sender the embedder wired in deps and
-// builds the mail and SMS ones it did not from the config.
+// builds the others from the config. The message channel's sender is the one
+// GATEWAY_TEMPLATEMSG_PROVIDER names; no provider builds none.
 func buildOutboundSenders(deps Deps, logger *zap.Logger) (outboundSenders, error) {
 	out := outboundSenders{
 		mailer: deps.EmailTransport, mailDelivers: deps.EmailTransport != nil,
@@ -1062,10 +1064,15 @@ func buildOutboundSenders(deps Deps, logger *zap.Logger) (outboundSenders, error
 		out.mailer, out.mailDelivers = buildEmailTransport(deps.Config, logger)
 	}
 	out.mailer = observability.WrapMailer(out.mailer)
+	var err error
 	if out.sms == nil {
-		var err error
 		if out.sms, err = buildSMSSender(deps.Config, logger); err != nil {
 			return outboundSenders{}, fmt.Errorf("sms sender: %w", err)
+		}
+	}
+	if out.templates == nil && deps.Config.TemplateMessageProvider == config.TemplateMessageProviderWhatsAppCloud {
+		if out.templates, err = buildWhatsAppCloudSender(deps.Config, logger); err != nil {
+			return outboundSenders{}, fmt.Errorf("template message sender: %w", err)
 		}
 	}
 	return out, nil

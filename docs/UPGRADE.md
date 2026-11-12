@@ -1,5 +1,41 @@
 # Upgrade guide
 
+## Next — the message channel sends through the WhatsApp Business Cloud API: `GATEWAY_TEMPLATEMSG_*` (off by default; `templatemsg.NewWhatsAppCloud` (Go API))
+
+Phone codes on the message channel needed a sender only an embedder could
+supply, so the server's own image could not send one. It can now, and nothing
+changes until `GATEWAY_TEMPLATEMSG_PROVIDER` is set.
+
+- **WhatsApp Business Cloud API.** `GATEWAY_TEMPLATEMSG_PROVIDER=whatsapp_cloud`
+  wires the message channel (`"message"` in a project's `phone.channels`) to
+  the Cloud API. Each code is sent as the template the project names
+  (`phone.message_template`, in `phone.message_language`), its one body
+  parameter the code.
+
+  | Variable | Default | Meaning |
+  | --- | --- | --- |
+  | `GATEWAY_TEMPLATEMSG_PROVIDER` | `""` (none) | `whatsapp_cloud`. |
+  | `GATEWAY_TEMPLATEMSG_WHATSAPP_ACCESS_TOKEN` | — (required) | A system user's access token with the `whatsapp_business_messaging` permission. Sent only as the request's bearer token; never logged. |
+  | `GATEWAY_TEMPLATEMSG_WHATSAPP_PHONE_NUMBER_ID` | — (required) | The id of the business phone number the messages come from (WhatsApp Manager, API Setup), digits only; not the number itself. |
+  | `GATEWAY_TEMPLATEMSG_WHATSAPP_API_VERSION` | `v26.0` | The Graph API version called. |
+  | `GATEWAY_TEMPLATEMSG_WHATSAPP_LANGUAGE` | `""` | The template language (e.g. `en_US`) for a project whose `phone.message_language` is empty. With neither, the send is refused and the next channel is tried. |
+  | `GATEWAY_TEMPLATEMSG_WHATSAPP_CODE_BUTTON` | `true` | The templates have a copy-code (one-time password) button, as an authentication template does, so each send gives the button the code too. Set `false` for a template without one: the Cloud API refuses a send whose parameters do not match its template. |
+
+  The boot is refused when the token or the phone number id is missing, the
+  token has whitespace, the id is not digits, or the version is not shaped
+  like `v26.0`. On Meta's side the operator needs an approved authentication
+  template (with a copy-code button, in each language a project names) on the
+  WhatsApp Business Account that owns the number. A send the Cloud API refuses
+  fails with `templatemsg.ErrTransport`, naming the HTTP status, the Graph API
+  error code and its `fbtrace_id`, never the error's message or details (which
+  can quote the recipient); the service logs it and tries the project's next
+  channel. A sender an embedder sets in `identityserver.Options.TemplateMessageSender`
+  still takes the place of the one these variables build.
+- **Go API.** `templatemsg.NewWhatsAppCloud(WhatsAppCloudConfig)` builds the
+  Cloud API sender (it takes no default API version: a caller pins its own)
+  and `WhatsAppCloudConfig.Validate` checks a config; `config.Config` gains the
+  `TemplateMessage*` fields and `WhatsAppCloud`.
+
 ## Next — an admin RPC does not reset the caller's own password or merge another account into it (behaviour change; no migration; `service.ErrAdminOwnAccount` (Go API))
 
 An admin RPC asks for no password and no recent sign-in, so on the caller's
@@ -72,7 +108,7 @@ now a setting, and none changes until it is set.
 - **A project can only narrow.** It can switch verification off, drop a
   channel and refuse countries. It cannot use a channel the deployment has no
   sender for: SMS needs `GATEWAY_SMS_ENABLED` and a provider, and the message
-  channel needs a sender the embedder supplies (below). A project whose
+  channel needs a template-message sender (below). A project whose
   channels all lack a sender answers `UNAVAILABLE`. That refusal, and the one
   for a code no channel delivered, no longer names SMS: its message is
   `phone verification is not available`, and never carries a sender's error,
@@ -105,11 +141,11 @@ now a setting, and none changes until it is set.
   `templatemsg.Sender`: the template's name and language come from the
   project, and its one parameter is the code. The channels are tried in the
   project's order and the first that accepts the message wins; one that fails
-  is logged and the next is tried. **This server ships no provider for the
-  message channel and has no environment variable for one**: an embedder sets
-  `identityserver.Options.TemplateMessageSender` (or `app.Deps`), and without
-  one the channel is skipped. A `Sender` must never log the code, nor put it
-  in an error it returns: identity logs those errors.
+  is logged and the next is tried. The sender is the WhatsApp Business Cloud
+  API (`GATEWAY_TEMPLATEMSG_*`, in the entry above) or one an embedder sets in
+  `identityserver.Options.TemplateMessageSender` (or `app.Deps`); without
+  either the channel is skipped. A `Sender` must never log the code, nor put
+  it in an error it returns: identity logs those errors.
 - **A merge moves the phone.** When the survivor has no phone, the retired
   account's number, its verified state and its claim move to it; when the
   survivor has one, the survivor keeps it and the retired account's claim is
