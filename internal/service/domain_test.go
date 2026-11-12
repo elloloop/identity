@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sort"
@@ -716,6 +717,45 @@ func (f *fakeMembershipStore) activeTenant(m *TenantMembership, projectID, userI
 		return nil
 	}
 	return &UserTenant{TenantID: t.ID, Name: t.Name, Role: m.Role, Source: m.Source}
+}
+
+// MatchTenantMemberPhones mirrors the postgres store: ErrNotFound for a
+// tenant the project does not hold, nobody for one that is not claimed, and
+// otherwise every member the active-tenant reads admit (a domain one by its
+// account's verified email) whose account is an active person's with a
+// verified number hashing to one of phoneHashes, in id order.
+func (f *fakeMembershipStore) MatchTenantMemberPhones(_ context.Context, projectID, tenantID string, phoneHashes [][]byte) ([]string, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if f.tenants == nil {
+		return nil, fmt.Errorf("%w: tenant", ErrNotFound)
+	}
+	if _, ok := f.tenants.byID[projectID+"/"+tenantID]; !ok {
+		return nil, fmt.Errorf("%w: tenant", ErrNotFound)
+	}
+	wanted := map[[sha256.Size]byte]bool{}
+	for _, h := range phoneHashes {
+		wanted[[sha256.Size]byte(h)] = true
+	}
+	var out []string
+	for _, m := range f.byKey {
+		if m.TenantID != tenantID || f.accounts == nil {
+			continue
+		}
+		u := f.accounts.byID[f.accounts.key(projectID, m.UserID)]
+		if u == nil || u.IsAnonymous || u.IsAgent() || !isActiveStatus(u.Status) || !u.PhoneVerified || u.PhoneNumber == "" {
+			continue
+		}
+		if f.activeTenant(m, projectID, m.UserID, verifiedEmailDomain(u)) == nil {
+			continue
+		}
+		if wanted[sha256.Sum256([]byte(u.PhoneNumber))] {
+			out = append(out, m.UserID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 var _ MembershipStore = (*fakeMembershipStore)(nil)
