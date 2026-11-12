@@ -242,6 +242,14 @@ func (StubRepository) RemoveRecoveryEmail(context.Context, string, string) (bool
 	return false, ErrServiceUnavailable
 }
 
+func (StubRepository) FindRecoveryEmailHolder(context.Context, string) (*RecoveryEmail, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) MarkRecoveryEmailSignIn(context.Context, string, string, int64) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) GetTotpCredential(context.Context, string) (*TotpCredRecord, error) {
 	return nil, ErrServiceUnavailable
 }

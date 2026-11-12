@@ -11,6 +11,10 @@ type RecoveryEmail struct {
 	// FoldEmail like a primary email.
 	Email      string
 	VerifiedAt int64 // epoch ms
+	// LastSignInAt is when the address last signed in to the account (epoch
+	// ms; 0 = never). The latest across an account's addresses starts the
+	// hold on its recovery settings.
+	LastSignInAt int64
 }
 
 // RecoveryEmailCodeRecord is the emailed code that proves a recovery address
@@ -43,6 +47,12 @@ var (
 	// `reauthentication_required` token clients match on to sign the user in
 	// again and retry, as ErrReauthenticationRequired's does.
 	ErrRecoveryReauthenticationRequired = errors.New("reauthentication_required: sign in again to change your recovery settings")
+	// ErrRecoveryHold is returned, inside a RecoveryHoldError, when a change
+	// to an account's recovery settings is asked for while a sign-in by a
+	// recovery email holds them (recovery_emails.hold_seconds). Mapped to
+	// CodeFailedPrecondition; its message leads with the stable
+	// `recovery_hold` token clients match on.
+	ErrRecoveryHold = errors.New("recovery_hold: this account signed in with a recovery email recently; its recovery settings cannot change yet")
 	// ErrRecoveryEmailCodeInvalid is returned when a recovery-email code is
 	// missing, expired, already consumed, the wrong code, sent to another
 	// address, or has exhausted its attempt budget. Mapped to
@@ -58,3 +68,12 @@ var (
 	// CodeResourceExhausted.
 	ErrRecoveryEmailLimit = errors.New("this account has the most recovery emails it may hold")
 )
+
+// RecoveryHoldError is ErrRecoveryHold with when the hold ends.
+type RecoveryHoldError struct {
+	UntilMs int64 // epoch ms
+}
+
+func (e *RecoveryHoldError) Error() string { return ErrRecoveryHold.Error() }
+
+func (e *RecoveryHoldError) Unwrap() error { return ErrRecoveryHold }

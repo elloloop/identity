@@ -146,3 +146,31 @@ func (r *fakeRepo) DeleteExpiredRecoveryEmailCodes(_ context.Context, beforeMs i
 	}
 	return nil
 }
+
+func (r *fakeRepo) FindRecoveryEmailHolder(_ context.Context, email string) (*RecoveryEmail, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	fold := FoldEmail(email)
+	for _, list := range r.recoveryEmails {
+		for _, e := range list {
+			if FoldEmail(e.Email) == fold {
+				cp := *e
+				return &cp, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) MarkRecoveryEmailSignIn(_ context.Context, userID, email string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	fold := FoldEmail(email)
+	for _, e := range r.recoveryEmails[userID] {
+		if FoldEmail(e.Email) == fold {
+			e.LastSignInAt = atMs
+			return nil
+		}
+	}
+	return fmt.Errorf("fake: MarkRecoveryEmailSignIn: %w", ErrNotFound)
+}

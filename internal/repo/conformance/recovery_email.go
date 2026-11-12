@@ -180,4 +180,38 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 			t.Fatalf("CreateUser on the freed address: %v", err)
 		}
 	})
+
+	t.Run(driver.Name+"/RecoveryEmail_HolderAndSignInStamp", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "rec-holder@example.com")
+		other := createTestUser(t, r, "rec-nonholder@example.com")
+		if got, err := r.FindRecoveryEmailHolder(ctx, "spare@example.net"); err != nil || got != nil {
+			t.Fatalf("holder of an address nobody holds = %#v %v, want nil nil", got, err)
+		}
+		// A primary email is not a recovery email.
+		if got, err := r.FindRecoveryEmailHolder(ctx, "rec-holder@example.com"); err != nil || got != nil {
+			t.Fatalf("holder of a primary email = %#v %v, want nil nil", got, err)
+		}
+		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "spare@example.net", VerifiedAt: 10}, 5); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		got, err := r.FindRecoveryEmailHolder(ctx, "SPARE@example.net")
+		if err != nil || got == nil || got.UserID != uid || got.Email != "spare@example.net" || got.VerifiedAt != 10 || got.LastSignInAt != 0 {
+			t.Fatalf("holder = %#v %v", got, err)
+		}
+		if err := r.MarkRecoveryEmailSignIn(ctx, uid, "Spare@example.net", 77); err != nil {
+			t.Fatalf("Mark: %v", err)
+		}
+		if err := r.MarkRecoveryEmailSignIn(ctx, other, "spare@example.net", 88); !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("Mark by an account that does not hold the address: want ErrNotFound, got %v", err)
+		}
+		list, err := r.ListRecoveryEmails(ctx, uid)
+		if err != nil || len(list) != 1 || list[0].LastSignInAt != 77 {
+			t.Fatalf("List after Mark = %#v %v, want LastSignInAt 77", list, err)
+		}
+		if got, _ := r.FindRecoveryEmailHolder(ctx, "spare@example.net"); got == nil || got.LastSignInAt != 77 {
+			t.Fatalf("holder after Mark = %#v", got)
+		}
+	})
 }

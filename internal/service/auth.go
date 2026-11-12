@@ -631,6 +631,13 @@ type Repository interface {
 	AddRecoveryEmail(ctx context.Context, e *RecoveryEmail, max int) error
 	ListRecoveryEmails(ctx context.Context, userID string) ([]*RecoveryEmail, error)
 	RemoveRecoveryEmail(ctx context.Context, userID, email string) (bool, error)
+	// FindRecoveryEmailHolder returns the recovery-email row holding the
+	// address (under FoldEmail) in the project, whose UserID is the account
+	// it signs in to, or nil when no account holds it.
+	// MarkRecoveryEmailSignIn stamps LastSignInAt on the account's address;
+	// an address the account does not hold is ErrNotFound.
+	FindRecoveryEmailHolder(ctx context.Context, email string) (*RecoveryEmail, error)
+	MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs int64) error
 
 	// TOTP credentials
 	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)

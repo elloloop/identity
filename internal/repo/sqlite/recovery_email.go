@@ -212,7 +212,7 @@ func (r *sqliteRepository) AddRecoveryEmail(ctx context.Context, e *service.Reco
 
 func (r *sqliteRepository) ListRecoveryEmails(ctx context.Context, userID string) ([]*service.RecoveryEmail, error) {
 	const q = `
-		SELECT user_id, email, verified_at_ms
+		SELECT user_id, email, verified_at_ms, last_sign_in_at_ms
 		  FROM user_recovery_emails
 		 WHERE project_id = $1 AND user_id = $2
 		 ORDER BY verified_at_ms ASC, id ASC`
@@ -224,7 +224,7 @@ func (r *sqliteRepository) ListRecoveryEmails(ctx context.Context, userID string
 	var out []*service.RecoveryEmail
 	for rows.Next() {
 		var e service.RecoveryEmail
-		if err := rows.Scan(&e.UserID, &e.Email, &e.VerifiedAt); err != nil {
+		if err := rows.Scan(&e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt); err != nil {
 			return nil, wrapErr("ListRecoveryEmails", err)
 		}
 		out = append(out, &e)
@@ -241,6 +241,40 @@ func (r *sqliteRepository) RemoveRecoveryEmail(ctx context.Context, userID, emai
 		return false, wrapErr("RemoveRecoveryEmail", err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+func (r *sqliteRepository) FindRecoveryEmailHolder(ctx context.Context, email string) (*service.RecoveryEmail, error) {
+	if email == "" {
+		return nil, nil
+	}
+	const q = `
+		SELECT user_id, email, verified_at_ms, last_sign_in_at_ms
+		  FROM user_recovery_emails
+		 WHERE project_id = $1 AND lower(email) = $2`
+	var e service.RecoveryEmail
+	err := r.db.QueryRow(ctx, q, r.projectID, service.FoldEmail(email)).Scan(&e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt)
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapErr("FindRecoveryEmailHolder", err)
+	}
+	return &e, nil
+}
+
+func (r *sqliteRepository) MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs int64) error {
+	const q = `
+		UPDATE user_recovery_emails
+		   SET last_sign_in_at_ms = $4
+		 WHERE project_id = $1 AND user_id = $2 AND lower(email) = $3`
+	tag, err := r.db.Exec(ctx, q, r.projectID, userID, service.FoldEmail(email), atMs)
+	if err != nil {
+		return wrapErr("MarkRecoveryEmailSignIn", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("sqlite: MarkRecoveryEmailSignIn: %w", service.ErrNotFound)
+	}
+	return nil
 }
 
 func (r *sqliteRepository) DeleteExpiredRecoveryEmailCodes(ctx context.Context, beforeMs int64, limit int) error {
