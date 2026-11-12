@@ -63,12 +63,18 @@ type directoryAddress struct {
 
 // DirectoryService answers read-only directory lookups for services. Its
 // caller is a directory_reader project credential, not a user: the credential
-// is the whole authorization, it is bound to exactly one project, and the
-// only thing it can do is resolve email addresses to active accounts in that
-// project. It has no write path at all.
+// is the whole authorization, it is bound to exactly one project, and all it
+// can do is read that project's directory: resolve email addresses to active
+// accounts (LookupUsers) and match phone-number hashes against a tenant's
+// members (MatchTenantMemberPhones). It has no write path at all.
 type DirectoryService struct {
 	credentials DirectoryCredentialStore
 	users       Repository
+	// members backs MatchTenantMemberPhones, and phoneMatches budgets it per
+	// credential and tenant (WithTenantMemberPhones); without members the
+	// match is ErrUnimplemented.
+	members      TenantMemberPhoneMatcher
+	phoneMatches *probeBudget
 	// requireVerifiedEmail is GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL. When set,
 	// an account whose owner has not proven its address is not returned:
 	// without that, whoever signed up with an address first would be
@@ -109,7 +115,7 @@ func (s *DirectoryService) LookupUsers(ctx context.Context, presentedKey string,
 	if err != nil {
 		return nil, err
 	}
-	cred, err := s.authenticate(ctx, publicID, secret)
+	cred, err := s.authenticate(ctx, audit.EventDirectoryLookup, publicID, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -155,11 +161,11 @@ func splitDirectoryKey(presentedKey string) (publicID, secret string, err error)
 
 // authenticate resolves a split directory key (splitDirectoryKey) to an
 // active directory_reader credential; every refusal is errInvalidDirectoryKey.
-// A refusal against a directory_reader credential that exists is audited
-// under its project with the reason; any other kind's public id is public by
-// design (a publishable key ships in clients), so presenting one records
-// nothing.
-func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret string) (*AdminProjectCredential, error) {
+// A refusal against a directory_reader credential that exists is audited as
+// event, the call's own, under its project with the reason; any other kind's
+// public id is public by design (a publishable key ships in clients), so
+// presenting one records nothing.
+func (s *DirectoryService) authenticate(ctx context.Context, event audit.EventType, publicID, secret string) (*AdminProjectCredential, error) {
 	cred, reason, err := checkProjectCredential(ctx, s.credentials, CredentialKindDirectoryReader, publicID, secret)
 	if err != nil {
 		return nil, err
@@ -170,7 +176,7 @@ func (s *DirectoryService) authenticate(ctx context.Context, publicID, secret st
 	if reason == "" {
 		return cred, nil
 	}
-	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: cred.ProjectID}), audit.EventDirectoryLookup,
+	s.audit.Log(WithProjectScope(ctx, &ProjectScope{ProjectID: cred.ProjectID}), event,
 		audit.WithActor(credentialActor(cred)),
 		audit.WithSuccess(false),
 		audit.WithDetails(map[string]any{"reason": reason}),

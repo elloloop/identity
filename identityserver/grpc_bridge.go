@@ -43,13 +43,15 @@ import (
 // budgets across transports.
 type grpcBridge struct {
 	identitypb.UnimplementedIdentityServiceServer
-	h              *identityconnect.IdentityHandler
-	directoryLimit middleware.PathLimit
-	machineLimits  map[string]middleware.PathLimit
-	operatorLimits map[string]middleware.PathLimit
-	trustedProxies []*net.IPNet
-	logger         *zap.Logger
-	trust          grpcTrust
+	h *identityconnect.IdentityHandler
+	// directoryLimits holds the per-IP limit of each directory read, by
+	// procedure.
+	directoryLimits map[string]middleware.PathLimit
+	machineLimits   map[string]middleware.PathLimit
+	operatorLimits  map[string]middleware.PathLimit
+	trustedProxies  []*net.IPNet
+	logger          *zap.Logger
+	trust           grpcTrust
 }
 
 // grpcTrust names the x-authenticated-* keys besides the user id that the
@@ -64,12 +66,15 @@ type grpcTrust struct {
 }
 
 func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcBridge {
-	directoryLimit, ok := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceLookupUsersProcedure)
-	if !ok {
-		// app.Build always configures this limit; reaching here means the
-		// wiring drifted and LookupUsers runs unthrottled on this surface.
-		logger.Error("directory_lookup_grpc_unthrottled",
-			zap.String("procedure", identityv1connect.IdentityServiceLookupUsersProcedure))
+	directoryLimits := make(map[string]middleware.PathLimit, 2)
+	for _, procedure := range []string{identityv1connect.IdentityServiceLookupUsersProcedure, identityv1connect.IdentityServiceMatchTenantMemberPhonesProcedure} {
+		limit, found := middleware.MatchPathLimit(built.RateLimits, procedure)
+		if !found {
+			// app.Build always configures these; reaching here means the
+			// wiring drifted and the read runs unthrottled on this surface.
+			logger.Error("directory_lookup_grpc_unthrottled", zap.String("procedure", procedure))
+		}
+		directoryLimits[procedure] = limit
 	}
 	machineLimits := make(map[string]middleware.PathLimit)
 	for _, procedure := range []string{identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
@@ -89,13 +94,13 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 		operatorLimits[procedure] = limit
 	}
 	return &grpcBridge{
-		machineLimits:  machineLimits,
-		operatorLimits: operatorLimits,
-		h:              built.ConnectHandler,
-		directoryLimit: directoryLimit,
-		trustedProxies: built.TrustedProxies,
-		logger:         logger,
-		trust:          trust,
+		machineLimits:   machineLimits,
+		operatorLimits:  operatorLimits,
+		h:               built.ConnectHandler,
+		directoryLimits: directoryLimits,
+		trustedProxies:  built.TrustedProxies,
+		logger:          logger,
+		trust:           trust,
 	}
 }
 
@@ -726,10 +731,17 @@ func (b *grpcBridge) AdminRevokeProjectCredential(ctx context.Context, in *ident
 }
 
 func (b *grpcBridge) LookupUsers(ctx context.Context, in *identitypb.LookupUsersRequest) (*identitypb.LookupUsersResponse, error) {
-	if err := b.throttle(ctx, b.directoryLimit); err != nil {
+	if err := b.throttle(ctx, b.directoryLimits[identityv1connect.IdentityServiceLookupUsersProcedure]); err != nil {
 		return nil, err
 	}
 	return invoke(ctx, b, in, b.h.LookupUsers)
+}
+
+func (b *grpcBridge) MatchTenantMemberPhones(ctx context.Context, in *identitypb.MatchTenantMemberPhonesRequest) (*identitypb.MatchTenantMemberPhonesResponse, error) {
+	if err := b.throttle(ctx, b.directoryLimits[identityv1connect.IdentityServiceMatchTenantMemberPhonesProcedure]); err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.MatchTenantMemberPhones)
 }
 
 func (b *grpcBridge) AdminCreateProjectCredential(ctx context.Context, in *identitypb.AdminCreateProjectCredentialRequest) (*identitypb.AdminCreateProjectCredentialResponse, error) {

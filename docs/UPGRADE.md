@@ -1,5 +1,45 @@
 # Upgrade guide
 
+## Next — match phone-number hashes against a tenant's members: `MatchTenantMemberPhones` (additive RPC for `directory_reader` credentials; new setting `GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT`, default 60; additive audit event `directory_phone_match`; `MembershipStore.MatchTenantMemberPhones` (Go API))
+
+A service that holds a person's contacts had no way to tell which of them are
+members of a tenant short of resolving them one by one, and phone numbers
+could not be looked up at all.
+
+- **What it does.** `MatchTenantMemberPhones` takes a `tenant_id` and 1 to
+  3000 SHA-256 digests of E.164 numbers (the hash of the number's text with
+  its leading `+`), and returns the ids of the tenant's members whose
+  **verified** number is among them, in ascending order. A member is one who
+  may act in the tenant, as `ListMyTenants` judges it; a suspended or latent
+  tenant has none. An unverified number never matches. The hashes are
+  compared and dropped, never stored or logged.
+- **Who can call it.** Only a `directory_reader` project credential in
+  `X-Directory-Key`, as for `LookupUsers`; the RPC is JWT-exempt, and a
+  user's access token authorizes nothing. A tenant the credential's project
+  does not hold is `PERMISSION_DENIED`. **An existing `directory_reader`
+  credential can call it from this release on**: a holder that should only
+  resolve email addresses needs no change, since it never calls the new RPC,
+  but review who holds these keys, and revoke any not needed.
+- **Rate limits.** Each credential may make
+  `GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT` calls (default 60) against each
+  tenant per `GATEWAY_RATE_LIMIT_WINDOW_SECONDS` window, counted per replica;
+  over it the call is `RESOURCE_EXHAUSTED`. Like
+  `GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` it cannot be switched off: zero keeps
+  the default and a negative value fails the boot. The RPC is also held to
+  `GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP` per client IP, a budget of its own,
+  on HTTP and on the native gRPC bridge.
+- **Audit.** Each answered call records `directory_phone_match` with the
+  credential as actor, the tenant and how many hashes were asked for and
+  matched; a tenant outside the project is recorded with `success=false` and
+  `reason: tenant_not_in_project`.
+- **No migration.** Postgres computes the hash of each member's stored number
+  in the query. The memory and SQLite drivers have no tenant memberships and
+  answer `UNIMPLEMENTED`.
+- **Go API.** `service.MembershipStore` gains `MatchTenantMemberPhones`
+  (through `service.TenantMemberPhoneMatcher`); `DirectoryService` gains
+  `WithTenantMemberPhones` and `MatchTenantMemberPhones`; `config.Config`
+  gains `RateLimitPhoneMatchPerTenant`.
+
 ## Next — a refusal for a missing phone names the countries the tenant accepts: `TenantSelectionRefusedDetails.phone_calling_codes` (additive error-detail field)
 
 A `RefreshToken` that selects a tenant requiring a verified phone

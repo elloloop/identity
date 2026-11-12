@@ -477,6 +477,7 @@ func TestToConnectError_RecoveryAndPhoneSentinels(t *testing.T) {
 		service.ErrPhoneCountryNotAllowed:           connect.CodeFailedPrecondition,
 		service.ErrPhoneVerificationRequired:        connect.CodeFailedPrecondition,
 		service.ErrRecoverySession:                  connect.CodeFailedPrecondition,
+		service.ErrPhoneMatchLimited:                connect.CodeResourceExhausted,
 	} {
 		assert.Equal(t, want, connect.CodeOf(toConnectError(err)), "%v", err)
 		assert.Equal(t, want, connect.CodeOf(toConnectError(fmt.Errorf("%w: detail", err))), "wrapped %v", err)

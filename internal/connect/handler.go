@@ -51,15 +51,15 @@ type IdentityHandler struct {
 	// with a tenant_operator credential and no secret check it (see
 	// service.ControlPlaneAdminService).
 	controlAdmin *service.ControlPlaneAdminService
-	// directory backs LookupUsers, authenticated by a directory_reader
-	// project credential rather than a user JWT. nil when the build has no
-	// control plane (memory, sqlite), which disables the RPC
-	// (CodeUnimplemented).
 	agentOAuth   *service.AgentOAuthService
 	teammateKeys *service.TeammateKeyService
 	exchanges    *prometheus.CounterVec
-	directory    *service.DirectoryService
-	cfg          *config.Config
+	// directory backs LookupUsers and MatchTenantMemberPhones, authenticated
+	// by a directory_reader project credential rather than a user JWT. nil
+	// when the build has no control plane (memory, sqlite), which disables
+	// both (CodeUnimplemented).
+	directory *service.DirectoryService
+	cfg       *config.Config
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service
@@ -75,8 +75,8 @@ type IdentityHandler struct {
 // controlAdmin is optional: nil (memory, or no configured admin secret)
 // causes the control-plane admin RPCs to return CodeUnimplemented.
 //
-// directory is optional: nil (no control plane) causes LookupUsers to
-// return CodeUnimplemented.
+// directory is optional: nil (no control plane) causes LookupUsers and
+// MatchTenantMemberPhones to return CodeUnimplemented.
 func NewIdentityHandler(
 	auth *service.AuthService,
 	admin *service.AdminService,

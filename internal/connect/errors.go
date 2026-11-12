@@ -104,7 +104,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrInviterLimited),
 		errors.Is(err, service.ErrInvitationRecipientLimited),
 		errors.Is(err, service.ErrDomainAttemptsLimited),
-		errors.Is(err, service.ErrRecoveryEmailLimit):
+		errors.Is(err, service.ErrRecoveryEmailLimit),
+		errors.Is(err, service.ErrPhoneMatchLimited):
 		// CodeResourceExhausted: lockout is a per-account quota of failed
 		// attempts. ResourceExhausted matches gRPC's documented semantics
 		// for "the resource is exhausted" / rate-limit-style failures and

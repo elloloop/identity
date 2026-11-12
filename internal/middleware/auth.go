@@ -143,6 +143,9 @@ var AuthExemptPaths = map[string]bool{
 	// directory service verifies (hash compare, kind, revocation) and which
 	// scopes the lookup to that credential's project.
 	"/identity.v1.IdentityService/LookupUsers": true,
+	// MatchTenantMemberPhones is authenticated the same way, by the
+	// directory service, and never by a user's token.
+	"/identity.v1.IdentityService/MatchTenantMemberPhones": true,
 	// TeammateKeyService is called by a service holding a teammate_key_manager
 	// project credential in X-Teammate-Key-Manager-Key, which the service
 	// verifies and which selects the project.

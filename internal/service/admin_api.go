@@ -26,8 +26,9 @@ const (
 // Credential kinds an operator may mint. "publishable" is a public lookup
 // key with no secret half; "secret" carries a secret shown exactly once;
 // "directory_reader" also carries a once-shown secret, and is the only kind
-// DirectoryService accepts — it authorizes the read-only LookupUsers RPC
-// against its own project and nothing else.
+// DirectoryService accepts — it authorizes the read-only directory RPCs,
+// LookupUsers and MatchTenantMemberPhones, against its own project and
+// nothing else.
 const (
 	CredentialKindPublishable     = "publishable"
 	CredentialKindSecret          = "secret"

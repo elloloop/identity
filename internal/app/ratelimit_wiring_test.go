@@ -340,6 +340,27 @@ func TestBuildRateLimits_DirectoryLookupLimited(t *testing.T) {
 	assertQuotaExhausts(t, handler, path, "9.9.9.9", 2)
 }
 
+// MatchTenantMemberPhones is authenticated like LookupUsers, so it carries
+// the same per-IP bound on the credential reads a caller can drive, as a
+// budget of its own: spending one directory read's budget leaves the other's.
+func TestBuildRateLimits_PhoneMatchLimited(t *testing.T) {
+	const (
+		path   = "/identity.v1.IdentityService/MatchTenantMemberPhones"
+		lookup = "/identity.v1.IdentityService/LookupUsers"
+	)
+	limits := buildRateLimits(&config.Config{RateLimitWindowSeconds: 60, RateLimitDirectoryPerIP: 2})
+	pl, ok := middleware.MatchPathLimit(limits, path)
+	require.True(t, ok, "MatchTenantMemberPhones must carry a rate limit")
+	require.Equal(t, "directory_phone_match", pl.Tag)
+	require.Empty(t, pl.Header, "every call is counted, whatever it presents")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, path, "9.9.9.6", 2)
+	assertQuotaExhausts(t, handler, lookup, "9.9.9.6", 2)
+}
+
 // The tenant-operator procedures share one per-IP budget, drawn only by
 // requests that present a tenant_operator key: a caller holding the admin
 // secret alone is not newly throttled, and a guessed key cannot be tried at

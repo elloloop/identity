@@ -18,9 +18,10 @@ import (
 // operator can confirm the effective limit without reading the environment.
 func TestBuildDirectoryService_LogsBootState(t *testing.T) {
 	cfg := &config.Config{
-		RateLimitDirectoryPerIP:  250,
-		RateLimitWindowSeconds:   30,
-		AuthRequireVerifiedEmail: true,
+		RateLimitDirectoryPerIP:      250,
+		RateLimitWindowSeconds:       30,
+		AuthRequireVerifiedEmail:     true,
+		RateLimitPhoneMatchPerTenant: 7,
 	}
 
 	t.Run("enabled", func(t *testing.T) {
@@ -35,7 +36,8 @@ func TestBuildDirectoryService_LogsBootState(t *testing.T) {
 		}
 		fields := entries[0].ContextMap()
 		if fields["rate_limit_per_ip"] != int64(250) || fields["rate_limit_window"] != 30*time.Second ||
-			fields["require_verified_email"] != true {
+			fields["require_verified_email"] != true || fields["tenant_member_phone_match"] != false ||
+			fields["phone_match_per_tenant"] != int64(7) {
 			t.Fatalf("directory_lookup_enabled fields = %v", fields)
 		}
 		if n := logs.FilterMessage("directory_lookup_disabled").Len(); n != 0 {
