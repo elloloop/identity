@@ -24,6 +24,7 @@ func NewProjectScopeGuard() func(http.Handler) http.Handler {
 			scope := service.ProjectScopeFromContext(r.Context())
 			tokenProject := r.Header.Get(AuthenticatedProjectHeader)
 			if scope != nil && scope.ProjectID != "" && tokenProject != "" && scope.ProjectID != tokenProject {
+				recordProjectMismatchRefusal(r, scope.ProjectID, tokenProject)
 				writeConnectError(w, http.StatusForbidden, "permission_denied",
 					"access token was issued for a different project")
 				return
