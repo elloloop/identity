@@ -603,6 +603,35 @@ type Repository interface {
 	ConsumePhoneVerificationCode(ctx context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error)
 	SetUserPhoneVerified(ctx context.Context, userID, phoneNumber string, atMs int64) error
 
+	// Recovery emails (additional verified addresses of an account).
+	//
+	// The four *RecoveryEmailCode methods are the phone-verification code
+	// methods' twins, keyed on user_id: Upsert replaces the user's live
+	// code, Find returns the row (consumed or not; nil when none),
+	// Increment bumps attempt_count, and Consume is the single-winner
+	// compare-and-set that returns ErrRecoveryEmailCodeInvalid for a
+	// replay, an expired code or a missing one.
+	//
+	// AddRecoveryEmail stores a proved address on e.UserID, atomically with
+	// its two refusals: ErrRecoveryEmailTaken when the address (under
+	// FoldEmail) is any account's primary email or another account's
+	// recovery email in the project, and ErrRecoveryEmailLimit when the
+	// account already holds max addresses. Adding an address the account
+	// already holds changes nothing and returns nil. The reverse rule is
+	// the user writes': CreateUser, UpdateUser and UpdateUserEmail return
+	// ErrAlreadyExists for an email that is any account's recovery email.
+	//
+	// ListRecoveryEmails returns the account's addresses, oldest first.
+	// RemoveRecoveryEmail deletes one (matched under FoldEmail) and reports
+	// whether a row was removed.
+	UpsertRecoveryEmailCode(ctx context.Context, r *RecoveryEmailCodeRecord) (string, error)
+	FindRecoveryEmailCodeByUser(ctx context.Context, userID string) (*RecoveryEmailCodeRecord, error)
+	IncrementRecoveryEmailCodeAttempts(ctx context.Context, nodeID string) error
+	ConsumeRecoveryEmailCode(ctx context.Context, userID string, atMs int64) (*RecoveryEmailCodeRecord, error)
+	AddRecoveryEmail(ctx context.Context, e *RecoveryEmail, max int) error
+	ListRecoveryEmails(ctx context.Context, userID string) ([]*RecoveryEmail, error)
+	RemoveRecoveryEmail(ctx context.Context, userID, email string) (bool, error)
+
 	// TOTP credentials
 	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)
 	CreateTotpCredential(ctx context.Context, r *TotpCredRecord) (string, error)
@@ -861,6 +890,7 @@ type Repository interface {
 	DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredRecoveryEmailCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredQrLoginSessions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error
 }

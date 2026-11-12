@@ -214,6 +214,34 @@ func (StubRepository) SetUserPhoneVerified(context.Context, string, string, int6
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) UpsertRecoveryEmailCode(context.Context, *RecoveryEmailCodeRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) FindRecoveryEmailCodeByUser(context.Context, string) (*RecoveryEmailCodeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) IncrementRecoveryEmailCodeAttempts(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) ConsumeRecoveryEmailCode(context.Context, string, int64) (*RecoveryEmailCodeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) AddRecoveryEmail(context.Context, *RecoveryEmail, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) ListRecoveryEmails(context.Context, string) ([]*RecoveryEmail, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) RemoveRecoveryEmail(context.Context, string, string) (bool, error) {
+	return false, ErrServiceUnavailable
+}
+
 func (StubRepository) GetTotpCredential(context.Context, string) (*TotpCredRecord, error) {
 	return nil, ErrServiceUnavailable
 }
@@ -467,6 +495,10 @@ func (StubRepository) DeleteExpiredMagicLinkTokens(context.Context, int64, int) 
 }
 
 func (StubRepository) DeleteExpiredPhoneVerificationCodes(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredRecoveryEmailCodes(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
 

@@ -1801,6 +1801,9 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if err := r.DeleteExpiredPhoneVerificationCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredPhoneVerificationCodes: %v", err)
 	}
+	if err := r.DeleteExpiredRecoveryEmailCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredRecoveryEmailCodes: %v", err)
+	}
 	if err := r.DeleteExpiredQrLoginSessions(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredQrLoginSessions: %v", err)
 	}

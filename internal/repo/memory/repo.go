@@ -64,6 +64,8 @@ type Repo struct {
 	emailLoginCodes           map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens           map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes          map[string]*service.PhoneVerificationCodeRecord
+	recoveryEmailCodes        map[string]*service.RecoveryEmailCodeRecord
+	recoveryEmails            map[string][]*service.RecoveryEmail
 	totpCreds                 map[string]*service.TotpCredRecord
 	recoveryCodes             map[string]*service.RecoveryCodeRecord
 	loginChallenges           map[string]*service.LoginChallengeRecord
@@ -124,6 +126,8 @@ func newStore() *Repo {
 		emailLoginCodes:           make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:           make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:          make(map[string]*service.PhoneVerificationCodeRecord),
+		recoveryEmailCodes:        make(map[string]*service.RecoveryEmailCodeRecord),
+		recoveryEmails:            make(map[string][]*service.RecoveryEmail),
 		totpCreds:                 make(map[string]*service.TotpCredRecord),
 		recoveryCodes:             make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:           make(map[string]*service.LoginChallengeRecord),
@@ -365,6 +369,9 @@ func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int
 func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if u.Email != "" && r.recoveryEmailHeldLocked(u.Email) {
+		return "", fmt.Errorf("email %q is a recovery email: %w", u.Email, service.ErrAlreadyExists)
+	}
 	for _, existing := range r.users {
 		// Under FoldEmail, mirroring the SQL drivers' folded-email unique
 		// index: every backend signals a duplicate identically (the SCIM
@@ -412,6 +419,9 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if email, _ := fields["email"].(string); email != "" && r.recoveryEmailHeldLocked(email) {
+		return fmt.Errorf("email %q is a recovery email: %w", email, service.ErrAlreadyExists)
 	}
 	if v, ok := fields["external_id"]; ok {
 		if ext, _ := v.(string); ext != "" {
@@ -576,6 +586,8 @@ func (r *Repo) deleteUserLocked(userID string) {
 	deleteByUser(r.oauthIdentities, userID, func(o *service.OAuthIdentity) string { return o.UserID })
 	deleteByUser(r.idvRecords, userID, func(rec *service.IdentityVerificationRecord) string { return rec.UserID })
 	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
+	delete(r.recoveryEmailCodes, userID)
+	delete(r.recoveryEmails, userID)
 	// Guardian edges are live authorization state, so — matching the SQL
 	// drivers' ON DELETE CASCADE on both user FK columns — they drain when
 	// the user is deleted as guardian OR as child.
@@ -1550,6 +1562,9 @@ func (r *Repo) UpdateUserEmail(_ context.Context, userID, newEmail string, atMs 
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if newEmail != "" && r.recoveryEmailHeldLocked(newEmail) {
+		return fmt.Errorf("email %q is a recovery email: %w", newEmail, service.ErrAlreadyExists)
 	}
 	// The SQL drivers' folded-email unique index, as in UpdateUser.
 	for id, other := range r.users {

@@ -115,6 +115,10 @@ func (m *mockSweepRepo) DeleteExpiredPhoneVerificationCodes(_ context.Context, b
 	return m.sweep(b, l)
 }
 
+func (m *mockSweepRepo) DeleteExpiredRecoveryEmailCodes(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
 func (m *mockSweepRepo) DeleteExpiredQrLoginSessions(_ context.Context, b int64, l int) error {
 	return m.sweep(b, l)
 }
@@ -511,6 +515,7 @@ func TestSweeperTargetsCoverEveryRepositorySweep(t *testing.T) {
 		"email_login_codes",
 		"magic_link_tokens",
 		"phone_verification_codes",
+		"recovery_email_codes",
 		"qr_login_sessions",
 		"user_invitations",
 		"assurance_challenges",

@@ -262,6 +262,8 @@ type fakeRepo struct {
 	emailLoginCodes     map[string]*EmailLoginCodeRecord
 	magicLinkTokens     map[string]*MagicLinkTokenRecord
 	phoneVerifyCodes    map[string]*PhoneVerificationCodeRecord
+	recoveryEmailCodes  map[string]*RecoveryEmailCodeRecord
+	recoveryEmails      map[string][]*RecoveryEmail
 	totpCreds           map[string]*TotpCredRecord
 	recoveryCodes       map[string]*RecoveryCodeRecord
 	loginChallenges     map[string]*LoginChallengeRecord
@@ -294,6 +296,8 @@ func newFakeRepo() *fakeRepo {
 		emailLoginCodes:    make(map[string]*EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*PhoneVerificationCodeRecord),
+		recoveryEmailCodes: make(map[string]*RecoveryEmailCodeRecord),
+		recoveryEmails:     make(map[string][]*RecoveryEmail),
 		totpCreds:          make(map[string]*TotpCredRecord),
 		recoveryCodes:      make(map[string]*RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*LoginChallengeRecord),
@@ -446,6 +450,9 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if u.Email != "" && r.recoveryEmailHeldLocked(u.Email) {
+		return "", fmt.Errorf("email %q is a recovery email: %w", u.Email, ErrAlreadyExists)
+	}
 	for _, existing := range r.users {
 		// Mirrors the drivers' PARTIAL unique index (WHERE email <> ''):
 		// users without an address — every anonymous user — never collide.
@@ -487,6 +494,9 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 	}
 	// Mirrors the drivers' (project_id, email_fold) partial unique index.
 	if addr, _ := fields["email"].(string); addr != "" {
+		if r.recoveryEmailHeldLocked(addr) {
+			return fmt.Errorf("%w: email is a recovery email", ErrAlreadyExists)
+		}
 		for id, other := range r.users {
 			if id != userID && other.Email != "" && FoldEmail(other.Email) == FoldEmail(addr) {
 				return fmt.Errorf("%w: email already exists", ErrAlreadyExists)
@@ -702,6 +712,8 @@ func (r *fakeRepo) DeleteUser(_ context.Context, userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	InvalidateAgentCreationReceipts(r.agentCreations, userID)
+	delete(r.recoveryEmailCodes, userID)
+	delete(r.recoveryEmails, userID)
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
 			delete(r.refreshTokens, id)
@@ -1688,6 +1700,9 @@ func (r *fakeRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, a
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if newEmail != "" && r.recoveryEmailHeldLocked(newEmail) {
+		return fmt.Errorf("email %q is a recovery email: %w", newEmail, ErrAlreadyExists)
 	}
 	for id, other := range r.users {
 		if id != userID && other.Email == newEmail {

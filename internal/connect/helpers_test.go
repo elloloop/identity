@@ -98,6 +98,8 @@ type fakeRepo struct {
 	emailLoginCodes     map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens     map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes    map[string]*service.PhoneVerificationCodeRecord
+	recoveryEmailCodes  map[string]*service.RecoveryEmailCodeRecord
+	recoveryEmails      map[string][]*service.RecoveryEmail
 	totpCreds           map[string]*service.TotpCredRecord
 	recoveryCodes       map[string]*service.RecoveryCodeRecord
 	loginChallenges     map[string]*service.LoginChallengeRecord
@@ -136,6 +138,8 @@ func newFakeRepo() *fakeRepo {
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
+		recoveryEmailCodes: make(map[string]*service.RecoveryEmailCodeRecord),
+		recoveryEmails:     make(map[string][]*service.RecoveryEmail),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),

@@ -381,9 +381,8 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 	}
 	id, role, status := defaultNewUserFields(u)
 
-	_, err := r.pool.Exec(ctx, insertUserQuery, insertUserArgs(r.projectID, id, role, status, u)...)
-	if err != nil {
-		return "", wrapPgErr("CreateUser", err)
+	if _, err := r.execHoldingAddress(ctx, "CreateUser", u.Email, insertUserQuery, insertUserArgs(r.projectID, id, role, status, u)...); err != nil {
+		return "", err
 	}
 	u.ID = id
 	return id, nil
@@ -475,10 +474,9 @@ func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map
 		`UPDATE users SET %s WHERE project_id = $%d AND id = $%d`,
 		strings.Join(sets, ", "), idx, idx+1,
 	)
-	if _, err := r.pool.Exec(ctx, q, args...); err != nil {
-		return wrapPgErr("UpdateUser", err)
-	}
-	return nil
+	email, _ := fields["email"].(string)
+	_, err := r.execHoldingAddress(ctx, "UpdateUser", email, q, args...)
+	return err
 }
 
 // userDeleteNonFKTables lists the user-keyed tables whose user_id column
@@ -784,10 +782,8 @@ func (r *pgRepository) UpdateUserEmail(ctx context.Context, userID, newEmail str
 		       email_verified_at_ms = $4,
 		       updated_at_ms = $4
 		 WHERE project_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.projectID, userID, newEmail, atMs); err != nil {
-		return wrapPgErr("UpdateUserEmail", err)
-	}
-	return nil
+	_, err := r.execHoldingAddress(ctx, "UpdateUserEmail", newEmail, q, r.projectID, userID, newEmail, atMs)
+	return err
 }
 
 func (r *pgRepository) AssignAccountAddress(ctx context.Context, userID, address string) (string, error) {

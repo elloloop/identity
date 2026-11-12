@@ -751,6 +751,8 @@ type MemRepo struct {
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
+	recoveryEmailCodes map[string]*service.RecoveryEmailCodeRecord
+	recoveryEmails     map[string][]*service.RecoveryEmail
 	totpCreds          map[string]*service.TotpCredRecord
 	recoveryCodes      map[string]*service.RecoveryCodeRecord
 	loginChallenges    map[string]*service.LoginChallengeRecord
@@ -785,6 +787,8 @@ func NewMemRepo() *MemRepo {
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
+		recoveryEmailCodes: make(map[string]*service.RecoveryEmailCodeRecord),
+		recoveryEmails:     make(map[string][]*service.RecoveryEmail),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -958,6 +962,9 @@ func (r *MemRepo) GetUser(_ context.Context, userID string) (*service.User, erro
 func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if u.Email != "" && r.recoveryEmailHeldLocked(u.Email) {
+		return "", fmt.Errorf("email %q is a recovery email: %w", u.Email, service.ErrAlreadyExists)
+	}
 	for _, existing := range r.users {
 		// Under service.FoldEmail + ErrAlreadyExists-wrapped, matching the
 		// production memory driver and the cross-driver conformance contract.
@@ -999,6 +1006,9 @@ func (r *MemRepo) UpdateUser(_ context.Context, userID string, fields map[string
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if email, _ := fields["email"].(string); email != "" && r.recoveryEmailHeldLocked(email) {
+		return fmt.Errorf("email %q is a recovery email: %w", email, service.ErrAlreadyExists)
 	}
 	// Same partial unique index as CreateUser: a rename onto a taken handle
 	// is refused BEFORE any mutation, so a rejected update leaves the store
@@ -1066,6 +1076,8 @@ func (r *MemRepo) DeleteUser(_ context.Context, userID string) error {
 // must hold r.mu. Shared with DeleteStaleAnonymousUsers so the sweep
 // cascades exactly like the SQL drivers' foreign keys do.
 func (r *MemRepo) deleteUserRowsLocked(userID string) {
+	delete(r.recoveryEmailCodes, userID)
+	delete(r.recoveryEmails, userID)
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
 			delete(r.refreshTokens, id)
@@ -2108,6 +2120,9 @@ func (r *MemRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, at
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if newEmail != "" && r.recoveryEmailHeldLocked(newEmail) {
+		return fmt.Errorf("email %q is a recovery email: %w", newEmail, service.ErrAlreadyExists)
 	}
 	// Enforce uniqueness across users, on the same terms as CreateUser and the
 	// SQL drivers: under service.FoldEmail, and wrapping ErrAlreadyExists so
