@@ -160,6 +160,10 @@ const (
 	// The details carry the address redacted.
 	EventRecoveryEmailAdded   EventType = "recovery_email_added"
 	EventRecoveryEmailRemoved EventType = "recovery_email_removed"
+	// EventRecoveryEmailSignIn records an emailed code or link sent to a
+	// recovery email being accepted for the actor's account, before any
+	// second factor: the moment the hold on its recovery settings starts.
+	EventRecoveryEmailSignIn EventType = "recovery_email_sign_in"
 
 	// EventIdentityLinked records a provider identity being attached to a
 	// user — both implicit login-time auto-linking and the self-service
@@ -494,6 +498,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventPhoneVerified:                 {},
 	EventRecoveryEmailAdded:            {},
 	EventRecoveryEmailRemoved:          {},
+	EventRecoveryEmailSignIn:           {},
 	EventPlatformAdminBootstrapBlocked: {},
 	EventIdentityLinked:                {},
 	EventIdentityUnlinked:              {},

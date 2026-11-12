@@ -84,7 +84,7 @@ func TestRecoveryEmail_AddProvesTheAddressThenStoresIt(t *testing.T) {
 	if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "Spare@Example.net"); err != nil {
 		t.Fatalf("RequestRecoveryEmail: %v", err)
 	}
-	if held, _ := f.svc.ListRecoveryEmails(f.ctx, user.ID); len(held) != 0 {
+	if held, _, _ := f.svc.ListRecoveryEmails(f.ctx, user.ID); len(held) != 0 {
 		t.Fatalf("an unproved address is held: %#v", held)
 	}
 	code := f.codeMailedTo(t, "spare@example.net")
@@ -153,7 +153,7 @@ func TestRecoveryEmail_ChangesNeedARecentSignIn(t *testing.T) {
 		t.Fatalf("Remove at the edge of the window: %v", err)
 	}
 	// Listing needs no recent sign-in.
-	if _, err := f.svc.ListRecoveryEmails(f.ctx, user.ID); err != nil {
+	if _, _, err := f.svc.ListRecoveryEmails(f.ctx, user.ID); err != nil {
 		t.Fatalf("List: %v", err)
 	}
 }
@@ -176,7 +176,7 @@ func TestRecoveryEmail_AnAddressBelongsToOneAccount(t *testing.T) {
 		}
 		f.now = f.now.Add(2 * time.Minute)
 	}
-	if held, _ := f.svc.ListRecoveryEmails(f.ctx, b.ID); len(held) != 0 {
+	if held, _, _ := f.svc.ListRecoveryEmails(f.ctx, b.ID); len(held) != 0 {
 		t.Fatalf("the refused account holds %#v", held)
 	}
 
@@ -238,7 +238,7 @@ func TestRecoveryEmail_CodeIsBoundToItsAddressAndItsAttempts(t *testing.T) {
 	if _, err := f.svc.VerifyRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net", code); !errors.Is(err, ErrRecoveryEmailCodeInvalid) {
 		t.Fatalf("expired code: want ErrRecoveryEmailCodeInvalid, got %v", err)
 	}
-	if held, _ := f.svc.ListRecoveryEmails(f.ctx, user.ID); len(held) != 0 {
+	if held, _, _ := f.svc.ListRecoveryEmails(f.ctx, user.ID); len(held) != 0 {
 		t.Fatalf("held = %#v, want none", held)
 	}
 }

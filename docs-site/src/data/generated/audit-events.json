@@ -74,6 +74,7 @@
   "qr_login_rejected",
   "recovery_email_added",
   "recovery_email_removed",
+  "recovery_email_sign_in",
   "scim_auth_failed",
   "session_revoked",
   "signup_admitted_by_invitation",

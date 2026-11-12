@@ -1,5 +1,51 @@
 # Upgrade guide
 
+## Next — a recovery email signs in to its account, and holds the account's recovery settings: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0060; additive `ListRecoveryEmailsResponse.hold_until` and error detail `RecoveryHoldDetails`; additive audit event `recovery_email_sign_in`; two `Repository` methods (Go API))
+
+A project whose accounts sign in by emailed code had no way back in for a
+person who lost their primary mailbox: the email change and the account merge
+both ask for a password. A recovery email can now be that way.
+
+- **Nothing changes until a project opts in.** With `recovery_emails.sign_in`
+  unset, a code or link redeemed for an address that is an account's recovery
+  email is refused exactly as a wrong code is (`UNAUTHENTICATED`), and no
+  account is made on it.
+
+  | Key | Default | Meaning |
+  | --- | --- | --- |
+  | `recovery_emails.sign_in` | `false` | An emailed code or link sent to a recovery email signs in to the account that holds it. |
+  | `recovery_emails.hold_seconds` | `604800` (`0` selects it; at most `2592000`) | How long after such a sign-in the account's recovery settings are held. Cannot be turned off. |
+
+- **What it does.** `RequestEmailLoginCode` / `VerifyEmailLoginCode` and
+  `RequestMagicLink` / `RedeemMagicLink` on a recovery email sign in to the
+  holding account: never a new account, with the account's status, lockout,
+  required second factor and tenant login policy applied as at any sign-in.
+  The project's access policy and the login policy go by the account's primary
+  email; a recovery email need not be on an allowlist, and one on a blocked
+  domain, or in a `closed` project, is mailed nothing. OAuth and passkey
+  sign-in are unchanged: a provider asserting a recovery email does not sign
+  in to the holding account.
+- **The primary email is not proved by it.** A sign-in by a recovery email
+  leaves `email_verified` as it was.
+- **Every other address is told.** The account's primary email and its other
+  recovery emails are mailed a notice naming the address that signed in and
+  when the hold ends.
+- **The hold.** From that sign-in, for `recovery_emails.hold_seconds`,
+  `RemoveRecoveryEmail`, `RequestPhoneVerification` and `VerifyPhoneCode`
+  answer `FAILED_PRECONDITION` with the stable `recovery_hold` token and a
+  `RecoveryHoldDetails` saying when it ends; `ListRecoveryEmails` returns the
+  same time as `hold_until`. Adding a recovery email is not held. The hold is
+  on the account, whichever address the caller's session signed in with, and
+  is measured with the length configured now, not the one in force at the
+  sign-in. It starts when the code is accepted, before any second factor.
+- **One more read on every emailed-code or link sign-in**: whether the proved
+  address is a recovery email.
+- **Migration 0060** adds `user_recovery_emails.last_sign_in_at_ms` (SQLite:
+  0029), a constant-default column on a table 0059 created.
+- **Go API.** `service.Repository` gains `FindRecoveryEmailHolder` and
+  `MarkRecoveryEmailSignIn`; `AuthService.ListRecoveryEmails` also returns the
+  hold's end.
+
 ## Next — recovery emails: an account keeps additional addresses it has proved: `recovery_emails.enabled` per project (off by default; migration 0059; additive RPCs `RequestRecoveryEmail`, `VerifyRecoveryEmail`, `ListRecoveryEmails`, `RemoveRecoveryEmail`; additive audit events `recovery_email_added`, `recovery_email_removed`; six `Repository` methods and one sweep (Go API))
 
 `User.recovery_email` is one unverified string nothing reads. An account can

@@ -56,11 +56,14 @@ func (h *IdentityHandler) ListRecoveryEmails(
 	if userID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
 	}
-	held, err := h.auth.ListRecoveryEmails(ctx, userID)
+	held, holdUntil, err := h.auth.ListRecoveryEmails(ctx, userID)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
-	return connect.NewResponse(&identitypb.ListRecoveryEmailsResponse{RecoveryEmails: recoveryEmailsToProto(held)}), nil
+	return connect.NewResponse(&identitypb.ListRecoveryEmailsResponse{
+		RecoveryEmails: recoveryEmailsToProto(held),
+		HoldUntil:      holdUntil,
+	}), nil
 }
 
 // RemoveRecoveryEmail removes one of the caller's recovery emails.

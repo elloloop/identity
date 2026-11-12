@@ -805,6 +805,13 @@ default; a control-plane project's `config_json` only).
 - Adding and removing need a sign-in within
   `recovery_emails.reauth_max_age_seconds` (default 900), and every change is
   mailed to the account's other addresses.
+- With `recovery_emails.sign_in`, an emailed code or link sent to a recovery
+  email signs in to the account that holds it, which is the way back in for an
+  account whose primary mailbox is gone. The account's other addresses are
+  told, and for `recovery_emails.hold_seconds` (default seven days) the
+  account can neither remove a recovery email nor change its phone number:
+  whoever got into one recovery mailbox cannot strip the rest before the owner
+  has read the notice.
 
 ## Onboarding flows
 

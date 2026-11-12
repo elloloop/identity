@@ -22,6 +22,10 @@ func toConnectError(err error) *connect.Error {
 	if errors.As(err, &refusal) {
 		return tenantSelectionRefusedConnectError(refusal)
 	}
+	var hold *service.RecoveryHoldError
+	if errors.As(err, &hold) {
+		return recoveryHoldConnectError(hold)
+	}
 
 	switch {
 	case errors.Is(err, service.ErrAgentOAuthRevision), errors.Is(err, service.ErrOAuthClientRevision):
@@ -272,6 +276,16 @@ func tenantSelectionRefusalToProto(r service.TenantSelectionRefusal) identitypb.
 	default:
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED
 	}
+}
+
+// recoveryHoldConnectError is the hold's refusal, carrying when it ends so a
+// client can say so.
+func recoveryHoldConnectError(hold *service.RecoveryHoldError) *connect.Error {
+	cerr := connect.NewError(connect.CodeFailedPrecondition, hold)
+	if detail, err := connect.NewErrorDetail(&identitypb.RecoveryHoldDetails{HoldUntil: hold.UntilMs}); err == nil {
+		cerr.AddDetail(detail)
+	}
+	return cerr
 }
 
 func passwordChangeRequiredConnectError(err error) *connect.Error {

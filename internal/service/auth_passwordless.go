@@ -82,7 +82,7 @@ func (s *AuthService) RequestEmailLoginCode(ctx context.Context, emailAddr strin
 	// A closed or off-list project must not emit an OTP to an arbitrary address.
 	// The response is unchanged (nil) whether or not we send, preserving
 	// anti-enumeration; the authoritative deny is at VerifyEmailLoginCode.
-	if !s.accessAllowsCodeSend(ctx, cemail) {
+	if !s.loginCodeSendAllowed(ctx, cemail) {
 		s.logger.Info("email_login_code_send_suppressed_by_access",
 			zap.String("email", redactEmail(string(cemail))))
 		return nil
@@ -266,7 +266,7 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 	// A closed or off-list project must not email a sign-in link to an arbitrary
 	// address. Response is unchanged (nil) either way, preserving
 	// anti-enumeration; the authoritative deny is at RedeemMagicLink.
-	if !s.accessAllowsCodeSend(ctx, cemail) {
+	if !s.loginCodeSendAllowed(ctx, cemail) {
 		s.logger.Info("magic_link_send_suppressed_by_access",
 			zap.String("email", redactEmail(string(cemail))))
 		return nil
@@ -381,6 +381,13 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 	invalidErr := ErrEmailLoginCodeInvalid
 	if method == "magic_link" {
 		invalidErr = ErrMagicLinkInvalid
+	}
+
+	// An address an account holds as a recovery email signs in to that
+	// account, or to nothing; it never reaches the resolver, which would try
+	// to make a new account on it.
+	if result, handled, err := s.completeRecoveryEmailLogin(ctx, emailStr, method, invalidErr, ipAddr, userAgent); handled {
+		return result, err
 	}
 
 	// Project access mode is enforced inside resolveOrCreateUserByEmail below,

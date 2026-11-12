@@ -10374,6 +10374,15 @@ components:
             $ref: '#/components/schemas/identity.v1.RecoveryEmail'
           title: recovery_emails
           description: oldest first
+        holdUntil:
+          type:
+            - integer
+            - string
+          title: hold_until
+          format: int64
+          description: |-
+            hold_until is when the hold on the account's recovery settings ends
+             (epoch ms), or 0 when none is in force. See RecoveryHoldDetails.
       title: ListRecoveryEmailsResponse
       additionalProperties: false
     identity.v1.ListTenantDomainsRequest:
@@ -11480,6 +11489,26 @@ components:
       title: RecoveryEmail
       additionalProperties: false
       description: RecoveryEmail is one verified recovery address of an account.
+    identity.v1.RecoveryHoldDetails:
+      type: object
+      properties:
+        holdUntil:
+          type:
+            - integer
+            - string
+          title: hold_until
+          format: int64
+          description: epoch ms the hold ends
+      title: RecoveryHoldDetails
+      additionalProperties: false
+      description: |-
+        RecoveryHoldDetails is attached to the FAILED_PRECONDITION error (stable
+         `recovery_hold` token) that RemoveRecoveryEmail, RequestPhoneVerification
+         and VerifyPhoneCode return while a hold is in force. A sign-in by a
+         recovery email (`recovery_emails.sign_in`) starts one, for the project's
+         `recovery_emails.hold_seconds` (default 604800, seven days): whoever got
+         into a recovery mailbox cannot strip the account's other addresses or move
+         its phone before the owner has had the notice.
     identity.v1.RedeemMagicLinkRequest:
       type: object
       properties:

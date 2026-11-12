@@ -106,6 +106,11 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phon
 	if user.PhoneVerified && user.PhoneNumber == phone {
 		return ErrPhoneAlreadyVerified
 	}
+	// Before the send, like every other refusal here: a number that cannot
+	// be stored yet should not cost a message.
+	if err := s.checkRecoveryHold(ctx, userID); err != nil {
+		return err
+	}
 
 	// Per-user send cooldown so a single account cannot pump SMS at a
 	// victim number or burn the provider budget.
@@ -170,6 +175,10 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, 
 	phone, ok := normalizePhone(phoneNumber)
 	if !ok || strings.TrimSpace(code) == "" {
 		return nil, ErrPhoneCodeInvalid
+	}
+	// A code requested before a hold began must not move the number during it.
+	if err := s.checkRecoveryHold(ctx, userID); err != nil {
+		return nil, err
 	}
 
 	rec, err := s.repo(ctx).FindPhoneVerificationCodeByUser(ctx, userID)

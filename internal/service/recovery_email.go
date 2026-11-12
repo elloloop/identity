@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -227,25 +228,69 @@ func (s *AuthService) verifyAndConsumeRecoveryEmailCode(ctx context.Context, use
 	return nil
 }
 
-// ListRecoveryEmails returns the caller's recovery emails, oldest first. It
-// does not depend on the project's switch: an address kept while the feature
-// was on stays visible to its owner.
-func (s *AuthService) ListRecoveryEmails(ctx context.Context, userID string) ([]*RecoveryEmail, error) {
+// ListRecoveryEmails returns the caller's recovery emails, oldest first, and
+// when the hold on the account's recovery settings ends (epoch ms; 0 when
+// none is in force). It does not depend on the project's switch: an address
+// kept while the feature was on stays visible to its owner.
+func (s *AuthService) ListRecoveryEmails(ctx context.Context, userID string) ([]*RecoveryEmail, int64, error) {
 	if userID == "" {
-		return nil, fmt.Errorf("%w: missing user id", ErrUnauthenticated)
+		return nil, 0, fmt.Errorf("%w: missing user id", ErrUnauthenticated)
 	}
 	held, err := s.repo(ctx).ListRecoveryEmails(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("listing recovery emails: %w", err)
+		return nil, 0, fmt.Errorf("listing recovery emails: %w", err)
 	}
-	return held, nil
+	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
+	return held, recoveryHoldUntil(held, cfg.hold(), s.nowMs()), nil
+}
+
+// recoveryHoldUntil is when the hold on an account's recovery settings ends
+// (epoch ms), or 0 when none is in force. A sign-in by a recovery email
+// starts one: whoever got into a recovery mailbox must not be able to strip
+// the account's other addresses or move its phone before the owner has had
+// the notice.
+func recoveryHoldUntil(held []*RecoveryEmail, hold time.Duration, nowMs int64) int64 {
+	var last int64
+	for _, e := range held {
+		if e.LastSignInAt > last {
+			last = e.LastSignInAt
+		}
+	}
+	if last == 0 {
+		return 0
+	}
+	if until := last + hold.Milliseconds(); until > nowMs {
+		return until
+	}
+	return 0
+}
+
+// checkRecoveryHold refuses, with a RecoveryHoldError, a change to the
+// recovery settings of an account a hold is in force on.
+func (s *AuthService) checkRecoveryHold(ctx context.Context, userID string) error {
+	held, err := s.repo(ctx).ListRecoveryEmails(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("listing recovery emails: %w", err)
+	}
+	return s.refuseDuringRecoveryHold(ctx, userID, held)
+}
+
+func (s *AuthService) refuseDuringRecoveryHold(ctx context.Context, userID string, held []*RecoveryEmail) error {
+	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
+	until := recoveryHoldUntil(held, cfg.hold(), s.nowMs())
+	if until == 0 {
+		return nil
+	}
+	s.logger.Info("recovery_settings_change_refused_by_hold", zap.String("user_id", userID))
+	return &RecoveryHoldError{UntilMs: until}
 }
 
 // RemoveRecoveryEmail removes one of the caller's recovery emails and
 // returns what is left. A notice goes to the removed address and to every
 // other address of the account. An address the account does not hold is
-// ErrNotFound. Like ListRecoveryEmails it does not depend on the project's
-// switch.
+// ErrNotFound, and any removal while a hold is in force is a
+// RecoveryHoldError. Like ListRecoveryEmails it does not depend on the
+// project's switch.
 func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, authTimeSec int64, emailAddr string) ([]*RecoveryEmail, error) {
 	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
 	user, err := s.recoveryEmailCaller(ctx, userID, authTimeSec, cfg)
@@ -255,6 +300,9 @@ func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, au
 	addr, ok := canonicalMailbox(emailAddr)
 	if !ok {
 		return nil, fmt.Errorf("%w: email is not a usable address", ErrInvalidArgument)
+	}
+	if err := s.checkRecoveryHold(ctx, userID); err != nil {
+		return nil, err
 	}
 	removed, err := s.repo(ctx).RemoveRecoveryEmail(ctx, userID, string(addr))
 	if err != nil {

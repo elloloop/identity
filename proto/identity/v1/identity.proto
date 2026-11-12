@@ -699,7 +699,11 @@ message VerifyPhoneCodeResponse {
 // (identified by the access-token `sub`) has proved they control. An address
 // is stored only once the code mailed to it is confirmed, and within a project
 // it belongs to one account only: the primary address or a recovery address
-// of another account is refused. The project turns the feature on
+// of another account is refused. Where the project allows it
+// (`recovery_emails.sign_in`), RequestEmailLoginCode / VerifyEmailLoginCode
+// and RequestMagicLink / RedeemMagicLink on a recovery address sign in to the
+// account that holds it; every other address of the account is told, and the
+// account's recovery settings are held (RecoveryHoldDetails). The project turns the feature on
 // (`recovery_emails.enabled`) and caps the addresses per account
 // (`recovery_emails.max`, default 5). All four RPCs require auth; the three
 // that change the list also need a sign-in within the project's
@@ -736,6 +740,20 @@ message ListRecoveryEmailsRequest {}
 
 message ListRecoveryEmailsResponse {
   repeated RecoveryEmail recovery_emails = 1; // oldest first
+  // hold_until is when the hold on the account's recovery settings ends
+  // (epoch ms), or 0 when none is in force. See RecoveryHoldDetails.
+  int64 hold_until = 2;
+}
+
+// RecoveryHoldDetails is attached to the FAILED_PRECONDITION error (stable
+// `recovery_hold` token) that RemoveRecoveryEmail, RequestPhoneVerification
+// and VerifyPhoneCode return while a hold is in force. A sign-in by a
+// recovery email (`recovery_emails.sign_in`) starts one, for the project's
+// `recovery_emails.hold_seconds` (default 604800, seven days): whoever got
+// into a recovery mailbox cannot strip the account's other addresses or move
+// its phone before the owner has had the notice.
+message RecoveryHoldDetails {
+  int64 hold_until = 1; // epoch ms the hold ends
 }
 
 message RemoveRecoveryEmailRequest {
