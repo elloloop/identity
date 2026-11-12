@@ -100,6 +100,7 @@ type fakeRepo struct {
 	phoneVerifyCodes    map[string]*service.PhoneVerificationCodeRecord
 	recoveryEmailCodes  map[string]*service.RecoveryEmailCodeRecord
 	recoveryEmails      map[string][]*service.RecoveryEmail
+	phoneClaims         map[string]phoneClaim
 	totpCreds           map[string]*service.TotpCredRecord
 	recoveryCodes       map[string]*service.RecoveryCodeRecord
 	loginChallenges     map[string]*service.LoginChallengeRecord
@@ -140,6 +141,7 @@ func newFakeRepo() *fakeRepo {
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
 		recoveryEmailCodes: make(map[string]*service.RecoveryEmailCodeRecord),
 		recoveryEmails:     make(map[string][]*service.RecoveryEmail),
+		phoneClaims:        make(map[string]phoneClaim),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),

@@ -264,6 +264,7 @@ type fakeRepo struct {
 	phoneVerifyCodes    map[string]*PhoneVerificationCodeRecord
 	recoveryEmailCodes  map[string]*RecoveryEmailCodeRecord
 	recoveryEmails      map[string][]*RecoveryEmail
+	phoneClaims         map[string]phoneClaim
 	totpCreds           map[string]*TotpCredRecord
 	recoveryCodes       map[string]*RecoveryCodeRecord
 	loginChallenges     map[string]*LoginChallengeRecord
@@ -298,6 +299,7 @@ func newFakeRepo() *fakeRepo {
 		phoneVerifyCodes:   make(map[string]*PhoneVerificationCodeRecord),
 		recoveryEmailCodes: make(map[string]*RecoveryEmailCodeRecord),
 		recoveryEmails:     make(map[string][]*RecoveryEmail),
+		phoneClaims:        make(map[string]phoneClaim),
 		totpCreds:          make(map[string]*TotpCredRecord),
 		recoveryCodes:      make(map[string]*RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*LoginChallengeRecord),
@@ -714,6 +716,7 @@ func (r *fakeRepo) DeleteUser(_ context.Context, userID string) error {
 	InvalidateAgentCreationReceipts(r.agentCreations, userID)
 	delete(r.recoveryEmailCodes, userID)
 	delete(r.recoveryEmails, userID)
+	r.releasePhoneClaimsLocked(userID)
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
 			delete(r.refreshTokens, id)

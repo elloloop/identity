@@ -1,0 +1,74 @@
+//go:build integration
+
+package integration
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/elloloop/identity/internal/service"
+)
+
+// ── Phone number claims ───────────────────────────────────────────────
+
+func (r *MemRepo) ClaimPhoneNumber(_ context.Context, userID, phoneNumber string, atMs, takeOverBeforeMs int64) (string, error) {
+	if userID == "" || phoneNumber == "" {
+		return "", errors.New("integration: ClaimPhoneNumber: missing user id or phone number")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return "", fmt.Errorf("integration: ClaimPhoneNumber: %w", service.ErrNotFound)
+	}
+	previous := ""
+	if claim, held := r.phoneClaims[phoneNumber]; held && claim.userID != userID {
+		if claim.claimedAt >= takeOverBeforeMs {
+			return "", service.ErrPhoneNumberTaken
+		}
+		previous = claim.userID
+		if prev, ok := r.users[previous]; ok && prev.PhoneNumber == phoneNumber {
+			prev.PhoneNumber, prev.PhoneVerified, prev.PhoneVerifiedAt = "", false, 0
+		}
+	}
+	for number, claim := range r.phoneClaims {
+		if claim.userID == userID && number != phoneNumber {
+			delete(r.phoneClaims, number)
+		}
+	}
+	if claim, held := r.phoneClaims[phoneNumber]; !held || claim.userID != userID {
+		r.phoneClaims[phoneNumber] = phoneClaim{userID: userID, claimedAt: atMs}
+	}
+	u.PhoneNumber, u.PhoneVerified, u.PhoneVerifiedAt = phoneNumber, true, atMs
+	return previous, nil
+}
+
+func (r *MemRepo) ReleasePhoneNumber(_ context.Context, userID string, _ int64) error {
+	if userID == "" {
+		return errors.New("integration: ReleasePhoneNumber: missing user id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if u, ok := r.users[userID]; ok {
+		u.PhoneNumber, u.PhoneVerified, u.PhoneVerifiedAt = "", false, 0
+	}
+	r.releasePhoneClaimsLocked(userID)
+	return nil
+}
+
+// releasePhoneClaimsLocked deletes every claim userID holds. The caller
+// holds r.mu.
+func (r *MemRepo) releasePhoneClaimsLocked(userID string) {
+	for number, claim := range r.phoneClaims {
+		if claim.userID == userID {
+			delete(r.phoneClaims, number)
+		}
+	}
+}
+
+// phoneClaim is which account holds a verified phone number, and since when.
+type phoneClaim struct {
+	userID    string
+	claimedAt int64
+}

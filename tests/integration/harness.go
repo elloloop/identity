@@ -753,6 +753,7 @@ type MemRepo struct {
 	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
 	recoveryEmailCodes map[string]*service.RecoveryEmailCodeRecord
 	recoveryEmails     map[string][]*service.RecoveryEmail
+	phoneClaims        map[string]phoneClaim
 	totpCreds          map[string]*service.TotpCredRecord
 	recoveryCodes      map[string]*service.RecoveryCodeRecord
 	loginChallenges    map[string]*service.LoginChallengeRecord
@@ -789,6 +790,7 @@ func NewMemRepo() *MemRepo {
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
 		recoveryEmailCodes: make(map[string]*service.RecoveryEmailCodeRecord),
 		recoveryEmails:     make(map[string][]*service.RecoveryEmail),
+		phoneClaims:        make(map[string]phoneClaim),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -1078,6 +1080,7 @@ func (r *MemRepo) DeleteUser(_ context.Context, userID string) error {
 func (r *MemRepo) deleteUserRowsLocked(userID string) {
 	delete(r.recoveryEmailCodes, userID)
 	delete(r.recoveryEmails, userID)
+	r.releasePhoneClaimsLocked(userID)
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
 			delete(r.refreshTokens, id)

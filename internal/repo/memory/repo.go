@@ -66,6 +66,7 @@ type Repo struct {
 	phoneVerifyCodes          map[string]*service.PhoneVerificationCodeRecord
 	recoveryEmailCodes        map[string]*service.RecoveryEmailCodeRecord
 	recoveryEmails            map[string][]*service.RecoveryEmail
+	phoneClaims               map[string]phoneClaim
 	totpCreds                 map[string]*service.TotpCredRecord
 	recoveryCodes             map[string]*service.RecoveryCodeRecord
 	loginChallenges           map[string]*service.LoginChallengeRecord
@@ -128,6 +129,7 @@ func newStore() *Repo {
 		phoneVerifyCodes:          make(map[string]*service.PhoneVerificationCodeRecord),
 		recoveryEmailCodes:        make(map[string]*service.RecoveryEmailCodeRecord),
 		recoveryEmails:            make(map[string][]*service.RecoveryEmail),
+		phoneClaims:               make(map[string]phoneClaim),
 		totpCreds:                 make(map[string]*service.TotpCredRecord),
 		recoveryCodes:             make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:           make(map[string]*service.LoginChallengeRecord),
@@ -588,6 +590,7 @@ func (r *Repo) deleteUserLocked(userID string) {
 	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
 	delete(r.recoveryEmailCodes, userID)
 	delete(r.recoveryEmails, userID)
+	r.releasePhoneClaimsLocked(userID)
 	// Guardian edges are live authorization state, so — matching the SQL
 	// drivers' ON DELETE CASCADE on both user FK columns — they drain when
 	// the user is deleted as guardian OR as child.

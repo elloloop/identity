@@ -515,6 +515,7 @@ Each kept table replaces its leading `tenant_id` column with `project_id`
 | `phone_verification_codes` | `id` | `(project_id, user_id)` | `(project_id, expires_at_ms)` | `user_id` CASCADE |
 | `user_recovery_emails` | `id` | `(project_id, email_fold)` | `(project_id, user_id, verified_at_ms, id)` | `user_id` CASCADE |
 | `recovery_email_codes` | `id` | `(project_id, user_id)` | `(project_id, expires_at_ms)` | `user_id` CASCADE |
+| `phone_number_claims` | `(project_id, phone_number)` | — | `(project_id, user_id)` | `user_id` CASCADE |
 | `identity_verifications` | `id` | `(project_id, verification_id)` | `(project_id, user_id, created_at_ms DESC)` | `user_id` CASCADE |
 | `audit_events` | `id` | — | `(project_id, actor, occurred_at_ms DESC)`, `(project_id, event_type, occurred_at_ms DESC)` | none (actor/target are free text refs) |
 

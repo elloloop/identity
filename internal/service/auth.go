@@ -602,6 +602,20 @@ type Repository interface {
 	IncrementPhoneVerificationCodeAttempts(ctx context.Context, nodeID string) error
 	ConsumePhoneVerificationCode(ctx context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error)
 	SetUserPhoneVerified(ctx context.Context, userID, phoneNumber string, atMs int64) error
+	// ClaimPhoneNumber is SetUserPhoneVerified for a project that keeps
+	// numbers unique: in one transaction it makes userID the one account
+	// that holds phoneNumber and records the number verified on the user.
+	// A number another account holds is ErrPhoneNumberTaken, unless that
+	// claim was made before takeOverBeforeMs (0 = no claim is ever old
+	// enough): then the claim moves, the previous holder's phone is cleared
+	// and its id is returned. A number the user held before is released. An
+	// unknown user is ErrNotFound.
+	//
+	// ReleasePhoneNumber clears the user's phone number and verified state
+	// and deletes any claim the user holds; it changes nothing for a user
+	// with no number.
+	ClaimPhoneNumber(ctx context.Context, userID, phoneNumber string, atMs, takeOverBeforeMs int64) (previousHolderID string, err error)
+	ReleasePhoneNumber(ctx context.Context, userID string, atMs int64) error
 
 	// Recovery emails (additional verified addresses of an account).
 	//
@@ -1380,10 +1394,27 @@ var (
 	// the caller has already verified the same number. Maps to
 	// CodeAlreadyExists.
 	ErrPhoneAlreadyVerified = errors.New("phone number is already verified")
-	ErrInvitationUsed       = errors.New("invitation has already been accepted")
-	ErrInvitationExpired    = errors.New("invitation has expired")
-	ErrLocalAuthDisabled    = errors.New("local auth disabled")
-	ErrOAuthDisabled        = errors.New("oauth login is not configured")
+	// ErrPhoneNumberTaken is returned by VerifyPhoneCode, to a caller whose
+	// code was right, when another account of the project holds the number
+	// and the project keeps numbers unique (phone.unique). Maps to
+	// CodeAlreadyExists; its message leads with the stable
+	// `phone_number_taken` token clients match on.
+	ErrPhoneNumberTaken = errors.New("phone_number_taken: that phone number belongs to another account")
+	// ErrPhoneCountryNotAllowed is returned by the phone-verification RPCs
+	// for a number outside the project's phone.allowed_calling_codes. Maps
+	// to CodeFailedPrecondition; its message leads with the stable
+	// `phone_country_not_allowed` token.
+	ErrPhoneCountryNotAllowed = errors.New("phone_country_not_allowed: phone numbers from that country are not accepted here")
+	// ErrPhoneVerificationRequired is the refusal, inside a
+	// TenantSelectionRefusedError, of a tenant whose login policy requires a
+	// verified phone the account does not have. Maps to
+	// CodeFailedPrecondition; its message leads with the stable
+	// `phone_verification_required` token.
+	ErrPhoneVerificationRequired = errors.New("phone_verification_required: this tenant requires a verified phone number")
+	ErrInvitationUsed            = errors.New("invitation has already been accepted")
+	ErrInvitationExpired         = errors.New("invitation has expired")
+	ErrLocalAuthDisabled         = errors.New("local auth disabled")
+	ErrOAuthDisabled             = errors.New("oauth login is not configured")
 	// ErrNativeOAuthDisabled is returned by NativeOAuthLogin when
 	// GATEWAY_NATIVE_OAUTH_ENABLED is false or no native verifier is
 	// configured. It maps to FailedPrecondition (the feature is off), distinct

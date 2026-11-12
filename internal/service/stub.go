@@ -214,6 +214,14 @@ func (StubRepository) SetUserPhoneVerified(context.Context, string, string, int6
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) ClaimPhoneNumber(context.Context, string, string, int64, int64) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) ReleasePhoneNumber(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) UpsertRecoveryEmailCode(context.Context, *RecoveryEmailCodeRecord) (string, error) {
 	return "", ErrServiceUnavailable
 }
