@@ -1054,7 +1054,8 @@ type outboundSenders struct {
 
 // buildOutboundSenders takes each sender the embedder wired in deps and
 // builds the others from the config. The message channel's sender is the one
-// GATEWAY_TEMPLATEMSG_PROVIDER names; no provider builds none.
+// GATEWAY_TEMPLATEMSG_PROVIDER names; no provider builds none, and neither
+// does local_capture, since the service mails those codes itself.
 func buildOutboundSenders(deps Deps, logger *zap.Logger) (outboundSenders, error) {
 	out := outboundSenders{
 		mailer: deps.EmailTransport, mailDelivers: deps.EmailTransport != nil,

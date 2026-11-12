@@ -1921,7 +1921,7 @@
     "type": "string",
     "default": "",
     "required": true,
-    "description": "selects the SMS backend: \"twilio\", \"sns\", or \"azure\".",
+    "description": "selects the SMS backend: \"twilio\", \"sns\", \"azure\", or \"local_capture\", which mails each code to the account's own email address instead of texting it and is refused at boot unless every public URL, host and issuer the config names is a loopback host.",
     "category": "Phone / SMS verification",
     "anchor": "phone-sms-verification"
   },
@@ -2074,7 +2074,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "selects the template-message backend: \"whatsapp_cloud\" (the WhatsApp Business Cloud API).",
+    "description": "selects the template-message backend: \"whatsapp_cloud\" (the WhatsApp Business Cloud API), or \"local_capture\", which mails each code to the account's own email address instead and is refused at boot unless every public URL, host and issuer the config names is a loopback host.",
     "category": "Phone / SMS verification",
     "anchor": "phone-sms-verification"
   },

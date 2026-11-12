@@ -1,5 +1,42 @@
 # Upgrade guide
 
+## Next — a local deployment can capture phone codes by email: `GATEWAY_SMS_PROVIDER=local_capture`, `GATEWAY_TEMPLATEMSG_PROVIDER=local_capture` (off by default; new email template `phone_code_capture`)
+
+A local stack has no SMS or messaging account, so it could not finish the
+phone step at all. It can now capture the codes instead, and nothing changes
+until one of these is set.
+
+- **What it does.** `GATEWAY_SMS_PROVIDER=local_capture` (with
+  `GATEWAY_SMS_ENABLED=true`) and `GATEWAY_TEMPLATEMSG_PROVIDER=local_capture`
+  mail each code of that channel to the account's own email address through
+  the configured mailer, instead of sending it to the phone, so a stack with a
+  mail catcher (`GATEWAY_SMTP_HOST` pointed at it) can read the code and finish
+  the step. Template capture makes the message channel usable with no
+  template sender. Capture takes precedence over a sender an embedder set. An
+  account with no email address, or a send the mailer refuses, fails that
+  channel, and the project's next channel is tried.
+- **Only on a local deployment.** Capture proves no phone, so choosing it by
+  name is not enough: **the boot is refused unless every public address the
+  config names is a loopback host** (`localhost`, `*.localhost`,
+  `127.0.0.0/8` or `[::1]`). Checked: `GATEWAY_JWT_ISSUER`,
+  `GATEWAY_APP_BASE_URL`, `GATEWAY_EMAIL_LINK_BASE_URL`,
+  `GATEWAY_TENANT_INVITATION_PAGE_URL`, `GATEWAY_QR_LOGIN_BASE_URL`,
+  `GATEWAY_PASSKEY_RP_ID`, `GATEWAY_PASSKEY_ORIGIN`, every host, `rp_id` and
+  origin in `GATEWAY_PASSKEY_RELYING_PARTIES`,
+  `GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS`, `GATEWAY_COOKIE_DOMAIN`, every entry
+  of `GATEWAY_ALLOWED_ORIGINS` and `GATEWAY_OAUTH_ALLOWED_RETURN_URLS`, and
+  `GATEWAY_SAML_ENTITY_ID`, `GATEWAY_SAML_SSO_URL` and `GATEWAY_SAML_SLO_URL`,
+  each where set. An issuer that is not a URL names no host and is refused
+  too, as is an application-scheme origin. Addresses of other parties (OAuth
+  providers, webhook receivers, the mail server, `GATEWAY_JWT_AUDIENCE`) are
+  not checked.
+- **It says so.** A booted capture logs `phone_codes_captured_to_email` at
+  WARN, naming the channels, and each captured code logs
+  `phone_code_captured_to_email` at WARN, with the redacted number and
+  address and never the code.
+- **Go API.** `config.Config` gains `CapturesSMS` and
+  `CapturesTemplateMessages`.
+
 ## Next — the message channel sends through the WhatsApp Business Cloud API: `GATEWAY_TEMPLATEMSG_*` (off by default; `templatemsg.NewWhatsAppCloud` (Go API))
 
 Phone codes on the message channel needed a sender only an embedder could
@@ -14,7 +51,7 @@ changes until `GATEWAY_TEMPLATEMSG_PROVIDER` is set.
 
   | Variable | Default | Meaning |
   | --- | --- | --- |
-  | `GATEWAY_TEMPLATEMSG_PROVIDER` | `""` (none) | `whatsapp_cloud`. |
+  | `GATEWAY_TEMPLATEMSG_PROVIDER` | `""` (none) | `whatsapp_cloud`, or `local_capture` (in the entry above). |
   | `GATEWAY_TEMPLATEMSG_WHATSAPP_ACCESS_TOKEN` | — (required) | A system user's access token with the `whatsapp_business_messaging` permission. Sent only as the request's bearer token; never logged. |
   | `GATEWAY_TEMPLATEMSG_WHATSAPP_PHONE_NUMBER_ID` | — (required) | The id of the business phone number the messages come from (WhatsApp Manager, API Setup), digits only; not the number itself. |
   | `GATEWAY_TEMPLATEMSG_WHATSAPP_API_VERSION` | `v26.0` | The Graph API version called. |

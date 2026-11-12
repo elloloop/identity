@@ -871,8 +871,11 @@ recover an account.
 The deployment decides which senders exist: an SMS provider
 (`GATEWAY_SMS_*`), and optionally a messaging-app template sender, the
 WhatsApp Business Cloud API (`GATEWAY_TEMPLATEMSG_*`) or one an embedder wires
-(`pkg/templatemsg`). A project's `phone` block narrows the rest and can turn
-nothing on that the deployment lacks:
+(`pkg/templatemsg`). A local deployment can capture either channel instead
+(`local_capture`): each code is mailed to the account's own address, and the
+server refuses to start with it unless every public address it is configured
+with is a loopback host. A project's `phone` block narrows the rest and can
+turn nothing on that the deployment lacks:
 
 - `phone.enabled: false` switches verification off for the project.
 - `phone.channels` orders the delivery channels (`"message"`, `"sms"`) and

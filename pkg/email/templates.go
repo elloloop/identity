@@ -46,6 +46,11 @@ const (
 	// email signs in to it. Headline is the subject and Detail plain
 	// sentences saying what happened.
 	TemplateAccountNotice = "account_notice"
+	// TemplatePhoneCodeCapture carries a phone verification code to the
+	// account's own address on a local deployment that captures phone codes
+	// instead of sending them: the Code, the redacted Phone it is for, the
+	// Channel it would have gone by and ExpiresIn.
+	TemplatePhoneCodeCapture = "phone_code_capture"
 )
 
 // Render returns the HTML and plain-text bodies for the given template name,

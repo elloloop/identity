@@ -13,7 +13,8 @@ import (
 // configuration. When GATEWAY_SMS_ENABLED is false it returns the
 // log-only sender (so service code can always call Send without a nil
 // check). When enabled, it builds the configured provider — Twilio, AWS
-// SNS, or Azure Communication Services.
+// SNS, or Azure Communication Services — or, for local_capture, the
+// log-only sender, since the service then mails each code itself.
 //
 // Config.Validate has already enforced that an enabled deployment names
 // a supported provider with its required credentials set, so a build
@@ -58,6 +59,12 @@ func buildSMSSender(cfg *config.Config, logger *zap.Logger) (sms.Sender, error) 
 		}
 		logger.Info("sms_provider_configured", zap.String("provider", config.SMSProviderSNS))
 		return sender, nil
+
+	case config.SMSProviderLocalCapture:
+		// The service mails each code to the account itself
+		// (Config.CapturesSMS) and never calls this sender; it logs the
+		// capture's warning at construction.
+		return sms.NewLogOnly(logger), nil
 
 	case config.SMSProviderAzure:
 		endpoint, accessKey, err := sms.ParseAzureConnectionString(cfg.SMSAzureConnectionString)

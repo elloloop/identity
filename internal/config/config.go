@@ -951,7 +951,10 @@ type Config struct {
 	// whose phone.channels lists "message" verifies phones without it, by the
 	// template sender an embedder wires.
 	SMSEnabled bool
-	// SMSProvider selects the SMS backend: "twilio", "sns", or "azure".
+	// SMSProvider selects the SMS backend: "twilio", "sns", "azure", or
+	// "local_capture", which mails each code to the account's own email
+	// address instead of texting it and is refused at boot unless every
+	// public URL, host and issuer the config names is a loopback host.
 	SMSProvider string
 
 	// SMSTwilioAccountSID is the Twilio Account SID (provider "twilio").
@@ -982,7 +985,10 @@ type Config struct {
 	// channel to a sender an embedder supplies.
 
 	// TemplateMessageProvider selects the template-message backend:
-	// "whatsapp_cloud" (the WhatsApp Business Cloud API). Empty wires none.
+	// "whatsapp_cloud" (the WhatsApp Business Cloud API), or "local_capture",
+	// which mails each code to the account's own email address instead and is
+	// refused at boot unless every public URL, host and issuer the config
+	// names is a loopback host. Empty wires none.
 	TemplateMessageProvider string
 	// TemplateMessageWhatsAppAccessToken is the WhatsApp Business Cloud API
 	// access token, a system user's token with the
@@ -1948,16 +1954,37 @@ const (
 	SMSProviderTwilio = "twilio"
 	SMSProviderSNS    = "sns"
 	SMSProviderAzure  = "azure"
+	// SMSProviderLocalCapture mails each code to the account's own email
+	// address instead of texting it, for a local deployment
+	// (validatePhoneCodeCapture).
+	SMSProviderLocalCapture = "local_capture"
 )
 
-// TemplateMessageProviderWhatsAppCloud is the GATEWAY_TEMPLATEMSG_PROVIDER
-// name of the WhatsApp Business Cloud API.
-const TemplateMessageProviderWhatsAppCloud = "whatsapp_cloud"
+// Template-message provider names for GATEWAY_TEMPLATEMSG_PROVIDER.
+const (
+	TemplateMessageProviderWhatsAppCloud = "whatsapp_cloud"
+	// TemplateMessageProviderLocalCapture mails each code to the account's
+	// own email address instead of sending it, for a local deployment
+	// (validatePhoneCodeCapture).
+	TemplateMessageProviderLocalCapture = "local_capture"
+)
 
 // DefaultWhatsAppCloudAPIVersion is the Graph API version the WhatsApp
 // Cloud sender calls unless GATEWAY_TEMPLATEMSG_WHATSAPP_API_VERSION names
 // another. Pinned (AGENTS.md §10); bump it in a deliberate change.
 const DefaultWhatsAppCloudAPIVersion = "v26.0"
+
+// CapturesSMS reports whether SMS verification codes are mailed to the
+// account's own email address instead of texted.
+func (c *Config) CapturesSMS() bool {
+	return c.SMSEnabled && c.SMSProvider == SMSProviderLocalCapture
+}
+
+// CapturesTemplateMessages reports whether template-message verification
+// codes are mailed to the account's own email address instead of sent.
+func (c *Config) CapturesTemplateMessages() bool {
+	return c.TemplateMessageProvider == TemplateMessageProviderLocalCapture
+}
 
 // OIDCScopeList returns the configured generic-OIDC scopes split on
 // whitespace, dropping blanks. An empty config yields nil, which lets the
@@ -2441,6 +2468,9 @@ func (c *Config) Validate() error {
 	if err := c.validateTemplateMessages(); err != nil {
 		return err
 	}
+	if err := c.validatePhoneCodeCapture(); err != nil {
+		return err
+	}
 
 	if err := c.validateAnonymous(); err != nil {
 		return err
@@ -2794,10 +2824,11 @@ func (c *Config) validateSMS() error {
 				"config: GATEWAY_SMS_PROVIDER=azure requires GATEWAY_SMS_AZURE_CONNECTION_STRING and GATEWAY_SMS_AZURE_FROM",
 			)
 		}
+	case SMSProviderLocalCapture:
 	default:
 		return fmt.Errorf(
-			"config: GATEWAY_SMS_ENABLED=true requires GATEWAY_SMS_PROVIDER to be one of %q, %q, %q; got %q",
-			SMSProviderTwilio, SMSProviderSNS, SMSProviderAzure, c.SMSProvider,
+			"config: GATEWAY_SMS_ENABLED=true requires GATEWAY_SMS_PROVIDER to be one of %q, %q, %q, %q; got %q",
+			SMSProviderTwilio, SMSProviderSNS, SMSProviderAzure, SMSProviderLocalCapture, c.SMSProvider,
 		)
 	}
 	return nil
@@ -2820,13 +2851,13 @@ func (c *Config) WhatsAppCloud() templatemsg.WhatsAppCloudConfig {
 // so a deployment fails at boot rather than at its first code.
 func (c *Config) validateTemplateMessages() error {
 	switch c.TemplateMessageProvider {
-	case "":
+	case "", TemplateMessageProviderLocalCapture:
 		return nil
 	case TemplateMessageProviderWhatsAppCloud:
 	default:
 		return fmt.Errorf(
-			"config: GATEWAY_TEMPLATEMSG_PROVIDER must be empty or %q; got %q",
-			TemplateMessageProviderWhatsAppCloud, c.TemplateMessageProvider,
+			"config: GATEWAY_TEMPLATEMSG_PROVIDER must be empty, %q or %q; got %q",
+			TemplateMessageProviderWhatsAppCloud, TemplateMessageProviderLocalCapture, c.TemplateMessageProvider,
 		)
 	}
 	if c.TemplateMessageWhatsAppAccessToken == "" || c.TemplateMessageWhatsAppPhoneNumberID == "" {

@@ -1811,6 +1811,7 @@ func NewAuthServiceWithOAuth(
 	if !cfg.PasswordResetEnabled {
 		logger.Warn("password_reset_disabled")
 	}
+	warnPhoneCodeCapture(cfg, logger)
 	if len(totpRecoveryPepper) < totp.MinRecoveryPepperBytes {
 		// Refuse to construct an AuthService with a too-short pepper:
 		// any recovery-code path would silently fail, which is worse
