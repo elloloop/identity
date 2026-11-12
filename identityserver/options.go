@@ -12,6 +12,7 @@ import (
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/sms"
+	"github.com/elloloop/identity/pkg/templatemsg"
 )
 
 // Config is the full identity configuration, re-exported so embedding
@@ -89,6 +90,13 @@ type Options struct {
 	// sender from the GATEWAY_SMS_* settings in Config (log-only when SMS
 	// is disabled).
 	SMSSender sms.Sender
+
+	// TemplateMessageSender delivers phone verification codes as
+	// messaging-app template messages, for projects whose phone.channels
+	// lists "message". nil leaves that channel unavailable: the server
+	// ships no provider for it (templatemsg.NewLogOnly delivers nothing and
+	// is for development).
+	TemplateMessageSender templatemsg.Sender
 
 	// OAuthRegistry holds the per-provider exchangers. nil builds one
 	// from the OAuth client credentials in Config. A supplied registry

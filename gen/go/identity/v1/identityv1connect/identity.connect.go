@@ -145,6 +145,9 @@ const (
 	// IdentityServiceVerifyPhoneCodeProcedure is the fully-qualified name of the IdentityService's
 	// VerifyPhoneCode RPC.
 	IdentityServiceVerifyPhoneCodeProcedure = "/identity.v1.IdentityService/VerifyPhoneCode"
+	// IdentityServiceRemovePhoneProcedure is the fully-qualified name of the IdentityService's
+	// RemovePhone RPC.
+	IdentityServiceRemovePhoneProcedure = "/identity.v1.IdentityService/RemovePhone"
 	// IdentityServiceRequestRecoveryEmailProcedure is the fully-qualified name of the IdentityService's
 	// RequestRecoveryEmail RPC.
 	IdentityServiceRequestRecoveryEmailProcedure = "/identity.v1.IdentityService/RequestRecoveryEmail"
@@ -633,9 +636,14 @@ type IdentityServiceClient interface {
 	CreateAssuranceChallenge(context.Context, *connect.Request[v1.CreateAssuranceChallengeRequest]) (*connect.Response[v1.CreateAssuranceChallengeResponse], error)
 	IssueAssuranceToken(context.Context, *connect.Request[v1.IssueAssuranceTokenRequest]) (*connect.Response[v1.IssueAssuranceTokenResponse], error)
 	RefreshAssuranceToken(context.Context, *connect.Request[v1.RefreshAssuranceTokenRequest]) (*connect.Response[v1.RefreshAssuranceTokenResponse], error)
-	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	// Phone verification (one-time code) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *connect.Request[v1.RequestPhoneVerificationRequest]) (*connect.Response[v1.RequestPhoneVerificationResponse], error)
 	VerifyPhoneCode(context.Context, *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error)
+	// RemovePhone clears the caller's phone number and its verified state,
+	// freeing the number for another account where the project keeps numbers
+	// unique. A caller with no number gets their user back unchanged. A tenant
+	// that requires a verified phone can no longer be selected afterwards.
+	RemovePhone(context.Context, *connect.Request[v1.RemovePhoneRequest]) (*connect.Response[v1.RemovePhoneResponse], error)
 	// Recovery emails — additional addresses the authenticated caller has
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
 	// address another account of the project holds and RESOURCE_EXHAUSTED past
@@ -1480,6 +1488,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceVerifyPhoneCodeProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("VerifyPhoneCode")),
+			connect.WithClientOptions(opts...),
+		),
+		removePhone: connect.NewClient[v1.RemovePhoneRequest, v1.RemovePhoneResponse](
+			httpClient,
+			baseURL+IdentityServiceRemovePhoneProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RemovePhone")),
 			connect.WithClientOptions(opts...),
 		),
 		requestRecoveryEmail: connect.NewClient[v1.RequestRecoveryEmailRequest, v1.RequestRecoveryEmailResponse](
@@ -2357,6 +2371,7 @@ type identityServiceClient struct {
 	refreshAssuranceToken             *connect.Client[v1.RefreshAssuranceTokenRequest, v1.RefreshAssuranceTokenResponse]
 	requestPhoneVerification          *connect.Client[v1.RequestPhoneVerificationRequest, v1.RequestPhoneVerificationResponse]
 	verifyPhoneCode                   *connect.Client[v1.VerifyPhoneCodeRequest, v1.VerifyPhoneCodeResponse]
+	removePhone                       *connect.Client[v1.RemovePhoneRequest, v1.RemovePhoneResponse]
 	requestRecoveryEmail              *connect.Client[v1.RequestRecoveryEmailRequest, v1.RequestRecoveryEmailResponse]
 	verifyRecoveryEmail               *connect.Client[v1.VerifyRecoveryEmailRequest, v1.VerifyRecoveryEmailResponse]
 	listRecoveryEmails                *connect.Client[v1.ListRecoveryEmailsRequest, v1.ListRecoveryEmailsResponse]
@@ -2676,6 +2691,11 @@ func (c *identityServiceClient) RequestPhoneVerification(ctx context.Context, re
 // VerifyPhoneCode calls identity.v1.IdentityService.VerifyPhoneCode.
 func (c *identityServiceClient) VerifyPhoneCode(ctx context.Context, req *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error) {
 	return c.verifyPhoneCode.CallUnary(ctx, req)
+}
+
+// RemovePhone calls identity.v1.IdentityService.RemovePhone.
+func (c *identityServiceClient) RemovePhone(ctx context.Context, req *connect.Request[v1.RemovePhoneRequest]) (*connect.Response[v1.RemovePhoneResponse], error) {
+	return c.removePhone.CallUnary(ctx, req)
 }
 
 // RequestRecoveryEmail calls identity.v1.IdentityService.RequestRecoveryEmail.
@@ -3437,9 +3457,14 @@ type IdentityServiceHandler interface {
 	CreateAssuranceChallenge(context.Context, *connect.Request[v1.CreateAssuranceChallengeRequest]) (*connect.Response[v1.CreateAssuranceChallengeResponse], error)
 	IssueAssuranceToken(context.Context, *connect.Request[v1.IssueAssuranceTokenRequest]) (*connect.Response[v1.IssueAssuranceTokenResponse], error)
 	RefreshAssuranceToken(context.Context, *connect.Request[v1.RefreshAssuranceTokenRequest]) (*connect.Response[v1.RefreshAssuranceTokenResponse], error)
-	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	// Phone verification (one-time code) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *connect.Request[v1.RequestPhoneVerificationRequest]) (*connect.Response[v1.RequestPhoneVerificationResponse], error)
 	VerifyPhoneCode(context.Context, *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error)
+	// RemovePhone clears the caller's phone number and its verified state,
+	// freeing the number for another account where the project keeps numbers
+	// unique. A caller with no number gets their user back unchanged. A tenant
+	// that requires a verified phone can no longer be selected afterwards.
+	RemovePhone(context.Context, *connect.Request[v1.RemovePhoneRequest]) (*connect.Response[v1.RemovePhoneResponse], error)
 	// Recovery emails — additional addresses the authenticated caller has
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
 	// address another account of the project holds and RESOURCE_EXHAUSTED past
@@ -4280,6 +4305,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceVerifyPhoneCodeProcedure,
 		svc.VerifyPhoneCode,
 		connect.WithSchema(identityServiceMethods.ByName("VerifyPhoneCode")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRemovePhoneHandler := connect.NewUnaryHandler(
+		IdentityServiceRemovePhoneProcedure,
+		svc.RemovePhone,
+		connect.WithSchema(identityServiceMethods.ByName("RemovePhone")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceRequestRecoveryEmailHandler := connect.NewUnaryHandler(
@@ -5190,6 +5221,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceRequestPhoneVerificationHandler.ServeHTTP(w, r)
 		case IdentityServiceVerifyPhoneCodeProcedure:
 			identityServiceVerifyPhoneCodeHandler.ServeHTTP(w, r)
+		case IdentityServiceRemovePhoneProcedure:
+			identityServiceRemovePhoneHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestRecoveryEmailProcedure:
 			identityServiceRequestRecoveryEmailHandler.ServeHTTP(w, r)
 		case IdentityServiceVerifyRecoveryEmailProcedure:
@@ -5619,6 +5652,10 @@ func (UnimplementedIdentityServiceHandler) RequestPhoneVerification(context.Cont
 
 func (UnimplementedIdentityServiceHandler) VerifyPhoneCode(context.Context, *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.VerifyPhoneCode is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RemovePhone(context.Context, *connect.Request[v1.RemovePhoneRequest]) (*connect.Response[v1.RemovePhoneResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RemovePhone is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) RequestRecoveryEmail(context.Context, *connect.Request[v1.RequestRecoveryEmailRequest]) (*connect.Response[v1.RequestRecoveryEmailResponse], error) {

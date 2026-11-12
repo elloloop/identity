@@ -1,5 +1,83 @@
 # Upgrade guide
 
+## Next — phone verification per project: its own switch, one account per number, accepted countries, a message channel, and a tenant that requires a verified phone: `phone.*` in a project's config, `LoginPolicy.require_verified_phone` (all off by default; migration 0061; additive RPC `RemovePhone`, `LoginPolicy` / `UpsertLoginPolicyRequest` fields, `TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED`; additive audit event `phone_removed`; new package `pkg/templatemsg`; two `Repository` methods (Go API))
+
+Phone verification was one switch for the whole deployment
+(`GATEWAY_SMS_ENABLED`), a number could sit on any number of accounts, every
+country was texted, and nothing could require a phone. Each of those is now a
+setting, and none changes until it is set.
+
+- **Nothing changes until a project or a tenant opts in.** A project with no
+  `phone` block verifies phones exactly as the deployment does, by SMS, and a
+  tenant with no phone rule is selected as before. The block is control-plane
+  only: the env-configured default project has no `config_json`.
+
+  | Key | Default | Meaning |
+  | --- | --- | --- |
+  | `phone.enabled` | unset (follows the deployment) | `false` turns phone verification off for the project: both RPCs answer `UNAVAILABLE`, as when the deployment has no sender. `true` changes nothing: a project cannot verify phones without a sender. |
+  | `phone.unique` | `false` | A verified number belongs to one account of the project. |
+  | `phone.reassign_after_seconds` | `0` (never) | With `unique`: how long after its holder verified a number another account that proves it may take it. |
+  | `phone.allowed_calling_codes` | `[]` (every country) | Country calling codes accepted, as 1 to 3 digits without the `+`. |
+  | `phone.channels` | `[]` (`["sms"]`) | Delivery order: `"sms"`, `"message"`. A channel left out is never used. |
+  | `phone.message_template`, `phone.message_language` | `""` | The template the message channel sends; required when `channels` lists `"message"`. |
+
+- **A project can only narrow.** It can switch verification off, drop a
+  channel and refuse countries. It cannot use a channel the deployment has no
+  sender for: SMS needs `GATEWAY_SMS_ENABLED` and a provider, and the message
+  channel needs a sender the embedder supplies (below). A project whose
+  channels all lack a sender answers `UNAVAILABLE`.
+- **One account per number** (`phone.unique`). `RequestPhoneVerification`
+  sends a code to a number another account holds like any other;
+  `VerifyPhoneCode` then answers `ALREADY_EXISTS` with the stable
+  `phone_number_taken` token, only to a caller whose code was right. A number
+  is free again when its holder removes it (`RemovePhone`), verifies another,
+  or is deleted. With `phone.reassign_after_seconds`, a number also moves to
+  another account that proves it once that long has passed since its holder
+  verified it: the previous holder's phone is cleared, `phone_removed` is
+  audited for them (`reason: verified_by_another_account`) and their addresses
+  are mailed. **Numbers verified before a project turned `unique` on are not
+  claimed**: an older account keeps such a number, and it is held to one
+  account from the next time it is verified.
+- **Countries** (`phone.allowed_calling_codes`). A number outside the list is
+  refused by both RPCs before anything is sent, with `FAILED_PRECONDITION` and
+  the stable `phone_country_not_allowed` token.
+- **Channels.** `"sms"` is the deployment's SMS provider. `"message"` sends a
+  pre-approved messaging-app template message through a
+  `templatemsg.Sender`: the template's name and language come from the
+  project, and its one parameter is the code. The channels are tried in the
+  project's order and the first that accepts the message wins; one that fails
+  is logged and the next is tried. **This server ships no provider for the
+  message channel and has no environment variable for one**: an embedder sets
+  `identityserver.Options.TemplateMessageSender` (or `app.Deps`), and without
+  one the channel is skipped. `templatemsg.NewLogOnly` delivers nothing and is
+  for development.
+- **`RemovePhone`** clears the caller's number and its verified state and
+  returns the user; a caller with no number gets their user back unchanged.
+  It works whether or not the project verifies phones, mails the account's
+  addresses, audits `phone_removed` (`reason: removed_by_user`), and is refused
+  during a recovery hold like a change of number.
+- **A tenant can require a verified phone.** `LoginPolicy.require_verified_phone`
+  makes `RefreshToken` refuse a selection of the tenant for an account with no
+  verified phone, so no token for that tenant is minted;
+  `phone_calling_codes` narrows it to numbers of those countries. The refusal
+  is `FAILED_PRECONDITION` with the stable `phone_verification_required` token
+  and `TenantSelectionRefusedDetails.reason =
+  TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED`; like every selection
+  refusal it leaves the refresh token unspent. The account keeps signing in:
+  it refreshes without `tenant_id`, verifies a phone with that session, and
+  selects again. A session the policy would refuse anyway (sign-in rules,
+  timeouts) is refused for that first. It is checked at each selection:
+  removing the phone ends access at the next refresh. `phone_calling_codes`
+  without `require_verified_phone` is rejected. Writing a login policy still
+  needs the admin secret; a tenant operator credential can read it only.
+- **Migration 0061** adds `phone_number_claims` (SQLite: 0030), new and empty,
+  and two constant-default columns on `login_policies`
+  (`require_verified_phone`, `phone_calling_codes`).
+- **Go API.** `service.Repository` gains `ClaimPhoneNumber` and
+  `ReleasePhoneNumber`; `AuthService` gains `WithTemplateMessages` and
+  `RemovePhone`; `service.LoginPolicy` gains `RequireVerifiedPhone` and
+  `PhoneCallingCodes`.
+
 ## Next — a recovery email signs in to its account, and holds the account's recovery settings: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0060; additive `ListRecoveryEmailsResponse.hold_until` and error detail `RecoveryHoldDetails`; additive audit event `recovery_email_sign_in`; two `Repository` methods (Go API))
 
 A project whose accounts sign in by emailed code had no way back in for a

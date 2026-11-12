@@ -813,6 +813,31 @@ default; a control-plane project's `config_json` only).
   whoever got into one recovery mailbox cannot strip the rest before the owner
   has read the notice.
 
+## Phone verification
+
+A signed-in user proves a phone number with a one-time code
+(`RequestPhoneVerification`, `VerifyPhoneCode`) and can remove it
+(`RemovePhone`). A phone is a proof of ownership, never a way to sign in or to
+recover an account.
+
+The deployment decides which senders exist: an SMS provider
+(`GATEWAY_SMS_*`), and optionally a messaging-app template sender an embedder
+wires (`pkg/templatemsg`; the server ships none). A project's `phone` block
+narrows the rest and can turn nothing on that the deployment lacks:
+
+- `phone.enabled: false` switches verification off for the project.
+- `phone.channels` orders the delivery channels (`"message"`, `"sms"`) and
+  drops the ones left out.
+- `phone.allowed_calling_codes` limits the countries a code is sent to.
+- `phone.unique` keeps a verified number on one account; it moves only when
+  its holder releases it or, with `phone.reassign_after_seconds`, after that
+  long.
+
+A tenant can require a verified phone (`LoginPolicy.require_verified_phone`,
+optionally of some countries): until the account has one, a selection of the
+tenant is refused and no token for it is minted. The account still signs in
+and verifies a phone with that unselected session.
+
 ## Onboarding flows
 
 Every signup creates a `User` inside the resolved project's data plane,

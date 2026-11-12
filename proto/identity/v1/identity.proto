@@ -668,13 +668,22 @@ message RedeemMagicLinkResponse {
   string return_to = 5; // allowlist-validated app URL bound at request time
 }
 
-// ─── Phone verification (SMS OTP) ───────────────────────────────────
+// ─── Phone verification (one-time code) ─────────────────────────────
 //
 // RequestPhoneVerification and VerifyPhoneCode prove the authenticated
 // caller (identified by the access-token `sub`, not a field here) owns a
-// phone number. RequestPhoneVerification texts a 6-digit code to the
-// supplied number; VerifyPhoneCode confirms it and marks the user's
-// phone verified. Both require auth.
+// phone number. RequestPhoneVerification sends a 6-digit code to the
+// supplied number, by SMS or as a messaging-app template message (the
+// project's `phone.channels`); VerifyPhoneCode confirms it and marks the
+// user's phone verified. RemovePhone clears it. All require auth.
+//
+// A project may narrow the feature (`phone` in its config): switch it off
+// (UNAVAILABLE, as when the deployment has no sender), accept only some
+// countries (FAILED_PRECONDITION, stable `phone_country_not_allowed`
+// token), and keep a number on one account (`phone.unique`):
+// VerifyPhoneCode then answers ALREADY_EXISTS with the stable
+// `phone_number_taken` token for a number another account holds, and only
+// to a caller whose code was right.
 
 message RequestPhoneVerificationRequest {
   string phone_number = 1; // E.164 number to verify (e.g. "+14155550123")
@@ -691,6 +700,12 @@ message VerifyPhoneCodeRequest {
 
 message VerifyPhoneCodeResponse {
   User user = 1; // the updated user with phone_verified=true
+}
+
+message RemovePhoneRequest {}
+
+message RemovePhoneResponse {
+  User user = 1; // the updated user, with no phone number
 }
 
 // ─── Recovery emails ────────────────────────────────────────────────
@@ -845,6 +860,14 @@ enum TenantSelectionRefusal {
   // refused, and so is a session past the policy's idle or absolute
   // timeout. The code is PERMISSION_DENIED; retry without tenant_id.
   TENANT_SELECTION_REFUSAL_LOGIN_POLICY = 4;
+  // The tenant's login policy requires a verified phone number
+  // (LoginPolicy.require_verified_phone) and the account has none, or none
+  // of the countries the policy names. The code is FAILED_PRECONDITION with
+  // the stable `phone_verification_required` token. The refresh token was
+  // not consumed: refresh without tenant_id, verify a phone with that
+  // session (RequestPhoneVerification, VerifyPhoneCode), then select the
+  // tenant again.
+  TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED = 5;
 }
 
 message LogoutRequest {
@@ -2596,6 +2619,15 @@ message LoginPolicy {
   // measured from the original login regardless of activity. 0 means "no
   // absolute timeout".
   int64 session_absolute_timeout_seconds = 11;
+  // require_verified_phone refuses a selection of this tenant
+  // (RefreshToken.tenant_id) until the account has a verified phone number,
+  // so no token for the tenant exists before then. It is not a sign-in rule:
+  // the account still signs in, and verifies a phone with that session.
+  bool require_verified_phone = 12;
+  // phone_calling_codes narrows require_verified_phone to numbers of these
+  // country calling codes, as digits without the '+' (e.g. "91"). Empty
+  // accepts a verified number of any country.
+  repeated string phone_calling_codes = 13;
 }
 
 message UpsertLoginPolicyRequest {
@@ -2612,6 +2644,11 @@ message UpsertLoginPolicyRequest {
   // tenant's idle and absolute session timeouts (0 = no timeout).
   int64 session_idle_timeout_seconds = 8;
   int64 session_absolute_timeout_seconds = 9;
+  // require_verified_phone / phone_calling_codes set the tenant's phone rule
+  // (see LoginPolicy). phone_calling_codes is only valid with
+  // require_verified_phone; each entry is 1 to 3 digits.
+  bool require_verified_phone = 10;
+  repeated string phone_calling_codes = 11;
 }
 
 message UpsertLoginPolicyResponse {
@@ -3482,9 +3519,14 @@ service IdentityService {
   rpc IssueAssuranceToken(IssueAssuranceTokenRequest) returns (IssueAssuranceTokenResponse);
   rpc RefreshAssuranceToken(RefreshAssuranceTokenRequest) returns (RefreshAssuranceTokenResponse);
 
-  // Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+  // Phone verification (one-time code) — proves the authenticated caller owns a phone number
   rpc RequestPhoneVerification(RequestPhoneVerificationRequest) returns (RequestPhoneVerificationResponse);
   rpc VerifyPhoneCode(VerifyPhoneCodeRequest) returns (VerifyPhoneCodeResponse);
+  // RemovePhone clears the caller's phone number and its verified state,
+  // freeing the number for another account where the project keeps numbers
+  // unique. A caller with no number gets their user back unchanged. A tenant
+  // that requires a verified phone can no longer be selected afterwards.
+  rpc RemovePhone(RemovePhoneRequest) returns (RemovePhoneResponse);
 
   // Recovery emails — additional addresses the authenticated caller has
   // proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an

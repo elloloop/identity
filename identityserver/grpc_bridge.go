@@ -904,6 +904,10 @@ func (b *grpcBridge) RemoveRecoveryEmail(ctx context.Context, in *identitypb.Rem
 	return invoke(ctx, b, in, b.h.RemoveRecoveryEmail)
 }
 
+func (b *grpcBridge) RemovePhone(ctx context.Context, in *identitypb.RemovePhoneRequest) (*identitypb.RemovePhoneResponse, error) {
+	return invoke(ctx, b, in, b.h.RemovePhone)
+}
+
 func (b *grpcBridge) RequestPhoneVerification(ctx context.Context, in *identitypb.RequestPhoneVerificationRequest) (*identitypb.RequestPhoneVerificationResponse, error) {
 	return invoke(ctx, b, in, b.h.RequestPhoneVerification)
 }

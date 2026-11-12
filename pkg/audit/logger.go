@@ -154,6 +154,10 @@ const (
 
 	EventPhoneVerificationRequested EventType = "phone_verification_requested"
 	EventPhoneVerified              EventType = "phone_verified"
+	// EventPhoneRemoved records the actor's account losing its phone
+	// number: removed by its owner (reason removed_by_user) or moved to
+	// another account that proved it (verified_by_another_account).
+	EventPhoneRemoved EventType = "phone_removed"
 
 	// EventRecoveryEmailAdded and EventRecoveryEmailRemoved record a proved
 	// recovery email being stored on, or removed from, the actor's account.
@@ -496,6 +500,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventAdminHelpResolved:             {},
 	EventPhoneVerificationRequested:    {},
 	EventPhoneVerified:                 {},
+	EventPhoneRemoved:                  {},
 	EventRecoveryEmailAdded:            {},
 	EventRecoveryEmailRemoved:          {},
 	EventRecoveryEmailSignIn:           {},

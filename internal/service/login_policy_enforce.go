@@ -69,7 +69,9 @@ func breachedSessionTimeout(p *LoginPolicy, nowMs, sessionStartedAtMs, lastUsedA
 // that restricts sign-in (restrictsSignIn) admits only a session whose
 // sign-in it governed: one whose account email is on a domain the tenant has
 // verified. Any session is held to the policy's timeouts, measured from its
-// own start and last use. Every refusal is a TenantSelectionRefusedError,
+// own start and last use, and to its phone rule: a policy that requires a
+// verified phone admits no account without one, of the policy's countries
+// when it names any. Every refusal is a TenantSelectionRefusedError,
 // made before the refresh token is spent. Without the governance plane no
 // tenant has a policy, and a lookup that fails refuses as unavailable.
 func (s *AuthService) checkSelectedTenantPolicy(ctx context.Context, projectID string, user *User, session *RefreshTokenRecord, tenantID string) error {
@@ -96,6 +98,14 @@ func (s *AuthService) checkSelectedTenantPolicy(ctx context.Context, projectID s
 	if breachedSessionTimeout(policy, s.nowMs(), session.SessionStartedAt, session.LastUsedAt) != noTimeoutBreached {
 		return s.loginPolicyRefusal(projectID, tenantID, "session_timeout",
 			"the session is past the tenant's session timeout")
+	}
+	// Last, so a session the policy would refuse anyway is not sent to
+	// verify a phone first. The account keeps its unselected session, which
+	// is what it verifies the phone with before selecting again.
+	if policy.RequireVerifiedPhone && !phoneSatisfies(user, policy) {
+		s.logger.Info("tenant_selection_refused_phone_required",
+			zap.String("project_id", projectID), zap.String("tenant_id", tenantID))
+		return &TenantSelectionRefusedError{Reason: TenantSelectionPhoneRequired, Err: ErrPhoneVerificationRequired}
 	}
 	return nil
 }

@@ -52,6 +52,10 @@ const (
 	// TenantSelectionLoginPolicy: the tenant's login policy does not admit
 	// the session (ErrPermissionDenied).
 	TenantSelectionLoginPolicy
+	// TenantSelectionPhoneRequired: the tenant's login policy requires a
+	// verified phone number the account does not have
+	// (ErrPhoneVerificationRequired).
+	TenantSelectionPhoneRequired
 )
 
 // TenantSelectionRefusedError is RefreshToken's refusal of the tenant it was

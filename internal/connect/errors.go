@@ -76,7 +76,8 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrAlreadyExists),
 		errors.Is(err, service.ErrPhoneAlreadyVerified),
-		errors.Is(err, service.ErrRecoveryEmailTaken):
+		errors.Is(err, service.ErrRecoveryEmailTaken),
+		errors.Is(err, service.ErrPhoneNumberTaken):
 		return connect.NewError(connect.CodeAlreadyExists, err)
 
 	case errors.Is(err, service.ErrUnauthenticated),
@@ -147,6 +148,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrReauthenticationRequired),
 		errors.Is(err, service.ErrRecoveryReauthenticationRequired),
 		errors.Is(err, service.ErrRecoveryEmailsDisabled),
+		errors.Is(err, service.ErrPhoneCountryNotAllowed),
+		errors.Is(err, service.ErrPhoneVerificationRequired),
 		errors.Is(err, service.ErrAccountKindOff),
 		errors.Is(err, service.ErrPasskeySignupDisabled),
 		errors.Is(err, service.ErrNativeOAuthDisabled),
@@ -273,6 +276,8 @@ func tenantSelectionRefusalToProto(r service.TenantSelectionRefusal) identitypb.
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNAVAILABLE
 	case service.TenantSelectionLoginPolicy:
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_LOGIN_POLICY
+	case service.TenantSelectionPhoneRequired:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED
 	default:
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED
 	}

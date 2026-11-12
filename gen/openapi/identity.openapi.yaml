@@ -4843,6 +4843,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RemoveGroupMemberResponse'
+  /identity.v1.IdentityService/RemovePhone:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RemovePhone
+      description: |-
+        RemovePhone clears the caller's phone number and its verified state,
+         freeing the number for another account where the project keeps numbers
+         unique. A caller with no number gets their user back unchanged. A tenant
+         that requires a verified phone can no longer be selected afterwards.
+      operationId: identity.v1.IdentityService.RemovePhone
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RemovePhoneRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RemovePhoneResponse'
   /identity.v1.IdentityService/RemoveRecoveryEmail:
     post:
       tags:
@@ -5110,7 +5150,7 @@ paths:
       tags:
         - identity.v1.IdentityService
       summary: RequestPhoneVerification
-      description: Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+      description: Phone verification (one-time code) — proves the authenticated caller owns a phone number
       operationId: identity.v1.IdentityService.RequestPhoneVerification
       parameters:
         - name: Connect-Protocol-Version
@@ -10556,6 +10596,23 @@ components:
             session_absolute_timeout_seconds invalidates a session older than this,
              measured from the original login regardless of activity. 0 means "no
              absolute timeout".
+        requireVerifiedPhone:
+          type: boolean
+          title: require_verified_phone
+          description: |-
+            require_verified_phone refuses a selection of this tenant
+             (RefreshToken.tenant_id) until the account has a verified phone number,
+             so no token for the tenant exists before then. It is not a sign-in rule:
+             the account still signs in, and verifies a phone with that session.
+        phoneCallingCodes:
+          type: array
+          items:
+            type: string
+          title: phone_calling_codes
+          description: |-
+            phone_calling_codes narrows require_verified_phone to numbers of these
+             country calling codes, as digits without the '+' (e.g. "91"). Empty
+             accepts a verified number of any country.
       title: LoginPolicy
       additionalProperties: false
       description: |-
@@ -11830,6 +11887,19 @@ components:
       type: object
       title: RemoveGroupMemberResponse
       additionalProperties: false
+    identity.v1.RemovePhoneRequest:
+      type: object
+      title: RemovePhoneRequest
+      additionalProperties: false
+    identity.v1.RemovePhoneResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          description: the updated user, with no phone number
+          $ref: '#/components/schemas/identity.v1.User'
+      title: RemovePhoneResponse
+      additionalProperties: false
     identity.v1.RemoveRecoveryEmailRequest:
       type: object
       properties:
@@ -12697,6 +12767,7 @@ components:
         - TENANT_SELECTION_REFUSAL_NOT_A_MEMBER
         - TENANT_SELECTION_REFUSAL_UNAVAILABLE
         - TENANT_SELECTION_REFUSAL_LOGIN_POLICY
+        - TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED
       description: TenantSelectionRefusal says why RefreshToken refused a tenant selection.
     identity.v1.TenantSelectionRefusedDetails:
       type: object
@@ -13033,6 +13104,18 @@ components:
             - string
           title: session_absolute_timeout_seconds
           format: int64
+        requireVerifiedPhone:
+          type: boolean
+          title: require_verified_phone
+          description: |-
+            require_verified_phone / phone_calling_codes set the tenant's phone rule
+             (see LoginPolicy). phone_calling_codes is only valid with
+             require_verified_phone; each entry is 1 to 3 digits.
+        phoneCallingCodes:
+          type: array
+          items:
+            type: string
+          title: phone_calling_codes
       title: UpsertLoginPolicyRequest
       additionalProperties: false
     identity.v1.UpsertLoginPolicyResponse:

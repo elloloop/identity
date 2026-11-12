@@ -145,6 +145,13 @@ func (s *ControlPlaneAdminService) UpsertLoginPolicy(ctx context.Context, secret
 	if p.SessionIdleTimeoutSeconds > maxSessionTimeoutSeconds || p.SessionAbsoluteTimeoutSeconds > maxSessionTimeoutSeconds {
 		return nil, fmt.Errorf("%w: session timeout seconds must not exceed %d", ErrInvalidArgument, maxSessionTimeoutSeconds)
 	}
+	callingCodes, err := normalizePhoneCallingCodes(p.PhoneCallingCodes)
+	if err != nil {
+		return nil, err
+	}
+	if callingCodes != "" && !p.RequireVerifiedPhone {
+		return nil, fmt.Errorf("%w: phone_calling_codes needs require_verified_phone", ErrInvalidArgument)
+	}
 	policy := &LoginPolicy{
 		ProjectID:                     projectID,
 		TenantID:                      tenantID,
@@ -155,6 +162,8 @@ func (s *ControlPlaneAdminService) UpsertLoginPolicy(ctx context.Context, secret
 		PasswordMinLength:             p.PasswordMinLength,
 		SessionIdleTimeoutSeconds:     p.SessionIdleTimeoutSeconds,
 		SessionAbsoluteTimeoutSeconds: p.SessionAbsoluteTimeoutSeconds,
+		RequireVerifiedPhone:          p.RequireVerifiedPhone,
+		PhoneCallingCodes:             callingCodes,
 	}
 	if _, err := s.policies.UpsertLoginPolicy(ctx, policy); err != nil {
 		return nil, err
@@ -168,6 +177,8 @@ func (s *ControlPlaneAdminService) UpsertLoginPolicy(ctx context.Context, secret
 		"password_min_length":        policy.PasswordMinLength,
 		"session_idle_timeout_s":     policy.SessionIdleTimeoutSeconds,
 		"session_absolute_timeout_s": policy.SessionAbsoluteTimeoutSeconds,
+		"require_verified_phone":     policy.RequireVerifiedPhone,
+		"phone_calling_codes":        policy.PhoneCallingCodes,
 	}))
 	return policy, nil
 }

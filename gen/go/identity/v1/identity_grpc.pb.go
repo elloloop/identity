@@ -55,6 +55,7 @@ const (
 	IdentityService_RefreshAssuranceToken_FullMethodName             = "/identity.v1.IdentityService/RefreshAssuranceToken"
 	IdentityService_RequestPhoneVerification_FullMethodName          = "/identity.v1.IdentityService/RequestPhoneVerification"
 	IdentityService_VerifyPhoneCode_FullMethodName                   = "/identity.v1.IdentityService/VerifyPhoneCode"
+	IdentityService_RemovePhone_FullMethodName                       = "/identity.v1.IdentityService/RemovePhone"
 	IdentityService_RequestRecoveryEmail_FullMethodName              = "/identity.v1.IdentityService/RequestRecoveryEmail"
 	IdentityService_VerifyRecoveryEmail_FullMethodName               = "/identity.v1.IdentityService/VerifyRecoveryEmail"
 	IdentityService_ListRecoveryEmails_FullMethodName                = "/identity.v1.IdentityService/ListRecoveryEmails"
@@ -260,9 +261,14 @@ type IdentityServiceClient interface {
 	CreateAssuranceChallenge(ctx context.Context, in *CreateAssuranceChallengeRequest, opts ...grpc.CallOption) (*CreateAssuranceChallengeResponse, error)
 	IssueAssuranceToken(ctx context.Context, in *IssueAssuranceTokenRequest, opts ...grpc.CallOption) (*IssueAssuranceTokenResponse, error)
 	RefreshAssuranceToken(ctx context.Context, in *RefreshAssuranceTokenRequest, opts ...grpc.CallOption) (*RefreshAssuranceTokenResponse, error)
-	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	// Phone verification (one-time code) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(ctx context.Context, in *RequestPhoneVerificationRequest, opts ...grpc.CallOption) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(ctx context.Context, in *VerifyPhoneCodeRequest, opts ...grpc.CallOption) (*VerifyPhoneCodeResponse, error)
+	// RemovePhone clears the caller's phone number and its verified state,
+	// freeing the number for another account where the project keeps numbers
+	// unique. A caller with no number gets their user back unchanged. A tenant
+	// that requires a verified phone can no longer be selected afterwards.
+	RemovePhone(ctx context.Context, in *RemovePhoneRequest, opts ...grpc.CallOption) (*RemovePhoneResponse, error)
 	// Recovery emails — additional addresses the authenticated caller has
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
 	// address another account of the project holds and RESOURCE_EXHAUSTED past
@@ -1244,6 +1250,16 @@ func (c *identityServiceClient) VerifyPhoneCode(ctx context.Context, in *VerifyP
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(VerifyPhoneCodeResponse)
 	err := c.cc.Invoke(ctx, IdentityService_VerifyPhoneCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RemovePhone(ctx context.Context, in *RemovePhoneRequest, opts ...grpc.CallOption) (*RemovePhoneResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemovePhoneResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RemovePhone_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2704,9 +2720,14 @@ type IdentityServiceServer interface {
 	CreateAssuranceChallenge(context.Context, *CreateAssuranceChallengeRequest) (*CreateAssuranceChallengeResponse, error)
 	IssueAssuranceToken(context.Context, *IssueAssuranceTokenRequest) (*IssueAssuranceTokenResponse, error)
 	RefreshAssuranceToken(context.Context, *RefreshAssuranceTokenRequest) (*RefreshAssuranceTokenResponse, error)
-	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	// Phone verification (one-time code) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *RequestPhoneVerificationRequest) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error)
+	// RemovePhone clears the caller's phone number and its verified state,
+	// freeing the number for another account where the project keeps numbers
+	// unique. A caller with no number gets their user back unchanged. A tenant
+	// that requires a verified phone can no longer be selected afterwards.
+	RemovePhone(context.Context, *RemovePhoneRequest) (*RemovePhoneResponse, error)
 	// Recovery emails — additional addresses the authenticated caller has
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
 	// address another account of the project holds and RESOURCE_EXHAUSTED past
@@ -3441,6 +3462,9 @@ func (UnimplementedIdentityServiceServer) RequestPhoneVerification(context.Conte
 }
 func (UnimplementedIdentityServiceServer) VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VerifyPhoneCode not implemented")
+}
+func (UnimplementedIdentityServiceServer) RemovePhone(context.Context, *RemovePhoneRequest) (*RemovePhoneResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemovePhone not implemented")
 }
 func (UnimplementedIdentityServiceServer) RequestRecoveryEmail(context.Context, *RequestRecoveryEmailRequest) (*RequestRecoveryEmailResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RequestRecoveryEmail not implemented")
@@ -4524,6 +4548,24 @@ func _IdentityService_VerifyPhoneCode_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).VerifyPhoneCode(ctx, req.(*VerifyPhoneCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RemovePhone_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemovePhoneRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RemovePhone(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RemovePhone_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RemovePhone(ctx, req.(*RemovePhoneRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -7180,6 +7222,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VerifyPhoneCode",
 			Handler:    _IdentityService_VerifyPhoneCode_Handler,
+		},
+		{
+			MethodName: "RemovePhone",
+			Handler:    _IdentityService_RemovePhone_Handler,
 		},
 		{
 			MethodName: "RequestRecoveryEmail",

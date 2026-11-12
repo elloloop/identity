@@ -39,6 +39,7 @@ import (
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/passwords"
 	"github.com/elloloop/identity/pkg/sms"
+	"github.com/elloloop/identity/pkg/templatemsg"
 	"github.com/elloloop/identity/pkg/totp"
 )
 
@@ -1542,6 +1543,9 @@ type AuthService struct {
 	// (config.RateLimitUsernameTakenPerIP).
 	usernameProbes *probeBudget
 	phoneThrottle  *keyCooldown
+	// templateSender delivers the message channel's verification codes; nil
+	// when the embedder wired none (WithTemplateMessages).
+	templateSender templatemsg.Sender
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
 	// OAuth flow uses. Injected with WithReturnAllowlist; the zero value

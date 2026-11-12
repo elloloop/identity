@@ -40,6 +40,7 @@ import (
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/sms"
+	"github.com/elloloop/identity/pkg/templatemsg"
 )
 
 // Deps groups the injectable dependencies required to build the
@@ -162,6 +163,12 @@ type Deps struct {
 	// when GATEWAY_SMS_ENABLED is false, otherwise the configured
 	// provider (Twilio / SNS / Azure).
 	SMSSender sms.Sender
+
+	// TemplateMessageSender delivers phone verification codes as
+	// messaging-app template messages, the "message" channel a project's
+	// phone.channels may list. nil (the default) leaves that channel
+	// unavailable; this server ships no provider for it.
+	TemplateMessageSender templatemsg.Sender
 
 	// OAuthRegistry holds the per-provider Exchangers used for OAuth
 	// login. May be nil — in that case OAuthLogin returns
@@ -808,6 +815,7 @@ func New(deps Deps) (*Built, error) {
 		// or the driver has no governance stores (memory, SQLite).
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
+		WithTemplateMessages(deps.TemplateMessageSender).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).

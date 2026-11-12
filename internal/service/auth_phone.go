@@ -12,16 +12,88 @@ import (
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/sms"
+	"github.com/elloloop/identity/pkg/templatemsg"
 )
 
-// SMS-OTP phone-ownership verification. The caller is an
+// One-time-code phone-ownership verification. The caller is an
 // already-authenticated user (proven via JWT, like other authenticated
-// RPCs); RequestPhoneVerification texts a 6-digit code to the supplied
+// RPCs); RequestPhoneVerification sends a 6-digit code to the supplied
 // number and VerifyPhoneCode confirms it and marks the user's phone
 // verified. This is a standalone ownership proof — NOT a login/MFA
 // factor. It reuses the email-OTP code path's shape: crypto/rand 6-digit
 // code, sha256 hash at rest, constant-time compare, TTL, max-attempts,
 // and a per-user send cooldown.
+//
+// The deployment decides which senders exist (an SMS provider, and a
+// template-message sender an embedder wires); the request's project decides
+// the rest (ProjectPhoneConfig): whether it verifies phones at all, the
+// order the channels are tried in, the countries it accepts, and whether a
+// number belongs to one account.
+
+// WithTemplateMessages wires the sender of the message delivery channel
+// (PhoneChannelMessage) and returns the service for chaining. Without one
+// the channel is skipped wherever a project lists it.
+func (s *AuthService) WithTemplateMessages(sender templatemsg.Sender) *AuthService {
+	s.templateSender = sender
+	return s
+}
+
+// phoneChannelUsable reports whether the deployment has a sender for ch.
+func (s *AuthService) phoneChannelUsable(ch string) bool {
+	switch ch {
+	case PhoneChannelSMS:
+		return s.cfg.SMSEnabled
+	case PhoneChannelMessage:
+		return s.templateSender != nil
+	default:
+		return false
+	}
+}
+
+// phoneVerificationOn reports whether the project verifies phones: it has
+// not switched the feature off, and the deployment has a sender for at
+// least one of the channels it uses.
+func (s *AuthService) phoneVerificationOn(cfg ProjectPhoneConfig) bool {
+	if cfg.off() {
+		return false
+	}
+	for _, ch := range cfg.channels() {
+		if s.phoneChannelUsable(ch) {
+			return true
+		}
+	}
+	return false
+}
+
+// deliverPhoneCode sends code to phone over the project's channels in
+// order, stopping at the first that accepts it. A channel the deployment
+// has no sender for is skipped; one that fails is logged and the next is
+// tried. The error is the last channel's.
+func (s *AuthService) deliverPhoneCode(ctx context.Context, cfg ProjectPhoneConfig, userID, phone, code string, ttl time.Duration) error {
+	err := ErrSMSDisabled
+	for _, ch := range cfg.channels() {
+		if !s.phoneChannelUsable(ch) {
+			continue
+		}
+		var sendErr error
+		if ch == PhoneChannelMessage {
+			sendErr = s.templateSender.Send(ctx, templatemsg.Message{
+				To: phone, Template: cfg.MessageTemplate, Language: cfg.MessageLanguage, Params: []string{code},
+			})
+		} else {
+			body := fmt.Sprintf("Your verification code is %s. It expires in %s.", code, formatExpiresIn(ttl))
+			sendErr = s.smsSender.Send(ctx, sms.Message{To: phone, Body: body})
+		}
+		if sendErr == nil {
+			return nil
+		}
+		s.logger.Warn("phone_verification_send_failed",
+			zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)),
+			zap.String("channel", ch), zap.Error(sendErr))
+		err = fmt.Errorf("%w: %w", ErrSMSDisabled, sendErr)
+	}
+	return err
+}
 
 const (
 	defaultPhoneCodeTTL = 5 * time.Minute
@@ -61,13 +133,18 @@ func normalizePhone(raw string) (string, bool) {
 // ── RequestPhoneVerification ───────────────────────────────────────────
 
 // RequestPhoneVerification mints a 6-digit OTP for the user's phone and
-// texts it. The caller must be authenticated (userID is the verified
+// sends it. The caller must be authenticated (userID is the verified
 // `sub`). Returns ErrSMSDisabled when phone verification is not
-// configured, ErrPhoneAlreadyVerified when the user has already verified
-// the same number, and ErrInvalidArgument for a malformed number. A
-// per-user send cooldown bounds inbox/cost abuse.
+// configured or the project has it off, ErrPhoneAlreadyVerified when the
+// user has already verified the same number, ErrInvalidArgument for a
+// malformed number and ErrPhoneCountryNotAllowed for one outside the
+// project's countries. A per-user send cooldown bounds inbox/cost abuse.
+//
+// A number another account holds is sent a code like any other: whether a
+// number is taken is told only by VerifyPhoneCode, to whoever proves it.
 func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phoneNumber string) error {
-	if !s.cfg.SMSEnabled {
+	phoneCfg := phoneConfig(ProjectScopeFromContext(ctx))
+	if !s.phoneVerificationOn(phoneCfg) {
 		return ErrSMSDisabled
 	}
 	if userID == "" {
@@ -87,6 +164,9 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phon
 	phone, ok := normalizePhone(phoneNumber)
 	if !ok {
 		return fmt.Errorf("%w: phone number must be E.164 (e.g. +14155550123)", ErrInvalidArgument)
+	}
+	if !hasCallingCode(phone, phoneCfg.AllowedCallingCodes) {
+		return ErrPhoneCountryNotAllowed
 	}
 
 	user, err := s.repo(ctx).GetUser(ctx, userID)
@@ -133,14 +213,11 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phon
 		return fmt.Errorf("storing phone verification code: %w", err)
 	}
 
-	body := fmt.Sprintf("Your verification code is %s. It expires in %s.", code, formatExpiresIn(ttl))
-	if err := s.smsSender.Send(ctx, sms.Message{To: phone, Body: body}); err != nil {
-		// The code is already stored; an SMS-side failure is surfaced so
-		// the caller knows delivery failed (unlike the anti-enumeration
-		// email path, the caller here is authenticated and owns the flow).
-		s.logger.Warn("phone_verification_send_failed",
-			zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)), zap.Error(err))
-		return fmt.Errorf("%w: %w", ErrSMSDisabled, err)
+	// The code is already stored; a delivery failure is surfaced so the
+	// caller knows it did not arrive (unlike the anti-enumeration email
+	// path, the caller here is authenticated and owns the flow).
+	if err := s.deliverPhoneCode(ctx, phoneCfg, userID, phone, code, ttl); err != nil {
+		return err
 	}
 
 	s.audit.Log(ctx, audit.EventPhoneVerificationRequested,
@@ -160,8 +237,14 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phon
 // for) collapse to ErrPhoneCodeInvalid. A wrong guess bumps the per-code
 // attempt counter; at the cap the code is consumed so the brute-force
 // window over the 6-digit space is bounded.
+//
+// Where the project keeps numbers unique, a right code for a number another
+// account holds is ErrPhoneNumberTaken, unless that account's claim is old
+// enough to move (phone.reassign_after_seconds): then the number moves and
+// its previous holder is told.
 func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, code string) (*User, error) {
-	if !s.cfg.SMSEnabled {
+	phoneCfg := phoneConfig(ProjectScopeFromContext(ctx))
+	if !s.phoneVerificationOn(phoneCfg) {
 		return nil, ErrSMSDisabled
 	}
 	if userID == "" {
@@ -175,6 +258,9 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, 
 	phone, ok := normalizePhone(phoneNumber)
 	if !ok || strings.TrimSpace(code) == "" {
 		return nil, ErrPhoneCodeInvalid
+	}
+	if !hasCallingCode(phone, phoneCfg.AllowedCallingCodes) {
+		return nil, ErrPhoneCountryNotAllowed
 	}
 	// A code requested before a hold began must not move the number during it.
 	if err := s.checkRecoveryHold(ctx, userID); err != nil {
@@ -216,7 +302,20 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, 
 	}
 
 	now := s.nowMs()
-	if err := s.repo(ctx).SetUserPhoneVerified(ctx, userID, phone, now); err != nil {
+	if phoneCfg.Unique {
+		previous, err := s.repo(ctx).ClaimPhoneNumber(ctx, userID, phone, now, phoneCfg.takeOverBefore(now))
+		if errors.Is(err, ErrPhoneNumberTaken) {
+			s.logger.Info("phone_verification_refused_number_taken",
+				zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)))
+			return nil, ErrPhoneNumberTaken
+		}
+		if err != nil {
+			return nil, fmt.Errorf("claiming phone number: %w", err)
+		}
+		if previous != "" {
+			s.announcePhoneMoved(ctx, previous, phone)
+		}
+	} else if err := s.repo(ctx).SetUserPhoneVerified(ctx, userID, phone, now); err != nil {
 		return nil, fmt.Errorf("marking phone verified: %w", err)
 	}
 
@@ -234,4 +333,82 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, 
 	s.logger.Info("phone_verified",
 		zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)))
 	return user, nil
+}
+
+// announcePhoneMoved records that previousID lost phone to another account
+// that proved it, and tells previousID's addresses. Best-effort: the move
+// has already happened.
+func (s *AuthService) announcePhoneMoved(ctx context.Context, previousID, phone string) {
+	s.audit.Log(ctx, audit.EventPhoneRemoved,
+		audit.WithActor(previousID), audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"phone": sms.Redact(phone), "reason": "verified_by_another_account"}))
+	s.logger.Info("phone_moved_to_another_account",
+		zap.String("user_id", previousID), zap.String("phone", sms.Redact(phone)))
+	previous, err := s.repo(ctx).GetUser(ctx, previousID)
+	if err != nil || previous == nil {
+		s.logger.Warn("phone_moved_notice_lookup_failed", zap.String("user_id", previousID), zap.Error(err))
+		return
+	}
+	held, err := s.repo(ctx).ListRecoveryEmails(ctx, previousID)
+	if err != nil {
+		s.logger.Warn("phone_moved_notice_lookup_failed", zap.String("user_id", previousID), zap.Error(err))
+	}
+	s.notifyAccountAddresses(ctx, previous, held, "", accountNotice{
+		op:       "phone_moved_notice",
+		headline: "Your phone number was removed from your account",
+		detail: fmt.Sprintf("The phone number %s was verified by another account, so it is no longer on yours. "+
+			"If the number is still yours, verify it again.", sms.Redact(phone)),
+	})
+}
+
+// ── RemovePhone ────────────────────────────────────────────────────────
+
+// RemovePhone clears the caller's phone number, freeing it for another
+// account where the project keeps numbers unique, and returns the updated
+// user. It does not depend on the project's switch or on a sender: a number
+// stored while verification was on stays its owner's to remove. A caller
+// with no number gets their user back unchanged. Refused, like a change of
+// number, while a hold is in force (RecoveryHoldError).
+func (s *AuthService) RemovePhone(ctx context.Context, userID string) (*User, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("%w: missing user id", ErrUnauthenticated)
+	}
+	user, err := s.repo(ctx).GetUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("looking up user: %w", err)
+	}
+	if user == nil {
+		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if user.PhoneNumber == "" {
+		return user, nil
+	}
+	held, err := s.repo(ctx).ListRecoveryEmails(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("listing recovery emails: %w", err)
+	}
+	if err := s.refuseDuringRecoveryHold(ctx, userID, held); err != nil {
+		return nil, err
+	}
+	phone := user.PhoneNumber
+	if err := s.repo(ctx).ReleasePhoneNumber(ctx, userID, s.nowMs()); err != nil {
+		return nil, fmt.Errorf("removing phone number: %w", err)
+	}
+	s.audit.Log(ctx, audit.EventPhoneRemoved,
+		audit.WithActor(userID), audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"phone": sms.Redact(phone), "reason": "removed_by_user"}))
+	s.logger.Info("phone_removed", zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)))
+	s.notifyAccountAddresses(ctx, user, held, "", accountNotice{
+		op:       "phone_removed_notice",
+		headline: "The phone number was removed from your account",
+		detail:   fmt.Sprintf("The phone number %s was removed from your account.", sms.Redact(phone)),
+	})
+	updated, err := s.repo(ctx).GetUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("looking up user: %w", err)
+	}
+	if updated == nil {
+		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	return updated, nil
 }
