@@ -1,5 +1,63 @@
 # Upgrade guide
 
+## Next — recovery emails: an account keeps additional addresses it has proved: `recovery_emails.enabled` per project (off by default; migration 0059; additive RPCs `RequestRecoveryEmail`, `VerifyRecoveryEmail`, `ListRecoveryEmails`, `RemoveRecoveryEmail`; additive audit events `recovery_email_added`, `recovery_email_removed`; six `Repository` methods and one sweep (Go API))
+
+`User.recovery_email` is one unverified string nothing reads. An account can
+now keep a list of addresses it has proved it controls.
+
+- **Nothing changes until a project opts in.** `recovery_emails` in a project's
+  `config_json` is off by default: `RequestRecoveryEmail` and
+  `VerifyRecoveryEmail` answer `FAILED_PRECONDITION`. The block is
+  control-plane only: the env-configured default project has no `config_json`
+  and keeps none.
+
+  | Key | Default | Meaning |
+  | --- | --- | --- |
+  | `recovery_emails.enabled` | `false` | Lets a signed-in user add recovery emails. |
+  | `recovery_emails.max` | `5` (`0` selects it; at most `20`) | Recovery emails one account holds. |
+  | `recovery_emails.reauth_max_age_seconds` | `900` (`0` selects it; at most `3600`) | How recent a sign-in adding or removing an address needs. Cannot be turned off. |
+
+- **An address is stored only once proved.** `RequestRecoveryEmail` mails a
+  6-digit code (the passwordless code's lifetime and attempt cap,
+  `GATEWAY_PASSWORDLESS_CODE_*`) to the address; `VerifyRecoveryEmail` stores
+  it. The request answers the same whether or not another account holds the
+  address: that is told, as `ALREADY_EXISTS`, only to a caller whose code was
+  right. Past the cap both answer `RESOURCE_EXHAUSTED`. Each request is held to
+  `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS` per account and per address and to
+  `GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP`.
+- **One address, one account, per project.** An address that is an account's
+  recovery email cannot become any account's primary email: sign-up, an admin
+  or SCIM create or update, and a confirmed email change now answer
+  `ALREADY_EXISTS` for it (the code a sign-up proves the address with is
+  already spent by then). An address that is a primary email cannot be added
+  as a recovery email. Both directions hold under the same ASCII fold primary
+  emails use.
+- **Changes need a recent sign-in.** Adding and removing answer
+  `FAILED_PRECONDITION` with the stable `reauthentication_required` token when
+  the session's sign-in (`auth_time`) is older than the project's window: sign
+  the user in again and retry. Listing needs none. Anonymous accounts and
+  agents hold no recovery email.
+- **Every change is mailed.** An added address is announced to the account's
+  other addresses; a removal to those and to the removed address. The notice
+  uses the project's email branding.
+- **Turning it off keeps what is held.** Addresses already stored can still be
+  listed and removed, and still cannot be taken as a primary email.
+- **`User.recovery_email` is unchanged** and still unverified and unread. It is
+  not a recovery email in this sense; prefer the new RPCs.
+- **Migration 0059** adds `user_recovery_emails` and `recovery_email_codes`
+  (SQLite: 0028), both new and empty, under row-level security like every
+  data-plane table. On Postgres every write of `users.email` to a non-empty
+  address now runs in a short transaction that takes a per-address advisory
+  lock and reads `user_recovery_emails` once: that lock, shared with the
+  insert of a recovery email, is what keeps an address on one account across
+  the two tables.
+- **Go API.** `service.Repository` gains `UpsertRecoveryEmailCode`,
+  `FindRecoveryEmailCodeByUser`, `IncrementRecoveryEmailCodeAttempts`,
+  `ConsumeRecoveryEmailCode`, `AddRecoveryEmail`, `ListRecoveryEmails`,
+  `RemoveRecoveryEmail` and `DeleteExpiredRecoveryEmailCodes`; a custom driver
+  must implement them and refuse a recovery email in `CreateUser`,
+  `UpdateUser` and `UpdateUserEmail` (the conformance suite checks both).
+
 ## Next — an invite project can let a tenant invitation create the invitee's account: `access.admit_tenant_invitations` and `GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS` (off by default; migration 0058; additive audit event `signup_admitted_by_invitation`; `InvitationStore.OpenInvitationForEmail`, `AuthService.WithOpenInvitations` (Go API))
 
 A tenant invitation is accepted by a signed-in account, but an `invite` project

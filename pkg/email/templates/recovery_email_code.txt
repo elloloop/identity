@@ -1,0 +1,12 @@
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Someone asked to add this address to an account as a recovery email. Enter this code there to confirm it:
+
+{{.Code}}
+
+The code expires in {{.ExpiresIn}}.
+
+If you didn't ask for this, ignore this email and share the code with no one: without it the address is not added.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}

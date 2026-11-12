@@ -38,6 +38,13 @@ const (
 	// merged into another: to the retired account's address (Retired true)
 	// and to the survivor's, each naming only the recipient's own account.
 	TemplateAccountMerged = "account_merged"
+	// TemplateRecoveryEmailCode carries the 6-digit code that proves an
+	// address before it is kept as an account's recovery email.
+	TemplateRecoveryEmailCode = "recovery_email_code"
+	// TemplateAccountNotice is the security notice sent to an account's
+	// addresses when its recovery settings change. Headline is the subject
+	// and Detail one plain sentence saying what changed.
+	TemplateAccountNotice = "account_notice"
 )
 
 // Render returns the HTML and plain-text bodies for the given template name,

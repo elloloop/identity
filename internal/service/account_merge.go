@@ -413,6 +413,13 @@ const authTimeClockSkew = 30 * time.Second
 // seconds) is within GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS of now. A
 // session with no recorded sign-in time, or one in the future, is not.
 func (s *AuthService) recentlyAuthenticated(authTimeSec int64) bool {
+	return s.signedInWithin(authTimeSec, s.cfg.AccountMergeReauthMaxAge())
+}
+
+// signedInWithin reports whether a session's sign-in (the access token's
+// auth_time, in epoch seconds; 0 when no sign-in opened the session) is at
+// most maxAge old.
+func (s *AuthService) signedInWithin(authTimeSec int64, maxAge time.Duration) bool {
 	if authTimeSec <= 0 {
 		return false
 	}
@@ -420,5 +427,5 @@ func (s *AuthService) recentlyAuthenticated(authTimeSec int64) bool {
 	// sign-in stamped by a replica whose clock runs slightly ahead is still a
 	// sign-in; anything further in the future is not.
 	age := s.nowMs()/1000 - authTimeSec
-	return age >= -int64(authTimeClockSkew.Seconds()) && age <= int64(s.cfg.AccountMergeReauthMaxAge().Seconds())
+	return age >= -int64(authTimeClockSkew.Seconds()) && age <= int64(maxAge.Seconds())
 }

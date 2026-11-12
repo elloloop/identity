@@ -3935,6 +3935,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ListProjectAuthDomainsResponse'
+  /identity.v1.IdentityService/ListRecoveryEmails:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListRecoveryEmails
+      operationId: identity.v1.IdentityService.ListRecoveryEmails
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListRecoveryEmailsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListRecoveryEmailsResponse'
   /identity.v1.IdentityService/ListTenantDomains:
     post:
       tags:
@@ -4808,6 +4843,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RemoveGroupMemberResponse'
+  /identity.v1.IdentityService/RemoveRecoveryEmail:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RemoveRecoveryEmail
+      operationId: identity.v1.IdentityService.RemoveRecoveryEmail
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RemoveRecoveryEmailRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RemoveRecoveryEmailResponse'
   /identity.v1.IdentityService/RemoveTenantMember:
     post:
       tags:
@@ -5071,6 +5141,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RequestPhoneVerificationResponse'
+  /identity.v1.IdentityService/RequestRecoveryEmail:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RequestRecoveryEmail
+      description: |-
+        Recovery emails — additional addresses the authenticated caller has
+         proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+         address another account of the project holds and RESOURCE_EXHAUSTED past
+         the project's cap; a project that has not turned the feature on refuses
+         RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
+         while addresses already kept can still be listed and removed. Adding or
+         removing an address mails a notice to the account's other addresses, and
+         a removal to the removed address too.
+      operationId: identity.v1.IdentityService.RequestRecoveryEmail
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RequestRecoveryEmailRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RequestRecoveryEmailResponse'
   /identity.v1.IdentityService/ResetUserPassword:
     post:
       tags:
@@ -6501,6 +6615,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.VerifyProjectAuthDomainResponse'
+  /identity.v1.IdentityService/VerifyRecoveryEmail:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: VerifyRecoveryEmail
+      operationId: identity.v1.IdentityService.VerifyRecoveryEmail
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.VerifyRecoveryEmailRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.VerifyRecoveryEmailResponse'
   /identity.v1.IdentityService/VerifyTotp:
     post:
       tags:
@@ -10212,6 +10361,21 @@ components:
           title: domains
       title: ListProjectAuthDomainsResponse
       additionalProperties: false
+    identity.v1.ListRecoveryEmailsRequest:
+      type: object
+      title: ListRecoveryEmailsRequest
+      additionalProperties: false
+    identity.v1.ListRecoveryEmailsResponse:
+      type: object
+      properties:
+        recoveryEmails:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.RecoveryEmail'
+          title: recovery_emails
+          description: oldest first
+      title: ListRecoveryEmailsResponse
+      additionalProperties: false
     identity.v1.ListTenantDomainsRequest:
       type: object
       properties:
@@ -11300,6 +11464,22 @@ components:
       type: object
       title: ReactivateUserResponse
       additionalProperties: false
+    identity.v1.RecoveryEmail:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+        verifiedAt:
+          type:
+            - integer
+            - string
+          title: verified_at
+          format: int64
+          description: epoch ms the address was proved
+      title: RecoveryEmail
+      additionalProperties: false
+      description: RecoveryEmail is one verified recovery address of an account.
     identity.v1.RedeemMagicLinkRequest:
       type: object
       properties:
@@ -11621,6 +11801,25 @@ components:
       type: object
       title: RemoveGroupMemberResponse
       additionalProperties: false
+    identity.v1.RemoveRecoveryEmailRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+      title: RemoveRecoveryEmailRequest
+      additionalProperties: false
+    identity.v1.RemoveRecoveryEmailResponse:
+      type: object
+      properties:
+        recoveryEmails:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.RecoveryEmail'
+          title: recovery_emails
+          description: what is left, oldest first
+      title: RemoveRecoveryEmailResponse
+      additionalProperties: false
     identity.v1.RemoveTenantMemberRequest:
       type: object
       properties:
@@ -11767,6 +11966,23 @@ components:
       title: RequestPhoneVerificationResponse
       additionalProperties: false
       description: 'Empty: the code is delivered out of band via SMS.'
+    identity.v1.RequestRecoveryEmailRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+          description: the address to add
+      title: RequestRecoveryEmailRequest
+      additionalProperties: false
+    identity.v1.RequestRecoveryEmailResponse:
+      type: object
+      title: RequestRecoveryEmailResponse
+      additionalProperties: false
+      description: |-
+        Empty, and the same whether or not the address is free: the code is
+         mailed to the address, and an address another account holds is refused
+         only by VerifyRecoveryEmail, to whoever proves they control it.
     identity.v1.ResetUserPasswordRequest:
       type: object
       properties:
@@ -13224,6 +13440,30 @@ components:
           title: domain
           $ref: '#/components/schemas/identity.v1.ProjectAuthDomain'
       title: VerifyProjectAuthDomainResponse
+      additionalProperties: false
+    identity.v1.VerifyRecoveryEmailRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+          description: must match the address the code was sent to
+        code:
+          type: string
+          title: code
+          description: the 6-digit code from the email
+      title: VerifyRecoveryEmailRequest
+      additionalProperties: false
+    identity.v1.VerifyRecoveryEmailResponse:
+      type: object
+      properties:
+        recoveryEmails:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.RecoveryEmail'
+          title: recovery_emails
+          description: the account's addresses, oldest first
+      title: VerifyRecoveryEmailResponse
       additionalProperties: false
     identity.v1.VerifyTotpRequest:
       type: object

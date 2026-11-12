@@ -71,7 +71,8 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeUnavailable, err)
 
 	case errors.Is(err, service.ErrAlreadyExists),
-		errors.Is(err, service.ErrPhoneAlreadyVerified):
+		errors.Is(err, service.ErrPhoneAlreadyVerified),
+		errors.Is(err, service.ErrRecoveryEmailTaken):
 		return connect.NewError(connect.CodeAlreadyExists, err)
 
 	case errors.Is(err, service.ErrUnauthenticated),
@@ -81,6 +82,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrEmailLoginCodeInvalid),
 		errors.Is(err, service.ErrMagicLinkInvalid),
 		errors.Is(err, service.ErrPhoneCodeInvalid),
+		errors.Is(err, service.ErrRecoveryEmailCodeInvalid),
 		errors.Is(err, service.ErrNativeTokenReplayed),
 		errors.Is(err, service.ErrParentalConsentStepUpFailed):
 		return connect.NewError(connect.CodeUnauthenticated, err)
@@ -100,7 +102,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrInvitationResendTooSoon),
 		errors.Is(err, service.ErrInviterLimited),
 		errors.Is(err, service.ErrInvitationRecipientLimited),
-		errors.Is(err, service.ErrDomainAttemptsLimited):
+		errors.Is(err, service.ErrDomainAttemptsLimited),
+		errors.Is(err, service.ErrRecoveryEmailLimit):
 		// CodeResourceExhausted: lockout is a per-account quota of failed
 		// attempts. ResourceExhausted matches gRPC's documented semantics
 		// for "the resource is exhausted" / rate-limit-style failures and
@@ -138,6 +141,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrTeammateKeysDisabled),
 		errors.Is(err, service.ErrTeammateKeyConflict),
 		errors.Is(err, service.ErrReauthenticationRequired),
+		errors.Is(err, service.ErrRecoveryReauthenticationRequired),
+		errors.Is(err, service.ErrRecoveryEmailsDisabled),
 		errors.Is(err, service.ErrAccountKindOff),
 		errors.Is(err, service.ErrPasskeySignupDisabled),
 		errors.Is(err, service.ErrNativeOAuthDisabled),

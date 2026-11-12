@@ -55,6 +55,10 @@ const (
 	IdentityService_RefreshAssuranceToken_FullMethodName             = "/identity.v1.IdentityService/RefreshAssuranceToken"
 	IdentityService_RequestPhoneVerification_FullMethodName          = "/identity.v1.IdentityService/RequestPhoneVerification"
 	IdentityService_VerifyPhoneCode_FullMethodName                   = "/identity.v1.IdentityService/VerifyPhoneCode"
+	IdentityService_RequestRecoveryEmail_FullMethodName              = "/identity.v1.IdentityService/RequestRecoveryEmail"
+	IdentityService_VerifyRecoveryEmail_FullMethodName               = "/identity.v1.IdentityService/VerifyRecoveryEmail"
+	IdentityService_ListRecoveryEmails_FullMethodName                = "/identity.v1.IdentityService/ListRecoveryEmails"
+	IdentityService_RemoveRecoveryEmail_FullMethodName               = "/identity.v1.IdentityService/RemoveRecoveryEmail"
 	IdentityService_GetCurrentUser_FullMethodName                    = "/identity.v1.IdentityService/GetCurrentUser"
 	IdentityService_RefreshToken_FullMethodName                      = "/identity.v1.IdentityService/RefreshToken"
 	IdentityService_Logout_FullMethodName                            = "/identity.v1.IdentityService/Logout"
@@ -259,6 +263,18 @@ type IdentityServiceClient interface {
 	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(ctx context.Context, in *RequestPhoneVerificationRequest, opts ...grpc.CallOption) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(ctx context.Context, in *VerifyPhoneCodeRequest, opts ...grpc.CallOption) (*VerifyPhoneCodeResponse, error)
+	// Recovery emails — additional addresses the authenticated caller has
+	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+	// address another account of the project holds and RESOURCE_EXHAUSTED past
+	// the project's cap; a project that has not turned the feature on refuses
+	// RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
+	// while addresses already kept can still be listed and removed. Adding or
+	// removing an address mails a notice to the account's other addresses, and
+	// a removal to the removed address too.
+	RequestRecoveryEmail(ctx context.Context, in *RequestRecoveryEmailRequest, opts ...grpc.CallOption) (*RequestRecoveryEmailResponse, error)
+	VerifyRecoveryEmail(ctx context.Context, in *VerifyRecoveryEmailRequest, opts ...grpc.CallOption) (*VerifyRecoveryEmailResponse, error)
+	ListRecoveryEmails(ctx context.Context, in *ListRecoveryEmailsRequest, opts ...grpc.CallOption) (*ListRecoveryEmailsResponse, error)
+	RemoveRecoveryEmail(ctx context.Context, in *RemoveRecoveryEmailRequest, opts ...grpc.CallOption) (*RemoveRecoveryEmailResponse, error)
 	// Session / Token Auth
 	GetCurrentUser(ctx context.Context, in *GetCurrentUserRequest, opts ...grpc.CallOption) (*GetCurrentUserResponse, error)
 	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error)
@@ -1228,6 +1244,46 @@ func (c *identityServiceClient) VerifyPhoneCode(ctx context.Context, in *VerifyP
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(VerifyPhoneCodeResponse)
 	err := c.cc.Invoke(ctx, IdentityService_VerifyPhoneCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RequestRecoveryEmail(ctx context.Context, in *RequestRecoveryEmailRequest, opts ...grpc.CallOption) (*RequestRecoveryEmailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestRecoveryEmailResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RequestRecoveryEmail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) VerifyRecoveryEmail(ctx context.Context, in *VerifyRecoveryEmailRequest, opts ...grpc.CallOption) (*VerifyRecoveryEmailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyRecoveryEmailResponse)
+	err := c.cc.Invoke(ctx, IdentityService_VerifyRecoveryEmail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListRecoveryEmails(ctx context.Context, in *ListRecoveryEmailsRequest, opts ...grpc.CallOption) (*ListRecoveryEmailsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRecoveryEmailsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListRecoveryEmails_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RemoveRecoveryEmail(ctx context.Context, in *RemoveRecoveryEmailRequest, opts ...grpc.CallOption) (*RemoveRecoveryEmailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveRecoveryEmailResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RemoveRecoveryEmail_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2651,6 +2707,18 @@ type IdentityServiceServer interface {
 	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *RequestPhoneVerificationRequest) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error)
+	// Recovery emails — additional addresses the authenticated caller has
+	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+	// address another account of the project holds and RESOURCE_EXHAUSTED past
+	// the project's cap; a project that has not turned the feature on refuses
+	// RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
+	// while addresses already kept can still be listed and removed. Adding or
+	// removing an address mails a notice to the account's other addresses, and
+	// a removal to the removed address too.
+	RequestRecoveryEmail(context.Context, *RequestRecoveryEmailRequest) (*RequestRecoveryEmailResponse, error)
+	VerifyRecoveryEmail(context.Context, *VerifyRecoveryEmailRequest) (*VerifyRecoveryEmailResponse, error)
+	ListRecoveryEmails(context.Context, *ListRecoveryEmailsRequest) (*ListRecoveryEmailsResponse, error)
+	RemoveRecoveryEmail(context.Context, *RemoveRecoveryEmailRequest) (*RemoveRecoveryEmailResponse, error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error)
 	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error)
@@ -3373,6 +3441,18 @@ func (UnimplementedIdentityServiceServer) RequestPhoneVerification(context.Conte
 }
 func (UnimplementedIdentityServiceServer) VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VerifyPhoneCode not implemented")
+}
+func (UnimplementedIdentityServiceServer) RequestRecoveryEmail(context.Context, *RequestRecoveryEmailRequest) (*RequestRecoveryEmailResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestRecoveryEmail not implemented")
+}
+func (UnimplementedIdentityServiceServer) VerifyRecoveryEmail(context.Context, *VerifyRecoveryEmailRequest) (*VerifyRecoveryEmailResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyRecoveryEmail not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListRecoveryEmails(context.Context, *ListRecoveryEmailsRequest) (*ListRecoveryEmailsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRecoveryEmails not implemented")
+}
+func (UnimplementedIdentityServiceServer) RemoveRecoveryEmail(context.Context, *RemoveRecoveryEmailRequest) (*RemoveRecoveryEmailResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveRecoveryEmail not implemented")
 }
 func (UnimplementedIdentityServiceServer) GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCurrentUser not implemented")
@@ -4444,6 +4524,78 @@ func _IdentityService_VerifyPhoneCode_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).VerifyPhoneCode(ctx, req.(*VerifyPhoneCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RequestRecoveryEmail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestRecoveryEmailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RequestRecoveryEmail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RequestRecoveryEmail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RequestRecoveryEmail(ctx, req.(*RequestRecoveryEmailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_VerifyRecoveryEmail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyRecoveryEmailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).VerifyRecoveryEmail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_VerifyRecoveryEmail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).VerifyRecoveryEmail(ctx, req.(*VerifyRecoveryEmailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListRecoveryEmails_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRecoveryEmailsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListRecoveryEmails(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListRecoveryEmails_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListRecoveryEmails(ctx, req.(*ListRecoveryEmailsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RemoveRecoveryEmail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveRecoveryEmailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RemoveRecoveryEmail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RemoveRecoveryEmail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RemoveRecoveryEmail(ctx, req.(*RemoveRecoveryEmailRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -7028,6 +7180,22 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VerifyPhoneCode",
 			Handler:    _IdentityService_VerifyPhoneCode_Handler,
+		},
+		{
+			MethodName: "RequestRecoveryEmail",
+			Handler:    _IdentityService_RequestRecoveryEmail_Handler,
+		},
+		{
+			MethodName: "VerifyRecoveryEmail",
+			Handler:    _IdentityService_VerifyRecoveryEmail_Handler,
+		},
+		{
+			MethodName: "ListRecoveryEmails",
+			Handler:    _IdentityService_ListRecoveryEmails_Handler,
+		},
+		{
+			MethodName: "RemoveRecoveryEmail",
+			Handler:    _IdentityService_RemoveRecoveryEmail_Handler,
 		},
 		{
 			MethodName: "GetCurrentUser",

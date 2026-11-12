@@ -155,6 +155,12 @@ const (
 	EventPhoneVerificationRequested EventType = "phone_verification_requested"
 	EventPhoneVerified              EventType = "phone_verified"
 
+	// EventRecoveryEmailAdded and EventRecoveryEmailRemoved record a proved
+	// recovery email being stored on, or removed from, the actor's account.
+	// The details carry the address redacted.
+	EventRecoveryEmailAdded   EventType = "recovery_email_added"
+	EventRecoveryEmailRemoved EventType = "recovery_email_removed"
+
 	// EventIdentityLinked records a provider identity being attached to a
 	// user — both implicit login-time auto-linking and the self-service
 	// LinkIdentity RPC. EventIdentityUnlinked records a link removed: a
@@ -486,6 +492,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventAdminHelpResolved:             {},
 	EventPhoneVerificationRequested:    {},
 	EventPhoneVerified:                 {},
+	EventRecoveryEmailAdded:            {},
+	EventRecoveryEmailRemoved:          {},
 	EventPlatformAdminBootstrapBlocked: {},
 	EventIdentityLinked:                {},
 	EventIdentityUnlinked:              {},

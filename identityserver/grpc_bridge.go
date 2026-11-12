@@ -888,6 +888,22 @@ func (b *grpcBridge) JoinTenantByDomain(ctx context.Context, in *identitypb.Join
 	return invoke(ctx, b, in, b.h.JoinTenantByDomain)
 }
 
+func (b *grpcBridge) RequestRecoveryEmail(ctx context.Context, in *identitypb.RequestRecoveryEmailRequest) (*identitypb.RequestRecoveryEmailResponse, error) {
+	return invoke(ctx, b, in, b.h.RequestRecoveryEmail)
+}
+
+func (b *grpcBridge) VerifyRecoveryEmail(ctx context.Context, in *identitypb.VerifyRecoveryEmailRequest) (*identitypb.VerifyRecoveryEmailResponse, error) {
+	return invoke(ctx, b, in, b.h.VerifyRecoveryEmail)
+}
+
+func (b *grpcBridge) ListRecoveryEmails(ctx context.Context, in *identitypb.ListRecoveryEmailsRequest) (*identitypb.ListRecoveryEmailsResponse, error) {
+	return invoke(ctx, b, in, b.h.ListRecoveryEmails)
+}
+
+func (b *grpcBridge) RemoveRecoveryEmail(ctx context.Context, in *identitypb.RemoveRecoveryEmailRequest) (*identitypb.RemoveRecoveryEmailResponse, error) {
+	return invoke(ctx, b, in, b.h.RemoveRecoveryEmail)
+}
+
 func (b *grpcBridge) RequestPhoneVerification(ctx context.Context, in *identitypb.RequestPhoneVerificationRequest) (*identitypb.RequestPhoneVerificationResponse, error) {
 	return invoke(ctx, b, in, b.h.RequestPhoneVerification)
 }

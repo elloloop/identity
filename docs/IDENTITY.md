@@ -789,6 +789,23 @@ per-project `config_json` lives only in the Postgres control plane, and the
 default project's variable refuses to boot on memory or SQLite. See the
 multi-tenancy docs, "invited sign-up".
 
+## Recovery emails
+
+A project can let its accounts keep **recovery emails**: additional addresses
+the account has proved it controls (`recovery_emails.enabled`, off by
+default; a control-plane project's `config_json` only).
+
+- An address is stored only after the 6-digit code mailed to it is confirmed
+  (`RequestRecoveryEmail` then `VerifyRecoveryEmail`), so nothing unproved is
+  ever held.
+- Within a project an address belongs to one account, as its primary email or
+  as one of its recovery emails. The request never says whether an address is
+  taken; only a caller who proves the address learns it.
+- An account holds at most `recovery_emails.max` addresses (default 5).
+- Adding and removing need a sign-in within
+  `recovery_emails.reauth_max_age_seconds` (default 900), and every change is
+  mailed to the account's other addresses.
+
 ## Onboarding flows
 
 Every signup creates a `User` inside the resolved project's data plane,

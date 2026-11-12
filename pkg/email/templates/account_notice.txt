@@ -1,0 +1,10 @@
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Hi {{.UserName}},
+
+{{.Detail}}
+
+If this was you, there is nothing to do. If it was not, sign in and review your account, or contact support: your account may be compromised.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}

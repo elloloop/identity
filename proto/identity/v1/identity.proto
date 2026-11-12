@@ -693,6 +693,59 @@ message VerifyPhoneCodeResponse {
   User user = 1; // the updated user with phone_verified=true
 }
 
+// ─── Recovery emails ────────────────────────────────────────────────
+//
+// A recovery email is an additional address the authenticated caller
+// (identified by the access-token `sub`) has proved they control. An address
+// is stored only once the code mailed to it is confirmed, and within a project
+// it belongs to one account only: the primary address or a recovery address
+// of another account is refused. The project turns the feature on
+// (`recovery_emails.enabled`) and caps the addresses per account
+// (`recovery_emails.max`, default 5). All four RPCs require auth; the three
+// that change the list also need a sign-in within the project's
+// `recovery_emails.reauth_max_age_seconds` (default 900) and answer
+// FAILED_PRECONDITION with the stable `reauthentication_required` token
+// otherwise: sign the user in again and retry.
+
+// RecoveryEmail is one verified recovery address of an account.
+message RecoveryEmail {
+  string email = 1;
+  int64 verified_at = 2; // epoch ms the address was proved
+}
+
+message RequestRecoveryEmailRequest {
+  string email = 1; // the address to add
+}
+
+message RequestRecoveryEmailResponse {
+  // Empty, and the same whether or not the address is free: the code is
+  // mailed to the address, and an address another account holds is refused
+  // only by VerifyRecoveryEmail, to whoever proves they control it.
+}
+
+message VerifyRecoveryEmailRequest {
+  string email = 1; // must match the address the code was sent to
+  string code = 2; // the 6-digit code from the email
+}
+
+message VerifyRecoveryEmailResponse {
+  repeated RecoveryEmail recovery_emails = 1; // the account's addresses, oldest first
+}
+
+message ListRecoveryEmailsRequest {}
+
+message ListRecoveryEmailsResponse {
+  repeated RecoveryEmail recovery_emails = 1; // oldest first
+}
+
+message RemoveRecoveryEmailRequest {
+  string email = 1;
+}
+
+message RemoveRecoveryEmailResponse {
+  repeated RecoveryEmail recovery_emails = 1; // what is left, oldest first
+}
+
 // ─── Session / Token Auth ───────────────────────────────────────────
 
 message GetCurrentUserRequest {}
@@ -3414,6 +3467,19 @@ service IdentityService {
   // Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
   rpc RequestPhoneVerification(RequestPhoneVerificationRequest) returns (RequestPhoneVerificationResponse);
   rpc VerifyPhoneCode(VerifyPhoneCodeRequest) returns (VerifyPhoneCodeResponse);
+
+  // Recovery emails — additional addresses the authenticated caller has
+  // proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+  // address another account of the project holds and RESOURCE_EXHAUSTED past
+  // the project's cap; a project that has not turned the feature on refuses
+  // RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
+  // while addresses already kept can still be listed and removed. Adding or
+  // removing an address mails a notice to the account's other addresses, and
+  // a removal to the removed address too.
+  rpc RequestRecoveryEmail(RequestRecoveryEmailRequest) returns (RequestRecoveryEmailResponse);
+  rpc VerifyRecoveryEmail(VerifyRecoveryEmailRequest) returns (VerifyRecoveryEmailResponse);
+  rpc ListRecoveryEmails(ListRecoveryEmailsRequest) returns (ListRecoveryEmailsResponse);
+  rpc RemoveRecoveryEmail(RemoveRecoveryEmailRequest) returns (RemoveRecoveryEmailResponse);
 
   // Session / Token Auth
   rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
