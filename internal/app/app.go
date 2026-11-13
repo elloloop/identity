@@ -320,6 +320,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	signupLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0)
 	loginLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0)
 	domainLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitDomainPerIP, 0)
+	// Adding and removing a recovery email share one budget, and requesting a
+	// phone code and removing the phone another: each is the surface's
+	// budget. A removal that ends sessions clears the session cache, so one
+	// source must not be able to ask for removals without bound.
+	recoveryEmailLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0)
+	phoneLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0)
 	limits := []middleware.PathLimit{
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
@@ -366,7 +372,11 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// budget the size of the passwordless code's (a per-account and
 			// a per-address cooldown are the second layer).
 			PathPrefix: "/identity.v1.IdentityService/RequestRecoveryEmail", Tag: "recovery_email",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
+			Limiter: recoveryEmailLimiter,
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/RemoveRecoveryEmail", Tag: "recovery_email",
+			Limiter: recoveryEmailLimiter,
 		},
 		{
 			// Recovery-email code check: each call is a guess at a 6-digit
@@ -380,7 +390,11 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// sends an SMS, so a tight per-IP quota bounds cost/abuse (the
 			// per-user cooldown is the second layer).
 			PathPrefix: "/identity.v1.IdentityService/RequestPhoneVerification", Tag: "phone_verify",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0),
+			Limiter: phoneLimiter,
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/RemovePhone", Tag: "phone_verify",
+			Limiter: phoneLimiter,
 		},
 		{
 			// IDV session begin: authenticated, but every admitted call opens

@@ -147,7 +147,9 @@ curl -sX POST http://localhost/identity.v1.IdentityService/VerifyPhoneCode \\
     unchanged. It works whether or not the project verifies phones, mails the
     account's addresses, audits <code>phone_removed</code>
     (<code>reason: removed_by_user</code>), and is refused during a recovery
-    hold like a change of number.
+    hold like a change of number. It spends the per-IP budget
+    <code>RequestPhoneVerification</code> does
+    (<code>GATEWAY_RATE_LIMIT_PHONE_PER_IP</code>).
   </p>
 
   <h2 id="unique">One account per number</h2>

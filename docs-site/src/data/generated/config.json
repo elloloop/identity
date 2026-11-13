@@ -1615,7 +1615,7 @@
     "type": "integer",
     "default": "5",
     "required": false,
-    "description": "is the per-IP cap per window on RequestEmailLoginCode + RequestMagicLink, and the size of the separate budgets RequestRecoveryEmail and VerifyRecoveryEmail each get.",
+    "description": "is the per-IP cap per window on RequestEmailLoginCode and on RequestMagicLink, each its own budget, and the size of two more: one RequestRecoveryEmail and RemoveRecoveryEmail share, and VerifyRecoveryEmail's.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },
@@ -1624,7 +1624,7 @@
     "type": "integer",
     "default": "5",
     "required": false,
-    "description": "is the per-IP cap per window on RequestPhoneVerification.",
+    "description": "is the per-IP cap per window on RequestPhoneVerification and RemovePhone, one budget for both.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },

@@ -648,3 +648,37 @@ func TestBuildRateLimits_TenantDomainLimited(t *testing.T) {
 		require.True(t, pl.Allow("198.51.100.9", now), "a zero quota admits attempt %d", i+1)
 	}
 }
+
+// Removing a recovery email spends the budget adding one does, and removing
+// the phone the budget requesting a phone code does: a removal that ends
+// sessions clears the session cache, so one source cannot loop on it.
+func TestBuildRateLimits_RemovalsShareTheirSurfacesBudget(t *testing.T) {
+	cfg := &config.Config{
+		RateLimitWindowSeconds:     60,
+		RateLimitPasswordlessPerIP: 2,
+		RateLimitPhonePerIP:        2,
+		RateLimitSignupPerIP:       10,
+		RateLimitLoginPerIP:        30,
+		RateLimitResetPerIP:        5,
+		RateLimitVerifyPerIP:       20,
+	}
+	handler := middleware.RateLimitMiddleware(buildRateLimits(cfg), nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	call := func(path string) int {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "9.9.9.9")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	for request, remove := range map[string]string{
+		"/identity.v1.IdentityService/RequestRecoveryEmail":     "/identity.v1.IdentityService/RemoveRecoveryEmail",
+		"/identity.v1.IdentityService/RequestPhoneVerification": "/identity.v1.IdentityService/RemovePhone",
+	} {
+		assert.Equal(t, http.StatusOK, call(request), request)
+		assert.Equal(t, http.StatusOK, call(remove), remove)
+		assert.Equal(t, http.StatusTooManyRequests, call(remove), "%s after %s spent the budget", remove, request)
+		assert.Equal(t, http.StatusTooManyRequests, call(request), "%s after %s spent the budget", request, remove)
+	}
+}

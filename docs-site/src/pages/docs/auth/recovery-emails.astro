@@ -121,9 +121,10 @@ import { Code } from "astro-expressive-code/components";
     <code>GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS</code>), and every guess,
     right or wrong, counts against the cap. Requests are held to
     <code>GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS</code> per account and per
-    address, and <code>RequestRecoveryEmail</code> and
-    <code>VerifyRecoveryEmail</code> each to their own per-IP budget of
-    <code>GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP</code>.
+    address. <code>RequestRecoveryEmail</code> and
+    <code>RemoveRecoveryEmail</code> share one per-IP budget of
+    <code>GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP</code>, and
+    <code>VerifyRecoveryEmail</code> has its own of that size.
   </p>
 
   <h3>One address, one account</h3>

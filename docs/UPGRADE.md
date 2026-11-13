@@ -1,5 +1,19 @@
 # Upgrade guide
 
+## Next — removing a recovery email or the phone is rate-limited per IP, and a removal that changes nothing keeps the session cache (behaviour change; no migration; no configuration)
+
+- **`RemoveRecoveryEmail` spends the per-IP budget `RequestRecoveryEmail`
+  does** (`GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP`, one budget for the two),
+  and **`RemovePhone` the one `RequestPhoneVerification` does**
+  (`GATEWAY_RATE_LIMIT_PHONE_PER_IP`). Past it they answer
+  `RESOURCE_EXHAUSTED` like any limited RPC.
+- **Under `GATEWAY_REVOCATION_MODE=session`, a removal of an address the
+  account does not hold, and a merge refused before it writes (a conflict, or
+  past `recovery_emails.max`), no longer empty the replica's session cache.**
+  They ended no session; emptying the cache sent every other session to the
+  database on its next request, which anyone signed in could repeat. A write
+  that fails after it may have committed still clears it.
+
 ## Next — an admin RPC does not reset the caller's own password or merge another account into it (behaviour change; no migration; `service.ErrAdminOwnAccount` (Go API))
 
 An admin RPC asks for no password and no recent sign-in, and does not hold a

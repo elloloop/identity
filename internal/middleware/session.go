@@ -317,13 +317,17 @@ func (c *SessionCache) InvalidateAll() {
 // call that ends sessions also invalidates the in-process cache. Wiring
 // sits in internal/app/app.go so the wrap only happens in `mode=session`.
 //
-// Each call invalidates after the write returns, error or not: a lookup
-// that misses the cache while the write is in flight may read the row
-// before the write commits, and an entry invalidated before the write
-// would then be refilled as active for a whole TTL. A lookup still
-// filling when the invalidation lands writes into an entry the map no
-// longer holds, so the next request reads the store. A failed write
-// costs one extra cache miss.
+// Each call invalidates after the write returns: a lookup that misses the
+// cache while the write is in flight may read the row before the write
+// commits, and an entry invalidated before the write would then be
+// refilled as active for a whole TTL. A lookup still filling when the
+// invalidation lands writes into an entry the map no longer holds, so the
+// next request reads the store. A write that failed may still have
+// committed, so it invalidates too; one the driver refused before writing
+// anything (an address the account does not hold, a merge that conflicts
+// or would pass the cap) ended no session and does not. That matters for
+// the calls that clear the whole cache: a refusal anyone can repeat must
+// not empty it and send every other session to the store.
 type RevokingSessionRepository struct {
 	service.Repository
 	cache *SessionCache
@@ -360,17 +364,26 @@ func (r *RevokingSessionRepository) RevokeSessionsForUser(ctx context.Context, u
 }
 
 // RemoveRecoveryEmail revokes the sessions the address opened along with
-// it, inside the driver's transaction, so it drops every cached entry.
+// it, inside the driver's transaction, so it drops every cached entry,
+// unless the account holds no such address and nothing was written.
 func (r *RevokingSessionRepository) RemoveRecoveryEmail(ctx context.Context, userID, email string, atMs int64) (int, error) {
-	defer r.cache.InvalidateAll()
-	return r.Repository.RemoveRecoveryEmail(ctx, userID, email, atMs)
+	ended, err := r.Repository.RemoveRecoveryEmail(ctx, userID, email, atMs)
+	if !errors.Is(err, service.ErrNotFound) {
+		r.cache.InvalidateAll()
+	}
+	return ended, err
 }
 
 // ApplyAccountMerge revokes the retired account's sessions inside the
-// driver's transaction, so it drops every cached entry.
+// driver's transaction, so it drops every cached entry, unless the driver
+// refused the merge (ErrMergeConflict, ErrRecoveryEmailLimit) and nothing
+// was written.
 func (r *RevokingSessionRepository) ApplyAccountMerge(ctx context.Context, m service.AccountMerge) error {
-	defer r.cache.InvalidateAll()
-	return r.Repository.ApplyAccountMerge(ctx, m)
+	err := r.Repository.ApplyAccountMerge(ctx, m)
+	if !errors.Is(err, service.ErrMergeConflict) && !errors.Is(err, service.ErrRecoveryEmailLimit) {
+		r.cache.InvalidateAll()
+	}
+	return err
 }
 
 // SessionAuthMiddleware verifies JWT Bearer tokens AND consults the

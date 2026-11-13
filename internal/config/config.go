@@ -1285,8 +1285,9 @@ type Config struct {
 	// RateLimitVerifyPerIP is the per-IP request cap per window on the verification endpoints.
 	RateLimitVerifyPerIP int
 	// RateLimitPasswordlessPerIP is the per-IP cap per window on
-	// RequestEmailLoginCode + RequestMagicLink, and the size of the separate
-	// budgets RequestRecoveryEmail and VerifyRecoveryEmail each get.
+	// RequestEmailLoginCode and on RequestMagicLink, each its own budget, and
+	// the size of two more: one RequestRecoveryEmail and RemoveRecoveryEmail
+	// share, and VerifyRecoveryEmail's.
 	RateLimitPasswordlessPerIP int
 	// RateLimitAssurancePerIP is the per-IP request cap per window on the
 	// client-assurance endpoints. These are unauthenticated and each
@@ -1297,7 +1298,8 @@ type Config struct {
 	// anonymous caller drive third-party quota, storage and outbound
 	// amplification.
 	RateLimitAssurancePerIP int
-	// RateLimitPhonePerIP is the per-IP cap per window on RequestPhoneVerification.
+	// RateLimitPhonePerIP is the per-IP cap per window on
+	// RequestPhoneVerification and RemovePhone, one budget for both.
 	RateLimitPhonePerIP int
 	// RateLimitInvitationPerIP is the per-IP cap per window on
 	// CreateTenantInvitation, where every admitted call sends an email. 0
