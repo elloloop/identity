@@ -343,6 +343,48 @@ func TestApproveQrLogin_AnUnvouchedSessionIsRefusedDuringAHold(t *testing.T) {
 	}
 }
 
+// removedOnMarkRepo removes addr from its account right after a sign-in by
+// it is marked, as the owner's RemoveRecoveryEmail landing between the two
+// would.
+type removedOnMarkRepo struct {
+	*fakeRepo
+	addr string
+}
+
+func (r removedOnMarkRepo) WithProject(string) Repository { return r }
+
+func (r removedOnMarkRepo) MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs, holdMs int64) error {
+	if err := r.fakeRepo.MarkRecoveryEmailSignIn(ctx, userID, email, atMs, holdMs); err != nil {
+		return err
+	}
+	_, err := r.fakeRepo.RemoveRecoveryEmail(ctx, userID, r.addr, atMs)
+	return err
+}
+
+// An address the owner removes while its sign-in is being opened ends that
+// sign-in: it is refused, holds nothing, and no notice goes out about a hold
+// that is not in force.
+func TestRecoveryEmailSignIn_AddressRemovedMidSignInSendsNoNotice(t *testing.T) {
+	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
+	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	f.add(t, user, "spare@example.net")
+	f.svc.defaultRepo = removedOnMarkRepo{fakeRepo: f.repo, addr: "spare@example.net"}
+
+	if err := f.svc.RequestEmailLoginCode(f.ctx, "spare@example.net"); err != nil {
+		t.Fatalf("RequestEmailLoginCode: %v", err)
+	}
+	code, sent := f.codeMailedTo(t, "spare@example.net"), f.mailer.count()
+	if _, err := f.svc.VerifyEmailLoginCode(f.ctx, "spare@example.net", code, "203.0.113.7", "test-agent"); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("sign-in by an address removed as it was opened = %v, want ErrUnauthenticated", err)
+	}
+	if n := f.mailer.count() - sent; n != 0 {
+		t.Fatalf("%d messages after the refused sign-in, want none: %#v", n, f.mailedTo("owner@example.com"))
+	}
+	if until := f.holdUntil(t, user.ID); until != 0 {
+		t.Fatalf("hold after the refused sign-in = %d, want 0", until)
+	}
+}
+
 // sessionRevokedAt is when the access session of accessToken was revoked, 0
 // while it is live.
 func (f *recoveryEmailFixture) sessionRevokedAt(t *testing.T, accessToken string) int64 {
