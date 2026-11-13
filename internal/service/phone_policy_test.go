@@ -100,9 +100,9 @@ func TestPhone_OnlyTheProjectsCountriesAreSentACode(t *testing.T) {
 	require.ErrorIs(t, err, ErrPhoneCountryNotAllowed)
 	assert.Zero(t, f.sms.count(), "a refused country costs no message")
 
-	user, err := f.verify(t, id, "+919876543210")
+	user, err := f.verify(t, id, "+447700900123")
 	require.NoError(t, err)
-	assert.Equal(t, "+919876543210", user.PhoneNumber)
+	assert.Equal(t, "+447700900123", user.PhoneNumber)
 }
 
 func TestPhone_ChannelsAreTriedInTheProjectsOrder(t *testing.T) {
@@ -345,8 +345,8 @@ func TestProjectPhoneConfig_Validate(t *testing.T) {
 }
 
 func TestHasCallingCode(t *testing.T) {
-	assert.True(t, hasCallingCode("+919876543210", nil), "no list accepts every country")
-	assert.True(t, hasCallingCode("+919876543210", []string{"44", "91"}))
+	assert.True(t, hasCallingCode("+447700900123", nil), "no list accepts every country")
+	assert.True(t, hasCallingCode("+447700900123", []string{"44", "91"}))
 	assert.False(t, hasCallingCode("+14155550123", []string{"44", "91"}))
 	assert.False(t, hasCallingCode("+9", []string{"91"}))
 }
