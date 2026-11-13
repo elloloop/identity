@@ -336,7 +336,9 @@ func TestMergeUsers_RefusesTheAdminsOwnAccountAndKeepsTOTPPasswords(t *testing.T
 	ctx := accountsScope(t, "accounts.example.test")
 
 	_, err := svc.MergeUsers(ctx, "admin-1", "someone", "admin-1", false)
-	require.ErrorIs(t, err, ErrMergeRefused)
+	require.ErrorIs(t, err, ErrMergeRefused, "the admin's account is not merged away")
+	_, err = svc.MergeUsers(ctx, "admin-1", "admin-1", "someone", false)
+	require.ErrorIs(t, err, ErrMergeRefused, "nor is another merged into it")
 
 	survivor := seedUser(repo, "a@mail.example.com", "", StatusActive)
 	other := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)

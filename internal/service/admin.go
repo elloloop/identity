@@ -104,6 +104,15 @@ func (s *AdminService) requireAdmin(ctx context.Context, actorID string) (*User,
 	return requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID)
 }
 
+// ErrAdminOwnAccount is returned when an admin asks an admin RPC to delete or
+// deactivate their own account, or to reset its password. An admin changes
+// their own password with ChangePassword or the reset email, and deletes
+// their own account with DeleteMyAccount: those hold a session a recovery
+// email opened as they hold any account's, and an admin RPC would not, so a
+// recovery mailbox behind an admin's account would get a way in no recovery
+// email marks. Mapped to CodePermissionDenied.
+var ErrAdminOwnAccount = errors.New("an admin cannot do this to their own account")
+
 // InviteUser creates a new user (invited or immediately active) and
 // returns the user, an invitation token, setup URL, and optional
 // temporary password.
@@ -272,7 +281,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		return errors.New("user_id is required")
 	}
 	if targetUserID == actorID {
-		return errors.New("admins cannot deactivate themselves")
+		return fmt.Errorf("%w: admins cannot deactivate themselves", ErrAdminOwnAccount)
 	}
 
 	node, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(targetUserID), typeUser, targetUserID)
@@ -358,7 +367,8 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 	return nil
 }
 
-// ResetUserPassword generates a temp password or reset token for a user.
+// ResetUserPassword generates a temp password or reset token for a user
+// other than the caller (ErrAdminOwnAccount).
 func (s *AdminService) ResetUserPassword(
 	ctx context.Context, actorID, targetUserID string, generateTemp bool,
 ) (*ResetPasswordResult, error) {
@@ -367,6 +377,9 @@ func (s *AdminService) ResetUserPassword(
 	}
 	if targetUserID == "" {
 		return nil, errors.New("user_id is required")
+	}
+	if targetUserID == actorID {
+		return nil, fmt.Errorf("%w: change your own password with ChangePassword or the reset email", ErrAdminOwnAccount)
 	}
 
 	node, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(targetUserID), typeUser, targetUserID)

@@ -989,7 +989,9 @@ type IdentityServiceClient interface {
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
 	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
-	// survivor_user_id, no password asked. Admin only.
+	// survivor_user_id, no password asked. Admin only. Neither account may be
+	// the admin's own (FAILED_PRECONDITION): an admin merges another account
+	// into theirs with MergeAccounts.
 	MergeUsers(context.Context, *connect.Request[v1.MergeUsersRequest]) (*connect.Response[v1.MergeUsersResponse], error)
 	AcceptInvitation(context.Context, *connect.Request[v1.AcceptInvitationRequest]) (*connect.Response[v1.AcceptInvitationResponse], error)
 	DeactivateUser(context.Context, *connect.Request[v1.DeactivateUserRequest]) (*connect.Response[v1.DeactivateUserResponse], error)
@@ -3815,7 +3817,9 @@ type IdentityServiceHandler interface {
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
 	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
-	// survivor_user_id, no password asked. Admin only.
+	// survivor_user_id, no password asked. Admin only. Neither account may be
+	// the admin's own (FAILED_PRECONDITION): an admin merges another account
+	// into theirs with MergeAccounts.
 	MergeUsers(context.Context, *connect.Request[v1.MergeUsersRequest]) (*connect.Response[v1.MergeUsersResponse], error)
 	AcceptInvitation(context.Context, *connect.Request[v1.AcceptInvitationRequest]) (*connect.Response[v1.AcceptInvitationResponse], error)
 	DeactivateUser(context.Context, *connect.Request[v1.DeactivateUserRequest]) (*connect.Response[v1.DeactivateUserResponse], error)

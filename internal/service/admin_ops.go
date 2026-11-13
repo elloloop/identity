@@ -146,7 +146,7 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 		return errors.New("user_id is required")
 	}
 	if targetUserID == actorID {
-		return errors.New("admins cannot delete themselves")
+		return fmt.Errorf("%w: delete your own account with DeleteMyAccount", ErrAdminOwnAccount)
 	}
 	u, err := s.repo(ctx).GetUser(ctx, targetUserID)
 	if err != nil {

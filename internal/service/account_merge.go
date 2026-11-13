@@ -251,13 +251,20 @@ func (s *AuthService) auditMerge(ctx context.Context, actorID, targetID, ipAddr,
 // account is asked for, and it does not depend on the self-service switch.
 // It is refused like MergeAccounts while a recovery hold is in force on
 // either account: the owner ends one early by removing, signed in some other
-// way, the recovery email that started it.
+// way, the recovery email that started it. Neither account may be the
+// admin's own: merging one away retires the admin, and merging one in gives
+// the admin's account the other's password and sign-ins, which only
+// MergeAccounts, with that account's password and the caller's session
+// checked, may do.
 func (s *AdminService) MergeUsers(ctx context.Context, actorID, survivorID, otherID string, takeAddress bool) (*User, error) {
 	if _, err := s.requireAdmin(ctx, actorID); err != nil {
 		return nil, err
 	}
 	if otherID == actorID {
 		return nil, fmt.Errorf("%w: an admin cannot merge away their own account", ErrMergeRefused)
+	}
+	if survivorID == actorID {
+		return nil, fmt.Errorf("%w: an admin merges another account into their own with MergeAccounts", ErrMergeRefused)
 	}
 	repo := s.repo(ctx)
 	survivor, err := repo.GetUser(ctx, survivorID)

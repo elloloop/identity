@@ -13248,6 +13248,10 @@ func (*ReactivateUserResponse) Descriptor() ([]byte, []int) {
 	return file_identity_v1_identity_proto_rawDescGZIP(), []int{218}
 }
 
+// ResetUserPasswordRequest names another account: an admin's own is
+// PERMISSION_DENIED, since an admin changes their own password with
+// ChangePassword or the reset email, which hold a session a recovery email
+// opened as they would any account's.
 type ResetUserPasswordRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`

@@ -235,11 +235,8 @@ func TestAdminService_DeactivateUser_CannotSelf(t *testing.T) {
 	svc := newTestAdminService(db)
 
 	err := svc.DeactivateUser(context.Background(), "admin-1", "admin-1", "")
-	if err == nil {
-		t.Fatal("expected error when deactivating self")
-	}
-	if !strings.Contains(err.Error(), "cannot deactivate themselves") {
-		t.Errorf("unexpected error: %v", err)
+	if !errors.Is(err, ErrAdminOwnAccount) {
+		t.Fatalf("deactivating self = %v, want ErrAdminOwnAccount", err)
 	}
 }
 
@@ -317,6 +314,32 @@ func TestAdminService_ResetUserPassword_ResetToken(t *testing.T) {
 	}
 	if result.TemporaryPassword != "" {
 		t.Error("expected no temp password when generating reset token")
+	}
+}
+
+// An admin's own password is not theirs to reset from the admin seat, by
+// temporary password or by reset token: either would hand whoever holds the
+// admin's session, a recovery email's included, a password sign-in no
+// recovery email marks. Nothing is written.
+func TestAdminService_ResetUserPassword_RefusesTheAdminsOwnAccount(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	svc := newTestAdminService(db)
+	before, _ := db.GetNode(context.Background(), "", "", typeUser, "admin-1")
+	hash := pstr(before.Payload, ufPasswordHash)
+
+	for _, temp := range []bool{true, false} {
+		result, err := svc.ResetUserPassword(context.Background(), "admin-1", "admin-1", temp)
+		if !errors.Is(err, ErrAdminOwnAccount) || result != nil {
+			t.Fatalf("resetting own password (temp=%t) = %+v %v, want ErrAdminOwnAccount", temp, result, err)
+		}
+	}
+	after, _ := db.GetNode(context.Background(), "", "", typeUser, "admin-1")
+	if pstr(after.Payload, ufPasswordHash) != hash || pbool(after.Payload, ufPasswordChangeRequired) {
+		t.Fatal("a refused reset changed the admin's password")
+	}
+	if resets, _ := db.QueryNodes(context.Background(), "", tenantAdminActor, typePasswordReset, map[string]any{prfUserID: "admin-1"}); len(resets) != 0 {
+		t.Fatalf("a refused reset stored %d reset tokens", len(resets))
 	}
 }
 
@@ -550,8 +573,8 @@ func TestAdminService_DeleteUser_CannotSelf(t *testing.T) {
 	svc := newTestAdminServiceWithRepo(db, repo)
 
 	err := svc.DeleteUser(context.Background(), "admin-1", "admin-1")
-	if err == nil || !strings.Contains(err.Error(), "cannot delete themselves") {
-		t.Fatalf("expected cannot-delete-self error, got %v", err)
+	if !errors.Is(err, ErrAdminOwnAccount) {
+		t.Fatalf("deleting self = %v, want ErrAdminOwnAccount", err)
 	}
 }
 

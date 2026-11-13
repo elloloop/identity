@@ -39,6 +39,7 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeNotFound, err)
 
 	case errors.Is(err, service.ErrPermissionDenied),
+		errors.Is(err, service.ErrAdminOwnAccount),
 		errors.Is(err, service.ErrAccessNotAllowed),
 		errors.Is(err, service.ErrSignupByInvitationOnly),
 		errors.Is(err, service.ErrProductAgeRestricted),
@@ -230,7 +231,7 @@ func toConnectError(err error) *connect.Error {
 	switch {
 	case containsAny(msg, "not found", "user not found", "group not found", "help request not found"):
 		return connect.NewError(connect.CodeNotFound, err)
-	case containsAny(msg, "admin role required", "admins cannot deactivate"):
+	case containsAny(msg, "admin role required"):
 		return connect.NewError(connect.CodePermissionDenied, err)
 	case containsAny(msg, "already exists"):
 		return connect.NewError(connect.CodeAlreadyExists, err)

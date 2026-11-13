@@ -97,7 +97,9 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     </li>
     <li>
       <strong>An admin</strong>, with <code>MergeUsers</code>, naming both
-      accounts. No password is asked.
+      accounts. No password is asked, so neither account may be the admin's
+      own: an admin merges another account into theirs with
+      <code>MergeAccounts</code>.
     </li>
   </ul>
 

@@ -392,3 +392,44 @@ func TestHandler_PasswordSignup_RecoveryEmailCannotBeToldApart(t *testing.T) {
 	assert.Equal(t, shapes["free@example.com"], shapes["spare@example.com"])
 	assert.True(t, shapes["spare@example.com"].access, "the answer is a success, as for a free address")
 }
+
+// An admin whose recovery email signed in cannot use the admin seat to give
+// their own account a way in the hold would refuse them: no password reset of
+// their own comes back, as a temporary password or a reset token, and no other
+// account is merged into theirs. Their authority over other accounts stands.
+func TestHandler_AnAdminsRecoverySessionCannotResetOrMergeIntoTheirOwnAccount(t *testing.T) {
+	h, mailer := newRecoveryEmailHarness(t, service.ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true})
+	ctx := context.Background()
+	uid := seedHandlerUser(t, h, "admin@example.com")
+	h.db.addUser(uid, "admin@example.com", "Admin", "admin", "active")
+	h.db.addUser("member-1", "member@example.com", "Member", "member", "active")
+	require.NoError(t, h.repo.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "spare@example.net", VerifiedAt: 1}, 5))
+	_, err := h.client.RequestEmailLoginCode(ctx, connect.NewRequest(&identitypb.RequestEmailLoginCodeRequest{Email: "spare@example.net"}))
+	require.NoError(t, err)
+	login, err := h.client.VerifyEmailLoginCode(ctx, connect.NewRequest(&identitypb.VerifyEmailLoginCodeRequest{
+		Email: "spare@example.net", Code: mailer.codeTo(t, "spare@example.net"),
+	}))
+	require.NoError(t, err)
+	recovery := tokenRecoveryClaims(t, login.Msg.AccessToken)
+	listed, err := h.client.ListRecoveryEmails(ctx, authedReq(connect.NewRequest(&identitypb.ListRecoveryEmailsRequest{}), uid))
+	require.NoError(t, err)
+	require.NotZero(t, listed.Msg.HoldUntil, "the recovery sign-in holds the account")
+
+	for _, temp := range []bool{true, false} {
+		reset, err := h.client.ResetUserPassword(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.ResetUserPasswordRequest{
+			UserId: uid, GenerateTempPassword: temp,
+		}), uid, recovery.RecoveryEmailID))
+		require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err), "own password reset (temp=%t): %v", temp, err)
+		require.Nil(t, reset)
+	}
+	_, err = h.client.MergeUsers(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.MergeUsersRequest{
+		SurvivorUserId: uid, OtherUserId: "member-1",
+	}), uid, recovery.RecoveryEmailID))
+	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err), "merging another account into their own: %v", err)
+
+	reset, err := h.client.ResetUserPassword(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.ResetUserPasswordRequest{
+		UserId: "member-1",
+	}), uid, recovery.RecoveryEmailID))
+	require.NoError(t, err, "another account's reset is the admin's to do")
+	require.NotEmpty(t, reset.Msg.ResetToken)
+}

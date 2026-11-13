@@ -1,5 +1,26 @@
 # Upgrade guide
 
+## Next — an admin RPC does not reset the caller's own password or merge another account into it (behaviour change; no migration; `service.ErrAdminOwnAccount` (Go API))
+
+An admin RPC asks for no password and no recent sign-in, and does not hold a
+session a recovery email opened, so on the caller's own account it was a way
+round the account's own rules: a held recovery session on an admin's account
+could reset that account's password and sign in with it, an ordinary session
+no recovery email marks.
+
+- **`ResetUserPassword` on the caller's own account** answers
+  `PERMISSION_DENIED`, temporary password or reset token alike, and writes
+  nothing. An admin changes their own password with `ChangePassword` or the
+  reset email.
+- **`MergeUsers` with the caller as `survivor_user_id`** answers
+  `FAILED_PRECONDITION`, as merging the caller's account away already did. An
+  admin merges another account into theirs with `MergeAccounts`, which asks
+  for that account's password and holds a recovery session.
+- **`DeleteUser` on the caller's own account** answers `PERMISSION_DENIED`, as
+  `DeactivateUser` on it does, where it answered `INTERNAL`.
+- **Go API.** `service.ErrAdminOwnAccount` is what `ResetUserPassword`,
+  `DeleteUser` and `DeactivateUser` return for the caller's own account.
+
 ## Next — the emailed sign-in code and the phone code count each guess in the write that reads them (no configuration; two `Repository` methods replace four (Go API))
 
 The emailed sign-in code (`VerifyEmailLoginCode`, and the code passkey sign-up

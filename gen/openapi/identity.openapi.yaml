@@ -4246,7 +4246,9 @@ paths:
       summary: MergeUsers
       description: |-
         MergeUsers is the admin form of MergeAccounts: merge other_user_id into
-         survivor_user_id, no password asked. Admin only.
+         survivor_user_id, no password asked. Admin only. Neither account may be
+         the admin's own (FAILED_PRECONDITION): an admin merges another account
+         into theirs with MergeAccounts.
       operationId: identity.v1.IdentityService.MergeUsers
       parameters:
         - name: Connect-Protocol-Version
@@ -12138,6 +12140,11 @@ components:
              If false: create a reset token the admin hands off to the user.
       title: ResetUserPasswordRequest
       additionalProperties: false
+      description: |-
+        ResetUserPasswordRequest names another account: an admin's own is
+         PERMISSION_DENIED, since an admin changes their own password with
+         ChangePassword or the reset email, which hold a session a recovery email
+         opened as they would any account's.
     identity.v1.ResetUserPasswordResponse:
       type: object
       properties:

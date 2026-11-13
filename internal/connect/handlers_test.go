@@ -45,6 +45,7 @@ func TestToConnectError_SentinelMapping(t *testing.T) {
 	}{
 		{"NotFound", service.ErrNotFound, connect.CodeNotFound},
 		{"PermissionDenied", service.ErrPermissionDenied, connect.CodePermissionDenied},
+		{"AdminOwnAccount", service.ErrAdminOwnAccount, connect.CodePermissionDenied},
 		{"ProductAgeRestricted", service.ErrProductAgeRestricted, connect.CodePermissionDenied},
 		{"AlreadyExists", service.ErrAlreadyExists, connect.CodeAlreadyExists},
 		{"Unauthenticated", service.ErrUnauthenticated, connect.CodeUnauthenticated},
@@ -102,7 +103,6 @@ func TestToConnectError_MessageHeuristics(t *testing.T) {
 		{"group not found", connect.CodeNotFound},
 		{"help request not found", connect.CodeNotFound},
 		{"admin role required", connect.CodePermissionDenied},
-		{"admins cannot deactivate themselves", connect.CodePermissionDenied},
 		{"resource already exists", connect.CodeAlreadyExists},
 		{"name is required", connect.CodeInvalidArgument},
 		{"limit must be positive", connect.CodeInvalidArgument},
