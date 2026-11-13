@@ -949,7 +949,8 @@ type Config struct {
 
 	// SMSEnabled turns on the SMS channel of phone verification. A project
 	// whose phone.channels lists "message" verifies phones without it, by the
-	// template sender an embedder wires.
+	// template-message sender (GATEWAY_TEMPLATEMSG_PROVIDER, or one an
+	// embedder wires).
 	SMSEnabled bool
 	// SMSProvider selects the SMS backend: "twilio", "sns", "azure", or
 	// "local_capture", which mails each code to the account's own email
