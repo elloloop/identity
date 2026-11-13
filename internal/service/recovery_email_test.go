@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -335,6 +336,72 @@ func TestRecoveryEmail_RemoveTellsEveryAddress(t *testing.T) {
 	off := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-a"})
 	if _, err := f.svc.RemoveRecoveryEmail(off, user.ID, f.signedInNow(), "keep@example.net"); err != nil {
 		t.Fatalf("Remove with the feature off: %v", err)
+	}
+}
+
+// listFailsAfterWriteRepo fails ListRecoveryEmails once an address has been
+// added or removed, as a store that fails between a write and the read
+// after it would.
+type listFailsAfterWriteRepo struct {
+	*fakeRepo
+	written *atomic.Bool
+}
+
+func (r listFailsAfterWriteRepo) WithProject(string) Repository { return r }
+
+func (r listFailsAfterWriteRepo) AddRecoveryEmail(ctx context.Context, e *RecoveryEmail, max int) error {
+	err := r.fakeRepo.AddRecoveryEmail(ctx, e, max)
+	r.written.Store(err == nil)
+	return err
+}
+
+func (r listFailsAfterWriteRepo) RemoveRecoveryEmail(ctx context.Context, userID, email string, atMs int64) (int, error) {
+	ended, err := r.fakeRepo.RemoveRecoveryEmail(ctx, userID, email, atMs)
+	r.written.Store(err == nil)
+	return ended, err
+}
+
+func (r listFailsAfterWriteRepo) ListRecoveryEmails(ctx context.Context, userID string) ([]*RecoveryEmail, error) {
+	if r.written.Load() {
+		return nil, errors.New("store unavailable")
+	}
+	return r.fakeRepo.ListRecoveryEmails(ctx, userID)
+}
+
+// An address stored or removed stays audited and announced when the list
+// read after the write fails: the change happened, so the account is told,
+// at its primary email (and, for a removal, the removed address) at least.
+func TestRecoveryEmail_AChangeIsAuditedAndToldWhenTheListAfterItFails(t *testing.T) {
+	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
+	w := newRecordingAuditWriter()
+	f.svc.audit = audit.NewLogger(w, "test-tenant", nil)
+	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net"); err != nil {
+		t.Fatalf("RequestRecoveryEmail: %v", err)
+	}
+	code := f.codeMailedTo(t, "spare@example.net")
+	f.svc.defaultRepo = listFailsAfterWriteRepo{fakeRepo: f.repo, written: &atomic.Bool{}}
+
+	if _, err := f.svc.VerifyRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net", code); err == nil {
+		t.Fatal("VerifyRecoveryEmail with the list unreadable: want its error")
+	}
+	if n := w.countByEventType(string(audit.EventRecoveryEmailAdded)); n != 1 {
+		t.Fatalf("%d recovery_email_added events, want 1", n)
+	}
+	if got := f.mailedTo("owner@example.com"); len(got) == 0 || got[len(got)-1].Subject != "A recovery email was added to your account" {
+		t.Fatalf("the primary email was not told of the addition: %#v", got)
+	}
+
+	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net"); err == nil {
+		t.Fatal("RemoveRecoveryEmail with the list unreadable: want its error")
+	}
+	if n := w.countByEventType(string(audit.EventRecoveryEmailRemoved)); n != 1 {
+		t.Fatalf("%d recovery_email_removed events, want 1", n)
+	}
+	for _, addr := range []string{"owner@example.com", "spare@example.net"} {
+		if got := f.mailedTo(addr); len(got) == 0 || got[len(got)-1].Subject != "A recovery email was removed from your account" {
+			t.Fatalf("%s was not told of the removal: %#v", addr, got)
+		}
 	}
 }
 

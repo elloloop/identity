@@ -159,6 +159,35 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: "no-such-user", Email: "x@example.net", VerifiedAt: 1}, 2); !errors.Is(err, service.ErrNotFound) {
 			t.Fatalf("Add for a missing user: want ErrNotFound, got %v", err)
 		}
+		// A missing user is missing whoever holds the address.
+		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: "no-such-user", Email: "second@example.net", VerifiedAt: 1}, 2); !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("Add a held address for a missing user: want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run(driver.Name+"/RecoveryEmail_OnlyAnActiveUnmergedAccountTakesOne", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		deactivated := createTestUser(t, r, "rec-off@example.com")
+		if err := r.UpdateUser(ctx, deactivated, map[string]any{"status": service.StatusDeactivated}); err != nil {
+			t.Fatalf("UpdateUser: %v", err)
+		}
+		survivor := createTestUser(t, r, "rec-survivor@example.com")
+		retired := createTestUser(t, r, "rec-retired@example.com")
+		if err := r.ApplyAccountMerge(ctx, service.AccountMerge{SurvivorID: survivor, OtherID: retired, RecoveryEmailsMax: 5, AtMs: 10}); err != nil {
+			t.Fatalf("ApplyAccountMerge: %v", err)
+		}
+		for name, uid := range map[string]string{"deactivated": deactivated, "merged": retired} {
+			if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: name + "@example.net", VerifiedAt: 20}, 5); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("Add to a %s account: want ErrNotFound, got %v", name, err)
+			}
+			if list, _ := r.ListRecoveryEmails(ctx, uid); len(list) != 0 {
+				t.Fatalf("the %s account holds %#v", name, list)
+			}
+			if holder, err := r.FindRecoveryEmailHolder(ctx, name+"@example.net"); err != nil || holder != nil {
+				t.Fatalf("holder of the address refused to a %s account = %#v %v, want none", name, holder, err)
+			}
+		}
 	})
 
 	t.Run(driver.Name+"/RecoveryEmail_OneAccountPerAddress", func(t *testing.T) {

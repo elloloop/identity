@@ -262,7 +262,11 @@ import { Code } from "astro-expressive-code/components";
       <strong>The held session can still sign itself out</strong>:
       <code>Logout</code>, or <code>RevokeSession</code> of its own session,
       which it can name only under <code>GATEWAY_REVOCATION_MODE=session</code>,
-      where its token carries a <code>sid</code>.
+      where its token carries a <code>sid</code>. One more way it can end the
+      other sessions is not held: presenting one of its own rotated refresh
+      tokens again sets off replay detection, which signs the whole account
+      out, the owner included, as it would for any session. The owner then
+      signs in again another way, and the recovery session is gone too.
     </li>
     <li>
       <strong>A sign-in does not extend its own address's hold.</strong> A

@@ -182,20 +182,23 @@ func (s *AuthService) VerifyRecoveryEmail(ctx context.Context, userID string, si
 		}
 		return nil, fmt.Errorf("storing recovery email: %w", err)
 	}
-	held, err := s.repo(ctx).ListRecoveryEmails(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("listing recovery emails: %w", err)
-	}
 	s.audit.Log(ctx, audit.EventRecoveryEmailAdded,
 		audit.WithActor(userID), audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"email": redactEmail(string(addr))}))
 	s.logger.Info("recovery_email_added",
 		zap.String("user_id", userID), zap.String("email", redactEmail(string(addr))))
+	held, listErr := s.repo(ctx).ListRecoveryEmails(ctx, userID)
+	// The address is stored whether or not the list can be read, so the
+	// account is told either way: at every address, or at least at the
+	// primary one.
 	s.notifyAccountAddresses(ctx, user, held, string(addr), accountNotice{
 		op:       "recovery_email_added_notice",
 		headline: "A recovery email was added to your account",
 		detail:   fmt.Sprintf("The address %s was added to your account as a recovery email.", addr),
 	})
+	if listErr != nil {
+		return nil, fmt.Errorf("listing recovery emails: %w", listErr)
+	}
 	return held, nil
 }
 
@@ -404,16 +407,16 @@ func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, si
 	}
 	s.logger.Info("recovery_email_removed",
 		zap.String("user_id", userID), zap.String("email", redactEmail(string(addr))), zap.Int("sessions_ended", ended))
-	held, err := s.repo(ctx).ListRecoveryEmails(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("listing recovery emails: %w", err)
-	}
+	held, listErr := s.repo(ctx).ListRecoveryEmails(ctx, userID)
 	notice := accountNotice{
 		op:       "recovery_email_removed_notice",
 		headline: "A recovery email was removed from your account",
 		detail:   fmt.Sprintf("The address %s was removed from your account's recovery emails.", addr),
 	}
 	s.notifyAccountAddresses(ctx, user, append(held, &RecoveryEmail{Email: string(addr)}), "", notice)
+	if listErr != nil {
+		return nil, fmt.Errorf("listing recovery emails: %w", listErr)
+	}
 	return held, nil
 }
 

@@ -69,7 +69,7 @@ func (r *Repo) AddRecoveryEmail(_ context.Context, e *service.RecoveryEmail, max
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.users[e.UserID]; !ok {
+	if u, ok := r.users[e.UserID]; !ok || u.Status != service.StatusActive || u.MergedIntoUserID != "" {
 		return fmt.Errorf("memory: AddRecoveryEmail: %w", service.ErrNotFound)
 	}
 	fold := service.FoldEmail(e.Email)

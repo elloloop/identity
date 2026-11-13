@@ -728,6 +728,45 @@ func TestRecoveryEmailSignIn_SecondFactorComesBeforeTheHold(t *testing.T) {
 	}
 }
 
+// An address the owner removes while its sign-in waits on the second factor
+// opens nothing when the factor is proved: no session, no hold, no notice.
+func TestRecoveryEmailSignIn_AddressRemovedWhileTheSecondFactorIsPending(t *testing.T) {
+	f, user := newRecoverySecondFactorFixture(t, nil)
+	seedVerifiedTotp(t, f.repo, user.ID)
+	f.repo.mu.Lock()
+	f.repo.users[user.ID].TotpRequired = true
+	f.repo.mu.Unlock()
+	result, err := f.signInWith(f.ctx, t, "spare@example.net")
+	if err != nil || result.LoginChallengeID == "" {
+		t.Fatalf("code sign-in to a two-step account = %+v %v, want a second-factor challenge", result, err)
+	}
+	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net"); err != nil {
+		t.Fatalf("the owner removes the address: %v", err)
+	}
+	sent := f.mailer.count()
+
+	code, err := totpGenerateCode("JBSWY3DPEHPK3PXP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done, err := f.svc.VerifyTotp(f.ctx, result.LoginChallengeID, code, "", ""); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("VerifyTotp after the address was removed = %+v %v, want ErrUnauthenticated", done, err)
+	}
+	if until := f.holdUntil(t, user.ID); until != 0 {
+		t.Fatalf("hold after the refused sign-in = %d, want 0", until)
+	}
+	if n := f.mailer.count() - sent; n != 0 {
+		t.Fatalf("%d messages after the refused sign-in, want none", n)
+	}
+	f.repo.mu.Lock()
+	defer f.repo.mu.Unlock()
+	for _, rt := range f.repo.refreshTokens {
+		if rt.UserID == user.ID {
+			t.Fatalf("the refused sign-in stored a refresh token: %#v", rt)
+		}
+	}
+}
+
 func TestRecoveryEmailSignIn_TenantRequire2FAAsksForTheFactor(t *testing.T) {
 	f, user := newRecoverySecondFactorFixture(t, withRequire2FA())
 	seedVerifiedTotp(t, f.repo, user.ID)

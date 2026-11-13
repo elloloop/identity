@@ -142,10 +142,11 @@ func (r *sqliteRepository) ConsumeRecoveryEmailCode(ctx context.Context, userID 
 	return c, nil
 }
 
-// AddRecoveryEmail inserts first, which takes SQLite's single writer lock
-// and lets the unique index answer for another account's recovery email,
-// then checks the primary emails and the account's count inside the same
-// transaction and rolls back on a refusal.
+// AddRecoveryEmail inserts first, for an active, unmerged account only,
+// which takes SQLite's single writer lock and lets the unique index answer
+// for another account's recovery email, then checks the primary emails and
+// the account's count inside the same transaction and rolls back on a
+// refusal.
 func (r *sqliteRepository) AddRecoveryEmail(ctx context.Context, e *service.RecoveryEmail, max int) error {
 	if e == nil || e.UserID == "" || e.Email == "" {
 		return errors.New("sqlite: AddRecoveryEmail: missing user id or email")
@@ -159,13 +160,22 @@ func (r *sqliteRepository) AddRecoveryEmail(ctx context.Context, e *service.Reco
 	tag, err := tx.Exec(ctx,
 		`INSERT INTO user_recovery_emails (id, project_id, user_id, email, verified_at_ms)
 		 SELECT $1, $2, $3, $4, $5
-		  WHERE EXISTS (SELECT 1 FROM users WHERE project_id = $2 AND id = $3)
+		  WHERE EXISTS (SELECT 1 FROM users WHERE project_id = $2 AND id = $3 AND status = 'active' AND merged_into_user_id = '')
 		 ON CONFLICT (project_id, lower(email)) DO NOTHING`,
 		newID(), r.projectID, e.UserID, e.Email, e.VerifiedAt)
 	if err != nil {
 		return wrapErr("AddRecoveryEmail", err)
 	}
 	if tag.RowsAffected() == 0 {
+		var eligible bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM users WHERE project_id = $1 AND id = $2 AND status = 'active' AND merged_into_user_id = '')`,
+			r.projectID, e.UserID).Scan(&eligible); err != nil {
+			return wrapErr("AddRecoveryEmail(user)", err)
+		}
+		if !eligible {
+			return fmt.Errorf("sqlite: AddRecoveryEmail: %w", service.ErrNotFound)
+		}
 		var holder string
 		err := tx.QueryRow(ctx,
 			`SELECT user_id FROM user_recovery_emails WHERE project_id = $1 AND lower(email) = $2`,

@@ -625,7 +625,8 @@ type Repository interface {
 	// for a replay, an expired code or a missing one.
 	//
 	// AddRecoveryEmail stores a proved address on e.UserID, atomically with
-	// its two refusals: ErrRecoveryEmailTaken when the address (under
+	// its refusals: ErrNotFound when the account is missing, not active or
+	// merged away; ErrRecoveryEmailTaken when the address (under
 	// FoldEmail) is any account's primary email or another account's
 	// recovery email in the project, and ErrRecoveryEmailLimit when the
 	// account already holds max addresses. Adding an address the account

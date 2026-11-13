@@ -165,8 +165,10 @@ func (r *pgRepository) ConsumeRecoveryEmailCode(ctx context.Context, userID stri
 }
 
 // AddRecoveryEmail takes the address's lock, then the account's row lock so
-// two adds to one account count each other, and inserts only when the
-// address is free in both tables and the account is under max.
+// two adds to one account count each other, and a merge or deactivation
+// waits for it or makes it see the account retired, and inserts only when
+// the account is active and unmerged, the address is free in both tables and
+// the account is under max.
 func (r *pgRepository) AddRecoveryEmail(ctx context.Context, e *service.RecoveryEmail, max int) error {
 	if e == nil || e.UserID == "" || e.Email == "" {
 		return errors.New("postgres: AddRecoveryEmail: missing user id or email")
@@ -182,7 +184,7 @@ func (r *pgRepository) AddRecoveryEmail(ctx context.Context, e *service.Recovery
 	}
 	var userExists bool
 	if err := tx.QueryRow(ctx,
-		`SELECT TRUE FROM users WHERE project_id = $1 AND id = $2 FOR UPDATE`,
+		`SELECT TRUE FROM users WHERE project_id = $1 AND id = $2 AND status = 'active' AND merged_into_user_id = '' FOR UPDATE`,
 		r.projectID, e.UserID).Scan(&userExists); err != nil {
 		if noRows(err) {
 			return fmt.Errorf("postgres: AddRecoveryEmail: %w", service.ErrNotFound)

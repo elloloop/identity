@@ -244,7 +244,9 @@ both ask for a password. A recovery email can now be that way.
   leave the owner with nothing but that address. The held
   session can still sign itself out: `Logout`, or `RevokeSession` of its own
   session, which it can name only under `GATEWAY_REVOCATION_MODE=session`,
-  where its token carries a `sid`. A session opened any other way (the
+  where its token carries a `sid`. Replaying one of its own rotated refresh
+  tokens still sets off replay detection, which signs the whole account out,
+  owner included, as for any session. A session opened any other way (the
   primary email, a password, a passkey, a provider) is never held, so the
   owner can remove an address they do not recognise at any time.
   `ListRecoveryEmails` returns the hold's end as `hold_until`, and for each
@@ -405,8 +407,10 @@ now keep a list of addresses it has proved it controls.
   one write, so concurrent guesses never pass the attempt cap),
   `ConsumeRecoveryEmailCode`, `AddRecoveryEmail`, `ListRecoveryEmails`,
   `RemoveRecoveryEmail` and `DeleteExpiredRecoveryEmailCodes`; a custom driver
-  must implement them and refuse a recovery email in `CreateUser`,
-  `UpdateUser` and `UpdateUserEmail` (the conformance suite checks both).
+  must implement them, refuse with `ErrNotFound` an `AddRecoveryEmail` for an
+  account that is missing, not active or merged away, atomically against a
+  merge, and refuse a recovery email in `CreateUser`, `UpdateUser` and
+  `UpdateUserEmail` (the conformance suite checks all three).
 
 ## Next — an invite project can let a tenant invitation create the invitee's account: `access.admit_tenant_invitations` and `GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS` (off by default; migration 0058; additive audit event `signup_admitted_by_invitation`; `InvitationStore.OpenInvitationForEmail`, `AuthService.WithOpenInvitations` (Go API))
 
