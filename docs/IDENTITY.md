@@ -820,6 +820,11 @@ default; a control-plane project's `config_json` only).
   owner can always remove an address they do not recognise, and removing the
   one that started the hold ends it. A sign-in from the same address does not
   extend a hold already in force.
+- Removing a recovery email ends every session it opened, in the same
+  transaction: their refresh tokens are deleted, rotated ones included, and
+  under `GATEWAY_REVOCATION_MODE=session` their access tokens stop working at
+  once. A session being opened by the address as it is removed is refused,
+  and the account's other sessions are untouched.
 - While a hold is in force on either account, a merge is refused, whoever
   asks.
 - A session a recovery email opened acts in a tenant only through an explicit

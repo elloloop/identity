@@ -302,6 +302,18 @@ func TestClaims_AMRRoundTrip(t *testing.T) {
 	assert.Nil(t, stringsClaim("a"))
 }
 
+// recovery_email round-trips on a purpose ticket and is absent when unset.
+func TestClaims_RecoveryEmailRoundTrip(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+	tok, err := s.SignAccessToken(context.Background(), Claims{Sub: "u", Purpose: "p", RecoveryEmail: "spare@example.net"}, time.Minute)
+	require.NoError(t, err)
+	claims, err := VerifyPurposeToken(tok, s, "", "", false, "p")
+	require.NoError(t, err)
+	assert.Equal(t, "spare@example.net", claims.RecoveryEmail)
+
+	assert.NotContains(t, Claims{Sub: "u", Purpose: "p"}.ClaimsMap(time.Now(), time.Minute), "recovery_email")
+}
+
 // bnd round-trips on a purpose ticket and is absent when unset.
 func TestClaims_BindingRoundTrip(t *testing.T) {
 	s := newMemSigner(t, "test-kid")

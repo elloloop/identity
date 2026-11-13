@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/pkg/agegate"
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/jwt"
 )
 
@@ -196,6 +199,145 @@ func TestRecoveryEmailSignIn_MarksTheSessionAndHoldsOnlyIt(t *testing.T) {
 	}
 	if until := f.holdUntil(t, user.ID); until != 0 {
 		t.Fatalf("hold after the address that started it was removed = %d, want 0", until)
+	}
+}
+
+// sessionRevokedAt is when the access session of accessToken was revoked, 0
+// while it is live.
+func (f *recoveryEmailFixture) sessionRevokedAt(t *testing.T, accessToken string) int64 {
+	t.Helper()
+	claims, err := jwt.VerifyAccessToken(accessToken, f.svc.signer, "", "", false)
+	if err != nil || claims.SID == "" {
+		t.Fatalf("VerifyAccessToken = %+v %v, want a token with a sid", claims, err)
+	}
+	session, err := f.repo.GetSessionBySid(f.ctx, claims.SID)
+	if err != nil || session == nil {
+		t.Fatalf("GetSessionBySid(%s) = %#v %v", claims.SID, session, err)
+	}
+	return session.RevokedAtMs
+}
+
+// The owner removing a compromised recovery email ends every session that
+// address opened, the token it rotated away included, and no other: the
+// account's other recovery email's session and the owner's own keep
+// refreshing, so the refused tokens did not set off the replay alarm that
+// signs an account out everywhere. The ended sessions' access tokens stop
+// working at once, and their end is audited.
+func TestRemoveRecoveryEmail_EndsTheSessionsTheAddressOpened(t *testing.T) {
+	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
+	f.svc.cfg.RevocationMode = config.RevocationModeSession
+	w := newRecordingAuditWriter()
+	f.svc.audit = audit.NewLogger(w, "test-tenant", nil)
+	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	f.add(t, user, "stolen@example.net")
+	f.add(t, user, "kept@example.net")
+
+	stolen, err := f.signInWith(f.ctx, t, "stolen@example.net")
+	if err != nil {
+		t.Fatalf("sign-in by the stolen address: %v", err)
+	}
+	_, rotatedAccess, rotatedRefresh, err := f.svc.RefreshToken(f.ctx, stolen.RefreshToken, "", "", "")
+	if err != nil {
+		t.Fatalf("RefreshToken: %v", err)
+	}
+	kept, err := f.signInWith(f.ctx, t, "kept@example.net")
+	if err != nil {
+		t.Fatalf("sign-in by the kept address: %v", err)
+	}
+	owner, err := f.signInWith(f.ctx, t, "owner@example.com")
+	if err != nil {
+		t.Fatalf("sign-in by the primary email: %v", err)
+	}
+
+	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "Stolen@example.net"); err != nil {
+		t.Fatalf("the owner removes the stolen address: %v", err)
+	}
+	for name, token := range map[string]string{"current": rotatedRefresh, "rotated away": stolen.RefreshToken} {
+		if _, _, _, err := f.svc.RefreshToken(f.ctx, token, "", "", ""); !errors.Is(err, ErrUnauthenticated) {
+			t.Fatalf("refresh of the stolen session's %s token: want ErrUnauthenticated, got %v", name, err)
+		}
+	}
+	for _, access := range []string{stolen.AccessToken, rotatedAccess} {
+		if at := f.sessionRevokedAt(t, access); at != f.now.UnixMilli() {
+			t.Fatalf("the stolen session's access session revoked at %d, want %d", at, f.now.UnixMilli())
+		}
+	}
+	for name, survivor := range map[string]*LoginResult{"kept address": kept, "primary email": owner} {
+		if at := f.sessionRevokedAt(t, survivor.AccessToken); at != 0 {
+			t.Fatalf("the %s session was revoked at %d", name, at)
+		}
+		if _, _, _, err := f.svc.RefreshToken(f.ctx, survivor.RefreshToken, "", "", ""); err != nil {
+			t.Fatalf("the %s session no longer refreshes: %v", name, err)
+		}
+	}
+	revoked := w.detailsOf(string(audit.EventSessionRevoked))
+	if len(revoked) != 1 || revoked[0]["scope"] != "recovery_email" || revoked[0]["revoked_count"] != float64(1) {
+		t.Fatalf("session_revoked audit = %v, want one for the stolen address's one live session", revoked)
+	}
+}
+
+// A step that continues a recovery sign-in carries its address: the
+// date-of-birth step's session is the recovery session it interrupted, and
+// once the owner has removed the address the step opens none.
+func TestRecoveryEmailSignIn_DOBStepContinuesTheRecoverySessionWhileItsAddressIsHeld(t *testing.T) {
+	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
+	f.svc.cfg.RevocationMode = config.RevocationModeSession
+	f.svc.cfg.AgeGateEnabled, f.svc.cfg.AgeGateRequireDOB = true, true
+	f.svc.cfg.AgeGateChildMaxAge, f.svc.cfg.AgeGateAdultAge = 12, 18
+	gate, err := agegate.NewThreshold(12, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.svc.ageGate = gate
+	adult := f.now.AddDate(-30, 0, 0).UnixMilli()
+
+	ticketFor := func(owner, addr string) (*User, string) {
+		t.Helper()
+		user := seedUser(f.repo, owner, "", StatusActive)
+		f.add(t, user, addr)
+		var dob *DOBRequiredError
+		if _, err := f.signInWith(f.ctx, t, addr); !errors.As(err, &dob) {
+			t.Fatalf("recovery sign-in to a dob-less account: want a DOBRequiredError, got %v", err)
+		}
+		return user, dob.Ticket
+	}
+
+	held, ticket := ticketFor("held@example.com", "spare@example.net")
+	done, err := f.svc.SubmitDateOfBirth(f.ctx, ticket, adult, "", "")
+	if err != nil || done.AccessToken == "" {
+		t.Fatalf("SubmitDateOfBirth = %+v %v, want the recovery session", done, err)
+	}
+	if amr := f.sessionAMR(t, done.AccessToken); !slices.Equal(amr, []string{AMRRecoveryEmail}) {
+		t.Fatalf("the session the step completed has amr %v, want [%s]", amr, AMRRecoveryEmail)
+	}
+	if rec, _ := f.repo.FindRefreshTokenByHash(f.ctx, hashRefreshToken(done.RefreshToken)); rec == nil || rec.RecoveryEmail != "spare@example.net" {
+		t.Fatalf("the step's refresh token = %#v, want it tied to the recovery email", rec)
+	}
+	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, held.ID, f.signedInNow(), "spare@example.net"); err != nil {
+		t.Fatalf("RemoveRecoveryEmail: %v", err)
+	}
+	if _, _, _, err := f.svc.RefreshToken(f.ctx, done.RefreshToken, "", "", ""); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("refresh of the step's session after the removal: want ErrUnauthenticated, got %v", err)
+	}
+
+	removed, ticket := ticketFor("removed@example.com", "lost@example.net")
+	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, removed.ID, f.signedInNow(), "lost@example.net"); err != nil {
+		t.Fatalf("RemoveRecoveryEmail: %v", err)
+	}
+	if done, err := f.svc.SubmitDateOfBirth(f.ctx, ticket, adult, "", ""); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("SubmitDateOfBirth after the address was removed = %+v %v, want ErrUnauthenticated", done, err)
+	}
+	f.repo.mu.Lock()
+	defer f.repo.mu.Unlock()
+	for _, rt := range f.repo.refreshTokens {
+		if rt.UserID == removed.ID {
+			t.Fatalf("the refused step stored a refresh token: %#v", rt)
+		}
+	}
+	for _, session := range f.repo.sessions {
+		if session.UserID == removed.ID && session.RevokedAtMs == 0 {
+			t.Fatalf("the refused step left its access session live: %#v", session)
+		}
 	}
 }
 

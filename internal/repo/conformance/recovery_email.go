@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,9 +12,10 @@ import (
 )
 
 // runRecoveryEmailConformance pins the recovery-email store: the code's
-// upsert/find/consume, and the rule that an address is held once in a
-// project, as one account's primary email or one account's recovery email,
-// whichever write comes first.
+// upsert/count/consume, the rule that an address is held once in a project,
+// as one account's primary email or one account's recovery email, whichever
+// write comes first, and that removing an address ends every session it
+// opened, even one being opened at the same time.
 func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 	t.Helper()
 
@@ -160,11 +162,11 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "third@example.net", VerifiedAt: 300}, 2); !errors.Is(err, service.ErrRecoveryEmailLimit) {
 			t.Fatalf("Add past the cap: want ErrRecoveryEmailLimit, got %v", err)
 		}
-		if removed, err := r.RemoveRecoveryEmail(ctx, uid, "First@example.net"); err != nil || !removed {
-			t.Fatalf("Remove = %v %v, want true nil", removed, err)
+		if ended, err := r.RemoveRecoveryEmail(ctx, uid, "First@example.net", 400); err != nil || ended != 0 {
+			t.Fatalf("Remove = %d %v, want 0 nil", ended, err)
 		}
-		if removed, err := r.RemoveRecoveryEmail(ctx, uid, "first@example.net"); err != nil || removed {
-			t.Fatalf("Remove again = %v %v, want false nil", removed, err)
+		if _, err := r.RemoveRecoveryEmail(ctx, uid, "first@example.net", 500); !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("Remove again: want ErrNotFound, got %v", err)
 		}
 		if list, _ = r.ListRecoveryEmails(ctx, uid); len(list) != 1 || list[0].Email != "second@example.net" || list[0].VerifiedAt != 101 {
 			t.Fatalf("List after remove = %#v", list)
@@ -210,7 +212,7 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		}
 
 		// Released, the address is free again.
-		if _, err := r.RemoveRecoveryEmail(ctx, a, "shared@example.net"); err != nil {
+		if _, err := r.RemoveRecoveryEmail(ctx, a, "shared@example.net", 3); err != nil {
 			t.Fatalf("Remove: %v", err)
 		}
 		if err := r.UpdateUserEmail(ctx, b, "shared@example.net", 6); err != nil {
@@ -286,19 +288,38 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		}
 	})
 
-	t.Run(driver.Name+"/RecoverySession_AMRAndChallengeKeepTheRecoveryEmail", func(t *testing.T) {
+	t.Run(driver.Name+"/RecoverySession_RefreshTokenAndChallengeKeepTheRecoveryEmail", func(t *testing.T) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)
 		uid := createTestUser(t, r, "rec-session@example.com")
-		for hash, amr := range map[string][]string{"rec-rt-recovery": {service.AMRRecoveryEmail}, "rec-rt-plain": nil} {
+		other := createTestUser(t, r, "rec-session-other@example.com")
+		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "spare@example.net", VerifiedAt: 1}, 5); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		for hash, addr := range map[string]string{"rec-rt-recovery": "Spare@example.net", "rec-rt-plain": ""} {
 			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
-				TokenHash: hash, UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, AMR: amr,
+				TokenHash: hash, UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmail: addr,
 			}); err != nil {
 				t.Fatalf("CreateRefreshToken %s: %v", hash, err)
 			}
 			got, err := r.FindRefreshTokenByHash(ctx, hash)
-			if err != nil || got == nil || len(got.AMR) != len(amr) || (len(amr) == 1 && got.AMR[0] != amr[0]) {
-				t.Fatalf("refresh token %s = %#v %v, want AMR %v", hash, got, err, amr)
+			if err != nil || got == nil || got.RecoveryEmail != addr {
+				t.Fatalf("refresh token %s = %#v %v, want RecoveryEmail %q", hash, got, err, addr)
+			}
+		}
+		// A recovery session's token is stored only for an address its account
+		// holds: not one nobody holds, nor another account's.
+		for hash, owner := range map[string]struct{ user, addr string }{
+			"rec-rt-unheld": {uid, "nobody@example.net"},
+			"rec-rt-others": {other, "spare@example.net"},
+		} {
+			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
+				TokenHash: hash, UserID: owner.user, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmail: owner.addr,
+			}); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("CreateRefreshToken %s: want ErrNotFound, got %v", hash, err)
+			}
+			if got, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, hash); err != nil || got != nil {
+				t.Fatalf("refused refresh token %s was stored: %#v %v", hash, got, err)
 			}
 		}
 		for id, addr := range map[string]string{"rec-lc-recovery": "spare@example.net", "rec-lc-plain": ""} {
@@ -310,6 +331,139 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 			got, err := r.GetLoginChallengeByChallengeID(ctx, id)
 			if err != nil || got == nil || got.RecoveryEmail != addr {
 				t.Fatalf("login challenge %s = %#v %v, want RecoveryEmail %q", id, got, err, addr)
+			}
+		}
+	})
+
+	t.Run(driver.Name+"/RecoveryEmail_RemoveEndsTheSessionsItOpened", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "rec-ends@example.com")
+		other := createTestUser(t, r, "rec-ends-other@example.com")
+		for _, a := range []struct{ user, addr string }{
+			{uid, "stolen@example.net"}, {uid, "kept@example.net"}, {other, "theirs@example.net"},
+		} {
+			if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: a.user, Email: a.addr, VerifiedAt: 1}, 5); err != nil {
+				t.Fatalf("Add %s: %v", a.addr, err)
+			}
+		}
+		// The stolen address's sign-in, rotated once; a session the account's
+		// other recovery email opened; one opened another way; and another
+		// account's recovery session.
+		tokens := []struct {
+			hash, user, addr string
+			consumed         int64
+		}{
+			{"rec-ends-rotated", uid, "stolen@example.net", 50},
+			{"rec-ends-live", uid, "STOLEN@example.net", 0},
+			{"rec-ends-kept", uid, "kept@example.net", 0},
+			{"rec-ends-plain", uid, "", 0},
+			{"rec-ends-other", other, "theirs@example.net", 0},
+		}
+		for _, tok := range tokens {
+			sid := "sid-" + tok.hash
+			if _, err := r.CreateSession(ctx, &service.SessionRecord{SID: sid, UserID: tok.user, CreatedAtMs: 10}); err != nil {
+				t.Fatalf("CreateSession %s: %v", sid, err)
+			}
+			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
+				TokenHash: tok.hash, UserID: tok.user, ExpiresAt: 9_000_000_000_000, CreatedAt: 10, LastUsedAt: 10,
+				SID: sid, RecoveryEmail: tok.addr,
+			}); err != nil {
+				t.Fatalf("CreateRefreshToken %s: %v", tok.hash, err)
+			}
+			if tok.consumed != 0 {
+				if err := r.ConsumeRefreshTokenByHash(ctx, tok.hash, tok.consumed); err != nil {
+					t.Fatalf("Consume %s: %v", tok.hash, err)
+				}
+			}
+		}
+
+		const at = 1_000
+		ended, err := r.RemoveRecoveryEmail(ctx, uid, "Stolen@example.net", at)
+		if err != nil || ended != 1 {
+			t.Fatalf("Remove = %d %v, want the one unrotated session ended", ended, err)
+		}
+		for _, tok := range tokens {
+			gone := tok.user == uid && tok.addr != "" && service.FoldEmail(tok.addr) == "stolen@example.net"
+			got, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, tok.hash)
+			if err != nil || (got == nil) != gone {
+				t.Fatalf("refresh token %s after the removal = %#v %v, want gone=%t", tok.hash, got, err, gone)
+			}
+			session, err := r.GetSessionBySid(ctx, "sid-"+tok.hash)
+			want := int64(0)
+			if gone {
+				want = at
+			}
+			if err != nil || session == nil || session.RevokedAtMs != want {
+				t.Fatalf("session of %s after the removal = %#v %v, want RevokedAtMs %d", tok.hash, session, err, want)
+			}
+		}
+		if list, _ := r.ListRecoveryEmails(ctx, uid); len(list) != 1 || list[0].Email != "kept@example.net" {
+			t.Fatalf("List after remove = %#v, want only the kept address", list)
+		}
+		// The address is gone, so no session can be opened for it either.
+		after := tokens[1].hash + "-after"
+		if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
+			TokenHash: after, UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmail: "stolen@example.net",
+		}); !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("CreateRefreshToken for the removed address: want ErrNotFound, got %v", err)
+		}
+		// Another account's address of the same spelling is not this account's.
+		if _, err := r.RemoveRecoveryEmail(ctx, uid, "theirs@example.net", at); !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("Remove another account's address: want ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run(driver.Name+"/RecoveryEmail_RemoveRacingRecoverySessionsLeavesNone", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "rec-race-remove@example.com")
+		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "stolen@example.net", VerifiedAt: 1}, 5); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		errs := make(chan error, concurrentWriters+1)
+		var stored atomic.Int64
+		for i := range concurrentWriters {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
+					TokenHash: fmt.Sprintf("rec-race-%d", i), UserID: uid,
+					ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmail: "stolen@example.net",
+				})
+				switch {
+				case err == nil:
+					stored.Add(1)
+				case !errors.Is(err, service.ErrNotFound):
+					errs <- err
+				}
+			}()
+		}
+		var ended int
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			var err error
+			if ended, err = r.RemoveRecoveryEmail(ctx, uid, "stolen@example.net", 100); err != nil {
+				errs <- err
+			}
+		}()
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatalf("concurrent create/remove: %v", err)
+		}
+		if int64(ended) != stored.Load() {
+			t.Fatalf("the removal ended %d sessions, but %d were stored", ended, stored.Load())
+		}
+		for i := range concurrentWriters {
+			if got, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, fmt.Sprintf("rec-race-%d", i)); err != nil || got != nil {
+				t.Fatalf("a recovery session survived the removal of its address: %#v %v", got, err)
 			}
 		}
 	})

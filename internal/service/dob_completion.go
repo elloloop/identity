@@ -64,18 +64,19 @@ func (e *DOBRequiredError) Unwrap() error { return ErrDOBRequired }
 // with no channel to reach a parent. The moment an anonymous account is
 // promoted to an identified one, the exemption ends and this gate applies.
 //
-// authTimeMs is the sign-in behind the session being issued (0 for none);
-// the ticket carries it, so completing the step continues that session
-// rather than counting as a new sign-in. The refusal is audited with reason
+// authTimeMs is the sign-in behind the session being issued (0 for none),
+// and recoveryEmail the recovery email that made it (empty for none); the
+// ticket carries both, so completing the step continues that session rather
+// than counting as a new sign-in. The refusal is audited with reason
 // dob_required and gate, the step that refused.
-func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTimeMs int64, amr []string, ipAddr, userAgent string, gate sessionGate) error {
+func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTimeMs int64, recoveryEmail, ipAddr, userAgent string, gate sessionGate) error {
 	if !s.ageGate.Enabled() || !s.cfg.AgeGateRequireDOB || user == nil {
 		return nil
 	}
 	if user.IsAnonymous || user.DateOfBirthMs != 0 {
 		return nil
 	}
-	ticket, err := s.mintDOBCompletionTicket(ctx, user, authTimeMs, amr)
+	ticket, err := s.mintDOBCompletionTicket(ctx, user, authTimeMs, recoveryEmail)
 	if err != nil {
 		return err
 	}
@@ -125,11 +126,11 @@ func (s *AuthService) verifyPurposeTicket(ctx context.Context, ticket, purpose s
 // mintDOBCompletionTicket signs the short-lived bearer credential that
 // authorizes exactly one thing: a SubmitDateOfBirth call for the account
 // named by sub. It carries the sign-in behind the interrupted session
-// (auth_time, absent for none, and how it proved itself, amr) for
-// SubmitDateOfBirth to continue.
-func (s *AuthService) mintDOBCompletionTicket(ctx context.Context, user *User, authTimeMs int64, amr []string) (string, error) {
+// (auth_time, absent for none, and the recovery email that made it, absent
+// for a sign-in made another way) for SubmitDateOfBirth to continue.
+func (s *AuthService) mintDOBCompletionTicket(ctx context.Context, user *User, authTimeMs int64, recoveryEmail string) (string, error) {
 	return s.signPurposeTicket(ctx, jwt.Claims{
-		Sub: user.ID, Purpose: tokenPurposeDOBCompletion, AuthTime: authTimeMs / 1000, AMR: amr,
+		Sub: user.ID, Purpose: tokenPurposeDOBCompletion, AuthTime: authTimeMs / 1000, RecoveryEmail: recoveryEmail,
 	}, dobCompletionTicketTTL)
 }
 
@@ -241,7 +242,7 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	// through the sign-in path and audits a login_success below, so a rewrite
 	// here is a sign-in's.
 	anchor := claims.AuthTime * 1000
-	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, anchor, anchor, claims.AMR)
+	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, anchor, anchor, claims.RecoveryEmail)
 	if err != nil {
 		return nil, err
 	}

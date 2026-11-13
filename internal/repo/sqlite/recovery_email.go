@@ -224,15 +224,47 @@ func (r *sqliteRepository) ListRecoveryEmails(ctx context.Context, userID string
 	return out, wrapErr("ListRecoveryEmails", rows.Err())
 }
 
-func (r *sqliteRepository) RemoveRecoveryEmail(ctx context.Context, userID, email string) (bool, error) {
-	const q = `
-		DELETE FROM user_recovery_emails
-		 WHERE project_id = $1 AND user_id = $2 AND lower(email) = $3`
-	tag, err := r.db.Exec(ctx, q, r.projectID, userID, service.FoldEmail(email))
+func (r *sqliteRepository) RemoveRecoveryEmail(ctx context.Context, userID, email string, atMs int64) (int, error) {
+	fold := service.FoldEmail(email)
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return false, wrapErr("RemoveRecoveryEmail", err)
+		return 0, wrapErr("RemoveRecoveryEmail", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx,
+		`DELETE FROM user_recovery_emails WHERE project_id = $1 AND user_id = $2 AND lower(email) = $3`,
+		r.projectID, userID, fold)
+	if err != nil {
+		return 0, wrapErr("RemoveRecoveryEmail", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return 0, fmt.Errorf("sqlite: RemoveRecoveryEmail: %w", service.ErrNotFound)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions SET revoked_at_ms = $4
+		 WHERE project_id = $1 AND revoked_at_ms = 0
+		   AND sid IN (SELECT sid FROM refresh_tokens
+		                WHERE project_id = $1 AND user_id = $2 AND sid <> ''
+		                  AND lower(recovery_email) = $3)`,
+		r.projectID, userID, fold, atMs); err != nil {
+		return 0, wrapErr("RemoveRecoveryEmail(sessions)", err)
+	}
+	var ended int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM refresh_tokens
+		 WHERE project_id = $1 AND user_id = $2 AND lower(recovery_email) = $3 AND consumed_at_ms = 0`,
+		r.projectID, userID, fold).Scan(&ended); err != nil {
+		return 0, wrapErr("RemoveRecoveryEmail(count)", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = $2 AND lower(recovery_email) = $3`,
+		r.projectID, userID, fold); err != nil {
+		return 0, wrapErr("RemoveRecoveryEmail(refresh_tokens)", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, wrapErr("RemoveRecoveryEmail", err)
+	}
+	return ended, nil
 }
 
 func (r *sqliteRepository) FindRecoveryEmailHolder(ctx context.Context, email string) (*service.RecoveryEmail, error) {

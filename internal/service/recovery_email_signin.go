@@ -156,5 +156,5 @@ func (s *AuthService) startRecoveryEmailSession(ctx context.Context, user *User,
 			"Until %s that sign-in cannot change your account's recovery emails, phone number or sign-in methods. "+
 			"If it was not you, sign in with your primary email and remove the address.", addr, holdEnds),
 	})
-	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, []string{AMRRecoveryEmail})
+	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, addr)
 }

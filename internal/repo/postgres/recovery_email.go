@@ -250,15 +250,49 @@ func (r *pgRepository) ListRecoveryEmails(ctx context.Context, userID string) ([
 	return out, wrapPgErr("ListRecoveryEmails", rows.Err())
 }
 
-func (r *pgRepository) RemoveRecoveryEmail(ctx context.Context, userID, email string) (bool, error) {
-	const q = `
-		DELETE FROM user_recovery_emails
-		 WHERE project_id = $1 AND user_id = $2 AND email_fold = $3`
-	tag, err := r.pool.Exec(ctx, q, r.projectID, userID, service.FoldEmail(email))
+// RemoveRecoveryEmail deletes the address first, which takes its row lock
+// for the rest of the transaction: a recovery session's refresh token being
+// stored meanwhile (insertRecoverySessionRefreshToken) waits for the commit
+// and finds the address gone, and one stored before is ended below.
+func (r *pgRepository) RemoveRecoveryEmail(ctx context.Context, userID, email string, atMs int64) (int, error) {
+	fold := service.FoldEmail(email)
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return false, wrapPgErr("RemoveRecoveryEmail", err)
+		return 0, wrapPgErr("RemoveRecoveryEmail", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx,
+		`DELETE FROM user_recovery_emails WHERE project_id = $1 AND user_id = $2 AND email_fold = $3`,
+		r.projectID, userID, fold)
+	if err != nil {
+		return 0, wrapPgErr("RemoveRecoveryEmail", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return 0, fmt.Errorf("postgres: RemoveRecoveryEmail: %w", service.ErrNotFound)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions SET revoked_at_ms = $4
+		 WHERE project_id = $1 AND revoked_at_ms = 0
+		   AND sid IN (SELECT sid FROM refresh_tokens
+		                WHERE project_id = $1 AND user_id = $2 AND sid <> ''
+		                  AND lower(recovery_email COLLATE "C") = $3)`,
+		r.projectID, userID, fold, atMs); err != nil {
+		return 0, wrapPgErr("RemoveRecoveryEmail(sessions)", err)
+	}
+	var ended int
+	if err := tx.QueryRow(ctx, `
+		WITH ended AS (
+			DELETE FROM refresh_tokens
+			 WHERE project_id = $1 AND user_id = $2 AND lower(recovery_email COLLATE "C") = $3
+			RETURNING consumed_at_ms)
+		SELECT count(*) FROM ended WHERE consumed_at_ms = 0`,
+		r.projectID, userID, fold).Scan(&ended); err != nil {
+		return 0, wrapPgErr("RemoveRecoveryEmail(refresh_tokens)", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, wrapPgErr("RemoveRecoveryEmail", err)
+	}
+	return ended, nil
 }
 
 func (r *pgRepository) FindRecoveryEmailHolder(ctx context.Context, email string) (*service.RecoveryEmail, error) {

@@ -242,8 +242,8 @@ func (StubRepository) ListRecoveryEmails(context.Context, string) ([]*RecoveryEm
 	return nil, ErrServiceUnavailable
 }
 
-func (StubRepository) RemoveRecoveryEmail(context.Context, string, string) (bool, error) {
-	return false, ErrServiceUnavailable
+func (StubRepository) RemoveRecoveryEmail(context.Context, string, string, int64) (int, error) {
+	return 0, ErrServiceUnavailable
 }
 
 func (StubRepository) FindRecoveryEmailHolder(context.Context, string) (*RecoveryEmail, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -105,18 +106,37 @@ func (r *Repo) ListRecoveryEmails(_ context.Context, userID string) ([]*service.
 	return out, nil
 }
 
-func (r *Repo) RemoveRecoveryEmail(_ context.Context, userID, email string) (bool, error) {
+// heldRecoveryEmailLocked is the index of email (under FoldEmail) among
+// userID's recovery emails, or -1. The caller holds r.mu.
+func (r *Repo) heldRecoveryEmailLocked(userID, email string) int {
+	fold := service.FoldEmail(email)
+	return slices.IndexFunc(r.recoveryEmails[userID], func(e *service.RecoveryEmail) bool {
+		return service.FoldEmail(e.Email) == fold
+	})
+}
+
+func (r *Repo) RemoveRecoveryEmail(_ context.Context, userID, email string, atMs int64) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	fold := service.FoldEmail(email)
-	list := r.recoveryEmails[userID]
-	for i, e := range list {
-		if service.FoldEmail(e.Email) == fold {
-			r.recoveryEmails[userID] = append(list[:i:i], list[i+1:]...)
-			return true, nil
-		}
+	i := r.heldRecoveryEmailLocked(userID, email)
+	if i < 0 {
+		return 0, fmt.Errorf("memory: RemoveRecoveryEmail: %w", service.ErrNotFound)
 	}
-	return false, nil
+	list := r.recoveryEmails[userID]
+	r.recoveryEmails[userID] = append(list[:i:i], list[i+1:]...)
+	fold := service.FoldEmail(email)
+	ended := 0
+	for id, t := range r.refreshTokens {
+		if t.UserID != userID || t.RecoveryEmail == "" || service.FoldEmail(t.RecoveryEmail) != fold {
+			continue
+		}
+		if t.ConsumedAtMs == 0 {
+			ended++
+		}
+		r.revokeSessionLocked(t.SID, atMs)
+		delete(r.refreshTokens, id)
+	}
+	return ended, nil
 }
 
 func (r *Repo) DeleteExpiredRecoveryEmailCodes(_ context.Context, beforeMs int64, limit int) error {
@@ -156,14 +176,12 @@ func (r *Repo) FindRecoveryEmailHolder(_ context.Context, email string) (*servic
 func (r *Repo) MarkRecoveryEmailSignIn(_ context.Context, userID, email string, atMs, holdMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	fold := service.FoldEmail(email)
-	for _, e := range r.recoveryEmails[userID] {
-		if service.FoldEmail(e.Email) == fold {
-			if e.LastSignInAt <= atMs-holdMs {
-				e.LastSignInAt = atMs
-			}
-			return nil
-		}
+	i := r.heldRecoveryEmailLocked(userID, email)
+	if i < 0 {
+		return fmt.Errorf("memory: MarkRecoveryEmailSignIn: %w", service.ErrNotFound)
 	}
-	return fmt.Errorf("memory: MarkRecoveryEmailSignIn: %w", service.ErrNotFound)
+	if e := r.recoveryEmails[userID][i]; e.LastSignInAt <= atMs-holdMs {
+		e.LastSignInAt = atMs
+	}
+	return nil
 }

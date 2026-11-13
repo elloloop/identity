@@ -184,7 +184,7 @@ func TestMergeAccounts_RefusedWhileEitherAccountIsHeld(t *testing.T) {
 	holdAccount(ctx, t, repo, survivor.ID, "bob-spare@example.net", svc.nowMs())
 	_, err := svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.ErrorAs(t, err, &hold, "the survivor is held")
-	_, err = repo.RemoveRecoveryEmail(ctx, survivor.ID, "bob-spare@example.net")
+	_, err = repo.RemoveRecoveryEmail(ctx, survivor.ID, "bob-spare@example.net", svc.nowMs())
 	require.NoError(t, err)
 
 	holdAccount(ctx, t, repo, native.ID, "native-spare@example.net", svc.nowMs())

@@ -84,7 +84,7 @@ setting, and none changes until it is set.
   `RemovePhone`; `service.LoginPolicy` gains `RequireVerifiedPhone` and
   `PhoneCallingCodes`.
 
-## Next — a recovery email signs in to its account, and the session it opens is held from changing the account: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claim `amr`, `ListRecoveryEmailsResponse.hold_until`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; two `Repository` methods, new record fields and changed `AuthService` signatures (Go API))
+## Next — a recovery email signs in to its account, and the session it opens is held from changing the account: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claim `amr`, `ListRecoveryEmailsResponse.hold_until`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` signatures (Go API))
 
 A project whose accounts sign in by emailed code had no way back in for a
 person who lost their primary mailbox: the email change and the account merge
@@ -115,9 +115,21 @@ both ask for a password. A recovery email can now be that way.
   starts no hold and sends no notice.
 - **The session says how it was opened.** Its access tokens carry the claim
   `amr: ["recovery_email"]` (RFC 8176; absent on every other token, whose
-  bytes are unchanged), and its refresh token keeps it across rotations, a
-  date-of-birth completion included. A relying party that wants to treat such
-  a session as weaker can read it.
+  bytes are unchanged), and its refresh token keeps the address that opened
+  it across rotations, a date-of-birth completion included. A relying party
+  that wants to treat such a session as weaker can read the claim.
+- **Removing the address ends the sessions it opened.** `RemoveRecoveryEmail`
+  deletes, in the same transaction as the address, every refresh token a
+  sign-in by that address wrote, rotated ones included, and revokes the
+  access session each names: under `GATEWAY_REVOCATION_MODE=session` their
+  access tokens stop working at once, and under `ttl` they last to their
+  expiry and can no longer be refreshed. The account's other sessions,
+  including those its other recovery emails opened, are untouched, and the
+  refused refreshes do not set off replay detection. A session being opened
+  by that address while it is removed (a second factor or a date of birth
+  being completed) is refused `UNAUTHENTICATED` instead. The ended sessions
+  are audited as `session_revoked` with `scope: recovery_email` and
+  `revoked_count`.
 - **The primary email is not proved by it.** A sign-in by a recovery email
   leaves `email_verified` as it was.
 - **Every other address is told.** The account's primary email and its other
@@ -158,12 +170,22 @@ both ask for a password. A recovery email can now be that way.
 - **One more read on every emailed-code or link sign-in**: whether the proved
   address is a recovery email.
 - **Migration 0059** gives `user_recovery_emails` its `last_sign_in_at_ms`,
-  `refresh_tokens` an `amr` column and `login_challenges` a `recovery_email`
-  column (SQLite: 0028), each with a constant default.
+  and `refresh_tokens` and `login_challenges` each a `recovery_email` column
+  (SQLite: 0028), each with a constant default. A recovery session's refresh
+  token is inserted with a `FOR SHARE` read of its address's row, so it
+  waits on a removal in progress rather than outliving it.
 - **Go API.** `service.Repository` gains `FindRecoveryEmailHolder` and
-  `MarkRecoveryEmailSignIn`; `RefreshTokenRecord` gains `AMR` and
-  `LoginChallengeRecord` gains `RecoveryEmail`, which a custom driver must
-  store (the conformance suite checks both). `jwt.Claims` gains `AMR`. The
+  `MarkRecoveryEmailSignIn`; `RefreshTokenRecord` and `LoginChallengeRecord`
+  gain `RecoveryEmail`, which a custom driver must store. Its
+  `CreateRefreshToken` must refuse, with `ErrNotFound`, a token whose
+  `RecoveryEmail` its account does not hold, atomically against
+  `RemoveRecoveryEmail`, and `RemoveRecoveryEmail` (which takes the time of
+  the removal and returns how many unrotated sessions it ended, or
+  `ErrNotFound` for an address the account does not hold) must delete those
+  tokens and revoke their sessions in its transaction (the conformance suite
+  checks all of it, a race between the two included). `jwt.Claims` gains
+  `AMR`, and `RecoveryEmail`, which only the date-of-birth completion ticket
+  of a recovery session carries. The
   `AuthService` calls listed under the hold, `MergeAccounts` and
   `ApproveQrLogin`, and `MembershipService.ListMyTenants`, take a
   `service.SessionSignIn` (the token's `auth_time` and `amr`) where the

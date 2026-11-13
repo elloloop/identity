@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -107,18 +108,41 @@ func (r *MemRepo) ListRecoveryEmails(_ context.Context, userID string) ([]*servi
 	return out, nil
 }
 
-func (r *MemRepo) RemoveRecoveryEmail(_ context.Context, userID, email string) (bool, error) {
+// heldRecoveryEmailLocked is the index of email (under FoldEmail) among
+// userID's recovery emails, or -1. The caller holds r.mu.
+func (r *MemRepo) heldRecoveryEmailLocked(userID, email string) int {
+	fold := service.FoldEmail(email)
+	return slices.IndexFunc(r.recoveryEmails[userID], func(e *service.RecoveryEmail) bool {
+		return service.FoldEmail(e.Email) == fold
+	})
+}
+
+func (r *MemRepo) RemoveRecoveryEmail(_ context.Context, userID, email string, atMs int64) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	fold := service.FoldEmail(email)
-	list := r.recoveryEmails[userID]
-	for i, e := range list {
-		if service.FoldEmail(e.Email) == fold {
-			r.recoveryEmails[userID] = append(list[:i:i], list[i+1:]...)
-			return true, nil
-		}
+	i := r.heldRecoveryEmailLocked(userID, email)
+	if i < 0 {
+		return 0, fmt.Errorf("integration: RemoveRecoveryEmail: %w", service.ErrNotFound)
 	}
-	return false, nil
+	list := r.recoveryEmails[userID]
+	r.recoveryEmails[userID] = append(list[:i:i], list[i+1:]...)
+	fold := service.FoldEmail(email)
+	ended := 0
+	for id, t := range r.refreshTokens {
+		if t.UserID != userID || t.RecoveryEmail == "" || service.FoldEmail(t.RecoveryEmail) != fold {
+			continue
+		}
+		if t.ConsumedAtMs == 0 {
+			ended++
+		}
+		for _, s := range r.sessions {
+			if t.SID != "" && s.SID == t.SID && s.RevokedAtMs == 0 {
+				s.RevokedAtMs = atMs
+			}
+		}
+		delete(r.refreshTokens, id)
+	}
+	return ended, nil
 }
 
 func (r *MemRepo) DeleteExpiredRecoveryEmailCodes(_ context.Context, beforeMs int64, limit int) error {

@@ -4,13 +4,24 @@ import "slices"
 
 // AMRRecoveryEmail is the amr value (RFC 8176 lets a server define its own)
 // of a session a recovery email opened. Its access tokens carry it in the
-// amr claim, and its refresh token keeps it across rotations, so the session
-// says how it was opened for as long as it lasts. The address may be the
-// weakest mailbox the person has, so such a session is held from changing
-// the account's sign-in and recovery settings while a recovery hold is in
-// force, and acts in a tenant only through an explicit membership, never
-// through the domain of the account's email.
+// amr claim, and its refresh token keeps the address across rotations, so the
+// session says how it was opened for as long as it lasts, and ends when the
+// address is removed. The address may be the weakest mailbox the person has,
+// so such a session is held from changing the account's sign-in and recovery
+// settings while a recovery hold is in force, and acts in a tenant only
+// through an explicit membership, never through the domain of the account's
+// email.
 const AMRRecoveryEmail = "recovery_email"
+
+// recoverySessionAMR is the amr claim of a session's access tokens:
+// AMRRecoveryEmail when the recovery email recoveryEmail opened it, none
+// when it was opened another way.
+func recoverySessionAMR(recoveryEmail string) []string {
+	if recoveryEmail == "" {
+		return nil
+	}
+	return []string{AMRRecoveryEmail}
+}
 
 // AMRUnvouched marks a session whose amr no one vouched for: the native-gRPC
 // bridge sets it when the host's interceptor does not own the sign-in

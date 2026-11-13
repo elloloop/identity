@@ -631,10 +631,11 @@ func TestRefreshToken_RecoverySessionSelectsNoTenantThroughTheEmailDomain(t *tes
 
 	const recovery = "recovery-session-refresh"
 	now := f.svc.nowMs()
+	require.NoError(t, f.repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: f.user.ID, Email: "spare@example.net", VerifiedAt: now}, 5))
 	_, err = f.repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
 		TokenHash: hashRefreshToken(recovery), UserID: f.user.ID,
 		ExpiresAt: now + time.Hour.Milliseconds(), CreatedAt: now, LastUsedAt: now, SessionStartedAt: now,
-		AuthTimeMs: now, AMR: []string{AMRRecoveryEmail},
+		AuthTimeMs: now, RecoveryEmail: "spare@example.net",
 	})
 	require.NoError(t, err)
 

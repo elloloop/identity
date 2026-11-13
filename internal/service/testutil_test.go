@@ -676,6 +676,9 @@ func (r *fakeRepo) FindRefreshTokenByHashIncludingConsumed(_ context.Context, ha
 func (r *fakeRepo) CreateRefreshToken(_ context.Context, rec *RefreshTokenRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if rec.RecoveryEmail != "" && r.heldRecoveryEmailLocked(rec.UserID, rec.RecoveryEmail) < 0 {
+		return "", fmt.Errorf("fake: CreateRefreshToken: %w", ErrNotFound)
+	}
 	id := nextNodeID()
 	rec.NodeID = id
 	cp := *rec

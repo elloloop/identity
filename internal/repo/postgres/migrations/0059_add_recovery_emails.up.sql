@@ -17,11 +17,16 @@
 -- recovery_email_codes is the emailed code that proves an address before a
 -- row is stored: at most one live code per user, as phone_verification_codes.
 --
--- refresh_tokens.amr is how the sign-in that opened a session proved itself
--- (the access token's amr claim, values separated by spaces), copied
--- unchanged across rotations: 'recovery_email' for a session a recovery
--- email opened, '' for every other. login_challenges.recovery_email is the
--- recovery email a sign-in waiting on its second factor was made with.
+-- refresh_tokens.recovery_email is the recovery email whose sign-in opened a
+-- session, copied unchanged across rotations, '' for a session opened any
+-- other way; such a session's access tokens carry amr 'recovery_email'.
+-- Removing the address deletes every refresh token carrying it, rotated or
+-- not, and revokes the sessions they name, in one transaction; a token
+-- carrying it is inserted only while the address row exists, read FOR SHARE,
+-- so none is stored behind a removal. The deletion is scoped by
+-- (project_id, user_id), which refresh_tokens_project_user_idx serves.
+-- login_challenges.recovery_email is the recovery email a sign-in waiting on
+-- its second factor was made with.
 --
 -- The two tables are new and empty, and the two columns have constant
 -- defaults, so nothing here rewrites existing rows; the column adds wait
@@ -67,5 +72,5 @@ ALTER TABLE recovery_email_codes FORCE ROW LEVEL SECURITY;
 CREATE POLICY recovery_email_codes_project_isolation ON recovery_email_codes
     USING (project_id = current_setting('app.current_project_id', true));
 
-ALTER TABLE refresh_tokens ADD COLUMN amr TEXT NOT NULL DEFAULT '';
+ALTER TABLE refresh_tokens ADD COLUMN recovery_email TEXT NOT NULL DEFAULT '';
 ALTER TABLE login_challenges ADD COLUMN recovery_email TEXT NOT NULL DEFAULT '';

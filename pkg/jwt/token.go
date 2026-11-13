@@ -87,11 +87,15 @@ type Claims struct {
 	// session proved itself, where that limits what the session may do.
 	// identity sets it only on a session a recovery email opened
 	// ("recovery_email"), and absent on every other token, so their bytes
-	// are unchanged. On a purpose ticket it carries the amr of the session
-	// the ticket interrupted.
-	AMR       []string `json:"amr,omitempty"`
-	IssuedAt  int64    `json:"iat"`
-	ExpiresAt int64    `json:"exp"`
+	// are unchanged.
+	AMR []string `json:"amr,omitempty"`
+	// RecoveryEmail is set only on a purpose ticket that interrupted a
+	// session a recovery email opened: that address, so the session the
+	// ticket completes is tied to it as the interrupted one was. No access
+	// token carries it.
+	RecoveryEmail string `json:"recovery_email,omitempty"`
+	IssuedAt      int64  `json:"iat"`
+	ExpiresAt     int64  `json:"exp"`
 }
 
 // ClaimsMap converts the access-token claims plus standard iat/exp into
@@ -140,6 +144,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if len(c.AMR) > 0 {
 		m["amr"] = c.AMR
+	}
+	if c.RecoveryEmail != "" {
+		m["recovery_email"] = c.RecoveryEmail
 	}
 	if len(c.Audience) > 0 {
 		m["aud"] = c.Audience
@@ -298,6 +305,9 @@ func verifyTokenProfile(tokenStr string, kp KeyProvider, expectedTenant, expecte
 	}
 	if v, ok := tok.Get("amr"); ok {
 		claims.AMR = stringsClaim(v)
+	}
+	if v, ok := tok.Get("recovery_email"); ok {
+		claims.RecoveryEmail, _ = v.(string)
 	}
 	if v, ok := tok.Get("is_minor"); ok {
 		claims.IsMinor, _ = v.(bool)

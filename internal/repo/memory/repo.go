@@ -775,6 +775,9 @@ func (r *Repo) FindRefreshTokenByHashIncludingConsumed(_ context.Context, hash s
 func (r *Repo) CreateRefreshToken(_ context.Context, rec *service.RefreshTokenRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if rec.RecoveryEmail != "" && r.heldRecoveryEmailLocked(rec.UserID, rec.RecoveryEmail) < 0 {
+		return "", fmt.Errorf("memory: CreateRefreshToken: %w", service.ErrNotFound)
+	}
 	id := r.nextID()
 	rec.NodeID = id
 	cp := *rec
@@ -2302,21 +2305,26 @@ func (r *Repo) GetSessionBySid(_ context.Context, sid string) (*service.SessionR
 // or is already revoked. Concurrent revoke calls converge on the same
 // final state rather than racing each other into failure.
 func (r *Repo) RevokeSession(_ context.Context, sid string, atMs int64) error {
-	if sid == "" {
-		return nil
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.revokeSessionLocked(sid, atMs)
+	return nil
+}
+
+// revokeSessionLocked is RevokeSession with r.mu held.
+func (r *Repo) revokeSessionLocked(sid string, atMs int64) {
+	if sid == "" {
+		return
+	}
 	for _, s := range r.sessions {
 		if s.SID == sid {
 			if s.RevokedAtMs == 0 {
 				s.RevokedAtMs = atMs
 				r.revokeAgentOAuthSIDLocked(s.SID, atMs)
 			}
-			return nil
+			return
 		}
 	}
-	return nil
 }
 
 // RevokeSessionsForUser revokes every active session for the user.

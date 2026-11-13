@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // ── Recovery emails ───────────────────────────────────────────────────
@@ -103,18 +104,41 @@ func (r *fakeRepo) ListRecoveryEmails(_ context.Context, userID string) ([]*Reco
 	return out, nil
 }
 
-func (r *fakeRepo) RemoveRecoveryEmail(_ context.Context, userID, email string) (bool, error) {
+// heldRecoveryEmailLocked is the index of email (under FoldEmail) among
+// userID's recovery emails, or -1. The caller holds r.mu.
+func (r *fakeRepo) heldRecoveryEmailLocked(userID, email string) int {
+	fold := FoldEmail(email)
+	return slices.IndexFunc(r.recoveryEmails[userID], func(e *RecoveryEmail) bool {
+		return FoldEmail(e.Email) == fold
+	})
+}
+
+func (r *fakeRepo) RemoveRecoveryEmail(_ context.Context, userID, email string, atMs int64) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	fold := FoldEmail(email)
-	list := r.recoveryEmails[userID]
-	for i, e := range list {
-		if FoldEmail(e.Email) == fold {
-			r.recoveryEmails[userID] = append(list[:i:i], list[i+1:]...)
-			return true, nil
-		}
+	i := r.heldRecoveryEmailLocked(userID, email)
+	if i < 0 {
+		return 0, fmt.Errorf("fake: RemoveRecoveryEmail: %w", ErrNotFound)
 	}
-	return false, nil
+	list := r.recoveryEmails[userID]
+	r.recoveryEmails[userID] = append(list[:i:i], list[i+1:]...)
+	fold := FoldEmail(email)
+	ended := 0
+	for id, t := range r.refreshTokens {
+		if t.UserID != userID || t.RecoveryEmail == "" || FoldEmail(t.RecoveryEmail) != fold {
+			continue
+		}
+		if t.ConsumedAtMs == 0 {
+			ended++
+		}
+		for _, s := range r.sessions {
+			if t.SID != "" && s.SID == t.SID && s.RevokedAtMs == 0 {
+				s.RevokedAtMs = atMs
+			}
+		}
+		delete(r.refreshTokens, id)
+	}
+	return ended, nil
 }
 
 func (r *fakeRepo) DeleteExpiredRecoveryEmailCodes(_ context.Context, beforeMs int64, limit int) error {

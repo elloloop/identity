@@ -292,12 +292,16 @@ func (s *AuthService) refuseHeldSession(ctx context.Context, userID string, sign
 }
 
 // RemoveRecoveryEmail removes one of the caller's recovery emails and
-// returns what is left. A notice goes to the removed address and to every
-// other address of the account. An address the account does not hold is
-// ErrNotFound. While a hold is in force, a session a recovery email opened
-// is refused (RecoveryHoldError) and any other session may remove any
-// address. Like ListRecoveryEmails it does not depend on the project's
-// switch.
+// returns what is left. Every session the address opened ends with it, in
+// the same write: their refresh tokens are deleted and, under
+// GATEWAY_REVOCATION_MODE=session, their access tokens stop working, the
+// caller's own included when the address opened it; the ended sessions are
+// audited as session_revoked. A notice goes to the removed address and to
+// every other address of the account. An address the
+// account does not hold is ErrNotFound. While a hold is in force, a session a
+// recovery email opened is refused (RecoveryHoldError) and any other session
+// may remove any address. Like ListRecoveryEmails it does not depend on the
+// project's switch.
 func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, signIn SessionSignIn, emailAddr string) ([]*RecoveryEmail, error) {
 	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
 	user, err := s.recoveryEmailCaller(ctx, userID, signIn, cfg)
@@ -308,22 +312,29 @@ func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, si
 	if !ok {
 		return nil, fmt.Errorf("%w: email is not a usable address", ErrInvalidArgument)
 	}
-	removed, err := s.repo(ctx).RemoveRecoveryEmail(ctx, userID, string(addr))
-	if err != nil {
-		return nil, fmt.Errorf("removing recovery email: %w", err)
-	}
-	if !removed {
+	ended, err := s.repo(ctx).RemoveRecoveryEmail(ctx, userID, string(addr), s.nowMs())
+	if errors.Is(err, ErrNotFound) {
 		return nil, fmt.Errorf("%w: the account holds no such recovery email", ErrNotFound)
 	}
-	held, err := s.repo(ctx).ListRecoveryEmails(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("listing recovery emails: %w", err)
+		return nil, fmt.Errorf("removing recovery email: %w", err)
 	}
 	s.audit.Log(ctx, audit.EventRecoveryEmailRemoved,
 		audit.WithActor(userID), audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"email": redactEmail(string(addr))}))
+	if ended > 0 {
+		s.audit.Log(ctx, audit.EventSessionRevoked,
+			audit.WithActor(userID), audit.WithTarget(userID), audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{
+				"scope": "recovery_email", "email": redactEmail(string(addr)), "revoked_count": ended,
+			}))
+	}
 	s.logger.Info("recovery_email_removed",
-		zap.String("user_id", userID), zap.String("email", redactEmail(string(addr))))
+		zap.String("user_id", userID), zap.String("email", redactEmail(string(addr))), zap.Int("sessions_ended", ended))
+	held, err := s.repo(ctx).ListRecoveryEmails(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("listing recovery emails: %w", err)
+	}
 	notice := accountNotice{
 		op:       "recovery_email_removed_notice",
 		headline: "A recovery email was removed from your account",
