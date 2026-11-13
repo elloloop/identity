@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -242,5 +245,34 @@ func TestRegisterGRPC_TenantOperatorSharesHTTPBudget(t *testing.T) {
 	}
 	if _, err := grpcClient.AdminGetTenant(context.Background(), &identitypb.AdminGetTenantRequest{TenantId: "t"}); status.Code(err) != codes.Unimplemented {
 		t.Fatalf("a call without a key after the budget is spent: %v, want Unimplemented from the handler", err)
+	}
+}
+
+// A host whose interceptor forwards the token's other keys but not its amr
+// has every native-gRPC session treated as one a recovery email may have
+// opened, which it may not know: RegisterGRPC says so once. A host that
+// forwards the amr, or forwards nothing, is not told.
+func TestRegisterGRPC_WarnsWhenOtherKeysAreTrustedButNotTheAMR(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts func(*identityserver.Options)
+		warn bool
+	}{
+		{name: "auth time without amr", opts: func(o *identityserver.Options) { o.GRPCTrustAuthTime = true }, warn: true},
+		{name: "session id without amr", opts: func(o *identityserver.Options) { o.GRPCTrustSessionID = true }, warn: true},
+		{name: "auth time and amr", opts: func(o *identityserver.Options) { o.GRPCTrustAuthTime, o.GRPCTrustAMR = true, true }},
+		{name: "nothing trusted", opts: func(*identityserver.Options) {}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			core, logs := observer.New(zapcore.WarnLevel)
+			srv := newTestServerWith(t, nil, func(o *identityserver.Options) {
+				o.Logger = zap.New(core)
+				tc.opts(o)
+			})
+			srv.RegisterGRPC(grpc.NewServer())
+			if got := logs.FilterMessage("grpc_amr_not_trusted").Len(); got != map[bool]int{true: 1}[tc.warn] {
+				t.Fatalf("grpc_amr_not_trusted logged %d times, want warn=%t", got, tc.warn)
+			}
+		})
 	}
 }

@@ -28,7 +28,8 @@ func recoverySessionAMR(recoveryEmail string) []string {
 // token's amr. No token carries it. Such a session may be one a recovery
 // email opened, so it is treated as one wherever that is safe to assume: it
 // is held during a recovery hold, approves no QR sign-in while one is in
-// force, and acts in a tenant only through an explicit membership.
+// force, and, in a project whose recovery emails sign in, ListMyTenants
+// lists it only its explicit memberships.
 const AMRUnvouched = "unvouched"
 
 // SessionSignIn is what the caller's verified access token says about the
@@ -49,8 +50,13 @@ func (s SessionSignIn) openedByRecoveryEmail() bool {
 	return slices.Contains(s.AMR, AMRRecoveryEmail)
 }
 
+// unvouched reports whether no one vouched for how the session was opened.
+func (s SessionSignIn) unvouched() bool {
+	return slices.Contains(s.AMR, AMRUnvouched)
+}
+
 // mayBeRecoverySession reports whether the session may have been opened by
 // a recovery email: it says it was, or no one vouched for how it was opened.
 func (s SessionSignIn) mayBeRecoverySession() bool {
-	return s.openedByRecoveryEmail() || slices.Contains(s.AMR, AMRUnvouched)
+	return s.openedByRecoveryEmail() || s.unvouched()
 }

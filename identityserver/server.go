@@ -331,6 +331,12 @@ func (s *Server) Handler() http.Handler {
 // every per-IP limit except LookupUsers', which the bridge enforces from
 // the same budget as the HTTP surface.
 func (s *Server) RegisterGRPC(reg grpc.ServiceRegistrar) {
+	if (s.grpcTrust.authTime || s.grpcTrust.sessionID) && !s.grpcTrust.amr {
+		s.logger.Warn("grpc_amr_not_trusted",
+			zap.String("hint", "the interceptor forwards the verified token's other keys but GRPCTrustAMR is unset, "+
+				"so every native-gRPC session is treated as one a recovery email may have opened; "+
+				"forward the token's amr as x-authenticated-amr and set GRPCTrustAMR (see the embedding guide)"))
+	}
 	identitypb.RegisterIdentityServiceServer(reg, newGRPCBridge(s.built, s.logger, s.grpcTrust))
 }
 

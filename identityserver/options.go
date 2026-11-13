@@ -62,13 +62,17 @@ type Options struct {
 	// through to the handlers. Set it only when the host's gRPC auth
 	// interceptor deletes any value the client sent and sets it from the
 	// verified token's amr claim, its values separated by spaces (see the
-	// embedding guide). Left false, the bridge replaces it with "unvouched",
-	// so every session over native gRPC is treated as one a recovery email
-	// may have opened: while a recovery hold is in force it makes no account
-	// security change and approves no QR sign-in, and ListMyTenants lists
-	// its explicit memberships only. Without it a client could say no
-	// recovery email opened its session, and an interceptor that forwards no
-	// amr would say the same for every session.
+	// embedding guide). Every handler that limits a session by how it was
+	// opened reads the key. Left false, the bridge replaces it with
+	// "unvouched", so every session over native gRPC is treated as one a
+	// recovery email may have opened: while a recovery hold is in force on
+	// its account it makes no account security change and approves no QR
+	// sign-in, and in a project whose recovery emails sign in
+	// (recovery_emails.sign_in) ListMyTenants lists its explicit memberships
+	// only, hold or not. Without it a client could say no recovery email
+	// opened its session, and an interceptor that forwards no amr would say
+	// the same for every session. RegisterGRPC logs
+	// grpc_amr_not_trusted when another key is trusted and this one is not.
 	GRPCTrustAMR bool
 	// GRPCTrustSessionID requires the host interceptor to strip caller metadata
 	// and supply X-Authenticated-Session-Id from a verified human token.

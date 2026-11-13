@@ -589,8 +589,9 @@ func TestListMyTenants_DomainMembershipNeedsAVerifiedEmailOnTheDomain(t *testing
 
 // A session a recovery email opened lists no tenant the account belongs to
 // only through its email's domain: that session proved another mailbox. Nor
-// does one no one vouched for how it was opened, which may be such a
-// session.
+// does one no one vouched for how it was opened in a project whose recovery
+// emails sign in, where it may be such a session; in any other project no
+// such session can exist, and it lists the domain's tenants as before.
 func TestListMyTenants_RecoverySessionListsNoDomainMembership(t *testing.T) {
 	f := newSelfServiceFixture(&config.Config{})
 	ctx := context.Background()
@@ -605,15 +606,28 @@ func TestListMyTenants_RecoverySessionListsNoDomainMembership(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	got, err := f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{})
-	require.NoError(t, err)
-	assert.Len(t, got, 2)
-	for _, amr := range []string{AMRRecoveryEmail, AMRUnvouched} {
-		got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{AMR: []string{amr}})
+	recoverySignIn := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID:      ssProject,
+		Access:         ProjectAccessConfig{Mode: AccessModeOpen},
+		RecoveryEmails: ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true},
+	})
+	for name, ctx := range map[string]context.Context{"no recovery sign-in": withTenantsProject(false), "recovery sign-in": recoverySignIn} {
+		got, err := f.svc.ListMyTenants(ctx, ssOwnerID, SessionSignIn{})
 		require.NoError(t, err)
-		require.Len(t, got, 1, amr)
-		assert.Equal(t, "t-inv", got[0].TenantID, amr)
+		assert.Len(t, got, 2, name)
+		got, err = f.svc.ListMyTenants(ctx, ssOwnerID, SessionSignIn{AMR: []string{AMRRecoveryEmail}})
+		require.NoError(t, err)
+		require.Len(t, got, 1, name)
+		assert.Equal(t, "t-inv", got[0].TenantID, name)
 	}
+
+	got, err := f.svc.ListMyTenants(recoverySignIn, ssOwnerID, SessionSignIn{AMR: []string{AMRUnvouched}})
+	require.NoError(t, err)
+	require.Len(t, got, 1, "an unvouched session where recovery emails sign in")
+	assert.Equal(t, "t-inv", got[0].TenantID)
+	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{AMR: []string{AMRUnvouched}})
+	require.NoError(t, err)
+	assert.Len(t, got, 2, "an unvouched session where no recovery email signs in keeps its domain tenants")
 }
 
 // A session a recovery email opened selects a tenant only through an
