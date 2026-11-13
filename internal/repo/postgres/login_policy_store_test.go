@@ -77,7 +77,7 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 		SessionIdleTimeoutSeconds:     900,
 		SessionAbsoluteTimeoutSeconds: 86400,
 		RequireVerifiedPhone:          true,
-		PhoneCallingCodes:             "91,44",
+		PhoneCallingCodes:             []string{"91", "44"},
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, id1)
@@ -93,7 +93,7 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 	require.Equal(t, int64(900), got.SessionIdleTimeoutSeconds)
 	require.Equal(t, int64(86400), got.SessionAbsoluteTimeoutSeconds)
 	require.True(t, got.RequireVerifiedPhone)
-	require.Equal(t, "91,44", got.PhoneCallingCodes)
+	require.Equal(t, []string{"91", "44"}, got.PhoneCallingCodes)
 	require.JSONEq(t, `{}`, got.SSOConnectionJSON, "empty sso connection defaults to {}")
 	require.NotZero(t, got.CreatedAtMs)
 	createdAt := got.CreatedAtMs

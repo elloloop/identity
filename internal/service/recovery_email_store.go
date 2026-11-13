@@ -35,10 +35,12 @@ type RecoveryEmailCodeRecord struct {
 }
 
 var (
-	// ErrRecoveryEmailsDisabled is returned by the recovery-email RPCs when
-	// the caller's project has not turned them on (recovery_emails.enabled).
-	// Mapped to CodeFailedPrecondition.
-	ErrRecoveryEmailsDisabled = errors.New("this project does not keep recovery emails")
+	// ErrRecoveryEmailsDisabled is returned by RequestRecoveryEmail and
+	// VerifyRecoveryEmail when the caller's project has not turned recovery
+	// emails on (recovery_emails.enabled). Mapped to CodeFailedPrecondition;
+	// its message leads with the stable `recovery_emails_disabled` token
+	// clients match on.
+	ErrRecoveryEmailsDisabled = errors.New("recovery_emails_disabled: this project does not keep recovery emails")
 	// ErrRecoveryReauthenticationRequired is returned by the calls that
 	// change an account's recovery settings when the caller's session was not
 	// opened by a sign-in within the project's

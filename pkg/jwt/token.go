@@ -46,15 +46,15 @@ type Claims struct {
 	IsMinor bool `json:"is_minor,omitempty"`
 	// Anonymous marks the subject as an anonymous account — a real user with
 	// a stable sub but no credential of any kind. Emitted only when true
-	// (omitempty), so tokens for identified users are byte-identical to
-	// before. Downstream services MUST read it before granting anything that
+	// (omitempty): a token for an identified user has no anonymous claim.
+	// Downstream services MUST read it before granting anything that
 	// assumes a verified human: an anonymous sub is cheap to mint, and
 	// `email` is empty rather than absent-because-unverified. Firebase
 	// carries the same signal as sign_in_provider="anonymous".
 	Anonymous bool `json:"anonymous,omitempty"`
 	// Kind is "agent" on a token whose subject is an agent account (a
-	// non-human account a person owns) and empty otherwise, so tokens for
-	// people are byte-identical to before: an absent kind means a person.
+	// non-human account a person owns) and absent otherwise: an absent kind
+	// means a person.
 	// Downstream services MUST read it before granting anything that assumes
 	// a human at the keyboard.
 	Kind     string   `json:"kind,omitempty"`
@@ -62,8 +62,7 @@ type Claims struct {
 	Audience []string `json:"aud,omitempty"`
 	// Issuer is the "iss" claim: the deployment's configured issuer
 	// (GATEWAY_JWT_ISSUER), so a verifier can pin who minted the token.
-	// Omitted when unset, so tokens from a deployment without one are
-	// byte-identical to before.
+	// Omitted when the deployment configures none.
 	Issuer string `json:"iss,omitempty"`
 	// Purpose marks a token as a single-purpose bearer credential rather
 	// than a session access token (e.g. "dob_completion" for the
@@ -86,8 +85,7 @@ type Claims struct {
 	// AMR is the "amr" claim (RFC 8176): how the sign-in that opened the
 	// session proved itself, where that limits what the session may do.
 	// identity sets it only on a session a recovery email opened
-	// ("recovery_email"), and absent on every other token, so their bytes
-	// are unchanged.
+	// (["recovery_email"]); every other token has no amr claim.
 	AMR []string `json:"amr,omitempty"`
 	// RecoveryEmail is set only on a purpose ticket that interrupted a
 	// session a recovery email opened: that address, so the session the

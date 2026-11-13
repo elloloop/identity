@@ -81,7 +81,7 @@ func (s *LoginPolicyStore) UpsertLoginPolicy(ctx context.Context, p *service.Log
 			session_idle_timeout_seconds,
 			session_absolute_timeout_seconds, require_verified_phone,
 			phone_calling_codes, created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $12, $13, $11, $11)
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $12, COALESCE($13::text[], '{}'), $11, $11)
 		ON CONFLICT (project_id, tenant_id) DO UPDATE SET
 			allowed_methods                  = EXCLUDED.allowed_methods,
 			sso_required                     = EXCLUDED.sso_required,

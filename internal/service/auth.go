@@ -1402,7 +1402,7 @@ var (
 	// CodeUnauthenticated so all failure modes look identical to a
 	// brute-force attacker.
 	ErrPhoneCodeInvalid = errors.New("phone verification code is invalid or expired")
-	// ErrSMSDisabled is returned by RequestPhoneVerification and
+	// ErrPhoneVerificationUnavailable is returned by RequestPhoneVerification and
 	// VerifyPhoneCode when the caller's project cannot verify phones: it
 	// turned phone verification off (phone.enabled), or none of the channels
 	// it uses (phone.channels) has a sender on this deployment, as when
@@ -1410,7 +1410,7 @@ var (
 	// RequestPhoneVerification also returns it wrapped around the last
 	// failure when every channel with a sender failed to deliver the code.
 	// Maps to CodeUnavailable.
-	ErrSMSDisabled = errors.New("phone verification is not available")
+	ErrPhoneVerificationUnavailable = errors.New("phone verification is not available")
 	// ErrPhoneAlreadyVerified is returned by RequestPhoneVerification when
 	// the caller has already verified the same number. Maps to
 	// CodeAlreadyExists.
@@ -1425,7 +1425,7 @@ var (
 	// for a number outside the project's phone.allowed_calling_codes. Maps
 	// to CodeFailedPrecondition; its message leads with the stable
 	// `phone_country_not_allowed` token.
-	ErrPhoneCountryNotAllowed = errors.New("phone_country_not_allowed: phone numbers from that country are not accepted here")
+	ErrPhoneCountryNotAllowed = errors.New("phone_country_not_allowed: phone numbers with that country calling code are not accepted here")
 	// ErrPhoneVerificationRequired is the refusal, inside a
 	// TenantSelectionRefusedError, of a tenant whose login policy requires a
 	// verified phone the account does not have. Maps to

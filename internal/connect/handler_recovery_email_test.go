@@ -200,6 +200,7 @@ func TestHandler_RecoveryEmails_Refusals(t *testing.T) {
 	_, err = off.client.RequestRecoveryEmail(ctx,
 		signedIn(connect.NewRequest(&identitypb.RequestRecoveryEmailRequest{Email: "spare@example.net"}), offUID))
 	assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	require.ErrorContains(t, err, "recovery_emails_disabled", "the refusal carries a token apart from reauthentication_required")
 }
 
 // A sign-in by a recovery email holds the session it opened from account
@@ -226,6 +227,9 @@ func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 	require.NoError(t, err)
 	holdUntil := listed.Msg.HoldUntil
 	require.Greater(t, holdUntil, time.Now().Add(6*24*time.Hour).UnixMilli())
+	require.Len(t, listed.Msg.RecoveryEmails, 1)
+	assert.Equal(t, holdUntil-7*24*time.Hour.Milliseconds(), listed.Msg.RecoveryEmails[0].LastSignInAt,
+		"the list says which address started the hold, and when")
 
 	requireHold := func(err error) {
 		t.Helper()
@@ -336,7 +340,7 @@ func TestToConnectError_RecoveryAndPhoneSentinels(t *testing.T) {
 }
 
 func TestLoginPolicyPhoneRuleRoundTripsThroughTheProto(t *testing.T) {
-	got := loginPolicyToProto(&service.LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: "91,44"})
+	got := loginPolicyToProto(&service.LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}})
 	assert.True(t, got.RequireVerifiedPhone)
 	assert.Equal(t, []string{"91", "44"}, got.PhoneCallingCodes)
 	assert.Nil(t, loginPolicyToProto(&service.LoginPolicy{}).PhoneCallingCodes)

@@ -732,6 +732,11 @@ message RemovePhoneResponse {
 message RecoveryEmail {
   string email = 1;
   int64 verified_at = 2; // epoch ms the address was proved
+  // last_sign_in_at is when the address last signed in to the account (epoch
+  // ms), 0 when it never has. The address with the latest one started the
+  // hold ListRecoveryEmailsResponse.hold_until reports; removing it ends the
+  // hold.
+  int64 last_sign_in_at = 3;
 }
 
 message RequestRecoveryEmailRequest {
@@ -2643,9 +2648,10 @@ message LoginPolicy {
   // so no token for the tenant exists before then. It is not a sign-in rule:
   // the account still signs in, and verifies a phone with that session.
   bool require_verified_phone = 12;
-  // phone_calling_codes narrows require_verified_phone to numbers of these
-  // country calling codes, as digits without the '+' (e.g. "91"). Empty
-  // accepts a verified number of any country.
+  // phone_calling_codes narrows require_verified_phone to numbers under these
+  // country calling codes, as digits without the '+' (e.g. "1", "44", "91";
+  // one code can cover several countries). Empty accepts a verified number
+  // under any code.
   repeated string phone_calling_codes = 13;
 }
 
@@ -2665,7 +2671,8 @@ message UpsertLoginPolicyRequest {
   int64 session_absolute_timeout_seconds = 9;
   // require_verified_phone / phone_calling_codes set the tenant's phone rule
   // (see LoginPolicy). phone_calling_codes is only valid with
-  // require_verified_phone; each entry is 1 to 3 digits.
+  // require_verified_phone; each entry is 1 to 3 digits, not starting with
+  // 0, listed once, and anything else is INVALID_ARGUMENT.
   bool require_verified_phone = 10;
   repeated string phone_calling_codes = 11;
 }

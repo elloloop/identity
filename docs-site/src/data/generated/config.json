@@ -1912,7 +1912,7 @@
     "type": "boolean",
     "default": "false",
     "required": false,
-    "description": "turns on phone (SMS OTP) verification.",
+    "description": "turns on the SMS channel of phone verification.",
     "category": "Phone / SMS verification",
     "anchor": "phone-sms-verification"
   },

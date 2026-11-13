@@ -10623,9 +10623,10 @@ components:
             type: string
           title: phone_calling_codes
           description: |-
-            phone_calling_codes narrows require_verified_phone to numbers of these
-             country calling codes, as digits without the '+' (e.g. "91"). Empty
-             accepts a verified number of any country.
+            phone_calling_codes narrows require_verified_phone to numbers under these
+             country calling codes, as digits without the '+' (e.g. "1", "44", "91";
+             one code can cover several countries). Empty accepts a verified number
+             under any code.
       title: LoginPolicy
       additionalProperties: false
       description: |-
@@ -11556,6 +11557,17 @@ components:
           title: verified_at
           format: int64
           description: epoch ms the address was proved
+        lastSignInAt:
+          type:
+            - integer
+            - string
+          title: last_sign_in_at
+          format: int64
+          description: |-
+            last_sign_in_at is when the address last signed in to the account (epoch
+             ms), 0 when it never has. The address with the latest one started the
+             hold ListRecoveryEmailsResponse.hold_until reports; removing it ends the
+             hold.
       title: RecoveryEmail
       additionalProperties: false
       description: RecoveryEmail is one verified recovery address of an account.
@@ -13133,7 +13145,8 @@ components:
           description: |-
             require_verified_phone / phone_calling_codes set the tenant's phone rule
              (see LoginPolicy). phone_calling_codes is only valid with
-             require_verified_phone; each entry is 1 to 3 digits.
+             require_verified_phone; each entry is 1 to 3 digits, not starting with
+             0, listed once, and anything else is INVALID_ARGUMENT.
         phoneCallingCodes:
           type: array
           items:

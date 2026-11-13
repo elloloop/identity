@@ -10,8 +10,8 @@
 --
 -- login_policies gains the tenant's phone rule: require_verified_phone
 -- refuses a tenant selection until the account has a verified phone, and
--- phone_calling_codes, when set, is the comma-separated calling codes that
--- phone must start with. Both default to no rule, and adding columns with
+-- phone_calling_codes, when set, is the calling codes that phone must start
+-- with. Both default to no rule, and adding columns with
 -- constant defaults rewrites nothing.
 SET LOCAL lock_timeout = '10s';
 
@@ -31,4 +31,4 @@ CREATE POLICY phone_number_claims_project_isolation ON phone_number_claims
 
 ALTER TABLE login_policies
     ADD COLUMN require_verified_phone BOOLEAN NOT NULL DEFAULT FALSE,
-    ADD COLUMN phone_calling_codes    TEXT    NOT NULL DEFAULT '';
+    ADD COLUMN phone_calling_codes    TEXT[]  NOT NULL DEFAULT '{}';

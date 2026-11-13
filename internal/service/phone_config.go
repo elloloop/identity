@@ -25,11 +25,11 @@ const maxPhoneMessageTemplateLen = 128
 const maxPhoneReassignAfterSeconds = 10 * 365 * 24 * 60 * 60
 
 // ProjectPhoneConfig is a project's policy for phone verification. The zero
-// value is today's behaviour: verification is on wherever the deployment
+// value leaves the deployment's: verification is on wherever the deployment
 // has an SMS provider (GATEWAY_SMS_ENABLED), codes go by SMS, a number may
-// sit on any number of accounts, and every country is accepted. A project
-// can only narrow that: it cannot turn on a channel the deployment has no
-// sender for.
+// sit on any number of accounts, and every calling code is accepted. A
+// project can only narrow that: it cannot turn on a channel the deployment
+// has no sender for.
 type ProjectPhoneConfig struct {
 	// Enabled, when false, turns phone verification off for this project in
 	// a deployment that has it on. Unset follows the deployment. True
@@ -46,8 +46,9 @@ type ProjectPhoneConfig struct {
 	// valid with Unique.
 	ReassignAfterSeconds int64 `json:"reassign_after_seconds"`
 	// AllowedCallingCodes limits the numbers a code is sent to and stored
-	// for to these country calling codes, as digits without the '+' ("91").
-	// Empty accepts every country.
+	// for to these country calling codes, as digits without the '+' ("1",
+	// "44", "91"; one code can cover several countries). Empty accepts every
+	// code.
 	AllowedCallingCodes []string `json:"allowed_calling_codes"`
 	// Channels is the order in which the delivery channels are tried:
 	// PhoneChannelSMS and PhoneChannelMessage. The first one the deployment
@@ -158,29 +159,11 @@ func phoneConfig(scope *ProjectScope) ProjectPhoneConfig {
 	return scope.Phone
 }
 
-// normalizePhoneCallingCodes validates a login policy's comma-separated
-// calling codes and returns them trimmed, in the order given.
-func normalizePhoneCallingCodes(raw string) (string, error) {
-	var codes []string
-	for _, part := range strings.Split(raw, ",") {
-		if code := strings.TrimSpace(part); code != "" {
-			codes = append(codes, code)
-		}
-	}
-	if err := validateCallingCodes("phone_calling_codes", codes); err != nil {
-		return "", err
-	}
-	return strings.Join(codes, ","), nil
-}
-
 // phoneSatisfies reports whether user's verified phone meets a login
 // policy's phone rule.
 func phoneSatisfies(user *User, p *LoginPolicy) bool {
 	if !user.PhoneVerified || user.PhoneNumber == "" {
 		return false
 	}
-	if p.PhoneCallingCodes == "" {
-		return true
-	}
-	return hasCallingCode(user.PhoneNumber, strings.Split(p.PhoneCallingCodes, ","))
+	return hasCallingCode(user.PhoneNumber, p.PhoneCallingCodes)
 }

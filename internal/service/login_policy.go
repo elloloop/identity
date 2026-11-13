@@ -52,11 +52,11 @@ type LoginPolicy struct {
 	// account has a verified phone number. It is not a sign-in rule: the
 	// account still signs in, and uses that session to verify a phone.
 	RequireVerifiedPhone bool
-	// PhoneCallingCodes narrows RequireVerifiedPhone to numbers of these
-	// country calling codes: a comma-separated list of digits ("91,44").
-	// Empty accepts a verified number of any country. It is only valid with
+	// PhoneCallingCodes narrows RequireVerifiedPhone to numbers under these
+	// country calling codes, as digits without the '+' ("1", "44"). Empty
+	// accepts a verified number under any code. It is only valid with
 	// RequireVerifiedPhone.
-	PhoneCallingCodes string
+	PhoneCallingCodes []string
 	CreatedAtMs       int64
 	UpdatedAtMs       int64
 }

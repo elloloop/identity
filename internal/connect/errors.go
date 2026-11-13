@@ -217,7 +217,7 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrLocalAuthDisabled),
 		errors.Is(err, service.ErrOAuthDisabled),
-		errors.Is(err, service.ErrSMSDisabled):
+		errors.Is(err, service.ErrPhoneVerificationUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
 
 	case errors.Is(err, service.ErrUnimplemented):

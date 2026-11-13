@@ -49,19 +49,26 @@ func (s *AuthService) phoneChannelUsable(ch string) bool {
 	}
 }
 
-// phoneVerificationOn reports whether the project verifies phones: it has
-// not switched the feature off, and the deployment has a sender for at
-// least one of the channels it uses.
-func (s *AuthService) phoneVerificationOn(cfg ProjectPhoneConfig) bool {
+// refusePhoneVerificationOff returns ErrPhoneVerificationUnavailable when
+// the project does not verify phones: it switched the feature off, or the
+// deployment has a sender for none of the channels it uses. The answer is
+// the same either way, so the log says which, the second as a warning: a
+// project that names only channels this deployment cannot send on is
+// misconfigured, and every request it gets fails.
+func (s *AuthService) refusePhoneVerificationOff(ctx context.Context, cfg ProjectPhoneConfig) error {
 	if cfg.off() {
-		return false
+		s.logger.Info("phone_verification_unavailable", zap.String("reason", "switched_off_by_project"))
+		return ErrPhoneVerificationUnavailable
 	}
 	for _, ch := range cfg.channels() {
 		if s.phoneChannelUsable(ch) {
-			return true
+			return nil
 		}
 	}
-	return false
+	s.logger.Warn("phone_verification_unavailable",
+		zap.String("reason", "no_channel_has_a_sender"),
+		zap.String("project_id", s.projectID(ctx)), zap.Strings("channels", cfg.channels()))
+	return ErrPhoneVerificationUnavailable
 }
 
 // deliverPhoneCode sends code to phone over the project's channels in
@@ -69,7 +76,7 @@ func (s *AuthService) phoneVerificationOn(cfg ProjectPhoneConfig) bool {
 // has no sender for is skipped; one that fails is logged and the next is
 // tried. The error is the last channel's.
 func (s *AuthService) deliverPhoneCode(ctx context.Context, cfg ProjectPhoneConfig, userID, phone, code string, ttl time.Duration) error {
-	err := ErrSMSDisabled
+	err := ErrPhoneVerificationUnavailable
 	for _, ch := range cfg.channels() {
 		if !s.phoneChannelUsable(ch) {
 			continue
@@ -89,7 +96,7 @@ func (s *AuthService) deliverPhoneCode(ctx context.Context, cfg ProjectPhoneConf
 		s.logger.Warn("phone_verification_send_failed",
 			zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)),
 			zap.String("channel", ch), zap.Error(sendErr))
-		err = fmt.Errorf("%w: %w", ErrSMSDisabled, sendErr)
+		err = fmt.Errorf("%w: %w", ErrPhoneVerificationUnavailable, sendErr)
 	}
 	return err
 }
@@ -133,7 +140,7 @@ func normalizePhone(raw string) (string, bool) {
 
 // RequestPhoneVerification mints a 6-digit OTP for the user's phone and
 // sends it. The caller must be authenticated (userID is the verified
-// `sub`). Returns ErrSMSDisabled when the project cannot verify phones or
+// `sub`). Returns ErrPhoneVerificationUnavailable when the project cannot verify phones or
 // no channel delivered the code, ErrPhoneAlreadyVerified when the
 // user has already verified the same number, ErrInvalidArgument for a
 // malformed number and ErrPhoneCountryNotAllowed for one outside the
@@ -145,8 +152,8 @@ func normalizePhone(raw string) (string, bool) {
 // number is taken is told only by VerifyPhoneCode, to whoever proves it.
 func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID string, signIn SessionSignIn, phoneNumber string) error {
 	phoneCfg := phoneConfig(ProjectScopeFromContext(ctx))
-	if !s.phoneVerificationOn(phoneCfg) {
-		return ErrSMSDisabled
+	if err := s.refusePhoneVerificationOff(ctx, phoneCfg); err != nil {
+		return err
 	}
 	if userID == "" {
 		return fmt.Errorf("%w: missing user id", ErrUnauthenticated)
@@ -248,8 +255,8 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID strin
 // a recovery hold.
 func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID string, signIn SessionSignIn, phoneNumber, code string) (*User, error) {
 	phoneCfg := phoneConfig(ProjectScopeFromContext(ctx))
-	if !s.phoneVerificationOn(phoneCfg) {
-		return nil, ErrSMSDisabled
+	if err := s.refusePhoneVerificationOff(ctx, phoneCfg); err != nil {
+		return nil, err
 	}
 	if userID == "" {
 		return nil, fmt.Errorf("%w: missing user id", ErrUnauthenticated)

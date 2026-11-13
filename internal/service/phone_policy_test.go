@@ -79,9 +79,9 @@ func TestPhone_AProjectCanSwitchVerificationOff(t *testing.T) {
 	f := newPhoneFixture(t, ProjectPhoneConfig{Enabled: off()})
 	id := seedPhoneUser(t, f.repo, "owner@example.com")
 
-	require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrSMSDisabled)
+	require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrPhoneVerificationUnavailable)
 	_, err := f.svc.VerifyPhoneCode(f.ctx, id, SessionSignIn{}, "+14155550123", "123456")
-	require.ErrorIs(t, err, ErrSMSDisabled)
+	require.ErrorIs(t, err, ErrPhoneVerificationUnavailable)
 	assert.Zero(t, f.sms.count())
 
 	// Another project of the same deployment, with no phone block, is as on
@@ -154,11 +154,11 @@ func TestPhone_ChannelsAreTriedInTheProjectsOrder(t *testing.T) {
 
 		// No template sender: the project has no usable channel, though the
 		// deployment could text.
-		require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrSMSDisabled)
+		require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrPhoneVerificationUnavailable)
 		// A failing sender surfaces, and SMS is still not used.
 		f.svc.WithTemplateMessages(&fakeTemplateSender{err: templatemsg.ErrTransport})
 		err := f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123")
-		require.ErrorIs(t, err, ErrSMSDisabled)
+		require.ErrorIs(t, err, ErrPhoneVerificationUnavailable)
 		require.ErrorIs(t, err, templatemsg.ErrTransport)
 		assert.Zero(t, f.sms.count())
 	})
@@ -366,8 +366,8 @@ func TestRefreshToken_SelectionNeedsTheVerifiedPhoneTheTenantRequires(t *testing
 		{name: "required, no phone", policy: &LoginPolicy{RequireVerifiedPhone: true}},
 		{name: "required, number stored but unverified", policy: &LoginPolicy{RequireVerifiedPhone: true}, phone: "+14155550123"},
 		{name: "required, verified", policy: &LoginPolicy{RequireVerifiedPhone: true}, phone: "+14155550123", verified: true, admitted: true},
-		{name: "required of one country, verified in another", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: "91,44"}, phone: "+14155550123", verified: true},
-		{name: "required of one country, verified there", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: "91,44"}, phone: "+447700900123", verified: true, admitted: true},
+		{name: "required of one country, verified in another", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}}, phone: "+14155550123", verified: true},
+		{name: "required of one country, verified there", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}}, phone: "+447700900123", verified: true, admitted: true},
 		{name: "not required, no phone", policy: &LoginPolicy{SessionAbsoluteTimeoutSeconds: 3600}, admitted: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -414,22 +414,26 @@ func TestUpsertLoginPolicy_PhoneRule(t *testing.T) {
 	ctx := context.Background()
 
 	got, err := f.svc.UpsertLoginPolicy(ctx, policyAdminSecret, &LoginPolicy{
-		ProjectID: "proj-1", TenantID: "tenant-1", RequireVerifiedPhone: true, PhoneCallingCodes: "91, 44 ,",
+		ProjectID: "proj-1", TenantID: "tenant-1", RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"},
 	})
 	require.NoError(t, err)
 	assert.True(t, got.RequireVerifiedPhone)
-	assert.Equal(t, "91,44", got.PhoneCallingCodes)
+	assert.Equal(t, []string{"91", "44"}, got.PhoneCallingCodes)
 	read, err := f.svc.GetLoginPolicy(ctx, asAdmin(policyAdminSecret), "proj-1", "tenant-1")
 	require.NoError(t, err)
 	assert.True(t, read.RequireVerifiedPhone)
-	assert.Equal(t, "91,44", read.PhoneCallingCodes)
+	assert.Equal(t, []string{"91", "44"}, read.PhoneCallingCodes, "the policy reads back as written")
 
 	for name, bad := range map[string]*LoginPolicy{
-		"codes without the requirement": {PhoneCallingCodes: "91"},
-		"a plus":                        {RequireVerifiedPhone: true, PhoneCallingCodes: "+91"},
-		"letters":                       {RequireVerifiedPhone: true, PhoneCallingCodes: "abc"},
-		"listed twice":                  {RequireVerifiedPhone: true, PhoneCallingCodes: "91,91"},
-		"four digits":                   {RequireVerifiedPhone: true, PhoneCallingCodes: "1234"},
+		"codes without the requirement": {PhoneCallingCodes: []string{"91"}},
+		"a plus":                        {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"+91"}},
+		"letters":                       {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"abc"}},
+		"listed twice":                  {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "91"}},
+		"four digits":                   {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"1234"}},
+		"two codes in one entry":        {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"9,1"}},
+		"surrounding space":             {RequireVerifiedPhone: true, PhoneCallingCodes: []string{" 91"}},
+		"an empty entry":                {RequireVerifiedPhone: true, PhoneCallingCodes: []string{""}},
+		"a leading zero":                {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"044"}},
 	} {
 		bad.ProjectID, bad.TenantID = "proj-1", "tenant-1"
 		_, err := f.svc.UpsertLoginPolicy(ctx, policyAdminSecret, bad)

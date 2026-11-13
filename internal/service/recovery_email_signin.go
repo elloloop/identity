@@ -159,7 +159,8 @@ func (s *AuthService) startRecoveryEmailSession(ctx context.Context, user *User,
 				"Until %s that session cannot make security changes to your account: "+
 				"it cannot add or remove an email address, phone number, second factor, passkey or linked provider, "+
 				"change your password or primary email, sign out your other sessions or delete the account. "+
-				"If it was not you, sign in with your primary email and remove the address.",
+				"If it was not you, sign in another way (your primary email, your password, a passkey or a linked provider) "+
+				"and remove the address.",
 				addr, time.UnixMilli(until).UTC().Format("2 January 2006 at 15:04 UTC")),
 		})
 	}

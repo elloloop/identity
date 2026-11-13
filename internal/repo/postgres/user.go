@@ -607,6 +607,14 @@ func (r *pgRepository) DeleteUser(ctx context.Context, userID string) error {
 		}
 	}
 
+	// The phone claims before the user row, the order ClaimPhoneNumber and
+	// ReleasePhoneNumber take them in: left to the cascade, they would be
+	// locked after it, and a concurrent claim could deadlock with the delete.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM phone_number_claims WHERE project_id = $1 AND user_id = $2`,
+		r.projectID, userID); err != nil {
+		return wrapPgErr("DeleteUser(phone claims)", err)
+	}
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM users WHERE project_id = $1 AND id = $2`,
 		r.projectID, userID); err != nil {

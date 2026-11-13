@@ -49,8 +49,10 @@ type Message struct {
 
 // Sender delivers a template Message. Implementations validate the message
 // and return a wrapped ErrInvalidMessage for malformed input, or a wrapped
-// ErrTransport for a backend failure. They must be safe for concurrent use
-// and must never log Params, which carry one-time codes.
+// ErrTransport for a backend failure. They must be safe for concurrent use,
+// and must never log Params, which carry one-time codes, nor put them in an
+// error they return: the caller logs those errors, and a provider's error
+// often echoes the request it refused.
 type Sender interface {
 	Send(ctx context.Context, m Message) error
 }

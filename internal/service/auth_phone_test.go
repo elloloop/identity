@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
@@ -142,8 +144,49 @@ func TestRequestPhoneVerification_SMSDisabled(t *testing.T) {
 	svc := newTestAuthService(t, repo) // SMS disabled by default
 	uid := seedPhoneUser(t, repo, "p-disabled@example.com")
 	err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123")
-	if !errors.Is(err, ErrSMSDisabled) {
-		t.Fatalf("want ErrSMSDisabled, got %v", err)
+	if !errors.Is(err, ErrPhoneVerificationUnavailable) {
+		t.Fatalf("want ErrPhoneVerificationUnavailable, got %v", err)
+	}
+}
+
+// Both ways a project cannot verify phones answer the same, so the log says
+// which: a project that switched it off is told apart from one whose
+// channels this deployment has no sender for, which is a misconfiguration
+// every request fails on.
+func TestPhoneVerification_LogsWhyItIsUnavailable(t *testing.T) {
+	off := false
+	for _, tc := range []struct {
+		name, reason string
+		cfg          ProjectPhoneConfig
+		level        zapcore.Level
+	}{
+		{name: "switched off", reason: "switched_off_by_project", cfg: ProjectPhoneConfig{Enabled: &off}, level: zapcore.InfoLevel},
+		{name: "no sender for its channels", reason: "no_channel_has_a_sender", cfg: ProjectPhoneConfig{Channels: []string{PhoneChannelMessage}, MessageTemplate: "code"}, level: zapcore.WarnLevel},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newTestPhoneService(t, repo, &fakeSMSSender{})
+			core, logs := observer.New(zapcore.InfoLevel)
+			svc.logger = zap.New(core)
+			uid := seedPhoneUser(t, repo, "p-unavailable@example.com")
+			ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-a", Phone: tc.cfg})
+
+			if err := svc.RequestPhoneVerification(ctx, uid, SessionSignIn{}, "+14155550123"); !errors.Is(err, ErrPhoneVerificationUnavailable) {
+				t.Fatalf("RequestPhoneVerification = %v, want ErrPhoneVerificationUnavailable", err)
+			}
+			if _, err := svc.VerifyPhoneCode(ctx, uid, SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrPhoneVerificationUnavailable) {
+				t.Fatalf("VerifyPhoneCode = %v, want ErrPhoneVerificationUnavailable", err)
+			}
+			entries := logs.FilterMessage("phone_verification_unavailable").All()
+			if len(entries) != 2 {
+				t.Fatalf("logged %d refusals, want 2", len(entries))
+			}
+			for _, e := range entries {
+				if e.Level != tc.level || e.ContextMap()["reason"] != tc.reason {
+					t.Fatalf("logged %v %v, want %v reason=%s", e.Level, e.ContextMap(), tc.level, tc.reason)
+				}
+			}
+		})
 	}
 }
 
@@ -194,8 +237,8 @@ func TestRequestPhoneVerification_SendFailureSurfaces(t *testing.T) {
 	svc := newTestPhoneService(t, repo, sender)
 	uid := seedPhoneUser(t, repo, "p-sendfail@example.com")
 	err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123")
-	if !errors.Is(err, ErrSMSDisabled) {
-		t.Fatalf("send failure should surface (wrapped ErrSMSDisabled), got %v", err)
+	if !errors.Is(err, ErrPhoneVerificationUnavailable) {
+		t.Fatalf("send failure should surface (wrapped ErrPhoneVerificationUnavailable), got %v", err)
 	}
 }
 
@@ -308,8 +351,8 @@ func TestVerifyPhoneCode_SMSDisabled(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	uid := seedPhoneUser(t, repo, "v-disabled@example.com")
-	if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrSMSDisabled) {
-		t.Fatalf("want ErrSMSDisabled, got %v", err)
+	if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrPhoneVerificationUnavailable) {
+		t.Fatalf("want ErrPhoneVerificationUnavailable, got %v", err)
 	}
 }
 
@@ -359,8 +402,8 @@ func TestVerifyPhoneCode_ErrorBranches(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestPhoneService(t, repo, &fakeSMSSender{})
 		svc.cfg.SMSEnabled = false
-		if _, err := svc.VerifyPhoneCode(context.Background(), "u1", SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrSMSDisabled) {
-			t.Fatalf("want ErrSMSDisabled, got %v", err)
+		if _, err := svc.VerifyPhoneCode(context.Background(), "u1", SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrPhoneVerificationUnavailable) {
+			t.Fatalf("want ErrPhoneVerificationUnavailable, got %v", err)
 		}
 	})
 

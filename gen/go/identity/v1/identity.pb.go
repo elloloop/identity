@@ -4901,9 +4901,14 @@ func (x *RemovePhoneResponse) GetUser() *User {
 
 // RecoveryEmail is one verified recovery address of an account.
 type RecoveryEmail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
-	VerifiedAt    int64                  `protobuf:"varint,2,opt,name=verified_at,json=verifiedAt,proto3" json:"verified_at,omitempty"` // epoch ms the address was proved
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Email      string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	VerifiedAt int64                  `protobuf:"varint,2,opt,name=verified_at,json=verifiedAt,proto3" json:"verified_at,omitempty"` // epoch ms the address was proved
+	// last_sign_in_at is when the address last signed in to the account (epoch
+	// ms), 0 when it never has. The address with the latest one started the
+	// hold ListRecoveryEmailsResponse.hold_until reports; removing it ends the
+	// hold.
+	LastSignInAt  int64 `protobuf:"varint,3,opt,name=last_sign_in_at,json=lastSignInAt,proto3" json:"last_sign_in_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4948,6 +4953,13 @@ func (x *RecoveryEmail) GetEmail() string {
 func (x *RecoveryEmail) GetVerifiedAt() int64 {
 	if x != nil {
 		return x.VerifiedAt
+	}
+	return 0
+}
+
+func (x *RecoveryEmail) GetLastSignInAt() int64 {
+	if x != nil {
+		return x.LastSignInAt
 	}
 	return 0
 }
@@ -17459,9 +17471,10 @@ type LoginPolicy struct {
 	// so no token for the tenant exists before then. It is not a sign-in rule:
 	// the account still signs in, and verifies a phone with that session.
 	RequireVerifiedPhone bool `protobuf:"varint,12,opt,name=require_verified_phone,json=requireVerifiedPhone,proto3" json:"require_verified_phone,omitempty"`
-	// phone_calling_codes narrows require_verified_phone to numbers of these
-	// country calling codes, as digits without the '+' (e.g. "91"). Empty
-	// accepts a verified number of any country.
+	// phone_calling_codes narrows require_verified_phone to numbers under these
+	// country calling codes, as digits without the '+' (e.g. "1", "44", "91";
+	// one code can cover several countries). Empty accepts a verified number
+	// under any code.
 	PhoneCallingCodes []string `protobuf:"bytes,13,rep,name=phone_calling_codes,json=phoneCallingCodes,proto3" json:"phone_calling_codes,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -17605,7 +17618,8 @@ type UpsertLoginPolicyRequest struct {
 	SessionAbsoluteTimeoutSeconds int64 `protobuf:"varint,9,opt,name=session_absolute_timeout_seconds,json=sessionAbsoluteTimeoutSeconds,proto3" json:"session_absolute_timeout_seconds,omitempty"`
 	// require_verified_phone / phone_calling_codes set the tenant's phone rule
 	// (see LoginPolicy). phone_calling_codes is only valid with
-	// require_verified_phone; each entry is 1 to 3 digits.
+	// require_verified_phone; each entry is 1 to 3 digits, not starting with
+	// 0, listed once, and anything else is INVALID_ARGUMENT.
 	RequireVerifiedPhone bool     `protobuf:"varint,10,opt,name=require_verified_phone,json=requireVerifiedPhone,proto3" json:"require_verified_phone,omitempty"`
 	PhoneCallingCodes    []string `protobuf:"bytes,11,rep,name=phone_calling_codes,json=phoneCallingCodes,proto3" json:"phone_calling_codes,omitempty"`
 	unknownFields        protoimpl.UnknownFields
@@ -23873,11 +23887,12 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\"\x14\n" +
 	"\x12RemovePhoneRequest\"<\n" +
 	"\x13RemovePhoneResponse\x12%\n" +
-	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\"F\n" +
+	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\"m\n" +
 	"\rRecoveryEmail\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1f\n" +
 	"\vverified_at\x18\x02 \x01(\x03R\n" +
-	"verifiedAt\"3\n" +
+	"verifiedAt\x12%\n" +
+	"\x0flast_sign_in_at\x18\x03 \x01(\x03R\flastSignInAt\"3\n" +
 	"\x1bRequestRecoveryEmailRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\"\x1e\n" +
 	"\x1cRequestRecoveryEmailResponse\"F\n" +

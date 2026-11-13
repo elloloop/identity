@@ -852,11 +852,11 @@ type Config struct {
 	// MinorDataMinimization gates COPPA-style data-minimization for accounts
 	// the age gate classifies as AGE_BAND_CHILD. When true (and the age gate
 	// is enabled), the server refuses to collect or persist non-essential PII
-	// from a child: RequestPhoneVerification and BeginIdentityVerification are
-	// rejected with ErrMinorDataMinimized, and a recovery_email / avatar_url
-	// supplied for a child at signup or profile-update is dropped rather than
-	// stored. Default false preserves today's behavior — adults, teens, and
-	// accounts with an unknown age band are never affected.
+	// from a child: RequestPhoneVerification, RequestRecoveryEmail and
+	// BeginIdentityVerification are rejected with ErrMinorDataMinimized, and
+	// a recovery_email / avatar_url supplied for a child at signup or
+	// profile-update is dropped rather than stored. Off by default; adults,
+	// teens, and accounts with an unknown age band are never affected.
 	MinorDataMinimization bool // GATEWAY_MINOR_DATA_MINIMIZATION (default false)
 
 	// SCIM 2.0 inbound provisioning (#260). When SCIMEnabled is false the
@@ -941,11 +941,13 @@ type Config struct {
 	// PasswordlessMagicLinkTTLSeconds is the magic-link token lifetime in seconds.
 	PasswordlessMagicLinkTTLSeconds int
 
-	// Phone verification (SMS OTP) — standalone phone-ownership verification for
-	// an already-authenticated user, not yet a login factor. When SMSEnabled, a
+	// Phone verification — standalone phone-ownership verification for an
+	// already-authenticated user, not yet a login factor. When SMSEnabled, a
 	// provider and its credentials must be set (enforced by Validate).
 
-	// SMSEnabled turns on phone (SMS OTP) verification.
+	// SMSEnabled turns on the SMS channel of phone verification. A project
+	// whose phone.channels lists "message" verifies phones without it, by the
+	// template sender an embedder wires.
 	SMSEnabled bool
 	// SMSProvider selects the SMS backend: "twilio", "sns", or "azure".
 	SMSProvider string

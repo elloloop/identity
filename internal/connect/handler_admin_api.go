@@ -2,7 +2,6 @@ package connect
 
 import (
 	"context"
-	"strings"
 
 	"connectrpc.com/connect"
 
@@ -266,7 +265,7 @@ func (h *IdentityHandler) UpsertLoginPolicy(
 		SessionIdleTimeoutSeconds:     req.Msg.SessionIdleTimeoutSeconds,
 		SessionAbsoluteTimeoutSeconds: req.Msg.SessionAbsoluteTimeoutSeconds,
 		RequireVerifiedPhone:          req.Msg.RequireVerifiedPhone,
-		PhoneCallingCodes:             strings.Join(req.Msg.PhoneCallingCodes, ","),
+		PhoneCallingCodes:             req.Msg.PhoneCallingCodes,
 	})
 	if err != nil {
 		return nil, toConnectError(err)
@@ -631,17 +630,8 @@ func loginPolicyToProto(p *service.LoginPolicy) *identitypb.LoginPolicy {
 		SessionIdleTimeoutSeconds:     p.SessionIdleTimeoutSeconds,
 		SessionAbsoluteTimeoutSeconds: p.SessionAbsoluteTimeoutSeconds,
 		RequireVerifiedPhone:          p.RequireVerifiedPhone,
-		PhoneCallingCodes:             phoneCallingCodesToProto(p.PhoneCallingCodes),
+		PhoneCallingCodes:             p.PhoneCallingCodes,
 	}
-}
-
-// phoneCallingCodesToProto splits a policy's stored calling codes; nil for a
-// policy that names none.
-func phoneCallingCodesToProto(codes string) []string {
-	if codes == "" {
-		return nil
-	}
-	return strings.Split(codes, ",")
 }
 
 // CreateFirstPlatformAdmin is the trust-on-first-use bootstrap of the first
