@@ -96,8 +96,7 @@ type Options struct {
 	// TemplateMessageSender delivers phone verification codes as
 	// messaging-app template messages, for projects whose phone.channels
 	// lists "message". nil leaves that channel unavailable: the server
-	// ships no provider for it (templatemsg.NewLogOnly delivers nothing and
-	// is for development).
+	// ships no provider for it.
 	TemplateMessageSender templatemsg.Sender
 
 	// OAuthRegistry holds the per-provider exchangers. nil builds one

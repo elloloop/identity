@@ -164,9 +164,10 @@ const (
 	// The details carry the address redacted.
 	EventRecoveryEmailAdded   EventType = "recovery_email_added"
 	EventRecoveryEmailRemoved EventType = "recovery_email_removed"
-	// EventRecoveryEmailSignIn records an emailed code or link sent to a
-	// recovery email being accepted for the actor's account, before any
-	// second factor: the moment the hold on its recovery settings starts.
+	// EventRecoveryEmailSignIn records a sign-in to the actor's account by
+	// an emailed code or link sent to one of its recovery emails, once every
+	// factor it owed is proved: the moment the account's recovery hold
+	// starts.
 	EventRecoveryEmailSignIn EventType = "recovery_email_sign_in"
 
 	// EventIdentityLinked records a provider identity being attached to a

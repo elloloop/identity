@@ -133,8 +133,8 @@ func normalizePhone(raw string) (string, bool) {
 
 // RequestPhoneVerification mints a 6-digit OTP for the user's phone and
 // sends it. The caller must be authenticated (userID is the verified
-// `sub`). Returns ErrSMSDisabled when phone verification is not
-// configured or the project has it off, ErrPhoneAlreadyVerified when the
+// `sub`). Returns ErrSMSDisabled when the project cannot verify phones or
+// no channel delivered the code, ErrPhoneAlreadyVerified when the
 // user has already verified the same number, ErrInvalidArgument for a
 // malformed number and ErrPhoneCountryNotAllowed for one outside the
 // project's countries. A per-user send cooldown bounds inbox/cost abuse.

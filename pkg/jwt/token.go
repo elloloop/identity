@@ -436,8 +436,6 @@ func extractKID(tokenBytes []byte) (string, error) {
 	return headers.KeyID(), nil
 }
 
-// numericClaim reads a JSON number claim, which a JWT library may decode as
-// float64, json.Number or an integer type; anything else reads as zero.
 // stringsClaim reads an array-of-strings claim in the forms a decoded token
 // holds it; an element that is not a string is dropped, and any other value
 // reads as none.
@@ -458,6 +456,8 @@ func stringsClaim(v any) []string {
 	}
 }
 
+// numericClaim reads a JSON number claim, which a JWT library may decode as
+// float64, json.Number or an integer type; anything else reads as zero.
 func numericClaim(v any) int64 {
 	switch n := v.(type) {
 	case float64:

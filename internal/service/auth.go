@@ -1080,8 +1080,8 @@ type NativeTokenRedemptionRecord struct {
 // EmailLoginCodeRecord is the OTP arm of passwordless email login. The
 // record is keyed by Email (at most one live code per address); a new
 // request overwrites the previous one. CodeHash is sha256 of the 6-digit
-// code. AttemptCount tracks failed verifies; once it reaches MaxAttempts
-// the code is invalidated (brute-force cap). The record carries no user
+// code. AttemptCount counts every guess, the right one included; a guess
+// past MaxAttempts is refused (brute-force cap). The record carries no user
 // id — the account may not exist until VerifyEmailLoginCode resolves or
 // creates it.
 type EmailLoginCodeRecord struct {
@@ -1109,13 +1109,13 @@ type MagicLinkTokenRecord struct {
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
 }
 
-// PhoneVerificationCodeRecord is the SMS-OTP arm of phone-ownership
-// verification. The record is keyed by UserID (at most one live code per
-// user); a new request overwrites the previous one. CodeHash is sha256
-// of the 6-digit code. AttemptCount tracks failed verifies; once it
-// reaches MaxAttempts the code is invalidated (brute-force cap). Unlike
-// EmailLoginCodeRecord this always carries a UserID — the caller is an
-// already-authenticated user proving ownership of PhoneNumber.
+// PhoneVerificationCodeRecord is the one-time code that proves a phone
+// number. The record is keyed by UserID (at most one live code per user); a
+// new request overwrites the previous one. CodeHash is sha256 of the 6-digit
+// code. AttemptCount counts every guess, the right one included; a guess
+// past MaxAttempts is refused (brute-force cap). Unlike EmailLoginCodeRecord
+// this always carries a UserID — the caller is an already-authenticated
+// user proving ownership of PhoneNumber.
 type PhoneVerificationCodeRecord struct {
 	NodeID       string
 	UserID       string
@@ -1396,15 +1396,21 @@ var (
 	// ErrMagicLinkInvalid is returned when a passwordless magic-link token
 	// is missing, expired, or already consumed. Maps to CodeUnauthenticated.
 	ErrMagicLinkInvalid = errors.New("magic link is invalid or already used")
-	// ErrPhoneCodeInvalid is returned when an SMS-OTP phone-verification
-	// code is missing, expired, already consumed, the wrong code, or has
-	// exhausted its attempt budget. The Connect handler maps it to
+	// ErrPhoneCodeInvalid is returned when a phone-verification code is
+	// missing, expired, already consumed, the wrong code, or has exhausted
+	// its attempt budget. The Connect handler maps it to
 	// CodeUnauthenticated so all failure modes look identical to a
 	// brute-force attacker.
 	ErrPhoneCodeInvalid = errors.New("phone verification code is invalid or expired")
-	// ErrSMSDisabled is returned by the phone-verification RPCs when
-	// GATEWAY_SMS_ENABLED is false. Maps to CodeUnavailable.
-	ErrSMSDisabled = errors.New("sms phone verification is not configured")
+	// ErrSMSDisabled is returned by RequestPhoneVerification and
+	// VerifyPhoneCode when the caller's project cannot verify phones: it
+	// turned phone verification off (phone.enabled), or none of the channels
+	// it uses (phone.channels) has a sender on this deployment, as when
+	// GATEWAY_SMS_ENABLED is false and no templatemsg.Sender is wired.
+	// RequestPhoneVerification also returns it wrapped around the last
+	// failure when every channel with a sender failed to deliver the code.
+	// Maps to CodeUnavailable.
+	ErrSMSDisabled = errors.New("phone verification is not available")
 	// ErrPhoneAlreadyVerified is returned by RequestPhoneVerification when
 	// the caller has already verified the same number. Maps to
 	// CodeAlreadyExists.

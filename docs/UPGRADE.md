@@ -50,7 +50,9 @@ setting, and none changes until it is set.
   channel and refuse countries. It cannot use a channel the deployment has no
   sender for: SMS needs `GATEWAY_SMS_ENABLED` and a provider, and the message
   channel needs a sender the embedder supplies (below). A project whose
-  channels all lack a sender answers `UNAVAILABLE`.
+  channels all lack a sender answers `UNAVAILABLE`. That refusal, and the one
+  for a code no channel delivered, no longer names SMS: its message is
+  `phone verification is not available`.
 - **One account per number** (`phone.unique`). `RequestPhoneVerification`
   sends a code to a number another account holds like any other;
   `VerifyPhoneCode` then answers `ALREADY_EXISTS` with the stable
@@ -74,8 +76,7 @@ setting, and none changes until it is set.
   is logged and the next is tried. **This server ships no provider for the
   message channel and has no environment variable for one**: an embedder sets
   `identityserver.Options.TemplateMessageSender` (or `app.Deps`), and without
-  one the channel is skipped. `templatemsg.NewLogOnly` delivers nothing and is
-  for development.
+  one the channel is skipped.
 - **A merge moves the phone.** When the survivor has no phone, the retired
   account's number, its verified state and its claim move to it; when the
   survivor has one, the survivor keeps it and the retired account's claim is

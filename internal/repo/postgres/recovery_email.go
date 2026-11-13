@@ -252,8 +252,9 @@ func (r *pgRepository) ListRecoveryEmails(ctx context.Context, userID string) ([
 
 // RemoveRecoveryEmail deletes the address first, which takes its row lock
 // for the rest of the transaction: a recovery session's refresh token being
-// stored meanwhile (insertRecoverySessionRefreshToken) waits for the commit
-// and finds the address gone, and one stored before is ended below.
+// stored meanwhile (CreateRefreshToken's FOR SHARE read of the address)
+// waits for the commit and finds the address gone, and one stored before is
+// ended below.
 func (r *pgRepository) RemoveRecoveryEmail(ctx context.Context, userID, email string, atMs int64) (int, error) {
 	fold := service.FoldEmail(email)
 	tx, err := r.pool.Begin(ctx)

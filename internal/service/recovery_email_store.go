@@ -20,8 +20,8 @@ type RecoveryEmail struct {
 // RecoveryEmailCodeRecord is the emailed code that proves a recovery address
 // before it is stored. It is keyed by UserID (at most one live code per
 // account); a new request overwrites the previous one. CodeHash is sha256 of
-// the 6-digit code. AttemptCount tracks failed verifies; once it reaches
-// MaxAttempts the code is invalidated.
+// the 6-digit code. AttemptCount counts every guess, the right one included;
+// a guess past MaxAttempts is refused.
 type RecoveryEmailCodeRecord struct {
 	NodeID       string
 	UserID       string

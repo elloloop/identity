@@ -5,9 +5,8 @@
 // its placeholders. A Sender delivers one Message (a verification code) to
 // a phone number.
 //
-// This package ships no provider. NewLogOnly is the default, which records
-// a dropped message and delivers nothing; an embedder supplies a Sender for
-// the provider it uses.
+// This package ships no provider: an embedder supplies a Sender for the
+// provider it uses, and a deployment without one has no message channel.
 package templatemsg
 
 import (
