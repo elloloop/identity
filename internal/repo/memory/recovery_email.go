@@ -36,27 +36,16 @@ func (r *Repo) UpsertRecoveryEmailCode(_ context.Context, rec *service.RecoveryE
 	return rec.NodeID, nil
 }
 
-func (r *Repo) FindRecoveryEmailCodeByUser(_ context.Context, userID string) (*service.RecoveryEmailCodeRecord, error) {
+func (r *Repo) CountRecoveryEmailCodeAttempt(_ context.Context, userID string, atMs int64) (*service.RecoveryEmailCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.recoveryEmailCodes[userID]
-	if !ok {
+	if !ok || c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
 		return nil, nil
 	}
+	c.AttemptCount++
 	cp := *c
 	return &cp, nil
-}
-
-func (r *Repo) IncrementRecoveryEmailCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, c := range r.recoveryEmailCodes {
-		if c.NodeID == nodeID {
-			c.AttemptCount++
-			return nil
-		}
-	}
-	return fmt.Errorf("memory: IncrementRecoveryEmailCodeAttempts: %s not found", nodeID)
 }
 
 func (r *Repo) ConsumeRecoveryEmailCode(_ context.Context, userID string, atMs int64) (*service.RecoveryEmailCodeRecord, error) {

@@ -226,12 +226,8 @@ func (StubRepository) UpsertRecoveryEmailCode(context.Context, *RecoveryEmailCod
 	return "", ErrServiceUnavailable
 }
 
-func (StubRepository) FindRecoveryEmailCodeByUser(context.Context, string) (*RecoveryEmailCodeRecord, error) {
+func (StubRepository) CountRecoveryEmailCodeAttempt(context.Context, string, int64) (*RecoveryEmailCodeRecord, error) {
 	return nil, ErrServiceUnavailable
-}
-
-func (StubRepository) IncrementRecoveryEmailCodeAttempts(context.Context, string) error {
-	return ErrServiceUnavailable
 }
 
 func (StubRepository) ConsumeRecoveryEmailCode(context.Context, string, int64) (*RecoveryEmailCodeRecord, error) {

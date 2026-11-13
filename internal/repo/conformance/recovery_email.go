@@ -3,6 +3,8 @@ package conformance
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/elloloop/identity/internal/service"
@@ -15,12 +17,12 @@ import (
 func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 	t.Helper()
 
-	t.Run(driver.Name+"/RecoveryEmailCode_UpsertFindConsume", func(t *testing.T) {
+	t.Run(driver.Name+"/RecoveryEmailCode_UpsertCountConsume", func(t *testing.T) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)
 		uid := createTestUser(t, r, "rec-code@example.com")
-		if got, err := r.FindRecoveryEmailCodeByUser(ctx, uid); err != nil || got != nil {
-			t.Fatalf("Find before any code = %#v %v, want nil nil", got, err)
+		if got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 100); err != nil || got != nil {
+			t.Fatalf("Count before any code = %#v %v, want nil nil", got, err)
 		}
 		for _, hash := range []string{"old", "new"} {
 			if _, err := r.UpsertRecoveryEmailCode(ctx, &service.RecoveryEmailCodeRecord{
@@ -30,15 +32,10 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 				t.Fatalf("Upsert %s: %v", hash, err)
 			}
 		}
-		got, err := r.FindRecoveryEmailCodeByUser(ctx, uid)
-		if err != nil || got == nil || got.CodeHash != "new" || got.Email != "spare@example.net" || got.MaxAttempts != 5 || got.NodeID == "" {
-			t.Fatalf("Find after two upserts = %#v %v", got, err)
-		}
-		if err := r.IncrementRecoveryEmailCodeAttempts(ctx, got.NodeID); err != nil {
-			t.Fatalf("Increment: %v", err)
-		}
-		if got, _ = r.FindRecoveryEmailCodeByUser(ctx, uid); got == nil || got.AttemptCount != 1 {
-			t.Fatalf("after Increment: %#v", got)
+		got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 150)
+		if err != nil || got == nil || got.CodeHash != "new" || got.Email != "spare@example.net" || got.MaxAttempts != 5 ||
+			got.AttemptCount != 1 || got.NodeID == "" {
+			t.Fatalf("Count after two upserts = %#v %v, want the new code with one attempt", got, err)
 		}
 		rec, err := r.ConsumeRecoveryEmailCode(ctx, uid, 200)
 		if err != nil || rec == nil || rec.ConsumedAt != 200 {
@@ -46,6 +43,72 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		}
 		if _, err := r.ConsumeRecoveryEmailCode(ctx, uid, 300); !errors.Is(err, service.ErrRecoveryEmailCodeInvalid) {
 			t.Fatalf("replay Consume: want ErrRecoveryEmailCodeInvalid, got %v", err)
+		}
+		if got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 300); err != nil || got != nil {
+			t.Fatalf("Count of a consumed code = %#v %v, want nil nil", got, err)
+		}
+	})
+
+	t.Run(driver.Name+"/RecoveryEmailCode_CountStopsAtTheCapAndAtExpiry", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "rec-cap@example.com")
+		if _, err := r.UpsertRecoveryEmailCode(ctx, &service.RecoveryEmailCodeRecord{
+			UserID: uid, Email: "spare@example.net", CodeHash: "h", ExpiresAt: 1_000, CreatedAt: 100, MaxAttempts: 2,
+		}); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 1_000); err != nil || got != nil {
+			t.Fatalf("Count at expiry = %#v %v, want nil nil", got, err)
+		}
+		for want := int64(1); want <= 2; want++ {
+			got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 500)
+			if err != nil || got == nil || got.AttemptCount != want {
+				t.Fatalf("Count %d = %#v %v", want, got, err)
+			}
+		}
+		if got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 500); err != nil || got != nil {
+			t.Fatalf("Count past the cap = %#v %v, want nil nil", got, err)
+		}
+	})
+
+	t.Run(driver.Name+"/RecoveryEmailCode_ConcurrentGuessesStopAtTheCap", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "rec-race@example.com")
+		const maxAttempts = 3
+		if _, err := r.UpsertRecoveryEmailCode(ctx, &service.RecoveryEmailCodeRecord{
+			UserID: uid, Email: "spare@example.net", CodeHash: "h", ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: maxAttempts,
+		}); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		var wg sync.WaitGroup
+		var counted atomic.Int64
+		start := make(chan struct{})
+		errs := make(chan error, concurrentWriters)
+		for range concurrentWriters {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 200)
+				if err != nil {
+					errs <- err
+					return
+				}
+				if got != nil {
+					counted.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatalf("concurrent Count: %v", err)
+		}
+		if counted.Load() != maxAttempts {
+			t.Fatalf("%d of %d concurrent guesses were counted, want the cap of %d", counted.Load(), concurrentWriters, maxAttempts)
 		}
 	})
 
@@ -64,8 +127,8 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		if err := r.DeleteExpiredRecoveryEmailCodes(ctx, 151, 10); err != nil {
 			t.Fatalf("DeleteExpired: %v", err)
 		}
-		if got, err := r.FindRecoveryEmailCodeByUser(ctx, uid); err != nil || got != nil {
-			t.Fatalf("Find after sweep = %#v %v, want nil nil", got, err)
+		if got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 100); err != nil || got != nil {
+			t.Fatalf("Count after sweep = %#v %v, want nil nil", got, err)
 		}
 		if err := r.DeleteExpiredRecoveryEmailCodes(ctx, 151, 0); err == nil {
 			t.Fatal("DeleteExpired with limit 0: want an error")
@@ -173,7 +236,7 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		if list, err := r.ListRecoveryEmails(ctx, uid); err != nil || len(list) != 0 {
 			t.Fatalf("List after delete = %#v %v", list, err)
 		}
-		if got, err := r.FindRecoveryEmailCodeByUser(ctx, uid); err != nil || got != nil {
+		if got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 2); err != nil || got != nil {
 			t.Fatalf("code after delete = %#v %v", got, err)
 		}
 		if _, err := r.CreateUser(ctx, &service.User{Email: "freed@example.net", Status: "active"}); err != nil {

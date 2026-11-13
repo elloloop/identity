@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strings"
@@ -236,9 +235,9 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID strin
 // verified number on the user. The caller must be authenticated. All
 // failure modes (missing/expired/consumed code, wrong code, exhausted
 // attempts, or a number that does not match the one the code was minted
-// for) collapse to ErrPhoneCodeInvalid. A wrong guess bumps the per-code
-// attempt counter; at the cap the code is consumed so the brute-force
-// window over the 6-digit space is bounded.
+// for) collapse to ErrPhoneCodeInvalid. Every guess bumps the per-code
+// attempt counter, and a wrong one at the cap consumes the code, so the
+// brute-force window over the 6-digit space is bounded.
 //
 // Where the project keeps numbers unique, a right code for a number another
 // account holds is ErrPhoneNumberTaken, unless that account's claim is old
@@ -280,28 +279,20 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID string, signIn
 	if rec.MaxAttempts > 0 && rec.AttemptCount >= rec.MaxAttempts {
 		return nil, ErrPhoneCodeInvalid
 	}
-
-	// Constant-time compare so a timing oracle can't shortcut the guess.
-	if subtle.ConstantTimeCompare([]byte(rec.CodeHash), []byte(sha256Hex(code))) != 1 {
-		if err := s.repo(ctx).IncrementPhoneVerificationCodeAttempts(ctx, rec.NodeID); err != nil {
-			s.logger.Warn("phone_code_attempt_increment_failed",
-				zap.String("user_id", userID), zap.Error(err))
-		}
-		// At the cap, consume the code so the final wrong guess burns it.
-		if rec.MaxAttempts > 0 && rec.AttemptCount+1 >= rec.MaxAttempts {
-			if _, cErr := s.repo(ctx).ConsumePhoneVerificationCode(ctx, userID, s.nowMs()); cErr != nil &&
-				!errors.Is(cErr, ErrPhoneCodeInvalid) {
-				s.logger.Warn("phone_code_lock_failed",
-					zap.String("user_id", userID), zap.Error(cErr))
-			}
-		}
-		return nil, ErrPhoneCodeInvalid
+	if err := s.repo(ctx).IncrementPhoneVerificationCodeAttempts(ctx, rec.NodeID); err != nil {
+		s.logger.Warn("phone_code_attempt_increment_failed",
+			zap.String("user_id", userID), zap.Error(err))
 	}
-
-	// Correct code: consume single-use (CAS) before flipping the user so
-	// a replay racing this verify loses.
-	if _, err := s.repo(ctx).ConsumePhoneVerificationCode(ctx, userID, s.nowMs()); err != nil {
-		return nil, ErrPhoneCodeInvalid
+	if _, err := s.settleGuess(ctx, oneTimeCode{
+		kind: "phone_code", hash: rec.CodeHash,
+		attempts: rec.AttemptCount + 1, maxAttempts: rec.MaxAttempts,
+		invalid: ErrPhoneCodeInvalid,
+		consume: func(ctx context.Context) error {
+			_, err := s.repo(ctx).ConsumePhoneVerificationCode(ctx, userID, s.nowMs())
+			return err
+		},
+	}, code, zap.String("user_id", userID)); err != nil {
+		return nil, err
 	}
 
 	now := s.nowMs()

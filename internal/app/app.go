@@ -362,10 +362,17 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		},
 		{
 			// Recovery-email code request: authenticated, but each call
-			// mails a code to an address the caller names, so it shares the
-			// passwordless code's per-IP quota (a per-account and a
-			// per-address cooldown are the second layer).
+			// mails a code to an address the caller names, so it gets a
+			// budget the size of the passwordless code's (a per-account and
+			// a per-address cooldown are the second layer).
 			PathPrefix: "/identity.v1.IdentityService/RequestRecoveryEmail", Tag: "recovery_email",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
+		},
+		{
+			// Recovery-email code check: each call is a guess at a 6-digit
+			// code, so guesses from one source are bounded across codes as
+			// well as by each code's attempt cap.
+			PathPrefix: "/identity.v1.IdentityService/VerifyRecoveryEmail", Tag: "recovery_email_verify",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
 		},
 		{

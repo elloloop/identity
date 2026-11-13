@@ -621,12 +621,14 @@ type Repository interface {
 
 	// Recovery emails (additional verified addresses of an account).
 	//
-	// The four *RecoveryEmailCode methods are the phone-verification code
-	// methods' twins, keyed on user_id: Upsert replaces the user's live
-	// code, Find returns the row (consumed or not; nil when none),
-	// Increment bumps attempt_count, and Consume is the single-winner
-	// compare-and-set that returns ErrRecoveryEmailCodeInvalid for a
-	// replay, an expired code or a missing one.
+	// The *RecoveryEmailCode methods keep the emailed code that proves an
+	// address, keyed on user_id: Upsert replaces the user's live code;
+	// CountRecoveryEmailCodeAttempt counts one guess against the live code
+	// (unconsumed, unexpired at atMs, under its attempt cap) in one write and
+	// returns it with the guess counted, or nil when there is none, so
+	// concurrent guesses never pass the cap; and Consume is the
+	// single-winner compare-and-set that returns ErrRecoveryEmailCodeInvalid
+	// for a replay, an expired code or a missing one.
 	//
 	// AddRecoveryEmail stores a proved address on e.UserID, atomically with
 	// its two refusals: ErrRecoveryEmailTaken when the address (under
@@ -641,8 +643,7 @@ type Repository interface {
 	// RemoveRecoveryEmail deletes one (matched under FoldEmail) and reports
 	// whether a row was removed.
 	UpsertRecoveryEmailCode(ctx context.Context, r *RecoveryEmailCodeRecord) (string, error)
-	FindRecoveryEmailCodeByUser(ctx context.Context, userID string) (*RecoveryEmailCodeRecord, error)
-	IncrementRecoveryEmailCodeAttempts(ctx context.Context, nodeID string) error
+	CountRecoveryEmailCodeAttempt(ctx context.Context, userID string, atMs int64) (*RecoveryEmailCodeRecord, error)
 	ConsumeRecoveryEmailCode(ctx context.Context, userID string, atMs int64) (*RecoveryEmailCodeRecord, error)
 	AddRecoveryEmail(ctx context.Context, e *RecoveryEmail, max int) error
 	ListRecoveryEmails(ctx context.Context, userID string) ([]*RecoveryEmail, error)

@@ -34,20 +34,20 @@ func TestBuildRateLimits_PasswordlessPathsLimited(t *testing.T) {
 	for _, l := range limits {
 		byPath[l.PathPrefix] = l
 	}
-	for _, p := range []string{
+	paths := []string{
 		"/identity.v1.IdentityService/RequestEmailLoginCode",
 		"/identity.v1.IdentityService/RequestMagicLink",
-	} {
+		"/identity.v1.IdentityService/RequestRecoveryEmail",
+		"/identity.v1.IdentityService/VerifyRecoveryEmail",
+	}
+	for _, p := range paths {
 		require.Contains(t, byPath, p, "passwordless path %s must have a rate limit", p)
 	}
 
 	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	for _, p := range []string{
-		"/identity.v1.IdentityService/RequestEmailLoginCode",
-		"/identity.v1.IdentityService/RequestMagicLink",
-	} {
+	for _, p := range paths {
 		codes := make([]int, 3)
 		for i := 0; i < 3; i++ {
 			req := httptest.NewRequest(http.MethodPost, p, nil)

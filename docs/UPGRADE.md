@@ -193,8 +193,10 @@ now keep a list of addresses it has proved it controls.
   it. The request answers the same whether or not another account holds the
   address: that is told, as `ALREADY_EXISTS`, only to a caller whose code was
   right. Past the cap both answer `RESOURCE_EXHAUSTED`. Each request is held to
-  `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS` per account and per address and to
-  `GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP`.
+  `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS` per account and per address, and
+  `RequestRecoveryEmail` and `VerifyRecoveryEmail` each to their own per-IP
+  budget of `GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP`. Every guess at a code,
+  right or wrong, counts against its attempt cap.
 - **One address, one account, per project.** An address that is an account's
   recovery email cannot become any account's primary email, and no answer to
   a caller who is not signed in tells it apart from a free or a taken one:
@@ -235,7 +237,8 @@ now keep a list of addresses it has proved it controls.
   `user_recovery_emails` once: that lock, shared with the insert of a recovery
   email, is what keeps an address on one account across the two tables.
 - **Go API.** `service.Repository` gains `UpsertRecoveryEmailCode`,
-  `FindRecoveryEmailCodeByUser`, `IncrementRecoveryEmailCodeAttempts`,
+  `CountRecoveryEmailCodeAttempt` (which counts a guess and reads the code in
+  one write, so concurrent guesses never pass the attempt cap),
   `ConsumeRecoveryEmailCode`, `AddRecoveryEmail`, `ListRecoveryEmails`,
   `RemoveRecoveryEmail` and `DeleteExpiredRecoveryEmailCodes`; a custom driver
   must implement them and refuse a recovery email in `CreateUser`,

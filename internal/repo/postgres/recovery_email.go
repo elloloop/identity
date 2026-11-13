@@ -119,33 +119,25 @@ func scanRecoveryEmailCode(row pgx.Row) (*service.RecoveryEmailCodeRecord, error
 	return &c, nil
 }
 
-func (r *pgRepository) FindRecoveryEmailCodeByUser(ctx context.Context, userID string) (*service.RecoveryEmailCodeRecord, error) {
-	const q = `SELECT ` + recoveryEmailCodeColumns + `
-		  FROM recovery_email_codes
-		 WHERE project_id = $1 AND user_id = $2`
-	c, err := scanRecoveryEmailCode(r.pool.QueryRow(ctx, q, r.projectID, userID))
+// CountRecoveryEmailCodeAttempt counts the guess and reads the code in one
+// conditional UPDATE, so concurrent guesses never pass the cap between a
+// read and an increment.
+func (r *pgRepository) CountRecoveryEmailCodeAttempt(ctx context.Context, userID string, atMs int64) (*service.RecoveryEmailCodeRecord, error) {
+	const q = `
+		UPDATE recovery_email_codes
+		   SET attempt_count = attempt_count + 1
+		 WHERE project_id = $1 AND user_id = $2
+		   AND consumed_at_ms = 0 AND expires_at_ms > $3
+		   AND (max_attempts = 0 OR attempt_count < max_attempts)
+		RETURNING ` + recoveryEmailCodeColumns
+	c, err := scanRecoveryEmailCode(r.pool.QueryRow(ctx, q, r.projectID, userID, atMs))
 	if noRows(err) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, wrapPgErr("FindRecoveryEmailCodeByUser", err)
+		return nil, wrapPgErr("CountRecoveryEmailCodeAttempt", err)
 	}
 	return c, nil
-}
-
-func (r *pgRepository) IncrementRecoveryEmailCodeAttempts(ctx context.Context, nodeID string) error {
-	const q = `
-		UPDATE recovery_email_codes
-		   SET attempt_count = attempt_count + 1
-		 WHERE project_id = $1 AND id = $2`
-	tag, err := r.pool.Exec(ctx, q, r.projectID, nodeID)
-	if err != nil {
-		return wrapPgErr("IncrementRecoveryEmailCodeAttempts", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return errors.New("postgres: IncrementRecoveryEmailCodeAttempts: no such row")
-	}
-	return nil
 }
 
 // ConsumeRecoveryEmailCode atomically marks an unconsumed, unexpired code

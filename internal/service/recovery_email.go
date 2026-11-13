@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strings"
@@ -200,38 +199,28 @@ func (s *AuthService) VerifyRecoveryEmail(ctx context.Context, userID string, si
 	return held, nil
 }
 
-// verifyAndConsumeRecoveryEmailCode is the phone code's check for a recovery
-// address: a constant-time compare, an attempt counted per wrong guess, the
-// code burnt at the cap, and a single-use consume before the caller acts.
+// verifyAndConsumeRecoveryEmailCode checks a guess at the code mailed to
+// addr. The guess is counted against the code's attempt cap in the same
+// write that reads the code, so concurrent guesses never pass the cap, then
+// settled like every one-time code (settleGuess).
 func (s *AuthService) verifyAndConsumeRecoveryEmailCode(ctx context.Context, userID, addr, code string) error {
-	rec, err := s.repo(ctx).FindRecoveryEmailCodeByUser(ctx, userID)
+	rec, err := s.repo(ctx).CountRecoveryEmailCodeAttempt(ctx, userID, s.nowMs())
 	if err != nil {
 		return fmt.Errorf("looking up recovery email code: %w", err)
 	}
-	if rec == nil || rec.ConsumedAt != 0 || rec.ExpiresAt <= s.nowMs() || FoldEmail(rec.Email) != FoldEmail(addr) {
+	if rec == nil || FoldEmail(rec.Email) != FoldEmail(addr) {
 		return ErrRecoveryEmailCodeInvalid
 	}
-	if rec.MaxAttempts > 0 && rec.AttemptCount >= rec.MaxAttempts {
-		return ErrRecoveryEmailCodeInvalid
-	}
-	if subtle.ConstantTimeCompare([]byte(rec.CodeHash), []byte(sha256Hex(code))) != 1 {
-		if err := s.repo(ctx).IncrementRecoveryEmailCodeAttempts(ctx, rec.NodeID); err != nil {
-			s.logger.Warn("recovery_email_code_attempt_increment_failed",
-				zap.String("user_id", userID), zap.Error(err))
-		}
-		if rec.MaxAttempts > 0 && rec.AttemptCount+1 >= rec.MaxAttempts {
-			if _, cErr := s.repo(ctx).ConsumeRecoveryEmailCode(ctx, userID, s.nowMs()); cErr != nil &&
-				!errors.Is(cErr, ErrRecoveryEmailCodeInvalid) {
-				s.logger.Warn("recovery_email_code_lock_failed",
-					zap.String("user_id", userID), zap.Error(cErr))
-			}
-		}
-		return ErrRecoveryEmailCodeInvalid
-	}
-	if _, err := s.repo(ctx).ConsumeRecoveryEmailCode(ctx, userID, s.nowMs()); err != nil {
-		return ErrRecoveryEmailCodeInvalid
-	}
-	return nil
+	_, err = s.settleGuess(ctx, oneTimeCode{
+		kind: "recovery_email_code", hash: rec.CodeHash,
+		attempts: rec.AttemptCount, maxAttempts: rec.MaxAttempts,
+		invalid: ErrRecoveryEmailCodeInvalid,
+		consume: func(ctx context.Context) error {
+			_, err := s.repo(ctx).ConsumeRecoveryEmailCode(ctx, userID, s.nowMs())
+			return err
+		},
+	}, code, zap.String("user_id", userID))
+	return err
 }
 
 // ListRecoveryEmails returns the caller's recovery emails, oldest first, and

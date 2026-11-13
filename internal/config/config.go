@@ -1283,7 +1283,8 @@ type Config struct {
 	// RateLimitVerifyPerIP is the per-IP request cap per window on the verification endpoints.
 	RateLimitVerifyPerIP int
 	// RateLimitPasswordlessPerIP is the per-IP cap per window on
-	// RequestEmailLoginCode + RequestMagicLink.
+	// RequestEmailLoginCode + RequestMagicLink, and the size of the separate
+	// budgets RequestRecoveryEmail and VerifyRecoveryEmail each get.
 	RateLimitPasswordlessPerIP int
 	// RateLimitAssurancePerIP is the per-IP request cap per window on the
 	// client-assurance endpoints. These are unauthenticated and each

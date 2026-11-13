@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"math/big"
@@ -164,8 +163,8 @@ func (s *AuthService) sendEmailLoginCodeNow(ctx context.Context, emailAddr strin
 // Failure modes (missing/expired/consumed code, wrong code, exhausted
 // attempts, and — when auto-create is disabled — an unknown email) all
 // collapse to ErrEmailLoginCodeInvalid so the endpoint reveals nothing.
-// A wrong guess bumps the per-code attempt counter; once it reaches the
-// cap captured at mint time the code is consumed (invalidated) to stop a
+// Every guess counts against the cap captured at mint time, and the wrong
+// guess that reaches it consumes (invalidates) the code to stop a
 // brute-force walk of the 6-digit space.
 func (s *AuthService) VerifyEmailLoginCode(ctx context.Context, emailAddr, code string, ipAddr, userAgent string) (*LoginResult, error) {
 	// Canonicalize ONCE: the OTP was stored under the canonical key by
@@ -192,10 +191,11 @@ func (s *AuthService) VerifyEmailLoginCode(ctx context.Context, emailAddr, code 
 //
 // Every failure mode — missing/expired/consumed code, wrong code, exhausted
 // attempts — collapses to ErrEmailLoginCodeInvalid, so the caller can surface
-// one generic error with no existence oracle. A wrong guess bumps the per-code
-// attempt counter; once it reaches the cap captured at mint time the code is
-// consumed (invalidated) to stop a brute-force walk of the 6-digit space.
-// method tags the failure audit event ("email_code" or "passkey_signup").
+// one generic error with no existence oracle. Every guess bumps the per-code
+// attempt counter, and a wrong one that reaches the cap captured at mint time
+// consumes (invalidates) the code to stop a brute-force walk of the 6-digit
+// space (settleGuess). method tags the failure audit event ("email_code" or
+// "passkey_signup").
 func (s *AuthService) verifyAndConsumeEmailLoginCode(ctx context.Context, emailAddr, code, method, ipAddr, userAgent string) error {
 	rec, err := s.repo(ctx).FindEmailLoginCodeByEmail(ctx, emailAddr)
 	if err != nil {
@@ -207,34 +207,25 @@ func (s *AuthService) verifyAndConsumeEmailLoginCode(ctx context.Context, emailA
 	if rec.MaxAttempts > 0 && rec.AttemptCount >= rec.MaxAttempts {
 		return ErrEmailLoginCodeInvalid
 	}
-
-	// Constant-time compare so a timing oracle can't shortcut the guess.
-	if subtle.ConstantTimeCompare([]byte(rec.CodeHash), []byte(sha256Hex(code))) != 1 {
-		if err := s.repo(ctx).IncrementEmailLoginCodeAttempts(ctx, rec.NodeID); err != nil {
-			s.logger.Warn("email_login_code_attempt_increment_failed",
-				zap.String("email", redactEmail(emailAddr)), zap.Error(err))
-		}
-		// At the cap, consume the code so the (now-final) wrong guess
-		// burns it — no further attempts against this code are possible.
-		if rec.MaxAttempts > 0 && rec.AttemptCount+1 >= rec.MaxAttempts {
-			if _, cErr := s.repo(ctx).ConsumeEmailLoginCode(ctx, emailAddr, s.nowMs()); cErr != nil &&
-				!errors.Is(cErr, ErrEmailLoginCodeInvalid) {
-				s.logger.Warn("email_login_code_lock_failed",
-					zap.String("email", redactEmail(emailAddr)), zap.Error(cErr))
-			}
-		}
+	if err := s.repo(ctx).IncrementEmailLoginCodeAttempts(ctx, rec.NodeID); err != nil {
+		s.logger.Warn("email_login_code_attempt_increment_failed",
+			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
+	}
+	right, err := s.settleGuess(ctx, oneTimeCode{
+		kind: "email_login_code", hash: rec.CodeHash,
+		attempts: rec.AttemptCount + 1, maxAttempts: rec.MaxAttempts,
+		invalid: ErrEmailLoginCodeInvalid,
+		consume: func(ctx context.Context) error {
+			_, err := s.repo(ctx).ConsumeEmailLoginCode(ctx, emailAddr, s.nowMs())
+			return err
+		},
+	}, code, zap.String("email", redactEmail(emailAddr)))
+	if !right {
 		s.audit.Log(ctx, audit.EventLoginFailure,
 			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent), audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"method": method, "reason": "code_mismatch"}))
-		return ErrEmailLoginCodeInvalid
 	}
-
-	// Correct code: consume single-use (CAS) before the caller proceeds so
-	// a replay racing this verify loses.
-	if _, err := s.repo(ctx).ConsumeEmailLoginCode(ctx, emailAddr, s.nowMs()); err != nil {
-		return ErrEmailLoginCodeInvalid
-	}
-	return nil
+	return err
 }
 
 // ── RequestMagicLink ───────────────────────────────────────────────────
