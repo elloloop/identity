@@ -16,7 +16,7 @@ setting, and none changes until it is set.
   | --- | --- | --- |
   | `phone.enabled` | unset (follows the deployment) | `false` turns phone verification off for the project: both RPCs answer `UNAVAILABLE`, as when the deployment has no sender. `true` changes nothing: a project cannot verify phones without a sender. |
   | `phone.unique` | `false` | A verified number belongs to one account of the project. |
-  | `phone.reassign_after_seconds` | `0` (never) | With `unique`: how long after its holder verified a number another account that proves it may take it. |
+  | `phone.reassign_after_seconds` | `0` (never; at most `315360000`, ten years) | With `unique`: how long after its holder verified a number another account that proves it may take it. A larger value is rejected as `INVALID_ARGUMENT`. |
   | `phone.allowed_calling_codes` | `[]` (every country) | Country calling codes accepted, as 1 to 3 digits without the `+`. |
   | `phone.channels` | `[]` (`["sms"]`) | Delivery order: `"sms"`, `"message"`. A channel left out is never used. |
   | `phone.message_template`, `phone.message_language` | `""` | The template the message channel sends; required when `channels` lists `"message"`. |

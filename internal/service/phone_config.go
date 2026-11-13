@@ -19,6 +19,11 @@ const (
 // maxPhoneMessageTemplateLen bounds a template's name and language code.
 const maxPhoneMessageTemplateLen = 128
 
+// maxPhoneReassignAfterSeconds bounds phone.reassign_after_seconds at ten
+// years (of 365 days). A longer wait is never in practice, and the bound
+// keeps the reassignment time's arithmetic far inside int64.
+const maxPhoneReassignAfterSeconds = 10 * 365 * 24 * 60 * 60
+
 // ProjectPhoneConfig is a project's policy for phone verification. The zero
 // value is today's behaviour: verification is on wherever the deployment
 // has an SMS provider (GATEWAY_SMS_ENABLED), codes go by SMS, a number may
@@ -37,7 +42,8 @@ type ProjectPhoneConfig struct {
 	// ReassignAfterSeconds lets a number move to another account that
 	// proves it, this long after its holder verified it: carriers hand a
 	// number its owner gave up to someone else. 0 (the default) means a
-	// number moves only once released. Only valid with Unique.
+	// number moves only once released; at most 315360000 (ten years). Only
+	// valid with Unique.
 	ReassignAfterSeconds int64 `json:"reassign_after_seconds"`
 	// AllowedCallingCodes limits the numbers a code is sent to and stored
 	// for to these country calling codes, as digits without the '+' ("91").
@@ -57,8 +63,9 @@ type ProjectPhoneConfig struct {
 }
 
 func (c ProjectPhoneConfig) validate() error {
-	if c.ReassignAfterSeconds < 0 {
-		return fmt.Errorf("%w: phone.reassign_after_seconds must not be negative", ErrInvalidArgument)
+	if c.ReassignAfterSeconds < 0 || c.ReassignAfterSeconds > maxPhoneReassignAfterSeconds {
+		return fmt.Errorf("%w: phone.reassign_after_seconds must be between 0 and %d (ten years; 0 never reassigns)",
+			ErrInvalidArgument, maxPhoneReassignAfterSeconds)
 	}
 	if c.ReassignAfterSeconds > 0 && !c.Unique {
 		return fmt.Errorf("%w: phone.reassign_after_seconds needs phone.unique", ErrInvalidArgument)
@@ -132,12 +139,14 @@ func (c ProjectPhoneConfig) channels() []string {
 }
 
 // takeOverBefore is the claim time before which another account's claim on
-// a number is old enough to move at nowMs; 0 when no claim ever is.
+// a number is old enough to move at nowMs; 0 when no claim ever is. The wait
+// is clamped to its bound, so a value validate would refuse can never wrap
+// the subtraction into "every claim is old enough".
 func (c ProjectPhoneConfig) takeOverBefore(nowMs int64) int64 {
 	if c.ReassignAfterSeconds <= 0 {
 		return 0
 	}
-	return nowMs - c.ReassignAfterSeconds*1000 + 1
+	return nowMs - min(c.ReassignAfterSeconds, maxPhoneReassignAfterSeconds)*1000 + 1
 }
 
 // phoneConfig is the request's project's phone policy; the zero policy when

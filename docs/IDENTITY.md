@@ -844,8 +844,8 @@ narrows the rest and can turn nothing on that the deployment lacks:
   drops the ones left out.
 - `phone.allowed_calling_codes` limits the countries a code is sent to.
 - `phone.unique` keeps a verified number on one account; it moves only when
-  its holder releases it or, with `phone.reassign_after_seconds`, after that
-  long.
+  its holder releases it or, with `phone.reassign_after_seconds` (at most ten
+  years), after that long.
 
 A tenant can require a verified phone (`LoginPolicy.require_verified_phone`,
 optionally of some countries): until the account has one, a selection of the

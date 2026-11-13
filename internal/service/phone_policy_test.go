@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -281,11 +282,30 @@ func TestPhone_RemoveTellsTheAccountAndRespectsTheHold(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
+// A wait of years never wraps into "every claim is old enough": the value
+// validate refuses is clamped to the bound, and the bound reassigns nothing
+// verified within it.
+func TestProjectPhoneConfig_TakeOverBeforeNeverWraps(t *testing.T) {
+	const nowMs = int64(1_800_000_000_000)
+	assert.Zero(t, ProjectPhoneConfig{Unique: true}.takeOverBefore(nowMs), "0 never reassigns")
+	assert.Equal(t, nowMs-3_600_000+1, ProjectPhoneConfig{Unique: true, ReassignAfterSeconds: 3600}.takeOverBefore(nowMs))
+	bound := nowMs - maxPhoneReassignAfterSeconds*1000 + 1
+	for _, after := range []int64{maxPhoneReassignAfterSeconds, maxPhoneReassignAfterSeconds + 1, math.MaxInt64 / 1000, math.MaxInt64} {
+		got := ProjectPhoneConfig{Unique: true, ReassignAfterSeconds: after}.takeOverBefore(nowMs)
+		assert.Equal(t, bound, got, "reassign_after_seconds=%d", after)
+		assert.Less(t, got, nowMs, "a claim made now is never old enough")
+	}
+	err := ProjectConfig{Phone: ProjectPhoneConfig{Unique: true, ReassignAfterSeconds: math.MaxInt64}}.Validate()
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Contains(t, err.Error(), "315360000", "the refusal names the bound")
+}
+
 func TestProjectPhoneConfig_Validate(t *testing.T) {
 	valid := []ProjectPhoneConfig{
 		{},
 		{Enabled: off()},
 		{Unique: true, ReassignAfterSeconds: 86400},
+		{Unique: true, ReassignAfterSeconds: maxPhoneReassignAfterSeconds},
 		{AllowedCallingCodes: []string{"1", "44", "971"}},
 		{Channels: []string{PhoneChannelSMS}},
 		{Channels: []string{PhoneChannelMessage, PhoneChannelSMS}, MessageTemplate: "code", MessageLanguage: "en_GB"},
@@ -295,6 +315,8 @@ func TestProjectPhoneConfig_Validate(t *testing.T) {
 	}
 	invalid := map[string]ProjectPhoneConfig{
 		"negative period":            {Unique: true, ReassignAfterSeconds: -1},
+		"period past ten years":      {Unique: true, ReassignAfterSeconds: maxPhoneReassignAfterSeconds + 1},
+		"period at the int64 limit":  {Unique: true, ReassignAfterSeconds: math.MaxInt64},
 		"period without unique":      {ReassignAfterSeconds: 60},
 		"calling code with a plus":   {AllowedCallingCodes: []string{"+91"}},
 		"calling code too long":      {AllowedCallingCodes: []string{"1242"}},
