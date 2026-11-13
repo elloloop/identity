@@ -87,7 +87,7 @@ func (h *IdentityHandler) TransferAgent(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 	agent, err := h.auth.TransferAgent(
-		ctx, callerID,
+		ctx, callerID, authenticatedSignIn(req.Header()),
 		req.Msg.GetAgentUserId(), req.Msg.GetNewOwnerUserId(),
 		clientIP(req.Header()), clientUserAgent(req.Header()),
 	)

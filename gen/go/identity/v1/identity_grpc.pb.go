@@ -275,13 +275,14 @@ type IdentityServiceClient interface {
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
 	// address another account of the project holds and RESOURCE_EXHAUSTED past
 	// the project's cap; RequestRecoveryEmail answers them for the caller's own
-	// addresses and its own full list. A project that has not turned the
-	// feature on refuses
-	// RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
-	// while addresses already kept can still be listed and removed. Adding or
-	// removing an address mails a notice to the account's other addresses, and
-	// a removal to the removed address too. During a recovery hold a session a
-	// recovery email opened can do neither (RecoveryHoldDetails).
+	// addresses and its own full list, and INVALID_ARGUMENT for an address a
+	// sign-up would refuse. A project that has not turned the feature on
+	// refuses RequestRecoveryEmail and VerifyRecoveryEmail with
+	// FAILED_PRECONDITION, while addresses already kept can still be listed and
+	// removed. Adding or removing an address mails a notice to the account's
+	// other addresses, and a removal to the removed address too. During a
+	// recovery hold a session a recovery email opened can do neither
+	// (RecoveryHoldDetails).
 	RequestRecoveryEmail(ctx context.Context, in *RequestRecoveryEmailRequest, opts ...grpc.CallOption) (*RequestRecoveryEmailResponse, error)
 	VerifyRecoveryEmail(ctx context.Context, in *VerifyRecoveryEmailRequest, opts ...grpc.CallOption) (*VerifyRecoveryEmailResponse, error)
 	ListRecoveryEmails(ctx context.Context, in *ListRecoveryEmailsRequest, opts ...grpc.CallOption) (*ListRecoveryEmailsResponse, error)
@@ -2741,13 +2742,14 @@ type IdentityServiceServer interface {
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
 	// address another account of the project holds and RESOURCE_EXHAUSTED past
 	// the project's cap; RequestRecoveryEmail answers them for the caller's own
-	// addresses and its own full list. A project that has not turned the
-	// feature on refuses
-	// RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
-	// while addresses already kept can still be listed and removed. Adding or
-	// removing an address mails a notice to the account's other addresses, and
-	// a removal to the removed address too. During a recovery hold a session a
-	// recovery email opened can do neither (RecoveryHoldDetails).
+	// addresses and its own full list, and INVALID_ARGUMENT for an address a
+	// sign-up would refuse. A project that has not turned the feature on
+	// refuses RequestRecoveryEmail and VerifyRecoveryEmail with
+	// FAILED_PRECONDITION, while addresses already kept can still be listed and
+	// removed. Adding or removing an address mails a notice to the account's
+	// other addresses, and a removal to the removed address too. During a
+	// recovery hold a session a recovery email opened can do neither
+	// (RecoveryHoldDetails).
 	RequestRecoveryEmail(context.Context, *RequestRecoveryEmailRequest) (*RequestRecoveryEmailResponse, error)
 	VerifyRecoveryEmail(context.Context, *VerifyRecoveryEmailRequest) (*VerifyRecoveryEmailResponse, error)
 	ListRecoveryEmails(context.Context, *ListRecoveryEmailsRequest) (*ListRecoveryEmailsResponse, error)
@@ -7998,7 +8000,10 @@ type HireGrantServiceClient interface {
 	// session. PERMISSION_DENIED: the caller is not an active person, or is
 	// neither the teammate's owner nor a project admin, or teammate_id is not
 	// an active agent account of the project; every such caller gets the same
-	// answer. INVALID_ARGUMENT: a blank or malformed id.
+	// answer. INVALID_ARGUMENT: a blank or malformed id. FAILED_PRECONDITION
+	// (`recovery_hold`, RecoveryHoldDetails): a session a recovery hold binds;
+	// UNAUTHENTICATED, too, for a session whose recovery email the account no
+	// longer holds.
 	CreateHireGrant(ctx context.Context, in *CreateHireGrantRequest, opts ...grpc.CallOption) (*CreateHireGrantResponse, error)
 }
 
@@ -8034,7 +8039,10 @@ type HireGrantServiceServer interface {
 	// session. PERMISSION_DENIED: the caller is not an active person, or is
 	// neither the teammate's owner nor a project admin, or teammate_id is not
 	// an active agent account of the project; every such caller gets the same
-	// answer. INVALID_ARGUMENT: a blank or malformed id.
+	// answer. INVALID_ARGUMENT: a blank or malformed id. FAILED_PRECONDITION
+	// (`recovery_hold`, RecoveryHoldDetails): a session a recovery hold binds;
+	// UNAUTHENTICATED, too, for a session whose recovery email the account no
+	// longer holds.
 	CreateHireGrant(context.Context, *CreateHireGrantRequest) (*CreateHireGrantResponse, error)
 	mustEmbedUnimplementedHireGrantServiceServer()
 }

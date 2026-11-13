@@ -261,7 +261,7 @@ func (r *machineFailureRepo) GetOAuthClient(context.Context, string) (*OAuthClie
 func TestMachineHumanControlRefusesInvalidRequestsAndUnavailableClient(t *testing.T) {
 	t.Parallel()
 	oauth, repo, _ := machineFailureFixture(t)
-	human := AgentOAuthHuman{UserID: repo.authority.Owner.ID, SID: repo.authority.HumanSession.SID, AuthTime: time.Now().Unix()}
+	human := AgentOAuthHuman{UserID: repo.authority.Owner.ID, SignIn: SessionSignIn{SessionID: repo.authority.HumanSession.SID, AuthTimeSec: time.Now().Unix()}}
 	_, err := oauth.ListMachines(t.Context(), human, "", -1)
 	require.ErrorIs(t, err, ErrInvalidArgument)
 	_, err = oauth.SelectMachineAgents(t.Context(), human, "invalid/id", 1, true, nil, nil)

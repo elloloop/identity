@@ -34,6 +34,7 @@ func (h *IdentityHandler) CreateManagedChildAccount(
 	result, err := h.auth.CreateManagedChildAccount(
 		ctx,
 		callerUserID,
+		authenticatedSignIn(req.Header()),
 		service.ManagedChildAccountRequest{
 			Username:         req.Msg.GetUsername(),
 			DisplayName:      req.Msg.GetDisplayName(),

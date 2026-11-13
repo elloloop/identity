@@ -263,8 +263,19 @@ func (s *AuthService) oauthClientAdmin(ctx context.Context, caller string) error
 	return nil
 }
 
-func (s *AuthService) CreateOAuthClient(ctx context.Context, caller string, registration *OAuthClientRegistration) (*OAuthClient, error) {
-	if err := s.oauthClientAdmin(ctx, caller); err != nil {
+// oauthClientWriter is oauthClientAdmin for a call that registers or changes
+// a client: the agents, machines and delegations a client admits outlast the
+// session, so one a recovery hold binds, or whose recovery email is gone, is
+// refused (refuseHeldSession).
+func (s *AuthService) oauthClientWriter(ctx context.Context, caller string, signIn SessionSignIn) error {
+	if err := s.refuseHeldSession(ctx, caller, signIn); err != nil {
+		return err
+	}
+	return s.oauthClientAdmin(ctx, caller)
+}
+
+func (s *AuthService) CreateOAuthClient(ctx context.Context, caller string, signIn SessionSignIn, registration *OAuthClientRegistration) (*OAuthClient, error) {
+	if err := s.oauthClientWriter(ctx, caller, signIn); err != nil {
 		return nil, err
 	}
 	if err := registration.Validate(); err != nil {
@@ -296,8 +307,8 @@ func (s *AuthService) GetOAuthClient(ctx context.Context, caller, id string) (*O
 	return client, nil
 }
 
-func (s *AuthService) UpdateOAuthClient(ctx context.Context, caller, id string, expectedRevision int64, registration *OAuthClientRegistration) (*OAuthClient, error) {
-	if err := s.oauthClientAdmin(ctx, caller); err != nil {
+func (s *AuthService) UpdateOAuthClient(ctx context.Context, caller string, signIn SessionSignIn, id string, expectedRevision int64, registration *OAuthClientRegistration) (*OAuthClient, error) {
+	if err := s.oauthClientWriter(ctx, caller, signIn); err != nil {
 		return nil, err
 	}
 	if id == "" || expectedRevision <= 0 || expectedRevision == math.MaxInt64 {

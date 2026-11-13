@@ -8,8 +8,9 @@ import "slices"
 // claim, and its refresh token keeps that id across rotations, so the
 // session says how it was opened for as long as it lasts, and ends when the
 // address is removed. The address may be the weakest mailbox the person has,
-// so such a session makes no account security change while a recovery hold
-// is in force or once its address is gone, never approves another device's
+// so such a session makes no account security change, and grants no
+// authority that would outlast it, while a recovery hold is in force or once
+// its address is gone (refuseHeldSession), never approves another device's
 // QR sign-in, and acts in a tenant only through an explicit membership,
 // never through the domain of the account's email.
 const AMRRecoveryEmail = "recovery_email"

@@ -260,7 +260,7 @@ func allAgentOps() []agentOpCase {
 			return err
 		}},
 		{"transfer", func(f *agentFixture, c, a string) error {
-			_, err := f.svc.TransferAgent(ctx, c, a, f.admin.ID, "", "")
+			_, err := f.svc.TransferAgent(ctx, c, SessionSignIn{}, a, f.admin.ID, "", "")
 			return err
 		}},
 		{"cancel_transfer", func(f *agentFixture, c, a string) error {
@@ -456,7 +456,7 @@ func TestTransferAgent_IsAnOffer(t *testing.T) {
 	agent := seedAgent(f.repo, f.owner.ID)
 	seedChildSession(t, f.repo, agent.ID)
 
-	got, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	got, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, f.owner.ID, got.OwnerUserID)
 	assert.Equal(t, f.stranger.ID, got.PendingOwnerUserID)
@@ -474,7 +474,7 @@ func TestTransferAgent_IsAnOffer(t *testing.T) {
 	require.ErrorIs(t, err, ErrPermissionDenied)
 
 	// To the current owner: a no-op that leaves the offer standing.
-	_, err = f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.owner.ID, "", "")
+	_, err = f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.owner.ID, "", "")
 	require.NoError(t, err)
 	stored, _ = f.repo.GetUser(ctx, agent.ID)
 	assert.Equal(t, f.stranger.ID, stored.PendingOwnerUserID)
@@ -485,7 +485,7 @@ func TestAcceptAgentTransfer(t *testing.T) {
 	ctx := context.Background()
 	agent := seedAgent(f.repo, f.owner.ID)
 	seedChildSession(t, f.repo, agent.ID)
-	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
 
 	incoming, err := f.svc.ListIncomingAgentTransfers(ctx, f.stranger.ID)
@@ -534,7 +534,7 @@ func TestAgentTransferAnswer_OnlyTheRecipient(t *testing.T) {
 			agent := seedAgent(f.repo, f.owner.ID)
 			unoffered := seedAgent(f.repo, f.owner.ID)
 			sibling := seedAgent(f.repo, f.owner.ID)
-			_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+			_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 			require.NoError(t, err)
 
 			var msgs []string
@@ -567,7 +567,7 @@ func TestDeclineAgentTransfer(t *testing.T) {
 	f := newAgentFixture(t)
 	ctx := context.Background()
 	agent := seedAgent(f.repo, f.owner.ID)
-	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
 
 	got, err := f.svc.DeclineAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
@@ -589,7 +589,7 @@ func TestCancelAgentTransfer(t *testing.T) {
 			f := newAgentFixture(t)
 			ctx := context.Background()
 			agent := seedAgent(f.repo, f.owner.ID)
-			_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+			_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 			require.NoError(t, err)
 			caller := f.owner.ID
 			if who == "admin" {
@@ -619,9 +619,9 @@ func TestTransferAgent_ReplacesAPendingOffer(t *testing.T) {
 	f := newAgentFixture(t)
 	ctx := context.Background()
 	agent := seedAgent(f.repo, f.owner.ID)
-	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
-	_, err = f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.admin.ID, "", "")
+	_, err = f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.admin.ID, "", "")
 	require.NoError(t, err)
 
 	_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
@@ -640,7 +640,7 @@ func TestTransferAgent_OwnerChangedSinceReadRefused(t *testing.T) {
 	agent := seedAgent(f.repo, f.owner.ID)
 	stale, _ := f.repo.GetUser(ctx, agent.ID)
 	staleCopy := *stale
-	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
 	_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
 	require.NoError(t, err)
@@ -663,7 +663,7 @@ func TestAcceptAgentTransfer_StaleOfferRefused(t *testing.T) {
 	f := newAgentFixture(t)
 	ctx := context.Background()
 	agent := seedAgent(f.repo, f.owner.ID)
-	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
 	stale, _ := f.repo.GetUser(ctx, agent.ID)
 	staleCopy := *stale
@@ -689,10 +689,10 @@ func TestTransferAgent_RecipientMustBeEligible(t *testing.T) {
 	merged.MergedIntoUserID = f.stranger.ID
 
 	for _, to := range []string{other.ID, inactive.ID, anon.ID, merged.ID, "no-such-user"} {
-		_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, to, "", "")
+		_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, to, "", "")
 		require.ErrorIs(t, err, ErrInvalidArgument, to)
 	}
-	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, " ", "", "")
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, " ", "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
 
 	stored, _ := f.repo.GetUser(ctx, agent.ID)
@@ -708,7 +708,7 @@ func TestAcceptAgentTransfer_RespectsRecipientCap(t *testing.T) {
 	agent := seedAgent(f.repo, f.owner.ID)
 	held := seedAgent(f.repo, f.stranger.ID)
 
-	_, err := f.svc.TransferAgent(ctx, f.owner.ID, agent.ID, f.stranger.ID, "", "")
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err, "the offer is not capped")
 	_, err = f.svc.AcceptAgentTransfer(ctx, f.stranger.ID, agent.ID, "", "")
 	require.ErrorIs(t, err, ErrAgentLimitReached)
@@ -730,7 +730,7 @@ func TestTransferAgent_OrphanReassignedByAdmin(t *testing.T) {
 	seedChildSession(t, f.repo, agent.ID)
 	require.NoError(t, f.repo.DeleteUser(ctx, f.owner.ID))
 
-	got, err := f.svc.TransferAgent(ctx, f.admin.ID, agent.ID, f.stranger.ID, "", "")
+	got, err := f.svc.TransferAgent(ctx, f.admin.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, f.stranger.ID, got.OwnerUserID)
 	assert.Empty(t, got.PendingOwnerUserID)
@@ -750,7 +750,7 @@ func TestTransferAgent_OrphanRespectsRecipientCap(t *testing.T) {
 	seedAgent(f.repo, f.stranger.ID)
 	require.NoError(t, f.repo.DeleteUser(ctx, f.owner.ID))
 
-	_, err := f.svc.TransferAgent(ctx, f.admin.ID, agent.ID, f.stranger.ID, "", "")
+	_, err := f.svc.TransferAgent(ctx, f.admin.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.ErrorIs(t, err, ErrAgentLimitReached)
 	stored, _ := f.repo.GetUser(ctx, agent.ID)
 	assert.Equal(t, f.owner.ID, stored.OwnerUserID)
@@ -764,7 +764,7 @@ func TestTransferAgent_SuspendedOwnerIsNotAnOrphan(t *testing.T) {
 	agent := seedAgent(f.repo, f.owner.ID)
 	f.setStatus(f.owner.ID, StatusDeactivated)
 
-	got, err := f.svc.TransferAgent(ctx, f.admin.ID, agent.ID, f.stranger.ID, "", "")
+	got, err := f.svc.TransferAgent(ctx, f.admin.ID, SessionSignIn{}, agent.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, f.owner.ID, got.OwnerUserID)
 	assert.Equal(t, f.stranger.ID, got.PendingOwnerUserID)
@@ -779,11 +779,11 @@ func TestAccountMerge_RepointsPendingTransfers(t *testing.T) {
 	toOther := seedAgent(f.repo, f.owner.ID)
 	ownedBySurvivor := seedAgent(f.repo, f.admin.ID)
 	ownedByOther := seedAgent(f.repo, f.stranger.ID)
-	_, err := f.svc.TransferAgent(ctx, f.stranger.ID, ownedByOther.ID, f.admin.ID, "", "")
+	_, err := f.svc.TransferAgent(ctx, f.stranger.ID, SessionSignIn{}, ownedByOther.ID, f.admin.ID, "", "")
 	require.NoError(t, err)
-	_, err = f.svc.TransferAgent(ctx, f.owner.ID, toOther.ID, f.stranger.ID, "", "")
+	_, err = f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, toOther.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
-	_, err = f.svc.TransferAgent(ctx, f.admin.ID, ownedBySurvivor.ID, f.stranger.ID, "", "")
+	_, err = f.svc.TransferAgent(ctx, f.admin.ID, SessionSignIn{}, ownedBySurvivor.ID, f.stranger.ID, "", "")
 	require.NoError(t, err)
 
 	require.NoError(t, f.repo.ApplyAccountMerge(ctx, AccountMerge{SurvivorID: f.admin.ID, OtherID: f.stranger.ID, AtMs: 1}))
@@ -1299,7 +1299,7 @@ func TestAdminUpdateUser_RefusesAgents(t *testing.T) {
 		{strings.Repeat("x", agentNameMaxRunes+1), "", ""},
 		{"", "", "http://example.com/a.png"},
 	} {
-		_, err := svc.UpdateUser(context.Background(), "admin-1", "agent-1", tc.name, tc.role, tc.avatar)
+		_, err := svc.UpdateUser(context.Background(), "admin-1", SessionSignIn{}, "agent-1", tc.name, tc.role, tc.avatar)
 		require.ErrorIs(t, err, ErrInvalidArgument)
 	}
 	assert.Equal(t, "member", db.nodes["agent-1"].Payload[ufRole])
@@ -1312,7 +1312,7 @@ func TestAdminResetUserPassword_RefusesAgents(t *testing.T) {
 	addAgentNode(db, "agent-1", "admin-1")
 	svc := newTestAdminService(db)
 
-	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "agent-1", true)
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "agent-1", true)
 	require.ErrorIs(t, err, ErrAgentCredential)
 }
 

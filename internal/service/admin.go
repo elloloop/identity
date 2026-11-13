@@ -104,6 +104,18 @@ func (s *AdminService) requireAdmin(ctx context.Context, actorID string) (*User,
 	return requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID)
 }
 
+// requireAdminChange is requireAdmin for a call that adds an account, sets a
+// role or sets another account's password: each outlasts the session, so a
+// session a recovery hold binds, or whose recovery email is gone, is refused
+// (refuseHeldSession).
+func (s *AdminService) requireAdminChange(ctx context.Context, actorID string, signIn SessionSignIn) error {
+	if err := refuseHeldSession(ctx, s.repo(ctx), s.logger, actorID, signIn, nowMs()); err != nil {
+		return err
+	}
+	_, err := s.requireAdmin(ctx, actorID)
+	return err
+}
+
 // ErrAdminOwnAccount is returned when an admin asks an admin RPC to delete or
 // deactivate their own account, or to reset its password. An admin changes
 // their own password with ChangePassword or the reset email, and deletes
@@ -118,10 +130,10 @@ var ErrAdminOwnAccount = errors.New("an admin cannot do this to their own accoun
 // temporary password.
 func (s *AdminService) InviteUser(
 	ctx context.Context,
-	actorID, email, name, role, recoveryEmail string,
+	actorID string, signIn SessionSignIn, email, name, role, recoveryEmail string,
 	quotaBytes int64, createImmediately bool,
 ) (*InviteResult, error) {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return nil, err
 	}
 
@@ -370,9 +382,9 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 // ResetUserPassword generates a temp password or reset token for a user
 // other than the caller (ErrAdminOwnAccount).
 func (s *AdminService) ResetUserPassword(
-	ctx context.Context, actorID, targetUserID string, generateTemp bool,
+	ctx context.Context, actorID string, signIn SessionSignIn, targetUserID string, generateTemp bool,
 ) (*ResetPasswordResult, error) {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return nil, err
 	}
 	if targetUserID == "" {

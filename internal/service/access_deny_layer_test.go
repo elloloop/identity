@@ -381,11 +381,11 @@ func TestAdminService_InviteUser_DeniedByDenyLayer(t *testing.T) {
 	})
 
 	// The mode is open, so only the deny layer can refuse this.
-	_, err = svc.InviteUser(ctx, "admin-1", "contractor@gmail.com", "Contractor", "member", "", 1024, false)
+	_, err = svc.InviteUser(ctx, "admin-1", SessionSignIn{}, "contractor@gmail.com", "Contractor", "member", "", 1024, false)
 	require.ErrorIs(t, err, ErrAccessNotAllowed,
 		"an invite to a blocked domain dead-ends at acceptance, so it must be refused up front")
 
-	_, err = svc.InviteUser(ctx, "admin-1", "dev@corp.example", "Dev", "member", "", 1024, false)
+	_, err = svc.InviteUser(ctx, "admin-1", SessionSignIn{}, "dev@corp.example", "Dev", "member", "", 1024, false)
 	require.NoError(t, err, "the same open project still admits a work address")
 }
 

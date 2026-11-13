@@ -65,13 +65,16 @@ func (s *MembershipService) WithDomains(d DomainStore) *MembershipService {
 // domain as target. Asking for the value the domain already has returns it
 // unchanged and records nothing, so a retry is safe. A domain removed while
 // the call runs is ErrNotFound.
-func (s *DomainService) SetDomainJoin(ctx context.Context, callerID, domainID string, allowJoin bool, ip, userAgent string) (*Domain, error) {
+func (s *DomainService) SetDomainJoin(ctx context.Context, callerID string, signIn SessionSignIn, domainID string, allowJoin bool, ip, userAgent string) (*Domain, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if callerID == "" {
 		return nil, ErrUnauthenticated
+	}
+	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
+		return nil, err
 	}
 	domainID = strings.TrimSpace(domainID)
 	if domainID == "" {

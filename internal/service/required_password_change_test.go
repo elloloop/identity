@@ -170,21 +170,21 @@ func TestRequiredPasswordChange_AdminIssuedPasswordsAreFlagged(t *testing.T) {
 	svc := newTestAdminServiceWithRepo(db, repo)
 	ctx := context.Background()
 
-	_, err := svc.ResetUserPassword(ctx, "admin-1", "target-1", true)
+	_, err := svc.ResetUserPassword(ctx, "admin-1", SessionSignIn{}, "target-1", true)
 	require.NoError(t, err)
 	assert.Equal(t, true, db.nodes["target-1"].Payload[ufPasswordChangeRequired], "a temporary password is flagged")
 
 	db.addUser("target-2", "target2@test.com", "Target", "member", "active")
-	_, err = svc.ResetUserPassword(ctx, "admin-1", "target-2", false)
+	_, err = svc.ResetUserPassword(ctx, "admin-1", SessionSignIn{}, "target-2", false)
 	require.NoError(t, err)
 	assert.Nil(t, db.nodes["target-2"].Payload[ufPasswordChangeRequired], "a reset link lets the user choose; nothing to flag")
 
-	inv, err := svc.InviteUser(ctx, "admin-1", "imm@test.com", "Immediate", "member", "", 0, true)
+	inv, err := svc.InviteUser(ctx, "admin-1", SessionSignIn{}, "imm@test.com", "Immediate", "member", "", 0, true)
 	require.NoError(t, err)
 	assert.Equal(t, true, db.nodes[inv.User.ID].Payload[ufPasswordChangeRequired], "an immediate account's temporary password is flagged")
 
 	uctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"domain":"accounts.example.com","username_signup":"admin"}}`)
-	res, err := svc.CreateUsernameUser(uctx, "admin-1", "bob", "", "")
+	res, err := svc.CreateUsernameUser(uctx, "admin-1", SessionSignIn{}, "bob", "", "")
 	require.NoError(t, err)
 	created, _ := repo.GetUser(uctx, res.User.ID)
 	require.True(t, created.PasswordChangeRequired, "a username account's issued password is flagged")

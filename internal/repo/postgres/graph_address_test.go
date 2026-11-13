@@ -61,11 +61,11 @@ func TestPostgres_GraphUserWritesHoldOneAccountPerAddress(t *testing.T) {
 	require.NoError(t, err)
 	logger := zap.NewNop()
 	svc := service.NewAdminService(repo, repo, projectID, audit.NewLogger(nil, projectID, logger), &config.Config{}, email.NewLogOnly(logger), logger)
-	_, err = svc.InviteUser(ctx, admin, "spare@example.net", "Invitee", "member", "", 0, false)
+	_, err = svc.InviteUser(ctx, admin, service.SessionSignIn{}, "spare@example.net", "Invitee", "member", "", 0, false)
 	require.ErrorIs(t, err, service.ErrAlreadyExists, "an invitation of a recovery email")
 	taken, err := repo.FindUserByEmail(ctx, "spare@example.net")
 	require.NoError(t, err)
 	require.Nil(t, taken, "no account was made on the recovery email")
-	_, err = svc.InviteUser(ctx, admin, "invitee@example.com", "Invitee", "member", "", 0, false)
+	_, err = svc.InviteUser(ctx, admin, service.SessionSignIn{}, "invitee@example.com", "Invitee", "member", "", 0, false)
 	require.NoError(t, err, "an invitation of a free address")
 }

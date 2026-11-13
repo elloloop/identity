@@ -31,6 +31,7 @@ func (h *IdentityHandler) GrantParentalConsent(
 	rec, err := h.auth.GrantParentalConsent(
 		ctx,
 		consentingUserID,
+		authenticatedSignIn(req.Header()),
 		req.Msg.GetChildUserId(),
 		req.Msg.GetPolicyVersion(),
 		req.Msg.GetStepUpPassword(),

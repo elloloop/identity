@@ -118,11 +118,11 @@ func TestNewTeammateKeyServiceRefusesWhatCannotServeIt(t *testing.T) {
 		return &config.Config{TeammateKeysEnabled: true, JWTIssuer: "https://auth.example.test", JWTAudience: "https://api.example.test", DefaultProjectID: "project"}
 	}
 	signer := testKeyRing(t)
-	_, err := NewTeammateKeyService(&config.Config{TeammateKeysEnabled: true}, newFakeControlPlaneStore(), newFakeRepo(), signer, nil, nil)
+	_, err := NewTeammateKeyService(&config.Config{TeammateKeysEnabled: true}, newFakeControlPlaneStore(), newFakeRepo(), signer, nil, nil, nil)
 	require.ErrorContains(t, err, "GATEWAY_JWT_AUDIENCE")
-	_, err = NewTeammateKeyService(enabled(), nil, newFakeRepo(), signer, nil, nil)
+	_, err = NewTeammateKeyService(enabled(), nil, newFakeRepo(), signer, nil, nil, nil)
 	require.ErrorContains(t, err, "control plane")
-	_, err = NewTeammateKeyService(enabled(), newFakeControlPlaneStore(), newFakeRepo(), signer, nil, nil)
+	_, err = NewTeammateKeyService(enabled(), newFakeControlPlaneStore(), newFakeRepo(), signer, nil, nil, nil)
 	require.ErrorContains(t, err, "postgres repository")
 }
 

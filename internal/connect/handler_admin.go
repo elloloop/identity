@@ -27,6 +27,7 @@ func (h *IdentityHandler) InviteUser(
 	result, err := h.admin.InviteUser(
 		ctx,
 		callerID,
+		authenticatedSignIn(req.Header()),
 		req.Msg.Email,
 		req.Msg.Name,
 		req.Msg.Role,
@@ -114,6 +115,7 @@ func (h *IdentityHandler) UpdateUser(
 	user, err := h.admin.UpdateUser(
 		ctx,
 		callerID,
+		authenticatedSignIn(req.Header()),
 		req.Msg.UserId,
 		req.Msg.Name,
 		req.Msg.Role,
@@ -176,7 +178,7 @@ func (h *IdentityHandler) ResetUserPassword(
 	}
 
 	result, err := h.admin.ResetUserPassword(
-		ctx, callerID, req.Msg.UserId, req.Msg.GenerateTempPassword,
+		ctx, callerID, authenticatedSignIn(req.Header()), req.Msg.UserId, req.Msg.GenerateTempPassword,
 	)
 	if err != nil {
 		return nil, toConnectError(err)
@@ -225,7 +227,7 @@ func (h *IdentityHandler) CreateUser(
 		if req.Msg.Email != "" {
 			return nil, toConnectError(fmt.Errorf("%w: set one of email and username", service.ErrInvalidArgument))
 		}
-		result, err := h.admin.CreateUsernameUser(ctx, callerID, req.Msg.Username, req.Msg.Name, req.Msg.Role)
+		result, err := h.admin.CreateUsernameUser(ctx, callerID, authenticatedSignIn(req.Header()), req.Msg.Username, req.Msg.Name, req.Msg.Role)
 		if err != nil {
 			return nil, toConnectError(err)
 		}
@@ -236,7 +238,7 @@ func (h *IdentityHandler) CreateUser(
 	}
 
 	result, err := h.admin.InviteUser(
-		ctx, callerID, req.Msg.Email, req.Msg.Name, req.Msg.Role,
+		ctx, callerID, authenticatedSignIn(req.Header()), req.Msg.Email, req.Msg.Name, req.Msg.Role,
 		"",   // recoveryEmail
 		0,    // quotaBytes
 		true, // createImmediately

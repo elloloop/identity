@@ -59,7 +59,7 @@ func TestAdminInviteUser_DuplicateCheckQueryFails(t *testing.T) {
 	db.failQueryNodes = true
 	svc := newAdminWithDB(db)
 
-	_, err := svc.InviteUser(context.Background(), "admin-1", "x@test.com", "", "member", "", 0, false)
+	_, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{}, "x@test.com", "", "member", "", 0, false)
 	require.Error(t, err)
 }
 
@@ -69,7 +69,7 @@ func TestAdminInviteUser_CreateUserExecuteFails(t *testing.T) {
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
-	_, err := svc.InviteUser(context.Background(), "admin-1", "x@test.com", "", "member", "", 0, false)
+	_, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{}, "x@test.com", "", "member", "", 0, false)
 	require.Error(t, err)
 }
 
@@ -80,7 +80,7 @@ func TestAdminInviteUser_CreateInvitationExecuteFails(t *testing.T) {
 	db.failExecuteAfter = 2
 	svc := newAdminWithDB(db)
 
-	_, err := svc.InviteUser(context.Background(), "admin-1", "x@test.com", "", "member", "", 0, false)
+	_, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{}, "x@test.com", "", "member", "", 0, false)
 	require.Error(t, err)
 }
 
@@ -136,7 +136,7 @@ func TestAdminResetUserPassword_GetNodeFails(t *testing.T) {
 	db.failGetNodeAfter = 2
 	svc := newAdminWithDB(db)
 
-	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "target-1", true)
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "target-1", true)
 	require.Error(t, err)
 }
 
@@ -147,7 +147,7 @@ func TestAdminResetUserPassword_ExecuteFails_TempPath(t *testing.T) {
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
-	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "target-1", true)
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "target-1", true)
 	require.Error(t, err)
 }
 
@@ -158,7 +158,7 @@ func TestAdminResetUserPassword_ExecuteFails_TokenPath(t *testing.T) {
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
-	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "target-1", false)
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "target-1", false)
 	require.Error(t, err)
 }
 
@@ -238,7 +238,7 @@ func TestAdminUpdateUser_ExecuteFails(t *testing.T) {
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
-	_, err := svc.UpdateUser(context.Background(), "admin-1", "user-1", "Name", "", "")
+	_, err := svc.UpdateUser(context.Background(), "admin-1", SessionSignIn{}, "user-1", "Name", "", "")
 	require.Error(t, err)
 }
 
@@ -250,7 +250,7 @@ func TestAdminUpdateUser_RefetchFails(t *testing.T) {
 	db.failGetNodeAfter = 2
 	svc := newAdminWithDB(db)
 
-	_, err := svc.UpdateUser(context.Background(), "admin-1", "user-1", "Name", "", "")
+	_, err := svc.UpdateUser(context.Background(), "admin-1", SessionSignIn{}, "user-1", "Name", "", "")
 	require.Error(t, err)
 }
 
@@ -261,7 +261,7 @@ func TestAdminUpdateUser_RefetchReturnsNil(t *testing.T) {
 	svc := newAdminWithDB(db)
 
 	// user-x doesn't exist; update will succeed (no-op in fake), refetch returns nil.
-	_, err := svc.UpdateUser(context.Background(), "admin-1", "ghost-user", "Name", "", "")
+	_, err := svc.UpdateUser(context.Background(), "admin-1", SessionSignIn{}, "ghost-user", "Name", "", "")
 	require.Error(t, err)
 }
 

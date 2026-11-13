@@ -56,13 +56,16 @@ type OwnershipTransfer struct {
 // only through their email's domain must still be one: a domain the tenant
 // no longer verifies makes them no member (ErrNotFound). The transfer is
 // audited with callerID as actor and newOwnerID as target.
-func (s *MembershipService) TransferTenantOwnership(ctx context.Context, callerID, tenantID, newOwnerID, ip, userAgent string) (*OwnershipTransfer, error) {
+func (s *MembershipService) TransferTenantOwnership(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, newOwnerID, ip, userAgent string) (*OwnershipTransfer, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if callerID == "" {
 		return nil, ErrUnauthenticated
+	}
+	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
+		return nil, err
 	}
 	tenantID = strings.TrimSpace(tenantID)
 	newOwnerID = strings.TrimSpace(newOwnerID)

@@ -393,10 +393,10 @@ func TestGovernanceRevocation_FailedSelfServiceVerifyRevokesNothing(t *testing.T
 	pctx := service.WithProjectScope(ctx, &service.ProjectScope{
 		ProjectID: f.project, Access: service.ProjectAccessConfig{Mode: service.AccessModeOpen},
 	})
-	created, err := svc.CreateDomain(pctx, owner, owned.ID, govDomain, service.DomainVerificationDNSTXT)
+	created, err := svc.CreateDomain(pctx, owner, service.SessionSignIn{}, owned.ID, govDomain, service.DomainVerificationDNSTXT)
 	require.NoError(t, err)
 	for range 3 {
-		_, err = svc.VerifyDomain(pctx, owner, created.Domain.ID)
+		_, err = svc.VerifyDomain(pctx, owner, service.SessionSignIn{}, created.Domain.ID)
 		require.ErrorIs(t, err, service.ErrPermissionDenied)
 	}
 	d, err := f.domains.GetDomain(ctx, f.project, created.Domain.ID)

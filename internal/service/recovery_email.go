@@ -72,6 +72,11 @@ func (s *AuthService) RequestRecoveryEmail(ctx context.Context, userID string, s
 	if !ok {
 		return fmt.Errorf("%w: email is not a usable address", ErrInvalidArgument)
 	}
+	// The format a sign-up's address must have: an address that may sign in
+	// is held to no less, so no disposable or non-routable one is mailed.
+	if err := validateEmailFormat(string(addr)); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+	}
 	if s.minorData.BlocksChildFor(ctx, user) {
 		s.logger.Info("recovery_email_blocked_minor", zap.String("user_id", userID))
 		return ErrMinorDataMinimized
@@ -113,11 +118,12 @@ func recoveryEmailSenderKey(userID string) string { return "recovery-email-sende
 
 // sendRecoveryEmailCodeNow is the body of RequestRecoveryEmail's dispatch.
 // Two cooldowns bound it: one per account, so a session cannot mail a
-// stream of strangers, and the shared per-address one. Silent: a throttled,
-// unrendered or undelivered code is logged, never surfaced.
+// stream of strangers, and the shared per-address one. A code either one
+// holds back spends neither. Silent: a throttled, unrendered or undelivered
+// code is logged, never surfaced.
 func (s *AuthService) sendRecoveryEmailCodeNow(ctx context.Context, userID, addr string) {
 	now := s.nowMs()
-	if !s.emailThrottle.allow(recoveryEmailSenderKey(userID), now) || !s.emailThrottle.allow(addr, now) {
+	if !s.emailThrottle.allowAll(now, recoveryEmailSenderKey(userID), addr) {
 		s.logger.Info("recovery_email_code_throttled", zap.String("user_id", userID))
 		return
 	}
@@ -169,7 +175,7 @@ func (s *AuthService) VerifyRecoveryEmail(ctx context.Context, userID string, si
 		return nil, err
 	}
 	addr, ok := canonicalMailbox(emailAddr)
-	if !ok || strings.TrimSpace(code) == "" {
+	if !ok || validateEmailFormat(string(addr)) != nil || strings.TrimSpace(code) == "" {
 		return nil, ErrRecoveryEmailCodeInvalid
 	}
 	if err := s.verifyAndConsumeRecoveryEmailCode(ctx, userID, string(addr), code); err != nil {
@@ -278,8 +284,12 @@ func recoveryHoldOn(ctx context.Context, repo Repository, userID string, nowMs i
 
 // refuseHeldSession refuses an account security change (one that adds or
 // removes a way into the account or a way to recover it, ends its other
-// sessions, or merges or deletes it) asked for by a session which may have
-// been opened by a recovery email (SessionSignIn.mayBeRecoverySession):
+// sessions, or merges or deletes it), or a grant of authority that outlasts
+// the session (a delegation, an agent machine, a teammate's hire, an OAuth
+// client, a guardian's control, an agent's new owner, a tenant's members and
+// roles, a project admin's new account, role or password), asked for by a
+// session which may have been opened by a recovery email
+// (SessionSignIn.mayBeRecoverySession):
 //
 //   - with ErrUnauthenticated once the recovery email that opened it is no
 //     longer one of userID's, or once the session store says it has ended;
@@ -352,6 +362,19 @@ func heldRecoveryEmail(held []*RecoveryEmail, id string) *RecoveryEmail {
 		}
 	}
 	return nil
+}
+
+// refuseHeldSessionInProject is refuseHeldSession on userID's account in
+// projectID of accounts, for a service that keeps no account store bound to
+// the request. With no accounts nothing can show that no hold binds a
+// session a recovery email may have opened, so every such session is
+// refused (ErrServiceUnavailable).
+func refuseHeldSessionInProject(ctx context.Context, accounts Repository, logger *zap.Logger, projectID, userID string, signIn SessionSignIn, nowMs int64) error {
+	var repo Repository
+	if accounts != nil {
+		repo = accounts.WithProject(projectID)
+	}
+	return refuseHeldSession(ctx, repo, logger, userID, signIn, nowMs)
 }
 
 // refuseHeldSession is the package's refuseHeldSession on the request's

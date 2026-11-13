@@ -24,7 +24,7 @@ func (h *IdentityHandler) CreateTenantInvitation(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	created, err := h.members.CreateTenantInvitation(ctx, userID, req.Msg.TenantId, req.Msg.Email, req.Msg.Role)
+	created, err := h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId, req.Msg.Email, req.Msg.Role)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -123,7 +123,7 @@ func (h *IdentityHandler) RemoveTenantMember(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	if err := h.members.RemoveTenantMember(ctx, userID, req.Msg.TenantId, req.Msg.UserId, clientIP(req.Header()), clientUserAgent(req.Header())); err != nil {
+	if err := h.members.RemoveTenantMember(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId, req.Msg.UserId, clientIP(req.Header()), clientUserAgent(req.Header())); err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.RemoveTenantMemberResponse{}), nil
@@ -144,7 +144,7 @@ func (h *IdentityHandler) SuspendTenantMember(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	m, err := h.members.SuspendTenantMember(ctx, userID, req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	m, err := h.members.SuspendTenantMember(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -165,7 +165,7 @@ func (h *IdentityHandler) RestoreTenantMember(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	m, err := h.members.RestoreTenantMember(ctx, userID, req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	m, err := h.members.RestoreTenantMember(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -186,7 +186,7 @@ func (h *IdentityHandler) TransferTenantOwnership(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	transfer, err := h.members.TransferTenantOwnership(ctx, userID, req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	transfer, err := h.members.TransferTenantOwnership(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}

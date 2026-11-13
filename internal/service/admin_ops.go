@@ -190,8 +190,8 @@ func (s *AdminService) deleteGroupMembershipsForUser(ctx context.Context, userID
 }
 
 // UpdateUser patches name, role, and/or avatar_url for a user.
-func (s *AdminService) UpdateUser(ctx context.Context, actorID, userID, name, role, avatarURL string) (*User, error) {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+func (s *AdminService) UpdateUser(ctx context.Context, actorID string, signIn SessionSignIn, userID, name, role, avatarURL string) (*User, error) {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return nil, err
 	}
 	if userID == "" {

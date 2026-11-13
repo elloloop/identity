@@ -222,7 +222,7 @@ func TestEmail_InviteUser_SendsInvitationEmail(t *testing.T) {
 		audit.NewLogger(nil, "test-tenant", zap.NewNop()),
 		cfg, mailer, zap.NewNop())
 
-	result, err := svc.InviteUser(context.Background(), "admin-1",
+	result, err := svc.InviteUser(context.Background(), "admin-1", service.SessionSignIn{},
 		"invitee@test.com", "Invitee", "member", "", 0, false)
 	if err != nil {
 		t.Fatalf("InviteUser: %v", err)

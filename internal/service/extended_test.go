@@ -988,7 +988,7 @@ func TestAdminService_RequireAdmin_ActorMissing(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestAdminService(db)
 
-	_, err := svc.InviteUser(context.Background(), "ghost-actor", "x@example.com", "X", "member", "", 0, false)
+	_, err := svc.InviteUser(context.Background(), "ghost-actor", SessionSignIn{}, "x@example.com", "X", "member", "", 0, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "actor user not found")
 }
@@ -998,7 +998,7 @@ func TestAdminService_InviteUser_InvalidRole(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.InviteUser(context.Background(), "admin-1", "x@test.com", "", "owner", "", 0, false)
+	_, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{}, "x@test.com", "", "owner", "", 0, false)
 	require.Error(t, err)
 }
 
@@ -1007,7 +1007,7 @@ func TestAdminService_InviteUser_DefaultsRoleToMember(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	res, err := svc.InviteUser(context.Background(), "admin-1", "rolemiss@test.com", "", "", "", 0, false)
+	res, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{}, "rolemiss@test.com", "", "", "", 0, false)
 	require.NoError(t, err)
 	assert.Equal(t, "member", res.User.Role)
 }
@@ -1053,7 +1053,7 @@ func TestAdminService_ResetUserPassword_EmptyTarget(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "", true)
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "", true)
 	require.Error(t, err)
 }
 
@@ -1062,7 +1062,7 @@ func TestAdminService_ResetUserPassword_NotFound(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "ghost", true)
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "ghost", true)
 	require.Error(t, err)
 }
 
@@ -1098,7 +1098,7 @@ func TestAdminService_UpdateUser_NonAdmin(t *testing.T) {
 	db.addUser("member-1", "m@test.com", "M", "member", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.UpdateUser(context.Background(), "member-1", "user-1", "Name", "", "")
+	_, err := svc.UpdateUser(context.Background(), "member-1", SessionSignIn{}, "user-1", "Name", "", "")
 	require.Error(t, err)
 }
 
@@ -1107,7 +1107,7 @@ func TestAdminService_UpdateUser_EmptyID(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.UpdateUser(context.Background(), "admin-1", "", "N", "", "")
+	_, err := svc.UpdateUser(context.Background(), "admin-1", SessionSignIn{}, "", "N", "", "")
 	require.Error(t, err)
 }
 
@@ -1117,7 +1117,7 @@ func TestAdminService_UpdateUser_AvatarOnly(t *testing.T) {
 	db.addUser("user-1", "u@test.com", "U", "member", "active")
 	svc := newTestAdminService(db)
 
-	user, err := svc.UpdateUser(context.Background(), "admin-1", "user-1", "", "", "https://x.example.com/p.png")
+	user, err := svc.UpdateUser(context.Background(), "admin-1", SessionSignIn{}, "user-1", "", "", "https://x.example.com/p.png")
 	require.NoError(t, err)
 	assert.Equal(t, "https://x.example.com/p.png", user.AvatarURL)
 }

@@ -160,11 +160,16 @@ func (s *AuthService) startRecoveryEmailSession(ctx context.Context, user *User,
 		op:       "recovery_email_sign_in_notice",
 		headline: "Your account was signed in to with a recovery email",
 		detail: fmt.Sprintf("Someone signed in to your account with the recovery email %s. "+
-			"Until %s that session cannot make security changes to your account: "+
-			"it cannot add or remove an email address, phone number, second factor, passkey or linked provider, "+
-			"change your password or primary email, sign out your other sessions or delete the account. "+
+			"Until %s that session cannot add or remove an email address, phone number, second factor, passkey or linked provider, "+
+			"change your password or primary email, sign out your other sessions, or merge or delete the account. "+
+			"Nor can it hand out access that would outlast it: connect an agent or an agent machine, hire out a teammate, "+
+			"change an OAuth client, manage a child's account, give an agent to someone else, "+
+			"change who belongs to your tenants or with what role, or, as a project admin, add accounts or set their roles or passwords. "+
+			"It can use the account in every other way, and after that time it can make these changes too. "+
 			"If it was not you, sign in another way (your primary email, your password, a passkey or a linked provider) "+
-			"and remove the address.",
+			"and remove the address, which ends the session. "+
+			"Then check your account for changes you did not make: your sign-in methods, your connected agents and their delegations, "+
+			"your agent machines and teammate keys, and the owners and roles of your tenants.",
 			addr, time.UnixMilli(until).UTC().Format("2 January 2006 at 15:04 UTC")),
 	})
 	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, recoveryEmailID)

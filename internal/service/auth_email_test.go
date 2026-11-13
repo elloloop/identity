@@ -679,7 +679,7 @@ func TestInviteUser_FiresInvitationEmail(t *testing.T) {
 		audit.NewLogger(nil, "test", zap.NewNop()),
 		cfg, rec, zap.NewNop())
 
-	result, err := svc.InviteUser(context.Background(), "admin-1",
+	result, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{},
 		"new@test.com", "New User", "member", "", 0, false)
 	if err != nil {
 		t.Fatalf("InviteUser: %v", err)

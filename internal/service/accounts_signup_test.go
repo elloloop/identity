@@ -94,11 +94,11 @@ func TestInviteUser_EmailOff(t *testing.T) {
 	svc := newTestAdminService(db)
 
 	off := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"off"}}`)
-	_, err := svc.InviteUser(off, "admin-1", "new@mail.example.com", "New", "member", "", 0, true)
+	_, err := svc.InviteUser(off, "admin-1", SessionSignIn{}, "new@mail.example.com", "New", "member", "", 0, true)
 	require.ErrorIs(t, err, ErrAccountKindOff)
 
 	admin := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"admin"}}`)
-	_, err = svc.InviteUser(admin, "admin-1", "new@mail.example.com", "New", "member", "", 0, true)
+	_, err = svc.InviteUser(admin, "admin-1", SessionSignIn{}, "new@mail.example.com", "New", "member", "", 0, true)
 	require.NoError(t, err, "an admin creates email accounts when email_signup is admin")
 }
 
@@ -110,20 +110,20 @@ func TestCreateUsernameUser(t *testing.T) {
 	svc := newTestAdminServiceWithRepo(db, repo)
 
 	off := signupScope(t, `{"access":{"mode":"open"}}`)
-	_, err := svc.CreateUsernameUser(off, "admin-1", "bob", "Bob", "member")
+	_, err := svc.CreateUsernameUser(off, "admin-1", SessionSignIn{}, "bob", "Bob", "member")
 	require.ErrorIs(t, err, ErrAccountKindOff, "usernames are off by default")
 
 	for _, mode := range []string{`"closed"`, `"allowlist","allowed_domains":["mail.example.com"]`} {
 		refused := signupScope(t, `{"access":{"mode":`+mode+`},"accounts":{"username_signup":"admin"}}`)
-		_, err := svc.CreateUsernameUser(refused, "admin-1", "bob", "", "")
+		_, err := svc.CreateUsernameUser(refused, "admin-1", SessionSignIn{}, "bob", "", "")
 		require.ErrorIs(t, err, ErrAccessNotAllowed, "an account that could never sign in is refused under %s", mode)
 	}
 
 	ctx := signupScope(t, `{"access":{"mode":"invite"},"accounts":{"domain":"accounts.example.com","username_signup":"admin"}}`)
-	_, err = svc.CreateUsernameUser(ctx, "member-1", "bob", "Bob", "member")
+	_, err = svc.CreateUsernameUser(ctx, "member-1", SessionSignIn{}, "bob", "Bob", "member")
 	require.Error(t, err, "only an admin")
 
-	res, err := svc.CreateUsernameUser(ctx, "admin-1", " Bob ", "", "")
+	res, err := svc.CreateUsernameUser(ctx, "admin-1", SessionSignIn{}, " Bob ", "", "")
 	require.NoError(t, err)
 	require.Equal(t, "bob", res.User.Username)
 	require.Equal(t, "bob", res.User.Name)
@@ -139,11 +139,11 @@ func TestCreateUsernameUser(t *testing.T) {
 	require.NotNil(t, stored)
 	require.NotEmpty(t, stored.PasswordHash)
 
-	_, err = svc.CreateUsernameUser(ctx, "admin-1", "bob", "", "")
+	_, err = svc.CreateUsernameUser(ctx, "admin-1", SessionSignIn{}, "bob", "", "")
 	require.ErrorIs(t, err, ErrAlreadyExists)
-	_, err = svc.CreateUsernameUser(ctx, "admin-1", "bob-at-mail.example", "", "")
+	_, err = svc.CreateUsernameUser(ctx, "admin-1", SessionSignIn{}, "bob-at-mail.example", "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
-	_, err = svc.CreateUsernameUser(ctx, "admin-1", "carol", "", "owner")
+	_, err = svc.CreateUsernameUser(ctx, "admin-1", SessionSignIn{}, "carol", "", "owner")
 	require.ErrorIs(t, err, ErrInvalidArgument)
 }
 

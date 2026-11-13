@@ -605,7 +605,9 @@ type Repository interface {
 	// claim was made before takeOverBeforeMs (0 = no claim is ever old
 	// enough): then the claim moves, the previous holder's phone is cleared
 	// and its id is returned. A number the user held before is released. An
-	// unknown user is ErrNotFound.
+	// unknown user, or one merged into another, is ErrNotFound: a retired
+	// account's token may outlive the merge, and no one could sign in to
+	// release a number it claimed.
 	//
 	// ReleasePhoneNumber clears the user's phone number and verified state
 	// and deletes any claim the user holds; it changes nothing for a user
@@ -624,8 +626,10 @@ type Repository interface {
 	// single-winner compare-and-set that returns ErrRecoveryEmailCodeInvalid
 	// for a replay, an expired code or a missing one.
 	//
-	// AddRecoveryEmail stores a proved address on e.UserID, atomically with
-	// its refusals: ErrNotFound when the account is missing, not active or
+	// AddRecoveryEmail stores a proved address on e.UserID, taking only its
+	// Email and VerifiedAt: the row gets an ID of the driver's and no sign-in
+	// yet. It does so atomically with its refusals: ErrNotFound when the
+	// account is missing, not active or
 	// merged away; ErrRecoveryEmailTaken when the address (under
 	// FoldEmail) is any account's primary email or another account's
 	// recovery email in the project, and ErrRecoveryEmailLimit when the

@@ -84,7 +84,7 @@ func NewHireGrantHandler(keys *service.TeammateKeyService) *HireGrantHandler {
 }
 
 func (h *HireGrantHandler) CreateHireGrant(ctx context.Context, req *connect.Request[identitypb.CreateHireGrantRequest]) (*connect.Response[identitypb.CreateHireGrantResponse], error) {
-	grant, err := h.keys.CreateHireGrant(ctx, authenticatedUserID(req.Header()), req.Msg.TeammateId, req.Msg.PlacementId, req.Msg.CompanyId)
+	grant, err := h.keys.CreateHireGrant(ctx, authenticatedUserID(req.Header()), authenticatedSignIn(req.Header()), req.Msg.TeammateId, req.Msg.PlacementId, req.Msg.CompanyId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

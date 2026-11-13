@@ -293,7 +293,7 @@ func TestAccountAddress_NotIssuedToAnUnverifiedInvitee(t *testing.T) {
 	repo := &addressRecordingRepo{fakeRepo: newFakeRepo(), assigned: map[string]string{}}
 	svc := newTestAdminServiceWithRepo(db, repo)
 
-	res, err := svc.InviteUser(accountsScope(t, "accounts.example.com"), "admin-1",
+	res, err := svc.InviteUser(accountsScope(t, "accounts.example.com"), "admin-1", SessionSignIn{},
 		"new@mail.example.com", "New", "member", "", 0, true)
 	require.NoError(t, err)
 	// An invitee has not yet proven they own the address, so it gets none
@@ -304,7 +304,7 @@ func TestAccountAddress_NotIssuedToAnUnverifiedInvitee(t *testing.T) {
 
 func TestAccountAddress_IssuedToAManagedChild(t *testing.T) {
 	f := newManagedChildFixture(t, true)
-	res, err := f.svc.CreateManagedChildAccount(accountsScope(t, "accounts.example.com"), f.adult.ID, f.req(), "1.2.3.4", "agent/1.0")
+	res, err := f.svc.CreateManagedChildAccount(accountsScope(t, "accounts.example.com"), f.adult.ID, SessionSignIn{}, f.req(), "1.2.3.4", "agent/1.0")
 	require.NoError(t, err)
 	require.Equal(t, "kid.one@accounts.example.com", res.Child.AccountAddress)
 }
@@ -432,7 +432,7 @@ func TestAccountAddress_FollowsAManagedChildRename(t *testing.T) {
 	ensureAccountAddress(ctx, f.repo, zap.NewNop(), f.child)
 	require.Equal(t, "kid.one@accounts.example.test", f.child.AccountAddress)
 
-	child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "kid.two", strongPW, "", "")
+	child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "kid.two", strongPW, "", "")
 	require.NoError(t, err)
 	require.Equal(t, "kid.two@accounts.example.test", child.AccountAddress)
 	stored, err := f.repo.GetUser(ctx, f.child.ID)

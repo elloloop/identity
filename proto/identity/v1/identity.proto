@@ -783,18 +783,31 @@ message ListRecoveryEmailsResponse {
 // phone, a second factor or its recovery codes, a passkey or a linked
 // provider, change the password or the primary email, end another session
 // (RevokeSession of any session but its own, RevokeAllSessions,
-// SignOutEverywhere) or delete the account. So whoever got into a recovery
-// mailbox cannot take the rest of the account, or take it from the owner,
-// before the owner has had the notice. It can still sign itself out: Logout,
-// or RevokeSession of its own session where its token carries a `sid`. A
-// session opened any other way is not held, and removing every address whose
-// hold is still in force (RecoveryEmail.hold_started_at) ends the hold.
-// Merging either account is refused, whoever asks.
-// Once its address is removed, such a session makes none of these changes,
+// SignOutEverywhere) or delete the account. Nor does it hand out access that
+// would outlast it, whatever the account's role: it cannot connect an agent
+// or an agent machine (GetAgentAuthorization, DecideAgentAuthorization,
+// RegisterAgentMachine, SelectAgentMachineAgents), hire out a teammate
+// (CreateHireGrant), register or change an OAuth client, take or use a
+// guardian's control over a child (GrantParentalConsent,
+// CreateManagedChildAccount and the ManagedChild calls), give an agent to
+// someone else (TransferAgent), change who belongs to a tenant or with what
+// role (CreateTenantInvitation, RemoveTenantMember, SuspendTenantMember,
+// RestoreTenantMember, TransferTenantOwnership, CreateDomain, VerifyDomain,
+// SetDomainJoin), or, as a project admin, add an account or set a role or
+// another account's password (InviteUser, CreateUser, UpdateUser,
+// ResetUserPassword). So whoever got into a recovery mailbox cannot take the
+// rest of the account, take it from the owner, or hand out what removing the
+// address would not take back, before the owner has had the notice. It can
+// still sign itself out: Logout, or RevokeSession of its own session where
+// its token carries a `sid`. A session opened any other way is not held, and
+// removing every address whose hold is still in force
+// (RecoveryEmail.hold_started_at) ends the hold. Merging either account is
+// refused, whoever asks.
+// Once its address is removed, such a session makes none of these calls,
 // hold or not, for as long as its access token lasts: they answer
 // UNAUTHENTICATED. Over native gRPC, a session whose `amr` the host does not
 // forward is held too, and in a project whose recovery emails sign in it is
-// refused these changes outright with the stable `recovery_session` token,
+// refused these calls outright with the stable `recovery_session` token,
 // since it cannot name the address behind it (see the embedding guide).
 message RecoveryHoldDetails {
   int64 hold_until = 1; // epoch ms the hold ends
@@ -3580,13 +3593,14 @@ service IdentityService {
   // proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
   // address another account of the project holds and RESOURCE_EXHAUSTED past
   // the project's cap; RequestRecoveryEmail answers them for the caller's own
-  // addresses and its own full list. A project that has not turned the
-  // feature on refuses
-  // RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
-  // while addresses already kept can still be listed and removed. Adding or
-  // removing an address mails a notice to the account's other addresses, and
-  // a removal to the removed address too. During a recovery hold a session a
-  // recovery email opened can do neither (RecoveryHoldDetails).
+  // addresses and its own full list, and INVALID_ARGUMENT for an address a
+  // sign-up would refuse. A project that has not turned the feature on
+  // refuses RequestRecoveryEmail and VerifyRecoveryEmail with
+  // FAILED_PRECONDITION, while addresses already kept can still be listed and
+  // removed. Adding or removing an address mails a notice to the account's
+  // other addresses, and a removal to the removed address too. During a
+  // recovery hold a session a recovery email opened can do neither
+  // (RecoveryHoldDetails).
   rpc RequestRecoveryEmail(RequestRecoveryEmailRequest) returns (RequestRecoveryEmailResponse);
   rpc VerifyRecoveryEmail(VerifyRecoveryEmailRequest) returns (VerifyRecoveryEmailResponse);
   rpc ListRecoveryEmails(ListRecoveryEmailsRequest) returns (ListRecoveryEmailsResponse);
@@ -4348,6 +4362,9 @@ service HireGrantService {
   // session. PERMISSION_DENIED: the caller is not an active person, or is
   // neither the teammate's owner nor a project admin, or teammate_id is not
   // an active agent account of the project; every such caller gets the same
-  // answer. INVALID_ARGUMENT: a blank or malformed id.
+  // answer. INVALID_ARGUMENT: a blank or malformed id. FAILED_PRECONDITION
+  // (`recovery_hold`, RecoveryHoldDetails): a session a recovery hold binds;
+  // UNAUTHENTICATED, too, for a session whose recovery email the account no
+  // longer holds.
   rpc CreateHireGrant(CreateHireGrantRequest) returns (CreateHireGrantResponse);
 }

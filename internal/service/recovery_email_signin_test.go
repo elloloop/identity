@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
@@ -65,6 +67,18 @@ func TestRecoveryEmailSignIn_LandsInTheHoldingAccountAndTellsItsOtherAddresses(t
 		if len(got) == 0 || got[len(got)-1].Subject != subject {
 			t.Fatalf("%s was not told of the sign-in: %#v", addr, got)
 		}
+		// The notice says what the session cannot do, how to end it, and
+		// what to check afterwards: what the session may grant once the hold
+		// is over outlasts the address.
+		for _, says := range []string{
+			"spare@example.net", "cannot add or remove", "hand out access that would outlast it",
+			"remove the address, which ends the session", "connected agents and their delegations",
+			"agent machines and teammate keys", "owners and roles of your tenants",
+		} {
+			if !strings.Contains(got[len(got)-1].Text, says) {
+				t.Fatalf("the notice to %s does not say %q:\n%s", addr, says, got[len(got)-1].Text)
+			}
+		}
 	}
 	// The login code, then nothing: the address that signed in needs no notice.
 	if f.mailer.count() != sent+3 {
@@ -101,13 +115,150 @@ func (f *recoveryEmailFixture) addSession(userID, id, sid string) {
 	f.db.nodes[id].Payload[rfSID] = sid
 }
 
-// heldChanges are the account security changes a session a recovery hold
-// binds may not make, each asked for by session: those that add a way in
-// or a way to recover the account, and those that take one away, replace
-// one, end another session, or delete the account. It is the list the
-// recovery-emails docs page (docs-site auth/recovery-emails) gives; keep
-// the two the same.
+// heldChanges are the changes a session a recovery hold binds may not make,
+// each asked for by session: the account security changes, those that add a
+// way in or a way to recover the account, take one away, replace one, end
+// another session, or delete the account; and the grants of authority that
+// would outlast the hold (heldGrants). It is the list the recovery-emails
+// docs page (docs-site auth/recovery-emails) gives; keep the two the same.
+// The project-admin calls the hold refuses are AdminService's, whose clock
+// the fixture does not set (TestRecoveryHold_HoldsTheAdminSeatsGrants).
 func (f *recoveryEmailFixture) heldChanges(userID string, session SessionSignIn) map[string]func() error {
+	changes := f.heldGrants(userID, session)
+	for name, change := range f.heldSecurityChanges(userID, session) {
+		changes[name] = change
+	}
+	return changes
+}
+
+// heldAgentStore is the fixture's store as AgentOAuthService finds a machine
+// registry in it. The hold refuses before the registry is read, so none is
+// behind it.
+type heldAgentStore struct {
+	*fakeRepo
+	AgentMachineRepository
+}
+
+func (r heldAgentStore) WithProject(string) Repository { return r }
+
+// heldGrants are the calls that hand out authority outlasting the session,
+// each asked for by session from userID's account: a delegation to an
+// agent, an agent machine and the agents it acts as, a teammate's hire, an
+// OAuth client, a guardian's control over a child, an agent's new owner, and
+// who belongs to a tenant and with what role.
+func (f *recoveryEmailFixture) heldGrants(userID string, session SessionSignIn) map[string]func() error {
+	now := func() time.Time { return f.now }
+	f.svc.cfg.AgentMachineEnabled = true
+	agents := &AgentOAuthService{auth: f.svc, base: heldAgentStore{fakeRepo: f.repo}}
+	human := AgentOAuthHuman{UserID: userID, SignIn: session}
+	if human.SignIn.SessionID == "" {
+		human.SignIn.SessionID = "sid-held"
+	}
+	keys := &TeammateKeyService{base: f.repo, logger: zap.NewNop(), audit: audit.NewLogger(nil, "project-a", zap.NewNop()), now: now}
+	members := NewMembershipService(newFakeInvitationStore(), newFakeMembershipStore(), newFakeTenantStore(), newFakeUserDirectory(), f.mailer, true, &config.Config{}, nil).WithAccounts(f.repo)
+	members.nowFunc = now
+	domains := NewDomainService(newFakeDomainStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, &config.Config{}, nil).WithAccounts(f.repo)
+	domains.nowFunc = now
+	return map[string]func() error{
+		"GetAgentAuthorization": func() error {
+			_, err := agents.GetConsent(f.ctx, human, "request-1", 0)
+			return err
+		},
+		"DecideAgentAuthorization": func() error {
+			_, err := agents.Decide(f.ctx, human, "request-1", 1, true, "agent-1")
+			return err
+		},
+		"RegisterAgentMachine": func() error {
+			_, err := agents.RegisterMachine(f.ctx, human, AgentMachineRegistration{ID: "machine-1", ClientID: "client-1"})
+			return err
+		},
+		"SelectAgentMachineAgents": func() error {
+			_, err := agents.SelectMachineAgents(f.ctx, human, "machine-1", 1, true, nil, nil)
+			return err
+		},
+		"CreateHireGrant": func() error {
+			_, err := keys.CreateHireGrant(f.ctx, userID, session, "agent-1", "placement-1", "company-1")
+			return err
+		},
+		"CreateOAuthClient": func() error {
+			_, err := f.svc.CreateOAuthClient(f.ctx, userID, session, &OAuthClientRegistration{})
+			return err
+		},
+		"UpdateOAuthClient": func() error {
+			_, err := f.svc.UpdateOAuthClient(f.ctx, userID, session, "client-1", 1, &OAuthClientRegistration{})
+			return err
+		},
+		"GrantParentalConsent": func() error {
+			_, err := f.svc.GrantParentalConsent(f.ctx, userID, session, "child-1", "v1", "Str0ng!Pass1", "", "")
+			return err
+		},
+		"CreateManagedChildAccount": func() error {
+			_, err := f.svc.CreateManagedChildAccount(f.ctx, userID, session, ManagedChildAccountRequest{Username: "kid"}, "", "")
+			return err
+		},
+		"GetManagedChildProfile": func() error {
+			_, err := f.svc.GetManagedChildProfile(f.ctx, userID, session, "child-1", "Str0ng!Pass1", "", "")
+			return err
+		},
+		"SetManagedChildPassword": func() error {
+			return f.svc.SetManagedChildPassword(f.ctx, userID, session, "child-1", "N3w!Str0ngPass", "Str0ng!Pass1", "", "")
+		},
+		"SetManagedChildUsername": func() error {
+			_, err := f.svc.SetManagedChildUsername(f.ctx, userID, session, "child-1", "kid", "Str0ng!Pass1", "", "")
+			return err
+		},
+		"RevokeManagedChildSessions": func() error {
+			return f.svc.RevokeManagedChildSessions(f.ctx, userID, session, "child-1", "Str0ng!Pass1", "", "")
+		},
+		"DeactivateManagedChildAccount": func() error {
+			return f.svc.DeactivateManagedChildAccount(f.ctx, userID, session, "child-1", "", "Str0ng!Pass1", "", "")
+		},
+		"ReactivateManagedChildAccount": func() error {
+			return f.svc.ReactivateManagedChildAccount(f.ctx, userID, session, "child-1", "Str0ng!Pass1", "", "")
+		},
+		"DeleteManagedChildAccount": func() error {
+			return f.svc.DeleteManagedChildAccount(f.ctx, userID, session, "child-1", "Str0ng!Pass1", "", "")
+		},
+		"TransferAgent": func() error {
+			_, err := f.svc.TransferAgent(f.ctx, userID, session, "agent-1", "someone-else", "", "")
+			return err
+		},
+		"CreateTenantInvitation": func() error {
+			_, err := members.CreateTenantInvitation(f.ctx, userID, session, "tenant-1", "invitee@example.org", RoleAdmin)
+			return err
+		},
+		"RemoveTenantMember": func() error {
+			return members.RemoveTenantMember(f.ctx, userID, session, "tenant-1", "member-1", "", "")
+		},
+		"SuspendTenantMember": func() error {
+			_, err := members.SuspendTenantMember(f.ctx, userID, session, "tenant-1", "member-1", "", "")
+			return err
+		},
+		"RestoreTenantMember": func() error {
+			_, err := members.RestoreTenantMember(f.ctx, userID, session, "tenant-1", "member-1", "", "")
+			return err
+		},
+		"TransferTenantOwnership": func() error {
+			_, err := members.TransferTenantOwnership(f.ctx, userID, session, "tenant-1", "member-1", "", "")
+			return err
+		},
+		"CreateDomain": func() error {
+			_, err := domains.CreateDomain(f.ctx, userID, session, "tenant-1", "example.org", DomainVerificationDNSTXT)
+			return err
+		},
+		"VerifyDomain": func() error {
+			_, err := domains.VerifyDomain(f.ctx, userID, session, "domain-1")
+			return err
+		},
+		"SetDomainJoin": func() error {
+			_, err := domains.SetDomainJoin(f.ctx, userID, session, "domain-1", true, "", "")
+			return err
+		},
+	}
+}
+
+// heldSecurityChanges are the account security changes heldChanges lists.
+func (f *recoveryEmailFixture) heldSecurityChanges(userID string, session SessionSignIn) map[string]func() error {
 	return map[string]func() error{
 		"RequestRecoveryEmail": func() error {
 			return f.svc.RequestRecoveryEmail(f.ctx, userID, session, "added@example.net")
@@ -924,5 +1075,71 @@ func TestProjectRecoveryEmailsConfig_Hold(t *testing.T) {
 	}
 	if got := recoveryHoldUntil(held, 10*time.Second, 15_000); got != 0 {
 		t.Fatalf("hold end at its own end = %d, want 0", got)
+	}
+}
+
+// A project admin's recovery session adds no account, sets no role and sets
+// no other account's password from the admin seat while the hold is in force,
+// nor once its address is gone, and one that cannot name its address makes
+// none where recovery emails sign in: each would outlast the hold. The admin
+// signed in another way makes them as before.
+func TestRecoveryHold_HoldsTheAdminSeatsGrants(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@example.test", "Admin", RoleAdmin, StatusActive)
+	db.addUser("member-1", "member@example.test", "Member", "member", StatusActive)
+	repo := newFakeRepo()
+	repo.users["admin-1"] = &User{ID: "admin-1", Email: "admin@example.test", Role: RoleAdmin, Status: StatusActive}
+	svc := newTestAdminServiceWithRepo(db, repo)
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "project-a", Access: ProjectAccessConfig{Mode: AccessModeOpen},
+		RecoveryEmails: ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true},
+	})
+	holdAccount(ctx, t, repo, "admin-1", "admin-spare@example.net", nowMs())
+	held, err := repo.FindRecoveryEmailHolder(ctx, "admin-spare@example.net")
+	if err != nil || held == nil {
+		t.Fatalf("FindRecoveryEmailHolder = %+v %v", held, err)
+	}
+	grants := func(session SessionSignIn) map[string]func() error {
+		return map[string]func() error{
+			"InviteUser": func() error {
+				_, err := svc.InviteUser(ctx, "admin-1", session, "new@example.test", "New", RoleAdmin, "", 0, true)
+				return err
+			},
+			"CreateUsernameUser": func() error {
+				_, err := svc.CreateUsernameUser(ctx, "admin-1", session, "newcomer", "New", RoleAdmin)
+				return err
+			},
+			"UpdateUser": func() error {
+				_, err := svc.UpdateUser(ctx, "admin-1", session, "member-1", "Member", RoleAdmin, "")
+				return err
+			},
+			"ResetUserPassword": func() error {
+				_, err := svc.ResetUserPassword(ctx, "admin-1", session, "member-1", true)
+				return err
+			},
+		}
+	}
+	signedIn := time.Now().Unix()
+
+	for name, grant := range grants(SessionSignIn{AuthTimeSec: signedIn, AMR: []string{AMRRecoveryEmail}, RecoveryEmailID: held.ID}) {
+		if err := grant(); !errors.Is(err, ErrRecoveryHold) {
+			t.Fatalf("%s by the admin's recovery session during the hold = %v, want ErrRecoveryHold", name, err)
+		}
+	}
+	for name, grant := range grants(SessionSignIn{AuthTimeSec: signedIn, AMR: []string{AMRUnvouched}}) {
+		if err := grant(); !errors.Is(err, ErrRecoverySession) {
+			t.Fatalf("%s by a session that cannot name its address = %v, want ErrRecoverySession", name, err)
+		}
+	}
+	if _, err := repo.RemoveRecoveryEmail(ctx, "admin-1", "admin-spare@example.net", nowMs()); err != nil {
+		t.Fatalf("RemoveRecoveryEmail: %v", err)
+	}
+	for name, grant := range grants(SessionSignIn{AuthTimeSec: signedIn, AMR: []string{AMRRecoveryEmail}, RecoveryEmailID: held.ID}) {
+		if err := grant(); !errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRecoveryHold) {
+			t.Fatalf("%s by the removed address's session = %v, want ErrUnauthenticated", name, err)
+		}
+	}
+	if _, err := svc.ResetUserPassword(ctx, "admin-1", SessionSignIn{AuthTimeSec: signedIn}, "member-1", true); err != nil {
+		t.Fatalf("the admin's own session resets another account's password: %v", err)
 	}
 }

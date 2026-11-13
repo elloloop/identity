@@ -6,12 +6,11 @@ import (
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
-	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
 
 func agentOAuthHuman(headers headerReader) service.AgentOAuthHuman {
-	return service.AgentOAuthHuman{UserID: authenticatedUserID(headers), SID: headers.Get(middleware.AuthenticatedSessionIDHeader), AuthTime: authenticatedAuthTime(headers)}
+	return service.AgentOAuthHuman{UserID: authenticatedUserID(headers), SignIn: authenticatedSignIn(headers)}
 }
 
 func (h *IdentityHandler) GetAgentAuthorization(ctx context.Context, req *connect.Request[identitypb.GetAgentAuthorizationRequest]) (*connect.Response[identitypb.GetAgentAuthorizationResponse], error) {

@@ -899,9 +899,9 @@ func New(deps Deps) (*Built, error) {
 		return nil, err
 	}
 
-	domainSvc := buildDomainService(deps, auditLog, logger)
+	domainSvc := buildDomainService(deps, repo, auditLog, logger)
 	users := service.RepositoryUserDirectory(repo)
-	membershipSvc := buildMembershipService(deps, users, mailer, auditLog, logger)
+	membershipSvc := buildMembershipService(deps, repo, users, mailer, auditLog, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, users, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
@@ -1328,9 +1328,10 @@ func tokenTenants(deps Deps, logger *zap.Logger) (middleware.TokenTenants, error
 // domain-verification RPCs, or nil when the governance stores are absent
 // (the memory driver has no control plane). The Connect handler treats nil as
 // "disabled" and returns CodeUnimplemented. A nil deps.DNSResolver lets
-// NewDomainService default to net.DefaultResolver. auditLog receives the
+// NewDomainService default to net.DefaultResolver. accounts is the account
+// store a recovery hold on the caller is read from. auditLog receives the
 // SetDomainJoin trail.
-func buildDomainService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *service.DomainService {
+func buildDomainService(deps Deps, accounts service.Repository, auditLog *audit.Logger, logger *zap.Logger) *service.DomainService {
 	if deps.DomainStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil {
 		return nil
 	}
@@ -1341,7 +1342,7 @@ func buildDomainService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *
 		deps.DNSResolver,
 		deps.Config,
 		logger,
-	).WithAudit(auditLog)
+	).WithAudit(auditLog).WithAccounts(accounts)
 }
 
 // buildMembershipService returns the wired MembershipService backing the
@@ -1354,10 +1355,11 @@ func buildDomainService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *
 // not, CreateTenantInvitation returns the raw token in its response so a
 // headless deployment can still complete the flow. users resolves a caller
 // in the request's project (RepositoryUserDirectory over the boot
-// repository), as accounts are partitioned by project. deps.DomainStore,
-// when present, backs joining by domain. auditLog receives the CreateTenant,
-// ownership-transfer and join trail.
-func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
+// repository), as accounts are partitioned by project, and accounts is that
+// repository, which a recovery hold on the caller is read from.
+// deps.DomainStore, when present, backs joining by domain. auditLog receives
+// the CreateTenant, ownership-transfer and join trail.
+func buildMembershipService(deps Deps, accounts service.Repository, users service.UserDirectory, mailer email.Transport, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
 	if !membershipServiceServed(deps) {
 		return nil
 	}
@@ -1370,7 +1372,7 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 		mailDeliveryConfigured(deps),
 		deps.Config,
 		logger,
-	).WithAudit(auditLog).WithDomains(deps.DomainStore)
+	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts)
 }
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService

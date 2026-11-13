@@ -146,6 +146,26 @@ func TestRecoveryEmail_AddProvesTheAddressThenStoresIt(t *testing.T) {
 	}
 }
 
+// An address that may sign in to the account is held to the format a
+// sign-up's address is: no disposable mailbox and no non-routable domain is
+// mailed a code, nor stored.
+func TestRecoveryEmail_RefusesAnAddressASignUpWould(t *testing.T) {
+	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
+	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	for _, addr := range []string{"someone@mailinator.com", "someone@example.test", "someone@intranet.local"} {
+		sent := f.mailer.count()
+		if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), addr); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("RequestRecoveryEmail(%s) = %v, want ErrInvalidArgument", addr, err)
+		}
+		if _, err := f.svc.VerifyRecoveryEmail(f.ctx, user.ID, f.signedInNow(), addr, "123456"); !errors.Is(err, ErrRecoveryEmailCodeInvalid) {
+			t.Fatalf("VerifyRecoveryEmail(%s) = %v, want ErrRecoveryEmailCodeInvalid", addr, err)
+		}
+		if f.mailer.count() != sent {
+			t.Fatalf("%s was mailed", addr)
+		}
+	}
+}
+
 func TestRecoveryEmail_RefusedWhereTheProjectKeepsNone(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{})
 	user := seedUser(f.repo, "owner@example.com", "", StatusActive)

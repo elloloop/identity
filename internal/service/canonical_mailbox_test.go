@@ -142,7 +142,7 @@ func TestTagOnlyAddressIsRefusedOnEveryAccountPath(t *testing.T) {
 	t.Run("tenant invitation", func(t *testing.T) {
 		f := newMembershipFixtureNoMail()
 		f.seedAdmin(mTestProject, mTestTenant, mAdminID)
-		_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, "+x@acme.com", RoleMember)
+		_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, "+x@acme.com", RoleMember)
 		require.ErrorIs(t, err, ErrInvalidArgument)
 	})
 

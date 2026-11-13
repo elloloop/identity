@@ -88,9 +88,9 @@ func (r *fakeRepo) AddRecoveryEmail(_ context.Context, e *RecoveryEmail, max int
 	if len(r.recoveryEmails[e.UserID]) >= max {
 		return ErrRecoveryEmailLimit
 	}
-	cp := *e
-	cp.ID = nextNodeID()
-	r.recoveryEmails[e.UserID] = append(r.recoveryEmails[e.UserID], &cp)
+	r.recoveryEmails[e.UserID] = append(r.recoveryEmails[e.UserID], &RecoveryEmail{
+		ID: nextNodeID(), UserID: e.UserID, Email: e.Email, VerifiedAt: e.VerifiedAt,
+	})
 	return nil
 }
 

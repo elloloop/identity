@@ -132,7 +132,7 @@ func TestGrantParentalConsent_CreatesGuardianEdge(t *testing.T) {
 	adult := seedConsentingAdult(t, repo, "adult@example.com", hashPW(t, strongPW), adultFactors{phoneVerified: true})
 	child := seedChildPendingConsent(repo, "child@example.com")
 
-	if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "1.2.3.4", "agent/1.0"); err != nil {
+	if _, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "1.2.3.4", "agent/1.0"); err != nil {
 		t.Fatalf("GrantParentalConsent: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestRevokeParentalConsent_DeletesGuardianEdge(t *testing.T) {
 
 	adult := seedConsentingAdult(t, repo, "adult@example.com", hashPW(t, strongPW), adultFactors{phoneVerified: true})
 	child := seedChildPendingConsent(repo, "child@example.com")
-	if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
+	if _, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 

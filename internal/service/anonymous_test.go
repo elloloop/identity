@@ -234,6 +234,30 @@ func TestUpgradeAnonymousUser_RefusesASecondUpgrade(t *testing.T) {
 	}
 }
 
+// An address another account keeps as a recovery email is refused as a
+// primary email is, with the same answer, before any password is hashed.
+func TestUpgradeAnonymousUser_RejectsARecoveryEmailAsItDoesAPrimaryOne(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := anonCtx(true, AccessModeOpen)
+	holder := seedUser(repo, "holder@example.com", "", StatusActive)
+	if err := repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: holder.ID, Email: "spare@example.com", VerifiedAt: 1}, 5); err != nil {
+		t.Fatalf("AddRecoveryEmail: %v", err)
+	}
+	upgrade := func(addr string) error {
+		res, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+		if err != nil {
+			t.Fatalf("SignInAnonymously: %v", err)
+		}
+		_, err = svc.UpgradeAnonymousWithPassword(ctx, res.User.ID, AnonymousPasswordCredential{Email: addr, Password: "Str0ng-Passw0rd!x"})
+		return err
+	}
+	primary, recovery := upgrade("holder@example.com"), upgrade("spare@example.com")
+	if !errors.Is(recovery, ErrAlreadyExists) || recovery.Error() != primary.Error() {
+		t.Fatalf("upgrade to a recovery email = %v, want the answer a primary email gets (%v)", recovery, primary)
+	}
+}
+
 func TestUpgradeAnonymousUser_RejectsAClaimedAddress(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)

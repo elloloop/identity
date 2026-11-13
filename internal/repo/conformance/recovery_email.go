@@ -159,6 +159,15 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: "no-such-user", Email: "x@example.net", VerifiedAt: 1}, 2); !errors.Is(err, service.ErrNotFound) {
 			t.Fatalf("Add for a missing user: want ErrNotFound, got %v", err)
 		}
+		// Only the address and when it was proved are taken from the caller:
+		// an address never signed in starts no hold.
+		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{ID: "chosen", UserID: uid, Email: "fresh@example.net", VerifiedAt: 600, LastSignInAt: 700, HoldStartedAt: 700}, 2); err != nil {
+			t.Fatalf("Add fresh: %v", err)
+		}
+		fresh, err := r.FindRecoveryEmailHolder(ctx, "fresh@example.net")
+		if err != nil || fresh == nil || fresh.ID == "chosen" || fresh.VerifiedAt != 600 || fresh.LastSignInAt != 0 || fresh.HoldStartedAt != 0 {
+			t.Fatalf("stored = %#v %v, want the driver's id, VerifiedAt 600 and no sign-in", fresh, err)
+		}
 		// A missing user is missing whoever holds the address.
 		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: "no-such-user", Email: "second@example.net", VerifiedAt: 1}, 2); !errors.Is(err, service.ErrNotFound) {
 			t.Fatalf("Add a held address for a missing user: want ErrNotFound, got %v", err)

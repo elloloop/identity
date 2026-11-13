@@ -51,7 +51,7 @@ func TestGrantParentalConsent_AllowNoPassword(t *testing.T) {
 		svc := newTestAuthServiceWithAudit(t, repo, newRecordingAuditWriter())
 		adult := seedConsentingAdult(t, repo, "adult@example.com", "", adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
-		if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+		if _, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
 			t.Fatalf("err = %v, want ErrParentalConsentStepUpFailed", err)
 		}
 	})
@@ -62,7 +62,7 @@ func TestGrantParentalConsent_AllowNoPassword(t *testing.T) {
 		svc.cfg.GuardianStepUpAllowNoPassword = true
 		adult := seedConsentingAdult(t, repo, "adult@example.com", "", adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
-		rec, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, "", "", "")
+		rec, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, "", "", "")
 		if err != nil {
 			t.Fatalf("GrantParentalConsent: %v", err)
 		}
@@ -82,11 +82,11 @@ func TestGrantParentalConsent_AllowNoPassword(t *testing.T) {
 		adult := seedConsentingAdult(t, repo, "adult@example.com", hashPW(t, strongPW), adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
 		for _, stepUp := range []string{"", "not-the-password"} {
-			if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, stepUp, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+			if _, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, stepUp, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
 				t.Fatalf("stepUp=%q: err = %v, want ErrParentalConsentStepUpFailed", stepUp, err)
 			}
 		}
-		rec, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		rec, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		if err != nil || !rec.SteppedUp {
 			t.Fatalf("correct password: err = %v, stepped_up = %v, want nil/true", err, rec != nil && rec.SteppedUp)
 		}
@@ -164,7 +164,7 @@ func TestGrantParentalConsent_RequiresBothFactors(t *testing.T) {
 			adult := seedConsentingAdult(t, repo, "adult@example.com", hash, tc.factors)
 			child := seedChildPendingConsent(repo, "child@example.com")
 
-			rec, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, tc.stepUp, "1.2.3.4", "agent/1.0")
+			rec, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, tc.stepUp, "1.2.3.4", "agent/1.0")
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
@@ -215,7 +215,7 @@ func TestGrantParentalConsent_SuccessPerFactor(t *testing.T) {
 			adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, tc.factors)
 			child := seedChildPendingConsent(repo, "child@example.com")
 
-			rec, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "1.2.3.4", "agent/1.0")
+			rec, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "1.2.3.4", "agent/1.0")
 			if err != nil {
 				t.Fatalf("GrantParentalConsent: %v", err)
 			}
@@ -262,7 +262,7 @@ func TestGrantParentalConsent_InputAndStateGuards(t *testing.T) {
 		svc := newTestAuthService(t, repo)
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, "  ", strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, "  ", strongPW, "", "")
 		if !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("err = %v, want ErrInvalidArgument", err)
 		}
@@ -272,7 +272,7 @@ func TestGrantParentalConsent_InputAndStateGuards(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, adult.ID, consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, adult.ID, consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("err = %v, want ErrInvalidArgument", err)
 		}
@@ -282,7 +282,7 @@ func TestGrantParentalConsent_InputAndStateGuards(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, "no-such-child", consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, "no-such-child", consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
 		}
@@ -295,11 +295,11 @@ func TestGrantParentalConsent_InputAndStateGuards(t *testing.T) {
 		child := seedChildPendingConsent(repo, "child@example.com")
 
 		// First grant succeeds and activates the child.
-		if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
+		if _, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
 			t.Fatalf("first grant: %v", err)
 		}
 		// A second grant is refused: the child is no longer pending (double-grant guard).
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, ErrParentalConsentNotPending) {
 			t.Fatalf("err = %v, want ErrParentalConsentNotPending", err)
 		}
@@ -311,7 +311,7 @@ func TestGrantParentalConsent_InputAndStateGuards(t *testing.T) {
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
 		adult.Status = StatusPendingParentalConsent // a gated child cannot consent for another
 		child := seedChildPendingConsent(repo, "child@example.com")
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, ErrAccountNotActive) {
 			t.Fatalf("err = %v, want ErrAccountNotActive", err)
 		}
@@ -338,7 +338,7 @@ func TestGrantParentalConsent_ResumesHalfAppliedGrant(t *testing.T) {
 		t.Fatalf("seed consent: %v", err)
 	}
 
-	rec, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+	rec, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 	if err != nil {
 		t.Fatalf("resume grant: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestRevokeParentalConsent_Lifecycle(t *testing.T) {
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
 
-		if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
+		if _, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
 			t.Fatalf("grant: %v", err)
 		}
 		// The now-active child has a live session/token.
@@ -401,7 +401,7 @@ func TestRevokeParentalConsent_Lifecycle(t *testing.T) {
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
 		other := seedConsentingAdult(t, repo, "other@example.com", pwHash, adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
-		if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
+		if _, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
 			t.Fatalf("grant: %v", err)
 		}
 
@@ -460,7 +460,7 @@ func TestGrantParentalConsent_ArgumentGuards(t *testing.T) {
 	t.Run("empty consenting user id is unauthenticated", func(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
-		_, err := svc.GrantParentalConsent(ctx, "", "child", consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, "", SessionSignIn{}, "child", consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, ErrUnauthenticated) {
 			t.Fatalf("err = %v, want ErrUnauthenticated", err)
 		}
@@ -469,7 +469,7 @@ func TestGrantParentalConsent_ArgumentGuards(t *testing.T) {
 	t.Run("blank child user id is invalid", func(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
-		_, err := svc.GrantParentalConsent(ctx, "adult", "   ", consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, "adult", SessionSignIn{}, "   ", consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("err = %v, want ErrInvalidArgument", err)
 		}
@@ -479,7 +479,7 @@ func TestGrantParentalConsent_ArgumentGuards(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
 		child := seedChildPendingConsent(repo, "child@example.com")
-		_, err := svc.GrantParentalConsent(ctx, "ghost-adult", child.ID, consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, "ghost-adult", SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
 		}
@@ -497,7 +497,7 @@ func TestGrantParentalConsent_RepoErrorsPropagate(t *testing.T) {
 		repo := newFakeRepo()
 		repo.getUserErr = errConsentInjected
 		svc := newTestAuthService(t, repo)
-		_, err := svc.GrantParentalConsent(ctx, "adult", "child", consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, "adult", SessionSignIn{}, "child", consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -510,7 +510,7 @@ func TestGrantParentalConsent_RepoErrorsPropagate(t *testing.T) {
 		// No phone/idv factor, so the check must consult passkeys and fail there.
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{})
 		child := seedChildPendingConsent(repo, "child@example.com")
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -523,7 +523,7 @@ func TestGrantParentalConsent_RepoErrorsPropagate(t *testing.T) {
 		child := seedChildPendingConsent(repo, "child@example.com")
 		// Fail only the child fetch so the adult fetch and factor check pass.
 		repo.getUserErrByID = map[string]error{child.ID: errConsentInjected}
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -535,7 +535,7 @@ func TestGrantParentalConsent_RepoErrorsPropagate(t *testing.T) {
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
 		repo.getActiveConsentErr = errConsentInjected
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -547,7 +547,7 @@ func TestGrantParentalConsent_RepoErrorsPropagate(t *testing.T) {
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
 		repo.createConsentErr = errConsentInjected
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -563,7 +563,7 @@ func TestGrantParentalConsent_RepoErrorsPropagate(t *testing.T) {
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
 		repo.updateUserErr = errConsentInjected
-		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -588,7 +588,7 @@ func TestGrantParentalConsent_ResumeActivationError(t *testing.T) {
 	}
 	repo.updateUserErr = errConsentInjected
 
-	_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+	_, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 	if !errors.Is(err, errConsentInjected) {
 		t.Fatalf("err = %v, want injected error", err)
 	}
@@ -635,7 +635,7 @@ func TestRevokeParentalConsent_GuardsAndRepoErrors(t *testing.T) {
 		t.Helper()
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
-		if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
+		if _, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
 			t.Fatalf("grant: %v", err)
 		}
 		return adult.ID, child.ID
