@@ -1,5 +1,19 @@
 # Upgrade guide
 
+## Next — built with Go 1.26.11 for the `net/http` advisory (no API or schema change)
+
+The image and every CI job build with Go 1.26.11, which fixes GO-2026-6859
+(CVE-2026-97054): when a request body read through `http.MaxBytesReader`
+passes its limit, an HTTP/1 server sets `Connection: close` without
+synchronization, and a handler that writes a response header while the body
+is still being read can crash the process. Identity wraps request bodies in
+`http.MaxBytesReader` on its form endpoints (the OAuth form posts, the hosted
+sign-in callback and the agent OAuth endpoints); each reads the whole body
+before it writes a response, so none is known to hit the race. Anyone building identity or
+embedding its `pkg/` libraries should build on Go 1.26.11 or later on the
+1.26 line, or on the patched 1.27 release that
+https://pkg.go.dev/vuln/GO-2026-6859 lists.
+
 ## Next — an invite project can let a tenant invitation create the invitee's account: `access.admit_tenant_invitations` and `GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS` (off by default; migration 0058; additive audit event `signup_admitted_by_invitation`; `InvitationStore.OpenInvitationForEmail`, `AuthService.WithOpenInvitations` (Go API))
 
 A tenant invitation is accepted by a signed-in account, but an `invite` project
