@@ -22,10 +22,27 @@ func addressLockKey(projectID, email string) string {
 	return advisoryKey("account_address_holder", projectID, service.FoldEmail(email))
 }
 
+// holdAddress is what every write of a non-empty users.email does first,
+// inside the write's transaction: it takes the address's lock and refuses
+// with ErrAlreadyExists when the address is an account's recovery email.
+func (r *pgRepository) holdAddress(ctx context.Context, tx pgx.Tx, op, email string) error {
+	if err := lockXact(ctx, tx, op, addressLockKey(r.projectID, email)); err != nil {
+		return err
+	}
+	var held bool
+	const q = `SELECT EXISTS (SELECT 1 FROM user_recovery_emails WHERE project_id = $1 AND email_fold = $2)`
+	if err := tx.QueryRow(ctx, q, r.projectID, service.FoldEmail(email)).Scan(&held); err != nil {
+		return wrapPgErr(op, err)
+	}
+	if held {
+		return fmt.Errorf("postgres: %s: address is a recovery email: %w", op, service.ErrAlreadyExists)
+	}
+	return nil
+}
+
 // execHoldingAddress runs one write of users.email. For an empty address it
-// is a plain Exec. Otherwise it takes the address's lock, refuses with
-// ErrAlreadyExists when the address is an account's recovery email, and runs
-// the write in the same transaction.
+// is a plain Exec. Otherwise it runs the write in a transaction that holds
+// the address first (holdAddress).
 func (r *pgRepository) execHoldingAddress(ctx context.Context, op, email, sql string, args ...any) (pgconn.CommandTag, error) {
 	if email == "" {
 		tag, err := r.pool.Exec(ctx, sql, args...)
@@ -36,16 +53,8 @@ func (r *pgRepository) execHoldingAddress(ctx context.Context, op, email, sql st
 		return pgconn.CommandTag{}, wrapPgErr(op, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := lockXact(ctx, tx, op, addressLockKey(r.projectID, email)); err != nil {
+	if err := r.holdAddress(ctx, tx, op, email); err != nil {
 		return pgconn.CommandTag{}, err
-	}
-	var held bool
-	const q = `SELECT EXISTS (SELECT 1 FROM user_recovery_emails WHERE project_id = $1 AND email_fold = $2)`
-	if err := tx.QueryRow(ctx, q, r.projectID, service.FoldEmail(email)).Scan(&held); err != nil {
-		return pgconn.CommandTag{}, wrapPgErr(op, err)
-	}
-	if held {
-		return pgconn.CommandTag{}, fmt.Errorf("postgres: %s: address is a recovery email: %w", op, service.ErrAlreadyExists)
 	}
 	tag, err := tx.Exec(ctx, sql, args...)
 	if err != nil {

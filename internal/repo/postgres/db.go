@@ -433,6 +433,11 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op graph
 		lastLoginAt, _ := nullableInt64(op.Data[dbUfLastLoginAt])
 		emailVerifiedAt, _ := nullableInt64(op.Data[dbUfEmailVerifiedAt])
 		passwordChangeRequired, _ := nullableBool(op.Data[dbUfPasswordChangeRequired])
+		if email != "" {
+			if err := r.holdAddress(ctx, tx, "ExecuteAtomic(create user)", email); err != nil {
+				return "", err
+			}
+		}
 
 		_, err := tx.Exec(
 			ctx, `
@@ -610,6 +615,11 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op graph
 func (r *pgRepository) updateAtomicNode(ctx context.Context, tx pgx.Tx, op graph.Operation) error {
 	switch op.TypeID {
 	case dbTypeUser:
+		if email, _ := nullableString(op.Patch[dbUfEmail]); email != "" {
+			if err := r.holdAddress(ctx, tx, "ExecuteAtomic(update user)", email); err != nil {
+				return err
+			}
+		}
 		return updateBySpecs(ctx, tx, r.projectID, "users", op.NodeID, op.Patch, userQueryFields)
 	case dbTypeWorkingGroup:
 		return updateBySpecs(ctx, tx, r.projectID, "groups", op.NodeID, op.Patch, groupQueryFields)

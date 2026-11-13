@@ -216,10 +216,10 @@ now keep a list of addresses it has proved it controls.
 - **Migration 0059** adds `user_recovery_emails` and `recovery_email_codes`
   (SQLite: 0028), both new and empty, under row-level security like every
   data-plane table. On Postgres every write of `users.email` to a non-empty
-  address now runs in a short transaction that takes a per-address advisory
-  lock and reads `user_recovery_emails` once: that lock, shared with the
-  insert of a recovery email, is what keeps an address on one account across
-  the two tables.
+  address, the graph writes behind an admin's `InviteUser` included, now runs
+  in a transaction that takes a per-address advisory lock and reads
+  `user_recovery_emails` once: that lock, shared with the insert of a recovery
+  email, is what keeps an address on one account across the two tables.
 - **Go API.** `service.Repository` gains `UpsertRecoveryEmailCode`,
   `FindRecoveryEmailCodeByUser`, `IncrementRecoveryEmailCodeAttempts`,
   `ConsumeRecoveryEmailCode`, `AddRecoveryEmail`, `ListRecoveryEmails`,
