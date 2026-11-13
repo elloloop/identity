@@ -29,8 +29,9 @@ func (s *ProfileService) ListLinkedIdentities(ctx context.Context, userID string
 // removed (ErrLastCredential), so a self-service unlink can never lock a user
 // out of their own account. The check counts what would remain AFTER the
 // removal, using the link the caller asked to drop, so removing a non-final
-// link is always allowed.
-func (s *ProfileService) UnlinkIdentity(ctx context.Context, userID, provider, providerUserID string) error {
+// link is always allowed. A session a recovery hold binds is refused
+// (RecoveryHoldError): it would take a way in from the owner.
+func (s *ProfileService) UnlinkIdentity(ctx context.Context, userID string, signIn SessionSignIn, provider, providerUserID string) error {
 	if strings.TrimSpace(userID) == "" {
 		return fmt.Errorf("%w: user_id is required", ErrInvalidArgument)
 	}
@@ -43,6 +44,9 @@ func (s *ProfileService) UnlinkIdentity(ctx context.Context, userID, provider, p
 	repo := s.repo(ctx)
 	if repo == nil {
 		return ErrServiceUnavailable
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return err
 	}
 
 	links, err := repo.ListOAuthIdentitiesForUser(ctx, userID)

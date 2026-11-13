@@ -48,7 +48,7 @@ func (h *IdentityHandler) DeleteMyAccount(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	scheduledAt, err := h.profile.DeleteMyAccount(ctx, userID, req.Msg.Reason)
+	scheduledAt, err := h.profile.DeleteMyAccount(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Reason)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -134,7 +134,7 @@ func (h *IdentityHandler) ChangePassword(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	err := h.profile.ChangePassword(ctx, userID, req.Msg.CurrentPassword, req.Msg.NewPassword)
+	err := h.profile.ChangePassword(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.CurrentPassword, req.Msg.NewPassword)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -287,7 +287,7 @@ func (h *IdentityHandler) DeletePasskey(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	err := h.profile.DeletePasskey(ctx, userID, req.Msg.CredentialId)
+	err := h.profile.DeletePasskey(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.CredentialId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -330,7 +330,7 @@ func (h *IdentityHandler) RevokeSession(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	err := h.profile.RevokeSession(ctx, userID, req.Msg.SessionId)
+	err := h.profile.RevokeSession(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.SessionId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -417,7 +417,7 @@ func (h *IdentityHandler) UnlinkIdentity(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	err := h.profile.UnlinkIdentity(ctx, userID, req.Msg.Provider, req.Msg.ProviderUserId)
+	err := h.profile.UnlinkIdentity(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Provider, req.Msg.ProviderUserId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -436,7 +436,7 @@ func (h *IdentityHandler) RevokeAllSessions(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	revokedCount, err := h.profile.RevokeAllSessions(ctx, userID, req.Msg.Password)
+	revokedCount, err := h.profile.RevokeAllSessions(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Password)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -459,7 +459,7 @@ func (h *IdentityHandler) SignOutEverywhere(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	revokedCount, err := h.profile.RevokeAllSessions(ctx, userID, req.Msg.Password)
+	revokedCount, err := h.profile.RevokeAllSessions(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Password)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -528,7 +528,7 @@ func (h *IdentityHandler) RequestEmailChange(
 	if userID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
-	if err := h.auth.RequestEmailChange(ctx, userID, req.Msg.NewEmail, req.Msg.CurrentPassword); err != nil {
+	if err := h.auth.RequestEmailChange(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.NewEmail, req.Msg.CurrentPassword); err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.RequestEmailChangeResponse{}), nil

@@ -310,10 +310,10 @@ func TestRequestEmailChange_EnforcesProjectAccess(t *testing.T) {
 	user := seedUserWithPassword(t, repo, "dev@corp.example", "Str0ng!Pass1")
 	ctx := accessScope(t, workEmailOnlyJSON)
 
-	err := svc.RequestEmailChange(ctx, user.ID, "dev@gmail.com", "Str0ng!Pass1")
+	err := svc.RequestEmailChange(ctx, user.ID, SessionSignIn{}, "dev@gmail.com", "Str0ng!Pass1")
 	require.ErrorIs(t, err, ErrAccessNotAllowed, "must not move an account to a blocked domain")
 
-	require.NoError(t, svc.RequestEmailChange(ctx, user.ID, "dev@other-corp.example", "Str0ng!Pass1"))
+	require.NoError(t, svc.RequestEmailChange(ctx, user.ID, SessionSignIn{}, "dev@other-corp.example", "Str0ng!Pass1"))
 }
 
 // An invite-only project must still let an existing member change address:
@@ -324,7 +324,7 @@ func TestRequestEmailChange_InviteProject_AllowsExistingMember(t *testing.T) {
 	user := seedUserWithPassword(t, repo, "dev@corp.example", "Str0ng!Pass1")
 	ctx := accessScope(t, `{"access":{"mode":"invite"}}`)
 
-	require.NoError(t, svc.RequestEmailChange(ctx, user.ID, "dev2@corp.example", "Str0ng!Pass1"))
+	require.NoError(t, svc.RequestEmailChange(ctx, user.ID, SessionSignIn{}, "dev2@corp.example", "Str0ng!Pass1"))
 }
 
 // The token outlives the request, so redemption is the authoritative check: a

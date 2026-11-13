@@ -747,11 +747,11 @@ func TestDisableTotp_RequiresPassword(t *testing.T) {
 	u := seedUser(repo, "disable-totp@example.com", pwHash, "active")
 	u.TotpRequired = true
 
-	err := svc.DisableTotp(context.Background(), u.ID, "WrongP@ss1!")
+	err := svc.DisableTotp(context.Background(), u.ID, SessionSignIn{}, "WrongP@ss1!")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 
-	err = svc.DisableTotp(context.Background(), u.ID, strongPW)
+	err = svc.DisableTotp(context.Background(), u.ID, SessionSignIn{}, strongPW)
 	require.NoError(t, err)
 }
 
@@ -762,10 +762,10 @@ func TestRegenerateRecoveryCodes_RequiresPassword(t *testing.T) {
 	u := seedUser(repo, "regen@example.com", pwHash, "active")
 	u.TotpRequired = true
 
-	_, err := svc.RegenerateRecoveryCodes(context.Background(), u.ID, "WrongP@ss1!")
+	_, err := svc.RegenerateRecoveryCodes(context.Background(), u.ID, SessionSignIn{}, "WrongP@ss1!")
 	require.Error(t, err)
 
-	codes, err := svc.RegenerateRecoveryCodes(context.Background(), u.ID, strongPW)
+	codes, err := svc.RegenerateRecoveryCodes(context.Background(), u.ID, SessionSignIn{}, strongPW)
 	require.NoError(t, err)
 	assert.Len(t, codes, 10)
 }
@@ -777,7 +777,7 @@ func TestRegenerateRecoveryCodes_RequiresTotpEnabled(t *testing.T) {
 	seedUser(repo, "noregen@example.com", pwHash, "active")
 
 	u, _ := repo.FindUserByEmail(context.Background(), "noregen@example.com")
-	_, err := svc.RegenerateRecoveryCodes(context.Background(), u.ID, strongPW)
+	_, err := svc.RegenerateRecoveryCodes(context.Background(), u.ID, SessionSignIn{}, strongPW)
 	require.Error(t, err)
 }
 

@@ -78,6 +78,7 @@ const (
 	dbRfUserAgent  = "8"
 	dbRfLastUsedAt = "9"
 	dbRfConsumedAt = "10"
+	dbRfSID        = "11"
 )
 
 const (
@@ -1025,6 +1026,7 @@ func refreshTokenNodeFromRecord(rec *service.RefreshTokenRecord) *graph.Node {
 			dbRfUserAgent:  rec.UserAgent,
 			dbRfLastUsedAt: rec.LastUsedAt,
 			dbRfConsumedAt: rec.ConsumedAtMs,
+			dbRfSID:        rec.SID,
 		},
 	}
 }

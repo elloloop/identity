@@ -5167,8 +5167,8 @@ func (*ListRecoveryEmailsRequest) Descriptor() ([]byte, []int) {
 type ListRecoveryEmailsResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	RecoveryEmails []*RecoveryEmail       `protobuf:"bytes,1,rep,name=recovery_emails,json=recoveryEmails,proto3" json:"recovery_emails,omitempty"` // oldest first
-	// hold_until is when the hold on the account's recovery settings ends
-	// (epoch ms), or 0 when none is in force. See RecoveryHoldDetails.
+	// hold_until is when the account's recovery hold ends (epoch ms), or 0
+	// when none is in force. See RecoveryHoldDetails.
 	HoldUntil     int64 `protobuf:"varint,2,opt,name=hold_until,json=holdUntil,proto3" json:"hold_until,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5222,12 +5222,19 @@ func (x *ListRecoveryEmailsResponse) GetHoldUntil() int64 {
 // `recovery_hold` token) of a hold. A sign-in by a recovery email
 // (`recovery_emails.sign_in`) starts one, once any second factor is proved,
 // for the project's `recovery_emails.hold_seconds` (default 604800, seven
-// days). While it is in force, a session a recovery email opened cannot change
-// the account's recovery emails, phone, second factor, passkeys or linked
-// providers, so whoever got into a recovery mailbox cannot take the rest of
-// the account before the owner has had the notice; a session opened any other
-// way is not held, and removing the address that started the hold ends it.
-// Merging either account is refused, whoever asks.
+// days). While it is in force, a session a recovery email opened makes no
+// account security change: it cannot add or remove a recovery email, the
+// phone, a second factor or its recovery codes, a passkey or a linked
+// provider, change the password or the primary email, end another session
+// (RevokeSession of any session but its own, RevokeAllSessions,
+// SignOutEverywhere) or delete the account. So whoever got into a recovery
+// mailbox cannot take the rest of the account, or take it from the owner,
+// before the owner has had the notice. It can still sign itself out: Logout,
+// or RevokeSession of its own session where its token carries a `sid`. A
+// session opened any other way is not held, and removing the address that
+// started the hold ends it. Merging either account is refused, whoever asks.
+// Over native gRPC, a session whose `amr` the host does not forward is held
+// too (see the embedding guide).
 type RecoveryHoldDetails struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	HoldUntil     int64                  `protobuf:"varint,1,opt,name=hold_until,json=holdUntil,proto3" json:"hold_until,omitempty"` // epoch ms the hold ends

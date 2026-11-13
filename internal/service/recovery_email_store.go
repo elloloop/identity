@@ -12,8 +12,8 @@ type RecoveryEmail struct {
 	Email      string
 	VerifiedAt int64 // epoch ms
 	// LastSignInAt is when the address last signed in to the account (epoch
-	// ms; 0 = never). The latest across an account's addresses starts the
-	// hold on its recovery settings.
+	// ms; 0 = never). The latest across an account's addresses starts its
+	// recovery hold.
 	LastSignInAt int64
 }
 
@@ -47,12 +47,13 @@ var (
 	// `reauthentication_required` token clients match on to sign the user in
 	// again and retry, as ErrReauthenticationRequired's does.
 	ErrRecoveryReauthenticationRequired = errors.New("reauthentication_required: sign in again to change your recovery settings")
-	// ErrRecoveryHold is returned, inside a RecoveryHoldError, when a change
-	// to an account's recovery settings is asked for while a sign-in by a
-	// recovery email holds them (recovery_emails.hold_seconds). Mapped to
-	// CodeFailedPrecondition; its message leads with the stable
-	// `recovery_hold` token clients match on.
-	ErrRecoveryHold = errors.New("recovery_hold: this account signed in with a recovery email recently; its recovery settings cannot change yet")
+	// ErrRecoveryHold is returned, inside a RecoveryHoldError, when a
+	// session which may have been opened by a recovery email asks for an
+	// account security change while a sign-in by a recovery email holds the
+	// account (recovery_emails.hold_seconds), and to anyone asking to merge
+	// the account then. Mapped to CodeFailedPrecondition; its message leads
+	// with the stable `recovery_hold` token clients match on.
+	ErrRecoveryHold = errors.New("recovery_hold: a recovery email signed in to this account recently; account security changes are held until the hold ends")
 	// ErrRecoverySession is returned when a session a recovery email opened
 	// asks for what only a session opened another way may do: approving
 	// another device's QR sign-in, whose session could not say a recovery

@@ -1024,7 +1024,7 @@ func TestDeleteMyAccount_CutsOffOwnedAgents(t *testing.T) {
 	seedChildSession(t, repo, agent.ID)
 
 	ps := newTestProfileServiceForDeletion(repo, newRecordingAuditWriter())
-	_, err := ps.DeleteMyAccount(context.Background(), owner.ID, "")
+	_, err := ps.DeleteMyAccount(context.Background(), owner.ID, SessionSignIn{}, "")
 	require.NoError(t, err)
 	assert.False(t, liveSessions(repo, agent.ID))
 }

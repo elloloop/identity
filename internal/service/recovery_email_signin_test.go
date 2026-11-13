@@ -82,7 +82,7 @@ func (f *recoveryEmailFixture) sessionAMR(t *testing.T, accessToken string) []st
 	return claims.AMR
 }
 
-// holdUntil is when the hold on user's recovery settings ends, 0 for none.
+// holdUntil is when the recovery hold on userID's account ends, 0 for none.
 func (f *recoveryEmailFixture) holdUntil(t *testing.T, userID string) int64 {
 	t.Helper()
 	_, until, err := f.svc.ListRecoveryEmails(f.ctx, userID)
@@ -92,8 +92,19 @@ func (f *recoveryEmailFixture) holdUntil(t *testing.T, userID string) int64 {
 	return until
 }
 
-// heldChanges are the changes a session a recovery hold binds may not make,
-// each asked for by session.
+// addSession stores a session of userID's under id, whose access tokens
+// carry the sid sid ("" outside GATEWAY_REVOCATION_MODE=session).
+func (f *recoveryEmailFixture) addSession(userID, id, sid string) {
+	f.db.addRefreshToken(id, userID, f.now.Add(time.Hour).UnixMilli())
+	f.db.mu.Lock()
+	defer f.db.mu.Unlock()
+	f.db.nodes[id].Payload[rfSID] = sid
+}
+
+// heldChanges are the account security changes a session a recovery hold
+// binds may not make, each asked for by session: those that add a way in
+// or a way to recover the account, and those that take one away, end
+// another session, or delete the account.
 func (f *recoveryEmailFixture) heldChanges(userID string, session SessionSignIn) map[string]func() error {
 	return map[string]func() error{
 		"RequestRecoveryEmail": func() error {
@@ -138,6 +149,37 @@ func (f *recoveryEmailFixture) heldChanges(userID string, session SessionSignIn)
 			_, err := f.svc.LinkIdentity(f.ctx, userID, session, "code", "google", "https://app.test/cb", "", "", "")
 			return err
 		},
+		"DisableTotp": func() error {
+			return f.svc.DisableTotp(f.ctx, userID, session, "Str0ng!Pass1")
+		},
+		"RegenerateRecoveryCodes": func() error {
+			_, err := f.svc.RegenerateRecoveryCodes(f.ctx, userID, session, "Str0ng!Pass1")
+			return err
+		},
+		"RequestEmailChange": func() error {
+			return f.svc.RequestEmailChange(f.ctx, userID, session, "moved@example.org", "Str0ng!Pass1")
+		},
+		"ChangePassword": func() error {
+			return f.profile.ChangePassword(f.ctx, userID, session, "Str0ng!Pass1", "N3w!Str0ngPass")
+		},
+		"DeletePasskey": func() error {
+			return f.profile.DeletePasskey(f.ctx, userID, session, "cred-held")
+		},
+		"UnlinkIdentity": func() error {
+			return f.profile.UnlinkIdentity(f.ctx, userID, session, "google", "g-held")
+		},
+		"RevokeSession": func() error {
+			f.addSession(userID, "held-other-session", "sid-other")
+			return f.profile.RevokeSession(f.ctx, userID, session, "held-other-session")
+		},
+		"RevokeAllSessions": func() error {
+			_, err := f.profile.RevokeAllSessions(f.ctx, userID, session, "Str0ng!Pass1")
+			return err
+		},
+		"DeleteMyAccount": func() error {
+			_, err := f.profile.DeleteMyAccount(f.ctx, userID, session, "")
+			return err
+		},
 	}
 }
 
@@ -173,7 +215,7 @@ func TestRecoveryEmailSignIn_MarksTheSessionAndHoldsOnlyIt(t *testing.T) {
 	}
 
 	// The session the recovery email opened, and one no host vouched for,
-	// change none of the account's sign-in or recovery settings.
+	// make no account security change.
 	for _, session := range []SessionSignIn{f.recoverySignedInNow(), {AuthTimeSec: f.now.Unix(), AMR: []string{AMRUnvouched}}} {
 		for name, change := range f.heldChanges(user.ID, session) {
 			var hold *RecoveryHoldError
@@ -199,6 +241,68 @@ func TestRecoveryEmailSignIn_MarksTheSessionAndHoldsOnlyIt(t *testing.T) {
 	}
 	if until := f.holdUntil(t, user.ID); until != 0 {
 		t.Fatalf("hold after the address that started it was removed = %d, want 0", until)
+	}
+}
+
+// During a hold the recovery session cannot take the owner's ways in or
+// sessions away, which would leave the owner with nothing but the address
+// the hold is about; it can still end itself. The owner's session, opened by
+// the primary email or a passkey, removes each of them as at any time.
+func TestRecoveryHold_RemovalsAreHeldFromTheRecoverySessionOnly(t *testing.T) {
+	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
+	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	f.add(t, user, "spare@example.net")
+	if _, err := f.signInWith(f.ctx, t, "spare@example.net"); err != nil {
+		t.Fatalf("sign-in by the recovery email: %v", err)
+	}
+	f.db.addPasskey("pk-1", user.ID, "cred-1", "Laptop")
+	for _, id := range []string{"g-1", "g-2"} {
+		if err := f.repo.CreateOAuthIdentity(f.ctx, &OAuthIdentity{UserID: user.ID, Provider: "google", ProviderUserID: id}); err != nil {
+			t.Fatalf("CreateOAuthIdentity: %v", err)
+		}
+	}
+	f.addSession(user.ID, "owner-laptop", "sid-laptop")
+	f.addSession(user.ID, "recovery-phone", "sid-recovery")
+	recovery := f.recoverySignedInNow()
+	recovery.SessionID = "sid-recovery"
+
+	for name, remove := range map[string]func() error{
+		"DeletePasskey":  func() error { return f.profile.DeletePasskey(f.ctx, user.ID, recovery, "cred-1") },
+		"UnlinkIdentity": func() error { return f.profile.UnlinkIdentity(f.ctx, user.ID, recovery, "google", "g-1") },
+		"RevokeSession":  func() error { return f.profile.RevokeSession(f.ctx, user.ID, recovery, "owner-laptop") },
+		"DeleteMyAccount": func() error {
+			_, err := f.profile.DeleteMyAccount(f.ctx, user.ID, recovery, "")
+			return err
+		},
+	} {
+		if err := remove(); !errors.Is(err, ErrRecoveryHold) {
+			t.Fatalf("%s by the recovery session during the hold = %v, want ErrRecoveryHold", name, err)
+		}
+	}
+	if err := f.profile.RevokeSession(f.ctx, user.ID, recovery, "recovery-phone"); err != nil {
+		t.Fatalf("the recovery session ends itself during the hold: %v", err)
+	}
+
+	owner := f.signedInNow()
+	if err := f.profile.DeletePasskey(f.ctx, user.ID, owner, "cred-1"); err != nil {
+		t.Fatalf("the owner removes a passkey during the hold: %v", err)
+	}
+	if err := f.profile.UnlinkIdentity(f.ctx, user.ID, owner, "google", "g-1"); err != nil {
+		t.Fatalf("the owner unlinks a provider during the hold: %v", err)
+	}
+	if err := f.profile.RevokeSession(f.ctx, user.ID, owner, "owner-laptop"); err != nil {
+		t.Fatalf("the owner ends a session during the hold: %v", err)
+	}
+	if _, err := f.profile.DeleteMyAccount(f.ctx, user.ID, owner, ""); err != nil {
+		t.Fatalf("the owner deletes the account during the hold: %v", err)
+	}
+	passkeys, err := f.profile.ListMyPasskeys(f.ctx, user.ID)
+	if err != nil || len(passkeys) != 0 {
+		t.Fatalf("passkeys after the owner removed theirs = %v %v, want none", passkeys, err)
+	}
+	links, err := f.profile.ListLinkedIdentities(f.ctx, user.ID)
+	if err != nil || len(links) != 1 || links[0].ProviderUserID != "g-2" {
+		t.Fatalf("links after the owner unlinked one = %+v %v, want g-2 alone", links, err)
 	}
 }
 

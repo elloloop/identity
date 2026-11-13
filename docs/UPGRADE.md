@@ -110,7 +110,7 @@ setting, and none changes until it is set.
   `RemovePhone`; `service.LoginPolicy` gains `RequireVerifiedPhone` and
   `PhoneCallingCodes`.
 
-## Next — a recovery email signs in to its account, and the session it opens is held from changing the account: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claim `amr`, `ListRecoveryEmailsResponse.hold_until`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` signatures (Go API))
+## Next — a recovery email signs in to its account, and the session it opens is held from account security changes: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claim `amr`, `ListRecoveryEmailsResponse.hold_until`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` and `ProfileService` signatures (Go API))
 
 A project whose accounts sign in by emailed code had no way back in for a
 person who lost their primary mailbox: the email change and the account merge
@@ -124,7 +124,7 @@ both ask for a password. A recovery email can now be that way.
   | Key | Default | Meaning |
   | --- | --- | --- |
   | `recovery_emails.sign_in` | `false` | An emailed code or link sent to a recovery email signs in to the account that holds it. |
-  | `recovery_emails.hold_seconds` | `604800` (`0` selects it; at most `2592000`) | How long after such a sign-in the account's recovery settings are held. Cannot be turned off. |
+  | `recovery_emails.hold_seconds` | `604800` (`0` selects it; at most `2592000`) | How long after such a sign-in the session it opened is held from account security changes (below). Cannot be turned off. |
 
 - **What it does.** `RequestEmailLoginCode` / `VerifyEmailLoginCode` and
   `RequestMagicLink` / `RedeemMagicLink` on a recovery email sign in to the
@@ -162,27 +162,39 @@ both ask for a password. A recovery email can now be that way.
   recovery emails are mailed a notice naming the address that signed in and
   when the hold ends.
 - **The hold binds that session, not the owner.** From that sign-in, for
-  `recovery_emails.hold_seconds`, a session a recovery email opened is refused
-  with `FAILED_PRECONDITION`, the stable `recovery_hold` token and a
-  `RecoveryHoldDetails` saying when it ends, by `RequestRecoveryEmail`,
-  `VerifyRecoveryEmail`, `RemoveRecoveryEmail`, `RequestPhoneVerification`,
-  `VerifyPhoneCode`, `RemovePhone`, `BeginTotpSetup`, `VerifyTotpSetup`,
-  `BeginPasskeyRegistration`, `CompletePasskeyRegistration` and
-  `LinkIdentity`. A session opened any other way (the primary email, a
-  password, a passkey, a provider) is never held, so the owner can remove an
-  address they do not recognise at any time; removing the address that
-  started the hold ends it. `ListRecoveryEmails` returns the hold's end as
-  `hold_until`. A sign-in from an address whose own hold is still in force
-  does not extend it. The hold is measured with the length configured now, not
-  the one in force at the sign-in.
+  `recovery_emails.hold_seconds`, a session a recovery email opened makes no
+  account security change: it is refused with `FAILED_PRECONDITION`, the
+  stable `recovery_hold` token and a `RecoveryHoldDetails` saying when it
+  ends, by every call that adds a way in or a way to recover the account
+  (`RequestRecoveryEmail`, `VerifyRecoveryEmail`, `RequestPhoneVerification`,
+  `VerifyPhoneCode`, `BeginTotpSetup`, `VerifyTotpSetup`,
+  `RegenerateRecoveryCodes`, `BeginPasskeyRegistration`,
+  `CompletePasskeyRegistration`, `LinkIdentity`), takes one away
+  (`RemoveRecoveryEmail`, `RemovePhone`, `DisableTotp`, `DeletePasskey`,
+  `UnlinkIdentity`), replaces one (`ChangePassword`, `RequestEmailChange`),
+  ends another session (`RevokeSession` of any session but its own,
+  `RevokeAllSessions`, `SignOutEverywhere`) or deletes the account
+  (`DeleteMyAccount`). Without the removals in that list, whoever got into a
+  recovery mailbox could strip the owner's passkeys, providers and sessions
+  during the hold and leave the owner with nothing but that address. The held
+  session can still sign itself out: `Logout`, or `RevokeSession` of its own
+  session, which it can name only under `GATEWAY_REVOCATION_MODE=session`,
+  where its token carries a `sid`. A session opened any other way (the
+  primary email, a password, a passkey, a provider) is never held, so the
+  owner can remove an address they do not recognise at any time; removing the
+  address that started the hold ends it. `ListRecoveryEmails` returns the
+  hold's end as `hold_until`. A sign-in from an address whose own hold is
+  still in force does not extend it. The hold is measured with the length
+  configured now, not the one in force at the sign-in.
 - **Merges are held for everyone.** `MergeAccounts` and the admin
   `MergeUsers` answer the same `recovery_hold` refusal while a hold is in
   force on either account, whoever asks; the other account's hold is read only
   once its password is proved.
 - **No hand-off, no domain membership.** `ApproveQrLogin` from a session a
   recovery email opened answers `FAILED_PRECONDITION` with the stable
-  `recovery_session` token (rejecting is still allowed): the session the
-  hand-off would open could not say a recovery email stands behind it. And
+  `recovery_session` token, hold or not (rejecting is still allowed): the
+  session the hand-off would open could not say a recovery email stands
+  behind it. And
   such a session acts in a tenant only through an explicit membership:
   `RefreshToken` refuses to select, and `ListMyTenants` leaves out, a tenant
   the account belongs to only through its email's domain, so disabling an
@@ -211,12 +223,12 @@ both ask for a password. A recovery email can now be that way.
   tokens and revoke their sessions in its transaction (the conformance suite
   checks all of it, a race between the two included). `jwt.Claims` gains
   `AMR`, and `RecoveryEmail`, which only the date-of-birth completion ticket
-  of a recovery session carries. The
-  `AuthService` calls listed under the hold, `MergeAccounts` and
-  `ApproveQrLogin`, and `MembershipService.ListMyTenants`, take a
-  `service.SessionSignIn` (the token's `auth_time` and `amr`) where the
-  recovery-email calls and `MergeAccounts` took the bare `auth_time`.
-  `AuthService.ListRecoveryEmails` also returns the hold's end.
+  of a recovery session carries. The `AuthService` and `ProfileService`
+  calls listed under the hold, `MergeAccounts` and `ApproveQrLogin`, and
+  `MembershipService.ListMyTenants`, take a `service.SessionSignIn` (the
+  token's `auth_time`, `amr` and `sid`) where the recovery-email calls and
+  `MergeAccounts` took the bare `auth_time`. `AuthService.ListRecoveryEmails`
+  also returns the hold's end.
 
 ## Next — recovery emails: an account keeps additional addresses it has proved: `recovery_emails.enabled` per project (off by default; migration 0059; additive RPCs `RequestRecoveryEmail`, `VerifyRecoveryEmail`, `ListRecoveryEmails`, `RemoveRecoveryEmail`; additive audit events `recovery_email_added`, `recovery_email_removed`; six `Repository` methods and one sweep (Go API))
 

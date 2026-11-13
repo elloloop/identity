@@ -202,9 +202,10 @@ func TestHandler_RecoveryEmails_Refusals(t *testing.T) {
 	assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
 }
 
-// A sign-in by a recovery email holds the session it opened from the
-// account's recovery settings, both the list and the refusal say until
-// when, and a session opened another way is not held.
+// A sign-in by a recovery email holds the session it opened from account
+// security changes, adding a way in or taking one away alike, both the list
+// and the refusal say until when, the held session can still end itself, and
+// a session opened another way is not held.
 func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 	h, mailer := newRecoveryEmailHarness(t, service.ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true})
 	ctx := context.Background()
@@ -246,6 +247,42 @@ func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 	requireHold(err)
 	_, err = h.client.BeginTotpSetup(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.BeginTotpSetupRequest{}), uid))
 	requireHold(err)
+	_, err = h.client.DisableTotp(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.DisableTotpRequest{Password: "pw"}), uid))
+	requireHold(err)
+	_, err = h.client.RegenerateRecoveryCodes(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RegenerateRecoveryCodesRequest{Password: "pw"}), uid))
+	requireHold(err)
+	_, err = h.client.DeletePasskey(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.DeletePasskeyRequest{CredentialId: "cred-1"}), uid))
+	requireHold(err)
+	_, err = h.client.UnlinkIdentity(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.UnlinkIdentityRequest{Provider: "google", ProviderUserId: "g-1"}), uid))
+	requireHold(err)
+	_, err = h.client.ChangePassword(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.ChangePasswordRequest{CurrentPassword: "pw", NewPassword: "N3w!Str0ngPass"}), uid))
+	requireHold(err)
+	_, err = h.client.RequestEmailChange(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RequestEmailChangeRequest{NewEmail: "moved@example.org", CurrentPassword: "pw"}), uid))
+	requireHold(err)
+	_, err = h.client.RevokeAllSessions(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RevokeAllSessionsRequest{Password: "pw"}), uid))
+	requireHold(err)
+	_, err = h.client.SignOutEverywhere(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.SignOutEverywhereRequest{Password: "pw"}), uid))
+	requireHold(err)
+	_, err = h.client.DeleteMyAccount(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.DeleteMyAccountRequest{}), uid))
+	requireHold(err)
+
+	// The held session ends the owner's other session only by being it: the
+	// token's sid names the session it is.
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	for id, sid := range map[string]string{"owner-laptop": "sid-laptop", "recovery-phone": "sid-recovery"} {
+		h.db.addRefreshToken(id, uid, expires)
+		h.db.mu.Lock()
+		h.db.nodes[id].Payload[tRfSID] = sid
+		h.db.mu.Unlock()
+	}
+	revoke := func(sessionID string) error {
+		req := signedInByRecoveryEmail(connect.NewRequest(&identitypb.RevokeSessionRequest{SessionId: sessionID}), uid)
+		req.Header().Set(middleware.AuthenticatedSessionIDHeader, "sid-recovery")
+		_, err := h.client.RevokeSession(ctx, req)
+		return err
+	}
+	requireHold(revoke("owner-laptop"))
+	require.NoError(t, revoke("recovery-phone"))
 
 	// The owner's own session removes the address, and the hold is over.
 	_, err = h.client.RemoveRecoveryEmail(ctx,

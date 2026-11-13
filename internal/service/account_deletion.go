@@ -74,14 +74,19 @@ func (s *ProfileService) graceDays() int {
 // action takes precedence. The household/teardown concern for a sole admin lives
 // in the relay, not here.
 //
+// A session a recovery hold binds is refused (RecoveryHoldError).
+//
 // Returns the epoch-ms instant the account is scheduled to be purged.
-func (s *ProfileService) DeleteMyAccount(ctx context.Context, actorID, reason string) (int64, error) {
+func (s *ProfileService) DeleteMyAccount(ctx context.Context, actorID string, signIn SessionSignIn, reason string) (int64, error) {
 	if actorID == "" {
 		return 0, ErrUnauthenticated
 	}
 	repo := s.repo(ctx)
 	if repo == nil {
 		return 0, ErrServiceUnavailable
+	}
+	if err := s.refuseHeldSession(ctx, actorID, signIn); err != nil {
+		return 0, err
 	}
 
 	user, err := repo.GetUser(ctx, actorID)
@@ -100,7 +105,7 @@ func (s *ProfileService) DeleteMyAccount(ctx context.Context, actorID, reason st
 		return 0, fmt.Errorf("%w: account is %s", ErrAccountDeletionNotAllowed, user.Status)
 	}
 
-	now := nowMs()
+	now := s.nowMs()
 	scheduledAt := now + int64(s.graceDays())*msPerDay
 	if err := repo.UpdateUser(ctx, actorID, map[string]any{
 		"status":                   StatusPendingDeletion,

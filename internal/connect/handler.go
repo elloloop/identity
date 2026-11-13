@@ -172,11 +172,12 @@ func authenticatedAuthTime(headers headerReader) int64 {
 }
 
 // authenticatedSignIn returns what the verified token the auth middleware
-// read says about the sign-in that opened the caller's session.
+// read says about the caller's session and the sign-in that opened it.
 func authenticatedSignIn(headers headerReader) service.SessionSignIn {
 	return service.SessionSignIn{
 		AuthTimeSec: authenticatedAuthTime(headers),
 		AMR:         strings.Fields(headers.Get(middleware.AuthenticatedAMRHeader)),
+		SessionID:   headers.Get(middleware.AuthenticatedSessionIDHeader),
 	}
 }
 

@@ -58,6 +58,7 @@ const (
 	tRfUserID    = "2"
 	tRfExpiresAt = "4"
 	tRfCreatedAt = "5"
+	tRfSID       = "11"
 )
 
 // Passkey payload field IDs.

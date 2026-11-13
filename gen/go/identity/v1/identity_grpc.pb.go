@@ -269,8 +269,7 @@ type IdentityServiceClient interface {
 	// unique. A caller with no number gets their user back unchanged. A tenant
 	// that requires a verified phone can no longer be selected afterwards.
 	// Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
-	// session a recovery email opened during a recovery hold
-	// (RecoveryHoldDetails).
+	// session a recovery hold binds (RecoveryHoldDetails).
 	RemovePhone(ctx context.Context, in *RemovePhoneRequest, opts ...grpc.CallOption) (*RemovePhoneResponse, error)
 	// Recovery emails — additional addresses the authenticated caller has
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
@@ -2734,8 +2733,7 @@ type IdentityServiceServer interface {
 	// unique. A caller with no number gets their user back unchanged. A tenant
 	// that requires a verified phone can no longer be selected afterwards.
 	// Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
-	// session a recovery email opened during a recovery hold
-	// (RecoveryHoldDetails).
+	// session a recovery hold binds (RecoveryHoldDetails).
 	RemovePhone(context.Context, *RemovePhoneRequest) (*RemovePhoneResponse, error)
 	// Recovery emails — additional addresses the authenticated caller has
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an

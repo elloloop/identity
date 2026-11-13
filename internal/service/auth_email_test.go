@@ -340,7 +340,7 @@ func TestConfirmPasswordReset_EmailChangedSinceSendIsRefused(t *testing.T) {
 	resetTok := requestAndExtractResetToken(t, svc, rec, "before@test.com")
 
 	rec.Reset()
-	if err := svc.RequestEmailChange(ctx, user.ID, "after@test.com", "OldStr0ng!Pass"); err != nil {
+	if err := svc.RequestEmailChange(ctx, user.ID, SessionSignIn{}, "after@test.com", "OldStr0ng!Pass"); err != nil {
 		t.Fatalf("RequestEmailChange: %v", err)
 	}
 	if _, err := svc.ConfirmEmailChange(ctx, extractChangeTokenFromBody(t, rec.Sent()[0].Text)); err != nil {

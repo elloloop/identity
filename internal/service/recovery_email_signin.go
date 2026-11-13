@@ -18,10 +18,11 @@ import (
 // account is the one that holds the address, never a new one. The proof is of
 // the recovery address, so the primary email is not marked verified by it.
 // And because a recovery mailbox may be the weakest one the person has, the
-// sign-in is mailed to every other address of the account, starts a hold on
-// its recovery settings (recoveryHoldUntil), and opens a session marked
-// AMRRecoveryEmail: the hold binds that session, never one opened another
-// way, and the session acts in no tenant through its email's domain.
+// sign-in is mailed to every other address of the account, starts a recovery
+// hold on the account (recoveryHoldUntil), and opens a session marked
+// AMRRecoveryEmail: the hold keeps that session from account security
+// changes, never one opened another way, and the session acts in no tenant
+// through its email's domain.
 
 // recoveryEmailCodeSendAllowed reports whether a sign-in code or link may be
 // mailed to addr because an account holds it as a recovery email. It is
@@ -122,9 +123,9 @@ func (s *AuthService) completeRecoveryEmailLogin(ctx context.Context, addr, meth
 
 // startRecoveryEmailSession opens the session of a sign-in by the recovery
 // email addr once every factor it owed is proved (method names the last
-// proof: the emailed code or link, or "totp"). It starts the hold on the
-// account's recovery settings, unless one this address started is still in
-// force, tells every other address of the account, and issues the session
+// proof: the emailed code or link, or "totp"). It starts the account's
+// recovery hold, unless one this address started is still in force, tells
+// every other address of the account, and issues the session
 // marked AMRRecoveryEmail. The hold comes before the tokens: a sign-in that
 // cannot start the hold must not happen. A verified-email refusal comes
 // before both, so a sign-in that could yield no session starts nothing.
@@ -148,13 +149,19 @@ func (s *AuthService) startRecoveryEmailSession(ctx context.Context, user *User,
 	if err != nil {
 		return "", "", fmt.Errorf("listing recovery emails: %w", err)
 	}
-	holdEnds := time.UnixMilli(recoveryHoldUntil(held, hold, now)).UTC().Format("2 January 2006 at 15:04 UTC")
-	s.notifyAccountAddresses(ctx, user, held, addr, accountNotice{
-		op:       "recovery_email_sign_in_notice",
-		headline: "Your account was signed in to with a recovery email",
-		detail: fmt.Sprintf("Someone signed in to your account with the recovery email %s. "+
-			"Until %s that sign-in cannot change your account's recovery emails, phone number or sign-in methods. "+
-			"If it was not you, sign in with your primary email and remove the address.", addr, holdEnds),
-	})
+	// An address removed since it was marked starts no hold, and the session
+	// is refused below; there is nothing to tell.
+	if until := recoveryHoldUntil(held, hold, now); until != 0 {
+		s.notifyAccountAddresses(ctx, user, held, addr, accountNotice{
+			op:       "recovery_email_sign_in_notice",
+			headline: "Your account was signed in to with a recovery email",
+			detail: fmt.Sprintf("Someone signed in to your account with the recovery email %s. "+
+				"Until %s that session cannot make security changes to your account: "+
+				"it cannot add or remove an email address, phone number, second factor, passkey or linked provider, "+
+				"change your password or primary email, sign out your other sessions or delete the account. "+
+				"If it was not you, sign in with your primary email and remove the address.",
+				addr, time.UnixMilli(until).UTC().Format("2 January 2006 at 15:04 UTC")),
+		})
+	}
 	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, addr)
 }

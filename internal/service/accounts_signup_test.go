@@ -320,13 +320,13 @@ func TestUsernameAccount_CannotAddAnEmailWhereEmailSignupIsNotSelf(t *testing.T)
 		ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self","email_signup":"`+mode+`"}}`)
 		res, err := svc.UsernameSignup(ctx, "jo-"+mode, accessTestPassword, "", 0, "", "")
 		require.NoError(t, err)
-		err = svc.RequestEmailChange(ctx, res.User.ID, "jo@mail.example.test", accessTestPassword)
+		err = svc.RequestEmailChange(ctx, res.User.ID, SessionSignIn{}, "jo@mail.example.test", accessTestPassword)
 		require.ErrorIs(t, err, want, mode)
 	}
 	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
 	res, err := svc.UsernameSignup(ctx, "jo-self", accessTestPassword, "", 0, "", "")
 	require.NoError(t, err)
-	require.NoError(t, svc.RequestEmailChange(ctx, res.User.ID, "jo@mail.example.test", accessTestPassword))
+	require.NoError(t, svc.RequestEmailChange(ctx, res.User.ID, SessionSignIn{}, "jo@mail.example.test", accessTestPassword))
 }
 
 // After an IP has been told GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP times that a

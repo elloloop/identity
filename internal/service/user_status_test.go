@@ -47,7 +47,7 @@ func TestDeleteMyAccount_RejectsPaddedStatus(t *testing.T) {
 		svc := newTestProfileServiceForDeletion(repo, newRecordingAuditWriter())
 		u := seedUser(repo, "padded@example.com", "hash", status)
 
-		_, err := svc.DeleteMyAccount(ctx, u.ID, "")
+		_, err := svc.DeleteMyAccount(ctx, u.ID, SessionSignIn{}, "")
 		if !errors.Is(err, ErrAccountDeletionNotAllowed) {
 			t.Errorf("DeleteMyAccount with status %q = %v, want ErrAccountDeletionNotAllowed", status, err)
 		}

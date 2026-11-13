@@ -398,7 +398,7 @@ func TestDisableTotp_GetUserErrors(t *testing.T) {
 	r.failGetUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	err := svc.DisableTotp(context.Background(), "u", "p")
+	err := svc.DisableTotp(context.Background(), "u", SessionSignIn{}, "p")
 	require.Error(t, err)
 }
 
@@ -407,7 +407,7 @@ func TestRegenerateRecoveryCodes_GetUserErrors(t *testing.T) {
 	r.failGetUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.RegenerateRecoveryCodes(context.Background(), "u", "p")
+	_, err := svc.RegenerateRecoveryCodes(context.Background(), "u", SessionSignIn{}, "p")
 	require.Error(t, err)
 }
 
@@ -563,7 +563,7 @@ func TestRegenerateRecoveryCodes_StoreErrors(t *testing.T) {
 	r.failDeleteRecoveryCodesForUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.RegenerateRecoveryCodes(context.Background(), user.ID, strongPW)
+	_, err := svc.RegenerateRecoveryCodes(context.Background(), user.ID, SessionSignIn{}, strongPW)
 	require.Error(t, err)
 }
 

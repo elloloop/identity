@@ -8,25 +8,34 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 )
 
 // recoveryEmailFixture is an AuthService in a project that keeps recovery
-// emails, with a recording mailer and a clock the test moves.
+// emails, with a recording mailer and a clock the test moves, and the
+// ProfileService beside it on the same store (sessions and passkeys in db)
+// and clock.
 type recoveryEmailFixture struct {
-	svc    *AuthService
-	repo   *fakeRepo
-	mailer *recordingMailer
-	now    time.Time
-	ctx    context.Context
+	svc     *AuthService
+	profile *ProfileService
+	repo    *fakeRepo
+	db      *fakeDB
+	mailer  *recordingMailer
+	now     time.Time
+	ctx     context.Context
 }
 
 func newRecoveryEmailFixture(t *testing.T, cfg ProjectRecoveryEmailsConfig) *recoveryEmailFixture {
 	t.Helper()
-	f := &recoveryEmailFixture{repo: newFakeRepo(), mailer: &recordingMailer{}, now: time.Unix(1_800_000_000, 0)}
+	f := &recoveryEmailFixture{repo: newFakeRepo(), db: newFakeDB(), mailer: &recordingMailer{}, now: time.Unix(1_800_000_000, 0)}
 	f.svc = newTestAuthService(t, f.repo)
 	f.svc.mailer = f.mailer
 	f.svc.nowFunc = func() time.Time { return f.now }
+	f.profile = NewProfileService(f.repo, f.db, "project-a", audit.NewLogger(nil, "project-a", zap.NewNop()), zap.NewNop())
+	f.profile.nowFunc = func() time.Time { return f.now }
 	f.ctx = WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-a", RecoveryEmails: cfg})
 	return f
 }

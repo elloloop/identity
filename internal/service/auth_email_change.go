@@ -32,9 +32,15 @@ import (
 // the confirm call, the confirm call will fail with ErrAlreadyExists
 // (last-write-wins is rejected — the contended new_email is still owned
 // by the other user, so we cannot reassign it).
-func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, currentPassword string) error {
+//
+// A session a recovery hold binds is refused (RecoveryHoldError): the
+// primary email is the owner's way back in.
+func (s *AuthService) RequestEmailChange(ctx context.Context, userID string, signIn SessionSignIn, newEmail, currentPassword string) error {
 	if userID == "" {
 		return fmt.Errorf("%w: user id is required", ErrUnauthenticated)
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return err
 	}
 	// Stored in the canonical form sign-in resolves an account by, so the
 	// changed address is the one sign-in, the directory and SCIM find.

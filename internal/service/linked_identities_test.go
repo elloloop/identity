@@ -59,7 +59,7 @@ func TestProfileService_UnlinkIdentity_RemovesNonFinalLink(t *testing.T) {
 		UserID: u.ID, Provider: "github", ProviderUserID: "gh-1", CreatedAt: 200,
 	}))
 
-	require.NoError(t, svc.UnlinkIdentity(ctx, u.ID, "google", "g-1"))
+	require.NoError(t, svc.UnlinkIdentity(ctx, u.ID, SessionSignIn{}, "google", "g-1"))
 
 	got, err := repo.ListOAuthIdentitiesForUser(ctx, u.ID)
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestProfileService_UnlinkIdentity_LastCredentialBlocked(t *testing.T) {
 		UserID: u.ID, Provider: "google", ProviderUserID: "g-1", CreatedAt: 100,
 	}))
 
-	err := svc.UnlinkIdentity(ctx, u.ID, "google", "g-1")
+	err := svc.UnlinkIdentity(ctx, u.ID, SessionSignIn{}, "google", "g-1")
 	assert.ErrorIs(t, err, ErrLastCredential)
 
 	// The link must survive a refused unlink.
@@ -100,7 +100,7 @@ func TestProfileService_UnlinkIdentity_LastLinkAllowedWithPassword(t *testing.T)
 		UserID: u.ID, Provider: "google", ProviderUserID: "g-1", CreatedAt: 100,
 	}))
 
-	require.NoError(t, svc.UnlinkIdentity(ctx, u.ID, "google", "g-1"))
+	require.NoError(t, svc.UnlinkIdentity(ctx, u.ID, SessionSignIn{}, "google", "g-1"))
 
 	got, err := repo.ListOAuthIdentitiesForUser(ctx, u.ID)
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestProfileService_UnlinkIdentity_LastLinkAllowedWithPasskey(t *testing.T) 
 		UserID: u.ID, Provider: "google", ProviderUserID: "g-1", CreatedAt: 100,
 	}))
 
-	require.NoError(t, svc.UnlinkIdentity(ctx, u.ID, "google", "g-1"))
+	require.NoError(t, svc.UnlinkIdentity(ctx, u.ID, SessionSignIn{}, "google", "g-1"))
 
 	got, err := repo.ListOAuthIdentitiesForUser(ctx, u.ID)
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestProfileService_UnlinkIdentity_NotFound(t *testing.T) {
 	}))
 
 	// Wrong subject → ErrNotFound, not a last-credential precondition.
-	err := svc.UnlinkIdentity(ctx, u.ID, "google", "does-not-exist")
+	err := svc.UnlinkIdentity(ctx, u.ID, SessionSignIn{}, "google", "does-not-exist")
 	assert.ErrorIs(t, err, ErrNotFound)
 
 	// Another user's link must not be unlinkable by this user.
@@ -147,7 +147,7 @@ func TestProfileService_UnlinkIdentity_NotFound(t *testing.T) {
 	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
 		UserID: other.ID, Provider: "slack", ProviderUserID: "s-1", CreatedAt: 100,
 	}))
-	err = svc.UnlinkIdentity(ctx, u.ID, "slack", "s-1")
+	err = svc.UnlinkIdentity(ctx, u.ID, SessionSignIn{}, "slack", "s-1")
 	assert.ErrorIs(t, err, ErrNotFound)
 
 	// Other user's link survived.
@@ -160,9 +160,9 @@ func TestProfileService_UnlinkIdentity_Validation(t *testing.T) {
 	svc := newTestProfileServiceWithRepo(newFakeRepo(), newFakeDB())
 	ctx := context.Background()
 
-	assert.ErrorIs(t, svc.UnlinkIdentity(ctx, "", "google", "g-1"), ErrInvalidArgument)
-	assert.ErrorIs(t, svc.UnlinkIdentity(ctx, "u1", "", "g-1"), ErrInvalidArgument)
-	assert.ErrorIs(t, svc.UnlinkIdentity(ctx, "u1", "google", ""), ErrInvalidArgument)
+	assert.ErrorIs(t, svc.UnlinkIdentity(ctx, "", SessionSignIn{}, "google", "g-1"), ErrInvalidArgument)
+	assert.ErrorIs(t, svc.UnlinkIdentity(ctx, "u1", SessionSignIn{}, "", "g-1"), ErrInvalidArgument)
+	assert.ErrorIs(t, svc.UnlinkIdentity(ctx, "u1", SessionSignIn{}, "google", ""), ErrInvalidArgument)
 }
 
 func TestAuthService_LinkIdentity_AttachesVerifiedIdentity(t *testing.T) {

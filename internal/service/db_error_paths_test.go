@@ -381,7 +381,7 @@ func TestProfileRevokeSession_GetNodeFails(t *testing.T) {
 	db.failGetNode = true
 	svc := newProfileWithDB(db)
 
-	err := svc.RevokeSession(context.Background(), "u", "sess-1")
+	err := svc.RevokeSession(context.Background(), "u", SessionSignIn{}, "sess-1")
 	require.Error(t, err)
 }
 
@@ -391,7 +391,7 @@ func TestProfileRevokeSession_ExecuteFails(t *testing.T) {
 	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
 
-	err := svc.RevokeSession(context.Background(), "user-1", "sess-1")
+	err := svc.RevokeSession(context.Background(), "user-1", SessionSignIn{}, "sess-1")
 	require.Error(t, err)
 }
 
@@ -400,7 +400,7 @@ func TestProfileRevokeAllSessions_GetNodeFails(t *testing.T) {
 	db.failGetNode = true
 	svc := newProfileWithDB(db)
 
-	_, err := svc.RevokeAllSessions(context.Background(), "u", "p")
+	_, err := svc.RevokeAllSessions(context.Background(), "u", SessionSignIn{}, "p")
 	require.Error(t, err)
 }
 
@@ -411,7 +411,7 @@ func TestProfileRevokeAllSessions_QueryFails(t *testing.T) {
 	db.failQueryNodes = true
 	svc := newProfileWithDB(db)
 
-	_, err := svc.RevokeAllSessions(context.Background(), "user-1", "Str0ng!Pass")
+	_, err := svc.RevokeAllSessions(context.Background(), "user-1", SessionSignIn{}, "Str0ng!Pass")
 	require.Error(t, err)
 }
 
@@ -423,7 +423,7 @@ func TestProfileRevokeAllSessions_ExecuteFails(t *testing.T) {
 	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
 
-	count, err := svc.RevokeAllSessions(context.Background(), "user-1", "Str0ng!Pass")
+	count, err := svc.RevokeAllSessions(context.Background(), "user-1", SessionSignIn{}, "Str0ng!Pass")
 	require.NoError(t, err)
 	require.Equal(t, 0, count)
 }
@@ -442,7 +442,7 @@ func TestProfileDeletePasskey_QueryFails(t *testing.T) {
 	db.failQueryNodes = true
 	svc := newProfileWithDB(db)
 
-	err := svc.DeletePasskey(context.Background(), "u", "cred-1")
+	err := svc.DeletePasskey(context.Background(), "u", SessionSignIn{}, "cred-1")
 	require.Error(t, err)
 }
 
@@ -452,7 +452,7 @@ func TestProfileDeletePasskey_ExecuteFails(t *testing.T) {
 	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
 
-	err := svc.DeletePasskey(context.Background(), "user-1", "cred-1")
+	err := svc.DeletePasskey(context.Background(), "user-1", SessionSignIn{}, "cred-1")
 	require.Error(t, err)
 }
 
@@ -461,7 +461,7 @@ func TestProfileChangePassword_GetUserFails(t *testing.T) {
 	db.failGetNode = true
 	svc := newProfileWithDB(db)
 
-	err := svc.ChangePassword(context.Background(), "u", "old", "NewStr0ng!Pass")
+	err := svc.ChangePassword(context.Background(), "u", SessionSignIn{}, "old", "NewStr0ng!Pass")
 	require.Error(t, err)
 }
 
@@ -472,7 +472,7 @@ func TestProfileChangePassword_ExecuteFails(t *testing.T) {
 	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
 
-	err := svc.ChangePassword(context.Background(), "user-1", "OldStr0ng!Pass", "NewStr0ng!Pass")
+	err := svc.ChangePassword(context.Background(), "user-1", SessionSignIn{}, "OldStr0ng!Pass", "NewStr0ng!Pass")
 	require.Error(t, err)
 }
 

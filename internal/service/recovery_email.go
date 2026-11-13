@@ -224,8 +224,8 @@ func (s *AuthService) verifyAndConsumeRecoveryEmailCode(ctx context.Context, use
 }
 
 // ListRecoveryEmails returns the caller's recovery emails, oldest first, and
-// when the hold on the account's recovery settings ends (epoch ms; 0 when
-// none is in force). It does not depend on the project's switch: an address
+// when the account's recovery hold ends (epoch ms; 0 when none is in
+// force). It does not depend on the project's switch: an address
 // kept while the feature was on stays visible to its owner.
 func (s *AuthService) ListRecoveryEmails(ctx context.Context, userID string) ([]*RecoveryEmail, int64, error) {
 	if userID == "" {
@@ -239,12 +239,12 @@ func (s *AuthService) ListRecoveryEmails(ctx context.Context, userID string) ([]
 	return held, recoveryHoldUntil(held, cfg.hold(), s.nowMs()), nil
 }
 
-// recoveryHoldUntil is when the hold on an account's recovery settings ends
-// (epoch ms), or 0 when none is in force. A sign-in by a recovery email
-// starts one: whoever got into a recovery mailbox must not be able to strip
-// the account's other addresses, move its phone or add a way in before the
-// owner has had the notice. Removing the address that started a hold ends
-// it.
+// recoveryHoldUntil is when an account's recovery hold ends (epoch ms), or 0
+// when none is in force. A sign-in by a recovery email starts one: whoever
+// got into a recovery mailbox must not be able to strip the account's other
+// addresses, ways in and sessions, move its phone, add a way in of their own
+// or delete the account before the owner has had the notice. Removing the
+// address that started a hold ends it.
 func recoveryHoldUntil(held []*RecoveryEmail, hold time.Duration, nowMs int64) int64 {
 	var last int64
 	for _, e := range held {
@@ -274,21 +274,38 @@ func recoveryHoldOn(ctx context.Context, repo Repository, userID string, nowMs i
 	return nil
 }
 
-// refuseHeldSession refuses, with a RecoveryHoldError, a change to the
-// account's sign-in or recovery settings that a session a recovery hold
-// binds (SessionSignIn.heldByRecoveryHold) asks for while one is in force.
+// refuseHeldSession refuses, with a RecoveryHoldError, an account security
+// change (one that adds or removes a way into the account or a way to
+// recover it, ends its other sessions, or merges or deletes it) asked for
+// while a hold is in force on userID's account at nowMs by a session which
+// may have been opened by a recovery email (SessionSignIn.mayBeRecoverySession).
 // Every other session is free: the owner, signed in with the primary email,
 // a password, a passkey or an identity provider, can always remove an
 // address they do not recognise, and that ends the hold it started.
-func (s *AuthService) refuseHeldSession(ctx context.Context, userID string, signIn SessionSignIn) error {
-	if !signIn.heldByRecoveryHold() {
+func refuseHeldSession(ctx context.Context, repo Repository, logger *zap.Logger, userID string, signIn SessionSignIn, nowMs int64) error {
+	if !signIn.mayBeRecoverySession() {
 		return nil
 	}
-	err := recoveryHoldOn(ctx, s.repo(ctx), userID, s.nowMs())
+	if repo == nil {
+		return ErrServiceUnavailable
+	}
+	err := recoveryHoldOn(ctx, repo, userID, nowMs)
 	if errors.Is(err, ErrRecoveryHold) {
-		s.logger.Info("recovery_settings_change_refused_by_hold", zap.String("user_id", userID))
+		logger.Info("account_security_change_refused_by_hold", zap.String("user_id", userID))
 	}
 	return err
+}
+
+// refuseHeldSession is the package's refuseHeldSession on the request's
+// store and the service's clock.
+func (s *AuthService) refuseHeldSession(ctx context.Context, userID string, signIn SessionSignIn) error {
+	return refuseHeldSession(ctx, s.repo(ctx), s.logger, userID, signIn, s.nowMs())
+}
+
+// refuseHeldSession is the package's refuseHeldSession on the request's
+// store and the service's clock.
+func (s *ProfileService) refuseHeldSession(ctx context.Context, userID string, signIn SessionSignIn) error {
+	return refuseHeldSession(ctx, s.repo(ctx), s.logger, userID, signIn, s.nowMs())
 }
 
 // RemoveRecoveryEmail removes one of the caller's recovery emails and
@@ -344,9 +361,8 @@ func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, si
 	return held, nil
 }
 
-// accountNotice is a security notice about a change to an account's
-// recovery settings: the dispatch's op label, the subject, and one sentence
-// saying what changed.
+// accountNotice is a security notice to an account's addresses: the
+// dispatch's op label, the subject, and one sentence saying what happened.
 type accountNotice struct {
 	op, headline, detail string
 }

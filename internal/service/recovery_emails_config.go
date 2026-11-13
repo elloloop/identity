@@ -19,12 +19,13 @@ const (
 	// maxRecoveryEmailsReauthMaxAgeSeconds caps the window, as a merge's is
 	// capped: past an hour a sign-in is no longer recent.
 	maxRecoveryEmailsReauthMaxAgeSeconds = 3600
-	// defaultRecoveryHoldSeconds is how long a sign-in by a recovery email
-	// holds the account's recovery settings when the project sets no length:
-	// seven days, time for the owner to read the notice and act.
+	// defaultRecoveryHoldSeconds is how long the recovery hold a sign-in by a
+	// recovery email starts lasts when the project sets no length: seven
+	// days, time for the owner to read the notice and act.
 	defaultRecoveryHoldSeconds = 7 * 24 * 60 * 60
 	// maxRecoveryHoldSeconds bounds the hold at thirty days: past that it
-	// locks the owner out of their own settings more than it protects them.
+	// keeps a person who lost their primary mailbox from securing their own
+	// account more than it protects them.
 	maxRecoveryHoldSeconds = 30 * 24 * 60 * 60
 )
 
@@ -46,10 +47,11 @@ type ProjectRecoveryEmailsConfig struct {
 	// to the account that holds it. Default OFF: such an address then signs
 	// in to nothing and is refused like a wrong code.
 	SignIn bool `json:"sign_in"`
-	// HoldSeconds is how long after a sign-in by a recovery email the
-	// account may not remove a recovery email or change its phone number.
-	// 0 selects 604800 (seven days); at most 2592000. It cannot be turned
-	// off.
+	// HoldSeconds is how long the recovery hold a sign-in by a recovery
+	// email starts lasts: a session that may have been opened by a recovery
+	// email makes no account security change, and the account is not
+	// merged, until it ends. 0 selects 604800 (seven days); at most 2592000.
+	// It cannot be turned off.
 	HoldSeconds int `json:"hold_seconds"`
 }
 

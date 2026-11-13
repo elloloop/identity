@@ -812,14 +812,17 @@ default; a control-plane project's `config_json` only).
 - Such a sign-in opens a session marked with the `amr` value
   `recovery_email`, and once every factor is proved it starts a hold for
   `recovery_emails.hold_seconds` (default seven days) and tells the account's
-  other addresses. During the hold that session cannot add or remove a
-  recovery email, change or remove the phone, enrol a second factor or a
-  passkey, link an identity provider, or approve a QR sign-in, so whoever got
-  into one recovery mailbox cannot take the rest of the account before the
-  owner has read the notice. A session opened any other way is not held: the
-  owner can always remove an address they do not recognise, and removing the
-  one that started the hold ends it. A sign-in from the same address does not
-  extend a hold already in force.
+  other addresses. During the hold that session makes no account security
+  change: it cannot add or remove a recovery email, the phone, a second
+  factor or its recovery codes, a passkey or a linked identity provider,
+  change the password or the primary email, end the account's other
+  sessions, or delete the account. So whoever got into one recovery mailbox
+  can neither take the rest of the account nor take it away from the owner
+  before the owner has read the notice. The session can still sign itself
+  out. It never approves a QR sign-in, hold or not. A session opened any
+  other way is not held: the owner can always remove an address they do not
+  recognise, and removing the one that started the hold ends it. A sign-in
+  from the same address does not extend a hold already in force.
 - Removing a recovery email ends every session it opened, in the same
   transaction: their refresh tokens are deleted, rotated ones included, and
   under `GATEWAY_REVOCATION_MODE=session` their access tokens stop working at

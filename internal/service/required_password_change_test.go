@@ -194,7 +194,7 @@ func TestRequiredPasswordChange_ClearedWhenTheUserSetsTheirOwn(t *testing.T) {
 	db := newErrorDB()
 	db.addUserWithPassword("user-1", "u@test.com", "U", "member", "active", hashPW(t, issuedPW))
 	db.nodes["user-1"].Payload[ufPasswordChangeRequired] = true
-	require.NoError(t, newProfileWithDB(db).ChangePassword(context.Background(), "user-1", issuedPW, strongPW))
+	require.NoError(t, newProfileWithDB(db).ChangePassword(context.Background(), "user-1", SessionSignIn{}, issuedPW, strongPW))
 	assert.Equal(t, false, db.nodes["user-1"].Payload[ufPasswordChangeRequired], "ChangePassword clears it")
 
 	svc, repo, rec := newAuthSvcWithMailer(t)

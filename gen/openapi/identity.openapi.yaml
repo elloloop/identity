@@ -4854,8 +4854,7 @@ paths:
          unique. A caller with no number gets their user back unchanged. A tenant
          that requires a verified phone can no longer be selected afterwards.
          Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
-         session a recovery email opened during a recovery hold
-         (RecoveryHoldDetails).
+         session a recovery hold binds (RecoveryHoldDetails).
       operationId: identity.v1.IdentityService.RemovePhone
       parameters:
         - name: Connect-Protocol-Version
@@ -10431,8 +10430,8 @@ components:
           title: hold_until
           format: int64
           description: |-
-            hold_until is when the hold on the account's recovery settings ends
-             (epoch ms), or 0 when none is in force. See RecoveryHoldDetails.
+            hold_until is when the account's recovery hold ends (epoch ms), or 0
+             when none is in force. See RecoveryHoldDetails.
       title: ListRecoveryEmailsResponse
       additionalProperties: false
     identity.v1.ListTenantDomainsRequest:
@@ -11573,12 +11572,19 @@ components:
          `recovery_hold` token) of a hold. A sign-in by a recovery email
          (`recovery_emails.sign_in`) starts one, once any second factor is proved,
          for the project's `recovery_emails.hold_seconds` (default 604800, seven
-         days). While it is in force, a session a recovery email opened cannot change
-         the account's recovery emails, phone, second factor, passkeys or linked
-         providers, so whoever got into a recovery mailbox cannot take the rest of
-         the account before the owner has had the notice; a session opened any other
-         way is not held, and removing the address that started the hold ends it.
-         Merging either account is refused, whoever asks.
+         days). While it is in force, a session a recovery email opened makes no
+         account security change: it cannot add or remove a recovery email, the
+         phone, a second factor or its recovery codes, a passkey or a linked
+         provider, change the password or the primary email, end another session
+         (RevokeSession of any session but its own, RevokeAllSessions,
+         SignOutEverywhere) or delete the account. So whoever got into a recovery
+         mailbox cannot take the rest of the account, or take it from the owner,
+         before the owner has had the notice. It can still sign itself out: Logout,
+         or RevokeSession of its own session where its token carries a `sid`. A
+         session opened any other way is not held, and removing the address that
+         started the hold ends it. Merging either account is refused, whoever asks.
+         Over native gRPC, a session whose `amr` the host does not forward is held
+         too (see the embedding guide).
     identity.v1.RedeemMagicLinkRequest:
       type: object
       properties:
