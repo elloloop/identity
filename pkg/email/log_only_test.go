@@ -53,9 +53,6 @@ func TestLogOnlySendLogsAtWarn(t *testing.T) {
 	}
 }
 
-// The log-only transport runs wherever no SMTP is configured, production
-// included. Its line must never carry the credential a sign-in or reset
-// message holds, nor the full address.
 func TestLogOnlyLogsTheContextFields(t *testing.T) {
 	t.Parallel()
 
@@ -73,6 +70,9 @@ func TestLogOnlyLogsTheContextFields(t *testing.T) {
 	}
 }
 
+// The log-only transport runs wherever no SMTP is configured, production
+// included. Its line must never carry the credential a sign-in or reset
+// message holds, nor the full address.
 func TestLogOnlyNeverLogsTheBodyOrTheFullAddress(t *testing.T) {
 	t.Parallel()
 

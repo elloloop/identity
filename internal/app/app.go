@@ -1314,14 +1314,16 @@ func buildDomainService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *
 // absent (the memory driver has no control plane). The Connect handler treats nil
 // as "disabled" and returns CodeUnimplemented.
 //
-// mailDelivers tells the service whether mailer delivers (an injected
-// transport or a configured provider chain, not the log-only fallback). When
-// it does not, CreateTenantInvitation returns the raw token in its response so
-// a headless deployment can still complete the flow. users resolves a caller
-// in the request's project (RepositoryUserDirectory over the boot
-// repository), as accounts are partitioned by project. deps.DomainStore,
-// when present, backs joining by domain. auditLog receives the CreateTenant,
-// ownership-transfer and join trail.
+// mailDelivers tells the service whether mailer's Send reports delivery (an
+// injected transport or a configured provider chain, even one with no valid
+// provider) rather than being the log-only fallback for a server with no SMTP
+// settings. For that fallback alone CreateTenantInvitation returns the raw
+// token in its response, so a headless deployment can still complete the
+// flow. users resolves a caller in the request's project
+// (RepositoryUserDirectory over the boot repository), as accounts are
+// partitioned by project. deps.DomainStore, when present, backs joining by
+// domain. auditLog receives the CreateTenant, ownership-transfer and join
+// trail.
 func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, mailDelivers bool, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
 	if !membershipServiceServed(deps) {
 		return nil

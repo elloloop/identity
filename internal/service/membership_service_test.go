@@ -259,13 +259,13 @@ func newMembershipFixtureNoMail() *membershipFixture {
 	return newMembershipFixtureWith(false, &config.Config{})
 }
 
-func newMembershipFixtureWith(mailerConfigured bool, cfg *config.Config) *membershipFixture {
+func newMembershipFixtureWith(mailerDelivers bool, cfg *config.Config) *membershipFixture {
 	inv := newFakeInvitationStore()
 	mem := newFakeMembershipStore()
 	tnt := newFakeTenantStore()
 	usr := newFakeUserDirectory()
 	mailer := &recordingMailer{}
-	svc := NewMembershipService(inv, mem, tnt, usr, mailer, mailerConfigured, cfg, nil)
+	svc := NewMembershipService(inv, mem, tnt, usr, mailer, mailerDelivers, cfg, nil)
 	return &membershipFixture{
 		svc: svc, invitations: inv, memberships: mem, tenants: tnt, users: usr, mailer: mailer,
 	}
@@ -408,6 +408,35 @@ func TestCreateTenantInvitation_SendFailureReportsFailed(t *testing.T) {
 	stored := f.invitations.byID[f.invitations.key(mTestProject, out.Invitation.ID)]
 	require.NotNil(t, stored, "the invitation is stored before the email is sent")
 	require.Equal(t, InvitationStatusPending, stored.Status)
+}
+
+// An email that cannot be built (here, an invalid sender address the mailer
+// refuses before any provider sees it) fails like a send nobody accepted.
+func TestCreateTenantInvitation_UnbuildableEmailReportsFailed(t *testing.T) {
+	provider := &recordingMailer{}
+	f := newMembershipFixture()
+	f.svc = NewMembershipService(f.invitations, f.memberships, f.tenants, f.users,
+		email.NewChain(zap.NewNop(), provider), true, &config.Config{SMTPFrom: "not an address"}, nil)
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	require.NoError(t, err)
+	require.Equal(t, EmailSendFailed, out.EmailStatus)
+	require.Empty(t, out.RawToken)
+	require.Zero(t, provider.count(), "no provider was handed the email")
+}
+
+// A service wired without a mailer never claims delivery, whatever it is
+// told: it falls back to the log-only transport and hands the token back.
+func TestNewMembershipService_NilMailerIsNotConfigured(t *testing.T) {
+	f := newMembershipFixture()
+	f.svc = NewMembershipService(f.invitations, f.memberships, f.tenants, f.users, nil, true, &config.Config{}, nil)
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	require.NoError(t, err)
+	require.Equal(t, EmailNotConfigured, out.EmailStatus)
+	require.NotEmpty(t, out.RawToken)
 }
 
 // Every line logged for an invitation's email, by the service and by the

@@ -514,10 +514,12 @@ const (
 	// A configured mail provider accepted the email. It does not confirm the
 	// email reached the inbox.
 	EmailSendStatus_EMAIL_SEND_STATUS_SENT EmailSendStatus = 1
-	// No configured mail provider accepted the email (each one refused it or
-	// could not be reached), or the email could not be built.
+	// No mail provider accepted the email: each configured one refused it or
+	// could not be reached, the server's mail settings name no valid
+	// provider, or the email could not be built (an invalid sender address,
+	// say).
 	EmailSendStatus_EMAIL_SEND_STATUS_FAILED EmailSendStatus = 2
-	// The server has no mail provider configured, so no email was sent.
+	// The server has no mail settings at all, so no email was sent.
 	EmailSendStatus_EMAIL_SEND_STATUS_NOT_CONFIGURED EmailSendStatus = 3
 )
 
@@ -13713,9 +13715,11 @@ type CreateTenantInvitationResponse struct {
 	// empty, because the token belongs in the recipient's inbox, not the API
 	// response.
 	RawToken string `protobuf:"bytes,2,opt,name=raw_token,json=rawToken,proto3" json:"raw_token,omitempty"`
-	// email_send_status is what became of this invitation's email. It is
-	// reported here only and not stored: the invitation is created and open
-	// whatever it says.
+	// email_send_status is what became of the one attempt this call made,
+	// synchronously, to send the invitation's email. It is reported here only
+	// and not stored: the invitation is created and open whatever it says. On
+	// FAILED, call CreateTenantInvitation again once the resend cooldown has
+	// passed; that revokes the open invitation and sends a new one.
 	EmailSendStatus EmailSendStatus `protobuf:"varint,3,opt,name=email_send_status,json=emailSendStatus,proto3,enum=identity.v1.EmailSendStatus" json:"email_send_status,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache

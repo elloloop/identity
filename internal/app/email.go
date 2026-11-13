@@ -15,15 +15,17 @@ import (
 //  1. If cfg.SMTPProviders is non-empty, parse it as JSON
 //     ([]email.SMTPConfig) and chain the valid providers in order.
 //  2. Else if cfg.SMTPHost is set, a chain of that single SMTP provider.
-//  3. Otherwise a LogOnly transport, with a warning that email is
+//  3. Else if either is set but names no valid provider, an empty chain,
+//     whose every Send fails, logged at ERROR.
+//  4. Otherwise a LogOnly transport, with a warning that email is
 //     effectively disabled.
 //
 // The transport is never nil. A chain holds only real providers, so its
-// Send fails when every provider failed; delivers is true only for a chain,
-// and the LogOnly fallback's nil from Send means nothing was sent.
-// Configuration errors (bad JSON, bad SMTP fields) are logged and the
-// failing provider is skipped; this avoids hard-failing the whole binary
-// because of a misconfigured secondary provider.
+// Send fails unless a provider accepted the message; delivers is true for
+// every chain, and false only for the LogOnly fallback, whose nil from Send
+// means nothing was sent. Configuration errors (bad JSON, bad SMTP fields)
+// are logged and the failing provider is skipped; this avoids hard-failing
+// the whole binary because of a misconfigured secondary provider.
 func buildEmailTransport(cfg *config.Config, logger *zap.Logger) (transport email.Transport, delivers bool) {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -33,7 +35,7 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) (transport emai
 	if cfg.SMTPProviders != "" {
 		var providers []email.SMTPConfig
 		if err := json.Unmarshal([]byte(cfg.SMTPProviders), &providers); err != nil {
-			logger.Warn(
+			logger.Error(
 				"smtp_providers_parse_failed",
 				zap.Error(err),
 				zap.String("hint", "GATEWAY_SMTP_PROVIDERS must be a JSON array of email.SMTPConfig"),
@@ -58,9 +60,9 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) (transport emai
 				)
 				return email.NewChain(logger, transports...), true
 			}
-			logger.Warn(
+			logger.Error(
 				"smtp_providers_empty_after_validation",
-				zap.String("note", "no usable SMTP providers parsed; falling back to log-only"),
+				zap.String("note", "no usable SMTP providers parsed"),
 			)
 		}
 	}
@@ -78,7 +80,7 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) (transport emai
 		}
 		t, err := email.NewSMTP(smtpCfg)
 		if err != nil {
-			logger.Warn("smtp_single_provider_invalid", zap.Error(err))
+			logger.Error("smtp_single_provider_invalid", zap.Error(err))
 		} else {
 			logger.Info(
 				"email_smtp_configured",
@@ -91,7 +93,17 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) (transport emai
 		}
 	}
 
-	// (3) Nothing configured — log-only.
+	// (3) Configured, but no valid provider.
+	if cfg.SMTPProviders != "" || cfg.SMTPHost != "" {
+		logger.Error(
+			"email_smtp_no_valid_provider",
+			zap.String("hint",
+				"every email send fails until GATEWAY_SMTP_HOST or GATEWAY_SMTP_PROVIDERS names a valid provider"),
+		)
+		return email.NewChain(logger), true
+	}
+
+	// (4) Nothing configured — log-only.
 	logger.Warn(
 		"email_disabled_no_transport_configured",
 		zap.String("hint",

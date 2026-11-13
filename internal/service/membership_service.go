@@ -102,12 +102,13 @@ type MembershipService struct {
 	// JoinTenantByDomain unimplemented.
 	domains DomainStore
 	mailer  email.Transport
-	// mailerConfigured reports whether mailer delivers: its Send returns nil
+	// mailerDelivers reports whether mailer delivers: its Send returns nil
 	// only when a mail provider accepted the message. When false, mailer is
-	// the log-only fallback and CreateTenantInvitation returns the raw token
-	// in its response so a headless/dev deployment can still complete the
-	// flow; when true the token travels only in the email.
-	mailerConfigured bool
+	// the log-only fallback of a server with no mail provider configured, and
+	// CreateTenantInvitation returns the raw token in its response so a
+	// headless/dev deployment can still complete the flow; when true the
+	// token travels only in the email.
+	mailerDelivers bool
 	cfg              *config.Config
 	logger           *zap.Logger
 	// audit records CreateTenant outcomes, ownership transfers and joins by
@@ -116,23 +117,25 @@ type MembershipService struct {
 	nowFunc func() time.Time
 }
 
-// NewMembershipService wires a MembershipService. mailer must be non-nil (the
-// app builds a log-only transport when no provider is configured);
-// mailerConfigured tells the service whether that transport actually
-// delivers, which governs whether the raw token is returned in the RPC
-// response. A nil logger defaults to a no-op.
+// NewMembershipService wires a MembershipService. mailerDelivers tells the
+// service whether mailer actually delivers, which governs whether the raw
+// token is returned in the RPC response. A nil mailer defaults to a log-only
+// transport, which never delivers, and a nil logger to a no-op.
 func NewMembershipService(
 	invitations InvitationStore,
 	memberships MembershipStore,
 	tenants TenantStore,
 	users UserDirectory,
 	mailer email.Transport,
-	mailerConfigured bool,
+	mailerDelivers bool,
 	cfg *config.Config,
 	logger *zap.Logger,
 ) *MembershipService {
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+	if mailer == nil {
+		mailer, mailerDelivers = email.NewLogOnly(logger), false
 	}
 	return &MembershipService{
 		invitations:      invitations,
@@ -140,7 +143,7 @@ func NewMembershipService(
 		tenants:          tenants,
 		users:            users,
 		mailer:           mailer,
-		mailerConfigured: mailerConfigured,
+		mailerDelivers:   mailerDelivers,
 		cfg:              cfg,
 		logger:           logger,
 		nowFunc:          time.Now,
@@ -148,8 +151,8 @@ func NewMembershipService(
 }
 
 // CreatedInvitation is the result of CreateTenantInvitation: the stored
-// invitation, what became of its email, and, ONLY when no mailer is
-// configured, the raw token (so a headless deployment can hand it to the
+// invitation, what became of its email's one synchronous send, and, ONLY
+// when no mailer is configured, the raw token (so a headless deployment can hand it to the
 // recipient out-of-band). With a mailer configured RawToken is empty.
 type CreatedInvitation struct {
 	Invitation  *TenantInvitation
@@ -163,8 +166,8 @@ type EmailSendStatus int
 const (
 	// EmailSent: a configured mail provider accepted the email.
 	EmailSent EmailSendStatus = iota + 1
-	// EmailSendFailed: no configured provider accepted the email, or it
-	// could not be rendered.
+	// EmailSendFailed: no configured provider accepted the email, none is
+	// valid, or the email could not be built (an invalid sender address, say).
 	EmailSendFailed
 	// EmailNotConfigured: no mail provider is configured, so nothing was
 	// sent.
@@ -175,9 +178,11 @@ const (
 // must be an active owner/admin member of the tenant. It generates a random
 // token, stores its hash via InvitationStore.CreateInvitation (which
 // atomically revokes any prior open invite for the same recipient), and
-// then sends a branded invitation email carrying the raw token. A failed
-// send does not fail the call: the invitation stays stored and open, and
-// EmailStatus reports the outcome.
+// then sends a branded invitation email carrying the raw token, once and in
+// the request. A failed send does not fail the call: the invitation stays
+// stored and open, and EmailStatus reports that attempt. Calling again once
+// the resend cooldown has passed revokes the open invitation and sends a new
+// one.
 //
 // Every invitation sends an email, so the store refuses one past the limits
 // (see invitationLimits): ErrInvitationLimited past the per-tenant cap,
@@ -241,7 +246,7 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	sendErr := s.sendInvitationEmail(ctx, inv, rawToken)
 	out := &CreatedInvitation{Invitation: inv}
 	switch {
-	case !s.mailerConfigured:
+	case !s.mailerDelivers:
 		// No delivery channel: surface the token so the caller can hand it
 		// over out-of-band. The token never accompanies a configured mailer,
 		// even one that failed, as it belongs in the recipient's inbox.

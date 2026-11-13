@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"
@@ -188,10 +190,10 @@ func TestBuildEmailTransport(t *testing.T) {
 		delivers bool
 	}{
 		{"log only", &config.Config{}, false},
-		{"bad json providers", &config.Config{SMTPProviders: "not-json"}, false},
-		{"invalid json provider", &config.Config{SMTPProviders: `[{"Host":"","Port":2525}]`}, false},
+		{"bad json providers", &config.Config{SMTPProviders: "not-json"}, true},
+		{"invalid json provider", &config.Config{SMTPProviders: `[{"Host":"","Port":2525}]`}, true},
 		{"valid json provider", &config.Config{SMTPProviders: `[{"Host":"smtp.example.com","Port":2525,"From":"noreply@example.com"}]`}, true},
-		{"invalid single provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: -1}, false},
+		{"invalid single provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: -1}, true},
 		{"valid single starttls provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: 587, SMTPFrom: "noreply@example.com", SMTPTLS: true}, true},
 		{"valid single tls provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: 465, SMTPFrom: "noreply@example.com", SMTPTLS: true}, true},
 	}
@@ -203,6 +205,35 @@ func TestBuildEmailTransport(t *testing.T) {
 			}
 			if delivers != tc.delivers {
 				t.Fatalf("delivers = %v, want %v", delivers, tc.delivers)
+			}
+		})
+	}
+}
+
+// SMTP settings that name no valid provider are an error, not a server with
+// no mail: every send fails (so a tenant invitation reports FAILED and keeps
+// its token out of the response) instead of being dropped into the log.
+func TestBuildEmailTransportWithNoValidProviderFailsEverySend(t *testing.T) {
+	msg := email.Message{To: "invitee@example.com", From: "noreply@example.com", Subject: "s", Text: "t"}
+	for name, cfg := range map[string]*config.Config{
+		"bad json providers":      {SMTPProviders: "not-json"},
+		"invalid json provider":   {SMTPProviders: `[{"Host":"","Port":2525}]`},
+		"invalid single provider": {SMTPHost: "smtp.example.com", SMTPPort: -1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			core, logs := observer.New(zapcore.DebugLevel)
+			transport, delivers := buildEmailTransport(cfg, zap.New(core))
+			if !delivers {
+				t.Fatal("delivers = false, want true")
+			}
+			if lines := logs.FilterMessage("email_smtp_no_valid_provider").FilterLevelExact(zapcore.ErrorLevel).Len(); lines != 1 {
+				t.Fatalf("email_smtp_no_valid_provider at ERROR logged %d times, want 1", lines)
+			}
+			if lines := logs.FilterMessage("email_disabled_no_transport_configured").Len(); lines != 0 {
+				t.Fatal("invalid SMTP settings logged as no mail configured")
+			}
+			if err := transport.Send(context.Background(), msg); !errors.Is(err, email.ErrTransport) {
+				t.Fatalf("Send = %v, want an email.ErrTransport failure", err)
 			}
 		})
 	}

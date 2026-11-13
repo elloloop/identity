@@ -1,20 +1,27 @@
 # Upgrade guide
 
-## Next — `CreateTenantInvitation` reports whether its email was sent: `email_send_status` (additive field and enum; no migration; behaviour change for mail logs when every SMTP provider fails and for SMTP settings that are all invalid; `email.ContextWithLogFields`, `service.EmailSendStatus`, `CreatedInvitation.EmailStatus` (Go API))
+## Next — `CreateTenantInvitation` reports whether its email was sent: `email_send_status` (additive field and enum; no migration; behaviour change for mail logs and spans when every SMTP provider fails, and for SMTP settings that name no valid provider; `email.ContextWithLogFields`, `service.EmailSendStatus`, `CreatedInvitation.EmailStatus`, a nil mailer in `NewMembershipService` (Go API))
 
-`CreateTenantInvitation` stores the invitation and then sends its email in the
-same call, and a failed send does not fail the call. Until now the response
-did not say whether the email went out, and when every SMTP provider failed
-the server still logged `email_sent`. The order and the sending are unchanged;
-the outcome is now reported.
+`CreateTenantInvitation` stores the invitation and then sends its email once,
+synchronously, in the same call, and a failed send does not fail the call.
+Until now the response did not say whether the email went out, and when every
+SMTP provider failed the server still logged `email_sent`. The order and the
+sending are unchanged; the outcome is now reported.
 
-- **`CreateTenantInvitationResponse.email_send_status`** (`EmailSendStatus`):
-  `EMAIL_SEND_STATUS_SENT` when a configured mail provider accepted the email
-  (not proof it reached the inbox), `EMAIL_SEND_STATUS_FAILED` when none did
-  or the email could not be built, and `EMAIL_SEND_STATUS_NOT_CONFIGURED` when
-  the server has no mail provider, the one case `raw_token` is populated. The
-  status is returned only, never stored; a caller that needs it later records
-  it. A server older than this returns `EMAIL_SEND_STATUS_UNSPECIFIED`.
+- **`CreateTenantInvitationResponse.email_send_status`** (`EmailSendStatus`)
+  reports that one attempt: `EMAIL_SEND_STATUS_SENT` when a configured mail
+  provider accepted the email (not proof it reached the inbox);
+  `EMAIL_SEND_STATUS_FAILED` when no provider accepted it, the SMTP settings
+  name no valid provider, or the email could not be built (an invalid sender
+  address, say); and `EMAIL_SEND_STATUS_NOT_CONFIGURED` when the server has no
+  SMTP settings at all, the one case `raw_token` is populated. The status is
+  returned only, never stored; a caller that needs it later records it. A
+  server older than this returns `EMAIL_SEND_STATUS_UNSPECIFIED`.
+- **Recovering from `FAILED`.** The invitation is stored and open, but its
+  token reached nobody. Call `CreateTenantInvitation` again for the same
+  address once the resend cooldown
+  (`GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS`) has passed: that
+  revokes the open invitation and sends a new one.
 - **A provider chain no longer ends in the log-only transport.** The chain
   built from `GATEWAY_SMTP_HOST` or `GATEWAY_SMTP_PROVIDERS` holds only the
   configured providers, so when every one of them fails its send fails: the
@@ -25,13 +32,20 @@ the outcome is now reported.
   invitations, account-merge and duplicate-signup notices still succeed, and
   each now logs its own `*_send_failed` warning. Alert on `email_send_failed`
   rather than `email_disabled_no_transport` to catch a mail outage.
-- **SMTP settings that are all invalid now count as no mail provider.** When
-  `GATEWAY_SMTP_HOST` or `GATEWAY_SMTP_PROVIDERS` is set but no provider in it
-  is valid, the server already fell back to the log-only transport (and logs
-  `smtp_single_provider_invalid` or `smtp_providers_empty_after_validation`
-  at boot), yet `CreateTenantInvitation` still withheld the raw token. It now
-  returns `raw_token` with `EMAIL_SEND_STATUS_NOT_CONFIGURED`, as with no SMTP
-  settings at all.
+- **SMTP settings that name no valid provider are now an error, not "email
+  disabled".** When `GATEWAY_SMTP_HOST` or `GATEWAY_SMTP_PROVIDERS` is set but
+  no provider in it is valid, the server used to fall back to the log-only
+  transport, so every email was silently dropped. It now boots with an empty
+  provider chain: every send fails with `email_send_failed`, and a tenant
+  invitation reports `EMAIL_SEND_STATUS_FAILED` and still withholds
+  `raw_token`. Boot logs `email_smtp_no_valid_provider` at ERROR, and
+  `smtp_providers_parse_failed`, `smtp_providers_empty_after_validation` and
+  `smtp_single_provider_invalid` are raised from WARN to ERROR. Fix the
+  settings, or unset them to run with no mail.
+- **Spans.** An `email.Send` span that fails now records the email package's
+  sentinel (`email: transport failure` or `email: invalid message`) rather
+  than the provider's error text, which can quote the recipient's address.
+  The logs keep the full error.
 - **Logs.** The lines logged for an invitation's email (`email_sent`,
   `email_send_attempt_failed`, `email_send_failed`,
   `email_disabled_no_transport`, `tenant_invitation_send_failed`,
@@ -40,10 +54,11 @@ the outcome is now reported.
 - **Go API.** `email.ContextWithLogFields` puts fields on a context that a
   `Chain` or `LogOnly` transport adds to every line it logs for a send under
   it. `service.CreatedInvitation` gains `EmailStatus` (`service.EmailSendStatus`:
-  `EmailSent`, `EmailSendFailed`, `EmailNotConfigured`). An embedder that
-  supplies `EmailTransport` is taken to deliver, as before: its `Send`
-  returning nil reports the invitation's email as sent, and an error as
-  failed.
+  `EmailSent`, `EmailSendFailed`, `EmailNotConfigured`). `NewMembershipService`
+  takes a nil mailer as the log-only transport, which never delivers, as the
+  other services do. An embedder that supplies `EmailTransport` is taken to
+  deliver, as before: its `Send` returning nil reports the invitation's email
+  as sent, and an error as failed.
 
 ## Next — built with Go 1.26.11 for the `net/http` advisory (no API or schema change)
 

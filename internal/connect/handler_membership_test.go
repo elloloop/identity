@@ -118,7 +118,7 @@ func newMembershipSvc(
 	tnt service.TenantStore,
 	users service.UserDirectory,
 ) *service.MembershipService {
-	// mailerConfigured=false so the raw token surfaces in the response, which
+	// mailerDelivers=false so the raw token surfaces in the response, which
 	// the AcceptTenantInvitation handler test round-trips.
 	return service.NewMembershipService(inv, mem, tnt, users, email.NewLogOnly(zap.NewNop()), false, &config.Config{}, zap.NewNop())
 }

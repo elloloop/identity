@@ -8604,9 +8604,11 @@ components:
         emailSendStatus:
           title: email_send_status
           description: |-
-            email_send_status is what became of this invitation's email. It is
-             reported here only and not stored: the invitation is created and open
-             whatever it says.
+            email_send_status is what became of the one attempt this call made,
+             synchronously, to send the invitation's email. It is reported here only
+             and not stored: the invitation is created and open whatever it says. On
+             FAILED, call CreateTenantInvitation again once the resend cooldown has
+             passed; that revokes the open invitation and sends a new one.
           $ref: '#/components/schemas/identity.v1.EmailSendStatus'
       title: CreateTenantInvitationResponse
       additionalProperties: false
