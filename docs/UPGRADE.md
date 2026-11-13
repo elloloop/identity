@@ -190,12 +190,17 @@ now keep a list of addresses it has proved it controls.
   `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS` per account and per address and to
   `GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP`.
 - **One address, one account, per project.** An address that is an account's
-  recovery email cannot become any account's primary email: sign-up, an admin
-  or SCIM create or update, and a confirmed email change now answer
-  `ALREADY_EXISTS` for it (the code a sign-up proves the address with is
-  already spent by then). An address that is a primary email cannot be added
-  as a recovery email. Both directions hold under the same ASCII fold primary
-  emails use.
+  recovery email cannot become any account's primary email, and no answer to
+  a caller who is not signed in tells it apart from a free or a taken one:
+  `PasswordSignup` and passkey sign-up give the success-shaped decoy a taken
+  primary email gets (the same timing floor, and a notice to the address),
+  and an OAuth sign-in gets the `UNAUTHENTICATED` "sign in and link this
+  provider" an account the provider cannot prove gets. Callers that already
+  hold an account or an admin's authority are told plainly with
+  `ALREADY_EXISTS`: an anonymous account's upgrade, an admin or SCIM create,
+  invitation or update, and a confirmed email change. An address that is a
+  primary email cannot be added as a recovery email. Both directions hold
+  under the same ASCII fold primary emails use.
 - **Changes need a recent sign-in.** Adding and removing answer
   `FAILED_PRECONDITION` with the stable `reauthentication_required` token when
   the session's sign-in (`auth_time`) is older than the project's window: sign

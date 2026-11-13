@@ -160,7 +160,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
 
-	existing, err := s.repo(ctx).FindUserByEmail(ctx, email)
+	existing, err := s.signupAddressHolder(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +208,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		UpdatedAt:     msToTime(now),
 	})
 	if err != nil {
-		existing, lookupErr := s.repo(ctx).FindUserByEmail(ctx, email)
+		existing, lookupErr := s.signupAddressHolder(ctx, email)
 		if lookupErr == nil && existing != nil {
 			return s.handleDuplicatePasswordSignup(ctx, existing, email, name)
 		}
@@ -290,6 +290,31 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
+}
+
+// signupAddressHolder is the account a sign-up on email would collide with,
+// as the duplicate-signup handlers take it: the account whose primary email
+// it is, or, for an address an account keeps as a recovery email, that
+// account as reached at the address, so the notice goes to the mailbox the
+// sign-up named. nil when the address is free. A sign-up answers both the
+// same way, so neither is told apart from the other or from a free address.
+func (s *AuthService) signupAddressHolder(ctx context.Context, email string) (*User, error) {
+	if existing, err := s.repo(ctx).FindUserByEmail(ctx, email); err != nil || existing != nil {
+		return existing, err
+	}
+	held, err := s.repo(ctx).FindRecoveryEmailHolder(ctx, email)
+	if err != nil || held == nil {
+		return nil, err
+	}
+	holder, err := s.repo(ctx).GetUser(ctx, held.UserID)
+	if err != nil {
+		return nil, err
+	}
+	recipient := &User{ID: held.UserID, Email: held.Email}
+	if holder != nil {
+		recipient.Name = holder.Name
+	}
+	return recipient, nil
 }
 
 func (s *AuthService) handleDuplicatePasswordSignup(ctx context.Context, user *User, email, name string) (*LoginResult, error) {
@@ -1010,6 +1035,18 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	// email — an email-based first-time OAuth login links to a pre-existing
 	// password/passwordless account rather than duplicating it.
 	//
+	// An address an account keeps as a recovery email is that account's, and
+	// a provider never signs in through one: it is answered as an existing
+	// account the provider has not proved is, before and after the create
+	// (which refuses the address if it became a recovery email meanwhile).
+	held, err := s.repo(ctx).FindRecoveryEmailHolder(ctx, emailStr)
+	if err != nil {
+		return nil, false, err
+	}
+	if held != nil {
+		return nil, false, s.refuseProviderSignIn(ctx, held.UserID, identity.Provider, "provider_address_is_a_recovery_email")
+	}
+
 	// The provider proved the address it asserted, which is the account's only
 	// when no "+tag" outside Gmail was dropped to reach it.
 	user, isNew, err := s.resolveOrCreateUserByEmail(ctx, email, resolveOrCreateOpts{
@@ -1019,6 +1056,9 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		ipAddr:        ipAddr,
 		userAgent:     userAgent,
 	})
+	if errors.Is(err, ErrAlreadyExists) {
+		return nil, false, s.refuseProviderSignIn(ctx, "", identity.Provider, "provider_address_is_a_recovery_email")
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -1033,20 +1073,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		if linked, err := s.findLinkedOAuthUser(ctx, identity, emailStr, now); err != nil || linked != nil {
 			return linked, false, err
 		}
-		s.logger.Info("oauth_login_refused",
-			zap.String("reason", "provider_address_does_not_prove_account"),
-			zap.String("user_id", user.ID),
-			zap.String("provider", identity.Provider))
-		s.audit.Log(
-			ctx, audit.EventLoginFailure,
-			audit.WithActor(user.ID),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{
-				"reason":   "provider_address_does_not_prove_account",
-				"provider": identity.Provider,
-			}),
-		)
-		return nil, false, fmt.Errorf("%w: sign in and link this provider to use it", ErrUnauthenticated)
+		return nil, false, s.refuseProviderSignIn(ctx, user.ID, identity.Provider, "provider_address_does_not_prove_account")
 	}
 	if !isNew {
 		if err := s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now); err != nil {
@@ -1063,6 +1090,21 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		)
 	}
 	return user, isNew, nil
+}
+
+// refuseProviderSignIn answers a provider sign-in on an address an account
+// holds that the provider may not sign in to: the account signs in another
+// way and links the provider. reason says why in the log and the audit.
+func (s *AuthService) refuseProviderSignIn(ctx context.Context, userID, provider, reason string) error {
+	s.logger.Info("oauth_login_refused",
+		zap.String("reason", reason), zap.String("user_id", userID), zap.String("provider", provider))
+	s.audit.Log(
+		ctx, audit.EventLoginFailure,
+		audit.WithActor(userID),
+		audit.WithSuccess(false),
+		audit.WithDetails(map[string]any{"reason": reason, "provider": provider}),
+	)
+	return fmt.Errorf("%w: sign in and link this provider to use it", ErrUnauthenticated)
 }
 
 // findLinkedOAuthUser returns the account the provider identity is linked to,

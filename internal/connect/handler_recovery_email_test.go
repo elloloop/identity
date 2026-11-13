@@ -304,3 +304,37 @@ func TestLoginPolicyPhoneRuleRoundTripsThroughTheProto(t *testing.T) {
 	assert.Equal(t, []string{"91", "44"}, got.PhoneCallingCodes)
 	assert.Nil(t, loginPolicyToProto(&service.LoginPolicy{}).PhoneCallingCodes)
 }
+
+// On the wire, PasswordSignup answers an address an account keeps as a
+// recovery email exactly as it answers a free one and a taken one: the same
+// code, and the same fields filled.
+func TestHandler_PasswordSignup_RecoveryEmailCannotBeToldApart(t *testing.T) {
+	h, _ := newRecoveryEmailHarness(t, service.ProjectRecoveryEmailsConfig{Enabled: true})
+	ctx := context.Background()
+	uid := seedHandlerUser(t, h, "holder@example.com")
+	require.NoError(t, h.repo.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "spare@example.com", VerifiedAt: 1}, 5))
+
+	type shape struct {
+		code                  connect.Code
+		access, refresh, user bool
+		expiresIn             int32
+	}
+	shapes := map[string]shape{}
+	for _, addr := range []string{"free@example.com", "holder@example.com", "spare@example.com"} {
+		resp, err := h.client.PasswordSignup(ctx, withClientHeaders(connect.NewRequest(&identitypb.PasswordSignupRequest{
+			Email: addr, Password: strongPW,
+		})))
+		got := shape{code: connect.CodeOf(err)}
+		if err == nil {
+			m := resp.Msg
+			got = shape{
+				access: m.AccessToken != "", refresh: m.RefreshToken != "",
+				user: m.User != nil && m.User.Email == addr, expiresIn: m.ExpiresIn,
+			}
+		}
+		shapes[addr] = got
+	}
+	assert.Equal(t, shapes["free@example.com"], shapes["holder@example.com"])
+	assert.Equal(t, shapes["free@example.com"], shapes["spare@example.com"])
+	assert.True(t, shapes["spare@example.com"].access, "the answer is a success, as for a free address")
+}
