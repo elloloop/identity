@@ -862,7 +862,7 @@ func (r *pgRepository) ApplyAccountMerge(ctx context.Context, m service.AccountM
 
 	// The two accounts' phone claims are locked before their rows, the
 	// order ClaimPhoneNumber and ReleasePhoneNumber take them in.
-	if err := lockPhoneClaims(ctx, tx, r.projectID, "ApplyAccountMerge", m.SurvivorID, m.OtherID); err != nil {
+	if err := lockPhoneClaims(ctx, tx, r.projectID, "ApplyAccountMerge", "", m.SurvivorID, m.OtherID); err != nil {
 		return err
 	}
 
