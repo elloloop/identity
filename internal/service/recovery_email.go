@@ -282,6 +282,12 @@ func recoveryHoldOn(ctx context.Context, repo Repository, userID string, nowMs i
 // Every other session is free: the owner, signed in with the primary email,
 // a password, a passkey or an identity provider, can always remove an
 // address they do not recognise, and that ends the hold it started.
+//
+// Removing the address ends the hold because it ends the sessions the
+// address opened, in the same write. Another replica's session cache may
+// still pass such a session's access token for up to its TTL, and with
+// the address gone no hold would stop it, so a session that names its sid
+// is also refused, ErrUnauthenticated, once the store says it has ended.
 func refuseHeldSession(ctx context.Context, repo Repository, logger *zap.Logger, userID string, signIn SessionSignIn, nowMs int64) error {
 	if !signIn.mayBeRecoverySession() {
 		return nil
@@ -293,7 +299,18 @@ func refuseHeldSession(ctx context.Context, repo Repository, logger *zap.Logger,
 	if errors.Is(err, ErrRecoveryHold) {
 		logger.Info("account_security_change_refused_by_hold", zap.String("user_id", userID))
 	}
-	return err
+	if err != nil || signIn.SessionID == "" {
+		return err
+	}
+	session, err := repo.GetSessionBySid(ctx, signIn.SessionID)
+	if err != nil {
+		return fmt.Errorf("reading session: %w", err)
+	}
+	if session == nil || session.RevokedAtMs != 0 {
+		logger.Info("account_security_change_refused_ended_session", zap.String("user_id", userID))
+		return fmt.Errorf("%w: the session has ended", ErrUnauthenticated)
+	}
+	return nil
 }
 
 // refuseHeldSession is the package's refuseHeldSession on the request's

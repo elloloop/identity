@@ -103,8 +103,10 @@ func (f *recoveryEmailFixture) addSession(userID, id, sid string) {
 
 // heldChanges are the account security changes a session a recovery hold
 // binds may not make, each asked for by session: those that add a way in
-// or a way to recover the account, and those that take one away, end
-// another session, or delete the account.
+// or a way to recover the account, and those that take one away, replace
+// one, end another session, or delete the account. It is the list the
+// recovery-emails docs page (docs-site auth/recovery-emails) gives; keep
+// the two the same.
 func (f *recoveryEmailFixture) heldChanges(userID string, session SessionSignIn) map[string]func() error {
 	return map[string]func() error{
 		"RequestRecoveryEmail": func() error {
@@ -241,6 +243,51 @@ func TestRecoveryEmailSignIn_MarksTheSessionAndHoldsOnlyIt(t *testing.T) {
 	}
 	if until := f.holdUntil(t, user.ID); until != 0 {
 		t.Fatalf("hold after the address that started it was removed = %d, want 0", until)
+	}
+}
+
+// Removing the address ends the hold and, in the same write, the sessions
+// the address opened. Another replica's session cache can pass such a
+// session's access token for a while yet, and no hold binds it any more, so
+// it is refused every account security change once the store says it has
+// ended. A recovery session that is still live is not.
+func TestRecoveryHold_AnEndedRecoverySessionIsRefusedOnceItsAddressIsGone(t *testing.T) {
+	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
+	f.svc.cfg.RevocationMode = config.RevocationModeSession
+	f.svc.cfg.SMSEnabled = true
+	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	f.add(t, user, "spare@example.net")
+	f.repo.mu.Lock()
+	f.repo.users[user.ID].PhoneNumber, f.repo.users[user.ID].PhoneVerified = "+14155550199", true
+	f.repo.mu.Unlock()
+	result, err := f.signInWith(f.ctx, t, "spare@example.net")
+	if err != nil {
+		t.Fatalf("sign-in by the recovery email: %v", err)
+	}
+	claims, err := jwt.VerifyAccessToken(result.AccessToken, f.svc.signer, "", "", false)
+	if err != nil || claims.SID == "" {
+		t.Fatalf("the recovery session's token: sid %q, %v", claims.SID, err)
+	}
+	ended := SessionSignIn{AuthTimeSec: claims.AuthTime, AMR: claims.AMR, SessionID: claims.SID}
+
+	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net"); err != nil {
+		t.Fatalf("the owner removes the address: %v", err)
+	}
+	if until := f.holdUntil(t, user.ID); until != 0 {
+		t.Fatalf("hold after the address was removed = %d, want 0", until)
+	}
+	for name, change := range f.heldChanges(user.ID, ended) {
+		if err := change(); !errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRecoveryHold) {
+			t.Fatalf("%s by the ended recovery session = %v, want ErrUnauthenticated", name, err)
+		}
+	}
+
+	if _, err := f.repo.CreateSession(f.ctx, &SessionRecord{SID: "sid-live", UserID: user.ID}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	live := SessionSignIn{AuthTimeSec: f.now.Unix(), AMR: []string{AMRRecoveryEmail}, SessionID: "sid-live"}
+	if err := f.svc.refuseHeldSession(f.ctx, user.ID, live); err != nil {
+		t.Fatalf("a live recovery session with no hold in force = %v, want nil", err)
 	}
 }
 
