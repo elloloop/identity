@@ -3,7 +3,13 @@ package observability
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
+
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/idv"
@@ -136,5 +142,53 @@ func TestWrapMailer(t *testing.T) {
 	}
 	if f.last.Subject != "subj" {
 		t.Errorf("inner Send not invoked correctly: %+v", f.last)
+	}
+}
+
+// A send error can quote the recipient's address; the span records the
+// email package's address-free sentinel instead, while the caller still
+// gets the full error.
+func TestWrapMailer_SpanErrorCarriesNoAddress(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	prevTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() { otel.SetTracerProvider(prevTP) })
+
+	const address = "invitee@example.com"
+	for name, tc := range map[string]struct {
+		err  error
+		want error
+	}{
+		"provider refusal": {fmt.Errorf("%w: RCPT TO: 550 no such user %s", email.ErrTransport, address), email.ErrTransport},
+		"invalid message":  {fmt.Errorf("%w: invalid to address %q", email.ErrInvalidMessage, address), email.ErrInvalidMessage},
+		"unwrapped error":  {fmt.Errorf("dial failed for %s", address), email.ErrTransport},
+	} {
+		t.Run(name, func(t *testing.T) {
+			exporter.Reset()
+			err := WrapMailer(&fakeMailer{err: tc.err}).Send(context.Background(), email.Message{To: address, Subject: "s", Text: "t"})
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("Send = %v, want the inner error", err)
+			}
+			spans := exporter.GetSpans()
+			if len(spans) != 1 {
+				t.Fatalf("want 1 span, got %d", len(spans))
+			}
+			s := spans[0]
+			if s.Status.Description != tc.want.Error() {
+				t.Errorf("status = %q, want %q", s.Status.Description, tc.want.Error())
+			}
+			for _, ev := range s.Events {
+				for _, attr := range ev.Attributes {
+					if strings.Contains(attr.Value.String(), address) {
+						t.Errorf("span event %q attribute %s carries the address", ev.Name, attr.Key)
+					}
+				}
+			}
+		})
 	}
 }

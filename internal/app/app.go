@@ -155,6 +155,8 @@ type Deps struct {
 	// EmailTransport delivers outbound mail. If nil, New constructs a
 	// transport from cfg via buildEmailTransport (so production code
 	// only needs to populate this when a test wants a custom recorder).
+	// An injected transport is taken to deliver: its Send returning nil
+	// reports an invitation email as sent.
 	EmailTransport email.Transport
 
 	// SMSSender delivers outbound SMS for phone verification. If nil, New
@@ -746,9 +748,9 @@ func New(deps Deps) (*Built, error) {
 		repo = middleware.WrapSessionRepository(repo, sessionCache)
 	}
 
-	mailer := deps.EmailTransport
+	mailer, mailDelivers := deps.EmailTransport, deps.EmailTransport != nil
 	if mailer == nil {
-		mailer = buildEmailTransport(deps.Config, logger)
+		mailer, mailDelivers = buildEmailTransport(deps.Config, logger)
 	}
 	mailer = observability.WrapMailer(mailer)
 
@@ -864,7 +866,7 @@ func New(deps Deps) (*Built, error) {
 
 	domainSvc := buildDomainService(deps, auditLog, logger)
 	users := service.RepositoryUserDirectory(repo)
-	membershipSvc := buildMembershipService(deps, users, mailer, auditLog, logger)
+	membershipSvc := buildMembershipService(deps, users, mailer, mailDelivers, auditLog, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, users, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
@@ -1312,15 +1314,17 @@ func buildDomainService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *
 // absent (the memory driver has no control plane). The Connect handler treats nil
 // as "disabled" and returns CodeUnimplemented.
 //
-// mailerConfigured tells the service whether outbound mail actually delivers
-// (a real transport is wired, not just the log-only fallback). When it does
-// not, CreateTenantInvitation returns the raw token in its response so a
-// headless deployment can still complete the flow. users resolves a caller
-// in the request's project (RepositoryUserDirectory over the boot
-// repository), as accounts are partitioned by project. deps.DomainStore,
-// when present, backs joining by domain. auditLog receives the CreateTenant,
-// ownership-transfer and join trail.
-func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
+// mailDelivers tells the service whether mailer's Send reports delivery (an
+// injected transport or a configured provider chain, even one with no valid
+// provider) rather than being the log-only fallback for a server with no SMTP
+// settings. For that fallback alone CreateTenantInvitation returns the raw
+// token in its response, so a headless deployment can still complete the
+// flow. users resolves a caller in the request's project
+// (RepositoryUserDirectory over the boot repository), as accounts are
+// partitioned by project. deps.DomainStore, when present, backs joining by
+// domain. auditLog receives the CreateTenant, ownership-transfer and join
+// trail.
+func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, mailDelivers bool, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
 	if !membershipServiceServed(deps) {
 		return nil
 	}
@@ -1330,7 +1334,7 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 		deps.TenantStore,
 		users,
 		mailer,
-		mailDeliveryConfigured(deps),
+		mailDelivers,
 		deps.Config,
 		logger,
 	).WithAudit(auditLog).WithDomains(deps.DomainStore)
@@ -1391,27 +1395,6 @@ func buildDirectoryService(deps Deps, users service.Repository, auditLog *audit.
 		zap.Duration("rate_limit_window", rateLimitWindow(deps.Config)),
 		zap.Bool("require_verified_email", deps.Config.AuthRequireVerifiedEmail))
 	return service.NewDirectoryService(deps.DirectoryCredentials, users, deps.Config.AuthRequireVerifiedEmail, auditLog)
-}
-
-// mailDeliveryConfigured reports whether outbound mail actually delivers, as
-// opposed to the log-only fallback buildEmailTransport returns when nothing is
-// configured. It is true when either:
-//   - a custom EmailTransport was injected (a host or test wiring a real
-//     transport — the only reason to inject one is to deliver), or
-//   - the config wires a real SMTP provider (single host or the JSON chain),
-//     mirroring buildEmailTransport's provider selection.
-//
-// When false, CreateTenantInvitation surfaces the raw token in its response so
-// a deployment with no delivery channel can still hand it over out-of-band.
-func mailDeliveryConfigured(deps Deps) bool {
-	if deps.EmailTransport != nil {
-		return true
-	}
-	cfg := deps.Config
-	if cfg == nil {
-		return false
-	}
-	return cfg.SMTPHost != "" || cfg.SMTPProviders != ""
 }
 
 // wrapOAuthRegistry returns a registry whose Exchangers are wrapped

@@ -66,7 +66,7 @@ exactly as the container does. Set one to inject your own:
 | ---------------------------------- | ------------------------------------------------------- |
 | `Signer`                           | built from `Config.JWTSigner` (file or `kms_aws`)       |
 | `Repo` + `DB`                      | built from `Config.RepoDriver` (must be set together)   |
-| `EmailTransport`                   | built from SMTP settings (falls back to log-only)       |
+| `EmailTransport`                   | built from SMTP settings (falls back to log-only); a supplied one is taken to deliver, so its `Send` result is reported as a tenant invitation's `email_send_status` |
 | `SMSSender`                        | built from `GATEWAY_SMS_*` (log-only when SMS disabled)  |
 | `OAuthRegistry`                    | built from the OAuth client credentials in `Config`; a supplied one cannot be rebuilt with a host's own client (ADR-0019), so such an override is unavailable |
 | `IDVProvider`                      | built from `Config.IDVProvider` (may be disabled)       |

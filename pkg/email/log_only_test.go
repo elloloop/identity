@@ -53,9 +53,26 @@ func TestLogOnlySendLogsAtWarn(t *testing.T) {
 	}
 }
 
-// The log-only transport is the tail of every SMTP chain, so it runs in
-// production whenever every provider fails. Its line must never carry the
-// credential a sign-in or reset message holds, nor the full address.
+func TestLogOnlyLogsTheContextFields(t *testing.T) {
+	t.Parallel()
+
+	core, logs := observer.New(zapcore.WarnLevel)
+	ctx := ContextWithLogFields(context.Background(), zap.String("record_id", "rec-1"))
+	if err := NewLogOnly(zap.New(core)).Send(ctx, validMsg()); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	entries := logs.All()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 log entry, got %d", len(entries))
+	}
+	if got := entries[0].ContextMap()["record_id"]; got != "rec-1" {
+		t.Errorf("record_id field: got %v, want rec-1", got)
+	}
+}
+
+// The log-only transport runs wherever no SMTP is configured, production
+// included. Its line must never carry the credential a sign-in or reset
+// message holds, nor the full address.
 func TestLogOnlyNeverLogsTheBodyOrTheFullAddress(t *testing.T) {
 	t.Parallel()
 
