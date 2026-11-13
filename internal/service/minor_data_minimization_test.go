@@ -142,6 +142,61 @@ func TestRequestPhoneVerification_Minor_AdultAllowed(t *testing.T) {
 
 // ── Identity verification ───────────────────────────────────────────
 
+// requestRecoveryEmailAt asks, in a project that keeps recovery emails, for a
+// code to a recovery address on behalf of an account of the given age, and
+// returns how many messages were mailed and the refusal.
+func requestRecoveryEmailAt(t *testing.T, minimize bool, ageYears int) (int, error) {
+	t.Helper()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	if minimize {
+		enableMinorData(t, svc)
+	} else {
+		enableAgeGate(t, svc, false)
+	}
+	mailer := &recordingMailer{}
+	svc.mailer = mailer
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "account@example.com", Status: "active", DateOfBirthMs: dobAgeMs(ageYears)})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "project-a", RecoveryEmails: ProjectRecoveryEmailsConfig{Enabled: true},
+	})
+	err = svc.RequestRecoveryEmail(ctx, uid, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "spare@example.net")
+	return mailer.count(), err
+}
+
+func TestRequestRecoveryEmail_Minor_Blocked(t *testing.T) {
+	mailed, err := requestRecoveryEmailAt(t, true, 8)
+	if !errors.Is(err, ErrMinorDataMinimized) {
+		t.Fatalf("err = %v; want ErrMinorDataMinimized", err)
+	}
+	if mailed != 0 {
+		t.Fatalf("%d messages mailed for a child's recovery email, want none", mailed)
+	}
+}
+
+func TestRequestRecoveryEmail_MinimizationOff_ChildAllowed(t *testing.T) {
+	mailed, err := requestRecoveryEmailAt(t, false, 8)
+	if err != nil {
+		t.Fatalf("child refused while minimization off: %v", err)
+	}
+	if mailed != 1 {
+		t.Fatalf("%d messages mailed, want the code", mailed)
+	}
+}
+
+func TestRequestRecoveryEmail_Minor_AdultAllowed(t *testing.T) {
+	mailed, err := requestRecoveryEmailAt(t, true, 30)
+	if err != nil {
+		t.Fatalf("adult refused under minimization: %v", err)
+	}
+	if mailed != 1 {
+		t.Fatalf("%d messages mailed, want the code", mailed)
+	}
+}
+
 func TestBeginIdentityVerification_Minor_Blocked(t *testing.T) {
 	repo := newFakeRepo()
 	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: dobAgeMs(8)})
