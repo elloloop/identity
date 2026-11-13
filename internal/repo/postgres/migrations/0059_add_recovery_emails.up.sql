@@ -10,9 +10,13 @@
 -- the other table inside it.
 --
 -- last_sign_in_at_ms is when the address last signed in to its account (0 =
--- never). A sign-in by a recovery email starts a hold on the account's
--- recovery settings, measured from the latest of these, so the hold needs no
--- column of its own and follows the project's configured length.
+-- never), every sign-in included. hold_started_at_ms is when the latest hold
+-- the address started began: a sign-in by a recovery email starts a hold on
+-- the account's security settings unless one it started is still in force,
+-- which leaves the column as it is, so no sign-in extends its own hold. The
+-- account's hold is measured from the latest hold_started_at_ms among its
+-- addresses, so it needs no row of its own and follows the project's
+-- configured length.
 --
 -- recovery_email_codes is the emailed code that proves an address before a
 -- row is stored: at most one live code per user, as phone_verification_codes.
@@ -42,7 +46,8 @@ CREATE TABLE user_recovery_emails (
     email          TEXT NOT NULL CHECK (email <> ''),
     email_fold     TEXT COLLATE "C" GENERATED ALWAYS AS (lower(email COLLATE "C")) STORED,
     verified_at_ms BIGINT NOT NULL,
-    last_sign_in_at_ms BIGINT NOT NULL DEFAULT 0
+    last_sign_in_at_ms BIGINT NOT NULL DEFAULT 0,
+    hold_started_at_ms BIGINT NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX user_recovery_emails_project_email_fold_uidx
     ON user_recovery_emails (project_id, email_fold);

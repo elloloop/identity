@@ -622,9 +622,10 @@ func TestRecoveryEmailSignIn_RepeatedSignInsCannotLockTheOwnerOut(t *testing.T) 
 	if _, err := f.signInWith(f.ctx, t, "spare@example.net"); err != nil {
 		t.Fatalf("first sign-in: %v", err)
 	}
+	started := f.now.UnixMilli()
 	wantUntil := f.now.Add(7 * 24 * time.Hour).UnixMilli()
 	// Whoever holds the mailbox signs in again and again within the hold:
-	// it does not move.
+	// it does not move, and the list still says when each sign-in was.
 	for day := 1; day <= 6; day++ {
 		f.now = f.now.Add(24 * time.Hour)
 		if _, err := f.signInWith(f.ctx, t, "spare@example.net"); err != nil {
@@ -632,6 +633,10 @@ func TestRecoveryEmailSignIn_RepeatedSignInsCannotLockTheOwnerOut(t *testing.T) 
 		}
 		if until := f.holdUntil(t, user.ID); until != wantUntil {
 			t.Fatalf("hold after a sign-in on day %d = %d, want it still to end at %d", day, until, wantUntil)
+		}
+		listed, _, err := f.svc.ListRecoveryEmails(f.ctx, user.ID)
+		if err != nil || len(listed) != 1 || listed[0].LastSignInAt != f.now.UnixMilli() || listed[0].HoldStartedAt != started {
+			t.Fatalf("listed after a sign-in on day %d = %+v %v, want the sign-in last and the hold's start unmoved", day, listed, err)
 		}
 	}
 	// And the owner, signed in another way, adds and removes as they please
@@ -872,8 +877,9 @@ func TestProjectRecoveryEmailsConfig_Hold(t *testing.T) {
 		}
 	}
 	// The hold follows the configured length, not the one in force when the
-	// address signed in.
-	held := []*RecoveryEmail{{LastSignInAt: 1_000}, {LastSignInAt: 5_000}}
+	// address signed in, and is measured from the latest hold's start, not
+	// the latest sign-in.
+	held := []*RecoveryEmail{{HoldStartedAt: 1_000, LastSignInAt: 9_000}, {HoldStartedAt: 5_000, LastSignInAt: 5_000}}
 	if got := recoveryHoldUntil(held, 10*time.Second, 14_999); got != 15_000 {
 		t.Fatalf("hold end = %d, want 15000", got)
 	}

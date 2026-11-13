@@ -230,7 +230,7 @@ func (r *pgRepository) AddRecoveryEmail(ctx context.Context, e *service.Recovery
 
 func (r *pgRepository) ListRecoveryEmails(ctx context.Context, userID string) ([]*service.RecoveryEmail, error) {
 	const q = `
-		SELECT id, user_id, email, verified_at_ms, last_sign_in_at_ms
+		SELECT id, user_id, email, verified_at_ms, last_sign_in_at_ms, hold_started_at_ms
 		  FROM user_recovery_emails
 		 WHERE project_id = $1 AND user_id = $2
 		 ORDER BY verified_at_ms ASC, id ASC`
@@ -242,7 +242,7 @@ func (r *pgRepository) ListRecoveryEmails(ctx context.Context, userID string) ([
 	var out []*service.RecoveryEmail
 	for rows.Next() {
 		var e service.RecoveryEmail
-		if err := rows.Scan(&e.ID, &e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt, &e.HoldStartedAt); err != nil {
 			return nil, wrapPgErr("ListRecoveryEmails", err)
 		}
 		out = append(out, &e)
@@ -301,11 +301,11 @@ func (r *pgRepository) FindRecoveryEmailHolder(ctx context.Context, email string
 		return nil, nil
 	}
 	const q = `
-		SELECT id, user_id, email, verified_at_ms, last_sign_in_at_ms
+		SELECT id, user_id, email, verified_at_ms, last_sign_in_at_ms, hold_started_at_ms
 		  FROM user_recovery_emails
 		 WHERE project_id = $1 AND email_fold = $2`
 	var e service.RecoveryEmail
-	err := r.pool.QueryRow(ctx, q, r.projectID, service.FoldEmail(email)).Scan(&e.ID, &e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt)
+	err := r.pool.QueryRow(ctx, q, r.projectID, service.FoldEmail(email)).Scan(&e.ID, &e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt, &e.HoldStartedAt)
 	if noRows(err) {
 		return nil, nil
 	}
@@ -318,7 +318,8 @@ func (r *pgRepository) FindRecoveryEmailHolder(ctx context.Context, email string
 func (r *pgRepository) MarkRecoveryEmailSignIn(ctx context.Context, userID, id string, atMs, holdMs int64) error {
 	const q = `
 		UPDATE user_recovery_emails
-		   SET last_sign_in_at_ms = CASE WHEN last_sign_in_at_ms <= $4::bigint - $5::bigint THEN $4::bigint ELSE last_sign_in_at_ms END
+		   SET last_sign_in_at_ms = $4::bigint,
+		       hold_started_at_ms = CASE WHEN hold_started_at_ms <= $4::bigint - $5::bigint THEN $4::bigint ELSE hold_started_at_ms END
 		 WHERE project_id = $1 AND user_id = $2 AND id = $3`
 	tag, err := r.pool.Exec(ctx, q, r.projectID, userID, id, atMs, holdMs)
 	if err != nil {

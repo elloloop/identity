@@ -241,8 +241,10 @@ func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 	holdUntil := listed.Msg.HoldUntil
 	require.Greater(t, holdUntil, time.Now().Add(6*24*time.Hour).UnixMilli())
 	require.Len(t, listed.Msg.RecoveryEmails, 1)
-	assert.Equal(t, holdUntil-7*24*time.Hour.Milliseconds(), listed.Msg.RecoveryEmails[0].LastSignInAt,
+	assert.Equal(t, holdUntil-7*24*time.Hour.Milliseconds(), listed.Msg.RecoveryEmails[0].HoldStartedAt,
 		"the list says which address started the hold, and when")
+	assert.Equal(t, listed.Msg.RecoveryEmails[0].HoldStartedAt, listed.Msg.RecoveryEmails[0].LastSignInAt,
+		"and when it last signed in, here the same sign-in")
 
 	requireHold := func(err error) {
 		t.Helper()

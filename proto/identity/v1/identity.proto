@@ -734,10 +734,16 @@ message RecoveryEmail {
   string email = 1;
   int64 verified_at = 2; // epoch ms the address was proved
   // last_sign_in_at is when the address last signed in to the account (epoch
-  // ms), 0 when it never has. The address with the latest one started the
-  // hold ListRecoveryEmailsResponse.hold_until reports; removing it ends the
-  // hold.
+  // ms), every sign-in included, 0 when it never has.
   int64 last_sign_in_at = 3;
+  // hold_started_at is when the latest recovery hold this address started
+  // began (epoch ms), 0 when it never signed in: its first sign-in once no
+  // hold of its own was in force. A sign-in during that hold moves
+  // last_sign_in_at but not this, so it does not extend the hold. The hold
+  // ListRecoveryEmailsResponse.hold_until reports runs from the latest
+  // hold_started_at among the account's addresses, so it ends early only
+  // once every address whose hold is still in force has been removed.
+  int64 hold_started_at = 4;
 }
 
 message RequestRecoveryEmailRequest {
@@ -781,8 +787,9 @@ message ListRecoveryEmailsResponse {
 // mailbox cannot take the rest of the account, or take it from the owner,
 // before the owner has had the notice. It can still sign itself out: Logout,
 // or RevokeSession of its own session where its token carries a `sid`. A
-// session opened any other way is not held, and removing the address that
-// started the hold ends it. Merging either account is refused, whoever asks.
+// session opened any other way is not held, and removing every address whose
+// hold is still in force (RecoveryEmail.hold_started_at) ends the hold.
+// Merging either account is refused, whoever asks.
 // Once its address is removed, such a session makes none of these changes,
 // hold or not, for as long as its access token lasts: they answer
 // UNAUTHENTICATED. Over native gRPC, a session whose `amr` the host does not

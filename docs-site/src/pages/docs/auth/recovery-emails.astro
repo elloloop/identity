@@ -92,15 +92,18 @@ import { Code } from "astro-expressive-code/components";
   -d '{"email":"alice.spare@example.net","code":"123456"}'`} />
   <p>
     <code>ListRecoveryEmails</code> returns the addresses, oldest first, each
-    with <code>verified_at</code> and <code>last_sign_in_at</code> (epoch ms, 0
-    when it never signed in), and <code>hold_until</code>, when the account's
-    hold ends (0 when none is in force). It needs no recent sign-in and works
+    with <code>verified_at</code>, <code>last_sign_in_at</code>, its latest
+    sign-in, and <code>hold_started_at</code>, when the latest
+    <a href="#the-hold">hold</a> it started began (epoch ms, 0 when it never
+    signed in), and <code>hold_until</code>, when the account's hold ends (0
+    when none is in force). It needs no recent sign-in and works
     with the feature off. <code>RemoveRecoveryEmail</code> removes one address
     and returns what is left; it too works with the feature off.
   </p>
   <Code lang="json" code={`{
   "recoveryEmails": [
-    { "email": "alice.spare@example.net", "verifiedAt": "1730000000000", "lastSignInAt": "1730500000000" }
+    { "email": "alice.spare@example.net", "verifiedAt": "1730000000000",
+      "lastSignInAt": "1730700000000", "holdStartedAt": "1730500000000" }
   ],
   "holdUntil": "1731104800000"
 }`} />
@@ -223,8 +226,10 @@ import { Code } from "astro-expressive-code/components";
       <strong>The hold binds that session, not the owner.</strong> A session
       opened any other way (the primary email, a password, a passkey, a linked
       provider) is never held, so the owner can remove an address they do not
-      recognise at any time. <code>last_sign_in_at</code> says which address
-      started the hold, and removing it ends the hold.
+      recognise at any time. <code>hold_started_at</code> says which address
+      is keeping the account held: the hold runs from the latest one among the
+      account's addresses, so removing addresses ends it early only once every
+      address whose hold is still in force is gone.
     </li>
     <li>
       <strong>The held session can still sign itself out</strong>:
@@ -234,8 +239,9 @@ import { Code } from "astro-expressive-code/components";
     </li>
     <li>
       <strong>A sign-in does not extend its own address's hold.</strong> A
-      sign-in from an address whose hold is still in force leaves the hold's
-      end where it was. The hold is measured with the
+      sign-in from an address whose hold is still in force moves its
+      <code>last_sign_in_at</code> but not its <code>hold_started_at</code>, so
+      the hold's end stays where it was. The hold is measured with the
       <code>hold_seconds</code> configured now, not the one in force at the
       sign-in.
     </li>

@@ -160,7 +160,7 @@ now a setting, and none changes until it is set.
   `service.ErrSMSDisabled` is renamed `ErrPhoneVerificationUnavailable`, since
   it no longer means SMS alone.
 
-## Next — a recovery email signs in to its account, and the session it opens is held from account security changes: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claims `amr` and `recovery_email_id`, `ListRecoveryEmailsResponse.hold_until`, `RecoveryEmail.last_sign_in_at`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; native-gRPC hosts: new `identityserver.Options.GRPCTrustAMR`, **action required**; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` and `ProfileService` signatures (Go API))
+## Next — a recovery email signs in to its account, and the session it opens is held from account security changes: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claims `amr` and `recovery_email_id`, `ListRecoveryEmailsResponse.hold_until`, `RecoveryEmail.last_sign_in_at` and `hold_started_at`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; native-gRPC hosts: new `identityserver.Options.GRPCTrustAMR`, **action required**; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` and `ProfileService` signatures (Go API))
 
 A project whose accounts sign in by emailed code had no way back in for a
 person who lost their primary mailbox: the email change and the account merge
@@ -243,12 +243,17 @@ both ask for a password. A recovery email can now be that way.
   session, which it can name only under `GATEWAY_REVOCATION_MODE=session`,
   where its token carries a `sid`. A session opened any other way (the
   primary email, a password, a passkey, a provider) is never held, so the
-  owner can remove an address they do not recognise at any time; removing the
-  address that started the hold ends it. `ListRecoveryEmails` returns the
-  hold's end as `hold_until`, and each address's `last_sign_in_at`, so the
-  owner can tell which one started it. A sign-in from an address whose own
-  hold is still in force does not extend it. The hold is measured with the length
-  configured now, not the one in force at the sign-in.
+  owner can remove an address they do not recognise at any time.
+  `ListRecoveryEmails` returns the hold's end as `hold_until`, and for each
+  address `last_sign_in_at`, its latest sign-in, and `hold_started_at`, when
+  the latest hold it started began, so the owner can tell which one is
+  keeping the account held. A sign-in from an address whose own hold is still
+  in force moves its `last_sign_in_at` but not its `hold_started_at`, so it
+  does not extend the hold. The hold runs from the latest `hold_started_at`
+  among the account's addresses, so removing addresses ends it early only
+  once every address whose hold is still in force is gone. The hold is
+  measured with the length configured now, not the one in force at the
+  sign-in.
 - **Merges are held for everyone.** `MergeAccounts` and the admin
   `MergeUsers` answer the same `recovery_hold` refusal while a hold is in
   force on either account, whoever asks; the other account's hold is read only
@@ -290,8 +295,8 @@ both ask for a password. A recovery email can now be that way.
   session refused its account security changes (`recovery_session`).
 - **One more read on every emailed-code or link sign-in**: whether the proved
   address is a recovery email.
-- **Migration 0059** gives `user_recovery_emails` its `last_sign_in_at_ms`,
-  and `refresh_tokens` and `login_challenges` each a `recovery_email_id`
+- **Migration 0059** gives `user_recovery_emails` its `last_sign_in_at_ms`
+  and `hold_started_at_ms`, and `refresh_tokens` and `login_challenges` each a `recovery_email_id`
   column (SQLite: 0028), each with a constant default. A recovery session's
   refresh token is inserted with a `FOR SHARE` read of its address's row, so
   it waits on a removal in progress rather than outliving it.

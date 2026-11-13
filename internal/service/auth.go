@@ -650,9 +650,10 @@ type Repository interface {
 	// address (under FoldEmail) in the project, whose UserID is the account
 	// it signs in to, or nil when no account holds it.
 	// MarkRecoveryEmailSignIn stamps LastSignInAt = atMs on the account's
-	// address whose ID is id, unless the address signed in within holdMs
-	// before atMs: a sign-in does not extend the hold its own address
-	// started. An address the account does not hold is ErrNotFound.
+	// address whose ID is id, and HoldStartedAt = atMs too unless the hold
+	// that address started is still in force at atMs (HoldStartedAt within
+	// holdMs before it): a sign-in does not extend its own address's hold.
+	// An address the account does not hold is ErrNotFound.
 	FindRecoveryEmailHolder(ctx context.Context, email string) (*RecoveryEmail, error)
 	MarkRecoveryEmailSignIn(ctx context.Context, userID, id string, atMs, holdMs int64) error
 

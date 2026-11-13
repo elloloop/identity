@@ -85,7 +85,9 @@ func (h *IdentityHandler) RemoveRecoveryEmail(
 func recoveryEmailsToProto(held []*service.RecoveryEmail) []*identitypb.RecoveryEmail {
 	out := make([]*identitypb.RecoveryEmail, 0, len(held))
 	for _, e := range held {
-		out = append(out, &identitypb.RecoveryEmail{Email: e.Email, VerifiedAt: e.VerifiedAt, LastSignInAt: e.LastSignInAt})
+		out = append(out, &identitypb.RecoveryEmail{
+			Email: e.Email, VerifiedAt: e.VerifiedAt, LastSignInAt: e.LastSignInAt, HoldStartedAt: e.HoldStartedAt,
+		})
 	}
 	return out
 }

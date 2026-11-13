@@ -243,19 +243,18 @@ func (s *AuthService) ListRecoveryEmails(ctx context.Context, userID string) ([]
 // when none is in force. A sign-in by a recovery email starts one: whoever
 // got into a recovery mailbox must not be able to strip the account's other
 // addresses, ways in and sessions, move its phone, add a way in of their own
-// or delete the account before the owner has had the notice. Removing the
-// address that started a hold ends it.
+// or delete the account before the owner has had the notice. It is measured
+// from the latest HoldStartedAt among the account's addresses, so removing
+// addresses ends it early only once none whose hold is in force is left.
 func recoveryHoldUntil(held []*RecoveryEmail, hold time.Duration, nowMs int64) int64 {
-	var last int64
+	var latest int64
 	for _, e := range held {
-		if e.LastSignInAt > last {
-			last = e.LastSignInAt
-		}
+		latest = max(latest, e.HoldStartedAt)
 	}
-	if last == 0 {
+	if latest == 0 {
 		return 0
 	}
-	if until := last + hold.Milliseconds(); until > nowMs {
+	if until := latest + hold.Milliseconds(); until > nowMs {
 		return until
 	}
 	return 0

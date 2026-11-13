@@ -823,9 +823,10 @@ default; a control-plane project's `config_json` only).
   before the owner has read the notice. The session can still sign itself
   out. It never approves a QR sign-in, hold or not. A session opened any
   other way is not held: the owner can always remove an address they do not
-  recognise (`ListRecoveryEmails` says when each last signed in), and
-  removing the one that started the hold ends it. A sign-in from the same
-  address does not extend a hold already in force.
+  recognise (`ListRecoveryEmails` says when each last signed in and when the
+  latest hold it started began), and removing every address whose hold is
+  still in force ends the hold. A sign-in from the same address does not
+  extend a hold already in force.
 - Over native gRPC the session's `amr` and `recovery_email_id` reach
   identity only from a host that forwards them and says so (`GRPCTrustAMR`).
   Until then every session there is treated as one a recovery email may have

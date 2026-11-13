@@ -4906,10 +4906,16 @@ type RecoveryEmail struct {
 	Email      string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
 	VerifiedAt int64                  `protobuf:"varint,2,opt,name=verified_at,json=verifiedAt,proto3" json:"verified_at,omitempty"` // epoch ms the address was proved
 	// last_sign_in_at is when the address last signed in to the account (epoch
-	// ms), 0 when it never has. The address with the latest one started the
-	// hold ListRecoveryEmailsResponse.hold_until reports; removing it ends the
-	// hold.
-	LastSignInAt  int64 `protobuf:"varint,3,opt,name=last_sign_in_at,json=lastSignInAt,proto3" json:"last_sign_in_at,omitempty"`
+	// ms), every sign-in included, 0 when it never has.
+	LastSignInAt int64 `protobuf:"varint,3,opt,name=last_sign_in_at,json=lastSignInAt,proto3" json:"last_sign_in_at,omitempty"`
+	// hold_started_at is when the latest recovery hold this address started
+	// began (epoch ms), 0 when it never signed in: its first sign-in once no
+	// hold of its own was in force. A sign-in during that hold moves
+	// last_sign_in_at but not this, so it does not extend the hold. The hold
+	// ListRecoveryEmailsResponse.hold_until reports runs from the latest
+	// hold_started_at among the account's addresses, so it ends early only
+	// once every address whose hold is still in force has been removed.
+	HoldStartedAt int64 `protobuf:"varint,4,opt,name=hold_started_at,json=holdStartedAt,proto3" json:"hold_started_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4961,6 +4967,13 @@ func (x *RecoveryEmail) GetVerifiedAt() int64 {
 func (x *RecoveryEmail) GetLastSignInAt() int64 {
 	if x != nil {
 		return x.LastSignInAt
+	}
+	return 0
+}
+
+func (x *RecoveryEmail) GetHoldStartedAt() int64 {
+	if x != nil {
+		return x.HoldStartedAt
 	}
 	return 0
 }
@@ -5244,8 +5257,9 @@ func (x *ListRecoveryEmailsResponse) GetHoldUntil() int64 {
 // mailbox cannot take the rest of the account, or take it from the owner,
 // before the owner has had the notice. It can still sign itself out: Logout,
 // or RevokeSession of its own session where its token carries a `sid`. A
-// session opened any other way is not held, and removing the address that
-// started the hold ends it. Merging either account is refused, whoever asks.
+// session opened any other way is not held, and removing every address whose
+// hold is still in force (RecoveryEmail.hold_started_at) ends the hold.
+// Merging either account is refused, whoever asks.
 // Once its address is removed, such a session makes none of these changes,
 // hold or not, for as long as its access token lasts: they answer
 // UNAUTHENTICATED. Over native gRPC, a session whose `amr` the host does not
@@ -23899,12 +23913,13 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\"\x14\n" +
 	"\x12RemovePhoneRequest\"<\n" +
 	"\x13RemovePhoneResponse\x12%\n" +
-	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\"m\n" +
+	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\"\x95\x01\n" +
 	"\rRecoveryEmail\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1f\n" +
 	"\vverified_at\x18\x02 \x01(\x03R\n" +
 	"verifiedAt\x12%\n" +
-	"\x0flast_sign_in_at\x18\x03 \x01(\x03R\flastSignInAt\"3\n" +
+	"\x0flast_sign_in_at\x18\x03 \x01(\x03R\flastSignInAt\x12&\n" +
+	"\x0fhold_started_at\x18\x04 \x01(\x03R\rholdStartedAt\"3\n" +
 	"\x1bRequestRecoveryEmailRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\"\x1e\n" +
 	"\x1cRequestRecoveryEmailResponse\"F\n" +

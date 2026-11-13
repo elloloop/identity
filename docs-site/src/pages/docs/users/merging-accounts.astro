@@ -121,8 +121,8 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       Either account, whoever asks, while a recovery hold is in force on it: a
       recovery email signed in to it recently. The refusal carries the stable
       <code>recovery_hold</code> token and when the hold ends. The owner ends it
-      early by removing, signed in some other way, the recovery email that
-      started it.
+      early by removing, signed in some other way, every recovery email whose
+      hold is still in force.
     </li>
   </ul>
   <p>These refusals answer <code>FAILED_PRECONDITION</code>.</p>

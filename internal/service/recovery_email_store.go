@@ -17,9 +17,14 @@ type RecoveryEmail struct {
 	Email      string
 	VerifiedAt int64 // epoch ms
 	// LastSignInAt is when the address last signed in to the account (epoch
-	// ms; 0 = never). The latest across an account's addresses starts its
-	// recovery hold.
+	// ms; 0 = never), every sign-in included.
 	LastSignInAt int64
+	// HoldStartedAt is when the latest recovery hold this address started
+	// began (epoch ms; 0 = never): the time of its first sign-in once no hold
+	// of its own was in force. A sign-in within that hold leaves it, so no
+	// sign-in extends its own hold. The latest across an account's addresses
+	// is what the account's hold is measured from.
+	HoldStartedAt int64
 }
 
 // RecoveryEmailCodeRecord is the emailed code that proves a recovery address

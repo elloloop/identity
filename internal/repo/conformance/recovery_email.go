@@ -248,7 +248,7 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		}
 		got, err := r.FindRecoveryEmailHolder(ctx, "SPARE@example.net")
 		if err != nil || got == nil || got.UserID != uid || got.Email != "spare@example.net" || got.VerifiedAt != 10 || got.LastSignInAt != 0 ||
-			got.ID != recoveryEmailIDOf(t, r, uid, "spare@example.net") {
+			got.HoldStartedAt != 0 || got.ID != recoveryEmailIDOf(t, r, uid, "spare@example.net") {
 			t.Fatalf("holder = %#v %v", got, err)
 		}
 		id := got.ID
@@ -263,17 +263,18 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 			t.Fatalf("Mark of an ID the account does not hold: want ErrNotFound, got %v", err)
 		}
 		list, err := r.ListRecoveryEmails(ctx, uid)
-		if err != nil || len(list) != 1 || list[0].LastSignInAt != 5_000 {
-			t.Fatalf("List after Mark = %#v %v, want LastSignInAt 5000", list, err)
+		if err != nil || len(list) != 1 || list[0].LastSignInAt != 5_000 || list[0].HoldStartedAt != 5_000 {
+			t.Fatalf("List after Mark = %#v %v, want LastSignInAt and HoldStartedAt 5000", list, err)
 		}
-		// A sign-in within the hold its address started does not extend it;
-		// one once it has ended starts a new one.
-		for _, step := range []struct{ at, want int64 }{{5_999, 5_000}, {6_000, 6_000}} {
+		// Every sign-in is the address's last; one within the hold it started
+		// does not move the hold's start, so it does not extend the hold, and
+		// one once that hold has ended starts a new one.
+		for _, step := range []struct{ at, holdStarted int64 }{{5_999, 5_000}, {6_000, 6_000}} {
 			if err := r.MarkRecoveryEmailSignIn(ctx, uid, id, step.at, hold); err != nil {
 				t.Fatalf("Mark at %d: %v", step.at, err)
 			}
-			if got, _ := r.FindRecoveryEmailHolder(ctx, "spare@example.net"); got == nil || got.LastSignInAt != step.want {
-				t.Fatalf("holder after Mark at %d = %#v, want LastSignInAt %d", step.at, got, step.want)
+			if got, _ := r.FindRecoveryEmailHolder(ctx, "spare@example.net"); got == nil || got.LastSignInAt != step.at || got.HoldStartedAt != step.holdStarted {
+				t.Fatalf("holder after Mark at %d = %#v, want LastSignInAt %d and HoldStartedAt %d", step.at, got, step.at, step.holdStarted)
 			}
 		}
 	})

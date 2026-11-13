@@ -195,8 +195,10 @@ func (r *Repo) MarkRecoveryEmailSignIn(_ context.Context, userID, id string, atM
 	if i < 0 {
 		return fmt.Errorf("memory: MarkRecoveryEmailSignIn: %w", service.ErrNotFound)
 	}
-	if e := r.recoveryEmails[userID][i]; e.LastSignInAt <= atMs-holdMs {
-		e.LastSignInAt = atMs
+	e := r.recoveryEmails[userID][i]
+	e.LastSignInAt = atMs
+	if e.HoldStartedAt <= atMs-holdMs {
+		e.HoldStartedAt = atMs
 	}
 	return nil
 }
