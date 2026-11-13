@@ -846,8 +846,12 @@ default; a control-plane project's `config_json` only).
   asks.
 - A session a recovery email opened acts in a tenant only through an explicit
   membership: a tenant that admits members by their email's domain does not
-  admit it, so disabling a member's organisational mailbox is not undone by a
-  personal recovery address.
+  admit it. The limit binds that session, not the account: once the hold has
+  ended it may register a passkey or link a provider, whose sign-ins are
+  ordinary and act through the email's domain again. Disabling a member's
+  organisational mailbox therefore does not by itself end their access; the
+  organisation ends it with `SuspendTenantMember` or `RemoveTenantMember`, or
+  requires SSO in the tenant's login policy.
 
 ## Phone verification
 

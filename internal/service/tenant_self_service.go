@@ -215,10 +215,8 @@ func actsInTenant(t *UserTenant, domain string) bool {
 // memberDomain is the domain a session's account may be a tenant's member
 // through: verifiedEmailDomain, or "" for a session a recovery email opened.
 // That session proved a mailbox other than the account's email, so a tenant
-// that admits by the email's domain does not admit it, and an organisation
-// that disables a member's mailbox is not undone by a personal recovery
-// address. Explicit memberships (an invitation, an operator's add) still
-// apply.
+// that admits by the email's domain does not admit it. Explicit memberships
+// (an invitation, an operator's add) still apply.
 func memberDomain(user *User, byRecoveryEmail bool) string {
 	if byRecoveryEmail {
 		return ""

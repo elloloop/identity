@@ -35,12 +35,18 @@ import { Code } from "astro-expressive-code/components";
       code, nor put it in an error it returns.
     </li>
   </ul>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="On the deployment">
   <table>
-    <tr><th>Variable</th><th>Default</th><th>Meaning</th></tr>
-    <tr><td><code>GATEWAY_PHONE_CODE_TTL_SECONDS</code></td><td><code>300</code></td><td>How long a code lasts.</td></tr>
-    <tr><td><code>GATEWAY_PHONE_CODE_MAX_ATTEMPTS</code></td><td><code>5</code></td><td>Guesses a code takes, the right one included, before it is spent.</td></tr>
-    <tr><td><code>GATEWAY_PHONE_CODE_COOLDOWN_SECONDS</code></td><td><code>60</code></td><td>The least time between two codes for one account.</td></tr>
+    <thead>
+      <tr><th scope="col">Variable</th><th scope="col">Default</th><th scope="col">Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>GATEWAY_PHONE_CODE_TTL_SECONDS</code></td><td><code>300</code></td><td>How long a code lasts.</td></tr>
+      <tr><td><code>GATEWAY_PHONE_CODE_MAX_ATTEMPTS</code></td><td><code>5</code></td><td>Guesses a code takes, the right one included, before it is spent.</td></tr>
+      <tr><td><code>GATEWAY_PHONE_CODE_COOLDOWN_SECONDS</code></td><td><code>60</code></td><td>The least time between two codes for one account.</td></tr>
+    </tbody>
   </table>
+  </div>
 
   <h2 id="project">Per project</h2>
   <p>
@@ -59,44 +65,50 @@ import { Code } from "astro-expressive-code/components";
     "message_language": "en"
   }
 }`} />
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Per project">
   <table>
-    <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
-    <tr>
-      <td><code>enabled</code></td>
-      <td>unset (follows the deployment)</td>
-      <td><code>false</code> turns verification off for the project. <code>true</code> changes nothing: a project cannot verify phones without a sender.</td>
-    </tr>
-    <tr>
-      <td><code>unique</code></td>
-      <td><code>false</code></td>
-      <td>A verified number belongs to one account of the project.</td>
-    </tr>
-    <tr>
-      <td><code>reassign_after_seconds</code></td>
-      <td><code>0</code> (never; at most <code>315360000</code>, ten years)</td>
-      <td>With <code>unique</code>: how long after its holder verified a number another account that proves it may take it.</td>
-    </tr>
-    <tr>
-      <td><code>allowed_calling_codes</code></td>
-      <td><code>[]</code> (every code)</td>
-      <td>Country calling codes accepted, as 1 to 3 digits without the <code>+</code>. One code can cover several countries (<code>1</code> covers the whole North American numbering plan), so this narrows by calling code, not by country.</td>
-    </tr>
-    <tr>
-      <td><code>channels</code></td>
-      <td><code>[]</code> (<code>["sms"]</code>)</td>
-      <td>The delivery order: <code>"sms"</code>, <code>"message"</code>. A channel left out is never used.</td>
-    </tr>
-    <tr>
-      <td><code>message_template</code></td>
-      <td><code>""</code></td>
-      <td>The template the message channel sends, as registered with the provider. Required when <code>channels</code> lists <code>"message"</code>.</td>
-    </tr>
-    <tr>
-      <td><code>message_language</code></td>
-      <td><code>""</code></td>
-      <td>The template's language code, when the provider needs one.</td>
-    </tr>
+    <thead>
+      <tr><th scope="col">Key</th><th scope="col">Default</th><th scope="col">Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>enabled</code></td>
+        <td>unset (follows the deployment)</td>
+        <td><code>false</code> turns verification off for the project. <code>true</code> changes nothing: a project cannot verify phones without a sender.</td>
+      </tr>
+      <tr>
+        <td><code>unique</code></td>
+        <td><code>false</code></td>
+        <td>A verified number belongs to one account of the project.</td>
+      </tr>
+      <tr>
+        <td><code>reassign_after_seconds</code></td>
+        <td><code>0</code> (never; at most <code>315360000</code>, ten years)</td>
+        <td>With <code>unique</code>: how long after its holder verified a number another account that proves it may take it.</td>
+      </tr>
+      <tr>
+        <td><code>allowed_calling_codes</code></td>
+        <td><code>[]</code> (every code)</td>
+        <td>Country calling codes accepted, as 1 to 3 digits without the <code>+</code>. One code can cover several countries (<code>1</code> covers the whole North American numbering plan), so this narrows by calling code, not by country.</td>
+      </tr>
+      <tr>
+        <td><code>channels</code></td>
+        <td><code>[]</code> (<code>["sms"]</code>)</td>
+        <td>The delivery order: <code>"sms"</code>, <code>"message"</code>. A channel left out is never used.</td>
+      </tr>
+      <tr>
+        <td><code>message_template</code></td>
+        <td><code>""</code></td>
+        <td>The template the message channel sends, as registered with the provider. Required when <code>channels</code> lists <code>"message"</code>.</td>
+      </tr>
+      <tr>
+        <td><code>message_language</code></td>
+        <td><code>""</code></td>
+        <td>The template's language code, when the provider needs one.</td>
+      </tr>
+    </tbody>
   </table>
+  </div>
   <p>
     The channels are tried in order and the first that accepts the message
     wins; one that fails is logged and the next is tried. A project switched
@@ -126,17 +138,23 @@ curl -sX POST http://localhost/identity.v1.IdentityService/VerifyPhoneCode \\
     code like any other: whether a number is taken is told only to a caller
     whose code was right.
   </p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Verifying and removing a number">
   <table>
-    <tr><th>Answer</th><th>When</th></tr>
-    <tr><td><code>UNAVAILABLE</code></td><td>The project cannot verify phones, or no channel delivered the code.</td></tr>
-    <tr><td><code>INVALID_ARGUMENT</code></td><td>The number is not E.164.</td></tr>
-    <tr><td><code>FAILED_PRECONDITION</code>, <code>phone_country_not_allowed</code></td><td>The number is outside <code>allowed_calling_codes</code>; nothing is sent.</td></tr>
-    <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_hold</code></td><td>The session is held by a <a href="/identity/docs/auth/recovery-emails#the-hold">recovery hold</a>.</td></tr>
-    <tr><td><code>FAILED_PRECONDITION</code></td><td>An anonymous account (upgrade it first), or a child account when <code>GATEWAY_MINOR_DATA_MINIMIZATION</code> is on.</td></tr>
-    <tr><td><code>ALREADY_EXISTS</code></td><td><code>RequestPhoneVerification</code> for the number the account has already verified.</td></tr>
-    <tr><td><code>UNAUTHENTICATED</code></td><td>A missing, expired, used up or wrong code, or one sent to another number.</td></tr>
-    <tr><td><code>ALREADY_EXISTS</code>, <code>phone_number_taken</code></td><td><code>VerifyPhoneCode</code> with a right code for a number another account holds, where the project keeps numbers unique.</td></tr>
+    <thead>
+      <tr><th scope="col">Answer</th><th scope="col">When</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>UNAVAILABLE</code></td><td>The project cannot verify phones, or no channel delivered the code.</td></tr>
+      <tr><td><code>INVALID_ARGUMENT</code></td><td>The number is not E.164.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>phone_country_not_allowed</code></td><td>The number is outside <code>allowed_calling_codes</code>; nothing is sent.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_hold</code></td><td>The session is held by a <a href="/identity/docs/auth/recovery-emails#the-hold">recovery hold</a>.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code></td><td>An anonymous account (upgrade it first), or a child account when <code>GATEWAY_MINOR_DATA_MINIMIZATION</code> is on.</td></tr>
+      <tr><td><code>ALREADY_EXISTS</code></td><td><code>RequestPhoneVerification</code> for the number the account has already verified.</td></tr>
+      <tr><td><code>UNAUTHENTICATED</code></td><td>A missing, expired, used up or wrong code, or one sent to another number.</td></tr>
+      <tr><td><code>ALREADY_EXISTS</code>, <code>phone_number_taken</code></td><td><code>VerifyPhoneCode</code> with a right code for a number another account holds, where the project keeps numbers unique.</td></tr>
+    </tbody>
   </table>
+  </div>
   <p>
     Every guess, right or wrong, counts against the code's attempt cap in the
     same write that reads the code, so guesses sent at once cannot pass it.

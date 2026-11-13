@@ -28,34 +28,40 @@ import { Code } from "astro-expressive-code/components";
     "hold_seconds": 604800
   }
 }`} />
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Recovery email settings">
   <table>
-    <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
-    <tr>
-      <td><code>enabled</code></td>
-      <td><code>false</code></td>
-      <td>Lets a signed-in user add recovery emails.</td>
-    </tr>
-    <tr>
-      <td><code>max</code></td>
-      <td><code>5</code> (<code>0</code> selects it; at most <code>20</code>)</td>
-      <td>How many recovery emails one account holds.</td>
-    </tr>
-    <tr>
-      <td><code>reauth_max_age_seconds</code></td>
-      <td><code>900</code> (<code>0</code> selects it; at most <code>3600</code>)</td>
-      <td>How recent a sign-in adding or removing an address needs. It cannot be turned off.</td>
-    </tr>
-    <tr>
-      <td><code>sign_in</code></td>
-      <td><code>false</code></td>
-      <td>An emailed code or link sent to a recovery email signs in to the account that holds it.</td>
-    </tr>
-    <tr>
-      <td><code>hold_seconds</code></td>
-      <td><code>604800</code>, seven days (<code>0</code> selects it; at most <code>2592000</code>)</td>
-      <td>How long after such a sign-in the session it opened is <a href="#the-hold">held</a>. It cannot be turned off.</td>
-    </tr>
+    <thead>
+      <tr><th scope="col">Key</th><th scope="col">Default</th><th scope="col">Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>enabled</code></td>
+        <td><code>false</code></td>
+        <td>Lets a signed-in user add recovery emails.</td>
+      </tr>
+      <tr>
+        <td><code>max</code></td>
+        <td><code>5</code> (<code>0</code> selects it; at most <code>20</code>)</td>
+        <td>How many recovery emails one account holds.</td>
+      </tr>
+      <tr>
+        <td><code>reauth_max_age_seconds</code></td>
+        <td><code>900</code> (<code>0</code> selects it; at most <code>3600</code>)</td>
+        <td>How recent a sign-in adding or removing an address needs. It cannot be turned off.</td>
+      </tr>
+      <tr>
+        <td><code>sign_in</code></td>
+        <td><code>false</code></td>
+        <td>An emailed code or link sent to a recovery email signs in to the account that holds it.</td>
+      </tr>
+      <tr>
+        <td><code>hold_seconds</code></td>
+        <td><code>604800</code>, seven days (<code>0</code> selects it; at most <code>2592000</code>)</td>
+        <td>How long after such a sign-in the session it opened is <a href="#the-hold">held</a>. It cannot be turned off.</td>
+      </tr>
+    </tbody>
   </table>
+  </div>
   <p>
     The two switches are independent. Turning <code>enabled</code> off stops
     new addresses but keeps the ones held: their owners can still list and
@@ -107,17 +113,24 @@ import { Code } from "astro-expressive-code/components";
   ],
   "holdUntil": "1731104800000"
 }`} />
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Answers when adding and removing addresses">
   <table>
-    <tr><th>Answer</th><th>When</th></tr>
-    <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_emails_disabled</code></td><td><code>RequestRecoveryEmail</code> or <code>VerifyRecoveryEmail</code> in a project without <code>enabled</code>.</td></tr>
-    <tr><td><code>FAILED_PRECONDITION</code>, <code>reauthentication_required</code></td><td>Adding or removing from a session whose sign-in is too old.</td></tr>
-    <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_hold</code></td><td>Adding or removing from a session the <a href="#the-hold">hold</a> binds.</td></tr>
-    <tr><td><code>FAILED_PRECONDITION</code></td><td><code>RequestRecoveryEmail</code> for a child account when <code>GATEWAY_MINOR_DATA_MINIMIZATION</code> is on.</td></tr>
-    <tr><td><code>UNAUTHENTICATED</code></td><td>A missing, expired, used up or wrong code, or one sent to another address.</td></tr>
-    <tr><td><code>ALREADY_EXISTS</code></td><td>The address is the account's own (<code>RequestRecoveryEmail</code>), or another account's, told only by <code>VerifyRecoveryEmail</code> to a caller whose code was right.</td></tr>
-    <tr><td><code>RESOURCE_EXHAUSTED</code></td><td>The account already holds <code>max</code> addresses.</td></tr>
-    <tr><td><code>NOT_FOUND</code></td><td><code>RemoveRecoveryEmail</code> for an address the account does not hold.</td></tr>
+    <thead>
+      <tr><th scope="col">Answer</th><th scope="col">When</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_emails_disabled</code></td><td><code>RequestRecoveryEmail</code> or <code>VerifyRecoveryEmail</code> in a project without <code>enabled</code>.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>reauthentication_required</code></td><td>Adding or removing from a session whose sign-in is too old.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_hold</code></td><td>Adding or removing from a session the <a href="#the-hold">hold</a> binds.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_session</code></td><td>Adding or removing from a session that may be a recovery email's but names none, over <a href="#native-grpc">native gRPC</a>.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code></td><td><code>RequestRecoveryEmail</code> for a child account when <code>GATEWAY_MINOR_DATA_MINIMIZATION</code> is on.</td></tr>
+      <tr><td><code>UNAUTHENTICATED</code></td><td>A missing, expired, used up or wrong code, or one sent to another address; or a session a <a href="#removal">removed</a> address opened.</td></tr>
+      <tr><td><code>ALREADY_EXISTS</code></td><td>The address is the account's own (<code>RequestRecoveryEmail</code>), or another account's, told only by <code>VerifyRecoveryEmail</code> to a caller whose code was right.</td></tr>
+      <tr><td><code>RESOURCE_EXHAUSTED</code></td><td>The account already holds <code>max</code> addresses, or the caller's IP has spent its budget (below).</td></tr>
+      <tr><td><code>NOT_FOUND</code></td><td><code>RemoveRecoveryEmail</code> for an address the account does not hold.</td></tr>
+    </tbody>
   </table>
+  </div>
   <p>
     The code has the passwordless code's lifetime and attempt cap
     (<code>GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS</code>,
@@ -193,33 +206,47 @@ import { Code } from "astro-expressive-code/components";
     <code>recovery_hold</code> token and a <code>RecoveryHoldDetails</code>
     detail carrying <code>hold_until</code>, by these calls:
   </p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Calls the hold refuses">
   <table>
-    <tr><th>What the call does</th><th>Calls</th></tr>
-    <tr>
-      <td>Adds a way in or a way to recover the account</td>
-      <td><code>RequestRecoveryEmail</code>, <code>VerifyRecoveryEmail</code>, <code>RequestPhoneVerification</code>, <code>VerifyPhoneCode</code>, <code>BeginTotpSetup</code>, <code>VerifyTotpSetup</code>, <code>RegenerateRecoveryCodes</code>, <code>BeginPasskeyRegistration</code>, <code>CompletePasskeyRegistration</code>, <code>LinkIdentity</code></td>
-    </tr>
-    <tr>
-      <td>Takes one away</td>
-      <td><code>RemoveRecoveryEmail</code>, <code>RemovePhone</code>, <code>DisableTotp</code>, <code>DeletePasskey</code>, <code>UnlinkIdentity</code></td>
-    </tr>
-    <tr>
-      <td>Replaces one</td>
-      <td><code>ChangePassword</code>, <code>RequestEmailChange</code></td>
-    </tr>
-    <tr>
-      <td>Ends another session</td>
-      <td><code>RevokeSession</code> of any session but its own, <code>RevokeAllSessions</code>, <code>SignOutEverywhere</code></td>
-    </tr>
-    <tr>
-      <td>Deletes the account</td>
-      <td><code>DeleteMyAccount</code></td>
-    </tr>
+    <thead>
+      <tr><th scope="col">What the call does</th><th scope="col">Calls</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Adds a way in or a way to recover the account</td>
+        <td><code>RequestRecoveryEmail</code>, <code>VerifyRecoveryEmail</code>, <code>RequestPhoneVerification</code>, <code>VerifyPhoneCode</code>, <code>BeginTotpSetup</code>, <code>VerifyTotpSetup</code>, <code>RegenerateRecoveryCodes</code>, <code>BeginPasskeyRegistration</code>, <code>CompletePasskeyRegistration</code>, <code>LinkIdentity</code></td>
+      </tr>
+      <tr>
+        <td>Takes one away</td>
+        <td><code>RemoveRecoveryEmail</code>, <code>RemovePhone</code>, <code>DisableTotp</code>, <code>DeletePasskey</code>, <code>UnlinkIdentity</code></td>
+      </tr>
+      <tr>
+        <td>Replaces one</td>
+        <td><code>ChangePassword</code>, <code>RequestEmailChange</code></td>
+      </tr>
+      <tr>
+        <td>Ends another session</td>
+        <td><code>RevokeSession</code> of any session but its own, <code>RevokeAllSessions</code>, <code>SignOutEverywhere</code></td>
+      </tr>
+      <tr>
+        <td>Deletes the account</td>
+        <td><code>DeleteMyAccount</code></td>
+      </tr>
+    </tbody>
   </table>
+  </div>
   <p>
-    Nothing else is held. In particular, deciding an agent's delegated access
-    (<code>DecideAgentAuthorization</code>, <code>RevokeAgentDelegation</code>)
-    is not.
+    Nothing else is held. In particular these are not, though each grants
+    authority that can outlast the hold and the address's removal: deciding an
+    agent's delegated access (<code>DecideAgentAuthorization</code>,
+    <code>RevokeAgentDelegation</code>), registering an agent machine
+    (<code>RegisterAgentMachine</code>) or a teammate key
+    (<code>RegisterTeammateKey</code>), <code>CreateHireGrant</code>, OAuth
+    client changes, a guardian's controls over a managed child, and the
+    account's tenant roles (invitations, member changes,
+    <code>TransferTenantOwnership</code>). Tenant roles reached through an
+    explicit membership are the recovery session's to use, as the limits below
+    describe.
   </p>
   <ul>
     <li>
@@ -268,11 +295,36 @@ import { Code } from "astro-expressive-code/components";
       session acts in a tenant only through an explicit membership:
       <code>RefreshToken</code> refuses to select, and
       <code>ListMyTenants</code> leaves out, a tenant the account belongs to
-      only through its email's domain, so an organisation that disables a
-      member's mailbox is not undone by a personal recovery address (see
+      only through its email's domain (see
       <a href="/identity/docs/concepts/multi-tenancy">Multi-Tenancy</a>).
     </li>
   </ul>
+  <p>
+    These limits bind the sessions a recovery email opens, not the account.
+    Once the hold has ended, such a session may register a passkey or link a
+    provider, and a sign-in with either opens an ordinary session, which acts
+    in a tenant through the email's domain like any other, as long as the
+    account's primary email is verified and on that domain. So disabling a
+    member's organisational mailbox does not by itself end their access: a
+    personal recovery address can lead back to it a hold later, as a passkey
+    enrolled before the mailbox was disabled always could. An organisation
+    that wants a departing member out ends the membership itself, with
+    <code>SuspendTenantMember</code> or <code>RemoveTenantMember</code>, or
+    requires single sign-on in the tenant's login policy
+    (<code>sso_required</code>), which no recovery email can satisfy.
+  </p>
+
+  <h2 id="after-the-hold">After the hold: back to an ordinary session</h2>
+  <p>
+    A person who lost their primary mailbox signs in with a recovery email and
+    waits out the hold (<code>hold_until</code> says when it ends). Then, from
+    that session, they register a passkey
+    (<code>BeginPasskeyRegistration</code>) or link an identity provider
+    (<code>LinkIdentity</code>), and sign in with it from then on: that session
+    is an ordinary one, with no recovery limit. To replace the lost primary
+    email itself, <code>RequestEmailChange</code> needs the account's password;
+    an account without one keeps its primary email and signs in another way.
+  </p>
 
   <h2 id="removal">Removing an address ends its sessions</h2>
   <p>

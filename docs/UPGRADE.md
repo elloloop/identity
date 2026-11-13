@@ -234,8 +234,11 @@ both ask for a password. A recovery email can now be that way.
   `UnlinkIdentity`), replaces one (`ChangePassword`, `RequestEmailChange`),
   ends another session (`RevokeSession` of any session but its own,
   `RevokeAllSessions`, `SignOutEverywhere`) or deletes the account
-  (`DeleteMyAccount`). Nothing else is held: deciding an agent's delegated
-  access (`DecideAgentAuthorization`, `RevokeAgentDelegation`) is not.
+  (`DeleteMyAccount`). Nothing else is held, though some of it grants
+  authority that outlasts the hold and the address: deciding an agent's
+  delegated access (`DecideAgentAuthorization`, `RevokeAgentDelegation`),
+  `RegisterAgentMachine`, `RegisterTeammateKey`, `CreateHireGrant`, OAuth
+  client changes, a guardian's controls and the account's tenant roles.
   Without the removals in that list, whoever got into a recovery mailbox
   could strip the owner's passkeys, providers and sessions during the hold and
   leave the owner with nothing but that address. The held
@@ -265,8 +268,14 @@ both ask for a password. A recovery email can now be that way.
   behind it. And
   such a session acts in a tenant only through an explicit membership:
   `RefreshToken` refuses to select, and `ListMyTenants` leaves out, a tenant
-  the account belongs to only through its email's domain, so disabling an
-  organisational mailbox is not undone by a personal recovery address.
+  the account belongs to only through its email's domain. These limits bind
+  the sessions a recovery email opens, not the account: once the hold has
+  ended, such a session may register a passkey or link a provider, and a
+  sign-in with either is an ordinary session that acts through the email's
+  domain again while the primary email is verified and on it. So disabling a
+  member's organisational mailbox does not by itself end their access; an
+  organisation ends it with `SuspendTenantMember` or `RemoveTenantMember`, or
+  a tenant login policy with `sso_required`.
 - **Native gRPC: action required once a project turns `sign_in` on.** The
   bridge passes `x-authenticated-amr` and `x-authenticated-recovery-email-id`
   to the handlers only once the host sets the new
