@@ -818,10 +818,17 @@ default; a control-plane project's `config_json` only).
   change: it cannot add or remove a recovery email, the phone, a second
   factor or its recovery codes, a passkey or a linked identity provider,
   change the password or the primary email, end the account's other
-  sessions, or delete the account. So whoever got into one recovery mailbox
-  can neither take the rest of the account nor take it away from the owner
-  before the owner has read the notice. The session can still sign itself
-  out. It never approves a QR sign-in, hold or not. A session opened any
+  sessions, or delete the account. Nor does it hand out access that would
+  outlast the hold, from any seat the account holds: it connects no agent or
+  agent machine, hires out no teammate, registers or changes no OAuth client,
+  takes or uses no guardian's control over a child, gives no agent away,
+  changes no tenant's members or roles (domains included), and, as a project
+  admin, adds no account and sets no role or other account's password. So
+  whoever got into one recovery mailbox can neither take the rest of the
+  account, nor take it away from the owner, nor hand out what removing the
+  address would not take back, before the owner has read the notice. The
+  notice says what to check if the owner acts only after the hold. The
+  session can still sign itself out. It never approves a QR sign-in, hold or not. A session opened any
   other way is not held: the owner can always remove an address they do not
   recognise (`ListRecoveryEmails` says when each last signed in and when the
   latest hold it started began), and removing every address whose hold is
@@ -831,16 +838,16 @@ default; a control-plane project's `config_json` only).
   identity only from a host that forwards them and says so (`GRPCTrustAMR`).
   Until then every session there is treated as one a recovery email may have
   opened that cannot name its address: in a project with
-  `recovery_emails.sign_in` on it makes no account security change, approves
-  no QR sign-in and `ListMyTenants` lists only its explicit memberships;
-  elsewhere it is held during a hold.
+  `recovery_emails.sign_in` on it makes none of the changes a hold refuses,
+  approves no QR sign-in and `ListMyTenants` lists only its explicit
+  memberships; elsewhere it is held during a hold.
 - Removing a recovery email ends every session it opened, in the same
   transaction: their refresh tokens are deleted, rotated ones included, and
   under `GATEWAY_REVOCATION_MODE=session` their access tokens stop working at
   once on the replica that removed it and within the session cache's TTL on
-  others. Under either mode an access token left over makes no account
-  security change until it expires: it names an address the account no
-  longer holds. A session being opened by the address as it is removed is
+  others. Under either mode an access token left over makes none of the
+  changes a hold refuses until it expires: it names an address the account
+  no longer holds. A session being opened by the address as it is removed is
   refused, and the account's other sessions are untouched.
 - While a hold is in force on either account, a merge is refused, whoever
   asks.

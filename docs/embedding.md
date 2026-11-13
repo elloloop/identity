@@ -153,7 +153,7 @@ recovery-email change over native gRPC is refused
 Every call that limits a session by how it was opened reads
 `x-authenticated-amr`, the token's `amr` claim with its values separated by
 spaces (absent on most tokens): each call a recovery hold refuses (the
-[recovery emails](../docs-site/src/pages/docs/auth/recovery-emails.astro)
+[recovery emails](https://elloloop.github.io/identity/docs/auth/recovery-emails#the-hold)
 page lists them), `MergeAccounts`, `ApproveQrLogin` and `ListMyTenants`. The
 calls a hold refuses, and `MergeAccounts`, also read
 `x-authenticated-recovery-email-id`, the token's `recovery_email_id` claim
@@ -164,19 +164,22 @@ opt-in that covers both keys: until you do, the bridge replaces the `amr` with
 `unvouched` and drops the id, whatever the client sent, and treats every
 session as one a recovery email may have opened that cannot name its
 address. In a project whose recovery emails sign in
-(`recovery_emails.sign_in`) such a session makes no account security change
-and approves no QR sign-in (`FAILED_PRECONDITION`, `recovery_session`), and
+(`recovery_emails.sign_in`) such a session makes none of the calls a hold
+refuses (the account security changes, and the calls that hand out access
+that outlasts the session, such as `CreateTenantInvitation`, `InviteUser` or
+`DecideAgentAuthorization`) and approves no QR sign-in
+(`FAILED_PRECONDITION`, `recovery_session`), and
 `ListMyTenants` lists only its explicit memberships, hold or not, leaving out
 every tenant it belongs to through its email's domain (`RefreshToken` still
 selects one, since its refresh token records how the session was opened).
-Elsewhere it makes no account security change and approves no QR sign-in
-while a recovery hold is in force on its account, which happens only once a
+Elsewhere it makes none of them and approves no QR sign-in while a recovery
+hold is in force on its account, which happens only once a
 recovery email has signed in. `RegisterGRPC` logs `grpc_amr_not_trusted` when
 you trust `auth_time` or the session id but not the `amr`. A host that
 forwards `auth_time` but no `amr` must not set `GRPCTrustAMR`: an absent key
 reads as a session no recovery email opened. One that forwards the `amr` but
-not the id leaves every recovery session refused its account security
-changes, with `recovery_session`.
+not the id leaves every recovery session refused those calls, with
+`recovery_session`.
 
 Whether to pin the `tenant` claim depends on tenant selection. With
 `GATEWAY_TENANT_SELECTION_ENABLED` off, the default, every token carries the
@@ -243,7 +246,11 @@ This interceptor owns every sign-in key, so a host that installs it sets
 
 **Rate limits are the host's responsibility too, with three exceptions.**
 The per-IP limits on the sign-up, sign-in and other abuse-prone RPCs live in
-the HTTP chain; apply your own in an interceptor. The bridge enforces these
+the HTTP chain; apply your own in an interceptor. Among them are the
+recovery-email and phone calls, each of which mails or texts someone or
+checks a code: `RequestRecoveryEmail`, `VerifyRecoveryEmail`,
+`RemoveRecoveryEmail`, `RequestPhoneVerification` and `RemovePhone`. The
+bridge enforces these
 itself, from the same per-IP budgets the HTTP surface uses:
 
 - `LookupUsers`, whose limit cannot be switched off
