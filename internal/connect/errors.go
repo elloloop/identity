@@ -18,13 +18,8 @@ func toConnectError(err error) *connect.Error {
 	if err == nil {
 		return nil
 	}
-	var refusal *service.TenantSelectionRefusedError
-	if errors.As(err, &refusal) {
-		return tenantSelectionRefusedConnectError(refusal)
-	}
-	var hold *service.RecoveryHoldError
-	if errors.As(err, &hold) {
-		return recoveryHoldConnectError(hold)
+	if cerr := typedRefusalConnectError(err); cerr != nil {
+		return cerr
 	}
 
 	switch {
@@ -240,6 +235,20 @@ func toConnectError(err error) *connect.Error {
 	}
 
 	return connect.NewError(connect.CodeInternal, err)
+}
+
+// typedRefusalConnectError maps the refusals that carry their own detail,
+// and returns nil for any other error.
+func typedRefusalConnectError(err error) *connect.Error {
+	var refusal *service.TenantSelectionRefusedError
+	if errors.As(err, &refusal) {
+		return tenantSelectionRefusedConnectError(refusal)
+	}
+	var hold *service.RecoveryHoldError
+	if errors.As(err, &hold) {
+		return recoveryHoldConnectError(hold)
+	}
+	return nil
 }
 
 func dobRequiredConnectError(err error) *connect.Error {
