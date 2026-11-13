@@ -84,33 +84,15 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		}); err != nil {
 			t.Fatalf("Upsert: %v", err)
 		}
-		var wg sync.WaitGroup
-		var counted atomic.Int64
-		start := make(chan struct{})
-		errs := make(chan error, concurrentWriters)
-		for range concurrentWriters {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				<-start
-				got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 200)
-				if err != nil {
-					errs <- err
-					return
-				}
-				if got != nil {
-					counted.Add(1)
-				}
-			}()
-		}
-		close(start)
-		wg.Wait()
-		close(errs)
-		for err := range errs {
+		counted, err := countConcurrently(func() (bool, error) {
+			got, err := r.CountRecoveryEmailCodeAttempt(ctx, uid, 200)
+			return got != nil, err
+		})
+		if err != nil {
 			t.Fatalf("concurrent Count: %v", err)
 		}
-		if counted.Load() != maxAttempts {
-			t.Fatalf("%d of %d concurrent guesses were counted, want the cap of %d", counted.Load(), concurrentWriters, maxAttempts)
+		if counted != maxAttempts {
+			t.Fatalf("%d of %d concurrent guesses were counted, want the cap of %d", counted, concurrentWriters, maxAttempts)
 		}
 	})
 

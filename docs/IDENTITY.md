@@ -1394,7 +1394,9 @@ before you ship.
       via the existing `PathLimit` middleware); a per-email send cooldown
       reusing `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS` so one inbox can't be
       flooded; an OTP brute-force cap (`GATEWAY_PASSWORDLESS_CODE_MAX_
-      ATTEMPTS`, default 5) that invalidates the code once exhausted; a
+      ATTEMPTS`, default 5) that invalidates the code once exhausted, every
+      guess counted against it in the one write that reads the code
+      (`CountEmailLoginCodeAttempt`) so concurrent guesses cannot pass it; a
       short OTP TTL (`GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS`, default
       300); single-use replay rejection on both arms via the `consumed_at`
       CAS; and anti-enumeration on every Request response (identical

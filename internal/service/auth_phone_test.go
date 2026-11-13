@@ -124,7 +124,7 @@ func TestRequestPhoneVerification_HappyPath(t *testing.T) {
 		t.Fatalf("SMS to = %q", msg.To)
 	}
 	// The code is stored hashed, not in plaintext.
-	rec, _ := repo.FindPhoneVerificationCodeByUser(context.Background(), uid)
+	rec, _ := repo.CountPhoneVerificationCodeAttempt(context.Background(), uid, svc.nowMs())
 	if rec == nil {
 		t.Fatal("no code stored")
 	}
@@ -236,9 +236,16 @@ func TestVerifyPhoneCode_WrongCodeIncrementsAttempts(t *testing.T) {
 	if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "000000"); !errors.Is(err, ErrPhoneCodeInvalid) {
 		t.Fatalf("wrong code: want ErrPhoneCodeInvalid, got %v", err)
 	}
-	rec, _ := repo.FindPhoneVerificationCodeByUser(context.Background(), uid)
-	if rec == nil || rec.AttemptCount != 1 {
-		t.Fatalf("attempt not counted: %#v", rec)
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	var attempts []int64
+	for _, rec := range repo.phoneVerifyCodes {
+		if rec.UserID == uid {
+			attempts = append(attempts, rec.AttemptCount)
+		}
+	}
+	if len(attempts) != 1 || attempts[0] != 1 {
+		t.Fatalf("attempts on the user's code = %v, want one code with one attempt", attempts)
 	}
 }
 

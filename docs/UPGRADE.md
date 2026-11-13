@@ -1,5 +1,30 @@
 # Upgrade guide
 
+## Next — the emailed sign-in code and the phone code count each guess in the write that reads them (no configuration; two `Repository` methods replace four (Go API))
+
+The emailed sign-in code (`VerifyEmailLoginCode`, and the code passkey sign-up
+mails) and the phone code (`VerifyPhoneCode`) read their attempt count, then
+counted the guess in a second write, so guesses sent at once all read the
+same count and together went past `GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS` or
+`GATEWAY_PHONE_CODE_MAX_ATTEMPTS`. Each guess is now counted against the cap
+in the one write that reads the code, as the recovery-email code's already
+is, so no more guesses are compared than the cap allows.
+
+- **A guess that cannot be counted is refused.** A store error while counting
+  now fails the call (`INTERNAL`) and compares nothing, where it was logged
+  and the guess compared anyway; the code stays unspent for a retry.
+- **A phone guess for another number counts.** A code checked against a
+  number other than the one it was sent to is refused as before, and now
+  spends one of its attempts.
+- **Go API.** `service.Repository` loses `FindEmailLoginCodeByEmail`,
+  `IncrementEmailLoginCodeAttempts`, `FindPhoneVerificationCodeByUser` and
+  `IncrementPhoneVerificationCodeAttempts`, and gains
+  `CountEmailLoginCodeAttempt` and `CountPhoneVerificationCodeAttempt`: count
+  one guess against the live code (unconsumed, unexpired at the given time,
+  under its cap) and return it with the guess counted, or nil when there is
+  none, in one atomic write. A custom driver must implement them (the
+  conformance suite checks it, concurrent guesses included).
+
 ## Next — phone verification per project: its own switch, one account per number, accepted countries, a message channel, and a tenant that requires a verified phone: `phone.*` in a project's config, `LoginPolicy.require_verified_phone` (all off by default; migration 0060; additive RPC `RemovePhone`, `LoginPolicy` / `UpsertLoginPolicyRequest` fields, `TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED`; additive audit event `phone_removed`; new package `pkg/templatemsg`; two `Repository` methods (Go API))
 
 Phone verification was one switch for the whole deployment

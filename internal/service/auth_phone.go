@@ -235,9 +235,11 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID strin
 // verified number on the user. The caller must be authenticated. All
 // failure modes (missing/expired/consumed code, wrong code, exhausted
 // attempts, or a number that does not match the one the code was minted
-// for) collapse to ErrPhoneCodeInvalid. Every guess bumps the per-code
-// attempt counter, and a wrong one at the cap consumes the code, so the
-// brute-force window over the 6-digit space is bounded.
+// for) collapse to ErrPhoneCodeInvalid. Every guess, one for another number
+// included, is counted against the code's attempt cap in the same write that
+// reads the code, so concurrent guesses never pass it, and a wrong one at the
+// cap consumes the code, so the brute-force window over the 6-digit space is
+// bounded.
 //
 // Where the project keeps numbers unique, a right code for a number another
 // account holds is ErrPhoneNumberTaken, unless that account's claim is old
@@ -269,23 +271,16 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID string, signIn
 		return nil, err
 	}
 
-	rec, err := s.repo(ctx).FindPhoneVerificationCodeByUser(ctx, userID)
+	rec, err := s.repo(ctx).CountPhoneVerificationCodeAttempt(ctx, userID, s.nowMs())
 	if err != nil {
 		return nil, fmt.Errorf("looking up phone verification code: %w", err)
 	}
-	if rec == nil || rec.ConsumedAt != 0 || rec.ExpiresAt <= s.nowMs() || rec.PhoneNumber != phone {
+	if rec == nil || rec.PhoneNumber != phone {
 		return nil, ErrPhoneCodeInvalid
-	}
-	if rec.MaxAttempts > 0 && rec.AttemptCount >= rec.MaxAttempts {
-		return nil, ErrPhoneCodeInvalid
-	}
-	if err := s.repo(ctx).IncrementPhoneVerificationCodeAttempts(ctx, rec.NodeID); err != nil {
-		s.logger.Warn("phone_code_attempt_increment_failed",
-			zap.String("user_id", userID), zap.Error(err))
 	}
 	if _, err := s.settleGuess(ctx, oneTimeCode{
 		kind: "phone_code", hash: rec.CodeHash,
-		attempts: rec.AttemptCount + 1, maxAttempts: rec.MaxAttempts,
+		attempts: rec.AttemptCount, maxAttempts: rec.MaxAttempts,
 		invalid: ErrPhoneCodeInvalid,
 		consume: func(ctx context.Context) error {
 			_, err := s.repo(ctx).ConsumePhoneVerificationCode(ctx, userID, s.nowMs())

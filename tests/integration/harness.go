@@ -1664,27 +1664,21 @@ func (r *MemRepo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLogi
 	return id, nil
 }
 
-func (r *MemRepo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+func (r *MemRepo) CountEmailLoginCodeAttempt(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.emailLoginCodes {
-		if c.Email == email {
-			cp := *c
-			return &cp, nil
+		if c.Email != email {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *MemRepo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.emailLoginCodes[nodeID]
-	if !ok {
-		return errors.New("email login code not found")
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *MemRepo) ConsumeEmailLoginCode(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
@@ -1746,27 +1740,21 @@ func (r *MemRepo) UpsertPhoneVerificationCode(_ context.Context, rec *service.Ph
 	return id, nil
 }
 
-func (r *MemRepo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*service.PhoneVerificationCodeRecord, error) {
+func (r *MemRepo) CountPhoneVerificationCodeAttempt(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.phoneVerifyCodes {
-		if c.UserID == userID {
-			cp := *c
-			return &cp, nil
+		if c.UserID != userID {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *MemRepo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.phoneVerifyCodes[nodeID]
-	if !ok {
-		return fmt.Errorf("phone verification code %s not found", nodeID)
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *MemRepo) ConsumePhoneVerificationCode(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {

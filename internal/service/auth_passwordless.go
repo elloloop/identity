@@ -191,29 +191,23 @@ func (s *AuthService) VerifyEmailLoginCode(ctx context.Context, emailAddr, code 
 //
 // Every failure mode — missing/expired/consumed code, wrong code, exhausted
 // attempts — collapses to ErrEmailLoginCodeInvalid, so the caller can surface
-// one generic error with no existence oracle. Every guess bumps the per-code
-// attempt counter, and a wrong one that reaches the cap captured at mint time
+// one generic error with no existence oracle. Every guess is counted against
+// the cap captured at mint time in the same write that reads the code, so
+// concurrent guesses never pass it, and a wrong one that reaches the cap
 // consumes (invalidates) the code to stop a brute-force walk of the 6-digit
 // space (settleGuess). method tags the failure audit event ("email_code" or
 // "passkey_signup").
 func (s *AuthService) verifyAndConsumeEmailLoginCode(ctx context.Context, emailAddr, code, method, ipAddr, userAgent string) error {
-	rec, err := s.repo(ctx).FindEmailLoginCodeByEmail(ctx, emailAddr)
+	rec, err := s.repo(ctx).CountEmailLoginCodeAttempt(ctx, emailAddr, s.nowMs())
 	if err != nil {
 		return fmt.Errorf("looking up email login code: %w", err)
 	}
-	if rec == nil || rec.ConsumedAt != 0 || rec.ExpiresAt <= s.nowMs() {
+	if rec == nil {
 		return ErrEmailLoginCodeInvalid
-	}
-	if rec.MaxAttempts > 0 && rec.AttemptCount >= rec.MaxAttempts {
-		return ErrEmailLoginCodeInvalid
-	}
-	if err := s.repo(ctx).IncrementEmailLoginCodeAttempts(ctx, rec.NodeID); err != nil {
-		s.logger.Warn("email_login_code_attempt_increment_failed",
-			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
 	}
 	right, err := s.settleGuess(ctx, oneTimeCode{
 		kind: "email_login_code", hash: rec.CodeHash,
-		attempts: rec.AttemptCount + 1, maxAttempts: rec.MaxAttempts,
+		attempts: rec.AttemptCount, maxAttempts: rec.MaxAttempts,
 		invalid: ErrEmailLoginCodeInvalid,
 		consume: func(ctx context.Context) error {
 			_, err := s.repo(ctx).ConsumeEmailLoginCode(ctx, emailAddr, s.nowMs())

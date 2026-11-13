@@ -1081,27 +1081,21 @@ func (r *Repo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLoginCo
 	return id, nil
 }
 
-func (r *Repo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+func (r *Repo) CountEmailLoginCodeAttempt(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.emailLoginCodes {
-		if c.Email == email {
-			cp := *c
-			return &cp, nil
+		if c.Email != email {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *Repo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.emailLoginCodes[nodeID]
-	if !ok {
-		return fmt.Errorf("memory: IncrementEmailLoginCodeAttempts: %s not found", nodeID)
-	}
-	c.AttemptCount++
-	return nil
 }
 
 // ConsumeEmailLoginCode atomically marks the email's unconsumed,
@@ -1181,27 +1175,21 @@ func (r *Repo) UpsertPhoneVerificationCode(_ context.Context, rec *service.Phone
 	return id, nil
 }
 
-func (r *Repo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*service.PhoneVerificationCodeRecord, error) {
+func (r *Repo) CountPhoneVerificationCodeAttempt(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.phoneVerifyCodes {
-		if c.UserID == userID {
-			cp := *c
-			return &cp, nil
+		if c.UserID != userID {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *Repo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.phoneVerifyCodes[nodeID]
-	if !ok {
-		return fmt.Errorf("memory: IncrementPhoneVerificationCodeAttempts: %s not found", nodeID)
-	}
-	c.AttemptCount++
-	return nil
 }
 
 // ConsumePhoneVerificationCode atomically marks the user's unconsumed,

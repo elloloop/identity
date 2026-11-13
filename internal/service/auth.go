@@ -551,22 +551,17 @@ type Repository interface {
 	// email; the unique index makes the upsert a delete-then-create or an
 	// in-place overwrite depending on the backend.
 	//
-	// FindEmailLoginCodeByEmail returns the live row (consumed or not) so
-	// the verify path can compare the code hash, count attempts, and
-	// distinguish expired/consumed from a hash mismatch. Returns nil when
-	// no row exists for the email.
-	//
-	// IncrementEmailLoginCodeAttempts bumps attempt_count by one. Used on
-	// a wrong-code guess; the service invalidates the code once the count
-	// reaches the cap captured on the record.
+	// CountEmailLoginCodeAttempt counts one guess against the email's live
+	// code (unconsumed, unexpired at atMs, under its attempt cap) in one
+	// write and returns it with the guess counted, or nil when there is
+	// none, so concurrent guesses never pass the cap captured on the record.
 	//
 	// ConsumeEmailLoginCode is the single-winner compare-and-set: it marks
 	// the row consumed (consumed_at = atMs) only when currently unconsumed
 	// AND unexpired, returning the bound record on success. A replay, an
 	// expired code, or a missing code all return ErrEmailLoginCodeInvalid.
 	UpsertEmailLoginCode(ctx context.Context, r *EmailLoginCodeRecord) (string, error)
-	FindEmailLoginCodeByEmail(ctx context.Context, email string) (*EmailLoginCodeRecord, error)
-	IncrementEmailLoginCodeAttempts(ctx context.Context, nodeID string) error
+	CountEmailLoginCodeAttempt(ctx context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error)
 	ConsumeEmailLoginCode(ctx context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error)
 
 	// Magic-link tokens (magic-link arm of passwordless email login).
@@ -587,14 +582,10 @@ type Repository interface {
 	// valid at a time (a re-request invalidates the previous code). It is
 	// keyed on user_id.
 	//
-	// FindPhoneVerificationCodeByUser returns the live row (consumed or
-	// not) so the verify path can compare the code hash, count attempts,
-	// and distinguish expired/consumed from a hash mismatch. Returns nil
-	// when no row exists for the user.
-	//
-	// IncrementPhoneVerificationCodeAttempts bumps attempt_count by one,
-	// used on a wrong-code guess; the service invalidates the code once
-	// the count reaches the cap captured on the record.
+	// CountPhoneVerificationCodeAttempt counts one guess against the user's
+	// live code (unconsumed, unexpired at atMs, under its attempt cap) in one
+	// write and returns it with the guess counted, or nil when there is
+	// none, so concurrent guesses never pass the cap captured on the record.
 	//
 	// ConsumePhoneVerificationCode is the single-winner compare-and-set:
 	// it marks the row consumed (consumed_at = atMs) only when currently
@@ -605,8 +596,7 @@ type Repository interface {
 	// SetUserPhoneVerified records the verified phone on the user and
 	// flips phone_verified, mirroring SetUserEmailVerified.
 	UpsertPhoneVerificationCode(ctx context.Context, r *PhoneVerificationCodeRecord) (string, error)
-	FindPhoneVerificationCodeByUser(ctx context.Context, userID string) (*PhoneVerificationCodeRecord, error)
-	IncrementPhoneVerificationCodeAttempts(ctx context.Context, nodeID string) error
+	CountPhoneVerificationCodeAttempt(ctx context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error)
 	ConsumePhoneVerificationCode(ctx context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error)
 	SetUserPhoneVerified(ctx context.Context, userID, phoneNumber string, atMs int64) error
 	// ClaimPhoneNumber is SetUserPhoneVerified for a project that keeps

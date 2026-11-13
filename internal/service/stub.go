@@ -174,12 +174,8 @@ func (StubRepository) UpsertEmailLoginCode(context.Context, *EmailLoginCodeRecor
 	return "", ErrServiceUnavailable
 }
 
-func (StubRepository) FindEmailLoginCodeByEmail(context.Context, string) (*EmailLoginCodeRecord, error) {
+func (StubRepository) CountEmailLoginCodeAttempt(context.Context, string, int64) (*EmailLoginCodeRecord, error) {
 	return nil, ErrServiceUnavailable
-}
-
-func (StubRepository) IncrementEmailLoginCodeAttempts(context.Context, string) error {
-	return ErrServiceUnavailable
 }
 
 func (StubRepository) ConsumeEmailLoginCode(context.Context, string, int64) (*EmailLoginCodeRecord, error) {
@@ -198,12 +194,8 @@ func (StubRepository) UpsertPhoneVerificationCode(context.Context, *PhoneVerific
 	return "", ErrServiceUnavailable
 }
 
-func (StubRepository) FindPhoneVerificationCodeByUser(context.Context, string) (*PhoneVerificationCodeRecord, error) {
+func (StubRepository) CountPhoneVerificationCodeAttempt(context.Context, string, int64) (*PhoneVerificationCodeRecord, error) {
 	return nil, ErrServiceUnavailable
-}
-
-func (StubRepository) IncrementPhoneVerificationCodeAttempts(context.Context, string) error {
-	return ErrServiceUnavailable
 }
 
 func (StubRepository) ConsumePhoneVerificationCode(context.Context, string, int64) (*PhoneVerificationCodeRecord, error) {

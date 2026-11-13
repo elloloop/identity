@@ -45,14 +45,20 @@ func (r *sqliteRepository) UpsertEmailLoginCode(ctx context.Context, c *service.
 	return outID, nil
 }
 
-func (r *sqliteRepository) FindEmailLoginCodeByEmail(ctx context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+// CountEmailLoginCodeAttempt counts the guess and reads the code in one
+// conditional UPDATE, so concurrent guesses never pass the cap between a
+// read and an increment.
+func (r *sqliteRepository) CountEmailLoginCodeAttempt(ctx context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
 	const q = `
-		SELECT id, email, code_hash, expires_at_ms, created_at_ms,
-		       consumed_at_ms, attempt_count, max_attempts
-		  FROM email_login_codes
-		 WHERE project_id = $1 AND email = $2`
+		UPDATE email_login_codes
+		   SET attempt_count = attempt_count + 1
+		 WHERE project_id = $1 AND email = $2
+		   AND consumed_at_ms = 0 AND expires_at_ms > $3
+		   AND (max_attempts = 0 OR attempt_count < max_attempts)
+		RETURNING id, email, code_hash, expires_at_ms, created_at_ms,
+		          consumed_at_ms, attempt_count, max_attempts`
 	var c service.EmailLoginCodeRecord
-	err := r.db.QueryRow(ctx, q, r.projectID, email).Scan(
+	err := r.db.QueryRow(ctx, q, r.projectID, email, atMs).Scan(
 		&c.NodeID, &c.Email, &c.CodeHash, &c.ExpiresAt, &c.CreatedAt,
 		&c.ConsumedAt, &c.AttemptCount, &c.MaxAttempts,
 	)
@@ -60,23 +66,9 @@ func (r *sqliteRepository) FindEmailLoginCodeByEmail(ctx context.Context, email 
 		return nil, nil
 	}
 	if err != nil {
-		return nil, wrapErr("FindEmailLoginCodeByEmail", err)
+		return nil, wrapErr("CountEmailLoginCodeAttempt", err)
 	}
 	return &c, nil
-}
-
-func (r *sqliteRepository) IncrementEmailLoginCodeAttempts(ctx context.Context, nodeID string) error {
-	const q = `
-		UPDATE email_login_codes SET attempt_count = attempt_count + 1
-		 WHERE project_id = $1 AND id = $2`
-	tag, err := r.db.Exec(ctx, q, r.projectID, nodeID)
-	if err != nil {
-		return wrapErr("IncrementEmailLoginCodeAttempts", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return errors.New("sqlite: IncrementEmailLoginCodeAttempts: no such row")
-	}
-	return nil
 }
 
 func (r *sqliteRepository) ConsumeEmailLoginCode(ctx context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {

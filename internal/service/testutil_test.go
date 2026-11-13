@@ -1063,27 +1063,21 @@ func (r *fakeRepo) UpsertEmailLoginCode(_ context.Context, rec *EmailLoginCodeRe
 	return id, nil
 }
 
-func (r *fakeRepo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*EmailLoginCodeRecord, error) {
+func (r *fakeRepo) CountEmailLoginCodeAttempt(_ context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.emailLoginCodes {
-		if c.Email == email {
-			cp := *c
-			return &cp, nil
+		if c.Email != email {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *fakeRepo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.emailLoginCodes[nodeID]
-	if !ok {
-		return errors.New("email login code not found")
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *fakeRepo) ConsumeEmailLoginCode(_ context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error) {
@@ -1145,27 +1139,21 @@ func (r *fakeRepo) UpsertPhoneVerificationCode(_ context.Context, rec *PhoneVeri
 	return id, nil
 }
 
-func (r *fakeRepo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*PhoneVerificationCodeRecord, error) {
+func (r *fakeRepo) CountPhoneVerificationCodeAttempt(_ context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.phoneVerifyCodes {
-		if c.UserID == userID {
-			cp := *c
-			return &cp, nil
+		if c.UserID != userID {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *fakeRepo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.phoneVerifyCodes[nodeID]
-	if !ok {
-		return errors.New("phone verification code not found")
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *fakeRepo) ConsumePhoneVerificationCode(_ context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error) {

@@ -28,7 +28,6 @@ func TestStubRepository_ReturnsServiceUnavailable(t *testing.T) {
 		{"UpdateInvitation", func() error { return errOf(r.UpdateInvitation(ctx, "id", nil)) }},
 		{"UpdateQrLoginSession", func() error { return r.UpdateQrLoginSession(ctx, "id", nil) }},
 		{"ConsumeQrLoginSession", func() error { return r.ConsumeQrLoginSession(ctx, "id", 0) }},
-		{"IncrementEmailLoginCodeAttempts", func() error { return r.IncrementEmailLoginCodeAttempts(ctx, "e@x") }},
 		{"DeleteTotpCredential", func() error { return r.DeleteTotpCredential(ctx, "uid") }},
 		{"SetUserIDVVerified", func() error { return r.SetUserIDVVerified(ctx, "uid", 0) }},
 		{"CreateIdentityVerification", func() error { return r.CreateIdentityVerification(ctx, nil) }},
@@ -70,10 +69,16 @@ func TestStubRepository_ReturnsServiceUnavailable(t *testing.T) {
 			t.Errorf("ConsumeOAuthOneTimeCode: rec=%v err=%v", rec, err)
 		}
 	})
-	t.Run("FindEmailLoginCodeByEmail_nil_record", func(t *testing.T) {
-		rec, err := r.FindEmailLoginCodeByEmail(ctx, "e@x")
+	t.Run("CountEmailLoginCodeAttempt_nil_record", func(t *testing.T) {
+		rec, err := r.CountEmailLoginCodeAttempt(ctx, "e@x", 0)
 		if rec != nil || !errors.Is(err, ErrServiceUnavailable) {
-			t.Errorf("FindEmailLoginCodeByEmail: rec=%v err=%v", rec, err)
+			t.Errorf("CountEmailLoginCodeAttempt: rec=%v err=%v", rec, err)
+		}
+	})
+	t.Run("CountPhoneVerificationCodeAttempt_nil_record", func(t *testing.T) {
+		rec, err := r.CountPhoneVerificationCodeAttempt(ctx, "uid", 0)
+		if rec != nil || !errors.Is(err, ErrServiceUnavailable) {
+			t.Errorf("CountPhoneVerificationCodeAttempt: rec=%v err=%v", rec, err)
 		}
 	})
 	t.Run("ConsumeEmailLoginCode_nil_record", func(t *testing.T) {
