@@ -109,8 +109,8 @@ type MembershipService struct {
 	// headless/dev deployment can still complete the flow; when true the
 	// token travels only in the email.
 	mailerDelivers bool
-	cfg              *config.Config
-	logger           *zap.Logger
+	cfg            *config.Config
+	logger         *zap.Logger
 	// audit records CreateTenant outcomes, ownership transfers and joins by
 	// domain (WithAudit); nil records nothing.
 	audit   *audit.Logger
@@ -138,15 +138,15 @@ func NewMembershipService(
 		mailer, mailerDelivers = email.NewLogOnly(logger), false
 	}
 	return &MembershipService{
-		invitations:      invitations,
-		memberships:      memberships,
-		tenants:          tenants,
-		users:            users,
-		mailer:           mailer,
-		mailerDelivers:   mailerDelivers,
-		cfg:              cfg,
-		logger:           logger,
-		nowFunc:          time.Now,
+		invitations:    invitations,
+		memberships:    memberships,
+		tenants:        tenants,
+		users:          users,
+		mailer:         mailer,
+		mailerDelivers: mailerDelivers,
+		cfg:            cfg,
+		logger:         logger,
+		nowFunc:        time.Now,
 	}
 }
 
