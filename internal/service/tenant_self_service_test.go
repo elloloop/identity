@@ -650,10 +650,13 @@ func TestRefreshToken_RecoverySessionSelectsNoTenantThroughTheEmailDomain(t *tes
 	const recovery = "recovery-session-refresh"
 	now := f.svc.nowMs()
 	require.NoError(t, f.repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: f.user.ID, Email: "spare@example.net", VerifiedAt: now}, 5))
+	held, err := f.repo.ListRecoveryEmails(ctx, f.user.ID)
+	require.NoError(t, err)
+	require.Len(t, held, 1)
 	_, err = f.repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
 		TokenHash: hashRefreshToken(recovery), UserID: f.user.ID,
 		ExpiresAt: now + time.Hour.Milliseconds(), CreatedAt: now, LastUsedAt: now, SessionStartedAt: now,
-		AuthTimeMs: now, RecoveryEmail: "spare@example.net",
+		AuthTimeMs: now, RecoveryEmailID: held[0].ID,
 	})
 	require.NoError(t, err)
 
@@ -665,6 +668,7 @@ func TestRefreshToken_RecoverySessionSelectsNoTenantThroughTheEmailDomain(t *tes
 	claims, err := jwt.VerifyAccessToken(access, f.svc.signer, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, []string{AMRRecoveryEmail}, claims.AMR)
+	assert.Equal(t, held[0].ID, claims.RecoveryEmailID)
 
 	_, access, _, err = f.svc.RefreshToken(ctx, f.refresh, "t-dom", "", "")
 	require.NoError(t, err, "a session opened another way still acts through the domain")

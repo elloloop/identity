@@ -810,7 +810,9 @@ default; a control-plane project's `config_json` only).
   account whose primary mailbox is gone. Any second factor the account or its
   tenant requires is asked for as at any sign-in.
 - Such a sign-in opens a session marked with the `amr` value
-  `recovery_email`, and once every factor is proved it starts a hold for
+  `recovery_email` and tied to the address by `recovery_email_id`, an opaque
+  reference that never names it, and once every factor is proved it starts a
+  hold for
   `recovery_emails.hold_seconds` (default seven days) and tells the account's
   other addresses. During the hold that session makes no account security
   change: it cannot add or remove a recovery email, the phone, a second
@@ -824,19 +826,21 @@ default; a control-plane project's `config_json` only).
   recognise (`ListRecoveryEmails` says when each last signed in), and
   removing the one that started the hold ends it. A sign-in from the same
   address does not extend a hold already in force.
-- Over native gRPC the session's `amr` reaches identity only from a host
-  that forwards it and says so (`GRPCTrustAMR`). Until then every session
-  there is treated as one a recovery email may have opened: it is held
-  during a hold and approves no QR sign-in while one is in force, and in a
-  project with `recovery_emails.sign_in` on `ListMyTenants` lists only its
-  explicit memberships.
+- Over native gRPC the session's `amr` and `recovery_email_id` reach
+  identity only from a host that forwards them and says so (`GRPCTrustAMR`).
+  Until then every session there is treated as one a recovery email may have
+  opened that cannot name its address: in a project with
+  `recovery_emails.sign_in` on it makes no account security change, approves
+  no QR sign-in and `ListMyTenants` lists only its explicit memberships;
+  elsewhere it is held during a hold.
 - Removing a recovery email ends every session it opened, in the same
   transaction: their refresh tokens are deleted, rotated ones included, and
   under `GATEWAY_REVOCATION_MODE=session` their access tokens stop working at
   once on the replica that removed it and within the session cache's TTL on
-  others, where until then they make no account security change. A session
-  being opened by the address as it is removed is refused, and the account's
-  other sessions are untouched.
+  others. Under either mode an access token left over makes no account
+  security change until it expires: it names an address the account no
+  longer holds. A session being opened by the address as it is removed is
+  refused, and the account's other sessions are untouched.
 - While a hold is in force on either account, a merge is refused, whoever
   asks.
 - A session a recovery email opened acts in a tenant only through an explicit

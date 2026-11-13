@@ -6,6 +6,11 @@ import "errors"
 // Within a project an address is held once: as one account's primary email
 // or as one account's recovery email, never both and never by two accounts.
 type RecoveryEmail struct {
+	// ID is the row's opaque id. A session the address opens is tied to it
+	// rather than to the address, so no token names the address, and an
+	// address removed and added again is a new row whose old sessions stay
+	// ended.
+	ID     string
 	UserID string
 	// Email is the canonical address (canonicalMailbox), unique under
 	// FoldEmail like a primary email.
@@ -60,10 +65,14 @@ var (
 	// asks for what only a session opened another way may do: approving
 	// another device's QR sign-in, whose session could not say a recovery
 	// email stands behind it. A session no one vouched for how it was opened
-	// (AMRUnvouched) is refused it too while a recovery hold is in force on
-	// its account. Mapped to CodeFailedPrecondition; its message leads with
-	// the stable `recovery_session` token clients match on to send the person
-	// to sign in another way.
+	// (AMRUnvouched) is refused it too where it is treated as a recovery
+	// session (a project whose recovery emails sign in), and elsewhere while
+	// a recovery hold is in force on its account. It is also the answer to
+	// any account security change asked for by a session treated as a
+	// recovery session that names no recovery email, since nothing can show
+	// its address is still the account's. Mapped to CodeFailedPrecondition;
+	// its message leads with the stable `recovery_session` token clients
+	// match on to send the person to sign in another way.
 	ErrRecoverySession = errors.New("recovery_session: a session that may have been opened by a recovery email cannot do this")
 	// ErrRecoveryEmailCodeInvalid is returned when a recovery-email code is
 	// missing, expired, already consumed, the wrong code, sent to another

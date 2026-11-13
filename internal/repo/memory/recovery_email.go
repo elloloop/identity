@@ -1,10 +1,12 @@
 package memory
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -91,10 +93,14 @@ func (r *Repo) AddRecoveryEmail(_ context.Context, e *service.RecoveryEmail, max
 		return service.ErrRecoveryEmailLimit
 	}
 	cp := *e
+	cp.ID = r.nextID()
 	r.recoveryEmails[e.UserID] = append(r.recoveryEmails[e.UserID], &cp)
 	return nil
 }
 
+// ListRecoveryEmails sorts as the SQL drivers' ORDER BY verified_at_ms, id
+// does: a merge appends the retired account's addresses after the
+// survivor's, whenever each was proved.
 func (r *Repo) ListRecoveryEmails(_ context.Context, userID string) ([]*service.RecoveryEmail, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -103,31 +109,40 @@ func (r *Repo) ListRecoveryEmails(_ context.Context, userID string) ([]*service.
 		cp := *e
 		out = append(out, &cp)
 	}
+	slices.SortFunc(out, func(a, b *service.RecoveryEmail) int {
+		return cmp.Or(cmp.Compare(a.VerifiedAt, b.VerifiedAt), strings.Compare(a.ID, b.ID))
+	})
 	return out, nil
 }
 
-// heldRecoveryEmailLocked is the index of email (under FoldEmail) among
-// userID's recovery emails, or -1. The caller holds r.mu.
-func (r *Repo) heldRecoveryEmailLocked(userID, email string) int {
+// heldRecoveryEmailLocked is the index among userID's recovery emails of the
+// one match accepts, or -1. The caller holds r.mu.
+func (r *Repo) heldRecoveryEmailLocked(userID string, match func(*service.RecoveryEmail) bool) int {
+	return slices.IndexFunc(r.recoveryEmails[userID], match)
+}
+
+func recoveryEmailAt(email string) func(*service.RecoveryEmail) bool {
 	fold := service.FoldEmail(email)
-	return slices.IndexFunc(r.recoveryEmails[userID], func(e *service.RecoveryEmail) bool {
-		return service.FoldEmail(e.Email) == fold
-	})
+	return func(e *service.RecoveryEmail) bool { return service.FoldEmail(e.Email) == fold }
+}
+
+func recoveryEmailWithID(id string) func(*service.RecoveryEmail) bool {
+	return func(e *service.RecoveryEmail) bool { return e.ID == id }
 }
 
 func (r *Repo) RemoveRecoveryEmail(_ context.Context, userID, email string, atMs int64) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	i := r.heldRecoveryEmailLocked(userID, email)
+	i := r.heldRecoveryEmailLocked(userID, recoveryEmailAt(email))
 	if i < 0 {
 		return 0, fmt.Errorf("memory: RemoveRecoveryEmail: %w", service.ErrNotFound)
 	}
 	list := r.recoveryEmails[userID]
+	removed := list[i].ID
 	r.recoveryEmails[userID] = append(list[:i:i], list[i+1:]...)
-	fold := service.FoldEmail(email)
 	ended := 0
 	for id, t := range r.refreshTokens {
-		if t.UserID != userID || t.RecoveryEmail == "" || service.FoldEmail(t.RecoveryEmail) != fold {
+		if t.UserID != userID || t.RecoveryEmailID != removed {
 			continue
 		}
 		if t.ConsumedAtMs == 0 {
@@ -173,10 +188,10 @@ func (r *Repo) FindRecoveryEmailHolder(_ context.Context, email string) (*servic
 	return nil, nil
 }
 
-func (r *Repo) MarkRecoveryEmailSignIn(_ context.Context, userID, email string, atMs, holdMs int64) error {
+func (r *Repo) MarkRecoveryEmailSignIn(_ context.Context, userID, id string, atMs, holdMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	i := r.heldRecoveryEmailLocked(userID, email)
+	i := r.heldRecoveryEmailLocked(userID, recoveryEmailWithID(id))
 	if i < 0 {
 		return fmt.Errorf("memory: MarkRecoveryEmailSignIn: %w", service.ErrNotFound)
 	}

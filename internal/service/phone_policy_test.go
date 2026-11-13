@@ -260,8 +260,11 @@ func TestPhone_RemoveTellsTheAccountAndRespectsTheHold(t *testing.T) {
 	// A sign-in by a recovery email holds the phone as it holds the emails,
 	// for the session that sign-in opened.
 	require.NoError(t, f.repo.AddRecoveryEmail(f.ctx, &RecoveryEmail{UserID: id, Email: "spare@example.net", VerifiedAt: 1}, 5))
-	require.NoError(t, f.repo.MarkRecoveryEmailSignIn(f.ctx, id, "spare@example.net", f.now.UnixMilli(), (7*24*time.Hour).Milliseconds()))
-	_, err = f.svc.RemovePhone(f.ctx, id, SessionSignIn{AMR: []string{AMRRecoveryEmail}})
+	held, err := f.repo.ListRecoveryEmails(f.ctx, id)
+	require.NoError(t, err)
+	require.Len(t, held, 1)
+	require.NoError(t, f.repo.MarkRecoveryEmailSignIn(f.ctx, id, held[0].ID, f.now.UnixMilli(), (7*24*time.Hour).Milliseconds()))
+	_, err = f.svc.RemovePhone(f.ctx, id, SessionSignIn{AMR: []string{AMRRecoveryEmail}, RecoveryEmailID: held[0].ID})
 	require.ErrorIs(t, err, ErrRecoveryHold)
 
 	f.now = f.now.Add(7 * 24 * time.Hour)

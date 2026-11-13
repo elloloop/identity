@@ -166,7 +166,10 @@ var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in
 // (its children's guardian edges would point at a retired account); and,
 // whoever asks, either account while a recovery hold is in force on it
 // (RecoveryHoldError): a merge moves the recovery emails and the sign-in
-// methods the hold is keeping where they are.
+// methods the hold is keeping where they are. MergeAccounts also refuses a
+// session that may have been opened by a recovery email whatever
+// refuseHeldSession refuses: the other account's password could arrive on
+// the caller's account as a way in of its own.
 
 // MergeAccounts merges the account identified by otherIdentifier (an email,
 // or a username) into the caller's own account, survivorID. The proof that
@@ -188,6 +191,9 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, sign
 	// so a stale session learns nothing about the other account.
 	if !s.recentlyAuthenticated(signIn.AuthTimeSec) {
 		return nil, ErrReauthenticationRequired
+	}
+	if err := s.refuseHeldSession(ctx, survivorID, signIn); err != nil {
+		return nil, err
 	}
 	repo := s.repo(ctx)
 	survivor, err := repo.GetUser(ctx, survivorID)

@@ -170,7 +170,10 @@ func TestMergeAccounts_RefusedPastTheRecoveryEmailCap(t *testing.T) {
 func holdAccount(ctx context.Context, t *testing.T, repo *fakeRepo, userID, addr string, nowMs int64) {
 	t.Helper()
 	require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: userID, Email: addr, VerifiedAt: 1}, 5))
-	require.NoError(t, repo.MarkRecoveryEmailSignIn(ctx, userID, addr, nowMs, (7*24*time.Hour).Milliseconds()))
+	held, err := repo.FindRecoveryEmailHolder(ctx, addr)
+	require.NoError(t, err)
+	require.NotNil(t, held)
+	require.NoError(t, repo.MarkRecoveryEmailSignIn(ctx, userID, held.ID, nowMs, (7*24*time.Hour).Milliseconds()))
 }
 
 // A merge moves the recovery emails and sign-in methods a recovery hold is

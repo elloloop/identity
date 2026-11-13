@@ -58,21 +58,24 @@ type Options struct {
 	// reauthentication_required: a host interceptor written before the key
 	// existed cannot let a client vouch for its own recent sign-in.
 	GRPCTrustAuthTime bool
-	// GRPCTrustAMR lets the native-gRPC bridge pass x-authenticated-amr
-	// through to the handlers. Set it only when the host's gRPC auth
-	// interceptor deletes any value the client sent and sets it from the
-	// verified token's amr claim, its values separated by spaces (see the
-	// embedding guide). Every handler that limits a session by how it was
-	// opened reads the key. Left false, the bridge replaces it with
-	// "unvouched", so every session over native gRPC is treated as one a
-	// recovery email may have opened: while a recovery hold is in force on
-	// its account it makes no account security change and approves no QR
-	// sign-in, and in a project whose recovery emails sign in
-	// (recovery_emails.sign_in) ListMyTenants lists its explicit memberships
-	// only, hold or not. Without it a client could say no recovery email
-	// opened its session, and an interceptor that forwards no amr would say
-	// the same for every session. RegisterGRPC logs
-	// grpc_amr_not_trusted when another key is trusted and this one is not.
+	// GRPCTrustAMR lets the native-gRPC bridge pass x-authenticated-amr and
+	// x-authenticated-recovery-email-id through to the handlers. Set it only
+	// when the host's gRPC auth interceptor deletes any value the client sent
+	// for either and sets them from the verified token's amr claim, its values
+	// separated by spaces, and its recovery_email_id claim (see the embedding
+	// guide). Every handler that limits a session by how it was opened reads
+	// them. Left false, the bridge replaces the amr with "unvouched" and drops
+	// the id, so every session over native gRPC is treated as one a recovery
+	// email may have opened, which cannot name its address: in a project
+	// whose recovery emails sign in (recovery_emails.sign_in) it makes no
+	// account security change, approves no QR sign-in and ListMyTenants lists
+	// its explicit memberships only, hold or not; elsewhere it makes no
+	// account security change and approves no QR sign-in while a recovery
+	// hold is in force on its account. Without it a client could say no
+	// recovery email opened its session, or name an address its account still
+	// holds, and an interceptor that forwards no amr would say the first for
+	// every session. RegisterGRPC logs grpc_amr_not_trusted when another key
+	// is trusted and this one is not.
 	GRPCTrustAMR bool
 	// GRPCTrustSessionID requires the host interceptor to strip caller metadata
 	// and supply X-Authenticated-Session-Id from a verified human token.

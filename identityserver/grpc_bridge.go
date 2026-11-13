@@ -54,7 +54,8 @@ type grpcBridge struct {
 
 // grpcTrust names the x-authenticated-* keys besides the user id that the
 // host said its interceptor sets from the verified token, after deleting any
-// value the client sent (Options.GRPCTrustAuthTime, GRPCTrustAMR and
+// value the client sent (Options.GRPCTrustAuthTime, GRPCTrustAMR, which
+// covers x-authenticated-amr and x-authenticated-recovery-email-id, and
 // GRPCTrustSessionID). The bridge drops every other one.
 type grpcTrust struct {
 	authTime  bool
@@ -205,9 +206,12 @@ func invoke[Req, Resp any](
 		creq.Header().Del(middleware.AuthenticatedAuthTimeHeader)
 	}
 	// A missing amr would read as a session no recovery email opened, so a
-	// session whose amr no one vouches for is marked as possibly one.
+	// session whose amr no one vouches for is marked as possibly one, and
+	// names no recovery email: a client-chosen one could be an address the
+	// account still holds.
 	if !b.trust.amr {
 		creq.Header().Set(middleware.AuthenticatedAMRHeader, service.AMRUnvouched)
+		creq.Header().Del(middleware.AuthenticatedRecoveryEmailIDHeader)
 	}
 	cresp, err := fn(ctx, creq)
 	if err != nil {

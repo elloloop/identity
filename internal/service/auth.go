@@ -410,12 +410,11 @@ type Repository interface {
 	// consumed_at != 0, so the replay-detection branch can identify the
 	// user_id whose sessions must be invalidated.
 	FindRefreshTokenByHashIncludingConsumed(ctx context.Context, hash string) (*RefreshTokenRecord, error)
-	// CreateRefreshToken stores a refresh token. One whose RecoveryEmail is
-	// set is stored only while r.UserID holds that address as a recovery
-	// email (under FoldEmail), checked atomically against
-	// RemoveRecoveryEmail, and is ErrNotFound otherwise, so no session can
-	// outlive the address that opened it by being issued while it is
-	// removed.
+	// CreateRefreshToken stores a refresh token. One whose RecoveryEmailID
+	// is set is stored only while r.UserID holds the recovery email with that
+	// ID, checked atomically against RemoveRecoveryEmail, and is ErrNotFound
+	// otherwise, so no session can outlive the address that opened it by
+	// being issued while it is removed.
 	CreateRefreshToken(ctx context.Context, r *RefreshTokenRecord) (string, error)
 	DeleteRefreshToken(ctx context.Context, nodeID string) error
 	DeleteRefreshTokensForUser(ctx context.Context, userID string) error
@@ -634,13 +633,13 @@ type Repository interface {
 	// the user writes': CreateUser, UpdateUser and UpdateUserEmail return
 	// ErrAlreadyExists for an email that is any account's recovery email.
 	//
-	// ListRecoveryEmails returns the account's addresses, oldest first.
-	// RemoveRecoveryEmail deletes one (matched under FoldEmail) and, in the
-	// same transaction, ends every session it opened: it deletes each of the
-	// account's refresh tokens whose RecoveryEmail is that address, rotated
-	// or not, and revokes at atMs the session each names. It returns how
-	// many of those tokens were unrotated, and ErrNotFound when the account
-	// holds no such address.
+	// ListRecoveryEmails returns the account's addresses, oldest first (by
+	// VerifiedAt, then ID). RemoveRecoveryEmail deletes one (matched under
+	// FoldEmail) and, in the same transaction, ends every session it opened:
+	// it deletes each of the account's refresh tokens whose RecoveryEmailID
+	// is that address's ID, rotated or not, and revokes at atMs the session
+	// each names. It returns how many of those tokens were unrotated, and
+	// ErrNotFound when the account holds no such address.
 	UpsertRecoveryEmailCode(ctx context.Context, r *RecoveryEmailCodeRecord) (string, error)
 	CountRecoveryEmailCodeAttempt(ctx context.Context, userID string, atMs int64) (*RecoveryEmailCodeRecord, error)
 	ConsumeRecoveryEmailCode(ctx context.Context, userID string, atMs int64) (*RecoveryEmailCodeRecord, error)
@@ -651,11 +650,11 @@ type Repository interface {
 	// address (under FoldEmail) in the project, whose UserID is the account
 	// it signs in to, or nil when no account holds it.
 	// MarkRecoveryEmailSignIn stamps LastSignInAt = atMs on the account's
-	// address, unless the address signed in within holdMs before atMs: a
-	// sign-in does not extend the hold its own address started. An address
-	// the account does not hold is ErrNotFound.
+	// address whose ID is id, unless the address signed in within holdMs
+	// before atMs: a sign-in does not extend the hold its own address
+	// started. An address the account does not hold is ErrNotFound.
 	FindRecoveryEmailHolder(ctx context.Context, email string) (*RecoveryEmail, error)
-	MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs, holdMs int64) error
+	MarkRecoveryEmailSignIn(ctx context.Context, userID, id string, atMs, holdMs int64) error
 
 	// TOTP credentials
 	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)
@@ -984,12 +983,12 @@ type RefreshTokenRecord struct {
 	// session's tokens carry no auth_time. Accepting an invitation proves the
 	// mailbox it went to, so it is a sign-in and sets it.
 	AuthTimeMs int64 // epoch ms
-	// RecoveryEmail is the recovery email whose sign-in opened the session,
-	// empty for a session opened any other way. Every rotation copies it
-	// unchanged, and while it is set the session's access tokens carry the
-	// amr claim AMRRecoveryEmail. Removing the address ends the session
-	// (Repository.RemoveRecoveryEmail).
-	RecoveryEmail string
+	// RecoveryEmailID is the RecoveryEmail.ID of the recovery email whose
+	// sign-in opened the session, empty for a session opened any other way.
+	// Every rotation copies it unchanged, and while it is set the session's
+	// access tokens carry the amr claim AMRRecoveryEmail and the id itself.
+	// Removing the address ends the session (Repository.RemoveRecoveryEmail).
+	RecoveryEmailID string
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
@@ -1153,13 +1152,13 @@ type LoginChallengeRecord struct {
 	NodeID      string
 	ChallengeID string
 	UserID      string
-	// RecoveryEmail is the recovery email the sign-in waiting on its second
-	// factor was made with, which the session it opens is marked by and
-	// whose hold starts only once the factor is proved; empty for every
-	// other sign-in.
-	RecoveryEmail string
-	ExpiresAt     int64
-	CreatedAt     int64
+	// RecoveryEmailID is the RecoveryEmail.ID of the recovery email the
+	// sign-in waiting on its second factor was made with, which the session
+	// it opens is tied to and whose hold starts only once the factor is
+	// proved; empty for every other sign-in.
+	RecoveryEmailID string
+	ExpiresAt       int64
+	CreatedAt       int64
 }
 
 // PasswordResetToken represents a stored password-reset token.
@@ -2140,9 +2139,9 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // back in during the grace window has reclaimed the account. It is also the
 // one place a sign-in is recorded as the account's last login, once the
 // session is issued: a sign-in refused on the way is not a login.
-// recoveryEmail is the recovery email the sign-in was made with, empty for
-// most.
-func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64, recoveryEmail string) (string, string, error) {
+// recoveryEmailID is the RecoveryEmail.ID of the recovery email the sign-in
+// was made with, empty for most.
+func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64, recoveryEmailID string) (string, string, error) {
 	// An agent account has no sign-in method. Refused here, before anything
 	// is written, so no credential a corrupt row might hold opens one.
 	if err := s.refuseAgentSignIn(ctx, user, ipAddr, userAgent); err != nil {
@@ -2155,7 +2154,7 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 		return "", "", err
 	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, authTimeMs, recoveryEmail, "")
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, authTimeMs, recoveryEmailID, "")
 	if err != nil {
 		return "", "", err
 	}
@@ -2263,17 +2262,17 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 // sign-in. A sign-in passes its own time; the refresh path passes the consumed
 // record's AuthTimeMs; a flow no sign-in opened passes 0, and its tokens carry
 // no auth_time. A reader that needs a recent sign-in compares the claim with
-// now, so it ages as it should. recoveryEmail, the recovery email whose
-// sign-in opened the session, travels the same way, on the refresh record and
-// the DOB ticket, and gives the access token its amr claim. Its refresh token
-// is stored only while the account holds that address, so a session whose
-// address was removed while it was being issued is refused rather than opened
-// (ErrUnauthenticated).
+// now, so it ages as it should. recoveryEmailID, the RecoveryEmail.ID of the
+// recovery email whose sign-in opened the session, travels the same way, on
+// the refresh record and the DOB ticket, and gives the access token its amr
+// and recovery_email_id claims. Its refresh token is stored only while the
+// account holds that address, so a session whose address was removed while
+// it was being issued is refused rather than opened (ErrUnauthenticated).
 //
 // tenantID becomes the access token's tenant claim. It is a tenant the caller
 // has already checked the user may act in; empty keeps the deployment's
 // default tenant.
-func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, recoveryEmail, tenantID string) (string, string, error) {
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, recoveryEmailID, tenantID string) (string, string, error) {
 	// The verified-email gate's backstop: every path that mints a session (and
 	// any added later) honours it. Sign-ins and refreshes run the audited gate
 	// before reaching here, so this refuses silently.
@@ -2312,7 +2311,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// written. Like the product gate it lives here, at the chokepoint, so
 	// every session-issuing path — initial login, refresh, and any path
 	// added later — is covered by construction.
-	if err := s.enforceDOBRequired(ctx, user, claimAuthTimeMs, recoveryEmail, ipAddr, userAgent, gate); err != nil {
+	if err := s.enforceDOBRequired(ctx, user, claimAuthTimeMs, recoveryEmailID, ipAddr, userAgent, gate); err != nil {
 		return "", "", err
 	}
 
@@ -2328,7 +2327,8 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	claims := s.accessTokenClaims(ctx, user, claimAuthTimeMs)
-	claims.AMR = recoverySessionAMR(recoveryEmail)
+	claims.AMR = recoverySessionAMR(recoveryEmailID)
+	claims.RecoveryEmailID = recoveryEmailID
 	if tenantID != "" {
 		claims.Tenant = tenantID
 	}
@@ -2367,13 +2367,13 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		SessionStartedAt: sessionStart,
 		SID:              sid,
 		AuthTimeMs:       claimAuthTimeMs,
-		RecoveryEmail:    recoveryEmail,
+		RecoveryEmailID:  recoveryEmailID,
 	})
-	if recoveryEmail != "" && errors.Is(err, ErrNotFound) {
+	if recoveryEmailID != "" && errors.Is(err, ErrNotFound) {
 		s.revokeSessionIfModeSession(ctx, sid, user.ID, "recovery_email_removed")
 		s.logger.Info("recovery_session_refused_address_removed",
-			zap.String("user_id", user.ID), zap.String("email", redactEmail(recoveryEmail)))
-		return "", "", fmt.Errorf("%w: the recovery email that opened the session no longer belongs to the account", ErrUnauthenticated)
+			zap.String("user_id", user.ID), zap.String("recovery_email_id", recoveryEmailID))
+		return "", "", errRecoveryEmailGone
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("storing refresh token: %w", err)
@@ -2482,16 +2482,16 @@ func (s *AuthService) updateLastLogin(ctx context.Context, userID string) {
 }
 
 // issueLoginChallenge creates a pending 2FA login challenge, for a sign-in
-// by the recovery email recoveryEmail when it is not empty.
-func (s *AuthService) issueLoginChallenge(ctx context.Context, userID, recoveryEmail string) (string, error) {
+// by the recovery email recoveryEmailID when it is not empty.
+func (s *AuthService) issueLoginChallenge(ctx context.Context, userID, recoveryEmailID string) (string, error) {
 	now := s.nowMs()
 	challengeID := generateChallengeID()
 	_, err := s.repo(ctx).CreateLoginChallenge(ctx, &LoginChallengeRecord{
-		ChallengeID:   challengeID,
-		UserID:        userID,
-		RecoveryEmail: recoveryEmail,
-		ExpiresAt:     now + int64(s.cfg.LoginChallengeExpirySeconds)*1000,
-		CreatedAt:     now,
+		ChallengeID:     challengeID,
+		UserID:          userID,
+		RecoveryEmailID: recoveryEmailID,
+		ExpiresAt:       now + int64(s.cfg.LoginChallengeExpirySeconds)*1000,
+		CreatedAt:       now,
 	})
 	if err != nil {
 		return "", fmt.Errorf("creating login challenge: %w", err)
@@ -2765,7 +2765,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// issueTokensWithSessionStart (so nothing is bypassed); this early pass
 	// exists only so the refusal is non-destructive and the client can
 	// complete the step and rotate normally.
-	if err := s.enforceDOBRequired(ctx, timeoutUser, record.AuthTimeMs, record.RecoveryEmail, ipAddr, userAgent, sessionGateRefresh); err != nil {
+	if err := s.enforceDOBRequired(ctx, timeoutUser, record.AuthTimeMs, record.RecoveryEmailID, ipAddr, userAgent, sessionGateRefresh); err != nil {
 		return nil, "", "", err
 	}
 
@@ -2888,7 +2888,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// issueTokensWithSessionStart. The sign-in's auth_time is carried over
 	// unchanged too, and so is the recovery email that opened it; the gates
 	// get 0 because a rotation is not a sign-in.
-	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, record.RecoveryEmail, tenantID)
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, record.RecoveryEmailID, tenantID)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -2941,7 +2941,7 @@ func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, sess
 		return &TenantSelectionRefusedError{Reason: TenantSelectionNotEnabled, Err: ErrTenantSelectionDisabled}
 	}
 	projectID := s.projectID(ctx)
-	domain := memberDomain(user, session.RecoveryEmail != "")
+	domain := memberDomain(user, session.RecoveryEmailID != "")
 	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, projectID, tenantID, user.ID, domain)
 	if err != nil {
 		return s.tenantSelectionUnavailable(projectID, tenantID, err)

@@ -7872,8 +7872,9 @@ components:
          session a recovery email opened may reject but not approve: it is refused
          FAILED_PRECONDITION with the stable `recovery_session` token, since the
          session the hand-off opens could not carry its `amr`. Over native gRPC, a
-         session whose `amr` the host does not forward may be such a session, and
-         is refused the same while a recovery hold is in force on its account.
+         session whose `amr` the host does not forward may be such a session: it is
+         refused the same in a project whose recovery emails sign in, and elsewhere
+         while a recovery hold is in force on its account.
     identity.v1.ApproveQrLoginResponse:
       type: object
       properties:
@@ -10353,7 +10354,9 @@ components:
              memberships that are not active, and memberships through the email's
              domain while that email is unverified are left out, as are all
              memberships through the email's domain for a session a recovery email
-             opened, or one over native gRPC whose `amr` the host does not forward.
+             opened, or, in a project whose recovery emails sign in
+             (`recovery_emails.sign_in`), one over native gRPC whose `amr` the host
+             does not forward.
       title: ListMyTenantsResponse
       additionalProperties: false
     identity.v1.ListOAuthClientsRequest:
@@ -11599,8 +11602,12 @@ components:
          or RevokeSession of its own session where its token carries a `sid`. A
          session opened any other way is not held, and removing the address that
          started the hold ends it. Merging either account is refused, whoever asks.
-         Over native gRPC, a session whose `amr` the host does not forward is held
-         too (see the embedding guide).
+         Once its address is removed, such a session makes none of these changes,
+         hold or not, for as long as its access token lasts: they answer
+         UNAUTHENTICATED. Over native gRPC, a session whose `amr` the host does not
+         forward is held too, and in a project whose recovery emails sign in it is
+         refused these changes outright with the stable `recovery_session` token,
+         since it cannot name the address behind it (see the embedding guide).
     identity.v1.RedeemMagicLinkRequest:
       type: object
       properties:

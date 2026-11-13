@@ -417,7 +417,7 @@ func (r *fakeRepo) CreateRefreshToken(_ context.Context, rec *service.RefreshTok
 	if r.errIssueToken != nil {
 		return "", r.errIssueToken
 	}
-	if rec.RecoveryEmail != "" && r.heldRecoveryEmailLocked(rec.UserID, rec.RecoveryEmail) < 0 {
+	if rec.RecoveryEmailID != "" && r.heldRecoveryEmailLocked(rec.UserID, recoveryEmailWithID(rec.RecoveryEmailID)) < 0 {
 		return "", fmt.Errorf("fake: CreateRefreshToken: %w", service.ErrNotFound)
 	}
 	id := nextID()

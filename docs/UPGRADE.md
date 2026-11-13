@@ -125,7 +125,7 @@ now a setting, and none changes until it is set.
   `service.ErrSMSDisabled` is renamed `ErrPhoneVerificationUnavailable`, since
   it no longer means SMS alone.
 
-## Next — a recovery email signs in to its account, and the session it opens is held from account security changes: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claim `amr`, `ListRecoveryEmailsResponse.hold_until`, `RecoveryEmail.last_sign_in_at`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; native-gRPC hosts: new `identityserver.Options.GRPCTrustAMR`, **action required**; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` and `ProfileService` signatures (Go API))
+## Next — a recovery email signs in to its account, and the session it opens is held from account security changes: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claims `amr` and `recovery_email_id`, `ListRecoveryEmailsResponse.hold_until`, `RecoveryEmail.last_sign_in_at`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; native-gRPC hosts: new `identityserver.Options.GRPCTrustAMR`, **action required**; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` and `ProfileService` signatures (Go API))
 
 A project whose accounts sign in by emailed code had no way back in for a
 person who lost their primary mailbox: the email change and the account merge
@@ -155,23 +155,25 @@ both ask for a password. A recovery email can now be that way.
   nothing below happens until `VerifyTotp` proves the factor: a code alone
   starts no hold and sends no notice.
 - **The session says how it was opened.** Its access tokens carry the claim
-  `amr: ["recovery_email"]` (RFC 8176; absent on every other token, whose
-  bytes are unchanged), and its refresh token keeps the address that opened
-  it across rotations, a date-of-birth completion included. A relying party
-  that wants to treat such a session as weaker can read the claim.
+  `amr: ["recovery_email"]` (RFC 8176) and `recovery_email_id`, an opaque
+  reference to the address that opened it which never names the address
+  (both absent on every other token, whose bytes are unchanged), and its
+  refresh token keeps that reference across rotations, a date-of-birth
+  completion included. A relying party that wants to treat such a session as
+  weaker can read the `amr`.
 - **Removing the address ends the sessions it opened.** `RemoveRecoveryEmail`
   deletes, in the same transaction as the address, every refresh token a
   sign-in by that address wrote, rotated ones included, and revokes the
   access session each names. Under `GATEWAY_REVOCATION_MODE=session` their
   access tokens stop working at once on the replica that removed the address,
-  and within `GATEWAY_SESSION_CACHE_TTL_SECONDS` on others; until then such a
-  token makes no account security change on any replica (the held calls below
-  read its session from the store and answer `UNAUTHENTICATED` once it has
-  ended), although the hold its address started ends with it. A merge's
-  retired account now leaves the session cache at once on its replica too.
-  Under `ttl` they last to their expiry and can no longer be refreshed, and
-  in that time, with the address gone, no hold refuses them: a project that
-  relies on the hold should run `session` mode. The account's other sessions,
+  and within `GATEWAY_SESSION_CACHE_TTL_SECONDS` on others; under `ttl` they
+  last to their expiry and can no longer be refreshed. Under either mode such
+  a token makes no account security change in that time, although the hold
+  its address started may have ended with it: the held calls below, and
+  `MergeAccounts`, answer `UNAUTHENTICATED`, since its `recovery_email_id`
+  names an address the account no longer holds (an address removed and added
+  again is a new one). A merge's retired account now leaves the session cache
+  at once on its replica too. The account's other sessions,
   including those its other recovery emails opened, are untouched, and the
   refused refreshes do not set off replay detection. A session being opened
   by that address while it is removed (a second factor or a date of birth
@@ -226,48 +228,56 @@ both ask for a password. A recovery email can now be that way.
   the account belongs to only through its email's domain, so disabling an
   organisational mailbox is not undone by a personal recovery address.
 - **Native gRPC: action required once a project turns `sign_in` on.** The
-  bridge passes `x-authenticated-amr` to the handlers only once the host sets
-  the new `identityserver.Options.GRPCTrustAMR`, separate from
-  `GRPCTrustAuthTime`. Until then it replaces the key with `unvouched`,
+  bridge passes `x-authenticated-amr` and `x-authenticated-recovery-email-id`
+  to the handlers only once the host sets the new
+  `identityserver.Options.GRPCTrustAMR`, separate from `GRPCTrustAuthTime`.
+  Until then it replaces the `amr` with `unvouched` and drops the id,
   whatever the client sent, and treats every native-gRPC session as one a
-  recovery email may have opened: while a hold is in force on its account the
-  session makes none of the changes above and approves no QR sign-in
-  (`recovery_session`), and in a project with `recovery_emails.sign_in` on,
-  `ListMyTenants` lists only its explicit memberships, leaving out, hold or
-  not, every tenant it belongs to through its email's domain (`RefreshToken`
-  still selects such a tenant: its refresh token records how the session was
-  opened). A project that never turns `sign_in` on has no hold and sees no
-  change. Hosts already on `GRPCTrustAuthTime` are affected too: the
-  embedding guide's earlier sample interceptor forwarded no `amr`, which
-  would otherwise let every recovery session over native gRPC past the hold;
-  `RegisterGRPC` now logs `grpc_amr_not_trusted` for a host that trusts
-  `auth_time` or the session id but not the `amr`.
-  To have sessions treated by how they were opened, make the interceptor
-  delete any `x-authenticated-amr` the client sent and set it from the
-  verified token, `strings.Join(claims.AMR, " ")` (left out when the token
-  has no `amr`), then set `GRPCTrustAMR`.
+  recovery email may have opened that cannot name its address. In a project
+  with `recovery_emails.sign_in` on, such a session makes none of the changes
+  above, `MergeAccounts` included, and approves no QR sign-in, hold or not
+  (`FAILED_PRECONDITION`, `recovery_session`), and `ListMyTenants` lists only
+  its explicit memberships, leaving out every tenant it belongs to through
+  its email's domain (`RefreshToken` still selects such a tenant: its refresh
+  token records how the session was opened). Elsewhere it is refused the
+  changes and the approval only while a hold is in force on its account. A
+  project that never turns `sign_in` on has no hold and sees no change.
+  Hosts already on `GRPCTrustAuthTime` are affected too: the embedding
+  guide's earlier sample interceptor forwarded no `amr`, which would otherwise
+  let every recovery session over native gRPC past the hold; `RegisterGRPC`
+  now logs `grpc_amr_not_trusted` for a host that trusts `auth_time` or the
+  session id but not the `amr`. To have sessions treated by how they were
+  opened, make the interceptor delete any `x-authenticated-amr` and
+  `x-authenticated-recovery-email-id` the client sent and set them from the
+  verified token, `strings.Join(claims.AMR, " ")` and `claims.RecoveryEmailID`
+  (each left out when the token has none), then set `GRPCTrustAMR`. An
+  interceptor that forwards the `amr` but not the id leaves every recovery
+  session refused its account security changes (`recovery_session`).
 - **One more read on every emailed-code or link sign-in**: whether the proved
   address is a recovery email.
 - **Migration 0059** gives `user_recovery_emails` its `last_sign_in_at_ms`,
-  and `refresh_tokens` and `login_challenges` each a `recovery_email` column
-  (SQLite: 0028), each with a constant default. A recovery session's refresh
-  token is inserted with a `FOR SHARE` read of its address's row, so it
-  waits on a removal in progress rather than outliving it.
+  and `refresh_tokens` and `login_challenges` each a `recovery_email_id`
+  column (SQLite: 0028), each with a constant default. A recovery session's
+  refresh token is inserted with a `FOR SHARE` read of its address's row, so
+  it waits on a removal in progress rather than outliving it.
 - **Go API.** `service.Repository` gains `FindRecoveryEmailHolder` and
-  `MarkRecoveryEmailSignIn`; `RefreshTokenRecord` and `LoginChallengeRecord`
-  gain `RecoveryEmail`, which a custom driver must store. Its
+  `MarkRecoveryEmailSignIn` (by the address's ID); `RecoveryEmail` gains
+  `ID`, the row's id, which `ListRecoveryEmails` and
+  `FindRecoveryEmailHolder` must return (`ListRecoveryEmails` oldest first,
+  by `VerifiedAt` then `ID`); `RefreshTokenRecord` and `LoginChallengeRecord`
+  gain `RecoveryEmailID`, which a custom driver must store. Its
   `CreateRefreshToken` must refuse, with `ErrNotFound`, a token whose
-  `RecoveryEmail` its account does not hold, atomically against
-  `RemoveRecoveryEmail`, and `RemoveRecoveryEmail` (which takes the time of
-  the removal and returns how many unrotated sessions it ended, or
-  `ErrNotFound` for an address the account does not hold) must delete those
-  tokens and revoke their sessions in its transaction (the conformance suite
-  checks all of it, a race between the two included). `jwt.Claims` gains
-  `AMR`, and `RecoveryEmail`, which only the date-of-birth completion ticket
-  of a recovery session carries. The `AuthService` and `ProfileService`
-  calls listed under the hold, `MergeAccounts` and `ApproveQrLogin`, and
-  `MembershipService.ListMyTenants`, take a `service.SessionSignIn` (the
-  token's `auth_time`, `amr` and `sid`) where the recovery-email calls and
+  `RecoveryEmailID` is not one of its account's recovery emails, atomically
+  against `RemoveRecoveryEmail`, and `RemoveRecoveryEmail` (which takes the
+  time of the removal and returns how many unrotated sessions it ended, or
+  `ErrNotFound` for an address the account does not hold) must delete the
+  tokens carrying the removed address's ID and revoke their sessions in its
+  transaction (the conformance suite checks all of it, a race between the
+  two included). `jwt.Claims` gains `AMR` and `RecoveryEmailID`. The
+  `AuthService` and `ProfileService` calls listed under the hold,
+  `MergeAccounts` and `ApproveQrLogin`, and `MembershipService.ListMyTenants`,
+  take a `service.SessionSignIn` (the token's `auth_time`, `amr`,
+  `recovery_email_id` and `sid`) where the recovery-email calls and
   `MergeAccounts` took the bare `auth_time`. `AuthService.ListRecoveryEmails`
   also returns the hold's end. `identityserver.Options` gains
   `GRPCTrustAMR`.

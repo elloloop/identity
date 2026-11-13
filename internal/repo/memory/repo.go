@@ -775,7 +775,7 @@ func (r *Repo) FindRefreshTokenByHashIncludingConsumed(_ context.Context, hash s
 func (r *Repo) CreateRefreshToken(_ context.Context, rec *service.RefreshTokenRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if rec.RecoveryEmail != "" && r.heldRecoveryEmailLocked(rec.UserID, rec.RecoveryEmail) < 0 {
+	if rec.RecoveryEmailID != "" && r.heldRecoveryEmailLocked(rec.UserID, recoveryEmailWithID(rec.RecoveryEmailID)) < 0 {
 		return "", fmt.Errorf("memory: CreateRefreshToken: %w", service.ErrNotFound)
 	}
 	id := r.nextID()

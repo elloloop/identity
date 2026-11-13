@@ -65,8 +65,8 @@ func (s *AuthService) loginCodeSendAllowed(ctx context.Context, addr canonicalEm
 //
 // A code alone starts nothing: an account that owes a second factor gets a
 // challenge that remembers the address, and the hold, the notice and the
-// session's recovery_email marking come only once VerifyTotp proves the
-// factor (startRecoveryEmailSession).
+// session's tie to the address come only once VerifyTotp proves the factor
+// (startRecoveryEmailSession).
 func (s *AuthService) completeRecoveryEmailLogin(ctx context.Context, addr, method string, invalidErr error, ipAddr, userAgent string) (result *LoginResult, handled bool, err error) {
 	holder, err := s.repo(ctx).FindRecoveryEmailHolder(ctx, addr)
 	if err != nil {
@@ -100,10 +100,10 @@ func (s *AuthService) completeRecoveryEmailLogin(ctx context.Context, addr, meth
 		return nil, true, err
 	}
 	if user.TotpRequired || decision.RequireSecondFactor {
-		result, err := s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, addr, ipAddr, userAgent)
+		result, err := s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, holder.ID, ipAddr, userAgent)
 		return result, true, err
 	}
-	accessToken, refreshToken, err := s.startRecoveryEmailSession(ctx, user, addr, method, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.startRecoveryEmailSession(ctx, user, holder.ID, method, ipAddr, userAgent)
 	if err != nil {
 		return nil, true, err
 	}
@@ -122,47 +122,50 @@ func (s *AuthService) completeRecoveryEmailLogin(ctx context.Context, addr, meth
 }
 
 // startRecoveryEmailSession opens the session of a sign-in by the recovery
-// email addr once every factor it owed is proved (method names the last
-// proof: the emailed code or link, or "totp"). It starts the account's
-// recovery hold, unless one this address started is still in force, tells
-// every other address of the account, and issues the session
-// marked AMRRecoveryEmail. The hold comes before the tokens: a sign-in that
-// cannot start the hold must not happen. A verified-email refusal comes
-// before both, so a sign-in that could yield no session starts nothing.
-func (s *AuthService) startRecoveryEmailSession(ctx context.Context, user *User, addr, method, ipAddr, userAgent string) (string, string, error) {
+// email whose RecoveryEmail.ID is recoveryEmailID once every factor it owed
+// is proved (method names the last proof: the emailed code or link, or
+// "totp"). It starts the account's recovery hold, unless one this address
+// started is still in force, tells every other address of the account, and
+// issues the session marked AMRRecoveryEmail and tied to the address. The
+// hold comes before the tokens: a sign-in that cannot start the hold must
+// not happen. A verified-email refusal comes before both, so a sign-in that
+// could yield no session starts nothing, and an address removed meanwhile
+// (while its second factor was asked for, say) opens nothing.
+func (s *AuthService) startRecoveryEmailSession(ctx context.Context, user *User, recoveryEmailID, method, ipAddr, userAgent string) (string, string, error) {
 	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return "", "", err
 	}
 	hold := recoveryEmailsConfig(ProjectScopeFromContext(ctx)).hold()
 	now := s.nowMs()
-	if err := s.repo(ctx).MarkRecoveryEmailSignIn(ctx, user.ID, addr, now, hold.Milliseconds()); err != nil {
+	if err := s.repo(ctx).MarkRecoveryEmailSignIn(ctx, user.ID, recoveryEmailID, now, hold.Milliseconds()); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			// Removed from the account while its second factor was asked for.
-			return "", "", fmt.Errorf("%w: the address no longer belongs to the account", ErrUnauthenticated)
+			return "", "", errRecoveryEmailGone
 		}
 		return "", "", fmt.Errorf("recording recovery email sign-in: %w", err)
 	}
-	s.audit.Log(ctx, audit.EventRecoveryEmailSignIn,
-		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent), audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"method": method, "email": redactEmail(addr)}))
 	held, err := s.repo(ctx).ListRecoveryEmails(ctx, user.ID)
 	if err != nil {
 		return "", "", fmt.Errorf("listing recovery emails: %w", err)
 	}
-	// An address removed since it was marked starts no hold, and the session
-	// is refused below; there is nothing to tell.
-	if until := recoveryHoldUntil(held, hold, now); until != 0 {
-		s.notifyAccountAddresses(ctx, user, held, addr, accountNotice{
-			op:       "recovery_email_sign_in_notice",
-			headline: "Your account was signed in to with a recovery email",
-			detail: fmt.Sprintf("Someone signed in to your account with the recovery email %s. "+
-				"Until %s that session cannot make security changes to your account: "+
-				"it cannot add or remove an email address, phone number, second factor, passkey or linked provider, "+
-				"change your password or primary email, sign out your other sessions or delete the account. "+
-				"If it was not you, sign in another way (your primary email, your password, a passkey or a linked provider) "+
-				"and remove the address.",
-				addr, time.UnixMilli(until).UTC().Format("2 January 2006 at 15:04 UTC")),
-		})
+	signedIn := heldRecoveryEmail(held, recoveryEmailID)
+	if signedIn == nil {
+		return "", "", errRecoveryEmailGone
 	}
-	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, addr)
+	addr := signedIn.Email
+	s.audit.Log(ctx, audit.EventRecoveryEmailSignIn,
+		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent), audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"method": method, "email": redactEmail(addr)}))
+	until := recoveryHoldUntil(held, hold, now)
+	s.notifyAccountAddresses(ctx, user, held, addr, accountNotice{
+		op:       "recovery_email_sign_in_notice",
+		headline: "Your account was signed in to with a recovery email",
+		detail: fmt.Sprintf("Someone signed in to your account with the recovery email %s. "+
+			"Until %s that session cannot make security changes to your account: "+
+			"it cannot add or remove an email address, phone number, second factor, passkey or linked provider, "+
+			"change your password or primary email, sign out your other sessions or delete the account. "+
+			"If it was not you, sign in another way (your primary email, your password, a passkey or a linked provider) "+
+			"and remove the address.",
+			addr, time.UnixMilli(until).UTC().Format("2 January 2006 at 15:04 UTC")),
+	})
+	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, recoveryEmailID)
 }

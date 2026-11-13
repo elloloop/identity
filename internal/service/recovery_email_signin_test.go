@@ -218,11 +218,23 @@ func TestRecoveryEmailSignIn_MarksTheSessionAndHoldsOnlyIt(t *testing.T) {
 
 	// The session the recovery email opened, and one no host vouched for,
 	// make no account security change.
-	for _, session := range []SessionSignIn{f.recoverySignedInNow(), {AuthTimeSec: f.now.Unix(), AMR: []string{AMRUnvouched}}} {
+	for name, change := range f.heldChanges(user.ID, f.recoverySignedInNow(t, user, "spare@example.net")) {
+		var hold *RecoveryHoldError
+		if err := change(); !errors.As(err, &hold) || !errors.Is(err, ErrRecoveryHold) || hold.UntilMs != wantUntil {
+			t.Fatalf("%s by the recovery session during the hold = %v (%+v), want a RecoveryHoldError until %d", name, err, hold, wantUntil)
+		}
+	}
+	// One no host vouched for cannot name the address behind it, so where
+	// recovery emails sign in it is taken for a recovery session whose
+	// address may be gone, hold or not; and so is one that says a recovery
+	// email opened it but names none.
+	for _, session := range []SessionSignIn{
+		{AuthTimeSec: f.now.Unix(), AMR: []string{AMRUnvouched}},
+		{AuthTimeSec: f.now.Unix(), AMR: []string{AMRRecoveryEmail}},
+	} {
 		for name, change := range f.heldChanges(user.ID, session) {
-			var hold *RecoveryHoldError
-			if err := change(); !errors.As(err, &hold) || !errors.Is(err, ErrRecoveryHold) || hold.UntilMs != wantUntil {
-				t.Fatalf("%s by a %v session during the hold = %v (%+v), want a RecoveryHoldError until %d", name, session.AMR, err, hold, wantUntil)
+			if err := change(); !errors.Is(err, ErrRecoverySession) {
+				t.Fatalf("%s by a %v session naming no recovery email = %v, want ErrRecoverySession", name, session.AMR, err)
 			}
 		}
 	}
@@ -232,7 +244,7 @@ func TestRecoveryEmailSignIn_MarksTheSessionAndHoldsOnlyIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitiateQrLogin: %v", err)
 	}
-	if _, err := f.svc.ApproveQrLogin(f.ctx, qr.SessionID, true, user.ID, f.recoverySignedInNow(), "", ""); !errors.Is(err, ErrRecoverySession) {
+	if _, err := f.svc.ApproveQrLogin(f.ctx, qr.SessionID, true, user.ID, f.recoverySignedInNow(t, user, "spare@example.net"), "", ""); !errors.Is(err, ErrRecoverySession) {
 		t.Fatalf("QR approval by a recovery session: want ErrRecoverySession, got %v", err)
 	}
 
@@ -247,47 +259,57 @@ func TestRecoveryEmailSignIn_MarksTheSessionAndHoldsOnlyIt(t *testing.T) {
 }
 
 // Removing the address ends the hold and, in the same write, the sessions
-// the address opened. Another replica's session cache can pass such a
-// session's access token for a while yet, and no hold binds it any more, so
-// it is refused every account security change once the store says it has
-// ended. A recovery session that is still live is not.
-func TestRecoveryHold_AnEndedRecoverySessionIsRefusedOnceItsAddressIsGone(t *testing.T) {
-	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
-	f.svc.cfg.RevocationMode = config.RevocationModeSession
-	f.svc.cfg.SMSEnabled = true
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
-	f.add(t, user, "spare@example.net")
-	f.repo.mu.Lock()
-	f.repo.users[user.ID].PhoneNumber, f.repo.users[user.ID].PhoneVerified = "+14155550199", true
-	f.repo.mu.Unlock()
-	result, err := f.signInWith(f.ctx, t, "spare@example.net")
-	if err != nil {
-		t.Fatalf("sign-in by the recovery email: %v", err)
-	}
-	claims, err := jwt.VerifyAccessToken(result.AccessToken, f.svc.signer, "", "", false)
-	if err != nil || claims.SID == "" {
-		t.Fatalf("the recovery session's token: sid %q, %v", claims.SID, err)
-	}
-	ended := SessionSignIn{AuthTimeSec: claims.AuthTime, AMR: claims.AMR, SessionID: claims.SID}
+// the address opened. Their access tokens outlive that write: for the rest of
+// their lifetime under GATEWAY_REVOCATION_MODE=ttl, and under session for as
+// long as another replica's cache passes them. No hold binds them any more,
+// so each is refused every account security change by the recovery email it
+// names, which the account no longer holds. A recovery session whose address
+// is still held is not, and neither is the session of an address removed and
+// added again, which is a new address: the old session stays refused.
+func TestRecoveryHold_ARemovedAddressEndsItsSessionsChangesInEitherMode(t *testing.T) {
+	for _, mode := range []config.RevocationMode{config.RevocationModeTTL, config.RevocationModeSession} {
+		t.Run(string(mode), func(t *testing.T) {
+			f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
+			f.svc.cfg.RevocationMode = mode
+			f.svc.cfg.SMSEnabled = true
+			f.svc.cfg.AccountMergeEnabled = true
+			user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+			f.add(t, user, "spare@example.net")
+			f.add(t, user, "kept@example.net")
+			f.repo.mu.Lock()
+			f.repo.users[user.ID].PhoneNumber, f.repo.users[user.ID].PhoneVerified = "+14155550199", true
+			f.repo.mu.Unlock()
+			result, err := f.signInWith(f.ctx, t, "spare@example.net")
+			if err != nil {
+				t.Fatalf("sign-in by the recovery email: %v", err)
+			}
+			claims, err := jwt.VerifyAccessToken(result.AccessToken, f.svc.signer, "", "", false)
+			if err != nil || claims.RecoveryEmailID != f.recoveryEmailID(t, user.ID, "spare@example.net") || (claims.SID == "") != (mode == config.RevocationModeTTL) {
+				t.Fatalf("the recovery session's token = %+v %v, want the address's id and a sid only in session mode", claims, err)
+			}
+			ended := SessionSignIn{AuthTimeSec: claims.AuthTime, AMR: claims.AMR, RecoveryEmailID: claims.RecoveryEmailID, SessionID: claims.SID}
 
-	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net"); err != nil {
-		t.Fatalf("the owner removes the address: %v", err)
-	}
-	if until := f.holdUntil(t, user.ID); until != 0 {
-		t.Fatalf("hold after the address was removed = %d, want 0", until)
-	}
-	for name, change := range f.heldChanges(user.ID, ended) {
-		if err := change(); !errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRecoveryHold) {
-			t.Fatalf("%s by the ended recovery session = %v, want ErrUnauthenticated", name, err)
-		}
-	}
+			if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net"); err != nil {
+				t.Fatalf("the owner removes the address: %v", err)
+			}
+			if until := f.holdUntil(t, user.ID); until != 0 {
+				t.Fatalf("hold after the address was removed = %d, want 0", until)
+			}
+			f.add(t, user, "spare@example.net")
+			for name, change := range f.heldChanges(user.ID, ended) {
+				if err := change(); !errors.Is(err, ErrUnauthenticated) || errors.Is(err, ErrRecoveryHold) {
+					t.Fatalf("%s by the removed address's session = %v, want ErrUnauthenticated", name, err)
+				}
+			}
+			if _, err := f.svc.MergeAccounts(f.ctx, user.ID, ended, "other@example.com", "Str0ng!Pass1", "", "", false); !errors.Is(err, ErrUnauthenticated) {
+				t.Fatalf("MergeAccounts by the removed address's session = %v, want ErrUnauthenticated", err)
+			}
 
-	if _, err := f.repo.CreateSession(f.ctx, &SessionRecord{SID: "sid-live", UserID: user.ID}); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	live := SessionSignIn{AuthTimeSec: f.now.Unix(), AMR: []string{AMRRecoveryEmail}, SessionID: "sid-live"}
-	if err := f.svc.refuseHeldSession(f.ctx, user.ID, live); err != nil {
-		t.Fatalf("a live recovery session with no hold in force = %v, want nil", err)
+			kept := f.recoverySignedInNow(t, user, "kept@example.net")
+			if err := f.svc.refuseHeldSession(f.ctx, user.ID, kept); err != nil {
+				t.Fatalf("a recovery session whose address is held, no hold in force = %v, want nil", err)
+			}
+		})
 	}
 }
 
@@ -310,7 +332,7 @@ func TestRecoveryHold_RemovalsAreHeldFromTheRecoverySessionOnly(t *testing.T) {
 	}
 	f.addSession(user.ID, "owner-laptop", "sid-laptop")
 	f.addSession(user.ID, "recovery-phone", "sid-recovery")
-	recovery := f.recoverySignedInNow()
+	recovery := f.recoverySignedInNow(t, user, "spare@example.net")
 	recovery.SessionID = "sid-recovery"
 
 	for name, remove := range map[string]func() error{
@@ -354,38 +376,59 @@ func TestRecoveryHold_RemovalsAreHeldFromTheRecoverySessionOnly(t *testing.T) {
 }
 
 // A session no one vouched for how it was opened (the native-gRPC bridge
-// without GRPCTrustAMR) may be one a recovery email opened, so it approves
-// no QR sign-in while a hold is in force; otherwise it approves as before.
-// A session a recovery email opened approves none, hold or not.
-func TestApproveQrLogin_AnUnvouchedSessionIsRefusedDuringAHold(t *testing.T) {
-	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
+// without GRPCTrustAMR) may be one a recovery email opened. In a project
+// whose recovery emails sign in it is taken for one, which cannot name its
+// address: it approves no QR sign-in and makes no account security change,
+// hold or not. Elsewhere it is refused both while a hold is in force, and
+// otherwise approves and changes as before. A session a recovery email opened
+// approves none, hold or not.
+func TestRecoveryHold_AnUnvouchedSessionIsTakenForARecoverySessionWhereOneCouldBe(t *testing.T) {
+	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
+	signInOn := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "project-a", Access: ProjectAccessConfig{Mode: AccessModeOpen},
+		RecoveryEmails: ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true},
+	})
 	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
 	f.add(t, user, "spare@example.net")
-	approve := func(session SessionSignIn) (string, error) {
+	approve := func(ctx context.Context, session SessionSignIn) (string, error) {
 		t.Helper()
-		qr, err := f.svc.InitiateQrLogin(f.ctx, "laptop", "agent", "203.0.113.9")
+		qr, err := f.svc.InitiateQrLogin(ctx, "laptop", "agent", "203.0.113.9")
 		if err != nil {
 			t.Fatalf("InitiateQrLogin: %v", err)
 		}
-		return f.svc.ApproveQrLogin(f.ctx, qr.SessionID, true, user.ID, session, "", "")
+		return f.svc.ApproveQrLogin(ctx, qr.SessionID, true, user.ID, session, "", "")
 	}
 	unvouched := SessionSignIn{AuthTimeSec: f.now.Unix(), AMR: []string{AMRUnvouched}}
 
-	if status, err := approve(unvouched); err != nil || status != "approved" {
+	if status, err := approve(f.ctx, unvouched); err != nil || status != "approved" {
 		t.Fatalf("approval by an unvouched session with no hold = %q %v, want approved", status, err)
 	}
-	if _, err := f.signInWith(f.ctx, t, "spare@example.net"); err != nil {
-		t.Fatalf("sign-in by the recovery email: %v", err)
+	if err := f.svc.refuseHeldSession(f.ctx, user.ID, unvouched); err != nil {
+		t.Fatalf("an unvouched session with no hold, where recovery emails do not sign in = %v, want nil", err)
 	}
-	if _, err := approve(unvouched); !errors.Is(err, ErrRecoverySession) {
-		t.Fatalf("approval by an unvouched session during the hold = %v, want ErrRecoverySession", err)
+	if _, err := approve(signInOn, unvouched); !errors.Is(err, ErrRecoverySession) {
+		t.Fatalf("approval by an unvouched session where recovery emails sign in = %v, want ErrRecoverySession", err)
+	}
+	if err := f.svc.refuseHeldSession(signInOn, user.ID, unvouched); !errors.Is(err, ErrRecoverySession) {
+		t.Fatalf("a change by an unvouched session where recovery emails sign in = %v, want ErrRecoverySession", err)
 	}
 
-	f.now = f.now.Add(8 * 24 * time.Hour)
-	if status, err := approve(unvouched); err != nil || status != "approved" {
+	hold := 7 * 24 * time.Hour
+	if err := f.repo.MarkRecoveryEmailSignIn(f.ctx, user.ID, f.recoveryEmailID(t, user.ID, "spare@example.net"), f.now.UnixMilli(), hold.Milliseconds()); err != nil {
+		t.Fatalf("MarkRecoveryEmailSignIn: %v", err)
+	}
+	if _, err := approve(f.ctx, unvouched); !errors.Is(err, ErrRecoverySession) {
+		t.Fatalf("approval by an unvouched session during the hold = %v, want ErrRecoverySession", err)
+	}
+	if err := f.svc.refuseHeldSession(f.ctx, user.ID, unvouched); !errors.Is(err, ErrRecoveryHold) {
+		t.Fatalf("a change by an unvouched session during the hold = %v, want ErrRecoveryHold", err)
+	}
+
+	f.now = f.now.Add(hold + time.Hour)
+	if status, err := approve(f.ctx, unvouched); err != nil || status != "approved" {
 		t.Fatalf("approval by an unvouched session after the hold = %q %v, want approved", status, err)
 	}
-	if _, err := approve(f.recoverySignedInNow()); !errors.Is(err, ErrRecoverySession) {
+	if _, err := approve(f.ctx, f.recoverySignedInNow(t, user, "spare@example.net")); !errors.Is(err, ErrRecoverySession) {
 		t.Fatalf("approval by a recovery session after the hold = %v, want ErrRecoverySession", err)
 	}
 }
@@ -400,8 +443,8 @@ type removedOnMarkRepo struct {
 
 func (r removedOnMarkRepo) WithProject(string) Repository { return r }
 
-func (r removedOnMarkRepo) MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs, holdMs int64) error {
-	if err := r.fakeRepo.MarkRecoveryEmailSignIn(ctx, userID, email, atMs, holdMs); err != nil {
+func (r removedOnMarkRepo) MarkRecoveryEmailSignIn(ctx context.Context, userID, id string, atMs, holdMs int64) error {
+	if err := r.fakeRepo.MarkRecoveryEmailSignIn(ctx, userID, id, atMs, holdMs); err != nil {
 		return err
 	}
 	_, err := r.RemoveRecoveryEmail(ctx, userID, r.addr, atMs)
@@ -540,7 +583,7 @@ func TestRecoveryEmailSignIn_DOBStepContinuesTheRecoverySessionWhileItsAddressIs
 	if amr := f.sessionAMR(t, done.AccessToken); !slices.Equal(amr, []string{AMRRecoveryEmail}) {
 		t.Fatalf("the session the step completed has amr %v, want [%s]", amr, AMRRecoveryEmail)
 	}
-	if rec, _ := f.repo.FindRefreshTokenByHash(f.ctx, hashRefreshToken(done.RefreshToken)); rec == nil || rec.RecoveryEmail != "spare@example.net" {
+	if rec, _ := f.repo.FindRefreshTokenByHash(f.ctx, hashRefreshToken(done.RefreshToken)); rec == nil || rec.RecoveryEmailID != f.recoveryEmailID(t, held.ID, "spare@example.net") {
 		t.Fatalf("the step's refresh token = %#v, want it tied to the recovery email", rec)
 	}
 	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, held.ID, f.signedInNow(), "spare@example.net"); err != nil {

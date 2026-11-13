@@ -154,20 +154,29 @@ Every call that limits a session by how it was opened reads
 `x-authenticated-amr`, the token's `amr` claim with its values separated by
 spaces (absent on most tokens): each call a recovery hold refuses (the
 [recovery emails](../docs-site/src/pages/docs/auth/recovery-emails.astro)
-page lists them), `ApproveQrLogin` and `ListMyTenants`. Forward it the same
-way, **and** set `Options.GRPCTrustAMR`, a separate opt-in: until you do, the
-bridge replaces the key with `unvouched`, whatever the client sent, and
-treats every session as one a recovery email may have opened. While a
-recovery hold is in force on its account such a session makes no account
-security change and approves no QR sign-in; and in a project whose recovery
-emails sign in (`recovery_emails.sign_in`), `ListMyTenants` lists only its
-explicit memberships, hold or not, leaving out every tenant it belongs to
-through its email's domain (`RefreshToken` still selects one, since its
-refresh token records how the session was opened). Elsewhere nothing changes
-until a recovery email signs in. `RegisterGRPC` logs `grpc_amr_not_trusted`
-when you trust `auth_time` or the session id but not the `amr`. A host that
+page lists them), `MergeAccounts`, `ApproveQrLogin` and `ListMyTenants`. The
+calls a hold refuses, and `MergeAccounts`, also read
+`x-authenticated-recovery-email-id`, the token's `recovery_email_id` claim
+(present only beside `amr: ["recovery_email"]`): the recovery email that
+opened the session, which they refuse once the account no longer holds it.
+Forward both the same way, **and** set `Options.GRPCTrustAMR`, a separate
+opt-in that covers both keys: until you do, the bridge replaces the `amr` with
+`unvouched` and drops the id, whatever the client sent, and treats every
+session as one a recovery email may have opened that cannot name its
+address. In a project whose recovery emails sign in
+(`recovery_emails.sign_in`) such a session makes no account security change
+and approves no QR sign-in (`FAILED_PRECONDITION`, `recovery_session`), and
+`ListMyTenants` lists only its explicit memberships, hold or not, leaving out
+every tenant it belongs to through its email's domain (`RefreshToken` still
+selects one, since its refresh token records how the session was opened).
+Elsewhere it makes no account security change and approves no QR sign-in
+while a recovery hold is in force on its account, which happens only once a
+recovery email has signed in. `RegisterGRPC` logs `grpc_amr_not_trusted` when
+you trust `auth_time` or the session id but not the `amr`. A host that
 forwards `auth_time` but no `amr` must not set `GRPCTrustAMR`: an absent key
-reads as a session no recovery email opened.
+reads as a session no recovery email opened. One that forwards the `amr` but
+not the id leaves every recovery session refused its account security
+changes, with `recovery_session`.
 
 Whether to pin the `tenant` claim depends on tenant selection. With
 `GATEWAY_TENANT_SELECTION_ENABLED` off, the default, every token carries the
@@ -218,6 +227,9 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
                 if len(claims.AMR) > 0 {
                     md.Set("x-authenticated-amr", strings.Join(claims.AMR, " "))
                 }
+                if claims.RecoveryEmailID != "" {
+                    md.Set("x-authenticated-recovery-email-id", claims.RecoveryEmailID)
+                }
             }
         }
         return handler(metadata.NewIncomingContext(ctx, md), req)
@@ -225,7 +237,7 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
 }
 ```
 
-This interceptor owns both sign-in keys, so a host that installs it sets
+This interceptor owns every sign-in key, so a host that installs it sets
 `opts.GRPCTrustAuthTime = true` and `opts.GRPCTrustAMR = true` before
 `identityserver.New`.
 

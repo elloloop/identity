@@ -274,20 +274,29 @@ func recoveryHoldOn(ctx context.Context, repo Repository, userID string, nowMs i
 	return nil
 }
 
-// refuseHeldSession refuses, with a RecoveryHoldError, an account security
-// change (one that adds or removes a way into the account or a way to
-// recover it, ends its other sessions, or merges or deletes it) asked for
-// while a hold is in force on userID's account at nowMs by a session which
-// may have been opened by a recovery email (SessionSignIn.mayBeRecoverySession).
+// refuseHeldSession refuses an account security change (one that adds or
+// removes a way into the account or a way to recover it, ends its other
+// sessions, or merges or deletes it) asked for by a session which may have
+// been opened by a recovery email (SessionSignIn.mayBeRecoverySession):
+//
+//   - with ErrUnauthenticated once the recovery email that opened it is no
+//     longer one of userID's, or once the session store says it has ended;
+//   - with ErrRecoverySession when it is treated as a recovery session
+//     (SessionSignIn.treatedAsRecoverySession) but names no recovery email,
+//     so nothing can show that its address is still the account's;
+//   - with a RecoveryHoldError while a hold is in force on the account at
+//     nowMs.
+//
 // Every other session is free: the owner, signed in with the primary email,
 // a password, a passkey or an identity provider, can always remove an
-// address they do not recognise, and that ends the hold it started.
+// address they do not recognise.
 //
-// Removing the address ends the hold because it ends the sessions the
-// address opened, in the same write. Another replica's session cache may
-// still pass such a session's access token for up to its TTL, and with
-// the address gone no hold would stop it, so a session that names its sid
-// is also refused, ErrUnauthenticated, once the store says it has ended.
+// Removing the address ends the sessions it opened in the same write, but an
+// access token outlives that write: for the rest of its lifetime under
+// GATEWAY_REVOCATION_MODE=ttl, and for up to another replica's session-cache
+// TTL under session. With the address gone no hold would stop such a token,
+// so its recovery_email_id does, in either mode and over any transport that
+// forwards it.
 func refuseHeldSession(ctx context.Context, repo Repository, logger *zap.Logger, userID string, signIn SessionSignIn, nowMs int64) error {
 	if !signIn.mayBeRecoverySession() {
 		return nil
@@ -295,12 +304,28 @@ func refuseHeldSession(ctx context.Context, repo Repository, logger *zap.Logger,
 	if repo == nil {
 		return ErrServiceUnavailable
 	}
-	err := recoveryHoldOn(ctx, repo, userID, nowMs)
-	if errors.Is(err, ErrRecoveryHold) {
-		logger.Info("account_security_change_refused_by_hold", zap.String("user_id", userID))
+	held, err := repo.ListRecoveryEmails(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("listing recovery emails: %w", err)
 	}
-	if err != nil || signIn.SessionID == "" {
-		return err
+	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
+	if signIn.treatedAsRecoverySession(cfg) {
+		if signIn.RecoveryEmailID == "" {
+			logger.Info("account_security_change_refused_unnamed_recovery_session", zap.String("user_id", userID))
+			return fmt.Errorf("%w: it cannot show that the recovery email behind it is still the account's", ErrRecoverySession)
+		}
+		if heldRecoveryEmail(held, signIn.RecoveryEmailID) == nil {
+			logger.Info("account_security_change_refused_address_removed",
+				zap.String("user_id", userID), zap.String("recovery_email_id", signIn.RecoveryEmailID))
+			return errRecoveryEmailGone
+		}
+	}
+	if until := recoveryHoldUntil(held, cfg.hold(), nowMs); until != 0 {
+		logger.Info("account_security_change_refused_by_hold", zap.String("user_id", userID))
+		return &RecoveryHoldError{UntilMs: until}
+	}
+	if signIn.SessionID == "" {
+		return nil
 	}
 	session, err := repo.GetSessionBySid(ctx, signIn.SessionID)
 	if err != nil {
@@ -309,6 +334,20 @@ func refuseHeldSession(ctx context.Context, repo Repository, logger *zap.Logger,
 	if session == nil || session.RevokedAtMs != 0 {
 		logger.Info("account_security_change_refused_ended_session", zap.String("user_id", userID))
 		return fmt.Errorf("%w: the session has ended", ErrUnauthenticated)
+	}
+	return nil
+}
+
+// errRecoveryEmailGone refuses a recovery session, or the sign-in that would
+// open one, whose recovery email the account no longer holds.
+var errRecoveryEmailGone = fmt.Errorf("%w: the recovery email that opened the session no longer belongs to the account", ErrUnauthenticated)
+
+// heldRecoveryEmail returns the address among held whose ID is id, or nil.
+func heldRecoveryEmail(held []*RecoveryEmail, id string) *RecoveryEmail {
+	for _, e := range held {
+		if e.ID == id {
+			return e
+		}
 	}
 	return nil
 }
@@ -329,8 +368,9 @@ func (s *ProfileService) refuseHeldSession(ctx context.Context, userID string, s
 // returns what is left. Every session the address opened ends with it, in
 // the same write: their refresh tokens are deleted and, under
 // GATEWAY_REVOCATION_MODE=session, their access tokens stop working, the
-// caller's own included when the address opened it; the ended sessions are
-// audited as session_revoked. A notice goes to the removed address and to
+// caller's own included when the address opened it; under either mode no
+// access token left over makes an account security change
+// (refuseHeldSession). The ended sessions are audited as session_revoked. A notice goes to the removed address and to
 // every other address of the account. An address the
 // account does not hold is ErrNotFound. While a hold is in force, a session a
 // recovery email opened is refused (RecoveryHoldError) and any other session

@@ -175,9 +175,9 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 
 	loginMethod := "password+totp"
 	var accessToken, refreshToken string
-	if record.RecoveryEmail != "" {
+	if record.RecoveryEmailID != "" {
 		loginMethod = "recovery_email+totp"
-		accessToken, refreshToken, err = s.startRecoveryEmailSession(ctx, user, record.RecoveryEmail, "totp", ipAddr, userAgent)
+		accessToken, refreshToken, err = s.startRecoveryEmailSession(ctx, user, record.RecoveryEmailID, "totp", ipAddr, userAgent)
 	} else {
 		accessToken, refreshToken, err = s.issueTokens(ctx, user, ipAddr, userAgent)
 	}

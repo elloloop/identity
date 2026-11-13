@@ -204,7 +204,7 @@ func (r *sqliteRepository) AddRecoveryEmail(ctx context.Context, e *service.Reco
 
 func (r *sqliteRepository) ListRecoveryEmails(ctx context.Context, userID string) ([]*service.RecoveryEmail, error) {
 	const q = `
-		SELECT user_id, email, verified_at_ms, last_sign_in_at_ms
+		SELECT id, user_id, email, verified_at_ms, last_sign_in_at_ms
 		  FROM user_recovery_emails
 		 WHERE project_id = $1 AND user_id = $2
 		 ORDER BY verified_at_ms ASC, id ASC`
@@ -216,7 +216,7 @@ func (r *sqliteRepository) ListRecoveryEmails(ctx context.Context, userID string
 	var out []*service.RecoveryEmail
 	for rows.Next() {
 		var e service.RecoveryEmail
-		if err := rows.Scan(&e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt); err != nil {
 			return nil, wrapErr("ListRecoveryEmails", err)
 		}
 		out = append(out, &e)
@@ -231,34 +231,34 @@ func (r *sqliteRepository) RemoveRecoveryEmail(ctx context.Context, userID, emai
 		return 0, wrapErr("RemoveRecoveryEmail", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	tag, err := tx.Exec(ctx,
-		`DELETE FROM user_recovery_emails WHERE project_id = $1 AND user_id = $2 AND lower(email) = $3`,
-		r.projectID, userID, fold)
+	var id string
+	err = tx.QueryRow(ctx,
+		`DELETE FROM user_recovery_emails WHERE project_id = $1 AND user_id = $2 AND lower(email) = $3 RETURNING id`,
+		r.projectID, userID, fold).Scan(&id)
+	if noRows(err) {
+		return 0, fmt.Errorf("sqlite: RemoveRecoveryEmail: %w", service.ErrNotFound)
+	}
 	if err != nil {
 		return 0, wrapErr("RemoveRecoveryEmail", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return 0, fmt.Errorf("sqlite: RemoveRecoveryEmail: %w", service.ErrNotFound)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE sessions SET revoked_at_ms = $4
 		 WHERE project_id = $1 AND revoked_at_ms = 0
 		   AND sid IN (SELECT sid FROM refresh_tokens
-		                WHERE project_id = $1 AND user_id = $2 AND sid <> ''
-		                  AND lower(recovery_email) = $3)`,
-		r.projectID, userID, fold, atMs); err != nil {
+		                WHERE project_id = $1 AND user_id = $2 AND sid <> '' AND recovery_email_id = $3)`,
+		r.projectID, userID, id, atMs); err != nil {
 		return 0, wrapErr("RemoveRecoveryEmail(sessions)", err)
 	}
 	var ended int
 	if err := tx.QueryRow(ctx, `
 		SELECT count(*) FROM refresh_tokens
-		 WHERE project_id = $1 AND user_id = $2 AND lower(recovery_email) = $3 AND consumed_at_ms = 0`,
-		r.projectID, userID, fold).Scan(&ended); err != nil {
+		 WHERE project_id = $1 AND user_id = $2 AND recovery_email_id = $3 AND consumed_at_ms = 0`,
+		r.projectID, userID, id).Scan(&ended); err != nil {
 		return 0, wrapErr("RemoveRecoveryEmail(count)", err)
 	}
 	if _, err := tx.Exec(ctx,
-		`DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = $2 AND lower(recovery_email) = $3`,
-		r.projectID, userID, fold); err != nil {
+		`DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = $2 AND recovery_email_id = $3`,
+		r.projectID, userID, id); err != nil {
 		return 0, wrapErr("RemoveRecoveryEmail(refresh_tokens)", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -272,11 +272,11 @@ func (r *sqliteRepository) FindRecoveryEmailHolder(ctx context.Context, email st
 		return nil, nil
 	}
 	const q = `
-		SELECT user_id, email, verified_at_ms, last_sign_in_at_ms
+		SELECT id, user_id, email, verified_at_ms, last_sign_in_at_ms
 		  FROM user_recovery_emails
 		 WHERE project_id = $1 AND lower(email) = $2`
 	var e service.RecoveryEmail
-	err := r.db.QueryRow(ctx, q, r.projectID, service.FoldEmail(email)).Scan(&e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt)
+	err := r.db.QueryRow(ctx, q, r.projectID, service.FoldEmail(email)).Scan(&e.ID, &e.UserID, &e.Email, &e.VerifiedAt, &e.LastSignInAt)
 	if noRows(err) {
 		return nil, nil
 	}
@@ -286,12 +286,12 @@ func (r *sqliteRepository) FindRecoveryEmailHolder(ctx context.Context, email st
 	return &e, nil
 }
 
-func (r *sqliteRepository) MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs, holdMs int64) error {
+func (r *sqliteRepository) MarkRecoveryEmailSignIn(ctx context.Context, userID, id string, atMs, holdMs int64) error {
 	const q = `
 		UPDATE user_recovery_emails
 		   SET last_sign_in_at_ms = CASE WHEN last_sign_in_at_ms <= $4 - $5 THEN $4 ELSE last_sign_in_at_ms END
-		 WHERE project_id = $1 AND user_id = $2 AND lower(email) = $3`
-	tag, err := r.db.Exec(ctx, q, r.projectID, userID, service.FoldEmail(email), atMs, holdMs)
+		 WHERE project_id = $1 AND user_id = $2 AND id = $3`
+	tag, err := r.db.Exec(ctx, q, r.projectID, userID, id, atMs, holdMs)
 	if err != nil {
 		return wrapErr("MarkRecoveryEmailSignIn", err)
 	}

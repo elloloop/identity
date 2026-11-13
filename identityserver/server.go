@@ -335,7 +335,8 @@ func (s *Server) RegisterGRPC(reg grpc.ServiceRegistrar) {
 		s.logger.Warn("grpc_amr_not_trusted",
 			zap.String("hint", "the interceptor forwards the verified token's other keys but GRPCTrustAMR is unset, "+
 				"so every native-gRPC session is treated as one a recovery email may have opened; "+
-				"forward the token's amr as x-authenticated-amr and set GRPCTrustAMR (see the embedding guide)"))
+				"forward the token's amr as x-authenticated-amr and its recovery_email_id as "+
+				"x-authenticated-recovery-email-id and set GRPCTrustAMR (see the embedding guide)"))
 	}
 	identitypb.RegisterIdentityServiceServer(reg, newGRPCBridge(s.built, s.logger, s.grpcTrust))
 }

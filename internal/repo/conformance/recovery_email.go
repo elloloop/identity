@@ -136,6 +136,9 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 			list[0].VerifiedAt != 100 || list[0].UserID != uid {
 			t.Fatalf("List = %#v %v, want first then second", list, err)
 		}
+		if list[0].ID == "" || list[1].ID == "" || list[0].ID == list[1].ID {
+			t.Fatalf("List IDs = %q %q, want two distinct ones", list[0].ID, list[1].ID)
+		}
 		// The same address again changes nothing, whatever its case, and is
 		// not counted against the cap.
 		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "FIRST@example.net", VerifiedAt: 999}, 2); err != nil {
@@ -244,15 +247,20 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 			t.Fatalf("Add: %v", err)
 		}
 		got, err := r.FindRecoveryEmailHolder(ctx, "SPARE@example.net")
-		if err != nil || got == nil || got.UserID != uid || got.Email != "spare@example.net" || got.VerifiedAt != 10 || got.LastSignInAt != 0 {
+		if err != nil || got == nil || got.UserID != uid || got.Email != "spare@example.net" || got.VerifiedAt != 10 || got.LastSignInAt != 0 ||
+			got.ID != recoveryEmailIDOf(t, r, uid, "spare@example.net") {
 			t.Fatalf("holder = %#v %v", got, err)
 		}
+		id := got.ID
 		const hold = 1_000
-		if err := r.MarkRecoveryEmailSignIn(ctx, uid, "Spare@example.net", 5_000, hold); err != nil {
+		if err := r.MarkRecoveryEmailSignIn(ctx, uid, id, 5_000, hold); err != nil {
 			t.Fatalf("Mark: %v", err)
 		}
-		if err := r.MarkRecoveryEmailSignIn(ctx, other, "spare@example.net", 5_100, hold); !errors.Is(err, service.ErrNotFound) {
+		if err := r.MarkRecoveryEmailSignIn(ctx, other, id, 5_100, hold); !errors.Is(err, service.ErrNotFound) {
 			t.Fatalf("Mark by an account that does not hold the address: want ErrNotFound, got %v", err)
+		}
+		if err := r.MarkRecoveryEmailSignIn(ctx, uid, "no-such-id", 5_100, hold); !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("Mark of an ID the account does not hold: want ErrNotFound, got %v", err)
 		}
 		list, err := r.ListRecoveryEmails(ctx, uid)
 		if err != nil || len(list) != 1 || list[0].LastSignInAt != 5_000 {
@@ -261,7 +269,7 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		// A sign-in within the hold its address started does not extend it;
 		// one once it has ended starts a new one.
 		for _, step := range []struct{ at, want int64 }{{5_999, 5_000}, {6_000, 6_000}} {
-			if err := r.MarkRecoveryEmailSignIn(ctx, uid, "spare@example.net", step.at, hold); err != nil {
+			if err := r.MarkRecoveryEmailSignIn(ctx, uid, id, step.at, hold); err != nil {
 				t.Fatalf("Mark at %d: %v", step.at, err)
 			}
 			if got, _ := r.FindRecoveryEmailHolder(ctx, "spare@example.net"); got == nil || got.LastSignInAt != step.want {
@@ -270,7 +278,7 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		}
 	})
 
-	t.Run(driver.Name+"/RecoverySession_RefreshTokenAndChallengeKeepTheRecoveryEmail", func(t *testing.T) {
+	t.Run(driver.Name+"/RecoverySession_RefreshTokenAndChallengeKeepTheRecoveryEmailID", func(t *testing.T) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)
 		uid := createTestUser(t, r, "rec-session@example.com")
@@ -278,25 +286,26 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "spare@example.net", VerifiedAt: 1}, 5); err != nil {
 			t.Fatalf("Add: %v", err)
 		}
-		for hash, addr := range map[string]string{"rec-rt-recovery": "Spare@example.net", "rec-rt-plain": ""} {
+		spare := recoveryEmailIDOf(t, r, uid, "spare@example.net")
+		for hash, id := range map[string]string{"rec-rt-recovery": spare, "rec-rt-plain": ""} {
 			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
-				TokenHash: hash, UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmail: addr,
+				TokenHash: hash, UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmailID: id,
 			}); err != nil {
 				t.Fatalf("CreateRefreshToken %s: %v", hash, err)
 			}
 			got, err := r.FindRefreshTokenByHash(ctx, hash)
-			if err != nil || got == nil || got.RecoveryEmail != addr {
-				t.Fatalf("refresh token %s = %#v %v, want RecoveryEmail %q", hash, got, err, addr)
+			if err != nil || got == nil || got.RecoveryEmailID != id {
+				t.Fatalf("refresh token %s = %#v %v, want RecoveryEmailID %q", hash, got, err, id)
 			}
 		}
 		// A recovery session's token is stored only for an address its account
 		// holds: not one nobody holds, nor another account's.
-		for hash, owner := range map[string]struct{ user, addr string }{
-			"rec-rt-unheld": {uid, "nobody@example.net"},
-			"rec-rt-others": {other, "spare@example.net"},
+		for hash, owner := range map[string]struct{ user, id string }{
+			"rec-rt-unheld": {uid, "no-such-id"},
+			"rec-rt-others": {other, spare},
 		} {
 			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
-				TokenHash: hash, UserID: owner.user, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmail: owner.addr,
+				TokenHash: hash, UserID: owner.user, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmailID: owner.id,
 			}); !errors.Is(err, service.ErrNotFound) {
 				t.Fatalf("CreateRefreshToken %s: want ErrNotFound, got %v", hash, err)
 			}
@@ -304,15 +313,15 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 				t.Fatalf("refused refresh token %s was stored: %#v %v", hash, got, err)
 			}
 		}
-		for id, addr := range map[string]string{"rec-lc-recovery": "spare@example.net", "rec-lc-plain": ""} {
+		for challenge, id := range map[string]string{"rec-lc-recovery": spare, "rec-lc-plain": ""} {
 			if _, err := r.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{
-				ChallengeID: id, UserID: uid, RecoveryEmail: addr, ExpiresAt: 9_000_000_000_000, CreatedAt: 1,
+				ChallengeID: challenge, UserID: uid, RecoveryEmailID: id, ExpiresAt: 9_000_000_000_000, CreatedAt: 1,
 			}); err != nil {
-				t.Fatalf("CreateLoginChallenge %s: %v", id, err)
+				t.Fatalf("CreateLoginChallenge %s: %v", challenge, err)
 			}
-			got, err := r.GetLoginChallengeByChallengeID(ctx, id)
-			if err != nil || got == nil || got.RecoveryEmail != addr {
-				t.Fatalf("login challenge %s = %#v %v, want RecoveryEmail %q", id, got, err, addr)
+			got, err := r.GetLoginChallengeByChallengeID(ctx, challenge)
+			if err != nil || got == nil || got.RecoveryEmailID != id {
+				t.Fatalf("login challenge %s = %#v %v, want RecoveryEmailID %q", challenge, got, err, id)
 			}
 		}
 	})
@@ -329,18 +338,19 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 				t.Fatalf("Add %s: %v", a.addr, err)
 			}
 		}
+		stolen := recoveryEmailIDOf(t, r, uid, "stolen@example.net")
 		// The stolen address's sign-in, rotated once; a session the account's
 		// other recovery email opened; one opened another way; and another
 		// account's recovery session.
 		tokens := []struct {
-			hash, user, addr string
-			consumed         int64
+			hash, user, id string
+			consumed       int64
 		}{
-			{"rec-ends-rotated", uid, "stolen@example.net", 50},
-			{"rec-ends-live", uid, "STOLEN@example.net", 0},
-			{"rec-ends-kept", uid, "kept@example.net", 0},
+			{"rec-ends-rotated", uid, stolen, 50},
+			{"rec-ends-live", uid, stolen, 0},
+			{"rec-ends-kept", uid, recoveryEmailIDOf(t, r, uid, "kept@example.net"), 0},
 			{"rec-ends-plain", uid, "", 0},
-			{"rec-ends-other", other, "theirs@example.net", 0},
+			{"rec-ends-other", other, recoveryEmailIDOf(t, r, other, "theirs@example.net"), 0},
 		}
 		for _, tok := range tokens {
 			sid := "sid-" + tok.hash
@@ -349,7 +359,7 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 			}
 			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
 				TokenHash: tok.hash, UserID: tok.user, ExpiresAt: 9_000_000_000_000, CreatedAt: 10, LastUsedAt: 10,
-				SID: sid, RecoveryEmail: tok.addr,
+				SID: sid, RecoveryEmailID: tok.id,
 			}); err != nil {
 				t.Fatalf("CreateRefreshToken %s: %v", tok.hash, err)
 			}
@@ -366,7 +376,7 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 			t.Fatalf("Remove = %d %v, want the one unrotated session ended", ended, err)
 		}
 		for _, tok := range tokens {
-			gone := tok.user == uid && tok.addr != "" && service.FoldEmail(tok.addr) == "stolen@example.net"
+			gone := tok.id == stolen
 			got, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, tok.hash)
 			if err != nil || (got == nil) != gone {
 				t.Fatalf("refresh token %s after the removal = %#v %v, want gone=%t", tok.hash, got, err, gone)
@@ -383,10 +393,17 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		if list, _ := r.ListRecoveryEmails(ctx, uid); len(list) != 1 || list[0].Email != "kept@example.net" {
 			t.Fatalf("List after remove = %#v, want only the kept address", list)
 		}
-		// The address is gone, so no session can be opened for it either.
+		// The address is gone, so no session can be opened for it either, not
+		// even once it is added again: that is a new row, with a new ID.
+		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "stolen@example.net", VerifiedAt: 2}, 5); err != nil {
+			t.Fatalf("Add the address again: %v", err)
+		}
+		if again := recoveryEmailIDOf(t, r, uid, "stolen@example.net"); again == stolen {
+			t.Fatalf("the address added again kept its old ID %q", again)
+		}
 		after := tokens[1].hash + "-after"
 		if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
-			TokenHash: after, UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmail: "stolen@example.net",
+			TokenHash: after, UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmailID: stolen,
 		}); !errors.Is(err, service.ErrNotFound) {
 			t.Fatalf("CreateRefreshToken for the removed address: want ErrNotFound, got %v", err)
 		}
@@ -403,6 +420,7 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "stolen@example.net", VerifiedAt: 1}, 5); err != nil {
 			t.Fatalf("Add: %v", err)
 		}
+		stolen := recoveryEmailIDOf(t, r, uid, "stolen@example.net")
 		var wg sync.WaitGroup
 		start := make(chan struct{})
 		errs := make(chan error, concurrentWriters+1)
@@ -414,7 +432,7 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 				<-start
 				_, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
 					TokenHash: fmt.Sprintf("rec-race-%d", i), UserID: uid,
-					ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmail: "stolen@example.net",
+					ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmailID: stolen,
 				})
 				switch {
 				case err == nil:
@@ -449,4 +467,23 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 			}
 		}
 	})
+}
+
+// recoveryEmailIDOf returns the ID of the recovery email addr that uid holds.
+func recoveryEmailIDOf(t *testing.T, r service.Repository, uid, addr string) string {
+	t.Helper()
+	list, err := r.ListRecoveryEmails(context.Background(), uid)
+	if err != nil {
+		t.Fatalf("ListRecoveryEmails: %v", err)
+	}
+	for _, e := range list {
+		if service.FoldEmail(e.Email) == service.FoldEmail(addr) {
+			if e.ID == "" {
+				t.Fatalf("recovery email %s has no ID", addr)
+			}
+			return e.ID
+		}
+	}
+	t.Fatalf("%s holds no recovery email %s", uid, addr)
+	return ""
 }

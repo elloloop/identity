@@ -214,8 +214,9 @@ const (
 	// The caller may not act in the tenant: it is not a claimed tenant of the
 	// session's project, the caller holds no active membership in it, or they
 	// belong to it only through their email's domain while that email is
-	// unverified or not on a domain the tenant has verified. The refusal does
-	// not say which. The code is PERMISSION_DENIED.
+	// unverified or not on a domain the tenant has verified, or while the
+	// session is one a recovery email opened (see RecoveryEmail). The refusal
+	// does not say which. The code is PERMISSION_DENIED.
 	TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_NOT_A_MEMBER TenantSelectionRefusal = 2
 	// The membership or the tenant's login policy could not be read. The code
 	// is UNAVAILABLE; retry, with or without tenant_id.
@@ -5245,8 +5246,12 @@ func (x *ListRecoveryEmailsResponse) GetHoldUntil() int64 {
 // or RevokeSession of its own session where its token carries a `sid`. A
 // session opened any other way is not held, and removing the address that
 // started the hold ends it. Merging either account is refused, whoever asks.
-// Over native gRPC, a session whose `amr` the host does not forward is held
-// too (see the embedding guide).
+// Once its address is removed, such a session makes none of these changes,
+// hold or not, for as long as its access token lasts: they answer
+// UNAUTHENTICATED. Over native gRPC, a session whose `amr` the host does not
+// forward is held too, and in a project whose recovery emails sign in it is
+// refused these changes outright with the stable `recovery_session` token,
+// since it cannot name the address behind it (see the embedding guide).
 type RecoveryHoldDetails struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	HoldUntil     int64                  `protobuf:"varint,1,opt,name=hold_until,json=holdUntil,proto3" json:"hold_until,omitempty"` // epoch ms the hold ends
@@ -11403,8 +11408,9 @@ func (x *GetQrLoginSessionResponse) GetExpiresAt() *timestamppb.Timestamp {
 // session a recovery email opened may reject but not approve: it is refused
 // FAILED_PRECONDITION with the stable `recovery_session` token, since the
 // session the hand-off opens could not carry its `amr`. Over native gRPC, a
-// session whose `amr` the host does not forward may be such a session, and
-// is refused the same while a recovery hold is in force on its account.
+// session whose `amr` the host does not forward may be such a session: it is
+// refused the same in a project whose recovery emails sign in, and elsewhere
+// while a recovery hold is in force on its account.
 type ApproveQrLoginRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -15378,7 +15384,9 @@ type ListMyTenantsResponse struct {
 	// memberships that are not active, and memberships through the email's
 	// domain while that email is unverified are left out, as are all
 	// memberships through the email's domain for a session a recovery email
-	// opened, or one over native gRPC whose `amr` the host does not forward.
+	// opened, or, in a project whose recovery emails sign in
+	// (`recovery_emails.sign_in`), one over native gRPC whose `amr` the host
+	// does not forward.
 	Tenants       []*UserTenant `protobuf:"bytes,1,rep,name=tenants,proto3" json:"tenants,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

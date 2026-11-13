@@ -93,6 +93,7 @@ func (r *MemRepo) AddRecoveryEmail(_ context.Context, e *service.RecoveryEmail, 
 		return service.ErrRecoveryEmailLimit
 	}
 	cp := *e
+	cp.ID = r.nextID()
 	r.recoveryEmails[e.UserID] = append(r.recoveryEmails[e.UserID], &cp)
 	return nil
 }
@@ -108,28 +109,34 @@ func (r *MemRepo) ListRecoveryEmails(_ context.Context, userID string) ([]*servi
 	return out, nil
 }
 
-// heldRecoveryEmailLocked is the index of email (under FoldEmail) among
-// userID's recovery emails, or -1. The caller holds r.mu.
-func (r *MemRepo) heldRecoveryEmailLocked(userID, email string) int {
+// heldRecoveryEmailLocked is the index among userID's recovery emails of the
+// one match accepts, or -1. The caller holds r.mu.
+func (r *MemRepo) heldRecoveryEmailLocked(userID string, match func(*service.RecoveryEmail) bool) int {
+	return slices.IndexFunc(r.recoveryEmails[userID], match)
+}
+
+func recoveryEmailAt(email string) func(*service.RecoveryEmail) bool {
 	fold := service.FoldEmail(email)
-	return slices.IndexFunc(r.recoveryEmails[userID], func(e *service.RecoveryEmail) bool {
-		return service.FoldEmail(e.Email) == fold
-	})
+	return func(e *service.RecoveryEmail) bool { return service.FoldEmail(e.Email) == fold }
+}
+
+func recoveryEmailWithID(id string) func(*service.RecoveryEmail) bool {
+	return func(e *service.RecoveryEmail) bool { return e.ID == id }
 }
 
 func (r *MemRepo) RemoveRecoveryEmail(_ context.Context, userID, email string, atMs int64) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	i := r.heldRecoveryEmailLocked(userID, email)
+	i := r.heldRecoveryEmailLocked(userID, recoveryEmailAt(email))
 	if i < 0 {
 		return 0, fmt.Errorf("integration: RemoveRecoveryEmail: %w", service.ErrNotFound)
 	}
 	list := r.recoveryEmails[userID]
+	removed := list[i].ID
 	r.recoveryEmails[userID] = append(list[:i:i], list[i+1:]...)
-	fold := service.FoldEmail(email)
 	ended := 0
 	for id, t := range r.refreshTokens {
-		if t.UserID != userID || t.RecoveryEmail == "" || service.FoldEmail(t.RecoveryEmail) != fold {
+		if t.UserID != userID || t.RecoveryEmailID != removed {
 			continue
 		}
 		if t.ConsumedAtMs == 0 {
@@ -179,17 +186,15 @@ func (r *MemRepo) FindRecoveryEmailHolder(_ context.Context, email string) (*ser
 	return nil, nil
 }
 
-func (r *MemRepo) MarkRecoveryEmailSignIn(_ context.Context, userID, email string, atMs, holdMs int64) error {
+func (r *MemRepo) MarkRecoveryEmailSignIn(_ context.Context, userID, id string, atMs, holdMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	fold := service.FoldEmail(email)
-	for _, e := range r.recoveryEmails[userID] {
-		if service.FoldEmail(e.Email) == fold {
-			if e.LastSignInAt <= atMs-holdMs {
-				e.LastSignInAt = atMs
-			}
-			return nil
-		}
+	i := r.heldRecoveryEmailLocked(userID, recoveryEmailWithID(id))
+	if i < 0 {
+		return fmt.Errorf("integration: MarkRecoveryEmailSignIn: %w", service.ErrNotFound)
 	}
-	return fmt.Errorf("integration: MarkRecoveryEmailSignIn: %w", service.ErrNotFound)
+	if e := r.recoveryEmails[userID][i]; e.LastSignInAt <= atMs-holdMs {
+		e.LastSignInAt = atMs
+	}
+	return nil
 }

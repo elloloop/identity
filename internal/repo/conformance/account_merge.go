@@ -77,12 +77,18 @@ func runAccountMergeConformance(t *testing.T, driver Driver) {
 			survivor := createTestUser(t, r, "am-rec-s@example.com")
 			other := createTestUser(t, r, "am-rec-o@example.com")
 			third := createTestUser(t, r, "am-rec-t@example.com")
-			for user, addrs := range map[string][]string{survivor: {"s-spare@example.net"}, other: {"o-spare@example.net", "o-second@example.net"}} {
-				for _, addr := range addrs {
-					if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: user, Email: addr, VerifiedAt: 1}, 5); err != nil {
-						t.Fatalf("AddRecoveryEmail %s: %v", addr, err)
-					}
+			// Proved in an order that interleaves the two accounts', so the
+			// survivor's list after the merge is oldest first across both.
+			proved := []struct {
+				user, addr string
+				at         int64
+			}{{other, "o-spare@example.net", 1}, {survivor, "s-spare@example.net", 2}, {other, "o-second@example.net", 3}}
+			ids := make(map[string]string, len(proved))
+			for _, p := range proved {
+				if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: p.user, Email: p.addr, VerifiedAt: p.at}, 5); err != nil {
+					t.Fatalf("AddRecoveryEmail %s: %v", p.addr, err)
 				}
+				ids[p.addr] = recoveryEmailIDOf(t, r, p.user, p.addr)
 			}
 			const number = "+14155550142"
 			if _, err := r.ClaimPhoneNumber(ctx, other, number, 10, 0); err != nil {
@@ -95,6 +101,11 @@ func runAccountMergeConformance(t *testing.T, driver Driver) {
 			list, err := r.ListRecoveryEmails(ctx, survivor)
 			if err != nil || len(list) != 3 {
 				t.Fatalf("survivor's recovery emails = %#v %v, want all three", list, err)
+			}
+			for i, p := range proved {
+				if list[i].Email != p.addr || list[i].ID != ids[p.addr] || list[i].UserID != survivor {
+					t.Fatalf("survivor's recovery email %d = %#v, want %s oldest first with its own ID", i, list[i], p.addr)
+				}
 			}
 			if gone, _ := r.ListRecoveryEmails(ctx, other); len(gone) != 0 {
 				t.Fatalf("the retired account keeps recovery emails: %#v", gone)

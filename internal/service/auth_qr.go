@@ -102,7 +102,8 @@ func (s *AuthService) GetQrLoginSession(ctx context.Context, sessionID string) (
 // it (ErrRecoverySession): the session the hand-off opens would not carry
 // that sign-in's amr, and so would escape what binds it. A session no one
 // vouched for (AMRUnvouched) may be such a session, and is refused the same
-// while a recovery hold is in force on the account.
+// wherever it is treated as one (SessionSignIn.treatedAsRecoverySession), and
+// elsewhere while a recovery hold is in force on the account.
 func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, approve bool, userID string, signIn SessionSignIn, ipAddr, userAgent string) (string, error) {
 	if sessionID == "" {
 		return "", fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
@@ -175,13 +176,14 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 }
 
 // refuseRecoverySessionApproval refuses (ErrRecoverySession) a QR approval
-// by a session a recovery email opened, and by one that may have been opened
-// that way while a recovery hold is in force on userID's account at nowMs.
+// by a session treated as one a recovery email opened, and by one that may
+// have been opened that way while a recovery hold is in force on userID's
+// account at nowMs.
 func (s *AuthService) refuseRecoverySessionApproval(ctx context.Context, userID string, signIn SessionSignIn, nowMs int64) error {
 	if !signIn.mayBeRecoverySession() {
 		return nil
 	}
-	if !signIn.openedByRecoveryEmail() {
+	if !signIn.treatedAsRecoverySession(recoveryEmailsConfig(ProjectScopeFromContext(ctx))) {
 		if err := recoveryHoldOn(ctx, s.repo(ctx), userID, nowMs); !errors.Is(err, ErrRecoveryHold) {
 			return err
 		}

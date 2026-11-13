@@ -72,7 +72,12 @@ OIDC discovery, userinfo, implicit flow, dynamic registration or generic mint AP
 <p>Native-gRPC hosts that call consent RPCs must explicitly opt into
 <code>GRPCTrustSessionID</code> and <code>GRPCTrustAuthTime</code> only after their
 verified interceptor owns those metadata values. Otherwise the bridge strips
-them. Ordinary existing gRPC auth behavior is unchanged.</p>
+them. Ordinary existing gRPC auth behavior is unchanged. The consent RPCs do
+not read the token's <code>amr</code>, but a host that trusts these keys
+should also forward it and set <code>GRPCTrustAMR</code>: without it, in a
+project whose <a href="/identity/docs/auth/recovery-emails#native-grpc">recovery
+emails</a> sign in, every native-gRPC session is refused account security
+changes.</p>
 <h2>Durable unattended machines</h2>
 <p>For an orchestrator that must survive human signout, enable the separate
 <code>GATEWAY_AGENT_MACHINE_ENABLED</code> feature and explicitly register

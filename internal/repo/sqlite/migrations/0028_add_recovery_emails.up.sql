@@ -32,8 +32,9 @@ CREATE TABLE recovery_email_codes (
 CREATE UNIQUE INDEX recovery_email_codes_project_user_uidx ON recovery_email_codes (project_id, user_id);
 CREATE INDEX recovery_email_codes_project_expires_idx ON recovery_email_codes (project_id, expires_at_ms);
 
--- The recovery email whose sign-in opened a session ('' for a session opened
--- any other way), whose removal ends it, and the recovery email a sign-in
--- waiting on its second factor was made with.
-ALTER TABLE refresh_tokens ADD COLUMN recovery_email TEXT NOT NULL DEFAULT '';
-ALTER TABLE login_challenges ADD COLUMN recovery_email TEXT NOT NULL DEFAULT '';
+-- The user_recovery_emails.id of the recovery email whose sign-in opened a
+-- session ('' for a session opened any other way), whose removal ends it,
+-- and of the recovery email a sign-in waiting on its second factor was made
+-- with.
+ALTER TABLE refresh_tokens ADD COLUMN recovery_email_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE login_challenges ADD COLUMN recovery_email_id TEXT NOT NULL DEFAULT '';

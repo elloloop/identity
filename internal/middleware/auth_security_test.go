@@ -232,3 +232,30 @@ func TestAuthMiddleware_AMRComesOnlyFromTheToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "recovery_email", serve(tok))
 }
+
+// Which recovery email opened the session reaches the handlers only from a
+// verified token: a client-sent X-Authenticated-Recovery-Email-Id is dropped,
+// whatever the token, and a token's recovery_email_id is passed through.
+func TestAuthMiddleware_RecoveryEmailIDComesOnlyFromTheToken(t *testing.T) {
+	kr := newSecTestKR(t)
+	var seen string
+	handler := AuthMiddleware(kr, TokenTenants{}, "", false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get(AuthenticatedRecoveryEmailIDHeader)
+	}))
+	serve := func(token string) string {
+		seen = ""
+		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/BeginPasskeyRegistration", nil)
+		req.Header.Set(AuthenticatedRecoveryEmailIDHeader, "kept-address")
+		req.Header.Set("Authorization", "Bearer "+token)
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+		return seen
+	}
+
+	tok, err := kr.SignAccessToken(context.Background(), jwtpkg.Claims{Sub: "user-1", Tenant: "t1", AMR: []string{"recovery_email"}}, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Empty(t, serve(tok), "a token without recovery_email_id carries none, whatever the client sent")
+
+	tok, err = kr.SignAccessToken(context.Background(), jwtpkg.Claims{Sub: "user-1", Tenant: "t1", AMR: []string{"recovery_email"}, RecoveryEmailID: "removed-address"}, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, "removed-address", serve(tok))
+}

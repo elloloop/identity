@@ -46,9 +46,27 @@ func (f *recoveryEmailFixture) signedInNow() SessionSignIn {
 	return SessionSignIn{AuthTimeSec: f.now.Unix()}
 }
 
-// recoverySignedInNow is a session a recovery email opened just now.
-func (f *recoveryEmailFixture) recoverySignedInNow() SessionSignIn {
-	return SessionSignIn{AuthTimeSec: f.now.Unix(), AMR: []string{AMRRecoveryEmail}}
+// recoverySignedInNow is a session user's recovery email addr opened just
+// now.
+func (f *recoveryEmailFixture) recoverySignedInNow(t *testing.T, user *User, addr string) SessionSignIn {
+	t.Helper()
+	return SessionSignIn{AuthTimeSec: f.now.Unix(), AMR: []string{AMRRecoveryEmail}, RecoveryEmailID: f.recoveryEmailID(t, user.ID, addr)}
+}
+
+// recoveryEmailID is the ID of the recovery email addr userID holds.
+func (f *recoveryEmailFixture) recoveryEmailID(t *testing.T, userID, addr string) string {
+	t.Helper()
+	held, err := f.repo.ListRecoveryEmails(f.ctx, userID)
+	if err != nil {
+		t.Fatalf("ListRecoveryEmails: %v", err)
+	}
+	for _, e := range held {
+		if FoldEmail(e.Email) == FoldEmail(addr) {
+			return e.ID
+		}
+	}
+	t.Fatalf("%s holds no recovery email %s", userID, addr)
+	return ""
 }
 
 var sixDigits = regexp.MustCompile(`\b\d{6}\b`)

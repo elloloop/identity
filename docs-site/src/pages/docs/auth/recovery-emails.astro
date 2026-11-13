@@ -167,9 +167,11 @@ import { Code } from "astro-expressive-code/components";
     </li>
     <li>
       <strong>The session says how it was opened.</strong> Its access tokens
-      carry <code>amr: ["recovery_email"]</code> (see
+      carry <code>amr: ["recovery_email"]</code> and
+      <code>recovery_email_id</code>, an opaque reference to the address that
+      never names it (see
       <a href="/identity/docs/concepts/auth-model">the access token claims</a>),
-      and its refresh token keeps the address across every rotation.
+      and its refresh token keeps that reference across every rotation.
     </li>
     <li>
       <strong>A hold starts</strong>, unless one the same address started is
@@ -277,23 +279,21 @@ import { Code } from "astro-expressive-code/components";
     ended sessions are audited as <code>session_revoked</code> with
     <code>scope: recovery_email</code> and <code>revoked_count</code>.
   </p>
-  <ul>
-    <li>
-      Under <code>GATEWAY_REVOCATION_MODE=session</code>, the sessions' access
-      tokens stop working at once on the replica that removed the address, and
-      within <code>GATEWAY_SESSION_CACHE_TTL_SECONDS</code> on others. Until
-      then such a token makes no account security change on any replica: the
-      calls above read the session from the store and refuse it
-      <code>UNAUTHENTICATED</code> once it has ended, although the hold the
-      address started has ended with it.
-    </li>
-    <li>
-      Under <code>ttl</code>, the access tokens last to their expiry
-      (<code>GATEWAY_JWT_EXPIRY_SECONDS</code>) and can no longer be refreshed.
-      With the address gone, no hold refuses them in that time, so a project
-      that relies on the hold should run <code>session</code> mode.
-    </li>
-  </ul>
+  <p>
+    An access token outlives the removal for a while: under
+    <code>GATEWAY_REVOCATION_MODE=ttl</code> until it expires
+    (<code>GATEWAY_JWT_EXPIRY_SECONDS</code>), and under <code>session</code>
+    until the session cache of the replica it reaches drops it (at once on the
+    replica that removed the address, within
+    <code>GATEWAY_SESSION_CACHE_TTL_SECONDS</code> on others). In either mode
+    such a token makes no account security change in that time, hold or not:
+    every call the hold refuses, and <code>MergeAccounts</code>, answer it
+    <code>UNAUTHENTICATED</code>, since its <code>recovery_email_id</code>
+    names an address the account no longer holds. An address removed and
+    added again is a new address, so the sessions it opened before stay
+    refused. Calls that change nothing about the account's security, such as
+    <code>ListRecoveryEmails</code>, still answer until the token expires.
+  </p>
 
   <h2 id="notices">Notices</h2>
   <ul>
@@ -325,18 +325,22 @@ import { Code } from "astro-expressive-code/components";
   <h2 id="native-grpc">Native gRPC</h2>
   <p>
     A host that serves identity over native gRPC verifies tokens in its own
-    interceptor. The calls above read <code>x-authenticated-amr</code>, the
-    token's <code>amr</code>, only once the host sets
-    <code>identityserver.Options.GRPCTrustAMR</code>, meaning its interceptor
-    deletes whatever the client sent and sets the key from the verified token.
-    Until then the bridge marks every session <code>unvouched</code> and treats
-    it as one a recovery email may have opened: while a hold is in force on its
-    account it makes none of the changes above and approves no QR sign-in, and
-    in a project with <code>sign_in</code> on <code>ListMyTenants</code> lists
-    only its explicit memberships. <code>RegisterGRPC</code> logs
-    <code>grpc_amr_not_trusted</code> when the host trusts the token's other
-    keys but not this one. See <code>docs/embedding.md</code> in the
-    repository for the interceptor.
+    interceptor. The calls above read <code>x-authenticated-amr</code> and
+    <code>x-authenticated-recovery-email-id</code>, the token's
+    <code>amr</code> and <code>recovery_email_id</code>, only once the host
+    sets <code>identityserver.Options.GRPCTrustAMR</code>, meaning its
+    interceptor deletes whatever the client sent for either and sets both from
+    the verified token. Until then the bridge marks every session
+    <code>unvouched</code>, drops the id, and treats the session as one a
+    recovery email may have opened that cannot name its address. In a project
+    with <code>sign_in</code> on, such a session makes none of the changes
+    above and approves no QR sign-in, hold or not
+    (<code>FAILED_PRECONDITION</code>, <code>recovery_session</code>), and
+    <code>ListMyTenants</code> lists only its explicit memberships. Elsewhere
+    it is refused the same only while a hold is in force on its account.
+    <code>RegisterGRPC</code> logs <code>grpc_amr_not_trusted</code> when the
+    host trusts the token's other keys but not these. See
+    <code>docs/embedding.md</code> in the repository for the interceptor.
   </p>
 
   <h2 id="audit">Audit events</h2>

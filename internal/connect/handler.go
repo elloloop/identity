@@ -175,9 +175,10 @@ func authenticatedAuthTime(headers headerReader) int64 {
 // read says about the caller's session and the sign-in that opened it.
 func authenticatedSignIn(headers headerReader) service.SessionSignIn {
 	return service.SessionSignIn{
-		AuthTimeSec: authenticatedAuthTime(headers),
-		AMR:         strings.Fields(headers.Get(middleware.AuthenticatedAMRHeader)),
-		SessionID:   headers.Get(middleware.AuthenticatedSessionIDHeader),
+		AuthTimeSec:     authenticatedAuthTime(headers),
+		AMR:             strings.Fields(headers.Get(middleware.AuthenticatedAMRHeader)),
+		RecoveryEmailID: headers.Get(middleware.AuthenticatedRecoveryEmailIDHeader),
+		SessionID:       headers.Get(middleware.AuthenticatedSessionIDHeader),
 	}
 }
 

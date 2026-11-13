@@ -373,6 +373,12 @@ const AuthenticatedSessionIDHeader = "X-Authenticated-Session-Id"
 // session was opened. Absent when the token has none.
 const AuthenticatedAMRHeader = "X-Authenticated-Amr"
 
+// AuthenticatedRecoveryEmailIDHeader carries the verified
+// `recovery_email_id` claim, the recovery email that opened the session, to
+// the handlers that refuse such a session once its address is gone. Absent
+// when the token has none.
+const AuthenticatedRecoveryEmailIDHeader = "X-Authenticated-Recovery-Email-Id"
+
 // setAuthHeaders writes the verified identity headers from claims. Only
 // called after VerifyAccessToken succeeds, so the values are trusted.
 func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
@@ -392,6 +398,9 @@ func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
 	if len(claims.AMR) > 0 {
 		r.Header.Set(AuthenticatedAMRHeader, strings.Join(claims.AMR, " "))
 	}
+	if claims.RecoveryEmailID != "" {
+		r.Header.Set(AuthenticatedRecoveryEmailIDHeader, claims.RecoveryEmailID)
+	}
 }
 
 // clearAuthHeaders removes any inbound copies of the identity headers so
@@ -404,6 +413,7 @@ func clearAuthHeaders(r *http.Request) {
 	r.Header.Del(AuthenticatedAuthTimeHeader)
 	r.Header.Del(AuthenticatedSessionIDHeader)
 	r.Header.Del(AuthenticatedAMRHeader)
+	r.Header.Del(AuthenticatedRecoveryEmailIDHeader)
 }
 
 // extractBearerToken returns the token portion of an "Authorization: Bearer <token>"

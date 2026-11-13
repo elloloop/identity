@@ -107,25 +107,32 @@ func signedIn[T any](r *connect.Request[T], userID string) *connect.Request[T] {
 	return authedReq(r, userID)
 }
 
-// tokenAMR reads the amr claim of a token the harness minted. The signature
-// is the server's business; this only looks at what the token says.
-func tokenAMR(t *testing.T, token string) []string {
+// recoveryClaims is what an access token says about the recovery email that
+// opened its session.
+type recoveryClaims struct {
+	AMR             []string `json:"amr"`
+	RecoveryEmailID string   `json:"recovery_email_id"`
+}
+
+// tokenRecoveryClaims reads the recoveryClaims of a token the harness minted.
+// The signature is the server's business; this only looks at what the token
+// says.
+func tokenRecoveryClaims(t *testing.T, token string) recoveryClaims {
 	t.Helper()
 	parts := strings.Split(token, ".")
 	require.Len(t, parts, 3)
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	require.NoError(t, err)
-	var claims struct {
-		AMR []string `json:"amr"`
-	}
+	var claims recoveryClaims
 	require.NoError(t, json.Unmarshal(payload, &claims))
-	return claims.AMR
+	return claims
 }
 
 // signedInByRecoveryEmail marks a request as coming from a session of
 // userID's that a recovery email opened just now.
-func signedInByRecoveryEmail[T any](r *connect.Request[T], userID string) *connect.Request[T] {
+func signedInByRecoveryEmail[T any](r *connect.Request[T], userID, recoveryEmailID string) *connect.Request[T] {
 	r.Header().Set(middleware.AuthenticatedAMRHeader, service.AMRRecoveryEmail)
+	r.Header().Set(middleware.AuthenticatedRecoveryEmailIDHeader, recoveryEmailID)
 	return signedIn(r, userID)
 }
 
@@ -221,7 +228,13 @@ func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	assert.Equal(t, uid, login.Msg.User.Id)
-	assert.Equal(t, []string{service.AMRRecoveryEmail}, tokenAMR(t, login.Msg.AccessToken))
+	recovery := tokenRecoveryClaims(t, login.Msg.AccessToken)
+	assert.Equal(t, []string{service.AMRRecoveryEmail}, recovery.AMR)
+	held, err := h.repo.ListRecoveryEmails(ctx, uid)
+	require.NoError(t, err)
+	require.Len(t, held, 1)
+	assert.Equal(t, held[0].ID, recovery.RecoveryEmailID, "the token names the address by its id")
+	assert.NotContains(t, login.Msg.AccessToken, "spare@example.net")
 
 	listed, err := h.client.ListRecoveryEmails(ctx, authedReq(connect.NewRequest(&identitypb.ListRecoveryEmailsRequest{}), uid))
 	require.NoError(t, err)
@@ -245,29 +258,29 @@ func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 		assert.Equal(t, holdUntil, details.HoldUntil)
 	}
 	_, err = h.client.RemoveRecoveryEmail(ctx,
-		signedInByRecoveryEmail(connect.NewRequest(&identitypb.RemoveRecoveryEmailRequest{Email: "spare@example.net"}), uid))
+		signedInByRecoveryEmail(connect.NewRequest(&identitypb.RemoveRecoveryEmailRequest{Email: "spare@example.net"}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.RemovePhone(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RemovePhoneRequest{}), uid))
+	_, err = h.client.RemovePhone(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RemovePhoneRequest{}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.BeginTotpSetup(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.BeginTotpSetupRequest{}), uid))
+	_, err = h.client.BeginTotpSetup(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.BeginTotpSetupRequest{}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.DisableTotp(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.DisableTotpRequest{Password: "pw"}), uid))
+	_, err = h.client.DisableTotp(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.DisableTotpRequest{Password: "pw"}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.RegenerateRecoveryCodes(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RegenerateRecoveryCodesRequest{Password: "pw"}), uid))
+	_, err = h.client.RegenerateRecoveryCodes(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RegenerateRecoveryCodesRequest{Password: "pw"}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.DeletePasskey(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.DeletePasskeyRequest{CredentialId: "cred-1"}), uid))
+	_, err = h.client.DeletePasskey(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.DeletePasskeyRequest{CredentialId: "cred-1"}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.UnlinkIdentity(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.UnlinkIdentityRequest{Provider: "google", ProviderUserId: "g-1"}), uid))
+	_, err = h.client.UnlinkIdentity(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.UnlinkIdentityRequest{Provider: "google", ProviderUserId: "g-1"}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.ChangePassword(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.ChangePasswordRequest{CurrentPassword: "pw", NewPassword: "N3w!Str0ngPass"}), uid))
+	_, err = h.client.ChangePassword(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.ChangePasswordRequest{CurrentPassword: "pw", NewPassword: "N3w!Str0ngPass"}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.RequestEmailChange(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RequestEmailChangeRequest{NewEmail: "moved@example.org", CurrentPassword: "pw"}), uid))
+	_, err = h.client.RequestEmailChange(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RequestEmailChangeRequest{NewEmail: "moved@example.org", CurrentPassword: "pw"}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.RevokeAllSessions(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RevokeAllSessionsRequest{Password: "pw"}), uid))
+	_, err = h.client.RevokeAllSessions(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RevokeAllSessionsRequest{Password: "pw"}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.SignOutEverywhere(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.SignOutEverywhereRequest{Password: "pw"}), uid))
+	_, err = h.client.SignOutEverywhere(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.SignOutEverywhereRequest{Password: "pw"}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
-	_, err = h.client.DeleteMyAccount(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.DeleteMyAccountRequest{}), uid))
+	_, err = h.client.DeleteMyAccount(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.DeleteMyAccountRequest{}), uid, recovery.RecoveryEmailID))
 	requireHold(err)
 
 	// The held session ends the owner's other session only by being it: the
@@ -280,7 +293,7 @@ func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 		h.db.mu.Unlock()
 	}
 	revoke := func(sessionID string) error {
-		req := signedInByRecoveryEmail(connect.NewRequest(&identitypb.RevokeSessionRequest{SessionId: sessionID}), uid)
+		req := signedInByRecoveryEmail(connect.NewRequest(&identitypb.RevokeSessionRequest{SessionId: sessionID}), uid, recovery.RecoveryEmailID)
 		req.Header().Set(middleware.AuthenticatedSessionIDHeader, "sid-recovery")
 		_, err := h.client.RevokeSession(ctx, req)
 		return err

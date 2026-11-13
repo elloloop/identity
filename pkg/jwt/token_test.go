@@ -302,16 +302,23 @@ func TestClaims_AMRRoundTrip(t *testing.T) {
 	assert.Nil(t, stringsClaim("a"))
 }
 
-// recovery_email round-trips on a purpose ticket and is absent when unset.
-func TestClaims_RecoveryEmailRoundTrip(t *testing.T) {
+// recovery_email_id round-trips on an access token and on a purpose ticket,
+// and is absent when unset.
+func TestClaims_RecoveryEmailIDRoundTrip(t *testing.T) {
 	s := newMemSigner(t, "test-kid")
-	tok, err := s.SignAccessToken(context.Background(), Claims{Sub: "u", Purpose: "p", RecoveryEmail: "spare@example.net"}, time.Minute)
+	tok, err := s.SignAccessToken(context.Background(), Claims{Sub: "u", AMR: []string{"recovery_email"}, RecoveryEmailID: "rid-1"}, time.Minute)
 	require.NoError(t, err)
-	claims, err := VerifyPurposeToken(tok, s, "", "", false, "p")
+	claims, err := VerifyAccessToken(tok, s, "", "", false)
 	require.NoError(t, err)
-	assert.Equal(t, "spare@example.net", claims.RecoveryEmail)
+	assert.Equal(t, "rid-1", claims.RecoveryEmailID)
 
-	assert.NotContains(t, Claims{Sub: "u", Purpose: "p"}.ClaimsMap(time.Now(), time.Minute), "recovery_email")
+	tok, err = s.SignAccessToken(context.Background(), Claims{Sub: "u", Purpose: "p", RecoveryEmailID: "rid-2"}, time.Minute)
+	require.NoError(t, err)
+	claims, err = VerifyPurposeToken(tok, s, "", "", false, "p")
+	require.NoError(t, err)
+	assert.Equal(t, "rid-2", claims.RecoveryEmailID)
+
+	assert.NotContains(t, Claims{Sub: "u", Purpose: "p"}.ClaimsMap(time.Now(), time.Minute), "recovery_email_id")
 }
 
 // bnd round-trips on a purpose ticket and is absent when unset.

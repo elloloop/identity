@@ -83,63 +83,117 @@ func authed[T any](msg *T, token string) *connect.Request[T] {
 	return req
 }
 
-// Under GATEWAY_REVOCATION_MODE=session, removing a recovery email ends the
-// session it opened at once on the replica that removed it, its session
-// cache warm and all. Another replica's cache passes the token until its
-// TTL, but the session can make no account security change there: the store
-// says it has ended, and no hold stands in the way any more.
-func TestRecoveryEmailRemoval_EndsItsSessionAtOnceOnThisReplicaAndHoldsItOnOthers(t *testing.T) {
+// recoveryDeployment is replicas of one deployment on one store, whose
+// project lets recovery emails sign in: an owner signed in with a password,
+// and a session the owner's recovery email opened.
+type recoveryDeployment struct {
+	repo                      *memory.Repo
+	replicas                  []identityconnect.IdentityServiceClient
+	ownerID                   string
+	ownerToken, recoveryToken string
+}
+
+func newRecoveryDeployment(t *testing.T, cfg *config.Config, replicas int) *recoveryDeployment {
+	t.Helper()
 	ctx := context.Background()
-	cfg := newTestConfig()
-	cfg.DefaultProjectID = config.DefaultProjectIDFallback
-	cfg.RevocationMode = config.RevocationModeSession
-	cfg.SessionCacheTTLSeconds = 60
-	repo := memory.New()
+	d := &recoveryDeployment{repo: memory.New()}
 	mail := &codeMailbox{}
 	signer := jwttest.NewSigner(t, "recovery-session-test-key")
 	pk, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: "localhost", RPName: "Identity test", Origin: "http://localhost:9002"})
 	require.NoError(t, err)
-	replica := func() identityconnect.IdentityServiceClient {
+	for range replicas {
 		built, err := New(Deps{
-			Config: cfg, Logger: zap.NewNop(), Signer: signer, Repo: repo, DB: repo, Passkeys: pk,
+			Config: cfg, Logger: zap.NewNop(), Signer: signer, Repo: d.repo, DB: d.repo, Passkeys: pk,
 			TOTPKey: []byte("01234567890123456789012345678901"), TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
 			EmailTransport: mail, ProjectResolver: recoveryProject{},
 		})
 		require.NoError(t, err)
 		server := httptest.NewServer(built.Handler)
 		t.Cleanup(server.Close)
-		return identityconnect.NewIdentityServiceClient(server.Client(), server.URL)
+		d.replicas = append(d.replicas, identityconnect.NewIdentityServiceClient(server.Client(), server.URL))
 	}
-	here, there := replica(), replica()
+	here := d.replicas[0]
 
 	owner, err := here.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{Email: "owner@example.com", Password: "Offline-test-Password123!"}))
 	require.NoError(t, err)
-	ownerToken := owner.Msg.AccessToken
-	_, err = here.RequestRecoveryEmail(ctx, authed(&identitypb.RequestRecoveryEmailRequest{Email: "spare@example.net"}, ownerToken))
+	d.ownerID, d.ownerToken = owner.Msg.User.Id, owner.Msg.AccessToken
+	_, err = here.RequestRecoveryEmail(ctx, authed(&identitypb.RequestRecoveryEmailRequest{Email: "spare@example.net"}, d.ownerToken))
 	require.NoError(t, err)
-	_, err = here.VerifyRecoveryEmail(ctx, authed(&identitypb.VerifyRecoveryEmailRequest{Email: "spare@example.net", Code: mail.codeFor(t, "spare@example.net", 0)}, ownerToken))
+	_, err = here.VerifyRecoveryEmail(ctx, authed(&identitypb.VerifyRecoveryEmailRequest{Email: "spare@example.net", Code: mail.codeFor(t, "spare@example.net", 0)}, d.ownerToken))
 	require.NoError(t, err)
 
 	_, err = here.RequestEmailLoginCode(ctx, connect.NewRequest(&identitypb.RequestEmailLoginCodeRequest{Email: "spare@example.net"}))
 	require.NoError(t, err)
 	recovery, err := here.VerifyEmailLoginCode(ctx, connect.NewRequest(&identitypb.VerifyEmailLoginCodeRequest{Email: "spare@example.net", Code: mail.codeFor(t, "spare@example.net", 1)}))
 	require.NoError(t, err)
-	recoveryToken := recovery.Msg.AccessToken
-	for _, client := range []identityconnect.IdentityServiceClient{here, there} {
-		_, err = client.ListRecoveryEmails(ctx, authed(&identitypb.ListRecoveryEmailsRequest{}, recoveryToken))
+	d.recoveryToken = recovery.Msg.AccessToken
+	return d
+}
+
+// securityChangesRefused asserts that the recovery session makes none of
+// the account security changes that would leave a way in behind, through
+// client, and that the owner's session is not refused them.
+func (d *recoveryDeployment) securityChangesRefused(t *testing.T, client identityconnect.IdentityServiceClient) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := client.BeginPasskeyRegistration(ctx, authed(&identitypb.BeginPasskeyRegistrationRequest{DeviceName: "Key"}, d.recoveryToken))
+	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err), "the removed address's session registers no passkey: %v", err)
+	link := &identitypb.LinkIdentityRequest{Provider: "google", Code: "code", RedirectUri: "http://localhost:9002/cb"}
+	_, err = client.LinkIdentity(ctx, authed(link, d.recoveryToken))
+	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err), "the removed address's session links no provider: %v", err)
+
+	_, err = client.BeginPasskeyRegistration(ctx, authed(&identitypb.BeginPasskeyRegistrationRequest{DeviceName: "Key"}, d.ownerToken))
+	require.NoError(t, err, "the owner's session is untouched")
+	_, err = client.LinkIdentity(ctx, authed(link, d.ownerToken))
+	require.NotEqual(t, connect.CodeUnauthenticated, connect.CodeOf(err), "the owner's session is not refused a link: %v", err)
+}
+
+// Under GATEWAY_REVOCATION_MODE=ttl, the default, nothing ends an access
+// token before it expires, so the recovery session's token still
+// authenticates once the owner removes the address. It makes no account
+// security change, though: it names the address that opened it, which the
+// account no longer holds.
+func TestRecoveryEmailRemoval_InTTLModeTheTokenMakesNoSecurityChange(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig()
+	cfg.DefaultProjectID = config.DefaultProjectIDFallback
+	cfg.RevocationMode = config.RevocationModeTTL
+	d := newRecoveryDeployment(t, cfg, 1)
+	client := d.replicas[0]
+
+	_, err := client.RemoveRecoveryEmail(ctx, authed(&identitypb.RemoveRecoveryEmailRequest{Email: "spare@example.net"}, d.ownerToken))
+	require.NoError(t, err)
+	listed, err := client.ListRecoveryEmails(ctx, authed(&identitypb.ListRecoveryEmailsRequest{}, d.recoveryToken))
+	require.NoError(t, err, "in ttl mode the token authenticates until it expires")
+	require.Zero(t, listed.Msg.HoldUntil, "and no hold is left to stop it")
+	d.securityChangesRefused(t, client)
+}
+
+// Under GATEWAY_REVOCATION_MODE=session, removing a recovery email ends the
+// session it opened at once on the replica that removed it, its session
+// cache warm and all. Another replica's cache passes the token until its
+// TTL, but the session makes no account security change there: it names an
+// address the account no longer holds, and the store says it has ended.
+func TestRecoveryEmailRemoval_EndsItsSessionAtOnceOnThisReplicaAndHoldsItOnOthers(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig()
+	cfg.DefaultProjectID = config.DefaultProjectIDFallback
+	cfg.RevocationMode = config.RevocationModeSession
+	cfg.SessionCacheTTLSeconds = 60
+	d := newRecoveryDeployment(t, cfg, 2)
+	here, there := d.replicas[0], d.replicas[1]
+	for _, client := range d.replicas {
+		_, err := client.ListRecoveryEmails(ctx, authed(&identitypb.ListRecoveryEmailsRequest{}, d.recoveryToken))
 		require.NoError(t, err, "the recovery session is live, and each replica's cache now holds it active")
 	}
 
-	_, err = here.RemoveRecoveryEmail(ctx, authed(&identitypb.RemoveRecoveryEmailRequest{Email: "spare@example.net"}, ownerToken))
+	_, err := here.RemoveRecoveryEmail(ctx, authed(&identitypb.RemoveRecoveryEmailRequest{Email: "spare@example.net"}, d.ownerToken))
 	require.NoError(t, err)
 
-	_, err = here.ListRecoveryEmails(ctx, authed(&identitypb.ListRecoveryEmailsRequest{}, recoveryToken))
+	_, err = here.ListRecoveryEmails(ctx, authed(&identitypb.ListRecoveryEmailsRequest{}, d.recoveryToken))
 	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err), "the replica that removed the address refuses its session at once: %v", err)
 
-	_, err = there.ListRecoveryEmails(ctx, authed(&identitypb.ListRecoveryEmailsRequest{}, recoveryToken))
+	_, err = there.ListRecoveryEmails(ctx, authed(&identitypb.ListRecoveryEmailsRequest{}, d.recoveryToken))
 	require.NoError(t, err, "another replica's cache passes the token until its TTL")
-	_, err = there.BeginPasskeyRegistration(ctx, authed(&identitypb.BeginPasskeyRegistrationRequest{DeviceName: "Key"}, recoveryToken))
-	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err), "but makes no account security change there: %v", err)
-	_, err = there.BeginPasskeyRegistration(ctx, authed(&identitypb.BeginPasskeyRegistrationRequest{DeviceName: "Key"}, ownerToken))
-	require.NoError(t, err, "the owner's session is untouched")
+	d.securityChangesRefused(t, there)
 }

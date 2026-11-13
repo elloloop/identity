@@ -89,6 +89,7 @@ func (r *fakeRepo) AddRecoveryEmail(_ context.Context, e *RecoveryEmail, max int
 		return ErrRecoveryEmailLimit
 	}
 	cp := *e
+	cp.ID = nextNodeID()
 	r.recoveryEmails[e.UserID] = append(r.recoveryEmails[e.UserID], &cp)
 	return nil
 }
@@ -104,28 +105,34 @@ func (r *fakeRepo) ListRecoveryEmails(_ context.Context, userID string) ([]*Reco
 	return out, nil
 }
 
-// heldRecoveryEmailLocked is the index of email (under FoldEmail) among
-// userID's recovery emails, or -1. The caller holds r.mu.
-func (r *fakeRepo) heldRecoveryEmailLocked(userID, email string) int {
+// heldRecoveryEmailLocked is the index among userID's recovery emails of the
+// one match accepts, or -1. The caller holds r.mu.
+func (r *fakeRepo) heldRecoveryEmailLocked(userID string, match func(*RecoveryEmail) bool) int {
+	return slices.IndexFunc(r.recoveryEmails[userID], match)
+}
+
+func recoveryEmailAt(email string) func(*RecoveryEmail) bool {
 	fold := FoldEmail(email)
-	return slices.IndexFunc(r.recoveryEmails[userID], func(e *RecoveryEmail) bool {
-		return FoldEmail(e.Email) == fold
-	})
+	return func(e *RecoveryEmail) bool { return FoldEmail(e.Email) == fold }
+}
+
+func recoveryEmailWithID(id string) func(*RecoveryEmail) bool {
+	return func(e *RecoveryEmail) bool { return e.ID == id }
 }
 
 func (r *fakeRepo) RemoveRecoveryEmail(_ context.Context, userID, email string, atMs int64) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	i := r.heldRecoveryEmailLocked(userID, email)
+	i := r.heldRecoveryEmailLocked(userID, recoveryEmailAt(email))
 	if i < 0 {
 		return 0, fmt.Errorf("fake: RemoveRecoveryEmail: %w", ErrNotFound)
 	}
 	list := r.recoveryEmails[userID]
+	removed := list[i].ID
 	r.recoveryEmails[userID] = append(list[:i:i], list[i+1:]...)
-	fold := FoldEmail(email)
 	ended := 0
 	for id, t := range r.refreshTokens {
-		if t.UserID != userID || t.RecoveryEmail == "" || FoldEmail(t.RecoveryEmail) != fold {
+		if t.UserID != userID || t.RecoveryEmailID != removed {
 			continue
 		}
 		if t.ConsumedAtMs == 0 {
@@ -175,17 +182,15 @@ func (r *fakeRepo) FindRecoveryEmailHolder(_ context.Context, email string) (*Re
 	return nil, nil
 }
 
-func (r *fakeRepo) MarkRecoveryEmailSignIn(_ context.Context, userID, email string, atMs, holdMs int64) error {
+func (r *fakeRepo) MarkRecoveryEmailSignIn(_ context.Context, userID, id string, atMs, holdMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	fold := FoldEmail(email)
-	for _, e := range r.recoveryEmails[userID] {
-		if FoldEmail(e.Email) == fold {
-			if e.LastSignInAt <= atMs-holdMs {
-				e.LastSignInAt = atMs
-			}
-			return nil
-		}
+	i := r.heldRecoveryEmailLocked(userID, recoveryEmailWithID(id))
+	if i < 0 {
+		return fmt.Errorf("fake: MarkRecoveryEmailSignIn: %w", ErrNotFound)
 	}
-	return fmt.Errorf("fake: MarkRecoveryEmailSignIn: %w", ErrNotFound)
+	if e := r.recoveryEmails[userID][i]; e.LastSignInAt <= atMs-holdMs {
+		e.LastSignInAt = atMs
+	}
+	return nil
 }
