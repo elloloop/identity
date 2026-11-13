@@ -129,6 +129,42 @@ func TestMergeUsers_AdminOnlyNoPassword(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
+// Everything that lets the person back in moves with a merge: the other
+// account's recovery emails, and its phone where the survivor has none.
+func TestMergeAccounts_MovesRecoveryEmailsAndThePhone(t *testing.T) {
+	svc, repo, survivor, native, ctx := mergeFixture(t)
+	require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: native.ID, Email: "native-spare@example.net", VerifiedAt: 1}, 5))
+	native.PhoneNumber, native.PhoneVerified, native.PhoneVerifiedAt = "+14155550145", true, 7
+
+	merged, err := svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	require.NoError(t, err)
+	require.Equal(t, "+14155550145", merged.PhoneNumber)
+	require.True(t, merged.PhoneVerified)
+	holder, err := repo.FindRecoveryEmailHolder(ctx, "native-spare@example.net")
+	require.NoError(t, err)
+	require.NotNil(t, holder)
+	require.Equal(t, survivor.ID, holder.UserID, "the recovery email signs in to the survivor now")
+	retired, _ := repo.GetUser(ctx, native.ID)
+	require.Empty(t, retired.PhoneNumber)
+}
+
+// A merge that would leave the survivor with more recovery emails than the
+// project lets one account keep is refused, naming what to do first.
+func TestMergeAccounts_RefusedPastTheRecoveryEmailCap(t *testing.T) {
+	svc, repo, survivor, native, ctx := mergeFixture(t)
+	scope := *ProjectScopeFromContext(ctx)
+	scope.RecoveryEmails.Max = 1
+	ctx = WithProjectScope(context.Background(), &scope)
+	require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: survivor.ID, Email: "bob-spare@example.net", VerifiedAt: 1}, 5))
+	require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: native.ID, Email: "native-spare@example.net", VerifiedAt: 1}, 5))
+
+	_, err := svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	require.ErrorIs(t, err, ErrMergeRefused)
+	require.ErrorContains(t, err, "recovery emails")
+	other, _ := repo.GetUser(ctx, native.ID)
+	require.Equal(t, StatusActive, other.Status)
+}
+
 // holdAccount puts a recovery hold on userID's account: one of its recovery
 // emails signed in now.
 func holdAccount(ctx context.Context, t *testing.T, repo *fakeRepo, userID, addr string, nowMs int64) {

@@ -1035,9 +1035,9 @@ func TestAccountMerge_ApplyToUsersRefusesAgents(t *testing.T) {
 	agent := &User{ID: "a", Kind: UserKindAgent, OwnerUserID: "p", Status: StatusActive}
 	person := &User{ID: "p", Kind: UserKindPerson, Status: StatusActive}
 	m := AccountMerge{SurvivorID: person.ID, OtherID: agent.ID}
-	require.ErrorIs(t, m.ApplyToUsers(person, agent), ErrMergeConflict)
+	require.ErrorIs(t, m.ApplyToUsers(person, agent, nil), ErrMergeConflict)
 	m = AccountMerge{SurvivorID: agent.ID, OtherID: person.ID}
-	require.ErrorIs(t, m.ApplyToUsers(agent, person), ErrMergeConflict)
+	require.ErrorIs(t, m.ApplyToUsers(agent, person, nil), ErrMergeConflict)
 }
 
 // Both merge entry points share checkMergeable: an agent is refused on

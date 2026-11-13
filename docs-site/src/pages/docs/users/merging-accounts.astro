@@ -28,6 +28,8 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       survivor, in one transaction:
       <ul>
         <li>the retired account's <strong>linked providers</strong> (Google, Apple, …), always;</li>
+        <li>its <strong>recovery emails</strong>, always. A merge that would leave the survivor with more than the project lets one account keep is refused: remove some first;</li>
+        <li>its <strong>phone number</strong>, with its verified state, where the survivor has none. Where the survivor has one it keeps it, and the retired account's number is released for whoever proves it next;</li>
         <li>its <strong>username</strong>, <strong>password</strong> and <strong>email</strong>, each only where the survivor has none of its own (a password that two-step verification protected does not move), so <code>bob</code> now signs in to the survivor;</li>
         <li>with <code>take_address</code>, its account address. The survivor's old address moves to the retired account, so neither is freed for someone else.</li>
       </ul>

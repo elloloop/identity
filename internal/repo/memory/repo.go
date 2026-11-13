@@ -2466,9 +2466,10 @@ func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) erro
 		}
 	}()
 	// A missing account is nil, which ApplyToUsers refuses.
-	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
+	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID], r.recoveryEmails); err != nil {
 		return err
 	}
+	r.mergePhoneClaimsLocked(m)
 	r.invalidateAgentCreations(m.OtherID)
 	for _, u := range r.users {
 		before := *u

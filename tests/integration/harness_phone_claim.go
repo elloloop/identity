@@ -72,3 +72,18 @@ type phoneClaim struct {
 	userID    string
 	claimedAt int64
 }
+
+// mergePhoneClaimsLocked gives the survivor the retired account's phone
+// claim when the merge moves the phone, and releases it otherwise. The
+// caller holds r.mu.
+func (r *MemRepo) mergePhoneClaimsLocked(m service.AccountMerge) {
+	for number, claim := range r.phoneClaims {
+		switch {
+		case claim.userID != m.OtherID:
+		case m.MovePhone:
+			r.phoneClaims[number] = phoneClaim{userID: m.SurvivorID, claimedAt: claim.claimedAt}
+		default:
+			delete(r.phoneClaims, number)
+		}
+	}
+}

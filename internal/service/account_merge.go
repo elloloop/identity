@@ -28,25 +28,47 @@ type AccountMerge struct {
 	// SwapAddress gives the survivor the retired account's account address
 	// and the retired account the survivor's old one.
 	SwapAddress bool
-	AtMs        int64
+	// MovePhone moves the retired account's phone number, its verified state
+	// and its claim on the number (phone.unique) to the survivor, which has
+	// none. Without it the retired account's claim is released, so a number
+	// is never held by an account that can no longer sign in.
+	MovePhone bool
+	// RecoveryEmailsMax caps the survivor's recovery emails once the retired
+	// account's have moved to it: when together they hold more, the merge is
+	// ErrRecoveryEmailLimit and changes nothing.
+	RecoveryEmailsMax int
+	AtMs              int64
 }
 
-// ApplyToUsers is the merge's change to the two account records, for a store
-// that holds them in memory (the memory driver and the test stores): the
-// guards the SQL drivers apply in their transaction, then the moves. It
-// changes nothing and returns ErrMergeConflict when either account is no
-// longer active, unmerged people, or a move would overwrite a field the
-// survivor has filled. The caller re-points the other account's linked
-// providers, applies ApplyToAgent to its users, and ends its sessions,
-// under the same lock.
-func (m AccountMerge) ApplyToUsers(survivor, other *User) error {
+// ApplyToUsers is the merge's change to the two account records and to the
+// recovery-email table (by account id), for a store that holds them in
+// memory (the memory driver and the test stores): the guards the SQL drivers
+// apply in their transaction, then the moves. It changes nothing and returns
+// ErrMergeConflict when either account is no longer active, unmerged people,
+// or a move would overwrite a field the survivor has filled, and
+// ErrRecoveryEmailLimit when the survivor could not take the other account's
+// recovery emails. The caller re-points the other account's linked
+// providers, moves or releases its phone claim (MovePhone), applies
+// ApplyToAgent to its users, and ends its sessions, under the same lock.
+func (m AccountMerge) ApplyToUsers(survivor, other *User, recoveryEmails map[string][]*RecoveryEmail) error {
 	mergeable := func(u *User) bool { return u.Status == StatusActive && u.MergedIntoUserID == "" && !u.IsAgent() }
 	if survivor == nil || other == nil || m.OtherID == m.SurvivorID || !mergeable(other) || !mergeable(survivor) {
 		return ErrMergeConflict
 	}
 	if (m.MoveUsername && survivor.Username != "") || (m.MovePassword && survivor.PasswordHash != "") ||
-		(m.MoveEmail && survivor.Email != "") {
+		(m.MoveEmail && survivor.Email != "") || (m.MovePhone && survivor.PhoneNumber != "") {
 		return ErrMergeConflict
+	}
+	moving := recoveryEmails[m.OtherID]
+	if len(moving) > 0 && len(recoveryEmails[m.SurvivorID])+len(moving) > m.RecoveryEmailsMax {
+		return ErrRecoveryEmailLimit
+	}
+	for _, e := range moving {
+		e.UserID = m.SurvivorID
+	}
+	if len(moving) > 0 {
+		recoveryEmails[m.SurvivorID] = append(recoveryEmails[m.SurvivorID], moving...)
+		delete(recoveryEmails, m.OtherID)
 	}
 	if m.MoveUsername {
 		survivor.Username, other.Username = other.Username, ""
@@ -60,6 +82,10 @@ func (m AccountMerge) ApplyToUsers(survivor, other *User) error {
 	}
 	if m.SwapAddress {
 		survivor.AccountAddress, other.AccountAddress = other.AccountAddress, survivor.AccountAddress
+	}
+	if m.MovePhone {
+		survivor.PhoneNumber, survivor.PhoneVerified, survivor.PhoneVerifiedAt = other.PhoneNumber, other.PhoneVerified, other.PhoneVerifiedAt
+		other.PhoneNumber, other.PhoneVerified, other.PhoneVerifiedAt = "", false, 0
 	}
 	other.Status, other.MergedIntoUserID = StatusDeactivated, m.SurvivorID
 	other.UpdatedAt, survivor.UpdatedAt = time.UnixMilli(m.AtMs), time.UnixMilli(m.AtMs)
@@ -120,10 +146,13 @@ var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in
 //
 // Everything that lets the person sign in the way they used to moves to the
 // survivor, in one transaction (Repository.ApplyAccountMerge): its linked
-// provider identities always; its username, password and email
-// where the survivor has none of its own; and, on request (takeAddress), its
-// account address, the survivor's old address moving to the retired account
-// so neither is freed for someone else. Passkeys do not move: a passkey is
+// provider identities and its recovery emails always (refused when together
+// the two accounts would hold more recovery emails than one may keep); its
+// username, password, email and phone number where the survivor has none of
+// its own (a phone the survivor already has keeps it, and the retired
+// account's number is released); and, on request (takeAddress), its account
+// address, the survivor's old address moving to the retired account so
+// neither is freed for someone else. Passkeys do not move: a passkey is
 // bound to the account it was registered for (its WebAuthn user handle), so
 // it would not sign in to the survivor. The person registers passkeys again
 // on the survivor.
@@ -282,17 +311,25 @@ func mergeAccounts(ctx context.Context, repo Repository, survivor, other *User, 
 			return nil, nil, err
 		}
 	}
-	if err := repo.ApplyAccountMerge(ctx, AccountMerge{
+	recoveryMax := recoveryEmailsConfig(ProjectScopeFromContext(ctx)).max()
+	err := repo.ApplyAccountMerge(ctx, AccountMerge{
 		SurvivorID:   survivor.ID,
 		OtherID:      other.ID,
 		MoveUsername: other.Username != "" && survivor.Username == "",
 		// A password a second factor protected does not move: on the
 		// survivor it would sign in without one.
-		MovePassword: other.PasswordHash != "" && survivor.PasswordHash == "" && !other.TotpRequired,
-		MoveEmail:    other.Email != "" && survivor.Email == "",
-		SwapAddress:  takeAddress && other.AccountAddress != "",
-		AtMs:         now,
-	}); err != nil {
+		MovePassword:      other.PasswordHash != "" && survivor.PasswordHash == "" && !other.TotpRequired,
+		MoveEmail:         other.Email != "" && survivor.Email == "",
+		SwapAddress:       takeAddress && other.AccountAddress != "",
+		MovePhone:         other.PhoneNumber != "" && survivor.PhoneNumber == "",
+		RecoveryEmailsMax: recoveryMax,
+		AtMs:              now,
+	})
+	if errors.Is(err, ErrRecoveryEmailLimit) {
+		return nil, nil, fmt.Errorf("%w: together the two accounts hold more than the %d recovery emails one account may keep; remove some from either first",
+			ErrMergeRefused, recoveryMax)
+	}
+	if err != nil {
 		return nil, nil, err
 	}
 	merged, err := repo.GetUser(ctx, survivor.ID)

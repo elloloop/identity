@@ -51,6 +51,12 @@ setting, and none changes until it is set.
   `identityserver.Options.TemplateMessageSender` (or `app.Deps`), and without
   one the channel is skipped. `templatemsg.NewLogOnly` delivers nothing and is
   for development.
+- **A merge moves the phone.** When the survivor has no phone, the retired
+  account's number, its verified state and its claim move to it; when the
+  survivor has one, the survivor keeps it and the retired account's claim is
+  released, so no number stays held by an account that can no longer sign
+  in. `AccountMerge` gains `MovePhone`, which a custom driver's
+  `ApplyAccountMerge` must apply (the conformance suite checks it).
 - **`RemovePhone`** clears the caller's number and its verified state and
   returns the user; a caller with no number gets their user back unchanged.
   It works whether or not the project verifies phones, mails the account's
@@ -211,6 +217,14 @@ now keep a list of addresses it has proved it controls.
   uses the project's email branding.
 - **Turning it off keeps what is held.** Addresses already stored can still be
   listed and removed, and still cannot be taken as a primary email.
+- **A merge moves them.** `MergeAccounts` and `MergeUsers` move the retired
+  account's recovery emails to the survivor in the merge's transaction, so
+  each still signs in to, and is removed from, a live account. A merge that
+  would leave the survivor holding more than `recovery_emails.max` is refused
+  `FAILED_PRECONDITION`, saying to remove some first. `AccountMerge` gains
+  `RecoveryEmailsMax`, and a custom driver's `ApplyAccountMerge` must move the
+  rows and refuse past it with `ErrRecoveryEmailLimit` (the conformance suite
+  checks both).
 - **`User.recovery_email` is unchanged** and still unverified and unread. It is
   not a recovery email in this sense; prefer the new RPCs.
 - **Migration 0059** adds `user_recovery_emails` and `recovery_email_codes`

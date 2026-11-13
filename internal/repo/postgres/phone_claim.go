@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -90,6 +92,21 @@ func (r *pgRepository) ClaimPhoneNumber(ctx context.Context, userID, phoneNumber
 		return "", wrapPgErr("ClaimPhoneNumber", err)
 	}
 	return previous, nil
+}
+
+// lockPhoneClaims locks the claims the users hold, in number order. Every
+// write that changes a claim and a user row takes the claims first, so two
+// such writes never wait on each other in a cycle.
+func lockPhoneClaims(ctx context.Context, tx pgx.Tx, projectID, op string, userIDs ...string) error {
+	rows, err := tx.Query(ctx, `
+		SELECT phone_number FROM phone_number_claims
+		 WHERE project_id = $1 AND user_id = ANY($2)
+		 ORDER BY phone_number FOR UPDATE`, projectID, userIDs)
+	if err != nil {
+		return wrapPgErr(op+"(lock phone claims)", err)
+	}
+	rows.Close()
+	return wrapPgErr(op+"(lock phone claims)", rows.Err())
 }
 
 // clearUserPhoneQuery clears one user's phone number and verified state.

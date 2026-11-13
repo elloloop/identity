@@ -2658,9 +2658,10 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m AccountMerge) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// A missing account is nil, which ApplyToUsers refuses.
-	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
+	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID], r.recoveryEmails); err != nil {
 		return err
 	}
+	r.mergePhoneClaimsLocked(m)
 	InvalidateAgentCreationReceipts(r.agentCreations, m.OtherID)
 	for _, u := range r.users {
 		before := *u
