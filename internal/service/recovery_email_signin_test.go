@@ -357,7 +357,7 @@ func (r removedOnMarkRepo) MarkRecoveryEmailSignIn(ctx context.Context, userID, 
 	if err := r.fakeRepo.MarkRecoveryEmailSignIn(ctx, userID, email, atMs, holdMs); err != nil {
 		return err
 	}
-	_, err := r.fakeRepo.RemoveRecoveryEmail(ctx, userID, r.addr, atMs)
+	_, err := r.RemoveRecoveryEmail(ctx, userID, r.addr, atMs)
 	return err
 }
 
