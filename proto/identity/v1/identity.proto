@@ -2052,10 +2052,29 @@ message CreateTenantInvitationRequest {
 message CreateTenantInvitationResponse {
   TenantInvitation invitation = 1;
   // raw_token is the unhashed redemption token. It is populated ONLY when
-  // no mailer is configured (so a headless/dev deployment can still drive
-  // the flow); when an email was dispatched it is empty, because the token
-  // belongs in the recipient's inbox, not the API response.
+  // no mailer is configured (email_send_status NOT_CONFIGURED, so a
+  // headless/dev deployment can still drive the flow); otherwise it is
+  // empty, because the token belongs in the recipient's inbox, not the API
+  // response.
   string raw_token = 2;
+  // email_send_status is what became of this invitation's email. It is
+  // reported here only and not stored: the invitation is created and open
+  // whatever it says.
+  EmailSendStatus email_send_status = 3;
+}
+
+// EmailSendStatus says whether the server handed an email to a mail
+// provider.
+enum EmailSendStatus {
+  EMAIL_SEND_STATUS_UNSPECIFIED = 0;
+  // A configured mail provider accepted the email. It does not confirm the
+  // email reached the inbox.
+  EMAIL_SEND_STATUS_SENT = 1;
+  // No configured mail provider accepted the email (each one refused it or
+  // could not be reached), or the email could not be built.
+  EMAIL_SEND_STATUS_FAILED = 2;
+  // The server has no mail provider configured, so no email was sent.
+  EMAIL_SEND_STATUS_NOT_CONFIGURED = 3;
 }
 
 message AcceptTenantInvitationRequest {

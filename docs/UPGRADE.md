@@ -1,5 +1,50 @@
 # Upgrade guide
 
+## Next — `CreateTenantInvitation` reports whether its email was sent: `email_send_status` (additive field and enum; no migration; behaviour change for mail logs when every SMTP provider fails and for SMTP settings that are all invalid; `email.ContextWithLogFields`, `service.EmailSendStatus`, `CreatedInvitation.EmailStatus` (Go API))
+
+`CreateTenantInvitation` stores the invitation and then sends its email in the
+same call, and a failed send does not fail the call. Until now the response
+did not say whether the email went out, and when every SMTP provider failed
+the server still logged `email_sent`. The order and the sending are unchanged;
+the outcome is now reported.
+
+- **`CreateTenantInvitationResponse.email_send_status`** (`EmailSendStatus`):
+  `EMAIL_SEND_STATUS_SENT` when a configured mail provider accepted the email
+  (not proof it reached the inbox), `EMAIL_SEND_STATUS_FAILED` when none did
+  or the email could not be built, and `EMAIL_SEND_STATUS_NOT_CONFIGURED` when
+  the server has no mail provider, the one case `raw_token` is populated. The
+  status is returned only, never stored; a caller that needs it later records
+  it. A server older than this returns `EMAIL_SEND_STATUS_UNSPECIFIED`.
+- **A provider chain no longer ends in the log-only transport.** The chain
+  built from `GATEWAY_SMTP_HOST` or `GATEWAY_SMTP_PROVIDERS` holds only the
+  configured providers, so when every one of them fails its send fails: the
+  chain logs `email_send_failed` (ERROR) where it used to log `email_sent`
+  followed by `email_disabled_no_transport`, and the `email.Send` span is
+  marked as an error. No call changes its response: sign-in codes, magic
+  links, password resets, email verification, email change, admin
+  invitations, account-merge and duplicate-signup notices still succeed, and
+  each now logs its own `*_send_failed` warning. Alert on `email_send_failed`
+  rather than `email_disabled_no_transport` to catch a mail outage.
+- **SMTP settings that are all invalid now count as no mail provider.** When
+  `GATEWAY_SMTP_HOST` or `GATEWAY_SMTP_PROVIDERS` is set but no provider in it
+  is valid, the server already fell back to the log-only transport (and logs
+  `smtp_single_provider_invalid` or `smtp_providers_empty_after_validation`
+  at boot), yet `CreateTenantInvitation` still withheld the raw token. It now
+  returns `raw_token` with `EMAIL_SEND_STATUS_NOT_CONFIGURED`, as with no SMTP
+  settings at all.
+- **Logs.** The lines logged for an invitation's email (`email_sent`,
+  `email_send_attempt_failed`, `email_send_failed`,
+  `email_disabled_no_transport`, `tenant_invitation_send_failed`,
+  `tenant_invitation_render_failed`) carry `invitation_id` and, when the
+  request is traced, `trace_id`.
+- **Go API.** `email.ContextWithLogFields` puts fields on a context that a
+  `Chain` or `LogOnly` transport adds to every line it logs for a send under
+  it. `service.CreatedInvitation` gains `EmailStatus` (`service.EmailSendStatus`:
+  `EmailSent`, `EmailSendFailed`, `EmailNotConfigured`). An embedder that
+  supplies `EmailTransport` is taken to deliver, as before: its `Send`
+  returning nil reports the invitation's email as sent, and an error as
+  failed.
+
 ## Next — built with Go 1.26.11 for the `net/http` advisory (no API or schema change)
 
 The image and every CI job build with Go 1.26.11, which fixes GO-2026-6859

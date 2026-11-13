@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
@@ -204,18 +205,19 @@ func (d *fakeUserDirectory) GetUserInProject(_ context.Context, projectID, userI
 
 var _ UserDirectory = (*fakeUserDirectory)(nil)
 
-// recordingMailer captures sent messages so a test can assert the invitation
-// email was dispatched. It never fails (best-effort send semantics).
+// recordingMailer captures every message handed to it so a test can assert
+// the invitation email was dispatched, and returns sendErr from each Send.
 type recordingMailer struct {
-	mu   sync.Mutex
-	sent []email.Message
+	mu      sync.Mutex
+	sent    []email.Message
+	sendErr error
 }
 
 func (m *recordingMailer) Send(_ context.Context, msg email.Message) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sent = append(m.sent, msg)
-	return nil
+	return m.sendErr
 }
 
 func (m *recordingMailer) count() int {
@@ -313,6 +315,7 @@ func TestCreateTenantInvitation_AdminInvitesAndEmails(t *testing.T) {
 
 	// With a mailer configured the raw token is NOT returned; it is emailed.
 	require.Empty(t, out.RawToken, "raw token must not be returned when a mailer is configured")
+	require.Equal(t, EmailSent, out.EmailStatus)
 	require.Equal(t, 1, f.mailer.count(), "an invitation email was dispatched")
 	require.Equal(t, mInvitee, f.mailer.last().To)
 
@@ -384,9 +387,77 @@ func TestCreateTenantInvitation_NoMailerReturnsRawToken(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, RoleMember, out.Invitation.Role, "blank role defaults to member")
 	require.NotEmpty(t, out.RawToken, "raw token returned when no mailer is configured")
+	require.Equal(t, EmailNotConfigured, out.EmailStatus)
 
 	// The returned raw token must hash to the stored token hash.
 	require.Equal(t, out.Invitation.TokenHash, sha256Hex(out.RawToken))
+}
+
+// A mailer that accepts nothing fails the email, not the call: the invitation
+// is stored and open, and the token stays out of the response.
+func TestCreateTenantInvitation_SendFailureReportsFailed(t *testing.T) {
+	f := newMembershipFixture()
+	f.mailer.sendErr = email.ErrTransport
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	require.NoError(t, err)
+	require.Equal(t, EmailSendFailed, out.EmailStatus)
+	require.Empty(t, out.RawToken, "a configured mailer that failed never surfaces the token")
+	require.Equal(t, 1, f.mailer.count(), "the email was attempted once")
+	stored := f.invitations.byID[f.invitations.key(mTestProject, out.Invitation.ID)]
+	require.NotNil(t, stored, "the invitation is stored before the email is sent")
+	require.Equal(t, InvitationStatusPending, stored.Status)
+}
+
+// Every line logged for an invitation's email, by the service and by the
+// mailer chain, carries the invitation id and the request's trace id.
+func TestCreateTenantInvitation_EmailLogLinesCarryInvitationAndTrace(t *testing.T) {
+	traceID := trace.TraceID{0x0a, 0x0b, 0x0c, 0x0d, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x10, 0x11, 0x12}
+	spanID := trace.SpanID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+	span := trace.NewSpanContext(trace.SpanContextConfig{TraceID: traceID, SpanID: spanID})
+
+	for _, tc := range []struct {
+		name      string
+		providers []email.Transport
+		wantLines []string
+		want      EmailSendStatus
+	}{
+		{
+			name:      "second provider accepts",
+			providers: []email.Transport{&recordingMailer{sendErr: email.ErrTransport}, &recordingMailer{}},
+			wantLines: []string{"email_send_attempt_failed", "email_sent"},
+			want:      EmailSent,
+		},
+		{
+			name:      "every provider fails",
+			providers: []email.Transport{&recordingMailer{sendErr: email.ErrTransport}},
+			wantLines: []string{"email_send_attempt_failed", "email_send_failed", "tenant_invitation_send_failed"},
+			want:      EmailSendFailed,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			core, logs := observer.New(zap.DebugLevel)
+			logger := zap.New(core)
+			f := newMembershipFixture()
+			f.svc = NewMembershipService(f.invitations, f.memberships, f.tenants, f.users,
+				email.NewChain(logger, tc.providers...), true, &config.Config{}, logger)
+			f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+
+			ctx := trace.ContextWithSpanContext(withProject(mTestProject), span)
+			out, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, out.EmailStatus)
+
+			for _, msg := range tc.wantLines {
+				lines := logs.FilterMessage(msg).All()
+				require.Len(t, lines, 1, msg)
+				fields := lines[0].ContextMap()
+				require.Equal(t, out.Invitation.ID, fields["invitation_id"], msg)
+				require.Equal(t, traceID.String(), fields["trace_id"], msg)
+			}
+		})
+	}
 }
 
 func TestCreateTenantInvitation_RejectsNonAdmin(t *testing.T) {

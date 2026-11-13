@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type mockTransport struct {
@@ -79,6 +81,51 @@ func TestChainAllFailReturnsLast(t *testing.T) {
 	err := c.Send(context.Background(), validMsg())
 	if !errors.Is(err, last) {
 		t.Fatalf("expected last err, got %v", err)
+	}
+}
+
+// Every line the chain logs for a Send carries the fields on its context, and
+// fields added later keep the earlier ones.
+func TestChainLogsTheContextFields(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		transports []Transport
+		wantLines  []string
+	}{
+		"second accepts": {
+			transports: []Transport{&mockTransport{err: errors.New("down")}, &mockTransport{}},
+			wantLines:  []string{"email_send_attempt_failed", "email_sent"},
+		},
+		"every one fails": {
+			transports: []Transport{&mockTransport{err: errors.New("down")}},
+			wantLines:  []string{"email_send_attempt_failed", "email_send_failed"},
+		},
+		"no transports": {
+			wantLines: []string{"email_send_failed"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			core, logs := observer.New(zapcore.DebugLevel)
+			ctx := ContextWithLogFields(context.Background(), zap.String("record_id", "rec-1"))
+			ctx = ContextWithLogFields(ctx, zap.String("trace_id", "trace-1"))
+			_ = NewChain(zap.New(core), tc.transports...).Send(ctx, validMsg())
+
+			entries := logs.All()
+			if len(entries) != len(tc.wantLines) {
+				t.Fatalf("got %d log lines, want %d", len(entries), len(tc.wantLines))
+			}
+			for i, e := range entries {
+				if e.Message != tc.wantLines[i] {
+					t.Errorf("line %d: got %q, want %q", i, e.Message, tc.wantLines[i])
+				}
+				fields := e.ContextMap()
+				if fields["record_id"] != "rec-1" || fields["trace_id"] != "trace-1" {
+					t.Errorf("%s: fields %v lack the context fields", e.Message, fields)
+				}
+			}
+		})
 	}
 }
 

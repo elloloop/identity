@@ -361,6 +361,14 @@ RestoreTenantMember(tenant_id, user_id)
     HTTP surface only, it gets HTTP 429 with a <code>Retry-After</code>
     header, which Connect clients surface as <code>UNAVAILABLE</code>. The email names an operator's or a domain
     tenant, but never a self-service tenant, whose name its creator typed.
+    The invitation is stored first and the email sent after, in the same
+    call; a failed send does not fail the call. The response's
+    <code>email_send_status</code> says what became of the email:
+    <code>SENT</code> when a configured mail provider accepted it (not proof
+    it reached the inbox), <code>FAILED</code> when none did, and
+    <code>NOT_CONFIGURED</code> when the server has no mail provider, in which
+    case <code>raw_token</code> carries the token to hand over out-of-band.
+    The status is not stored; record it if you need it later.
     Accepting an invitation needs a verified email at the invited address
     (<code>FAILED_PRECONDITION</code> until then; the invitation stays open),
     and never lowers a role, so it cannot demote an owner. A member who is

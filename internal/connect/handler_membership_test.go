@@ -265,6 +265,9 @@ func TestMembership_InviteThenAccept_Handler(t *testing.T) {
 	if created.Msg.GetRawToken() == "" {
 		t.Fatal("expected a raw token when no mailer is configured")
 	}
+	if got := created.Msg.GetEmailSendStatus(); got != identitypb.EmailSendStatus_EMAIL_SEND_STATUS_NOT_CONFIGURED {
+		t.Fatalf("email_send_status = %v, want NOT_CONFIGURED", got)
+	}
 	if created.Msg.GetInvitation().GetEmail() != "invitee@acme.com" {
 		t.Fatalf("invitation email = %q", created.Msg.GetInvitation().GetEmail())
 	}
@@ -281,6 +284,51 @@ func TestMembership_InviteThenAccept_Handler(t *testing.T) {
 	}
 	if members.upserted == nil || members.upserted.UserID != "invitee" {
 		t.Fatalf("membership was not upserted: %+v", members.upserted)
+	}
+}
+
+type fixedResultMailer struct{ err error }
+
+func (m fixedResultMailer) Send(context.Context, email.Message) error { return m.err }
+
+func TestCreateTenantInvitation_Handler_ReportsEmailSendStatus(t *testing.T) {
+	cases := []struct {
+		name       string
+		mailer     email.Transport
+		configured bool
+		want       identitypb.EmailSendStatus
+		wantToken  bool
+	}{
+		{"provider accepted", fixedResultMailer{}, true, identitypb.EmailSendStatus_EMAIL_SEND_STATUS_SENT, false},
+		{"every provider failed", fixedResultMailer{err: email.ErrTransport}, true, identitypb.EmailSendStatus_EMAIL_SEND_STATUS_FAILED, false},
+		{"no provider configured", email.NewLogOnly(zap.NewNop()), false, identitypb.EmailSendStatus_EMAIL_SEND_STATUS_NOT_CONFIGURED, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			members := &connectMembershipStore{member: &service.TenantMembership{
+				Role: service.RoleOwner, Status: service.MembershipStatusActive,
+			}}
+			svc := service.NewMembershipService(newConnectInvitationStore(), members, claimedTenantStore(),
+				&connectUserDirectory{}, tc.mailer, tc.configured, &config.Config{}, zap.NewNop())
+			srv := startMembershipServer(t, svc)
+
+			created, err := srv.client.CreateTenantInvitation(context.Background(),
+				withAuth(&identitypb.CreateTenantInvitationRequest{
+					TenantId: "tenant-1", Email: "invitee@acme.com", Role: service.RoleMember,
+				}, "owner-1"))
+			if err != nil {
+				t.Fatalf("CreateTenantInvitation: %v", err)
+			}
+			if got := created.Msg.GetEmailSendStatus(); got != tc.want {
+				t.Fatalf("email_send_status = %v, want %v", got, tc.want)
+			}
+			if got := created.Msg.GetRawToken() != ""; got != tc.wantToken {
+				t.Fatalf("raw token returned = %v, want %v", got, tc.wantToken)
+			}
+			if created.Msg.GetInvitation().GetId() == "" {
+				t.Fatal("the invitation is created whatever its email's status")
+			}
+		})
 	}
 }
 

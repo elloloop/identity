@@ -8597,9 +8597,17 @@ components:
           title: raw_token
           description: |-
             raw_token is the unhashed redemption token. It is populated ONLY when
-             no mailer is configured (so a headless/dev deployment can still drive
-             the flow); when an email was dispatched it is empty, because the token
-             belongs in the recipient's inbox, not the API response.
+             no mailer is configured (email_send_status NOT_CONFIGURED, so a
+             headless/dev deployment can still drive the flow); otherwise it is
+             empty, because the token belongs in the recipient's inbox, not the API
+             response.
+        emailSendStatus:
+          title: email_send_status
+          description: |-
+            email_send_status is what became of this invitation's email. It is
+             reported here only and not stored: the invitation is created and open
+             whatever it says.
+          $ref: '#/components/schemas/identity.v1.EmailSendStatus'
       title: CreateTenantInvitationResponse
       additionalProperties: false
     identity.v1.CreateTenantRequest:
@@ -9008,6 +9016,17 @@ components:
         Domain is an email domain bound to a Tenant within the caller's
          Project. Verifying it (DNS TXT or email) flips its status to verified
          and claims the owning tenant.
+    identity.v1.EmailSendStatus:
+      type: string
+      title: EmailSendStatus
+      enum:
+        - EMAIL_SEND_STATUS_UNSPECIFIED
+        - EMAIL_SEND_STATUS_SENT
+        - EMAIL_SEND_STATUS_FAILED
+        - EMAIL_SEND_STATUS_NOT_CONFIGURED
+      description: |-
+        EmailSendStatus says whether the server handed an email to a mail
+         provider.
     identity.v1.ExchangeAgentMachineCredentialRequest:
       type: object
       properties:

@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"
+	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -179,21 +183,55 @@ func TestBuildOAuthRegistry_DisabledOIDCKeepsBuiltIns(t *testing.T) {
 
 func TestBuildEmailTransport(t *testing.T) {
 	cases := []struct {
-		name string
-		cfg  *config.Config
+		name     string
+		cfg      *config.Config
+		delivers bool
 	}{
-		{"log only", &config.Config{}},
-		{"bad json providers", &config.Config{SMTPProviders: "not-json"}},
-		{"invalid json provider", &config.Config{SMTPProviders: `[{"Host":"","Port":2525}]`}},
-		{"valid json provider", &config.Config{SMTPProviders: `[{"Host":"smtp.example.com","Port":2525,"From":"noreply@example.com"}]`}},
-		{"invalid single provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: -1}},
-		{"valid single starttls provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: 587, SMTPFrom: "noreply@example.com", SMTPTLS: true}},
-		{"valid single tls provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: 465, SMTPFrom: "noreply@example.com", SMTPTLS: true}},
+		{"log only", &config.Config{}, false},
+		{"bad json providers", &config.Config{SMTPProviders: "not-json"}, false},
+		{"invalid json provider", &config.Config{SMTPProviders: `[{"Host":"","Port":2525}]`}, false},
+		{"valid json provider", &config.Config{SMTPProviders: `[{"Host":"smtp.example.com","Port":2525,"From":"noreply@example.com"}]`}, true},
+		{"invalid single provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: -1}, false},
+		{"valid single starttls provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: 587, SMTPFrom: "noreply@example.com", SMTPTLS: true}, true},
+		{"valid single tls provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: 465, SMTPFrom: "noreply@example.com", SMTPTLS: true}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if transport := buildEmailTransport(tc.cfg, nil); transport == nil {
+			transport, delivers := buildEmailTransport(tc.cfg, nil)
+			if transport == nil {
 				t.Fatal("transport is nil")
+			}
+			if delivers != tc.delivers {
+				t.Fatalf("delivers = %v, want %v", delivers, tc.delivers)
+			}
+		})
+	}
+}
+
+// A configured provider that refuses the message fails the send: the chain
+// has no log-only link to turn the outage into a success.
+func TestBuildEmailTransportFailsWhenEveryProviderFails(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	msg := email.Message{To: "invitee@example.com", From: "noreply@example.com", Subject: "s", Text: "t"}
+
+	for name, cfg := range map[string]*config.Config{
+		"single provider": {SMTPHost: "127.0.0.1", SMTPPort: port},
+		"provider chain":  {SMTPProviders: fmt.Sprintf(`[{"Host":"127.0.0.1","Port":%d},{"Host":"127.0.0.1","Port":%d}]`, port, port)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport, delivers := buildEmailTransport(cfg, nil)
+			if !delivers {
+				t.Fatal("delivers = false, want true")
+			}
+			if err := transport.Send(context.Background(), msg); !errors.Is(err, email.ErrTransport) {
+				t.Fatalf("Send = %v, want an email.ErrTransport failure", err)
 			}
 		})
 	}

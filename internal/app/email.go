@@ -10,27 +10,24 @@ import (
 )
 
 // buildEmailTransport constructs an email.Transport from the gateway
-// configuration. The chosen transport order is:
+// configuration and reports whether it delivers. The chosen transport is:
 //
 //  1. If cfg.SMTPProviders is non-empty, parse it as JSON
-//     ([]email.SMTPConfig) and chain those providers in order, with a
-//     LogOnly tail so the chain is never empty.
-//  2. Else if cfg.SMTPHost is set, use a single SMTP transport
-//     followed by a LogOnly tail.
-//  3. Otherwise return a LogOnly transport and warn that email is
+//     ([]email.SMTPConfig) and chain the valid providers in order.
+//  2. Else if cfg.SMTPHost is set, a chain of that single SMTP provider.
+//  3. Otherwise a LogOnly transport, with a warning that email is
 //     effectively disabled.
 //
-// The function never returns nil — calls to Send always succeed
-// (possibly only as a log line), so service code can rely on the
-// transport always being usable. Configuration errors (bad JSON, bad
-// SMTP fields) are logged and the failing provider is skipped; this
-// avoids hard-failing the whole binary because of a misconfigured
-// secondary provider.
-func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport {
+// The transport is never nil. A chain holds only real providers, so its
+// Send fails when every provider failed; delivers is true only for a chain,
+// and the LogOnly fallback's nil from Send means nothing was sent.
+// Configuration errors (bad JSON, bad SMTP fields) are logged and the
+// failing provider is skipped; this avoids hard-failing the whole binary
+// because of a misconfigured secondary provider.
+func buildEmailTransport(cfg *config.Config, logger *zap.Logger) (transport email.Transport, delivers bool) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	tail := email.NewLogOnly(logger)
 
 	// (1) JSON multi-provider config.
 	if cfg.SMTPProviders != "" {
@@ -42,7 +39,7 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport
 				zap.String("hint", "GATEWAY_SMTP_PROVIDERS must be a JSON array of email.SMTPConfig"),
 			)
 		} else {
-			transports := make([]email.Transport, 0, len(providers)+1)
+			transports := make([]email.Transport, 0, len(providers))
 			for i, p := range providers {
 				t, err := email.NewSMTP(p)
 				if err != nil {
@@ -55,12 +52,11 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport
 				transports = append(transports, t)
 			}
 			if len(transports) > 0 {
-				transports = append(transports, tail)
 				logger.Info(
 					"email_transport_chain_configured",
-					zap.Int("provider_count", len(transports)-1),
+					zap.Int("provider_count", len(transports)),
 				)
-				return email.NewChain(logger, transports...)
+				return email.NewChain(logger, transports...), true
 			}
 			logger.Warn(
 				"smtp_providers_empty_after_validation",
@@ -91,7 +87,7 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport
 				zap.Bool("tls", smtpCfg.TLS),
 				zap.Bool("starttls", smtpCfg.StartTLS),
 			)
-			return email.NewChain(logger, t, tail)
+			return email.NewChain(logger, t), true
 		}
 	}
 
@@ -101,5 +97,5 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport
 		zap.String("hint",
 			"set GATEWAY_SMTP_HOST/PORT/USER/PASS/FROM or GATEWAY_SMTP_PROVIDERS to enable email delivery"),
 	)
-	return tail
+	return email.NewLogOnly(logger), false
 }
