@@ -28,7 +28,7 @@ func (r *pgRepository) ClaimPhoneNumber(ctx context.Context, userID, phoneNumber
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var known bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE project_id = $1 AND id = $2)`,
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE project_id = $1 AND id = $2 AND merged_into_user_id = '')`,
 		r.projectID, userID).Scan(&known); err != nil {
 		return "", wrapPgErr("ClaimPhoneNumber(user)", err)
 	}
@@ -83,13 +83,21 @@ func (r *pgRepository) ClaimPhoneNumber(ctx context.Context, userID, phoneNumber
 		return "", wrapPgErr("ClaimPhoneNumber(release previous number)", err)
 	}
 
+	// The write is guarded again: a merge that retired the user after the
+	// check above holds its row until it commits.
 	setClaimer := func() error {
-		_, err := tx.Exec(ctx, `
+		tag, err := tx.Exec(ctx, `
 			UPDATE users
 			   SET phone_number = $3, phone_verified = TRUE, phone_verified_at_ms = $4, updated_at_ms = $4
-			 WHERE project_id = $1 AND id = $2`,
+			 WHERE project_id = $1 AND id = $2 AND merged_into_user_id = ''`,
 			r.projectID, userID, phoneNumber, atMs)
-		return wrapPgErr("ClaimPhoneNumber(user)", err)
+		if err != nil {
+			return wrapPgErr("ClaimPhoneNumber(user)", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("postgres: ClaimPhoneNumber: %w", service.ErrNotFound)
+		}
+		return nil
 	}
 	clearPrevious := func() error {
 		_, err := tx.Exec(ctx, clearUserPhoneQuery+` AND phone_number = $4`, r.projectID, previous, atMs, phoneNumber)

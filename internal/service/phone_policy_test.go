@@ -10,7 +10,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/templatemsg"
 )
 
@@ -155,11 +159,12 @@ func TestPhone_ChannelsAreTriedInTheProjectsOrder(t *testing.T) {
 		// No template sender: the project has no usable channel, though the
 		// deployment could text.
 		require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrPhoneVerificationUnavailable)
-		// A failing sender surfaces, and SMS is still not used.
+		// A failing sender surfaces as the bare refusal, its error left to
+		// the log, and SMS is still not used.
 		f.svc.WithTemplateMessages(&fakeTemplateSender{err: templatemsg.ErrTransport})
 		err := f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123")
 		require.ErrorIs(t, err, ErrPhoneVerificationUnavailable)
-		require.ErrorIs(t, err, templatemsg.ErrTransport)
+		require.NotErrorIs(t, err, templatemsg.ErrTransport)
 		assert.Zero(t, f.sms.count())
 	})
 
@@ -215,6 +220,8 @@ func TestPhone_WithoutUniqueANumberMaySitOnTwoAccounts(t *testing.T) {
 
 func TestPhone_UniqueNumberMovesAfterTheReassignPeriod(t *testing.T) {
 	f := newPhoneFixture(t, ProjectPhoneConfig{Unique: true, ReassignAfterSeconds: 3600})
+	auditTrail := newRecordingAuditWriter()
+	f.svc.audit = audit.NewLogger(auditTrail, "project-a", nil)
 	a := seedPhoneUser(t, f.repo, "a@example.com")
 	b := seedPhoneUser(t, f.repo, "b@example.com")
 	const number = "+14155550123"
@@ -242,6 +249,8 @@ func TestPhone_UniqueNumberMovesAfterTheReassignPeriod(t *testing.T) {
 	assert.Equal(t, "a@example.com", notice.To)
 	assert.Equal(t, "Your phone number was removed from your account", notice.Subject)
 	assert.NotContains(t, notice.Text, number, "the notice carries the number redacted")
+	assert.Equal(t, 1, auditTrail.countByEventTypeActorTarget(string(audit.EventPhoneRemoved), b, a),
+		"the account that proved the number moved it from the previous holder")
 }
 
 func TestPhone_RemoveTellsTheAccountAndRespectsTheHold(t *testing.T) {
@@ -396,6 +405,33 @@ func TestRefreshToken_SelectionNeedsTheVerifiedPhoneTheTenantRequires(t *testing
 			require.NoError(t, err, "the refused selection left the refresh token unspent")
 			assert.Equal(t, f.svc.cfg.DefaultTenantID, f.tenantClaim(t, access))
 		})
+	}
+}
+
+// A refusal by the phone rule is a warning where the project cannot verify
+// phones: no account without one could ever meet the rule there.
+func TestRefreshToken_PhoneRuleRefusalWarnsWhereNoPhoneCanBeVerified(t *testing.T) {
+	for _, sms := range []bool{true, false} {
+		f := newSelectionFixture(t)
+		f.svc.cfg.SMSEnabled = sms
+		core, logs := observer.New(zapcore.InfoLevel)
+		f.svc.logger = zap.New(core)
+		f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
+		f.governTenant("t-acme", "acme.example.test", &LoginPolicy{RequireVerifiedPhone: true})
+
+		_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
+		require.ErrorIs(t, err, ErrPhoneVerificationRequired)
+		refusals := logs.FilterMessage("tenant_selection_refused_phone_required").All()
+		require.Len(t, refusals, 1)
+		want, reason := zapcore.WarnLevel, "no_channel_has_a_sender"
+		if sms {
+			want, reason = zapcore.InfoLevel, ""
+		}
+		assert.Equal(t, want, refusals[0].Level, "SMS on: %t", sms)
+		assert.Equal(t, "t-acme", refusals[0].ContextMap()["tenant_id"])
+		if reason != "" {
+			assert.Equal(t, reason, refusals[0].ContextMap()["phone_unverifiable"])
+		}
 	}
 }
 

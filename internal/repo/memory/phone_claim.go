@@ -17,7 +17,7 @@ func (r *Repo) ClaimPhoneNumber(_ context.Context, userID, phoneNumber string, a
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u, ok := r.users[userID]
-	if !ok {
+	if !ok || u.MergedIntoUserID != "" {
 		return "", fmt.Errorf("memory: ClaimPhoneNumber: %w", service.ErrNotFound)
 	}
 	previous := ""

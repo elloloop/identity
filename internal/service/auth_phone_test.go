@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -158,14 +159,19 @@ func TestPhoneVerification_LogsWhyItIsUnavailable(t *testing.T) {
 	for _, tc := range []struct {
 		name, reason string
 		cfg          ProjectPhoneConfig
+		noSMS        bool
 		level        zapcore.Level
 	}{
 		{name: "switched off", reason: "switched_off_by_project", cfg: ProjectPhoneConfig{Enabled: &off}, level: zapcore.InfoLevel},
 		{name: "no sender for its channels", reason: "no_channel_has_a_sender", cfg: ProjectPhoneConfig{Channels: []string{PhoneChannelMessage}, MessageTemplate: "code"}, level: zapcore.WarnLevel},
+		// A project that names no channel uses the deployment's SMS, which a
+		// deployment without SMS does not send by design: not a warning.
+		{name: "the deployment sends no SMS", reason: "no_channel_has_a_sender", noSMS: true, level: zapcore.InfoLevel},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newFakeRepo()
 			svc := newTestPhoneService(t, repo, &fakeSMSSender{})
+			svc.cfg.SMSEnabled = !tc.noSMS
 			core, logs := observer.New(zapcore.InfoLevel)
 			svc.logger = zap.New(core)
 			uid := seedPhoneUser(t, repo, "p-unavailable@example.com")
@@ -182,8 +188,8 @@ func TestPhoneVerification_LogsWhyItIsUnavailable(t *testing.T) {
 				t.Fatalf("logged %d refusals, want 2", len(entries))
 			}
 			for _, e := range entries {
-				if e.Level != tc.level || e.ContextMap()["reason"] != tc.reason {
-					t.Fatalf("logged %v %v, want %v reason=%s", e.Level, e.ContextMap(), tc.level, tc.reason)
+				if e.Level != tc.level || e.ContextMap()["reason"] != tc.reason || e.ContextMap()["project_id"] != "project-a" {
+					t.Fatalf("logged %v %v, want %v reason=%s project_id=project-a", e.Level, e.ContextMap(), tc.level, tc.reason)
 				}
 			}
 		})
@@ -231,14 +237,22 @@ func TestRequestPhoneVerification_AlreadyVerified(t *testing.T) {
 	}
 }
 
+// A send failure surfaces as the bare sentinel: the provider's error text is
+// logged, never handed to the caller.
 func TestRequestPhoneVerification_SendFailureSurfaces(t *testing.T) {
 	repo := newFakeRepo()
-	sender := &fakeSMSSender{err: errors.New("provider down")}
+	sender := &fakeSMSSender{err: errors.New("provider down: account 42 over quota")}
 	svc := newTestPhoneService(t, repo, sender)
+	core, logs := observer.New(zapcore.InfoLevel)
+	svc.logger = zap.New(core)
 	uid := seedPhoneUser(t, repo, "p-sendfail@example.com")
 	err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123")
-	if !errors.Is(err, ErrPhoneVerificationUnavailable) {
-		t.Fatalf("send failure should surface (wrapped ErrPhoneVerificationUnavailable), got %v", err)
+	if !errors.Is(err, ErrPhoneVerificationUnavailable) || err.Error() != ErrPhoneVerificationUnavailable.Error() {
+		t.Fatalf("send failure = %v, want the bare ErrPhoneVerificationUnavailable", err)
+	}
+	failed := logs.FilterMessage("phone_verification_send_failed").All()
+	if len(failed) != 1 || !strings.Contains(failed[0].ContextMap()["error"].(string), "over quota") {
+		t.Fatalf("send failure logged as %v, want the provider's error", failed)
 	}
 }
 

@@ -103,11 +103,23 @@ func (s *AuthService) checkSelectedTenantPolicy(ctx context.Context, projectID s
 	// verify a phone first. The account keeps its unselected session, which
 	// is what it verifies the phone with before selecting again.
 	if policy.RequireVerifiedPhone && !phoneSatisfies(user, policy) {
-		s.logger.Info("tenant_selection_refused_phone_required",
-			zap.String("project_id", projectID), zap.String("tenant_id", tenantID))
+		s.logPhoneRuleRefusal(ctx, projectID, tenantID)
 		return &TenantSelectionRefusedError{Reason: TenantSelectionPhoneRequired, Err: ErrPhoneVerificationRequired}
 	}
 	return nil
+}
+
+// logPhoneRuleRefusal logs a selection the tenant's phone rule refused, as a
+// warning when the project cannot verify phones: then no account without a
+// verified phone can ever meet the rule, which only the operator can fix.
+func (s *AuthService) logPhoneRuleRefusal(ctx context.Context, projectID, tenantID string) {
+	fields := []zap.Field{zap.String("project_id", projectID), zap.String("tenant_id", tenantID)}
+	reason := s.phoneUnverifiableReason(phoneConfig(ProjectScopeFromContext(ctx)))
+	if reason == "" {
+		s.logger.Info("tenant_selection_refused_phone_required", fields...)
+		return
+	}
+	s.logger.Warn("tenant_selection_refused_phone_required", append(fields, zap.String("phone_unverifiable", reason))...)
 }
 
 // restrictsSignIn reports whether a policy limits how its users sign in, as

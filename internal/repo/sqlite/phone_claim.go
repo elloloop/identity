@@ -27,7 +27,7 @@ func (r *sqliteRepository) ClaimPhoneNumber(ctx context.Context, userID, phoneNu
 	tag, err := tx.Exec(ctx, `
 		UPDATE users
 		   SET phone_number = $3, phone_verified = 1, phone_verified_at_ms = $4, updated_at_ms = $4
-		 WHERE project_id = $1 AND id = $2`,
+		 WHERE project_id = $1 AND id = $2 AND merged_into_user_id = ''`,
 		r.projectID, userID, phoneNumber, atMs)
 	if err != nil {
 		return "", wrapErr("ClaimPhoneNumber(user)", err)

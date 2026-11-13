@@ -19,7 +19,7 @@ func (r *MemRepo) ClaimPhoneNumber(_ context.Context, userID, phoneNumber string
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u, ok := r.users[userID]
-	if !ok {
+	if !ok || u.MergedIntoUserID != "" {
 		return "", fmt.Errorf("integration: ClaimPhoneNumber: %w", service.ErrNotFound)
 	}
 	previous := ""

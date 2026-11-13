@@ -52,31 +52,58 @@ func (s *AuthService) phoneChannelUsable(ch string) bool {
 // refusePhoneVerificationOff returns ErrPhoneVerificationUnavailable when
 // the project does not verify phones: it switched the feature off, or the
 // deployment has a sender for none of the channels it uses. The answer is
-// the same either way, so the log says which, the second as a warning: a
-// project that names only channels this deployment cannot send on is
-// misconfigured, and every request it gets fails.
+// the same either way, so the log says which. The second is a warning when
+// the project names its channels: one that names only channels this
+// deployment cannot send on is misconfigured, and every request it gets
+// fails. A project that names none uses the deployment's SMS, and a
+// deployment without SMS verifies no phones by design.
 func (s *AuthService) refusePhoneVerificationOff(ctx context.Context, cfg ProjectPhoneConfig) error {
-	if cfg.off() {
-		s.logger.Info("phone_verification_unavailable", zap.String("reason", "switched_off_by_project"))
+	reason := s.phoneUnverifiableReason(cfg)
+	switch reason {
+	case "":
+		return nil
+	case phoneSwitchedOff:
+		s.logger.Info("phone_verification_unavailable",
+			zap.String("reason", reason), zap.String("project_id", s.projectID(ctx)))
 		return ErrPhoneVerificationUnavailable
+	}
+	log := s.logger.Info
+	if len(cfg.Channels) > 0 {
+		log = s.logger.Warn
+	}
+	log("phone_verification_unavailable",
+		zap.String("reason", reason),
+		zap.String("project_id", s.projectID(ctx)), zap.Strings("channels", cfg.channels()))
+	return ErrPhoneVerificationUnavailable
+}
+
+// The reasons a project cannot verify phones (phoneUnverifiableReason).
+const (
+	phoneSwitchedOff = "switched_off_by_project"
+	phoneNoSender    = "no_channel_has_a_sender"
+)
+
+// phoneUnverifiableReason says why a project whose phone policy is cfg
+// cannot verify phones, or "" when it can.
+func (s *AuthService) phoneUnverifiableReason(cfg ProjectPhoneConfig) string {
+	if cfg.off() {
+		return phoneSwitchedOff
 	}
 	for _, ch := range cfg.channels() {
 		if s.phoneChannelUsable(ch) {
-			return nil
+			return ""
 		}
 	}
-	s.logger.Warn("phone_verification_unavailable",
-		zap.String("reason", "no_channel_has_a_sender"),
-		zap.String("project_id", s.projectID(ctx)), zap.Strings("channels", cfg.channels()))
-	return ErrPhoneVerificationUnavailable
+	return phoneNoSender
 }
 
 // deliverPhoneCode sends code to phone over the project's channels in
 // order, stopping at the first that accepts it. A channel the deployment
 // has no sender for is skipped; one that fails is logged and the next is
-// tried. The error is the last channel's.
+// tried. When none accepts it the caller gets ErrPhoneVerificationUnavailable
+// alone: a sender's error stays in the log, since its text is the
+// provider's and is not the caller's to read.
 func (s *AuthService) deliverPhoneCode(ctx context.Context, cfg ProjectPhoneConfig, userID, phone, code string, ttl time.Duration) error {
-	err := ErrPhoneVerificationUnavailable
 	for _, ch := range cfg.channels() {
 		if !s.phoneChannelUsable(ch) {
 			continue
@@ -96,9 +123,8 @@ func (s *AuthService) deliverPhoneCode(ctx context.Context, cfg ProjectPhoneConf
 		s.logger.Warn("phone_verification_send_failed",
 			zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)),
 			zap.String("channel", ch), zap.Error(sendErr))
-		err = fmt.Errorf("%w: %w", ErrPhoneVerificationUnavailable, sendErr)
 	}
-	return err
+	return ErrPhoneVerificationUnavailable
 }
 
 const (
@@ -309,7 +335,7 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID string, signIn
 			return nil, fmt.Errorf("claiming phone number: %w", err)
 		}
 		if previous != "" {
-			s.announcePhoneMoved(ctx, previous, phone)
+			s.announcePhoneMoved(ctx, userID, previous, phone)
 		}
 	} else if err := s.repo(ctx).SetUserPhoneVerified(ctx, userID, phone, now); err != nil {
 		return nil, fmt.Errorf("marking phone verified: %w", err)
@@ -331,12 +357,12 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID string, signIn
 	return user, nil
 }
 
-// announcePhoneMoved records that previousID lost phone to another account
-// that proved it, and tells previousID's addresses. Best-effort: the move
-// has already happened.
-func (s *AuthService) announcePhoneMoved(ctx context.Context, previousID, phone string) {
+// announcePhoneMoved records that previousID lost phone to claimerID, the
+// account that proved it, and tells previousID's addresses. Best-effort: the
+// move has already happened.
+func (s *AuthService) announcePhoneMoved(ctx context.Context, claimerID, previousID, phone string) {
 	s.audit.Log(ctx, audit.EventPhoneRemoved,
-		audit.WithActor(previousID), audit.WithSuccess(true),
+		audit.WithActor(claimerID), audit.WithTarget(previousID), audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"phone": sms.Redact(phone), "reason": "verified_by_another_account"}))
 	s.logger.Info("phone_moved_to_another_account",
 		zap.String("user_id", previousID), zap.String("phone", sms.Redact(phone)))

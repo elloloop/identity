@@ -115,10 +115,14 @@ import { Code } from "astro-expressive-code/components";
     off, and one none of whose channels has a sender here, both answer
     <code>UNAVAILABLE</code> with <code>phone verification is not
     available</code>. The log tells them apart:
-    <code>phone_verification_unavailable</code> with
-    <code>reason: switched_off_by_project</code>, or, as a warning, with
-    <code>reason: no_channel_has_a_sender</code>, a misconfiguration every
-    request to that project fails on.
+    <code>phone_verification_unavailable</code>, with the
+    <code>project_id</code>, has <code>reason: switched_off_by_project</code>
+    or <code>reason: no_channel_has_a_sender</code>. The second is a warning
+    when the project lists its <code>channels</code>, a misconfiguration every
+    request to that project fails on; a project that lists none uses SMS, and
+    a deployment without it verifies no phones by design. A channel that
+    fails is logged as <code>phone_verification_send_failed</code> with the
+    sender's error, which the caller is not shown.
   </p>
 
   <h2 id="rpcs">Verifying and removing a number</h2>
@@ -178,8 +182,9 @@ curl -sX POST http://localhost/identity.v1.IdentityService/VerifyPhoneCode \\
     another account that proves it once that long has passed since its holder
     verified it, since carriers give a number its owner gave up to someone
     else: the previous holder's phone is cleared, <code>phone_removed</code>
-    is audited for them (<code>reason: verified_by_another_account</code>),
-    and their addresses are mailed. Numbers verified before the project turned
+    is audited with the account that proved the number as actor and the
+    previous holder as target (<code>reason: verified_by_another_account</code>),
+    and the previous holder's addresses are mailed. Numbers verified before the project turned
     <code>unique</code> on are not claimed: an older account keeps such a
     number, and it is held to one account from the next time it is verified.
   </p>
@@ -219,7 +224,10 @@ curl -sX POST http://localhost/identity.v1.IdentityService/VerifyPhoneCode \\
     The rule is saved whatever the project can do. In a project that cannot
     verify phones (switched off, or with no sender), an account with no
     verified phone can never get one, so every such selection is refused:
-    check the project before you require a phone.
+    check the project before you require a phone. There each refusal is
+    logged as a warning, <code>tenant_selection_refused_phone_required</code>
+    with the <code>project_id</code>, the <code>tenant_id</code> and
+    <code>phone_unverifiable</code> saying why.
   </p>
   <p>
     See <a href="/identity/docs/concepts/multi-tenancy">Multi-Tenancy</a> for

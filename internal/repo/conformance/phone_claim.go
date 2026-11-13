@@ -113,6 +113,27 @@ func runPhoneClaimConformance(t *testing.T, driver Driver) {
 		}
 	})
 
+	t.Run(driver.Name+"/PhoneClaim_AMergedAwayAccountClaimsNothing", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		survivor := createTestUser(t, r, "claim-survivor@example.com")
+		retired := createTestUser(t, r, "claim-retired@example.com")
+		if err := r.ApplyAccountMerge(ctx, service.AccountMerge{SurvivorID: survivor, OtherID: retired, RecoveryEmailsMax: 5, AtMs: 10}); err != nil {
+			t.Fatalf("ApplyAccountMerge: %v", err)
+		}
+		const number = "+14155550144"
+		if _, err := r.ClaimPhoneNumber(ctx, retired, number, 20, 0); !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("claim by a merged-away account: want ErrNotFound, got %v", err)
+		}
+		if n, ok, _ := phoneOf(t, r, retired); n != "" || ok {
+			t.Fatalf("the merged-away account holds %q %v", n, ok)
+		}
+		// The number stays free for a live account.
+		if prev, err := r.ClaimPhoneNumber(ctx, survivor, number, 30, 0); err != nil || prev != "" {
+			t.Fatalf("claim by the survivor = %q %v, want the number free", prev, err)
+		}
+	})
+
 	t.Run(driver.Name+"/PhoneClaim_ReleaseClearsANumberThatWasNeverClaimed", func(t *testing.T) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)
