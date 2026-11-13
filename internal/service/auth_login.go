@@ -446,7 +446,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// because the tenant's LoginPolicy mandates a second factor for this
 	// single-factor primary method.
 	if user.TotpRequired || decision.RequireSecondFactor {
-		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, "", ipAddr, userAgent)
 	}
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
@@ -863,7 +863,7 @@ func (s *AuthService) OAuthLogin(
 	// OAuth is a single-factor primary: a Require2FA tenant must complete a
 	// second factor before full tokens are minted.
 	if user.TotpRequired || decision.RequireSecondFactor {
-		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, params.IPAddr, params.UserAgent)
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, "", params.IPAddr, params.UserAgent)
 	}
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)

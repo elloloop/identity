@@ -17,9 +17,9 @@ func (r *sqliteRepository) CreateLoginChallenge(ctx context.Context, c *service.
 	}
 	const q = `
 		INSERT INTO login_challenges (
-			id, project_id, challenge_id, user_id, expires_at_ms, created_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6)`
-	_, err := r.db.Exec(ctx, q, id, r.projectID, c.ChallengeID, c.UserID, c.ExpiresAt, c.CreatedAt)
+			id, project_id, challenge_id, user_id, recovery_email, expires_at_ms, created_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	_, err := r.db.Exec(ctx, q, id, r.projectID, c.ChallengeID, c.UserID, c.RecoveryEmail, c.ExpiresAt, c.CreatedAt)
 	if err != nil {
 		return "", wrapErr("CreateLoginChallenge", err)
 	}
@@ -32,13 +32,13 @@ func (r *sqliteRepository) GetLoginChallengeByChallengeID(ctx context.Context, c
 		return nil, nil
 	}
 	const q = `
-		SELECT id, challenge_id, user_id, expires_at_ms, created_at_ms
+		SELECT id, challenge_id, user_id, recovery_email, expires_at_ms, created_at_ms
 		  FROM login_challenges
 		 WHERE project_id = $1 AND challenge_id = $2
 		 LIMIT 1`
 	var c service.LoginChallengeRecord
 	err := r.db.QueryRow(ctx, q, r.projectID, challengeID).Scan(
-		&c.NodeID, &c.ChallengeID, &c.UserID, &c.ExpiresAt, &c.CreatedAt,
+		&c.NodeID, &c.ChallengeID, &c.UserID, &c.RecoveryEmail, &c.ExpiresAt, &c.CreatedAt,
 	)
 	if noRows(err) {
 		return nil, nil

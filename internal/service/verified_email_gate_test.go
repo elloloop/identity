@@ -196,7 +196,7 @@ func TestIssueTokensWithSessionStart_VerifiedEmailBackstop(t *testing.T) {
 	svc.cfg.AuthRequireVerifiedEmail = true
 	user := seedUser(repo, "backstop@example.com", "", StatusActive)
 
-	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", sessionGateSignIn, 0, 0, 0, "")
+	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", sessionGateSignIn, 0, 0, 0, nil, "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Zero(t, writer.countByEventType("login_failure"))
 }
@@ -211,7 +211,7 @@ func TestVerifiedEmailGate_RefusesBeforeTheSecondFactor(t *testing.T) {
 	user := seedUser(repo, "twofactor@example.com", "", StatusActive)
 	user.TotpRequired = true
 
-	res, err := svc.requireSecondFactor(ctx, user, false, "", "")
+	res, err := svc.requireSecondFactor(ctx, user, false, "", "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Nil(t, res)
 	repo.mu.Lock()

@@ -20,12 +20,14 @@ import (
 // project it belongs to one account (Repository.AddRecoveryEmail). Adding
 // and removing need a recent sign-in, so a stolen or long-lived session
 // cannot plant an address or strip the real ones, and every change is
-// mailed to the account's other addresses.
+// mailed to the account's other addresses. While a recovery hold is in
+// force, a session a recovery email opened can do neither.
 
 // recoveryEmailCaller loads the caller for a change to their recovery
 // emails and refuses the accounts that may hold none (anonymous accounts and
-// agents) and a session whose sign-in is older than the project's window.
-func (s *AuthService) recoveryEmailCaller(ctx context.Context, userID string, authTimeSec int64, cfg ProjectRecoveryEmailsConfig) (*User, error) {
+// agents), a session whose sign-in is older than the project's window, and
+// a session a recovery hold binds.
+func (s *AuthService) recoveryEmailCaller(ctx context.Context, userID string, signIn SessionSignIn, cfg ProjectRecoveryEmailsConfig) (*User, error) {
 	if userID == "" {
 		return nil, fmt.Errorf("%w: missing user id", ErrUnauthenticated)
 	}
@@ -42,8 +44,11 @@ func (s *AuthService) recoveryEmailCaller(ctx context.Context, userID string, au
 	if user.IsAnonymous {
 		return nil, fmt.Errorf("%w: an anonymous account keeps no recovery email", ErrAnonymousMustUpgrade)
 	}
-	if !s.signedInWithin(authTimeSec, cfg.reauthMaxAge()) {
+	if !s.signedInWithin(signIn.AuthTimeSec, cfg.reauthMaxAge()) {
 		return nil, ErrRecoveryReauthenticationRequired
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return nil, err
 	}
 	return user, nil
 }
@@ -53,13 +58,14 @@ func (s *AuthService) recoveryEmailCaller(ctx context.Context, userID string, au
 // another account holds the address: that is never looked up here, and is
 // told only to a caller who proves the address. The refusals it does return
 // are about the caller's own account: the feature being off, a stale
-// sign-in, the caller's own address, and a full list.
-func (s *AuthService) RequestRecoveryEmail(ctx context.Context, userID string, authTimeSec int64, emailAddr string) error {
+// sign-in, a recovery hold on the session, the caller's own address, and a
+// full list.
+func (s *AuthService) RequestRecoveryEmail(ctx context.Context, userID string, signIn SessionSignIn, emailAddr string) error {
 	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
 	if !cfg.Enabled {
 		return ErrRecoveryEmailsDisabled
 	}
-	user, err := s.recoveryEmailCaller(ctx, userID, authTimeSec, cfg)
+	user, err := s.recoveryEmailCaller(ctx, userID, signIn, cfg)
 	if err != nil {
 		return err
 	}
@@ -154,12 +160,12 @@ func (s *AuthService) sendRecoveryEmailCodeNow(ctx context.Context, userID, addr
 // once the code is right can the caller learn that another account holds the
 // address (ErrRecoveryEmailTaken): they have proved it is theirs to ask
 // about.
-func (s *AuthService) VerifyRecoveryEmail(ctx context.Context, userID string, authTimeSec int64, emailAddr, code string) ([]*RecoveryEmail, error) {
+func (s *AuthService) VerifyRecoveryEmail(ctx context.Context, userID string, signIn SessionSignIn, emailAddr, code string) ([]*RecoveryEmail, error) {
 	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
 	if !cfg.Enabled {
 		return nil, ErrRecoveryEmailsDisabled
 	}
-	user, err := s.recoveryEmailCaller(ctx, userID, authTimeSec, cfg)
+	user, err := s.recoveryEmailCaller(ctx, userID, signIn, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -247,8 +253,9 @@ func (s *AuthService) ListRecoveryEmails(ctx context.Context, userID string) ([]
 // recoveryHoldUntil is when the hold on an account's recovery settings ends
 // (epoch ms), or 0 when none is in force. A sign-in by a recovery email
 // starts one: whoever got into a recovery mailbox must not be able to strip
-// the account's other addresses or move its phone before the owner has had
-// the notice.
+// the account's other addresses, move its phone or add a way in before the
+// owner has had the notice. Removing the address that started a hold ends
+// it.
 func recoveryHoldUntil(held []*RecoveryEmail, hold time.Duration, nowMs int64) int64 {
 	var last int64
 	for _, e := range held {
@@ -265,44 +272,52 @@ func recoveryHoldUntil(held []*RecoveryEmail, hold time.Duration, nowMs int64) i
 	return 0
 }
 
-// checkRecoveryHold refuses, with a RecoveryHoldError, a change to the
-// recovery settings of an account a hold is in force on.
-func (s *AuthService) checkRecoveryHold(ctx context.Context, userID string) error {
-	held, err := s.repo(ctx).ListRecoveryEmails(ctx, userID)
+// recoveryHoldOn returns a RecoveryHoldError while a hold is in force on
+// userID's account at nowMs, and nil when none is.
+func recoveryHoldOn(ctx context.Context, repo Repository, userID string, nowMs int64) error {
+	held, err := repo.ListRecoveryEmails(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("listing recovery emails: %w", err)
 	}
-	return s.refuseDuringRecoveryHold(ctx, userID, held)
+	if until := recoveryHoldUntil(held, recoveryEmailsConfig(ProjectScopeFromContext(ctx)).hold(), nowMs); until != 0 {
+		return &RecoveryHoldError{UntilMs: until}
+	}
+	return nil
 }
 
-func (s *AuthService) refuseDuringRecoveryHold(ctx context.Context, userID string, held []*RecoveryEmail) error {
-	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
-	until := recoveryHoldUntil(held, cfg.hold(), s.nowMs())
-	if until == 0 {
+// refuseHeldSession refuses, with a RecoveryHoldError, a change to the
+// account's sign-in or recovery settings that a session a recovery hold
+// binds (SessionSignIn.heldByRecoveryHold) asks for while one is in force.
+// Every other session is free: the owner, signed in with the primary email,
+// a password, a passkey or an identity provider, can always remove an
+// address they do not recognise, and that ends the hold it started.
+func (s *AuthService) refuseHeldSession(ctx context.Context, userID string, signIn SessionSignIn) error {
+	if !signIn.heldByRecoveryHold() {
 		return nil
 	}
-	s.logger.Info("recovery_settings_change_refused_by_hold", zap.String("user_id", userID))
-	return &RecoveryHoldError{UntilMs: until}
+	err := recoveryHoldOn(ctx, s.repo(ctx), userID, s.nowMs())
+	if errors.Is(err, ErrRecoveryHold) {
+		s.logger.Info("recovery_settings_change_refused_by_hold", zap.String("user_id", userID))
+	}
+	return err
 }
 
 // RemoveRecoveryEmail removes one of the caller's recovery emails and
 // returns what is left. A notice goes to the removed address and to every
 // other address of the account. An address the account does not hold is
-// ErrNotFound, and any removal while a hold is in force is a
-// RecoveryHoldError. Like ListRecoveryEmails it does not depend on the
-// project's switch.
-func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, authTimeSec int64, emailAddr string) ([]*RecoveryEmail, error) {
+// ErrNotFound. While a hold is in force, a session a recovery email opened
+// is refused (RecoveryHoldError) and any other session may remove any
+// address. Like ListRecoveryEmails it does not depend on the project's
+// switch.
+func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, signIn SessionSignIn, emailAddr string) ([]*RecoveryEmail, error) {
 	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
-	user, err := s.recoveryEmailCaller(ctx, userID, authTimeSec, cfg)
+	user, err := s.recoveryEmailCaller(ctx, userID, signIn, cfg)
 	if err != nil {
 		return nil, err
 	}
 	addr, ok := canonicalMailbox(emailAddr)
 	if !ok {
 		return nil, fmt.Errorf("%w: email is not a usable address", ErrInvalidArgument)
-	}
-	if err := s.checkRecoveryHold(ctx, userID); err != nil {
-		return nil, err
 	}
 	removed, err := s.repo(ctx).RemoveRecoveryEmail(ctx, userID, string(addr))
 	if err != nil {

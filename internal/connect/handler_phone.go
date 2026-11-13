@@ -25,7 +25,7 @@ func (h *IdentityHandler) RequestPhoneVerification(
 	if userID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
 	}
-	if err := h.auth.RequestPhoneVerification(ctx, userID, req.Msg.PhoneNumber); err != nil {
+	if err := h.auth.RequestPhoneVerification(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.PhoneNumber); err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.RequestPhoneVerificationResponse{}), nil
@@ -41,7 +41,7 @@ func (h *IdentityHandler) VerifyPhoneCode(
 	if userID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
 	}
-	user, err := h.auth.VerifyPhoneCode(ctx, userID, req.Msg.PhoneNumber, req.Msg.Code)
+	user, err := h.auth.VerifyPhoneCode(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.PhoneNumber, req.Msg.Code)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -60,7 +60,7 @@ func (h *IdentityHandler) RemovePhone(
 	if userID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
 	}
-	user, err := h.auth.RemovePhone(ctx, userID)
+	user, err := h.auth.RemovePhone(ctx, userID, authenticatedSignIn(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}

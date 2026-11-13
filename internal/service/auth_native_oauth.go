@@ -190,7 +190,7 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		return nil, err
 	}
 	if user.TotpRequired || decision.RequireSecondFactor {
-		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, params.IPAddr, params.UserAgent)
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, "", params.IPAddr, params.UserAgent)
 	}
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)

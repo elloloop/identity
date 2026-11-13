@@ -139,10 +139,12 @@ func normalizePhone(raw string) (string, bool) {
 // user has already verified the same number, ErrInvalidArgument for a
 // malformed number and ErrPhoneCountryNotAllowed for one outside the
 // project's countries. A per-user send cooldown bounds inbox/cost abuse.
+// While a recovery hold is in force, a session a recovery email opened is
+// refused (RecoveryHoldError).
 //
 // A number another account holds is sent a code like any other: whether a
 // number is taken is told only by VerifyPhoneCode, to whoever proves it.
-func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phoneNumber string) error {
+func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID string, signIn SessionSignIn, phoneNumber string) error {
 	phoneCfg := phoneConfig(ProjectScopeFromContext(ctx))
 	if !s.phoneVerificationOn(phoneCfg) {
 		return ErrSMSDisabled
@@ -188,7 +190,7 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phon
 	}
 	// Before the send, like every other refusal here: a number that cannot
 	// be stored yet should not cost a message.
-	if err := s.checkRecoveryHold(ctx, userID); err != nil {
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return err
 	}
 
@@ -241,8 +243,9 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phon
 // Where the project keeps numbers unique, a right code for a number another
 // account holds is ErrPhoneNumberTaken, unless that account's claim is old
 // enough to move (phone.reassign_after_seconds): then the number moves and
-// its previous holder is told.
-func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, code string) (*User, error) {
+// its previous holder is told. Refused like RequestPhoneVerification during
+// a recovery hold.
+func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID string, signIn SessionSignIn, phoneNumber, code string) (*User, error) {
 	phoneCfg := phoneConfig(ProjectScopeFromContext(ctx))
 	if !s.phoneVerificationOn(phoneCfg) {
 		return nil, ErrSMSDisabled
@@ -263,7 +266,7 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, 
 		return nil, ErrPhoneCountryNotAllowed
 	}
 	// A code requested before a hold began must not move the number during it.
-	if err := s.checkRecoveryHold(ctx, userID); err != nil {
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return nil, err
 	}
 
@@ -368,8 +371,8 @@ func (s *AuthService) announcePhoneMoved(ctx context.Context, previousID, phone 
 // user. It does not depend on the project's switch or on a sender: a number
 // stored while verification was on stays its owner's to remove. A caller
 // with no number gets their user back unchanged. Refused, like a change of
-// number, while a hold is in force (RecoveryHoldError).
-func (s *AuthService) RemovePhone(ctx context.Context, userID string) (*User, error) {
+// number, to a session a recovery hold binds (RecoveryHoldError).
+func (s *AuthService) RemovePhone(ctx context.Context, userID string, signIn SessionSignIn) (*User, error) {
 	if userID == "" {
 		return nil, fmt.Errorf("%w: missing user id", ErrUnauthenticated)
 	}
@@ -383,12 +386,12 @@ func (s *AuthService) RemovePhone(ctx context.Context, userID string) (*User, er
 	if user.PhoneNumber == "" {
 		return user, nil
 	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return nil, err
+	}
 	held, err := s.repo(ctx).ListRecoveryEmails(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("listing recovery emails: %w", err)
-	}
-	if err := s.refuseDuringRecoveryHold(ctx, userID, held); err != nil {
-		return nil, err
 	}
 	phone := user.PhoneNumber
 	if err := s.repo(ctx).ReleasePhoneNumber(ctx, userID, s.nowMs()); err != nil {

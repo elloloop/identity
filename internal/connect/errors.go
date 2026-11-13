@@ -147,6 +147,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrTeammateKeyConflict),
 		errors.Is(err, service.ErrReauthenticationRequired),
 		errors.Is(err, service.ErrRecoveryReauthenticationRequired),
+		errors.Is(err, service.ErrRecoverySession),
 		errors.Is(err, service.ErrRecoveryEmailsDisabled),
 		errors.Is(err, service.ErrPhoneCountryNotAllowed),
 		errors.Is(err, service.ErrPhoneVerificationRequired),

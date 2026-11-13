@@ -520,7 +520,7 @@ func (h *IdentityHandler) ApproveQrLogin(
 	ipAddr := clientIP(req.Header())
 	userAgent := clientUserAgent(req.Header())
 
-	status, err := h.auth.ApproveQrLogin(ctx, req.Msg.SessionId, req.Msg.Approve, userID, ipAddr, userAgent)
+	status, err := h.auth.ApproveQrLogin(ctx, req.Msg.SessionId, req.Msg.Approve, userID, authenticatedSignIn(req.Header()), ipAddr, userAgent)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

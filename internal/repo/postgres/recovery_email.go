@@ -279,12 +279,12 @@ func (r *pgRepository) FindRecoveryEmailHolder(ctx context.Context, email string
 	return &e, nil
 }
 
-func (r *pgRepository) MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs int64) error {
+func (r *pgRepository) MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs, holdMs int64) error {
 	const q = `
 		UPDATE user_recovery_emails
-		   SET last_sign_in_at_ms = $4
+		   SET last_sign_in_at_ms = CASE WHEN last_sign_in_at_ms <= $4::bigint - $5::bigint THEN $4::bigint ELSE last_sign_in_at_ms END
 		 WHERE project_id = $1 AND user_id = $2 AND email_fold = $3`
-	tag, err := r.pool.Exec(ctx, q, r.projectID, userID, service.FoldEmail(email), atMs)
+	tag, err := r.pool.Exec(ctx, q, r.projectID, userID, service.FoldEmail(email), atMs, holdMs)
 	if err != nil {
 		return wrapPgErr("MarkRecoveryEmailSignIn", err)
 	}

@@ -207,3 +207,28 @@ func TestAuthMiddleware_AuthTimeComesOnlyFromTheToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "1700000000", serve(tok))
 }
+
+// How the session was opened reaches the handlers only from a verified
+// token: a client-sent X-Authenticated-Amr is dropped, and a token's amr is
+// passed through.
+func TestAuthMiddleware_AMRComesOnlyFromTheToken(t *testing.T) {
+	kr := newSecTestKR(t)
+	var seen string
+	handler := AuthMiddleware(kr, TokenTenants{}, "", false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get(AuthenticatedAMRHeader)
+	}))
+	serve := func(token string) string {
+		seen = ""
+		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/RemovePhone", nil)
+		req.Header.Set(AuthenticatedAMRHeader, "pwd")
+		req.Header.Set("Authorization", "Bearer "+token)
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+		return seen
+	}
+
+	assert.Empty(t, serve(mintToken(t, kr, "user-1")), "a token without amr carries none, whatever the client sent")
+
+	tok, err := kr.SignAccessToken(context.Background(), jwtpkg.Claims{Sub: "user-1", Tenant: "t1", AMR: []string{"recovery_email"}}, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, "recovery_email", serve(tok))
+}

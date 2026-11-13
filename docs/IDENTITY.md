@@ -807,11 +807,25 @@ default; a control-plane project's `config_json` only).
   mailed to the account's other addresses.
 - With `recovery_emails.sign_in`, an emailed code or link sent to a recovery
   email signs in to the account that holds it, which is the way back in for an
-  account whose primary mailbox is gone. The account's other addresses are
-  told, and for `recovery_emails.hold_seconds` (default seven days) the
-  account can neither remove a recovery email nor change its phone number:
-  whoever got into one recovery mailbox cannot strip the rest before the owner
-  has read the notice.
+  account whose primary mailbox is gone. Any second factor the account or its
+  tenant requires is asked for as at any sign-in.
+- Such a sign-in opens a session marked with the `amr` value
+  `recovery_email`, and once every factor is proved it starts a hold for
+  `recovery_emails.hold_seconds` (default seven days) and tells the account's
+  other addresses. During the hold that session cannot add or remove a
+  recovery email, change or remove the phone, enrol a second factor or a
+  passkey, link an identity provider, or approve a QR sign-in, so whoever got
+  into one recovery mailbox cannot take the rest of the account before the
+  owner has read the notice. A session opened any other way is not held: the
+  owner can always remove an address they do not recognise, and removing the
+  one that started the hold ends it. A sign-in from the same address does not
+  extend a hold already in force.
+- While a hold is in force on either account, a merge is refused, whoever
+  asks.
+- A session a recovery email opened acts in a tenant only through an explicit
+  membership: a tenant that admits members by their email's domain does not
+  admit it, so disabling a member's organisational mailbox is not undone by a
+  personal recovery address.
 
 ## Phone verification
 

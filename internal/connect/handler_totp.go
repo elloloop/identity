@@ -23,7 +23,7 @@ func (h *IdentityHandler) BeginTotpSetup(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	secret, qrCodeURI, recoveryCodes, err := h.auth.BeginTotpSetup(ctx, userID)
+	secret, qrCodeURI, recoveryCodes, err := h.auth.BeginTotpSetup(ctx, userID, authenticatedSignIn(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -47,7 +47,7 @@ func (h *IdentityHandler) VerifyTotpSetup(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	verified, err := h.auth.VerifyTotpSetup(ctx, userID, req.Msg.Code)
+	verified, err := h.auth.VerifyTotpSetup(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Code)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

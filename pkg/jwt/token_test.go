@@ -283,6 +283,25 @@ func TestClaims_AuthTimeRoundTrip(t *testing.T) {
 	assert.NotContains(t, Claims{Sub: "u"}.ClaimsMap(time.Now(), time.Minute), "auth_time")
 }
 
+// amr round-trips as a list of strings and is absent when unset.
+func TestClaims_AMRRoundTrip(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+	tok, err := s.SignAccessToken(context.Background(), Claims{Sub: "u", AMR: []string{"recovery_email"}}, 15*time.Minute)
+	require.NoError(t, err)
+	claims, err := VerifyAccessToken(tok, s, "", "", false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"recovery_email"}, claims.AMR)
+
+	tok, err = s.SignAccessToken(context.Background(), Claims{Sub: "u"}, 15*time.Minute)
+	require.NoError(t, err)
+	claims, err = VerifyAccessToken(tok, s, "", "", false)
+	require.NoError(t, err)
+	assert.Empty(t, claims.AMR)
+	assert.NotContains(t, Claims{Sub: "u"}.ClaimsMap(time.Now(), time.Minute), "amr")
+	assert.Equal(t, []string{"a", "c"}, stringsClaim([]any{"a", 1, "c"}))
+	assert.Nil(t, stringsClaim("a"))
+}
+
 // bnd round-trips on a purpose ticket and is absent when unset.
 func TestClaims_BindingRoundTrip(t *testing.T) {
 	s := newMemSigner(t, "test-kid")

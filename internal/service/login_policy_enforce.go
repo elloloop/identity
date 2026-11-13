@@ -421,7 +421,11 @@ func projectLoginControls(ctx context.Context) loginControls {
 //
 // The verified-email gate runs first: a sign-in that cannot yield a session
 // is not asked for a second factor (which could spend a recovery code on it).
-func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, policyForced bool, ipAddr, userAgent string) (*LoginResult, error) {
+//
+// recoveryEmail is the recovery email a sign-in by one was made with, kept on
+// the challenge for VerifyTotp to open the session as that sign-in's; empty
+// for every other sign-in.
+func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, policyForced bool, recoveryEmail, ipAddr, userAgent string) (*LoginResult, error) {
 	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
@@ -429,7 +433,7 @@ func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, polic
 		return nil, err
 	}
 
-	challengeID, err := s.issueLoginChallenge(ctx, user.ID)
+	challengeID, err := s.issueLoginChallenge(ctx, user.ID, recoveryEmail)
 	if err != nil {
 		return nil, err
 	}

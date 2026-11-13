@@ -102,7 +102,7 @@ func TestRequestPhoneVerification_Minor_Blocked(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	err = svc.RequestPhoneVerification(context.Background(), uid, "+14155550123")
+	err = svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123")
 	if !errors.Is(err, ErrMinorDataMinimized) {
 		t.Fatalf("err = %v; want ErrMinorDataMinimized", err)
 	}
@@ -118,7 +118,7 @@ func TestRequestPhoneVerification_MinimizationOff_ChildAllowed(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	err = svc.RequestPhoneVerification(context.Background(), uid, "+14155550123")
+	err = svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123")
 	if errors.Is(err, ErrMinorDataMinimized) {
 		t.Fatal("child blocked while minimization off; want allowed")
 	}
@@ -134,7 +134,7 @@ func TestRequestPhoneVerification_Minor_AdultAllowed(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	err = svc.RequestPhoneVerification(context.Background(), uid, "+14155550123")
+	err = svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123")
 	if errors.Is(err, ErrMinorDataMinimized) {
 		t.Fatal("adult blocked; want allowed")
 	}

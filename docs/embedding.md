@@ -139,14 +139,18 @@ metadata. Two rules it must follow, both of them load-bearing:
    win. Delete every `x-authenticated-` key before appending your own,
    including any a later identity release starts reading.
 
-`MergeAccounts` also reads `x-authenticated-auth-time`, the token's
-`auth_time` claim (epoch seconds, the session's sign-in; a refresh keeps
-it, a QR hand-off or anonymous session has none). Forward it from the
-verified token, after deleting any value the
+`MergeAccounts` and the recovery-email changes also read
+`x-authenticated-auth-time`, the token's `auth_time` claim (epoch seconds,
+the session's sign-in; a refresh keeps it, a QR hand-off or anonymous session
+has none), and the calls a recovery hold governs read `x-authenticated-amr`,
+the token's `amr` claim with its values separated by spaces (absent on most
+tokens). Forward both from the verified token, after deleting any value the
 client sent, **and** set `Options.GRPCTrustAuthTime`: until you do, the
-bridge drops the key, so an interceptor written before it existed cannot let
-a client vouch for its own sign-in, and every merge over native gRPC is
-refused `reauthentication_required`.
+bridge drops both keys, so an interceptor written before they existed cannot
+let a client vouch for its own sign-in. Every merge and recovery-email change
+over native gRPC is then refused `reauthentication_required`, and while a
+recovery hold is in force every session is held as if a recovery email had
+opened it.
 
 Whether to pin the `tenant` claim depends on tenant selection. With
 `GATEWAY_TENANT_SELECTION_ENABLED` off, the default, every token carries the

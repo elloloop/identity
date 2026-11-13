@@ -53,6 +53,13 @@ var (
 	// CodeFailedPrecondition; its message leads with the stable
 	// `recovery_hold` token clients match on.
 	ErrRecoveryHold = errors.New("recovery_hold: this account signed in with a recovery email recently; its recovery settings cannot change yet")
+	// ErrRecoverySession is returned when a session a recovery email opened
+	// asks for what only a session opened another way may do: approving
+	// another device's QR sign-in, whose session could not say a recovery
+	// email stands behind it. Mapped to CodeFailedPrecondition; its message
+	// leads with the stable `recovery_session` token clients match on to
+	// send the person to sign in another way.
+	ErrRecoverySession = errors.New("recovery_session: a session a recovery email opened cannot do this")
 	// ErrRecoveryEmailCodeInvalid is returned when a recovery-email code is
 	// missing, expired, already consumed, the wrong code, sent to another
 	// address, or has exhausted its attempt budget. Mapped to

@@ -543,7 +543,7 @@ func TestQrLogin_InitiateApproveAndPoll(t *testing.T) {
 	assert.Equal(t, "Pixel 8", info.NewDeviceInfo)
 
 	// Step 3: Approve.
-	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "ApproverAgent")
+	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, SessionSignIn{}, "", "ApproverAgent")
 	require.NoError(t, err)
 	assert.Equal(t, "approved", status)
 
@@ -570,7 +570,7 @@ func TestQrLogin_PollWithoutSecret_AppearsExpired(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Pixel", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 
 	// Missing secret.
@@ -600,7 +600,7 @@ func TestQrLogin_RejectFlow(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, false, user.ID, "", "")
+	status, err := svc.ApproveQrLogin(context.Background(), init.SessionID, false, user.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "rejected", status)
 
@@ -649,7 +649,7 @@ func TestQrLogin_ConcurrentPollOfApprovedSession_SingleWinner(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 
 	const N = 16
@@ -719,7 +719,7 @@ func TestTotpSetup_ReturnsSecretAndCodes(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "totp@example.com", "", "active")
 
-	secret, qrURI, codes, err := svc.BeginTotpSetup(context.Background(), u.ID)
+	secret, qrURI, codes, err := svc.BeginTotpSetup(context.Background(), u.ID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.NotEmpty(t, secret)
 	assert.Contains(t, qrURI, "otpauth://totp/")
@@ -731,10 +731,10 @@ func TestTotpSetup_VerifyInvalidCodeFails(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "totp2@example.com", "", "active")
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), u.ID)
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), u.ID, SessionSignIn{})
 	require.NoError(t, err)
 
-	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, "000000")
+	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, SessionSignIn{}, "000000")
 	require.Error(t, err)
 	assert.False(t, ok)
 	assert.True(t, errors.Is(err, ErrInvalidTotpCode))
@@ -980,7 +980,7 @@ func TestBeginPasskeyRegistration_ReturnsOptions(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "passkey@example.com", "", "active")
 
-	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, "My Key")
+	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, SessionSignIn{}, "My Key")
 	require.NoError(t, err)
 	assert.NotEmpty(t, optionsJSON)
 	assert.NotEmpty(t, challengeID)

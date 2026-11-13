@@ -5219,12 +5219,15 @@ func (x *ListRecoveryEmailsResponse) GetHoldUntil() int64 {
 }
 
 // RecoveryHoldDetails is attached to the FAILED_PRECONDITION error (stable
-// `recovery_hold` token) that RemoveRecoveryEmail, RequestPhoneVerification
-// and VerifyPhoneCode return while a hold is in force. A sign-in by a
-// recovery email (`recovery_emails.sign_in`) starts one, for the project's
-// `recovery_emails.hold_seconds` (default 604800, seven days): whoever got
-// into a recovery mailbox cannot strip the account's other addresses or move
-// its phone before the owner has had the notice.
+// `recovery_hold` token) of a hold. A sign-in by a recovery email
+// (`recovery_emails.sign_in`) starts one, once any second factor is proved,
+// for the project's `recovery_emails.hold_seconds` (default 604800, seven
+// days). While it is in force, a session a recovery email opened cannot change
+// the account's recovery emails, phone, second factor, passkeys or linked
+// providers, so whoever got into a recovery mailbox cannot take the rest of
+// the account before the owner has had the notice; a session opened any other
+// way is not held, and removing the address that started the hold ends it.
+// Merging either account is refused, whoever asks.
 type RecoveryHoldDetails struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	HoldUntil     int64                  `protobuf:"varint,1,opt,name=hold_until,json=holdUntil,proto3" json:"hold_until,omitempty"` // epoch ms the hold ends
@@ -11377,7 +11380,10 @@ func (x *GetQrLoginSessionResponse) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
-// Step 2b: Authenticated device approves (or rejects) the new device.
+// Step 2b: Authenticated device approves (or rejects) the new device. A
+// session a recovery email opened may reject but not approve: it is refused
+// FAILED_PRECONDITION with the stable `recovery_session` token, since the
+// session the hand-off opens could not carry its `amr`.
 type ApproveQrLoginRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`

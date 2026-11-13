@@ -209,7 +209,7 @@ func (h *IdentityHandler) BeginPasskeyRegistration(
 	}
 
 	optionsJSON, challengeID, err := h.auth.BeginPasskeyRegistration(
-		ctx, userID, req.Msg.DeviceName,
+		ctx, userID, authenticatedSignIn(req.Header()), req.Msg.DeviceName,
 	)
 	if err != nil {
 		return nil, toConnectError(err)
@@ -236,7 +236,7 @@ func (h *IdentityHandler) CompletePasskeyRegistration(
 	}
 
 	credential, session, err := h.auth.CompletePasskeyRegistration(
-		ctx, userID, req.Msg.ChallengeId, req.Msg.CredentialJson, req.Msg.DeviceName,
+		ctx, userID, authenticatedSignIn(req.Header()), req.Msg.ChallengeId, req.Msg.CredentialJson, req.Msg.DeviceName,
 		enrolment, clientIP(req.Header()), clientUserAgent(req.Header()),
 	)
 	if err != nil {
@@ -389,6 +389,7 @@ func (h *IdentityHandler) LinkIdentity(
 	oi, err := h.auth.LinkIdentity(
 		ctx,
 		userID,
+		authenticatedSignIn(req.Header()),
 		req.Msg.Code,
 		req.Msg.Provider,
 		req.Msg.RedirectUri,

@@ -63,10 +63,10 @@ func newPhoneFixture(t *testing.T, cfg ProjectPhoneConfig) *phoneFixture {
 func (f *phoneFixture) verify(t *testing.T, userID, number string) (*User, error) {
 	t.Helper()
 	before := f.sms.count()
-	require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, userID, number))
+	require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, userID, SessionSignIn{}, number))
 	require.Equal(t, before+1, f.sms.count(), "a code is sent whether or not the number is taken")
 	msg, _ := f.sms.last()
-	user, err := f.svc.VerifyPhoneCode(f.ctx, userID, number, extractCode(t, msg.Body))
+	user, err := f.svc.VerifyPhoneCode(f.ctx, userID, SessionSignIn{}, number, extractCode(t, msg.Body))
 	// Past the per-user send cooldown, for the next request in the test.
 	f.now = f.now.Add(2 * time.Minute)
 	return user, err
@@ -78,15 +78,15 @@ func TestPhone_AProjectCanSwitchVerificationOff(t *testing.T) {
 	f := newPhoneFixture(t, ProjectPhoneConfig{Enabled: off()})
 	id := seedPhoneUser(t, f.repo, "owner@example.com")
 
-	require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, "+14155550123"), ErrSMSDisabled)
-	_, err := f.svc.VerifyPhoneCode(f.ctx, id, "+14155550123", "123456")
+	require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrSMSDisabled)
+	_, err := f.svc.VerifyPhoneCode(f.ctx, id, SessionSignIn{}, "+14155550123", "123456")
 	require.ErrorIs(t, err, ErrSMSDisabled)
 	assert.Zero(t, f.sms.count())
 
 	// Another project of the same deployment, with no phone block, is as on
 	// as the deployment is.
 	other := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-b"})
-	require.NoError(t, f.svc.RequestPhoneVerification(other, id, "+14155550123"))
+	require.NoError(t, f.svc.RequestPhoneVerification(other, id, SessionSignIn{}, "+14155550123"))
 	assert.Equal(t, 1, f.sms.count())
 }
 
@@ -94,8 +94,8 @@ func TestPhone_OnlyTheProjectsCountriesAreSentACode(t *testing.T) {
 	f := newPhoneFixture(t, ProjectPhoneConfig{AllowedCallingCodes: []string{"91", "44"}})
 	id := seedPhoneUser(t, f.repo, "owner@example.com")
 
-	require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, "+14155550123"), ErrPhoneCountryNotAllowed)
-	_, err := f.svc.VerifyPhoneCode(f.ctx, id, "+14155550123", "123456")
+	require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrPhoneCountryNotAllowed)
+	_, err := f.svc.VerifyPhoneCode(f.ctx, id, SessionSignIn{}, "+14155550123", "123456")
 	require.ErrorIs(t, err, ErrPhoneCountryNotAllowed)
 	assert.Zero(t, f.sms.count(), "a refused country costs no message")
 
@@ -116,7 +116,7 @@ func TestPhone_ChannelsAreTriedInTheProjectsOrder(t *testing.T) {
 		f.svc.WithTemplateMessages(tmpl)
 		id := seedPhoneUser(t, f.repo, "owner@example.com")
 
-		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, "+14155550123"))
+		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"))
 		sent := tmpl.sent()
 		require.Len(t, sent, 1)
 		assert.Equal(t, "+14155550123", sent[0].To)
@@ -125,7 +125,7 @@ func TestPhone_ChannelsAreTriedInTheProjectsOrder(t *testing.T) {
 		require.Len(t, sent[0].Params, 1)
 		assert.Zero(t, f.sms.count())
 
-		user, err := f.svc.VerifyPhoneCode(f.ctx, id, "+14155550123", sent[0].Params[0])
+		user, err := f.svc.VerifyPhoneCode(f.ctx, id, SessionSignIn{}, "+14155550123", sent[0].Params[0])
 		require.NoError(t, err)
 		assert.True(t, user.PhoneVerified)
 	})
@@ -134,14 +134,14 @@ func TestPhone_ChannelsAreTriedInTheProjectsOrder(t *testing.T) {
 		f := newPhoneFixture(t, policy)
 		f.svc.WithTemplateMessages(&fakeTemplateSender{err: templatemsg.ErrTransport})
 		id := seedPhoneUser(t, f.repo, "owner@example.com")
-		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, "+14155550123"))
+		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"))
 		assert.Equal(t, 1, f.sms.count())
 	})
 
 	t.Run("with no template sender the channel is skipped", func(t *testing.T) {
 		f := newPhoneFixture(t, policy)
 		id := seedPhoneUser(t, f.repo, "owner@example.com")
-		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, "+14155550123"))
+		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"))
 		assert.Equal(t, 1, f.sms.count())
 	})
 
@@ -153,10 +153,10 @@ func TestPhone_ChannelsAreTriedInTheProjectsOrder(t *testing.T) {
 
 		// No template sender: the project has no usable channel, though the
 		// deployment could text.
-		require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, "+14155550123"), ErrSMSDisabled)
+		require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrSMSDisabled)
 		// A failing sender surfaces, and SMS is still not used.
 		f.svc.WithTemplateMessages(&fakeTemplateSender{err: templatemsg.ErrTransport})
-		err := f.svc.RequestPhoneVerification(f.ctx, id, "+14155550123")
+		err := f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123")
 		require.ErrorIs(t, err, ErrSMSDisabled)
 		require.ErrorIs(t, err, templatemsg.ErrTransport)
 		assert.Zero(t, f.sms.count())
@@ -170,7 +170,7 @@ func TestPhone_ChannelsAreTriedInTheProjectsOrder(t *testing.T) {
 		tmpl := &fakeTemplateSender{}
 		f.svc.WithTemplateMessages(tmpl)
 		id := seedPhoneUser(t, f.repo, "owner@example.com")
-		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, "+14155550123"))
+		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"))
 		assert.Len(t, tmpl.sent(), 1)
 	})
 }
@@ -193,7 +193,7 @@ func TestPhone_UniqueNumberBelongsToOneAccount(t *testing.T) {
 	assert.False(t, got.PhoneVerified)
 
 	// Released by its holder, the number is free.
-	removed, err := f.svc.RemovePhone(f.ctx, a)
+	removed, err := f.svc.RemovePhone(f.ctx, a, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Empty(t, removed.PhoneNumber)
 	assert.False(t, removed.PhoneVerified)
@@ -248,7 +248,7 @@ func TestPhone_RemoveTellsTheAccountAndRespectsTheHold(t *testing.T) {
 	id := seedPhoneUser(t, f.repo, "owner@example.com")
 
 	// Nothing to remove is not an error.
-	user, err := f.svc.RemovePhone(f.ctx, id)
+	user, err := f.svc.RemovePhone(f.ctx, id, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Empty(t, user.PhoneNumber)
 	assert.Zero(t, f.mailer.count())
@@ -256,17 +256,18 @@ func TestPhone_RemoveTellsTheAccountAndRespectsTheHold(t *testing.T) {
 	_, err = f.verify(t, id, "+14155550123")
 	require.NoError(t, err)
 
-	// A sign-in by a recovery email holds the phone as it holds the emails.
+	// A sign-in by a recovery email holds the phone as it holds the emails,
+	// for the session that sign-in opened.
 	require.NoError(t, f.repo.AddRecoveryEmail(f.ctx, &RecoveryEmail{UserID: id, Email: "spare@example.net", VerifiedAt: 1}, 5))
-	require.NoError(t, f.repo.MarkRecoveryEmailSignIn(f.ctx, id, "spare@example.net", f.now.UnixMilli()))
-	_, err = f.svc.RemovePhone(f.ctx, id)
+	require.NoError(t, f.repo.MarkRecoveryEmailSignIn(f.ctx, id, "spare@example.net", f.now.UnixMilli(), (7*24*time.Hour).Milliseconds()))
+	_, err = f.svc.RemovePhone(f.ctx, id, SessionSignIn{AMR: []string{AMRRecoveryEmail}})
 	require.ErrorIs(t, err, ErrRecoveryHold)
 
 	f.now = f.now.Add(7 * 24 * time.Hour)
 	// The project switching verification off does not strand a stored number.
 	scope := *ProjectScopeFromContext(f.ctx)
 	scope.Phone.Enabled = off()
-	user, err = f.svc.RemovePhone(WithProjectScope(context.Background(), &scope), id)
+	user, err = f.svc.RemovePhone(WithProjectScope(context.Background(), &scope), id, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Empty(t, user.PhoneNumber)
 	assert.False(t, user.PhoneVerified)
@@ -274,9 +275,9 @@ func TestPhone_RemoveTellsTheAccountAndRespectsTheHold(t *testing.T) {
 	assert.Equal(t, 2, f.mailer.count(), "the primary and the recovery email are told")
 	assert.Equal(t, "The phone number was removed from your account", f.mailer.last().Subject)
 
-	_, err = f.svc.RemovePhone(f.ctx, "")
+	_, err = f.svc.RemovePhone(f.ctx, "", SessionSignIn{})
 	require.ErrorIs(t, err, ErrUnauthenticated)
-	_, err = f.svc.RemovePhone(f.ctx, "no-such-user")
+	_, err = f.svc.RemovePhone(f.ctx, "no-such-user", SessionSignIn{})
 	require.ErrorIs(t, err, ErrNotFound)
 }
 

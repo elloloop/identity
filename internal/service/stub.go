@@ -254,7 +254,7 @@ func (StubRepository) FindRecoveryEmailHolder(context.Context, string) (*Recover
 	return nil, ErrServiceUnavailable
 }
 
-func (StubRepository) MarkRecoveryEmailSignIn(context.Context, string, string, int64) error {
+func (StubRepository) MarkRecoveryEmailSignIn(context.Context, string, string, int64, int64) error {
 	return ErrServiceUnavailable
 }
 

@@ -82,9 +82,16 @@ type Claims struct {
 	// an anonymous account). On a purpose ticket it carries the sign-in of the
 	// session the ticket interrupted. An RPC that needs a recent sign-in
 	// compares it with now; its presence alone proves nothing recent.
-	AuthTime  int64 `json:"auth_time,omitempty"`
-	IssuedAt  int64 `json:"iat"`
-	ExpiresAt int64 `json:"exp"`
+	AuthTime int64 `json:"auth_time,omitempty"`
+	// AMR is the "amr" claim (RFC 8176): how the sign-in that opened the
+	// session proved itself, where that limits what the session may do.
+	// identity sets it only on a session a recovery email opened
+	// ("recovery_email"), and absent on every other token, so their bytes
+	// are unchanged. On a purpose ticket it carries the amr of the session
+	// the ticket interrupted.
+	AMR       []string `json:"amr,omitempty"`
+	IssuedAt  int64    `json:"iat"`
+	ExpiresAt int64    `json:"exp"`
 }
 
 // ClaimsMap converts the access-token claims plus standard iat/exp into
@@ -130,6 +137,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if c.AuthTime > 0 {
 		m["auth_time"] = c.AuthTime
+	}
+	if len(c.AMR) > 0 {
+		m["amr"] = c.AMR
 	}
 	if len(c.Audience) > 0 {
 		m["aud"] = c.Audience
@@ -286,6 +296,9 @@ func verifyTokenProfile(tokenStr string, kp KeyProvider, expectedTenant, expecte
 	if v, ok := tok.Get("auth_time"); ok {
 		claims.AuthTime = numericClaim(v)
 	}
+	if v, ok := tok.Get("amr"); ok {
+		claims.AMR = stringsClaim(v)
+	}
 	if v, ok := tok.Get("is_minor"); ok {
 		claims.IsMinor, _ = v.(bool)
 	}
@@ -415,6 +428,26 @@ func extractKID(tokenBytes []byte) (string, error) {
 
 // numericClaim reads a JSON number claim, which a JWT library may decode as
 // float64, json.Number or an integer type; anything else reads as zero.
+// stringsClaim reads an array-of-strings claim in the forms a decoded token
+// holds it; an element that is not a string is dropped, and any other value
+// reads as none.
+func stringsClaim(v any) []string {
+	switch vs := v.(type) {
+	case []string:
+		return vs
+	case []any:
+		out := make([]string, 0, len(vs))
+		for _, e := range vs {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 func numericClaim(v any) int64 {
 	switch n := v.(type) {
 	case float64:

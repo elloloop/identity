@@ -271,7 +271,7 @@ func (h *IdentityHandler) ListMyTenants(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	tenants, err := h.members.ListMyTenants(ctx, userID)
+	tenants, err := h.members.ListMyTenants(ctx, userID, authenticatedSignIn(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}

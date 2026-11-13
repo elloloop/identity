@@ -224,7 +224,7 @@ func TestBeginPasskeyRegistration_GetUserErrors(t *testing.T) {
 	r.failGetUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "u", "Key")
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "u", SessionSignIn{}, "Key")
 	require.Error(t, err)
 }
 
@@ -235,7 +235,7 @@ func TestBeginPasskeyRegistration_ListErrors(t *testing.T) {
 	r.failListPasskeyCredentials = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, "Key")
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{}, "Key")
 	require.Error(t, err)
 }
 
@@ -246,7 +246,7 @@ func TestBeginPasskeyRegistration_CreateChallengeErrors(t *testing.T) {
 	r.failCreatePasskeyChallenge = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, "Key")
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{}, "Key")
 	require.Error(t, err)
 }
 
@@ -255,7 +255,7 @@ func TestCompletePasskeyRegistration_ChallengeRepoErrors(t *testing.T) {
 	r.failGetPasskeyChallenge = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "u", "challenge", "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "u", SessionSignIn{}, "challenge", "{}", "Device", false, "", "")
 	require.Error(t, err)
 }
 
@@ -303,7 +303,7 @@ func TestBeginTotpSetup_GetUserErrors(t *testing.T) {
 	r.failGetUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), "u")
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), "u", SessionSignIn{})
 	require.Error(t, err)
 }
 
@@ -314,7 +314,7 @@ func TestBeginTotpSetup_GetTotpCredErrors(t *testing.T) {
 	r.failGetTotpCredential = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), user.ID)
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), user.ID, SessionSignIn{})
 	require.Error(t, err)
 }
 
@@ -325,7 +325,7 @@ func TestBeginTotpSetup_CreateCredErrors(t *testing.T) {
 	r.failCreateTotpCredential = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), user.ID)
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), user.ID, SessionSignIn{})
 	require.Error(t, err)
 }
 
@@ -336,7 +336,7 @@ func TestBeginTotpSetup_StoreRecoveryErrors(t *testing.T) {
 	r.failDeleteRecoveryCodesForUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), user.ID)
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), user.ID, SessionSignIn{})
 	require.Error(t, err)
 }
 
@@ -347,7 +347,7 @@ func TestBeginTotpSetup_CreateRecoveryCodeErrors(t *testing.T) {
 	r.failCreateRecoveryCode = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), user.ID)
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), user.ID, SessionSignIn{})
 	require.Error(t, err)
 }
 
@@ -356,7 +356,7 @@ func TestVerifyTotpSetup_GetCredErrors(t *testing.T) {
 	r.failGetTotpCredential = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.VerifyTotpSetup(context.Background(), "u", "123456")
+	_, err := svc.VerifyTotpSetup(context.Background(), "u", SessionSignIn{}, "123456")
 	require.Error(t, err)
 }
 
@@ -436,7 +436,7 @@ func TestApproveQrLogin_FindErrors(t *testing.T) {
 	r.failFindQrLoginSession = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.ApproveQrLogin(context.Background(), "sid", true, "u", "", "")
+	_, err := svc.ApproveQrLogin(context.Background(), "sid", true, "u", SessionSignIn{}, "", "")
 	require.Error(t, err)
 }
 
@@ -456,7 +456,7 @@ func TestPollQrLogin_GetUserErrors(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 
 	r.failGetUser = true
@@ -471,7 +471,7 @@ func TestPollQrLogin_IssueTokensFails(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 
 	r.failCreateRefreshToken = true
@@ -506,7 +506,7 @@ func TestApproveQrLogin_UpdateErrors(t *testing.T) {
 	require.NoError(t, err)
 
 	r.failUpdateQrLoginSession = true
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, SessionSignIn{}, "", "")
 	require.ErrorContains(t, err, "updating QR login session")
 }
 
@@ -518,7 +518,7 @@ func TestApproveQrLogin_RejectUpdateErrors(t *testing.T) {
 	require.NoError(t, err)
 
 	r.failUpdateQrLoginSession = true
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, false, "u", "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, false, "u", SessionSignIn{}, "", "")
 	require.Error(t, err)
 }
 

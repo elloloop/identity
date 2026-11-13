@@ -4853,6 +4853,9 @@ paths:
          freeing the number for another account where the project keeps numbers
          unique. A caller with no number gets their user back unchanged. A tenant
          that requires a verified phone can no longer be selected afterwards.
+         Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
+         session a recovery email opened during a recovery hold
+         (RecoveryHoldDetails).
       operationId: identity.v1.IdentityService.RemovePhone
       parameters:
         - name: Connect-Protocol-Version
@@ -5190,11 +5193,14 @@ paths:
         Recovery emails — additional addresses the authenticated caller has
          proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
          address another account of the project holds and RESOURCE_EXHAUSTED past
-         the project's cap; a project that has not turned the feature on refuses
+         the project's cap; RequestRecoveryEmail answers them for the caller's own
+         addresses and its own full list. A project that has not turned the
+         feature on refuses
          RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
          while addresses already kept can still be listed and removed. Adding or
          removing an address mails a notice to the account's other addresses, and
-         a removal to the removed address too.
+         a removal to the removed address too. During a recovery hold a session a
+         recovery email opened can do neither (RecoveryHoldDetails).
       operationId: identity.v1.IdentityService.RequestRecoveryEmail
       parameters:
         - name: Connect-Protocol-Version
@@ -7862,7 +7868,11 @@ components:
           title: approve
       title: ApproveQrLoginRequest
       additionalProperties: false
-      description: 'Step 2b: Authenticated device approves (or rejects) the new device.'
+      description: |-
+        Step 2b: Authenticated device approves (or rejects) the new device. A
+         session a recovery email opened may reject but not approve: it is refused
+         FAILED_PRECONDITION with the stable `recovery_session` token, since the
+         session the hand-off opens could not carry its `amr`.
     identity.v1.ApproveQrLoginResponse:
       type: object
       properties:
@@ -11560,12 +11570,15 @@ components:
       additionalProperties: false
       description: |-
         RecoveryHoldDetails is attached to the FAILED_PRECONDITION error (stable
-         `recovery_hold` token) that RemoveRecoveryEmail, RequestPhoneVerification
-         and VerifyPhoneCode return while a hold is in force. A sign-in by a
-         recovery email (`recovery_emails.sign_in`) starts one, for the project's
-         `recovery_emails.hold_seconds` (default 604800, seven days): whoever got
-         into a recovery mailbox cannot strip the account's other addresses or move
-         its phone before the owner has had the notice.
+         `recovery_hold` token) of a hold. A sign-in by a recovery email
+         (`recovery_emails.sign_in`) starts one, once any second factor is proved,
+         for the project's `recovery_emails.hold_seconds` (default 604800, seven
+         days). While it is in force, a session a recovery email opened cannot change
+         the account's recovery emails, phone, second factor, passkeys or linked
+         providers, so whoever got into a recovery mailbox cannot take the rest of
+         the account before the owner has had the notice; a session opened any other
+         way is not held, and removing the address that started the hold ends it.
+         Merging either account is refused, whoever asks.
     identity.v1.RedeemMagicLinkRequest:
       type: object
       properties:

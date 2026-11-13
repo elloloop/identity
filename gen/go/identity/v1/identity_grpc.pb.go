@@ -268,15 +268,21 @@ type IdentityServiceClient interface {
 	// freeing the number for another account where the project keeps numbers
 	// unique. A caller with no number gets their user back unchanged. A tenant
 	// that requires a verified phone can no longer be selected afterwards.
+	// Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
+	// session a recovery email opened during a recovery hold
+	// (RecoveryHoldDetails).
 	RemovePhone(ctx context.Context, in *RemovePhoneRequest, opts ...grpc.CallOption) (*RemovePhoneResponse, error)
 	// Recovery emails — additional addresses the authenticated caller has
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
 	// address another account of the project holds and RESOURCE_EXHAUSTED past
-	// the project's cap; a project that has not turned the feature on refuses
+	// the project's cap; RequestRecoveryEmail answers them for the caller's own
+	// addresses and its own full list. A project that has not turned the
+	// feature on refuses
 	// RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
 	// while addresses already kept can still be listed and removed. Adding or
 	// removing an address mails a notice to the account's other addresses, and
-	// a removal to the removed address too.
+	// a removal to the removed address too. During a recovery hold a session a
+	// recovery email opened can do neither (RecoveryHoldDetails).
 	RequestRecoveryEmail(ctx context.Context, in *RequestRecoveryEmailRequest, opts ...grpc.CallOption) (*RequestRecoveryEmailResponse, error)
 	VerifyRecoveryEmail(ctx context.Context, in *VerifyRecoveryEmailRequest, opts ...grpc.CallOption) (*VerifyRecoveryEmailResponse, error)
 	ListRecoveryEmails(ctx context.Context, in *ListRecoveryEmailsRequest, opts ...grpc.CallOption) (*ListRecoveryEmailsResponse, error)
@@ -2727,15 +2733,21 @@ type IdentityServiceServer interface {
 	// freeing the number for another account where the project keeps numbers
 	// unique. A caller with no number gets their user back unchanged. A tenant
 	// that requires a verified phone can no longer be selected afterwards.
+	// Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
+	// session a recovery email opened during a recovery hold
+	// (RecoveryHoldDetails).
 	RemovePhone(context.Context, *RemovePhoneRequest) (*RemovePhoneResponse, error)
 	// Recovery emails — additional addresses the authenticated caller has
 	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
 	// address another account of the project holds and RESOURCE_EXHAUSTED past
-	// the project's cap; a project that has not turned the feature on refuses
+	// the project's cap; RequestRecoveryEmail answers them for the caller's own
+	// addresses and its own full list. A project that has not turned the
+	// feature on refuses
 	// RequestRecoveryEmail and VerifyRecoveryEmail with FAILED_PRECONDITION,
 	// while addresses already kept can still be listed and removed. Adding or
 	// removing an address mails a notice to the account's other addresses, and
-	// a removal to the removed address too.
+	// a removal to the removed address too. During a recovery hold a session a
+	// recovery email opened can do neither (RecoveryHoldDetails).
 	RequestRecoveryEmail(context.Context, *RequestRecoveryEmailRequest) (*RequestRecoveryEmailResponse, error)
 	VerifyRecoveryEmail(context.Context, *VerifyRecoveryEmailRequest) (*VerifyRecoveryEmailResponse, error)
 	ListRecoveryEmails(context.Context, *ListRecoveryEmailsRequest) (*ListRecoveryEmailsResponse, error)

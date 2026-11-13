@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -13,17 +14,19 @@ import (
 const refreshTokenColumns = `
 	id, token_hash, user_id, device_info, device_name,
 	ip_address, user_agent,
-	expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms, sid, auth_time_ms`
+	expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms, sid, auth_time_ms, amr`
 
 func scanRefreshToken(row pgx.Row) (*service.RefreshTokenRecord, error) {
 	var t service.RefreshTokenRecord
+	var amr string
 	if err := row.Scan(
 		&t.NodeID, &t.TokenHash, &t.UserID, &t.DeviceInfo, &t.DeviceName,
 		&t.IPAddress, &t.UserAgent,
-		&t.ExpiresAt, &t.CreatedAt, &t.LastUsedAt, &t.SessionStartedAt, &t.ConsumedAtMs, &t.SID, &t.AuthTimeMs,
+		&t.ExpiresAt, &t.CreatedAt, &t.LastUsedAt, &t.SessionStartedAt, &t.ConsumedAtMs, &t.SID, &t.AuthTimeMs, &amr,
 	); err != nil {
 		return nil, err
 	}
+	t.AMR = strings.Fields(amr)
 	return &t, nil
 }
 
@@ -78,19 +81,19 @@ func (r *pgRepository) CreateRefreshToken(ctx context.Context, t *service.Refres
 			id, project_id, token_hash, user_id,
 			device_info, device_name, ip_address, user_agent,
 			expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms, sid,
-			auth_time_ms
+			auth_time_ms, amr
 		) VALUES (
 			$1, $2, $3, $4,
 			$5, $6, $7, $8,
 			$9, $10, $11, $12, $13, $14,
-			$15
+			$15, $16
 		)`
 	_, err := r.pool.Exec(
 		ctx, q,
 		id, r.projectID, t.TokenHash, t.UserID,
 		t.DeviceInfo, t.DeviceName, t.IPAddress, t.UserAgent,
 		t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.SessionStartedAt, t.ConsumedAtMs, t.SID,
-		t.AuthTimeMs,
+		t.AuthTimeMs, strings.Join(t.AMR, " "),
 	)
 	if err != nil {
 		return "", wrapPgErr("CreateRefreshToken", err)

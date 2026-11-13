@@ -24,7 +24,7 @@ func (h *IdentityHandler) RequestRecoveryEmail(
 	if userID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
 	}
-	if err := h.auth.RequestRecoveryEmail(ctx, userID, authenticatedAuthTime(req.Header()), req.Msg.Email); err != nil {
+	if err := h.auth.RequestRecoveryEmail(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Email); err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.RequestRecoveryEmailResponse{}), nil
@@ -40,7 +40,7 @@ func (h *IdentityHandler) VerifyRecoveryEmail(
 	if userID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
 	}
-	held, err := h.auth.VerifyRecoveryEmail(ctx, userID, authenticatedAuthTime(req.Header()), req.Msg.Email, req.Msg.Code)
+	held, err := h.auth.VerifyRecoveryEmail(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Email, req.Msg.Code)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -75,7 +75,7 @@ func (h *IdentityHandler) RemoveRecoveryEmail(
 	if userID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
 	}
-	held, err := h.auth.RemoveRecoveryEmail(ctx, userID, authenticatedAuthTime(req.Header()), req.Msg.Email)
+	held, err := h.auth.RemoveRecoveryEmail(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Email)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

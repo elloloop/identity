@@ -133,8 +133,11 @@ var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in
 //
 // Refused: merging an account with itself; an account that is not active;
 // an anonymous account (upgrade it instead); an agent; a managed child's account (it
-// stays with its guardian), and an account that is any child's guardian
-// (its children's guardian edges would point at a retired account).
+// stays with its guardian); an account that is any child's guardian
+// (its children's guardian edges would point at a retired account); and,
+// whoever asks, either account while a recovery hold is in force on it
+// (RecoveryHoldError): a merge moves the recovery emails and the sign-in
+// methods the hold is keeping where they are.
 
 // MergeAccounts merges the account identified by otherIdentifier (an email,
 // or a username) into the caller's own account, survivorID. The proof that
@@ -144,7 +147,7 @@ var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in
 // second factor protects — enrolled two-step, or a policy requiring one —
 // cannot be merged by its password alone. The deployment must have turned
 // merging on (GATEWAY_ACCOUNT_MERGE_ENABLED).
-func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, authTimeSec int64, otherIdentifier, otherPassword, ipAddr, userAgent string, takeAddress bool) (*User, error) {
+func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, signIn SessionSignIn, otherIdentifier, otherPassword, ipAddr, userAgent string, takeAddress bool) (*User, error) {
 	if !s.cfg.AccountMergeEnabled {
 		return nil, ErrAccountMergeDisabled
 	}
@@ -154,7 +157,7 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, auth
 	// The account that is kept proves itself as freshly as the other one: a
 	// session is not enough, a recent sign-in is. Before any password check,
 	// so a stale session learns nothing about the other account.
-	if !s.recentlyAuthenticated(authTimeSec) {
+	if !s.recentlyAuthenticated(signIn.AuthTimeSec) {
 		return nil, ErrReauthenticationRequired
 	}
 	repo := s.repo(ctx)
@@ -211,6 +214,9 @@ func (s *AuthService) auditMerge(ctx context.Context, actorID, targetID, ipAddr,
 // MergeUsers is the admin form of MergeAccounts: an admin merges otherID into
 // survivorID. The admin's role is the authority, so no password of either
 // account is asked for, and it does not depend on the self-service switch.
+// It is refused like MergeAccounts while a recovery hold is in force on
+// either account: the owner ends one early by removing, signed in some other
+// way, the recovery email that started it.
 func (s *AdminService) MergeUsers(ctx context.Context, actorID, survivorID, otherID string, takeAddress bool) (*User, error) {
 	if _, err := s.requireAdmin(ctx, actorID); err != nil {
 		return nil, err
@@ -265,10 +271,16 @@ func announceMerge(ctx context.Context, a mergeAnnouncer, retiredBefore, merged,
 }
 
 // mergeAccounts checks the pair, applies the merge in one transaction and
-// returns both accounts as stored afterwards.
+// returns both accounts as stored afterwards. The other account's recovery
+// hold is read only here, once the caller has proved it is theirs.
 func mergeAccounts(ctx context.Context, repo Repository, survivor, other *User, takeAddress bool, now int64) (*User, *User, error) {
 	if err := checkMergeable(ctx, repo, survivor, other); err != nil {
 		return nil, nil, err
+	}
+	for _, id := range []string{survivor.ID, other.ID} {
+		if err := recoveryHoldOn(ctx, repo, id, now); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := repo.ApplyAccountMerge(ctx, AccountMerge{
 		SurvivorID:   survivor.ID,

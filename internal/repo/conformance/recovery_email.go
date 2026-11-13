@@ -200,18 +200,54 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		if err != nil || got == nil || got.UserID != uid || got.Email != "spare@example.net" || got.VerifiedAt != 10 || got.LastSignInAt != 0 {
 			t.Fatalf("holder = %#v %v", got, err)
 		}
-		if err := r.MarkRecoveryEmailSignIn(ctx, uid, "Spare@example.net", 77); err != nil {
+		const hold = 1_000
+		if err := r.MarkRecoveryEmailSignIn(ctx, uid, "Spare@example.net", 5_000, hold); err != nil {
 			t.Fatalf("Mark: %v", err)
 		}
-		if err := r.MarkRecoveryEmailSignIn(ctx, other, "spare@example.net", 88); !errors.Is(err, service.ErrNotFound) {
+		if err := r.MarkRecoveryEmailSignIn(ctx, other, "spare@example.net", 5_100, hold); !errors.Is(err, service.ErrNotFound) {
 			t.Fatalf("Mark by an account that does not hold the address: want ErrNotFound, got %v", err)
 		}
 		list, err := r.ListRecoveryEmails(ctx, uid)
-		if err != nil || len(list) != 1 || list[0].LastSignInAt != 77 {
-			t.Fatalf("List after Mark = %#v %v, want LastSignInAt 77", list, err)
+		if err != nil || len(list) != 1 || list[0].LastSignInAt != 5_000 {
+			t.Fatalf("List after Mark = %#v %v, want LastSignInAt 5000", list, err)
 		}
-		if got, _ := r.FindRecoveryEmailHolder(ctx, "spare@example.net"); got == nil || got.LastSignInAt != 77 {
-			t.Fatalf("holder after Mark = %#v", got)
+		// A sign-in within the hold its address started does not extend it;
+		// one once it has ended starts a new one.
+		for _, step := range []struct{ at, want int64 }{{5_999, 5_000}, {6_000, 6_000}} {
+			if err := r.MarkRecoveryEmailSignIn(ctx, uid, "spare@example.net", step.at, hold); err != nil {
+				t.Fatalf("Mark at %d: %v", step.at, err)
+			}
+			if got, _ := r.FindRecoveryEmailHolder(ctx, "spare@example.net"); got == nil || got.LastSignInAt != step.want {
+				t.Fatalf("holder after Mark at %d = %#v, want LastSignInAt %d", step.at, got, step.want)
+			}
+		}
+	})
+
+	t.Run(driver.Name+"/RecoverySession_AMRAndChallengeKeepTheRecoveryEmail", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "rec-session@example.com")
+		for hash, amr := range map[string][]string{"rec-rt-recovery": {service.AMRRecoveryEmail}, "rec-rt-plain": nil} {
+			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
+				TokenHash: hash, UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, AMR: amr,
+			}); err != nil {
+				t.Fatalf("CreateRefreshToken %s: %v", hash, err)
+			}
+			got, err := r.FindRefreshTokenByHash(ctx, hash)
+			if err != nil || got == nil || len(got.AMR) != len(amr) || (len(amr) == 1 && got.AMR[0] != amr[0]) {
+				t.Fatalf("refresh token %s = %#v %v, want AMR %v", hash, got, err, amr)
+			}
+		}
+		for id, addr := range map[string]string{"rec-lc-recovery": "spare@example.net", "rec-lc-plain": ""} {
+			if _, err := r.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{
+				ChallengeID: id, UserID: uid, RecoveryEmail: addr, ExpiresAt: 9_000_000_000_000, CreatedAt: 1,
+			}); err != nil {
+				t.Fatalf("CreateLoginChallenge %s: %v", id, err)
+			}
+			got, err := r.GetLoginChallengeByChallengeID(ctx, id)
+			if err != nil || got == nil || got.RecoveryEmail != addr {
+				t.Fatalf("login challenge %s = %#v %v, want RecoveryEmail %q", id, got, err, addr)
+			}
 		}
 	})
 }

@@ -176,7 +176,7 @@ func TestAuthService_LinkIdentity_AttachesVerifiedIdentity(t *testing.T) {
 	// The fake exchanger derives the subject from the email argument as
 	// "sub-<email>". Drive a link for a Google identity.
 	code := fakeOAuthCode("linker@example.com", "Linker", "", "google")
-	oi, err := svc.LinkIdentity(ctx, u.ID, code, "google", "https://app/cb", "", "", "")
+	oi, err := svc.LinkIdentity(ctx, u.ID, SessionSignIn{}, code, "google", "https://app/cb", "", "", "")
 	require.NoError(t, err)
 	require.NotNil(t, oi)
 	assert.Equal(t, u.ID, oi.UserID)
@@ -202,7 +202,7 @@ func TestAuthService_LinkIdentity_AlreadyLinked(t *testing.T) {
 	// identity (the fake exchanger maps the code's email to the subject).
 	attacker := seedUser(repo, "attacker@example.com", "hash", "active")
 	code := fakeOAuthCode("victim@example.com", "Victim", "", "google")
-	_, err := svc.LinkIdentity(ctx, attacker.ID, code, "google", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(ctx, attacker.ID, SessionSignIn{}, code, "google", "https://app/cb", "", "", "")
 	assert.ErrorIs(t, err, ErrAlreadyExists)
 
 	// The link still points at the original owner.
@@ -218,6 +218,6 @@ func TestAuthService_LinkIdentity_RequiresAuth(t *testing.T) {
 	ctx := context.Background()
 
 	code := fakeOAuthCode("noauth@example.com", "NoAuth", "", "google")
-	_, err := svc.LinkIdentity(ctx, "", code, "google", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(ctx, "", SessionSignIn{}, code, "google", "https://app/cb", "", "", "")
 	assert.ErrorIs(t, err, ErrUnauthenticated)
 }

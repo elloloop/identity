@@ -298,7 +298,7 @@ func TestBeginPasskeyRegistration_UserNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "no-such-user", "Key")
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "no-such-user", SessionSignIn{}, "Key")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -317,7 +317,7 @@ func TestBeginPasskeyRegistration_WithExistingCreds(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, "Key")
+	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, SessionSignIn{}, "Key")
 	require.NoError(t, err)
 	assert.NotEmpty(t, optionsJSON)
 	assert.NotEmpty(t, challengeID)
@@ -329,7 +329,7 @@ func TestCompletePasskeyRegistration_MissingArgs(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", "", "", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, "", "", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -338,7 +338,7 @@ func TestCompletePasskeyRegistration_ChallengeNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", "no-such-challenge", "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, "no-such-challenge", "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -358,7 +358,7 @@ func TestCompletePasskeyRegistration_WrongChallengeType(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -378,7 +378,7 @@ func TestCompletePasskeyRegistration_WrongUser(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-2", id, "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-2", SessionSignIn{}, id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrPermissionDenied))
 }
@@ -398,7 +398,7 @@ func TestCompletePasskeyRegistration_ExpiredChallenge(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTokenExpired))
 }
@@ -419,7 +419,7 @@ func TestCompletePasskeyRegistration_VerifyFails(t *testing.T) {
 	repo.mu.Unlock()
 
 	// Bogus credential JSON — verification will fail.
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, `{"id":"x"}`, "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, id, `{"id":"x"}`, "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -537,7 +537,7 @@ func TestBeginTotpSetup_UserNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), "no-such")
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), "no-such", SessionSignIn{})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -555,7 +555,7 @@ func TestBeginTotpSetup_CleansUnverifiedCred(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), u.ID)
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), u.ID, SessionSignIn{})
 	require.NoError(t, err)
 
 	// The unverified credential should be replaced.
@@ -570,7 +570,7 @@ func TestBeginTotpSetup_UserWithoutEmailUsesID(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "", "", "active")
 
-	_, qrURI, _, err := svc.BeginTotpSetup(context.Background(), u.ID)
+	_, qrURI, _, err := svc.BeginTotpSetup(context.Background(), u.ID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.NotEmpty(t, qrURI)
 }
@@ -581,7 +581,7 @@ func TestVerifyTotpSetup_EmptyCode(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	ok, err := svc.VerifyTotpSetup(context.Background(), "user-1", "")
+	ok, err := svc.VerifyTotpSetup(context.Background(), "user-1", SessionSignIn{}, "")
 	require.Error(t, err)
 	assert.False(t, ok)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
@@ -591,7 +591,7 @@ func TestVerifyTotpSetup_NoSetupInProgress(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	ok, err := svc.VerifyTotpSetup(context.Background(), "no-cred-user", "123456")
+	ok, err := svc.VerifyTotpSetup(context.Background(), "no-cred-user", SessionSignIn{}, "123456")
 	require.Error(t, err)
 	assert.False(t, ok)
 	assert.True(t, errors.Is(err, ErrNotFound))
@@ -609,7 +609,7 @@ func TestVerifyTotpSetup_DecryptFails(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, "123456")
+	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, SessionSignIn{}, "123456")
 	require.Error(t, err)
 	assert.False(t, ok)
 }
@@ -634,7 +634,7 @@ func TestVerifyTotpSetup_HappyPath(t *testing.T) {
 	code, err := totpGenerateCode(secret)
 	require.NoError(t, err)
 
-	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, code)
+	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, SessionSignIn{}, code)
 	require.NoError(t, err)
 	assert.True(t, ok)
 
@@ -878,7 +878,7 @@ func TestApproveQrLogin_EmptyID(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.ApproveQrLogin(context.Background(), "", true, "u", "", "")
+	_, err := svc.ApproveQrLogin(context.Background(), "", true, "u", SessionSignIn{}, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -887,7 +887,7 @@ func TestApproveQrLogin_NotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.ApproveQrLogin(context.Background(), "ghost", true, "u", "", "")
+	_, err := svc.ApproveQrLogin(context.Background(), "ghost", true, "u", SessionSignIn{}, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -900,7 +900,7 @@ func TestApproveQrLogin_ExpiredPending(t *testing.T) {
 	require.NoError(t, err)
 	svc.nowFunc = func() time.Time { return time.Now().Add(time.Hour) }
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, "u", "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, "u", SessionSignIn{}, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrQrLoginExpired))
 }
@@ -912,11 +912,11 @@ func TestApproveQrLogin_AlreadyConsumed(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 
 	// Approving twice should fail with ErrQrLoginNotPending.
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, SessionSignIn{}, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrQrLoginNotPending))
 }
@@ -970,7 +970,7 @@ func TestPollQrLogin_ApprovedUserDeleted(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 
 	repo.mu.Lock()

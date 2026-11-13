@@ -52,7 +52,7 @@ func TestSuspendTenantMember_SuspendsAndRestoresAndAudits(t *testing.T) {
 	}}, f.audit.detailsOf(suspended))
 	assert.Equal(t, [][2]string{{"203.0.113.7", "test-agent"}}, f.audit.clientsOf(suspended))
 
-	mine, err := f.svc.ListMyTenants(ctx, joinerID)
+	mine, err := f.svc.ListMyTenants(ctx, joinerID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Empty(t, mine, "a suspended member's tenant is not theirs to choose")
 	members, err := f.svc.ListTenantMembers(ctx, ssOwnerID, ownTenant)
@@ -75,7 +75,7 @@ func TestSuspendTenantMember_SuspendsAndRestoresAndAudits(t *testing.T) {
 		"project_id": ssProject, "tenant_id": ownTenant,
 		"role": RoleMember, "source": MembershipSourceDomain, "status": MembershipStatusActive,
 	}}, f.audit.detailsOf(restored))
-	mine, err = f.svc.ListMyTenants(ctx, joinerID)
+	mine, err = f.svc.ListMyTenants(ctx, joinerID, SessionSignIn{})
 	require.NoError(t, err)
 	require.Len(t, mine, 1)
 	assert.Equal(t, ownTenant, mine[0].TenantID)

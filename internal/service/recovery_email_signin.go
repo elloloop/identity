@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -17,8 +18,10 @@ import (
 // account is the one that holds the address, never a new one. The proof is of
 // the recovery address, so the primary email is not marked verified by it.
 // And because a recovery mailbox may be the weakest one the person has, the
-// sign-in is mailed to every other address of the account and starts a hold
-// on its recovery settings (recoveryHoldUntil).
+// sign-in is mailed to every other address of the account, starts a hold on
+// its recovery settings (recoveryHoldUntil), and opens a session marked
+// AMRRecoveryEmail: the hold binds that session, never one opened another
+// way, and the session acts in no tenant through its email's domain.
 
 // recoveryEmailCodeSendAllowed reports whether a sign-in code or link may be
 // mailed to addr because an account holds it as a recovery email. It is
@@ -58,6 +61,11 @@ func (s *AuthService) loginCodeSendAllowed(ctx context.Context, addr canonicalEm
 // Where the project does not let recovery emails sign in, the address signs
 // in to nothing: invalidErr, the answer a wrong code gets, rather than a new
 // account on an address another account holds.
+//
+// A code alone starts nothing: an account that owes a second factor gets a
+// challenge that remembers the address, and the hold, the notice and the
+// session's recovery_email marking come only once VerifyTotp proves the
+// factor (startRecoveryEmailSession).
 func (s *AuthService) completeRecoveryEmailLogin(ctx context.Context, addr, method string, invalidErr error, ipAddr, userAgent string) (result *LoginResult, handled bool, err error) {
 	holder, err := s.repo(ctx).FindRecoveryEmailHolder(ctx, addr)
 	if err != nil {
@@ -66,8 +74,7 @@ func (s *AuthService) completeRecoveryEmailLogin(ctx context.Context, addr, meth
 	if holder == nil {
 		return nil, false, nil
 	}
-	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
-	if !cfg.SignIn {
+	if !recoveryEmailsConfig(ProjectScopeFromContext(ctx)).SignIn {
 		s.logger.Info("recovery_email_sign_in_not_enabled", zap.String("email", redactEmail(addr)))
 		return nil, true, invalidErr
 	}
@@ -91,33 +98,11 @@ func (s *AuthService) completeRecoveryEmailLogin(ctx context.Context, addr, meth
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, true, err
 	}
-
-	// The hold and the notice come before any token or second-factor
-	// challenge: a sign-in that cannot start the hold must not happen.
-	now := s.nowMs()
-	if err := s.repo(ctx).MarkRecoveryEmailSignIn(ctx, user.ID, addr, now); err != nil {
-		return nil, true, fmt.Errorf("recording recovery email sign-in: %w", err)
-	}
-	s.audit.Log(ctx, audit.EventRecoveryEmailSignIn,
-		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent), audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"method": method, "email": redactEmail(addr)}))
-	held, err := s.repo(ctx).ListRecoveryEmails(ctx, user.ID)
-	if err != nil {
-		return nil, true, fmt.Errorf("listing recovery emails: %w", err)
-	}
-	holdEnds := time.UnixMilli(now + cfg.hold().Milliseconds()).UTC().Format("2 January 2006 at 15:04 UTC")
-	s.notifyAccountAddresses(ctx, user, held, addr, accountNotice{
-		op:       "recovery_email_sign_in_notice",
-		headline: "Your account was signed in to with a recovery email",
-		detail: fmt.Sprintf("Someone signed in to your account with the recovery email %s. "+
-			"Until %s its recovery emails cannot be removed and its phone number cannot be changed.", addr, holdEnds),
-	})
-
 	if user.TotpRequired || decision.RequireSecondFactor {
-		result, err := s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
+		result, err := s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, addr, ipAddr, userAgent)
 		return result, true, err
 	}
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.startRecoveryEmailSession(ctx, user, addr, method, ipAddr, userAgent)
 	if err != nil {
 		return nil, true, err
 	}
@@ -133,4 +118,43 @@ func (s *AuthService) completeRecoveryEmailLogin(ctx context.Context, addr, meth
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, true, nil
+}
+
+// startRecoveryEmailSession opens the session of a sign-in by the recovery
+// email addr once every factor it owed is proved (method names the last
+// proof: the emailed code or link, or "totp"). It starts the hold on the
+// account's recovery settings, unless one this address started is still in
+// force, tells every other address of the account, and issues the session
+// marked AMRRecoveryEmail. The hold comes before the tokens: a sign-in that
+// cannot start the hold must not happen. A verified-email refusal comes
+// before both, so a sign-in that could yield no session starts nothing.
+func (s *AuthService) startRecoveryEmailSession(ctx context.Context, user *User, addr, method, ipAddr, userAgent string) (string, string, error) {
+	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
+		return "", "", err
+	}
+	hold := recoveryEmailsConfig(ProjectScopeFromContext(ctx)).hold()
+	now := s.nowMs()
+	if err := s.repo(ctx).MarkRecoveryEmailSignIn(ctx, user.ID, addr, now, hold.Milliseconds()); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// Removed from the account while its second factor was asked for.
+			return "", "", fmt.Errorf("%w: the address no longer belongs to the account", ErrUnauthenticated)
+		}
+		return "", "", fmt.Errorf("recording recovery email sign-in: %w", err)
+	}
+	s.audit.Log(ctx, audit.EventRecoveryEmailSignIn,
+		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent), audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"method": method, "email": redactEmail(addr)}))
+	held, err := s.repo(ctx).ListRecoveryEmails(ctx, user.ID)
+	if err != nil {
+		return "", "", fmt.Errorf("listing recovery emails: %w", err)
+	}
+	holdEnds := time.UnixMilli(recoveryHoldUntil(held, hold, now)).UTC().Format("2 January 2006 at 15:04 UTC")
+	s.notifyAccountAddresses(ctx, user, held, addr, accountNotice{
+		op:       "recovery_email_sign_in_notice",
+		headline: "Your account was signed in to with a recovery email",
+		detail: fmt.Sprintf("Someone signed in to your account with the recovery email %s. "+
+			"Until %s that sign-in cannot change your account's recovery emails, phone number or sign-in methods. "+
+			"If it was not you, sign in with your primary email and remove the address.", addr, holdEnds),
+	})
+	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, []string{AMRRecoveryEmail})
 }

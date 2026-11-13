@@ -97,8 +97,11 @@ func (s *AuthService) GetQrLoginSession(ctx context.Context, sessionID string) (
 
 // ── ApproveQrLogin ─────────────────────────────────────────────────────
 
-// ApproveQrLogin approves or rejects a QR login session. Returns the new status.
-func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, approve bool, userID, ipAddr, userAgent string) (string, error) {
+// ApproveQrLogin approves or rejects a QR login session. Returns the new
+// status. A session a recovery email opened may reject one but not approve
+// it (ErrRecoverySession): the session the hand-off opens would not carry
+// that sign-in's amr, and so would escape what binds it.
+func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, approve bool, userID string, signIn SessionSignIn, ipAddr, userAgent string) (string, error) {
 	if sessionID == "" {
 		return "", fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
 	}
@@ -127,6 +130,9 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 
 	var newStatus string
 	if approve {
+		if signIn.openedByRecoveryEmail() {
+			return "", fmt.Errorf("%w: sign in on the other device instead", ErrRecoverySession)
+		}
 		if err := s.checkQrApprover(ctx, userID, ipAddr, userAgent); err != nil {
 			return "", err
 		}
@@ -306,7 +312,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	// is new (its own absolute lifetime) but carries no auth_time, so it never
 	// counts as a recent sign-in, and its refreshes carry none either. It is
 	// still a sign-in for a pending deletion: the approving device signed in.
-	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, 0, 0)
+	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, 0, 0, nil)
 	if err != nil {
 		return nil, err
 	}

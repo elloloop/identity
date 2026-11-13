@@ -31,3 +31,9 @@ CREATE TABLE recovery_email_codes (
 );
 CREATE UNIQUE INDEX recovery_email_codes_project_user_uidx ON recovery_email_codes (project_id, user_id);
 CREATE INDEX recovery_email_codes_project_expires_idx ON recovery_email_codes (project_id, expires_at_ms);
+
+-- How the sign-in that opened a session proved itself (the access token's
+-- amr claim, values separated by spaces; '' for none), and the recovery
+-- email a sign-in waiting on its second factor was made with.
+ALTER TABLE refresh_tokens ADD COLUMN amr TEXT NOT NULL DEFAULT '';
+ALTER TABLE login_challenges ADD COLUMN recovery_email TEXT NOT NULL DEFAULT '';

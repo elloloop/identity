@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/elloloop/identity/internal/middleware"
+	"github.com/elloloop/identity/internal/service"
 )
 
 func peerContext(addr string, md metadata.MD) context.Context {
@@ -102,27 +103,29 @@ func TestGRPCBridge_InvokeSetsTheClientIPFromTheTransport(t *testing.T) {
 	}
 }
 
-// A sign-in time a caller sent in metadata never reaches the handlers unless
-// the host declared that its interceptor owns the key: an interceptor written
-// before the key existed would otherwise let a client vouch for its own
-// recent sign-in.
-func TestGRPCBridge_AuthTimeOnlyWhenTheHostOwnsIt(t *testing.T) {
-	md := metadata.Pairs("x-authenticated-auth-time", "1700000000")
+// The sign-in metadata a caller sent never reaches the handlers unless the
+// host declared that its interceptor owns the keys: an interceptor written
+// before the keys existed would otherwise let a client vouch for its own
+// recent sign-in, or say no recovery email opened its session. Without that
+// declaration the session is marked unvouched, which a recovery hold binds.
+func TestGRPCBridge_SignInMetadataOnlyWhenTheHostOwnsIt(t *testing.T) {
+	md := metadata.Pairs("x-authenticated-auth-time", "1700000000", "x-authenticated-amr", "pwd")
 	for _, trust := range []bool{false, true} {
 		b := &grpcBridge{logger: zap.NewNop(), trustAuthTime: trust}
-		var seen string
+		var authTime, amr string
 		fn := func(_ context.Context, req *connect.Request[struct{}]) (*connect.Response[struct{}], error) {
-			seen = req.Header().Get(middleware.AuthenticatedAuthTimeHeader)
+			authTime = req.Header().Get(middleware.AuthenticatedAuthTimeHeader)
+			amr = req.Header().Get(middleware.AuthenticatedAMRHeader)
 			return connect.NewResponse(&struct{}{}), nil
 		}
 		if _, err := invoke(peerContext("198.51.100.4", md), b, &struct{}{}, fn); err != nil {
 			t.Fatal(err)
 		}
-		if trust && seen != "1700000000" {
-			t.Fatalf("trusted host: handler saw %q, want the interceptor's value", seen)
+		if trust && (authTime != "1700000000" || amr != "pwd") {
+			t.Fatalf("trusted host: handler saw auth time %q, amr %q, want the interceptor's values", authTime, amr)
 		}
-		if !trust && seen != "" {
-			t.Fatalf("untrusted host: the caller's auth time %q reached the handler", seen)
+		if !trust && (authTime != "" || amr != service.AMRUnvouched) {
+			t.Fatalf("untrusted host: handler saw auth time %q, amr %q, want none and %q", authTime, amr, service.AMRUnvouched)
 		}
 	}
 }

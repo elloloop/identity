@@ -262,12 +262,12 @@ func (r *sqliteRepository) FindRecoveryEmailHolder(ctx context.Context, email st
 	return &e, nil
 }
 
-func (r *sqliteRepository) MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs int64) error {
+func (r *sqliteRepository) MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs, holdMs int64) error {
 	const q = `
 		UPDATE user_recovery_emails
-		   SET last_sign_in_at_ms = $4
+		   SET last_sign_in_at_ms = CASE WHEN last_sign_in_at_ms <= $4 - $5 THEN $4 ELSE last_sign_in_at_ms END
 		 WHERE project_id = $1 AND user_id = $2 AND lower(email) = $3`
-	tag, err := r.db.Exec(ctx, q, r.projectID, userID, service.FoldEmail(email), atMs)
+	tag, err := r.db.Exec(ctx, q, r.projectID, userID, service.FoldEmail(email), atMs, holdMs)
 	if err != nil {
 		return wrapErr("MarkRecoveryEmailSignIn", err)
 	}

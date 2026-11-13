@@ -24,6 +24,7 @@ import (
 	"github.com/elloloop/identity/internal/app"
 	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/middleware"
+	"github.com/elloloop/identity/internal/service"
 )
 
 // grpcBridge adapts identity's Connect service implementation to the
@@ -48,8 +49,10 @@ type grpcBridge struct {
 	operatorLimits map[string]middleware.PathLimit
 	trustedProxies []*net.IPNet
 	logger         *zap.Logger
-	// trustAuthTime: the host's interceptor owns x-authenticated-auth-time
-	// (Options.GRPCTrustAuthTime). Otherwise the bridge drops it.
+	// trustAuthTime: the host's interceptor owns the sign-in metadata,
+	// x-authenticated-auth-time and x-authenticated-amr
+	// (Options.GRPCTrustAuthTime). Otherwise the bridge drops both, and marks
+	// the session's sign-in unvouched.
 	trustAuthTime  bool
 	trustSessionID bool
 }
@@ -193,8 +196,11 @@ func invoke[Req, Resp any](
 	if !b.trustSessionID {
 		creq.Header().Del(middleware.AuthenticatedSessionIDHeader)
 	}
+	// A session no one vouches for is held like one a recovery email opened
+	// while a recovery hold is in force.
 	if !b.trustAuthTime {
 		creq.Header().Del(middleware.AuthenticatedAuthTimeHeader)
+		creq.Header().Set(middleware.AuthenticatedAMRHeader, service.AMRUnvouched)
 	}
 	cresp, err := fn(ctx, creq)
 	if err != nil {

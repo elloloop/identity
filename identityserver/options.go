@@ -49,14 +49,16 @@ type Options struct {
 	// logger; the container passes a zap production logger.
 	Logger *zap.Logger
 
-	// GRPCTrustAuthTime lets the native-gRPC bridge pass the
-	// x-authenticated-auth-time metadata through to the handlers. Set it only
-	// when the host's gRPC auth interceptor deletes any value the client sent
-	// and sets it from the verified token's auth_time (see the embedding
-	// guide). Left false, the bridge drops the key, and MergeAccounts over
-	// native gRPC is refused reauthentication_required: a host interceptor
-	// written before the key existed cannot let a client vouch for its own
-	// sign-in.
+	// GRPCTrustAuthTime lets the native-gRPC bridge pass the sign-in
+	// metadata, x-authenticated-auth-time and x-authenticated-amr, through to
+	// the handlers. Set it only when the host's gRPC auth interceptor deletes
+	// any value the client sent for either and sets them from the verified
+	// token's auth_time and amr claims (see the embedding guide). Left false,
+	// the bridge drops both: MergeAccounts and the recovery-email changes over
+	// native gRPC are refused reauthentication_required, and while a recovery
+	// hold is in force every session is held as if a recovery email had
+	// opened it. A host interceptor written before the keys existed cannot
+	// let a client vouch for its own sign-in.
 	GRPCTrustAuthTime bool
 	// GRPCTrustSessionID requires the host interceptor to strip caller metadata
 	// and supply X-Authenticated-Session-Id from a verified human token.

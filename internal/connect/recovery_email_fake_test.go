@@ -150,13 +150,15 @@ func (r *fakeRepo) FindRecoveryEmailHolder(_ context.Context, email string) (*se
 	return nil, nil
 }
 
-func (r *fakeRepo) MarkRecoveryEmailSignIn(_ context.Context, userID, email string, atMs int64) error {
+func (r *fakeRepo) MarkRecoveryEmailSignIn(_ context.Context, userID, email string, atMs, holdMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	fold := service.FoldEmail(email)
 	for _, e := range r.recoveryEmails[userID] {
 		if service.FoldEmail(e.Email) == fold {
-			e.LastSignInAt = atMs
+			if e.LastSignInAt <= atMs-holdMs {
+				e.LastSignInAt = atMs
+			}
 			return nil
 		}
 	}

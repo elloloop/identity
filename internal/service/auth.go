@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -649,10 +650,12 @@ type Repository interface {
 	// FindRecoveryEmailHolder returns the recovery-email row holding the
 	// address (under FoldEmail) in the project, whose UserID is the account
 	// it signs in to, or nil when no account holds it.
-	// MarkRecoveryEmailSignIn stamps LastSignInAt on the account's address;
-	// an address the account does not hold is ErrNotFound.
+	// MarkRecoveryEmailSignIn stamps LastSignInAt = atMs on the account's
+	// address, unless the address signed in within holdMs before atMs: a
+	// sign-in does not extend the hold its own address started. An address
+	// the account does not hold is ErrNotFound.
 	FindRecoveryEmailHolder(ctx context.Context, email string) (*RecoveryEmail, error)
-	MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs int64) error
+	MarkRecoveryEmailSignIn(ctx context.Context, userID, email string, atMs, holdMs int64) error
 
 	// TOTP credentials
 	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)
@@ -981,6 +984,11 @@ type RefreshTokenRecord struct {
 	// session's tokens carry no auth_time. Accepting an invitation proves the
 	// mailbox it went to, so it is a sign-in and sets it.
 	AuthTimeMs int64 // epoch ms
+	// AMR is how the sign-in that opened the session proved itself, the
+	// access token's amr claim: AMRRecoveryEmail for a session a recovery
+	// email opened, empty for every other. Every rotation copies it
+	// unchanged.
+	AMR []string
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
@@ -1144,8 +1152,13 @@ type LoginChallengeRecord struct {
 	NodeID      string
 	ChallengeID string
 	UserID      string
-	ExpiresAt   int64
-	CreatedAt   int64
+	// RecoveryEmail is the recovery email the sign-in waiting on its second
+	// factor was made with, which the session it opens is marked by and
+	// whose hold starts only once the factor is proved; empty for every
+	// other sign-in.
+	RecoveryEmail string
+	ExpiresAt     int64
+	CreatedAt     int64
 }
 
 // PasswordResetToken represents a stored password-reset token.
@@ -2108,7 +2121,7 @@ func generateChallengeID() string {
 // directly so the anchor propagates unchanged across rotations.
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
 	now := s.nowMs()
-	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now)
+	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, nil)
 }
 
 // issueSignInTokens issues the tokens of an interactive sign-in into an
@@ -2119,8 +2132,9 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // place to auto-cancel a pending self-service deletion: an owner who signs
 // back in during the grace window has reclaimed the account. It is also the
 // one place a sign-in is recorded as the account's last login, once the
-// session is issued: a sign-in refused on the way is not a login.
-func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+// session is issued: a sign-in refused on the way is not a login. amr is how
+// the sign-in proved itself (SessionSignIn.AMR), nil for most.
+func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64, amr []string) (string, string, error) {
 	// An agent account has no sign-in method. Refused here, before anything
 	// is written, so no credential a corrupt row might hold opens one.
 	if err := s.refuseAgentSignIn(ctx, user, ipAddr, userAgent); err != nil {
@@ -2133,7 +2147,7 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 		return "", "", err
 	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, authTimeMs, "")
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, authTimeMs, amr, "")
 	if err != nil {
 		return "", "", err
 	}
@@ -2241,12 +2255,13 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 // sign-in. A sign-in passes its own time; the refresh path passes the consumed
 // record's AuthTimeMs; a flow no sign-in opened passes 0, and its tokens carry
 // no auth_time. A reader that needs a recent sign-in compares the claim with
-// now, so it ages as it should.
+// now, so it ages as it should. amr travels the same way, as the amr claim
+// and the refresh record's AMR.
 //
 // tenantID becomes the access token's tenant claim. It is a tenant the caller
 // has already checked the user may act in; empty keeps the deployment's
 // default tenant.
-func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, tenantID string) (string, string, error) {
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, amr []string, tenantID string) (string, string, error) {
 	// The verified-email gate's backstop: every path that mints a session (and
 	// any added later) honours it. Sign-ins and refreshes run the audited gate
 	// before reaching here, so this refuses silently.
@@ -2285,7 +2300,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// written. Like the product gate it lives here, at the chokepoint, so
 	// every session-issuing path — initial login, refresh, and any path
 	// added later — is covered by construction.
-	if err := s.enforceDOBRequired(ctx, user, claimAuthTimeMs, ipAddr, userAgent, gate); err != nil {
+	if err := s.enforceDOBRequired(ctx, user, claimAuthTimeMs, amr, ipAddr, userAgent, gate); err != nil {
 		return "", "", err
 	}
 
@@ -2301,6 +2316,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	claims := s.accessTokenClaims(ctx, user, claimAuthTimeMs)
+	claims.AMR = amr
 	if tenantID != "" {
 		claims.Tenant = tenantID
 	}
@@ -2339,6 +2355,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		SessionStartedAt: sessionStart,
 		SID:              sid,
 		AuthTimeMs:       claimAuthTimeMs,
+		AMR:              amr,
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("storing refresh token: %w", err)
@@ -2446,15 +2463,17 @@ func (s *AuthService) updateLastLogin(ctx context.Context, userID string) {
 	}
 }
 
-// issueLoginChallenge creates a pending 2FA login challenge.
-func (s *AuthService) issueLoginChallenge(ctx context.Context, userID string) (string, error) {
+// issueLoginChallenge creates a pending 2FA login challenge, for a sign-in
+// by the recovery email recoveryEmail when it is not empty.
+func (s *AuthService) issueLoginChallenge(ctx context.Context, userID, recoveryEmail string) (string, error) {
 	now := s.nowMs()
 	challengeID := generateChallengeID()
 	_, err := s.repo(ctx).CreateLoginChallenge(ctx, &LoginChallengeRecord{
-		ChallengeID: challengeID,
-		UserID:      userID,
-		ExpiresAt:   now + int64(s.cfg.LoginChallengeExpirySeconds)*1000,
-		CreatedAt:   now,
+		ChallengeID:   challengeID,
+		UserID:        userID,
+		RecoveryEmail: recoveryEmail,
+		ExpiresAt:     now + int64(s.cfg.LoginChallengeExpirySeconds)*1000,
+		CreatedAt:     now,
 	})
 	if err != nil {
 		return "", fmt.Errorf("creating login challenge: %w", err)
@@ -2728,7 +2747,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// issueTokensWithSessionStart (so nothing is bypassed); this early pass
 	// exists only so the refusal is non-destructive and the client can
 	// complete the step and rotate normally.
-	if err := s.enforceDOBRequired(ctx, timeoutUser, record.AuthTimeMs, ipAddr, userAgent, sessionGateRefresh); err != nil {
+	if err := s.enforceDOBRequired(ctx, timeoutUser, record.AuthTimeMs, record.AMR, ipAddr, userAgent, sessionGateRefresh); err != nil {
 		return nil, "", "", err
 	}
 
@@ -2849,8 +2868,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// absolute timeout keeps measuring from the original login. A legacy row
 	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
 	// issueTokensWithSessionStart. The sign-in's auth_time is carried over
-	// unchanged too; the gates get 0 because a rotation is not a sign-in.
-	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, tenantID)
+	// unchanged too, and so is how it proved itself; the gates get 0 because
+	// a rotation is not a sign-in.
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, record.AMR, tenantID)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -2891,7 +2911,8 @@ func notTenantIDRune(r rune) bool {
 // checkTenantSelection refuses a tenant the user may not act in: one that is
 // not a claimed tenant of the request's project, one where the user holds no
 // active membership, or one they belong to only through their email's domain
-// while that email is unverified or not on a domain the tenant has verified.
+// while that email is unverified or not on a domain the tenant has verified,
+// or while the session is one a recovery email opened (memberDomain).
 // The refusal does not say which. A member is then held to the tenant's
 // login policy (checkSelectedTenantPolicy). Without a reader
 // (GATEWAY_TENANT_SELECTION_ENABLED off, or a driver with no tenants) every
@@ -2902,11 +2923,12 @@ func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, sess
 		return &TenantSelectionRefusedError{Reason: TenantSelectionNotEnabled, Err: ErrTenantSelectionDisabled}
 	}
 	projectID := s.projectID(ctx)
-	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, projectID, tenantID, user.ID, verifiedEmailDomain(user))
+	domain := memberDomain(user, slices.Contains(session.AMR, AMRRecoveryEmail))
+	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, projectID, tenantID, user.ID, domain)
 	if err != nil {
 		return s.tenantSelectionUnavailable(projectID, tenantID, err)
 	}
-	if t == nil || !actsInTenant(user, t) {
+	if t == nil || !actsInTenant(t, domain) {
 		return &TenantSelectionRefusedError{
 			Reason: TenantSelectionNotAMember,
 			Err:    fmt.Errorf("%w: not an active member of that tenant", ErrPermissionDenied),

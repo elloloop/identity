@@ -17,8 +17,15 @@
 -- recovery_email_codes is the emailed code that proves an address before a
 -- row is stored: at most one live code per user, as phone_verification_codes.
 --
--- Both tables are new and empty, so nothing here waits on or rewrites
--- existing rows.
+-- refresh_tokens.amr is how the sign-in that opened a session proved itself
+-- (the access token's amr claim, values separated by spaces), copied
+-- unchanged across rotations: 'recovery_email' for a session a recovery
+-- email opened, '' for every other. login_challenges.recovery_email is the
+-- recovery email a sign-in waiting on its second factor was made with.
+--
+-- The two tables are new and empty, and the two columns have constant
+-- defaults, so nothing here rewrites existing rows; the column adds wait
+-- only for the brief exclusive lock lock_timeout bounds.
 SET LOCAL lock_timeout = '10s';
 
 CREATE TABLE user_recovery_emails (
@@ -59,3 +66,6 @@ ALTER TABLE recovery_email_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recovery_email_codes FORCE ROW LEVEL SECURITY;
 CREATE POLICY recovery_email_codes_project_isolation ON recovery_email_codes
     USING (project_id = current_setting('app.current_project_id', true));
+
+ALTER TABLE refresh_tokens ADD COLUMN amr TEXT NOT NULL DEFAULT '';
+ALTER TABLE login_challenges ADD COLUMN recovery_email TEXT NOT NULL DEFAULT '';

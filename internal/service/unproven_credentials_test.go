@@ -67,9 +67,9 @@ func TestVerificationLink_VoidsWhatAProviderClaimantAdded(t *testing.T) {
 	require.Equal(t, "someone@example.com", claimed.Email)
 	require.False(t, claimed.EmailVerified)
 
-	_, err = svc.LinkIdentity(ctx, claimed.ID, fakeOAuthCode("claimant@example.org", "C", "", "github"), "github", "https://app/cb", "", "", "")
+	_, err = svc.LinkIdentity(ctx, claimed.ID, SessionSignIn{}, fakeOAuthCode("claimant@example.org", "C", "", "github"), "github", "https://app/cb", "", "", "")
 	require.NoError(t, err)
-	_, err = svc.LinkIdentity(ctx, claimed.ID, fakeOAuthCode("someone@example.com", "S", "", "microsoft"), "microsoft", "https://app/cb", "", "", "")
+	_, err = svc.LinkIdentity(ctx, claimed.ID, SessionSignIn{}, fakeOAuthCode("someone@example.com", "S", "", "microsoft"), "microsoft", "https://app/cb", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{
 		"google/sub-someone+news@example.com": "someone+news@example.com",
@@ -276,7 +276,7 @@ func TestLinkIdentity_WithdrawsALinkWhenTheAddressIsProvenMeanwhile(t *testing.T
 		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
 	}
 
-	_, err := svc.LinkIdentity(ctx, user.ID, fakeOAuthCode("planter@example.org", "P", "", "github"), "github", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(ctx, user.ID, SessionSignIn{}, fakeOAuthCode("planter@example.org", "P", "", "github"), "github", "https://app/cb", "", "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	assert.Empty(t, linkedProviders(t, repo, user.ID), "the link is withdrawn")
 }
@@ -292,7 +292,7 @@ func TestLinkIdentity_AccountDeletedMeanwhileIsNotFound(t *testing.T) {
 		require.NoError(t, repo.DeleteUser(ctx, user.ID))
 	}
 
-	_, err := svc.LinkIdentity(ctx, user.ID, fakeOAuthCode("gone@example.org", "G", "", "github"), "github", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(ctx, user.ID, SessionSignIn{}, fakeOAuthCode("gone@example.org", "G", "", "github"), "github", "https://app/cb", "", "", "")
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.NotErrorIs(t, err, ErrUnauthenticated)
 	assert.Empty(t, linkedProviders(t, repo, user.ID), "the link is withdrawn")
@@ -304,7 +304,7 @@ func TestLinkIdentity_KeepsALinkOnAnUnprovenAccount(t *testing.T) {
 	svc, repo, _ := proofSvc(t)
 	user := seedUser(repo, "someone@example.com", hashPW(t, "Owner-Passw0rd!x"), StatusActive)
 
-	_, err := svc.LinkIdentity(context.Background(), user.ID, fakeOAuthCode("someone@example.org", "S", "", "github"), "github", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(context.Background(), user.ID, SessionSignIn{}, fakeOAuthCode("someone@example.org", "S", "", "github"), "github", "https://app/cb", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"github/sub-someone@example.org"}, linkedProviders(t, repo, user.ID))
 }
@@ -394,7 +394,7 @@ func TestCompletePasskeyRegistration_WithdrawsAPasskeyWhenTheAddressIsProvenMean
 		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
 	require.NoError(t, err)
@@ -415,7 +415,7 @@ func TestCompletePasskeyRegistration_VerificationLinkMidRegistrationKeepsEarlier
 		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
 	require.NoError(t, err)
@@ -442,7 +442,7 @@ func TestCompletePasskeyRegistration_PasskeyAlreadyVoidedIsNotAFailure(t *testin
 		}
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	assert.NotErrorIs(t, err, ErrUnavailable)
 }
@@ -461,7 +461,7 @@ func TestCompletePasskeyRegistration_FailedRecheckWithdrawsThePasskey(t *testing
 		repo.getUserErr = errors.New("connection reset")
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
 	require.ErrorIs(t, err, ErrUnavailable)
 	repo.getUserErr = nil
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
@@ -494,7 +494,7 @@ func TestCompletePasskeyRegistration_FailedWithdrawIsUnavailable(t *testing.T) {
 		repo.deletePasskeyCredErr = errors.New("connection reset")
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
 	require.ErrorIs(t, err, ErrUnavailable)
 	assert.NotErrorIs(t, err, ErrUnauthenticated)
 }
@@ -512,7 +512,7 @@ func TestCompletePasskeyRegistration_AccountDeletedMeanwhileIsNotFound(t *testin
 		require.NoError(t, repo.DeleteUser(ctx, user.ID))
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.NotErrorIs(t, err, ErrUnauthenticated)
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
@@ -528,7 +528,7 @@ func TestCompletePasskeyRegistration_KeepsAPasskeyOnAnUnprovenAccount(t *testing
 	user := seedUser(repo, "someone@example.com", "", StatusActive)
 	challengeID := registrationChallenge(t, repo, user.ID)
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
 	require.NoError(t, err)
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
 	require.NoError(t, err)

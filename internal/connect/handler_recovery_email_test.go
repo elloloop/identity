@@ -2,12 +2,15 @@ package connect
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -104,6 +107,28 @@ func signedIn[T any](r *connect.Request[T], userID string) *connect.Request[T] {
 	return authedReq(r, userID)
 }
 
+// tokenAMR reads the amr claim of a token the harness minted. The signature
+// is the server's business; this only looks at what the token says.
+func tokenAMR(t *testing.T, token string) []string {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	require.Len(t, parts, 3)
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+	var claims struct {
+		AMR []string `json:"amr"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &claims))
+	return claims.AMR
+}
+
+// signedInByRecoveryEmail marks a request as coming from a session of
+// userID's that a recovery email opened just now.
+func signedInByRecoveryEmail[T any](r *connect.Request[T], userID string) *connect.Request[T] {
+	r.Header().Set(middleware.AuthenticatedAMRHeader, service.AMRRecoveryEmail)
+	return signedIn(r, userID)
+}
+
 func TestHandler_RecoveryEmails_AddListRemove(t *testing.T) {
 	h, mailer := newRecoveryEmailHarness(t, service.ProjectRecoveryEmailsConfig{Enabled: true})
 	ctx := context.Background()
@@ -177,8 +202,9 @@ func TestHandler_RecoveryEmails_Refusals(t *testing.T) {
 	assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
 }
 
-// A sign-in by a recovery email holds the account's recovery settings, and
-// both the list and the refusal say until when.
+// A sign-in by a recovery email holds the session it opened from the
+// account's recovery settings, both the list and the refusal say until
+// when, and a session opened another way is not held.
 func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 	h, mailer := newRecoveryEmailHarness(t, service.ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true})
 	ctx := context.Background()
@@ -193,6 +219,7 @@ func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	assert.Equal(t, uid, login.Msg.User.Id)
+	assert.Equal(t, []string{service.AMRRecoveryEmail}, tokenAMR(t, login.Msg.AccessToken))
 
 	listed, err := h.client.ListRecoveryEmails(ctx, authedReq(connect.NewRequest(&identitypb.ListRecoveryEmailsRequest{}), uid))
 	require.NoError(t, err)
@@ -213,10 +240,20 @@ func TestHandler_RecoverySignInHoldIsReported(t *testing.T) {
 		assert.Equal(t, holdUntil, details.HoldUntil)
 	}
 	_, err = h.client.RemoveRecoveryEmail(ctx,
+		signedInByRecoveryEmail(connect.NewRequest(&identitypb.RemoveRecoveryEmailRequest{Email: "spare@example.net"}), uid))
+	requireHold(err)
+	_, err = h.client.RemovePhone(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.RemovePhoneRequest{}), uid))
+	requireHold(err)
+	_, err = h.client.BeginTotpSetup(ctx, signedInByRecoveryEmail(connect.NewRequest(&identitypb.BeginTotpSetupRequest{}), uid))
+	requireHold(err)
+
+	// The owner's own session removes the address, and the hold is over.
+	_, err = h.client.RemoveRecoveryEmail(ctx,
 		signedIn(connect.NewRequest(&identitypb.RemoveRecoveryEmailRequest{Email: "spare@example.net"}), uid))
-	requireHold(err)
-	_, err = h.client.RemovePhone(ctx, authedReq(connect.NewRequest(&identitypb.RemovePhoneRequest{}), uid))
-	requireHold(err)
+	require.NoError(t, err)
+	listed, err = h.client.ListRecoveryEmails(ctx, authedReq(connect.NewRequest(&identitypb.ListRecoveryEmailsRequest{}), uid))
+	require.NoError(t, err)
+	assert.Zero(t, listed.Msg.HoldUntil)
 }
 
 func TestHandler_RemovePhone(t *testing.T) {
@@ -243,6 +280,7 @@ func TestToConnectError_RecoveryAndPhoneSentinels(t *testing.T) {
 		service.ErrPhoneNumberTaken:                 connect.CodeAlreadyExists,
 		service.ErrPhoneCountryNotAllowed:           connect.CodeFailedPrecondition,
 		service.ErrPhoneVerificationRequired:        connect.CodeFailedPrecondition,
+		service.ErrRecoverySession:                  connect.CodeFailedPrecondition,
 	} {
 		assert.Equal(t, want, connect.CodeOf(toConnectError(err)), "%v", err)
 		assert.Equal(t, want, connect.CodeOf(toConnectError(fmt.Errorf("%w: detail", err))), "wrapped %v", err)

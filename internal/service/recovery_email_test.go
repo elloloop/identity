@@ -31,8 +31,16 @@ func newRecoveryEmailFixture(t *testing.T, cfg ProjectRecoveryEmailsConfig) *rec
 	return f
 }
 
-// signedInNow is the auth_time of a session whose sign-in just happened.
-func (f *recoveryEmailFixture) signedInNow() int64 { return f.now.Unix() }
+// signedInNow is a session whose sign-in, not by a recovery email, just
+// happened.
+func (f *recoveryEmailFixture) signedInNow() SessionSignIn {
+	return SessionSignIn{AuthTimeSec: f.now.Unix()}
+}
+
+// recoverySignedInNow is a session a recovery email opened just now.
+func (f *recoveryEmailFixture) recoverySignedInNow() SessionSignIn {
+	return SessionSignIn{AuthTimeSec: f.now.Unix(), AMR: []string{AMRRecoveryEmail}}
+}
 
 var sixDigits = regexp.MustCompile(`\b\d{6}\b`)
 
@@ -136,20 +144,20 @@ func TestRecoveryEmail_ChangesNeedARecentSignIn(t *testing.T) {
 	stale := f.now.Add(-601 * time.Second).Unix()
 	fresh := f.now.Add(-600 * time.Second).Unix()
 	for _, authTime := range []int64{0, stale} {
-		if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, authTime, "other@example.net"); !errors.Is(err, ErrRecoveryReauthenticationRequired) {
+		if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, SessionSignIn{AuthTimeSec: authTime}, "other@example.net"); !errors.Is(err, ErrRecoveryReauthenticationRequired) {
 			t.Fatalf("Request at auth_time %d: want ErrRecoveryReauthenticationRequired, got %v", authTime, err)
 		}
-		if _, err := f.svc.VerifyRecoveryEmail(f.ctx, user.ID, authTime, "other@example.net", "123456"); !errors.Is(err, ErrRecoveryReauthenticationRequired) {
+		if _, err := f.svc.VerifyRecoveryEmail(f.ctx, user.ID, SessionSignIn{AuthTimeSec: authTime}, "other@example.net", "123456"); !errors.Is(err, ErrRecoveryReauthenticationRequired) {
 			t.Fatalf("Verify at auth_time %d: want ErrRecoveryReauthenticationRequired, got %v", authTime, err)
 		}
-		if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, authTime, "spare@example.net"); !errors.Is(err, ErrRecoveryReauthenticationRequired) {
+		if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, SessionSignIn{AuthTimeSec: authTime}, "spare@example.net"); !errors.Is(err, ErrRecoveryReauthenticationRequired) {
 			t.Fatalf("Remove at auth_time %d: want ErrRecoveryReauthenticationRequired, got %v", authTime, err)
 		}
 	}
 	if !strings.HasPrefix(ErrRecoveryReauthenticationRequired.Error(), "reauthentication_required") {
 		t.Fatalf("the refusal lost its wire token: %q", ErrRecoveryReauthenticationRequired)
 	}
-	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, fresh, "spare@example.net"); err != nil {
+	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, user.ID, SessionSignIn{AuthTimeSec: fresh}, "spare@example.net"); err != nil {
 		t.Fatalf("Remove at the edge of the window: %v", err)
 	}
 	// Listing needs no recent sign-in.

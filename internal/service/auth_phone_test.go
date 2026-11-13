@@ -113,7 +113,7 @@ func TestRequestPhoneVerification_HappyPath(t *testing.T) {
 	svc := newTestPhoneService(t, repo, sender)
 	uid := seedPhoneUser(t, repo, "p1@example.com")
 
-	if err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123"); err != nil {
+	if err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123"); err != nil {
 		t.Fatalf("RequestPhoneVerification: %v", err)
 	}
 	msg, ok := sender.last()
@@ -141,7 +141,7 @@ func TestRequestPhoneVerification_SMSDisabled(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo) // SMS disabled by default
 	uid := seedPhoneUser(t, repo, "p-disabled@example.com")
-	err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123")
+	err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123")
 	if !errors.Is(err, ErrSMSDisabled) {
 		t.Fatalf("want ErrSMSDisabled, got %v", err)
 	}
@@ -151,7 +151,7 @@ func TestRequestPhoneVerification_InvalidNumber(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestPhoneService(t, repo, &fakeSMSSender{})
 	uid := seedPhoneUser(t, repo, "p-bad@example.com")
-	err := svc.RequestPhoneVerification(context.Background(), uid, "14155550123") // no +
+	err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "14155550123") // no +
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("want ErrInvalidArgument, got %v", err)
 	}
@@ -163,11 +163,11 @@ func TestRequestPhoneVerification_Cooldown(t *testing.T) {
 	svc := newTestPhoneService(t, repo, sender)
 	uid := seedPhoneUser(t, repo, "p-cool@example.com")
 
-	if err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123"); err != nil {
+	if err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123"); err != nil {
 		t.Fatalf("first request: %v", err)
 	}
 	// Second immediate request is throttled: returns nil but sends no SMS.
-	if err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123"); err != nil {
+	if err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123"); err != nil {
 		t.Fatalf("second request: %v", err)
 	}
 	if sender.count() != 1 {
@@ -182,7 +182,7 @@ func TestRequestPhoneVerification_AlreadyVerified(t *testing.T) {
 	if err := repo.SetUserPhoneVerified(context.Background(), uid, "+14155550123", 1); err != nil {
 		t.Fatalf("seed verified: %v", err)
 	}
-	err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123")
+	err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123")
 	if !errors.Is(err, ErrPhoneAlreadyVerified) {
 		t.Fatalf("want ErrPhoneAlreadyVerified, got %v", err)
 	}
@@ -193,7 +193,7 @@ func TestRequestPhoneVerification_SendFailureSurfaces(t *testing.T) {
 	sender := &fakeSMSSender{err: errors.New("provider down")}
 	svc := newTestPhoneService(t, repo, sender)
 	uid := seedPhoneUser(t, repo, "p-sendfail@example.com")
-	err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123")
+	err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123")
 	if !errors.Is(err, ErrSMSDisabled) {
 		t.Fatalf("send failure should surface (wrapped ErrSMSDisabled), got %v", err)
 	}
@@ -205,13 +205,13 @@ func TestVerifyPhoneCode_HappyPath(t *testing.T) {
 	svc := newTestPhoneService(t, repo, sender)
 	uid := seedPhoneUser(t, repo, "v1@example.com")
 
-	if err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123"); err != nil {
+	if err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123"); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 	msg, _ := sender.last()
 	code := extractCode(t, msg.Body)
 
-	user, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", code)
+	user, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", code)
 	if err != nil {
 		t.Fatalf("VerifyPhoneCode: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestVerifyPhoneCode_HappyPath(t *testing.T) {
 		t.Fatalf("user not marked verified: %+v", user)
 	}
 	// Replay is rejected (code consumed).
-	if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", code); !errors.Is(err, ErrPhoneCodeInvalid) {
+	if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", code); !errors.Is(err, ErrPhoneCodeInvalid) {
 		t.Fatalf("replay: want ErrPhoneCodeInvalid, got %v", err)
 	}
 }
@@ -229,11 +229,11 @@ func TestVerifyPhoneCode_WrongCodeIncrementsAttempts(t *testing.T) {
 	sender := &fakeSMSSender{}
 	svc := newTestPhoneService(t, repo, sender)
 	uid := seedPhoneUser(t, repo, "v-wrong@example.com")
-	if err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123"); err != nil {
+	if err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123"); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 
-	if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", "000000"); !errors.Is(err, ErrPhoneCodeInvalid) {
+	if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "000000"); !errors.Is(err, ErrPhoneCodeInvalid) {
 		t.Fatalf("wrong code: want ErrPhoneCodeInvalid, got %v", err)
 	}
 	rec, _ := repo.FindPhoneVerificationCodeByUser(context.Background(), uid)
@@ -247,7 +247,7 @@ func TestVerifyPhoneCode_MaxAttemptsBurnsCode(t *testing.T) {
 	sender := &fakeSMSSender{}
 	svc := newTestPhoneService(t, repo, sender)
 	uid := seedPhoneUser(t, repo, "v-max@example.com")
-	if err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123"); err != nil {
+	if err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123"); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 	msg, _ := sender.last()
@@ -255,12 +255,12 @@ func TestVerifyPhoneCode_MaxAttemptsBurnsCode(t *testing.T) {
 
 	// Exhaust the 5-attempt budget with wrong guesses.
 	for i := 0; i < 5; i++ {
-		if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", "999999"); !errors.Is(err, ErrPhoneCodeInvalid) {
+		if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "999999"); !errors.Is(err, ErrPhoneCodeInvalid) {
 			t.Fatalf("attempt %d: want ErrPhoneCodeInvalid, got %v", i, err)
 		}
 	}
 	// The real code is now burned — even a correct guess fails.
-	if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", realCode); !errors.Is(err, ErrPhoneCodeInvalid) {
+	if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", realCode); !errors.Is(err, ErrPhoneCodeInvalid) {
 		t.Fatalf("post-cap correct code: want ErrPhoneCodeInvalid, got %v", err)
 	}
 }
@@ -276,7 +276,7 @@ func TestVerifyPhoneCode_Expired(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", "123456"); !errors.Is(err, ErrPhoneCodeInvalid) {
+	if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrPhoneCodeInvalid) {
 		t.Fatalf("expired: want ErrPhoneCodeInvalid, got %v", err)
 	}
 }
@@ -286,13 +286,13 @@ func TestVerifyPhoneCode_NumberMismatch(t *testing.T) {
 	sender := &fakeSMSSender{}
 	svc := newTestPhoneService(t, repo, sender)
 	uid := seedPhoneUser(t, repo, "v-mismatch@example.com")
-	if err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123"); err != nil {
+	if err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123"); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 	msg, _ := sender.last()
 	code := extractCode(t, msg.Body)
 	// Verifying against a different number must fail even with the right code.
-	if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550999", code); !errors.Is(err, ErrPhoneCodeInvalid) {
+	if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550999", code); !errors.Is(err, ErrPhoneCodeInvalid) {
 		t.Fatalf("number mismatch: want ErrPhoneCodeInvalid, got %v", err)
 	}
 }
@@ -301,7 +301,7 @@ func TestVerifyPhoneCode_SMSDisabled(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	uid := seedPhoneUser(t, repo, "v-disabled@example.com")
-	if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", "123456"); !errors.Is(err, ErrSMSDisabled) {
+	if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrSMSDisabled) {
 		t.Fatalf("want ErrSMSDisabled, got %v", err)
 	}
 }
@@ -352,7 +352,7 @@ func TestVerifyPhoneCode_ErrorBranches(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestPhoneService(t, repo, &fakeSMSSender{})
 		svc.cfg.SMSEnabled = false
-		if _, err := svc.VerifyPhoneCode(context.Background(), "u1", "+14155550123", "123456"); !errors.Is(err, ErrSMSDisabled) {
+		if _, err := svc.VerifyPhoneCode(context.Background(), "u1", SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrSMSDisabled) {
 			t.Fatalf("want ErrSMSDisabled, got %v", err)
 		}
 	})
@@ -360,7 +360,7 @@ func TestVerifyPhoneCode_ErrorBranches(t *testing.T) {
 	t.Run("missing user id", func(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestPhoneService(t, repo, &fakeSMSSender{})
-		if _, err := svc.VerifyPhoneCode(context.Background(), "", "+14155550123", "123456"); !errors.Is(err, ErrUnauthenticated) {
+		if _, err := svc.VerifyPhoneCode(context.Background(), "", SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrUnauthenticated) {
 			t.Fatalf("want ErrUnauthenticated, got %v", err)
 		}
 	})
@@ -369,10 +369,10 @@ func TestVerifyPhoneCode_ErrorBranches(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestPhoneService(t, repo, &fakeSMSSender{})
 		uid := seedPhoneUser(t, repo, "v-bad@example.com")
-		if _, err := svc.VerifyPhoneCode(context.Background(), uid, "not-a-phone", "123456"); !errors.Is(err, ErrPhoneCodeInvalid) {
+		if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "not-a-phone", "123456"); !errors.Is(err, ErrPhoneCodeInvalid) {
 			t.Fatalf("malformed number: want ErrPhoneCodeInvalid, got %v", err)
 		}
-		if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", "  "); !errors.Is(err, ErrPhoneCodeInvalid) {
+		if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "  "); !errors.Is(err, ErrPhoneCodeInvalid) {
 			t.Fatalf("empty code: want ErrPhoneCodeInvalid, got %v", err)
 		}
 	})
@@ -381,7 +381,7 @@ func TestVerifyPhoneCode_ErrorBranches(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestPhoneService(t, repo, &fakeSMSSender{})
 		uid := seedPhoneUser(t, repo, "v-none@example.com")
-		if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", "123456"); !errors.Is(err, ErrPhoneCodeInvalid) {
+		if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "123456"); !errors.Is(err, ErrPhoneCodeInvalid) {
 			t.Fatalf("no code: want ErrPhoneCodeInvalid, got %v", err)
 		}
 	})
@@ -391,13 +391,13 @@ func TestVerifyPhoneCode_ErrorBranches(t *testing.T) {
 		sender := &fakeSMSSender{}
 		svc := newTestPhoneService(t, repo, sender)
 		uid := seedPhoneUser(t, repo, "v-mismatch@example.com")
-		if err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123"); err != nil {
+		if err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123"); err != nil {
 			t.Fatalf("Request: %v", err)
 		}
 		msg, _ := sender.last()
 		code := extractCode(t, msg.Body)
 		// Verify against a DIFFERENT number than the one the code was minted for.
-		if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550999", code); !errors.Is(err, ErrPhoneCodeInvalid) {
+		if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550999", code); !errors.Is(err, ErrPhoneCodeInvalid) {
 			t.Fatalf("number mismatch: want ErrPhoneCodeInvalid, got %v", err)
 		}
 	})
@@ -408,19 +408,19 @@ func TestVerifyPhoneCode_ErrorBranches(t *testing.T) {
 		svc := newTestPhoneService(t, repo, sender)
 		svc.cfg.PhoneCodeMaxAttempts = 2
 		uid := seedPhoneUser(t, repo, "v-burn@example.com")
-		if err := svc.RequestPhoneVerification(context.Background(), uid, "+14155550123"); err != nil {
+		if err := svc.RequestPhoneVerification(context.Background(), uid, SessionSignIn{}, "+14155550123"); err != nil {
 			t.Fatalf("Request: %v", err)
 		}
 		// Two wrong guesses reach the cap and consume the code.
 		for i := 0; i < 2; i++ {
-			if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", "000000"); !errors.Is(err, ErrPhoneCodeInvalid) {
+			if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", "000000"); !errors.Is(err, ErrPhoneCodeInvalid) {
 				t.Fatalf("wrong guess %d: want ErrPhoneCodeInvalid, got %v", i, err)
 			}
 		}
 		// Even the correct code now fails — it was burned at the cap.
 		msg, _ := sender.last()
 		code := extractCode(t, msg.Body)
-		if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", code); !errors.Is(err, ErrPhoneCodeInvalid) {
+		if _, err := svc.VerifyPhoneCode(context.Background(), uid, SessionSignIn{}, "+14155550123", code); !errors.Is(err, ErrPhoneCodeInvalid) {
 			t.Fatalf("post-cap correct code: want ErrPhoneCodeInvalid, got %v", err)
 		}
 	})
