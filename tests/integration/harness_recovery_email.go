@@ -3,10 +3,12 @@
 package integration
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -69,7 +71,7 @@ func (r *MemRepo) AddRecoveryEmail(_ context.Context, e *service.RecoveryEmail, 
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.users[e.UserID]; !ok {
+	if u, ok := r.users[e.UserID]; !ok || u.Status != service.StatusActive || u.MergedIntoUserID != "" {
 		return fmt.Errorf("integration: AddRecoveryEmail: %w", service.ErrNotFound)
 	}
 	fold := service.FoldEmail(e.Email)
@@ -106,6 +108,9 @@ func (r *MemRepo) ListRecoveryEmails(_ context.Context, userID string) ([]*servi
 		cp := *e
 		out = append(out, &cp)
 	}
+	slices.SortFunc(out, func(a, b *service.RecoveryEmail) int {
+		return cmp.Or(cmp.Compare(a.VerifiedAt, b.VerifiedAt), strings.Compare(a.ID, b.ID))
+	})
 	return out, nil
 }
 
