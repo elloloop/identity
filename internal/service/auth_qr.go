@@ -100,7 +100,9 @@ func (s *AuthService) GetQrLoginSession(ctx context.Context, sessionID string) (
 // ApproveQrLogin approves or rejects a QR login session. Returns the new
 // status. A session a recovery email opened may reject one but not approve
 // it (ErrRecoverySession): the session the hand-off opens would not carry
-// that sign-in's amr, and so would escape what binds it.
+// that sign-in's amr, and so would escape what binds it. A session no one
+// vouched for (AMRUnvouched) may be such a session, and is refused the same
+// while a recovery hold is in force on the account.
 func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, approve bool, userID string, signIn SessionSignIn, ipAddr, userAgent string) (string, error) {
 	if sessionID == "" {
 		return "", fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
@@ -130,8 +132,8 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 
 	var newStatus string
 	if approve {
-		if signIn.openedByRecoveryEmail() {
-			return "", fmt.Errorf("%w: sign in on the other device instead", ErrRecoverySession)
+		if err := s.refuseRecoverySessionApproval(ctx, userID, signIn, now); err != nil {
+			return "", err
 		}
 		if err := s.checkQrApprover(ctx, userID, ipAddr, userAgent); err != nil {
 			return "", err
@@ -170,6 +172,21 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 		zap.Bool("approved", approve),
 	)
 	return newStatus, nil
+}
+
+// refuseRecoverySessionApproval refuses (ErrRecoverySession) a QR approval
+// by a session a recovery email opened, and by one that may have been opened
+// that way while a recovery hold is in force on userID's account at nowMs.
+func (s *AuthService) refuseRecoverySessionApproval(ctx context.Context, userID string, signIn SessionSignIn, nowMs int64) error {
+	if !signIn.mayBeRecoverySession() {
+		return nil
+	}
+	if !signIn.openedByRecoveryEmail() {
+		if err := recoveryHoldOn(ctx, s.repo(ctx), userID, nowMs); !errors.Is(err, ErrRecoveryHold) {
+			return err
+		}
+	}
+	return fmt.Errorf("%w: sign in on the other device instead", ErrRecoverySession)
 }
 
 // checkQrApprover refuses an approval from an account that could not sign in

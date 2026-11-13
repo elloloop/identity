@@ -823,6 +823,11 @@ default; a control-plane project's `config_json` only).
   other way is not held: the owner can always remove an address they do not
   recognise, and removing the one that started the hold ends it. A sign-in
   from the same address does not extend a hold already in force.
+- Over native gRPC the session's `amr` reaches identity only from a host
+  that forwards it and says so (`GRPCTrustAMR`). Until then every session
+  there is treated as one a recovery email may have opened: it is held
+  during a hold, approves no QR sign-in while one is in force, and
+  `ListMyTenants` lists only its explicit memberships.
 - Removing a recovery email ends every session it opened, in the same
   transaction: their refresh tokens are deleted, rotated ones included, and
   under `GATEWAY_REVOCATION_MODE=session` their access tokens stop working at

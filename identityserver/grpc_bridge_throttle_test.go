@@ -3,6 +3,7 @@ package identityserver
 import (
 	"context"
 	"net"
+	"slices"
 	"testing"
 	"time"
 
@@ -104,28 +105,40 @@ func TestGRPCBridge_InvokeSetsTheClientIPFromTheTransport(t *testing.T) {
 }
 
 // The sign-in metadata a caller sent never reaches the handlers unless the
-// host declared that its interceptor owns the keys: an interceptor written
+// host declared that its interceptor owns the key: an interceptor written
 // before the keys existed would otherwise let a client vouch for its own
-// recent sign-in, or say no recovery email opened its session. Without that
-// declaration the session is marked unvouched, which a recovery hold binds.
+// recent sign-in, or say no recovery email opened its session. The amr has
+// its own declaration, since a host that forwards auth_time may forward no
+// amr, and a missing amr would read as a session no recovery email opened:
+// until the host declares it, every session is marked unvouched, whatever
+// the client sent and whatever else the host trusts.
 func TestGRPCBridge_SignInMetadataOnlyWhenTheHostOwnsIt(t *testing.T) {
-	md := metadata.Pairs("x-authenticated-auth-time", "1700000000", "x-authenticated-amr", "pwd")
-	for _, trust := range []bool{false, true} {
-		b := &grpcBridge{logger: zap.NewNop(), trustAuthTime: trust}
-		var authTime, amr string
-		fn := func(_ context.Context, req *connect.Request[struct{}]) (*connect.Response[struct{}], error) {
-			authTime = req.Header().Get(middleware.AuthenticatedAuthTimeHeader)
-			amr = req.Header().Get(middleware.AuthenticatedAMRHeader)
-			return connect.NewResponse(&struct{}{}), nil
-		}
-		if _, err := invoke(peerContext("198.51.100.4", md), b, &struct{}{}, fn); err != nil {
-			t.Fatal(err)
-		}
-		if trust && (authTime != "1700000000" || amr != "pwd") {
-			t.Fatalf("trusted host: handler saw auth time %q, amr %q, want the interceptor's values", authTime, amr)
-		}
-		if !trust && (authTime != "" || amr != service.AMRUnvouched) {
-			t.Fatalf("untrusted host: handler saw auth time %q, amr %q, want none and %q", authTime, amr, service.AMRUnvouched)
+	for _, sent := range []metadata.MD{
+		metadata.Pairs("x-authenticated-auth-time", "1700000000", "x-authenticated-amr", "pwd"),
+		metadata.Pairs("x-authenticated-auth-time", "1700000000"),
+	} {
+		for _, trust := range []grpcTrust{{}, {authTime: true}, {amr: true}, {authTime: true, amr: true}} {
+			b := &grpcBridge{logger: zap.NewNop(), trust: trust}
+			var authTime string
+			var amr []string
+			fn := func(_ context.Context, req *connect.Request[struct{}]) (*connect.Response[struct{}], error) {
+				authTime = req.Header().Get(middleware.AuthenticatedAuthTimeHeader)
+				amr = req.Header().Values(middleware.AuthenticatedAMRHeader)
+				return connect.NewResponse(&struct{}{}), nil
+			}
+			if _, err := invoke(peerContext("198.51.100.4", sent), b, &struct{}{}, fn); err != nil {
+				t.Fatal(err)
+			}
+			if wantTime := map[bool]string{true: "1700000000"}[trust.authTime]; authTime != wantTime {
+				t.Errorf("trust %+v, sent %v: handler saw auth time %q, want %q", trust, sent, authTime, wantTime)
+			}
+			wantAMR := []string{service.AMRUnvouched}
+			if trust.amr {
+				wantAMR = sent.Get("x-authenticated-amr")
+			}
+			if !slices.Equal(amr, wantAMR) {
+				t.Errorf("trust %+v, sent %v: handler saw amr %q, want %q", trust, sent, amr, wantAMR)
+			}
 		}
 	}
 }

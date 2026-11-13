@@ -306,6 +306,43 @@ func TestRecoveryHold_RemovalsAreHeldFromTheRecoverySessionOnly(t *testing.T) {
 	}
 }
 
+// A session no one vouched for how it was opened (the native-gRPC bridge
+// without GRPCTrustAMR) may be one a recovery email opened, so it approves
+// no QR sign-in while a hold is in force; otherwise it approves as before.
+// A session a recovery email opened approves none, hold or not.
+func TestApproveQrLogin_AnUnvouchedSessionIsRefusedDuringAHold(t *testing.T) {
+	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
+	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	f.add(t, user, "spare@example.net")
+	approve := func(session SessionSignIn) (string, error) {
+		t.Helper()
+		qr, err := f.svc.InitiateQrLogin(f.ctx, "laptop", "agent", "203.0.113.9")
+		if err != nil {
+			t.Fatalf("InitiateQrLogin: %v", err)
+		}
+		return f.svc.ApproveQrLogin(f.ctx, qr.SessionID, true, user.ID, session, "", "")
+	}
+	unvouched := SessionSignIn{AuthTimeSec: f.now.Unix(), AMR: []string{AMRUnvouched}}
+
+	if status, err := approve(unvouched); err != nil || status != "approved" {
+		t.Fatalf("approval by an unvouched session with no hold = %q %v, want approved", status, err)
+	}
+	if _, err := f.signInWith(f.ctx, t, "spare@example.net"); err != nil {
+		t.Fatalf("sign-in by the recovery email: %v", err)
+	}
+	if _, err := approve(unvouched); !errors.Is(err, ErrRecoverySession) {
+		t.Fatalf("approval by an unvouched session during the hold = %v, want ErrRecoverySession", err)
+	}
+
+	f.now = f.now.Add(8 * 24 * time.Hour)
+	if status, err := approve(unvouched); err != nil || status != "approved" {
+		t.Fatalf("approval by an unvouched session after the hold = %q %v, want approved", status, err)
+	}
+	if _, err := approve(f.recoverySignedInNow()); !errors.Is(err, ErrRecoverySession) {
+		t.Fatalf("approval by a recovery session after the hold = %v, want ErrRecoverySession", err)
+	}
+}
+
 // sessionRevokedAt is when the access session of accessToken was revoked, 0
 // while it is live.
 func (f *recoveryEmailFixture) sessionRevokedAt(t *testing.T, accessToken string) int64 {

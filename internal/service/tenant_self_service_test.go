@@ -588,7 +588,9 @@ func TestListMyTenants_DomainMembershipNeedsAVerifiedEmailOnTheDomain(t *testing
 }
 
 // A session a recovery email opened lists no tenant the account belongs to
-// only through its email's domain: that session proved another mailbox.
+// only through its email's domain: that session proved another mailbox. Nor
+// does one no one vouched for how it was opened, which may be such a
+// session.
 func TestListMyTenants_RecoverySessionListsNoDomainMembership(t *testing.T) {
 	f := newSelfServiceFixture(&config.Config{})
 	ctx := context.Background()
@@ -606,10 +608,12 @@ func TestListMyTenants_RecoverySessionListsNoDomainMembership(t *testing.T) {
 	got, err := f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
-	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{AMR: []string{AMRRecoveryEmail}})
-	require.NoError(t, err)
-	require.Len(t, got, 1)
-	assert.Equal(t, "t-inv", got[0].TenantID)
+	for _, amr := range []string{AMRRecoveryEmail, AMRUnvouched} {
+		got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{AMR: []string{amr}})
+		require.NoError(t, err)
+		require.Len(t, got, 1, amr)
+		assert.Equal(t, "t-inv", got[0].TenantID, amr)
+	}
 }
 
 // A session a recovery email opened selects a tenant only through an

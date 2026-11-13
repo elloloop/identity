@@ -57,10 +57,12 @@ var (
 	// ErrRecoverySession is returned when a session a recovery email opened
 	// asks for what only a session opened another way may do: approving
 	// another device's QR sign-in, whose session could not say a recovery
-	// email stands behind it. Mapped to CodeFailedPrecondition; its message
-	// leads with the stable `recovery_session` token clients match on to
-	// send the person to sign in another way.
-	ErrRecoverySession = errors.New("recovery_session: a session a recovery email opened cannot do this")
+	// email stands behind it. A session no one vouched for how it was opened
+	// (AMRUnvouched) is refused it too while a recovery hold is in force on
+	// its account. Mapped to CodeFailedPrecondition; its message leads with
+	// the stable `recovery_session` token clients match on to send the person
+	// to sign in another way.
+	ErrRecoverySession = errors.New("recovery_session: a session that may have been opened by a recovery email cannot do this")
 	// ErrRecoveryEmailCodeInvalid is returned when a recovery-email code is
 	// missing, expired, already consumed, the wrong code, sent to another
 	// address, or has exhausted its attempt budget. Mapped to

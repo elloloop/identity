@@ -24,9 +24,11 @@ func recoverySessionAMR(recoveryEmail string) []string {
 }
 
 // AMRUnvouched marks a session whose amr no one vouched for: the native-gRPC
-// bridge sets it when the host's interceptor does not own the sign-in
-// metadata. No token carries it. During a recovery hold such a session is
-// held like one a recovery email opened.
+// bridge sets it unless the host said its interceptor forwards the verified
+// token's amr. No token carries it. Such a session may be one a recovery
+// email opened, so it is treated as one wherever that is safe to assume: it
+// is held during a recovery hold, approves no QR sign-in while one is in
+// force, and acts in a tenant only through an explicit membership.
 const AMRUnvouched = "unvouched"
 
 // SessionSignIn is what the caller's verified access token says about the

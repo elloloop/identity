@@ -11390,7 +11390,9 @@ func (x *GetQrLoginSessionResponse) GetExpiresAt() *timestamppb.Timestamp {
 // Step 2b: Authenticated device approves (or rejects) the new device. A
 // session a recovery email opened may reject but not approve: it is refused
 // FAILED_PRECONDITION with the stable `recovery_session` token, since the
-// session the hand-off opens could not carry its `amr`.
+// session the hand-off opens could not carry its `amr`. Over native gRPC, a
+// session whose `amr` the host does not forward may be such a session, and
+// is refused the same while a recovery hold is in force on its account.
 type ApproveQrLoginRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -15362,7 +15364,9 @@ type ListMyTenantsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// tenants are ordered by name, then id. Latent and suspended tenants,
 	// memberships that are not active, and memberships through the email's
-	// domain while that email is unverified are left out.
+	// domain while that email is unverified are left out, as are all
+	// memberships through the email's domain for a session a recovery email
+	// opened, or one over native gRPC whose `amr` the host does not forward.
 	Tenants       []*UserTenant `protobuf:"bytes,1,rep,name=tenants,proto3" json:"tenants,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

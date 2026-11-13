@@ -49,17 +49,27 @@ type Options struct {
 	// logger; the container passes a zap production logger.
 	Logger *zap.Logger
 
-	// GRPCTrustAuthTime lets the native-gRPC bridge pass the sign-in
-	// metadata, x-authenticated-auth-time and x-authenticated-amr, through to
-	// the handlers. Set it only when the host's gRPC auth interceptor deletes
-	// any value the client sent for either and sets them from the verified
-	// token's auth_time and amr claims (see the embedding guide). Left false,
-	// the bridge drops both: MergeAccounts and the recovery-email changes over
-	// native gRPC are refused reauthentication_required, and while a recovery
-	// hold is in force every session is held as if a recovery email had
-	// opened it. A host interceptor written before the keys existed cannot
-	// let a client vouch for its own sign-in.
+	// GRPCTrustAuthTime lets the native-gRPC bridge pass
+	// x-authenticated-auth-time through to the handlers. Set it only when
+	// the host's gRPC auth interceptor deletes any value the client sent and
+	// sets it from the verified token's auth_time claim (see the embedding
+	// guide). Left false, the bridge drops it, and MergeAccounts and the
+	// recovery-email changes over native gRPC are refused
+	// reauthentication_required: a host interceptor written before the key
+	// existed cannot let a client vouch for its own recent sign-in.
 	GRPCTrustAuthTime bool
+	// GRPCTrustAMR lets the native-gRPC bridge pass x-authenticated-amr
+	// through to the handlers. Set it only when the host's gRPC auth
+	// interceptor deletes any value the client sent and sets it from the
+	// verified token's amr claim, its values separated by spaces (see the
+	// embedding guide). Left false, the bridge replaces it with "unvouched",
+	// so every session over native gRPC is treated as one a recovery email
+	// may have opened: while a recovery hold is in force it makes no account
+	// security change and approves no QR sign-in, and ListMyTenants lists
+	// its explicit memberships only. Without it a client could say no
+	// recovery email opened its session, and an interceptor that forwards no
+	// amr would say the same for every session.
+	GRPCTrustAMR bool
 	// GRPCTrustSessionID requires the host interceptor to strip caller metadata
 	// and supply X-Authenticated-Session-Id from a verified human token.
 	GRPCTrustSessionID bool

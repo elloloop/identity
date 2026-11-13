@@ -14,7 +14,7 @@ func TestDelegatedGRPCSessionMetadataRequiresExplicitHostTrust(t *testing.T) {
 	for _, trustSession := range []bool{false, true} {
 		for _, trustTime := range []bool{false, true} {
 			ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-authenticated-session-id", "interceptor-sid", "x-authenticated-auth-time", "1234"))
-			bridge := &grpcBridge{trustSessionID: trustSession, trustAuthTime: trustTime}
+			bridge := &grpcBridge{trust: grpcTrust{sessionID: trustSession, authTime: trustTime}}
 			_, err := invoke(ctx, bridge, &identitypb.GetAgentAuthorizationRequest{}, func(_ context.Context, req *connect.Request[identitypb.GetAgentAuthorizationRequest]) (*connect.Response[identitypb.GetAgentAuthorizationResponse], error) {
 				gotSID := req.Header().Get(middleware.AuthenticatedSessionIDHeader)
 				gotTime := req.Header().Get(middleware.AuthenticatedAuthTimeHeader)

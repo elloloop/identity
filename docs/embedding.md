@@ -143,15 +143,23 @@ metadata. Two rules it must follow, both of them load-bearing:
 `MergeAccounts` and the recovery-email changes also read
 `x-authenticated-auth-time`, the token's `auth_time` claim (epoch seconds,
 the session's sign-in; a refresh keeps it, a QR hand-off or anonymous session
-has none), and the calls a recovery hold governs read `x-authenticated-amr`,
-the token's `amr` claim with its values separated by spaces (absent on most
-tokens). Forward both from the verified token, after deleting any value the
+has none). Forward it from the verified token, after deleting any value the
 client sent, **and** set `Options.GRPCTrustAuthTime`: until you do, the
-bridge drops both keys, so an interceptor written before they existed cannot
-let a client vouch for its own sign-in. Every merge and recovery-email change
-over native gRPC is then refused `reauthentication_required`, and while a
-recovery hold is in force every session is held as if a recovery email had
-opened it.
+bridge drops the key, so an interceptor written before it existed cannot let
+a client vouch for its own recent sign-in, and every merge and
+recovery-email change over native gRPC is refused
+`reauthentication_required`.
+
+The calls a recovery hold governs, `ApproveQrLogin` and `ListMyTenants`, read
+`x-authenticated-amr`, the token's `amr` claim with its values separated by
+spaces (absent on most tokens). Forward it the same way, **and** set
+`Options.GRPCTrustAMR`, a separate opt-in: until you do, the bridge replaces
+the key with `unvouched`, whatever the client sent, and treats every session
+as one a recovery email may have opened. While a recovery hold is in force
+on its account such a session makes no account security change and approves
+no QR sign-in, and `ListMyTenants` lists only its explicit memberships. A
+host that forwards `auth_time` but no `amr` must not set `GRPCTrustAMR`: an
+absent key reads as a session no recovery email opened.
 
 Whether to pin the `tenant` claim depends on tenant selection. With
 `GATEWAY_TENANT_SELECTION_ENABLED` off, the default, every token carries the
@@ -199,12 +207,19 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
                 if claims.AuthTime > 0 {
                     md.Set("x-authenticated-auth-time", strconv.FormatInt(claims.AuthTime, 10))
                 }
+                if len(claims.AMR) > 0 {
+                    md.Set("x-authenticated-amr", strings.Join(claims.AMR, " "))
+                }
             }
         }
         return handler(metadata.NewIncomingContext(ctx, md), req)
     }
 }
 ```
+
+This interceptor owns both sign-in keys, so a host that installs it sets
+`opts.GRPCTrustAuthTime = true` and `opts.GRPCTrustAMR = true` before
+`identityserver.New`.
 
 **Rate limits are the host's responsibility too, with three exceptions.**
 The per-IP limits on the sign-up, sign-in and other abuse-prone RPCs live in

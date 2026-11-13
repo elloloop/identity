@@ -44,10 +44,9 @@ import (
 // New, expose it via Handler and/or RegisterGRPC, run its background
 // workers with Start, and tear everything down with Shutdown.
 type Server struct {
-	built              *app.Built
-	logger             *zap.Logger
-	grpcTrustAuthTime  bool
-	grpcTrustSessionID bool
+	built     *app.Built
+	logger    *zap.Logger
+	grpcTrust grpcTrust
 
 	// shutdownFns run in Shutdown, in reverse construction order, to
 	// release everything New acquired (signer watcher,
@@ -71,7 +70,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	cfg := opts.Config
 
-	s := &Server{logger: logger, grpcTrustAuthTime: opts.GRPCTrustAuthTime, grpcTrustSessionID: opts.GRPCTrustSessionID}
+	s := &Server{logger: logger, grpcTrust: grpcTrust{
+		authTime: opts.GRPCTrustAuthTime, amr: opts.GRPCTrustAMR, sessionID: opts.GRPCTrustSessionID,
+	}}
 
 	otelShutdown, err := observability.Setup(ctx, observability.FromAppConfig(&cfg))
 	if err != nil {
@@ -330,7 +331,7 @@ func (s *Server) Handler() http.Handler {
 // every per-IP limit except LookupUsers', which the bridge enforces from
 // the same budget as the HTTP surface.
 func (s *Server) RegisterGRPC(reg grpc.ServiceRegistrar) {
-	identitypb.RegisterIdentityServiceServer(reg, newGRPCBridge(s.built, s.logger, s.grpcTrustAuthTime, s.grpcTrustSessionID))
+	identitypb.RegisterIdentityServiceServer(reg, newGRPCBridge(s.built, s.logger, s.grpcTrust))
 }
 
 // Start launches the background workers: the async audit flusher, the

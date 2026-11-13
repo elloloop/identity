@@ -49,15 +49,20 @@ type grpcBridge struct {
 	operatorLimits map[string]middleware.PathLimit
 	trustedProxies []*net.IPNet
 	logger         *zap.Logger
-	// trustAuthTime: the host's interceptor owns the sign-in metadata,
-	// x-authenticated-auth-time and x-authenticated-amr
-	// (Options.GRPCTrustAuthTime). Otherwise the bridge drops both, and marks
-	// the session's sign-in unvouched.
-	trustAuthTime  bool
-	trustSessionID bool
+	trust          grpcTrust
 }
 
-func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSessionID bool) *grpcBridge {
+// grpcTrust names the x-authenticated-* keys besides the user id that the
+// host said its interceptor sets from the verified token, after deleting any
+// value the client sent (Options.GRPCTrustAuthTime, GRPCTrustAMR and
+// GRPCTrustSessionID). The bridge drops every other one.
+type grpcTrust struct {
+	authTime  bool
+	amr       bool
+	sessionID bool
+}
+
+func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcBridge {
 	directoryLimit, ok := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceLookupUsersProcedure)
 	if !ok {
 		// app.Build always configures this limit; reaching here means the
@@ -89,8 +94,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSes
 		directoryLimit: directoryLimit,
 		trustedProxies: built.TrustedProxies,
 		logger:         logger,
-		trustAuthTime:  trustAuthTime,
-		trustSessionID: trustSessionID,
+		trust:          trust,
 	}
 }
 
@@ -191,15 +195,18 @@ func invoke[Req, Resp any](
 	if ip := b.clientIP(ctx); ip != "" {
 		creq.Header().Set(middleware.ClientIPHeader, ip)
 	}
-	// The sign-in time vouches for a recent sign-in; only a host that said
-	// its interceptor sets it from the verified token may pass it on.
-	if !b.trustSessionID {
+	// An interceptor written before a key existed may pass on whatever the
+	// client sent for it, so a key reaches the handlers only once the host
+	// said its interceptor owns it.
+	if !b.trust.sessionID {
 		creq.Header().Del(middleware.AuthenticatedSessionIDHeader)
 	}
-	// A session no one vouches for is held like one a recovery email opened
-	// while a recovery hold is in force.
-	if !b.trustAuthTime {
+	if !b.trust.authTime {
 		creq.Header().Del(middleware.AuthenticatedAuthTimeHeader)
+	}
+	// A missing amr would read as a session no recovery email opened, so a
+	// session whose amr no one vouches for is marked as possibly one.
+	if !b.trust.amr {
 		creq.Header().Set(middleware.AuthenticatedAMRHeader, service.AMRUnvouched)
 	}
 	cresp, err := fn(ctx, creq)

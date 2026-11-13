@@ -165,7 +165,9 @@ func (s *MembershipService) CreateTenant(ctx context.Context, callerID, name, ip
 // tenant has verified. Suspended tenants and memberships that are not active
 // are left out too, and for a session a recovery email opened every
 // membership the email's domain gave, so the list is exactly the set
-// RefreshToken may select from.
+// RefreshToken may select from. A session no one vouched for how it was
+// opened (AMRUnvouched) may be one a recovery email opened, and is listed
+// its explicit memberships only.
 func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string, signIn SessionSignIn) ([]*UserTenant, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -181,7 +183,7 @@ func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string, 
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
-	domain := memberDomain(caller, signIn.openedByRecoveryEmail())
+	domain := memberDomain(caller, signIn.mayBeRecoverySession())
 	tenants, err := s.memberships.ListActiveTenantsForUser(ctx, projectID, callerID, domain)
 	if err != nil {
 		return nil, err

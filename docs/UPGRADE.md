@@ -110,7 +110,7 @@ setting, and none changes until it is set.
   `RemovePhone`; `service.LoginPolicy` gains `RequireVerifiedPhone` and
   `PhoneCallingCodes`.
 
-## Next — a recovery email signs in to its account, and the session it opens is held from account security changes: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claim `amr`, `ListRecoveryEmailsResponse.hold_until`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` and `ProfileService` signatures (Go API))
+## Next — a recovery email signs in to its account, and the session it opens is held from account security changes: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claim `amr`, `ListRecoveryEmailsResponse.hold_until`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; native-gRPC hosts: new `identityserver.Options.GRPCTrustAMR`, **action required**; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` and `ProfileService` signatures (Go API))
 
 A project whose accounts sign in by emailed code had no way back in for a
 person who lost their primary mailbox: the email change and the account merge
@@ -199,12 +199,23 @@ both ask for a password. A recovery email can now be that way.
   `RefreshToken` refuses to select, and `ListMyTenants` leaves out, a tenant
   the account belongs to only through its email's domain, so disabling an
   organisational mailbox is not undone by a personal recovery address.
-- **Native gRPC.** The bridge reads the session's `amr` from
-  `x-authenticated-amr` (values separated by spaces) under the same
-  `identityserver.Options.GRPCTrustAuthTime` that lets
-  `x-authenticated-auth-time` through: forward both from the verified token.
-  Until a host does, every session over native gRPC is held during a hold as
-  if a recovery email had opened it.
+- **Native gRPC: action required.** The bridge passes `x-authenticated-amr`
+  to the handlers only once the host sets the new
+  `identityserver.Options.GRPCTrustAMR`, separate from `GRPCTrustAuthTime`.
+  Until then it replaces the key with `unvouched`, whatever the client sent,
+  and treats every native-gRPC session as one a recovery email may have
+  opened: while a hold is in force on its account the session makes none of
+  the changes above and approves no QR sign-in (`recovery_session`), and
+  `ListMyTenants` lists only its explicit memberships, leaving out, hold or
+  not, every tenant it belongs to through its email's domain (`RefreshToken`
+  still selects such a tenant: its refresh token records how the session was
+  opened). Hosts already on `GRPCTrustAuthTime` are affected too: the
+  embedding guide's earlier sample interceptor forwarded no `amr`, which
+  would otherwise let every recovery session over native gRPC past the hold.
+  To have sessions treated by how they were opened, make the interceptor
+  delete any `x-authenticated-amr` the client sent and set it from the
+  verified token, `strings.Join(claims.AMR, " ")` (left out when the token
+  has no `amr`), then set `GRPCTrustAMR`.
 - **One more read on every emailed-code or link sign-in**: whether the proved
   address is a recovery email.
 - **Migration 0059** gives `user_recovery_emails` its `last_sign_in_at_ms`,
@@ -228,7 +239,8 @@ both ask for a password. A recovery email can now be that way.
   `MembershipService.ListMyTenants`, take a `service.SessionSignIn` (the
   token's `auth_time`, `amr` and `sid`) where the recovery-email calls and
   `MergeAccounts` took the bare `auth_time`. `AuthService.ListRecoveryEmails`
-  also returns the hold's end.
+  also returns the hold's end. `identityserver.Options` gains
+  `GRPCTrustAMR`.
 
 ## Next — recovery emails: an account keeps additional addresses it has proved: `recovery_emails.enabled` per project (off by default; migration 0059; additive RPCs `RequestRecoveryEmail`, `VerifyRecoveryEmail`, `ListRecoveryEmails`, `RemoveRecoveryEmail`; additive audit events `recovery_email_added`, `recovery_email_removed`; six `Repository` methods and one sweep (Go API))
 
