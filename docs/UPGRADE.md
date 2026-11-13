@@ -1,5 +1,37 @@
 # Upgrade guide
 
+## Next — project guardian admission and live machine authorization
+
+Projects may opt in with `config_json.guardian.require_step_up: true` and
+`config_json.guardian.require_adult_profile: true`. Both default to false; no
+other project's deployment policy changes. The former overrides
+`GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD` for child creation, consent grants,
+and guardian account management. Passwordless guardians must establish a
+password through the existing verified account flow before these calls; a
+registered factor or session alone is not fresh proof. The latter requires a
+permanent, active person whose age band is known ADULT under the project age
+policy, before those operations write. Consent withdrawal remains available
+without adding barriers to removing access.
+
+Migration 0059 adds `managed_child_reader` project credentials (minted through
+`AdminCreateProjectCredential`). Keep their once-shown raw keys server-side.
+`GetManagedChildAuthorization` accepts `child_user_id` and `guardian_user_id`,
+a private `X-Managed-Child-Key`, and the matching resolved project (normally
+`X-Project-Key`). It returns only `authorized`, true for active permanent people
+with a live guardian edge, a known minor child and a known adult guardian.
+Unknown ages and disabled age gating return false. No account profile or
+credential is returned. A credential from another project, a revoked credential,
+or an invalid explicit project is refused. The service binds all reads to the
+credential's project and uses that project's jurisdiction thresholds.
+
+This is a point-in-time decision: consumers must recheck before issuing,
+refreshing, or using their child-device credentials and fail closed on false,
+errors or unavailability. It grants no other RPC. Requests use the existing
+machine-credential per-IP rate limit and emit `managed_child_authorization`
+audit events. The Postgres control plane is required to mint/read keys; without
+it the RPC is unimplemented. Rollback deletes only this new credential kind
+before restoring the previous constraint. No account tables or data change.
+
 ## Next — `CreateTenantInvitation` reports whether its email was sent: `email_send_status` (additive field and enum; no migration; behaviour change for mail logs and spans when every SMTP provider fails, and for SMTP settings that name no valid provider; `email.ContextWithLogFields`, `service.EmailSendStatus`, `CreatedInvitation.EmailStatus`, a nil mailer in `NewMembershipService` (Go API))
 
 `CreateTenantInvitation` stores the invitation and then sends its email once,
@@ -73,6 +105,7 @@ before it writes a response, so none is known to hit the race. Anyone building i
 embedding its `pkg/` libraries should build on Go 1.26.11 or later on the
 1.26 line, or on the patched 1.27 release that
 https://pkg.go.dev/vuln/GO-2026-6859 lists.
+
 
 ## Next — an invite project can let a tenant invitation create the invitee's account: `access.admit_tenant_invitations` and `GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS` (off by default; migration 0058; additive audit event `signup_admitted_by_invitation`; `InvitationStore.OpenInvitationForEmail`, `AuthService.WithOpenInvitations` (Go API))
 

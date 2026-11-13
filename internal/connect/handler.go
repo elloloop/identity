@@ -54,11 +54,12 @@ type IdentityHandler struct {
 	// project credential rather than a user JWT. nil when the build has no
 	// control plane (memory, sqlite), which disables the RPC
 	// (CodeUnimplemented).
-	agentOAuth   *service.AgentOAuthService
-	teammateKeys *service.TeammateKeyService
-	exchanges    *prometheus.CounterVec
-	directory    *service.DirectoryService
-	cfg          *config.Config
+	agentOAuth                *service.AgentOAuthService
+	teammateKeys              *service.TeammateKeyService
+	exchanges                 *prometheus.CounterVec
+	managedChildAuthorization *service.ManagedChildAuthorizationService
+	directory                 *service.DirectoryService
+	cfg                       *config.Config
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service

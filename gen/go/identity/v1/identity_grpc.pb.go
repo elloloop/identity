@@ -189,6 +189,7 @@ const (
 	IdentityService_AdminListProjectOAuthProviders_FullMethodName    = "/identity.v1.IdentityService/AdminListProjectOAuthProviders"
 	IdentityService_AdminSetProjectOAuthHostClient_FullMethodName    = "/identity.v1.IdentityService/AdminSetProjectOAuthHostClient"
 	IdentityService_AdminDeleteProjectOAuthHostClient_FullMethodName = "/identity.v1.IdentityService/AdminDeleteProjectOAuthHostClient"
+	IdentityService_GetManagedChildAuthorization_FullMethodName      = "/identity.v1.IdentityService/GetManagedChildAuthorization"
 	IdentityService_LookupUsers_FullMethodName                       = "/identity.v1.IdentityService/LookupUsers"
 )
 
@@ -844,6 +845,10 @@ type IdentityServiceClient interface {
 	// plane.
 	AdminSetProjectOAuthHostClient(ctx context.Context, in *AdminSetProjectOAuthHostClientRequest, opts ...grpc.CallOption) (*AdminSetProjectOAuthHostClientResponse, error)
 	AdminDeleteProjectOAuthHostClient(ctx context.Context, in *AdminDeleteProjectOAuthHostClientRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthHostClientResponse, error)
+	// Rechecks live guardian authorization for a service holding only a
+	// managed_child_reader project credential. Errors and false must fail closed;
+	// callers must recheck before each operation, never cache a true response.
+	GetManagedChildAuthorization(ctx context.Context, in *GetManagedChildAuthorizationRequest, opts ...grpc.CallOption) (*GetManagedChildAuthorizationResponse, error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT
 	// but by a directory_reader project credential (minted with
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
@@ -2574,6 +2579,16 @@ func (c *identityServiceClient) AdminDeleteProjectOAuthHostClient(ctx context.Co
 	return out, nil
 }
 
+func (c *identityServiceClient) GetManagedChildAuthorization(ctx context.Context, in *GetManagedChildAuthorizationRequest, opts ...grpc.CallOption) (*GetManagedChildAuthorizationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetManagedChildAuthorizationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetManagedChildAuthorization_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) LookupUsers(ctx context.Context, in *LookupUsersRequest, opts ...grpc.CallOption) (*LookupUsersResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LookupUsersResponse)
@@ -3236,6 +3251,10 @@ type IdentityServiceServer interface {
 	// plane.
 	AdminSetProjectOAuthHostClient(context.Context, *AdminSetProjectOAuthHostClientRequest) (*AdminSetProjectOAuthHostClientResponse, error)
 	AdminDeleteProjectOAuthHostClient(context.Context, *AdminDeleteProjectOAuthHostClientRequest) (*AdminDeleteProjectOAuthHostClientResponse, error)
+	// Rechecks live guardian authorization for a service holding only a
+	// managed_child_reader project credential. Errors and false must fail closed;
+	// callers must recheck before each operation, never cache a true response.
+	GetManagedChildAuthorization(context.Context, *GetManagedChildAuthorizationRequest) (*GetManagedChildAuthorizationResponse, error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT
 	// but by a directory_reader project credential (minted with
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
@@ -3775,6 +3794,9 @@ func (UnimplementedIdentityServiceServer) AdminSetProjectOAuthHostClient(context
 }
 func (UnimplementedIdentityServiceServer) AdminDeleteProjectOAuthHostClient(context.Context, *AdminDeleteProjectOAuthHostClientRequest) (*AdminDeleteProjectOAuthHostClientResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminDeleteProjectOAuthHostClient not implemented")
+}
+func (UnimplementedIdentityServiceServer) GetManagedChildAuthorization(context.Context, *GetManagedChildAuthorizationRequest) (*GetManagedChildAuthorizationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetManagedChildAuthorization not implemented")
 }
 func (UnimplementedIdentityServiceServer) LookupUsers(context.Context, *LookupUsersRequest) (*LookupUsersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LookupUsers not implemented")
@@ -6860,6 +6882,24 @@ func _IdentityService_AdminDeleteProjectOAuthHostClient_Handler(srv interface{},
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_GetManagedChildAuthorization_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetManagedChildAuthorizationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetManagedChildAuthorization(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetManagedChildAuthorization_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetManagedChildAuthorization(ctx, req.(*GetManagedChildAuthorizationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_LookupUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(LookupUsersRequest)
 	if err := dec(in); err != nil {
@@ -7564,6 +7604,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminDeleteProjectOAuthHostClient",
 			Handler:    _IdentityService_AdminDeleteProjectOAuthHostClient_Handler,
+		},
+		{
+			MethodName: "GetManagedChildAuthorization",
+			Handler:    _IdentityService_GetManagedChildAuthorization_Handler,
 		},
 		{
 			MethodName: "LookupUsers",

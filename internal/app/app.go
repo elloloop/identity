@@ -544,6 +544,10 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
 		},
 		{
+			PathPrefix: identityconnectgen.IdentityServiceGetManagedChildAuthorizationProcedure, Tag: "managed_child_authorization",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
+		},
+		{
 			// SCIM: every request carries the deployment-wide bearer token,
 			// checked before anything else runs. Counting every request, not
 			// only refused ones, keeps the limit ahead of the check, so a
@@ -881,7 +885,7 @@ func New(deps Deps) (*Built, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent exchange metrics: %w", err)
 	}
-	handler.WithTeammateKeys(teammateKeys).WithAgentExchangeMetrics(exchanges)
+	handler.WithManagedChildAuthorization(service.NewManagedChildAuthorizationService(deps.DirectoryCredentials, authSvc)).WithTeammateKeys(teammateKeys).WithAgentExchangeMetrics(exchanges)
 
 	mux := http.NewServeMux()
 	if err := mountIdentityService(mux, deps, authSvc, handler, teammateKeys, returnAllow); err != nil {

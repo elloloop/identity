@@ -209,10 +209,15 @@ func (s *AuthService) GrantParentalConsent(
 		return nil, ErrAccountNotActive
 	}
 
+	if !s.guardianProfileAllowed(ctx, adult) {
+		s.auditConsentFailure(ctx, consentingUserID, childUserID, "adult_profile", ip, userAgent)
+		return nil, fmt.Errorf("%w: a known adult profile is required", ErrPermissionDenied)
+	}
+
 	// Check (b): STEP-UP RE-AUTH. Verified before any state changes so a
 	// caller holding only a session token (a hijacked session, a shared
 	// device) cannot consent.
-	admitted, reauthenticated := s.stepUp(adult, stepUpPassword)
+	admitted, reauthenticated := s.stepUp(ctx, adult, stepUpPassword)
 	if !admitted {
 		s.auditConsentFailure(ctx, consentingUserID, childUserID, "step_up", ip, userAgent)
 		return nil, ErrParentalConsentStepUpFailed

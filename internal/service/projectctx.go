@@ -16,6 +16,8 @@ import (
 // default project, so the scope is always present once the middleware is
 // installed; nothing downstream is forced to special-case its absence.
 type ProjectScope struct {
+	Guardian ProjectGuardianConfig
+
 	// ProjectID is the resolved control-plane project id.
 	ProjectID string
 
@@ -152,6 +154,8 @@ func ProjectScopeFromContext(ctx context.Context) *ProjectScope {
 // driver-agnostic value so the resolver contract does not leak a concrete
 // store type into the middleware or app wiring.
 type ResolvedProject struct {
+	Guardian ProjectGuardianConfig
+
 	ID                 string
 	StorageScopeID     string
 	PrimaryAuthDomain  string

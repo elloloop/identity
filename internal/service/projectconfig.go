@@ -23,6 +23,9 @@ import (
 // newer server still decodes on an older one, ignoring fields it does not
 // understand.
 type ProjectConfig struct {
+	// Guardian controls fresh reauthentication for child account operations.
+	Guardian ProjectGuardianConfig `json:"guardian"`
+
 	// CORS holds the project's browser cross-origin policy.
 	CORS ProjectCORSConfig `json:"cors"`
 
@@ -102,6 +105,14 @@ type ProjectConfig struct {
 	// signed-in user may create a tenant they own. Default OFF. See
 	// ProjectTenantsConfig.
 	Tenants ProjectTenantsConfig `json:"tenants"`
+}
+
+// ProjectGuardianConfig may strengthen, but never weaken, the deployment policy.
+type ProjectGuardianConfig struct {
+	// RequireStepUp disallows the deployment-wide passwordless exception.
+	RequireStepUp bool `json:"require_step_up"`
+	// RequireAdultProfile requires an active person with a known adult age band.
+	RequireAdultProfile bool `json:"require_adult_profile"`
 }
 
 // ProjectOAuthConfig is a project's per-provider hosted-flow OAuth

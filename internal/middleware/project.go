@@ -121,7 +121,11 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 			key = r.URL.Query().Get(ProjectKeyParam)
 		}
 	}
-	if key != "" && pr.resolver != nil {
+	if key != "" {
+		if pr.resolver == nil {
+			writeConnectError(w, http.StatusUnauthorized, "unauthenticated", "invalid project key")
+			return nil, false
+		}
 		rp, err := pr.resolver.ResolveByCredential(ctx, key)
 		if err != nil {
 			pr.logger.Error("project_resolve_by_key_failed", zap.Error(err))
@@ -235,6 +239,7 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		Jurisdictions:      rp.Jurisdictions,
 		Accounts:           rp.Accounts,
 		Tenants:            rp.Tenants,
+		Guardian:           rp.Guardian,
 	}
 }
 

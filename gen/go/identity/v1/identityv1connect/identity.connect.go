@@ -545,6 +545,9 @@ const (
 	// IdentityServiceAdminDeleteProjectOAuthHostClientProcedure is the fully-qualified name of the
 	// IdentityService's AdminDeleteProjectOAuthHostClient RPC.
 	IdentityServiceAdminDeleteProjectOAuthHostClientProcedure = "/identity.v1.IdentityService/AdminDeleteProjectOAuthHostClient"
+	// IdentityServiceGetManagedChildAuthorizationProcedure is the fully-qualified name of the
+	// IdentityService's GetManagedChildAuthorization RPC.
+	IdentityServiceGetManagedChildAuthorizationProcedure = "/identity.v1.IdentityService/GetManagedChildAuthorization"
 	// IdentityServiceLookupUsersProcedure is the fully-qualified name of the IdentityService's
 	// LookupUsers RPC.
 	IdentityServiceLookupUsersProcedure = "/identity.v1.IdentityService/LookupUsers"
@@ -1209,6 +1212,10 @@ type IdentityServiceClient interface {
 	// plane.
 	AdminSetProjectOAuthHostClient(context.Context, *connect.Request[v1.AdminSetProjectOAuthHostClientRequest]) (*connect.Response[v1.AdminSetProjectOAuthHostClientResponse], error)
 	AdminDeleteProjectOAuthHostClient(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthHostClientRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthHostClientResponse], error)
+	// Rechecks live guardian authorization for a service holding only a
+	// managed_child_reader project credential. Errors and false must fail closed;
+	// callers must recheck before each operation, never cache a true response.
+	GetManagedChildAuthorization(context.Context, *connect.Request[v1.GetManagedChildAuthorizationRequest]) (*connect.Response[v1.GetManagedChildAuthorizationResponse], error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT
 	// but by a directory_reader project credential (minted with
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
@@ -2262,6 +2269,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminDeleteProjectOAuthHostClient")),
 			connect.WithClientOptions(opts...),
 		),
+		getManagedChildAuthorization: connect.NewClient[v1.GetManagedChildAuthorizationRequest, v1.GetManagedChildAuthorizationResponse](
+			httpClient,
+			baseURL+IdentityServiceGetManagedChildAuthorizationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetManagedChildAuthorization")),
+			connect.WithClientOptions(opts...),
+		),
 		lookupUsers: connect.NewClient[v1.LookupUsersRequest, v1.LookupUsersResponse](
 			httpClient,
 			baseURL+IdentityServiceLookupUsersProcedure,
@@ -2443,6 +2456,7 @@ type identityServiceClient struct {
 	adminListProjectOAuthProviders    *connect.Client[v1.AdminListProjectOAuthProvidersRequest, v1.AdminListProjectOAuthProvidersResponse]
 	adminSetProjectOAuthHostClient    *connect.Client[v1.AdminSetProjectOAuthHostClientRequest, v1.AdminSetProjectOAuthHostClientResponse]
 	adminDeleteProjectOAuthHostClient *connect.Client[v1.AdminDeleteProjectOAuthHostClientRequest, v1.AdminDeleteProjectOAuthHostClientResponse]
+	getManagedChildAuthorization      *connect.Client[v1.GetManagedChildAuthorizationRequest, v1.GetManagedChildAuthorizationResponse]
 	lookupUsers                       *connect.Client[v1.LookupUsersRequest, v1.LookupUsersResponse]
 }
 
@@ -3298,6 +3312,11 @@ func (c *identityServiceClient) AdminDeleteProjectOAuthHostClient(ctx context.Co
 	return c.adminDeleteProjectOAuthHostClient.CallUnary(ctx, req)
 }
 
+// GetManagedChildAuthorization calls identity.v1.IdentityService.GetManagedChildAuthorization.
+func (c *identityServiceClient) GetManagedChildAuthorization(ctx context.Context, req *connect.Request[v1.GetManagedChildAuthorizationRequest]) (*connect.Response[v1.GetManagedChildAuthorizationResponse], error) {
+	return c.getManagedChildAuthorization.CallUnary(ctx, req)
+}
+
 // LookupUsers calls identity.v1.IdentityService.LookupUsers.
 func (c *identityServiceClient) LookupUsers(ctx context.Context, req *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error) {
 	return c.lookupUsers.CallUnary(ctx, req)
@@ -3953,6 +3972,10 @@ type IdentityServiceHandler interface {
 	// plane.
 	AdminSetProjectOAuthHostClient(context.Context, *connect.Request[v1.AdminSetProjectOAuthHostClientRequest]) (*connect.Response[v1.AdminSetProjectOAuthHostClientResponse], error)
 	AdminDeleteProjectOAuthHostClient(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthHostClientRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthHostClientResponse], error)
+	// Rechecks live guardian authorization for a service holding only a
+	// managed_child_reader project credential. Errors and false must fail closed;
+	// callers must recheck before each operation, never cache a true response.
+	GetManagedChildAuthorization(context.Context, *connect.Request[v1.GetManagedChildAuthorizationRequest]) (*connect.Response[v1.GetManagedChildAuthorizationResponse], error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT
 	// but by a directory_reader project credential (minted with
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
@@ -5002,6 +5025,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminDeleteProjectOAuthHostClient")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceGetManagedChildAuthorizationHandler := connect.NewUnaryHandler(
+		IdentityServiceGetManagedChildAuthorizationProcedure,
+		svc.GetManagedChildAuthorization,
+		connect.WithSchema(identityServiceMethods.ByName("GetManagedChildAuthorization")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceLookupUsersHandler := connect.NewUnaryHandler(
 		IdentityServiceLookupUsersProcedure,
 		svc.LookupUsers,
@@ -5350,6 +5379,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminSetProjectOAuthHostClientHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminDeleteProjectOAuthHostClientProcedure:
 			identityServiceAdminDeleteProjectOAuthHostClientHandler.ServeHTTP(w, r)
+		case IdentityServiceGetManagedChildAuthorizationProcedure:
+			identityServiceGetManagedChildAuthorizationHandler.ServeHTTP(w, r)
 		case IdentityServiceLookupUsersProcedure:
 			identityServiceLookupUsersHandler.ServeHTTP(w, r)
 		default:
@@ -6039,6 +6070,10 @@ func (UnimplementedIdentityServiceHandler) AdminSetProjectOAuthHostClient(contex
 
 func (UnimplementedIdentityServiceHandler) AdminDeleteProjectOAuthHostClient(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthHostClientRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthHostClientResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminDeleteProjectOAuthHostClient is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetManagedChildAuthorization(context.Context, *connect.Request[v1.GetManagedChildAuthorizationRequest]) (*connect.Response[v1.GetManagedChildAuthorizationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetManagedChildAuthorization is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error) {

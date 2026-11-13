@@ -244,3 +244,24 @@ func TestRegisterGRPC_TenantOperatorSharesHTTPBudget(t *testing.T) {
 		t.Fatalf("a call without a key after the budget is spent: %v, want Unimplemented from the handler", err)
 	}
 }
+
+func TestRegisterGRPC_ManagedChildAuthorizationSharesHTTPBudget(t *testing.T) {
+	srv := newTestServerWith(t, func(c *config.Config) { c.RateLimitDirectoryPerIP = 2 }, nil)
+	httpSrv := httptest.NewServer(srv.Handler())
+	t.Cleanup(httpSrv.Close)
+	httpClient := identityconnectgen.NewIdentityServiceClient(httpSrv.Client(), httpSrv.URL)
+	grpcClient := serveGRPC(t, srv)
+	request := &identitypb.GetManagedChildAuthorizationRequest{ChildUserId: "child", GuardianUserId: "guardian"}
+	if _, err := httpClient.GetManagedChildAuthorization(context.Background(), connect.NewRequest(request)); connect.CodeOf(err) != connect.CodeUnimplemented {
+		t.Fatalf("HTTP: %v", err)
+	}
+	if _, err := grpcClient.GetManagedChildAuthorization(context.Background(), request); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("gRPC: %v", err)
+	}
+	if _, err := grpcClient.GetManagedChildAuthorization(context.Background(), request); status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("gRPC over quota: %v", err)
+	}
+	if _, err := httpClient.GetManagedChildAuthorization(context.Background(), connect.NewRequest(request)); connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("HTTP over quota: %v", err)
+	}
+}

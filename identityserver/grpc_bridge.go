@@ -63,7 +63,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSes
 			zap.String("procedure", identityv1connect.IdentityServiceLookupUsersProcedure))
 	}
 	machineLimits := make(map[string]middleware.PathLimit)
-	for _, procedure := range []string{identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
+	for _, procedure := range []string{identityv1connect.IdentityServiceGetManagedChildAuthorizationProcedure, identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
 		if limit, found := middleware.MatchPathLimit(built.RateLimits, procedure); found {
 			machineLimits[procedure] = limit
 		}
@@ -1033,4 +1033,11 @@ func (b *grpcBridge) RegisterAgentMachineAgentKey(ctx context.Context, in *ident
 		return nil, err
 	}
 	return invoke(ctx, b, in, b.h.RegisterAgentMachineAgentKey)
+}
+
+func (b *grpcBridge) GetManagedChildAuthorization(ctx context.Context, in *identitypb.GetManagedChildAuthorizationRequest) (*identitypb.GetManagedChildAuthorizationResponse, error) {
+	if err := b.throttle(ctx, b.machineLimits[identityv1connect.IdentityServiceGetManagedChildAuthorizationProcedure]); err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.GetManagedChildAuthorization)
 }

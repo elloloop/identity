@@ -2242,6 +2242,7 @@ message AdminCreateProjectCredentialRequest {
   string project_id = 1;
   // kind selects the credential type: "publishable" (a public lookup key,
   // no secret), "secret" (a key whose secret half is shown ONCE), or
+  // "managed_child_reader" (only GetManagedChildAuthorization, no profile/write rights),
   // "directory_reader" (a machine credential whose secret half is shown ONCE
   // and which authorizes exactly one thing: LookupUsers against this
   // project's directory, presented in the X-Directory-Key header), or
@@ -2856,6 +2857,22 @@ message AdminListProjectOAuthProvidersResponse {
   // host_clients lists every host client (ADR-0019) with secrets REDACTED,
   // ordered by callback_host and then provider key.
   repeated ProjectOAuthHostClient host_clients = 2;
+}
+
+// GetManagedChildAuthorizationRequest checks a single guardian-child pair.
+// A managed_child_reader credential in X-Managed-Child-Key must belong to the
+// explicitly resolved request project. The credential grants no user or write RPCs.
+message GetManagedChildAuthorizationRequest {
+  string child_user_id = 1;
+  string guardian_user_id = 2;
+}
+
+message GetManagedChildAuthorizationResponse {
+  // True only for an active minor with a live edge to an active person with a known adult age band as
+  // guardian in this project. Missing, revoked, inactive, and adult targets
+  // all return false. No account profile or credentials are disclosed.
+  // This is a point-in-time check, not a reusable authorization token.
+  bool authorized = 1;
 }
 
 // ─── Directory lookup (machine credential) ──────────────────────────
@@ -4056,6 +4073,11 @@ service IdentityService {
   // plane.
   rpc AdminSetProjectOAuthHostClient(AdminSetProjectOAuthHostClientRequest) returns (AdminSetProjectOAuthHostClientResponse);
   rpc AdminDeleteProjectOAuthHostClient(AdminDeleteProjectOAuthHostClientRequest) returns (AdminDeleteProjectOAuthHostClientResponse);
+
+  // Rechecks live guardian authorization for a service holding only a
+  // managed_child_reader project credential. Errors and false must fail closed;
+  // callers must recheck before each operation, never cache a true response.
+  rpc GetManagedChildAuthorization(GetManagedChildAuthorizationRequest) returns (GetManagedChildAuthorizationResponse);
 
   // Read-only directory lookup for services. Authenticated NOT by a user JWT
   // but by a directory_reader project credential (minted with

@@ -29,9 +29,10 @@ const (
 // DirectoryService accepts — it authorizes the read-only LookupUsers RPC
 // against its own project and nothing else.
 const (
-	CredentialKindPublishable     = "publishable"
-	CredentialKindSecret          = "secret"
-	CredentialKindDirectoryReader = "directory_reader"
+	CredentialKindPublishable        = "publishable"
+	CredentialKindSecret             = "secret"
+	CredentialKindDirectoryReader    = "directory_reader"
+	CredentialKindManagedChildReader = "managed_child_reader"
 	// CredentialKindTeammateKeyManager authorizes TeammateKeyService in its
 	// project, presented in X-Teammate-Key-Manager-Key.
 	CredentialKindTeammateKeyManager = "teammate_key_manager"
@@ -45,11 +46,12 @@ const (
 // (Stripe-style): pk_ for publishable, sk_ for secret, dk_ for directory,
 // tk_ for a teammate key manager, ok_ for a tenant operator.
 const (
-	publishableKeyPrefix     = "pk_"
-	secretKeyPrefix          = "sk_"
-	directoryReaderKeyPrefix = "dk_"
-	teammateKeyManagerPrefix = "tk_"
-	tenantOperatorKeyPrefix  = "ok_"
+	publishableKeyPrefix        = "pk_"
+	secretKeyPrefix             = "sk_"
+	directoryReaderKeyPrefix    = "dk_"
+	managedChildReaderKeyPrefix = "ck_"
+	teammateKeyManagerPrefix    = "tk_"
+	tenantOperatorKeyPrefix     = "ok_"
 )
 
 // rawKeySeparator joins a credential's public id and secret half in the raw
@@ -918,6 +920,8 @@ func normalizeCredentialKind(kind string) (canonical, prefix string, err error) 
 		return CredentialKindPublishable, publishableKeyPrefix, nil
 	case CredentialKindSecret:
 		return CredentialKindSecret, secretKeyPrefix, nil
+	case CredentialKindManagedChildReader:
+		return CredentialKindManagedChildReader, managedChildReaderKeyPrefix, nil
 	case CredentialKindDirectoryReader:
 		return CredentialKindDirectoryReader, directoryReaderKeyPrefix, nil
 	case CredentialKindTeammateKeyManager:
@@ -925,9 +929,9 @@ func normalizeCredentialKind(kind string) (canonical, prefix string, err error) 
 	case CredentialKindTenantOperator:
 		return CredentialKindTenantOperator, tenantOperatorKeyPrefix, nil
 	default:
-		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q, %q, %q or %q)",
+		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q, %q, %q, %q or %q)",
 			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret, CredentialKindDirectoryReader,
-			CredentialKindTeammateKeyManager, CredentialKindTenantOperator)
+			CredentialKindTeammateKeyManager, CredentialKindTenantOperator, CredentialKindManagedChildReader)
 	}
 }
 

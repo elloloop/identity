@@ -141,6 +141,30 @@ import { Code } from "astro-expressive-code/components";
     <code>invite</code> and <code>closed</code> too.
   </p>
 
+  <h2>Project guardian policy</h2>
+  <p>
+    Set <code>guardian.require_step_up: true</code> in the project's configuration
+    to require the password proof even when the deployment permits passwordless
+    guardians. A registered passkey or a signed-in session alone is not fresh
+    proof. Passwordless parents first establish a password through the verified
+    account flow. Set <code>guardian.require_adult_profile: true</code> to also
+    require an active person with a known adult age band. Both settings default
+    to false and apply before child creation, consent grants, and guardian
+    management writes. They do not obstruct withdrawing consent.
+  </p>
+  <h2>Checking a child device's authorization</h2>
+  <p>
+    Backends can use <code>GetManagedChildAuthorization</code> with a private
+    <code>managed_child_reader</code> credential in <code>X-Managed-Child-Key</code>
+    and the matching project key. Send <code>child_user_id</code> and
+    <code>guardian_user_id</code>. The only result is <code>authorized</code>:
+    the pair must be active people, with a known minor child, a known adult
+    guardian, and a live guardian edge in the credential's project. No profile
+    or sign-in credentials are returned. Recheck before granting or using
+    child access; false, errors and unavailability must deny it. Never cache
+    a true result or treat it as a token. Revoking the edge denies the next call.
+  </p>
+
   <h2>Managing the account</h2>
   <p>
     Seven RPCs cover what a parent actually does. None of them needs the child's

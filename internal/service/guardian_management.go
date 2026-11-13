@@ -86,12 +86,22 @@ func (s *AuthService) auditGuardianAction(
 // admitted alone. The two differ only under GuardianStepUpAllowNoPassword,
 // which admits an account holding no password hash without any proof — an
 // account that does hold a hash must still present the matching password.
-func (s *AuthService) stepUp(user *User, stepUpPassword string) (admitted, reauthenticated bool) {
+func (s *AuthService) stepUp(ctx context.Context, user *User, stepUpPassword string) (admitted, reauthenticated bool) {
 	if user.PasswordHash == "" {
-		return s.cfg.GuardianStepUpAllowNoPassword, false
+		scope := ProjectScopeFromContext(ctx)
+		strict := scope != nil && scope.Guardian.RequireStepUp
+		return s.cfg.GuardianStepUpAllowNoPassword && !strict, false
 	}
 	ok := stepUpPassword != "" && passwords.Verify(stepUpPassword, user.PasswordHash)
 	return ok, ok
+}
+
+func (s *AuthService) guardianProfileAllowed(ctx context.Context, user *User) bool {
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil || !scope.Guardian.RequireAdultProfile {
+		return true
+	}
+	return isActivePerson(user) && s.determinerForUser(ctx, user).Determine(user.DateOfBirthMs, s.nowFunc()).Band == agegate.BandAdult
 }
 
 // authorizeGuardianAction is the single chokepoint every guardian management
@@ -144,8 +154,13 @@ func (s *AuthService) authorizeGuardianAction(
 		return nil, nil, ErrAccountNotActive
 	}
 
+	if !s.guardianProfileAllowed(ctx, guardian) {
+		s.auditGuardianAction(ctx, op, guardianUserID, childUserID, false, ip, userAgent, map[string]any{"step": "adult_profile"})
+		return nil, nil, fmt.Errorf("%w: a known adult profile is required", ErrPermissionDenied)
+	}
+
 	// (2) Step-up re-authentication, verified before any state change.
-	if admitted, _ := s.stepUp(guardian, stepUpPassword); !admitted {
+	if admitted, _ := s.stepUp(ctx, guardian, stepUpPassword); !admitted {
 		s.auditGuardianAction(ctx, op, guardianUserID, childUserID, false, ip, userAgent,
 			map[string]any{"step": "step_up"})
 		return nil, nil, ErrParentalConsentStepUpFailed

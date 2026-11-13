@@ -143,6 +143,8 @@ var AuthExemptPaths = map[string]bool{
 	// directory service verifies (hash compare, kind, revocation) and which
 	// scopes the lookup to that credential's project.
 	"/identity.v1.IdentityService/LookupUsers": true,
+	// Only a project-scoped managed_child_reader machine credential authorizes this read.
+	"/identity.v1.IdentityService/GetManagedChildAuthorization": true,
 	// TeammateKeyService is called by a service holding a teammate_key_manager
 	// project credential in X-Teammate-Key-Manager-Key, which the service
 	// verifies and which selects the project.

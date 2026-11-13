@@ -214,7 +214,8 @@ const (
 	// read the directory and how much without copying it. A refused
 	// presentation of a real directory_reader credential (revoked, or the
 	// wrong secret) is logged with success=false and a `reason`.
-	EventDirectoryLookup EventType = "directory_lookup"
+	EventDirectoryLookup           EventType = "directory_lookup"
+	EventManagedChildAuthorization EventType = "managed_child_authorization"
 
 	// EventSCIMAuthFailed records a request to the SCIM surface refused for a
 	// missing or wrong bearer token. The actor is "system:scim" (the caller is
@@ -498,6 +499,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectCredentialCreated:      {},
 	EventProjectCredentialRevoked:      {},
 	EventDirectoryLookup:               {},
+	EventManagedChildAuthorization:     {},
 	EventSCIMAuthFailed:                {},
 	EventParentalConsentGranted:        {},
 	EventParentalConsentRevoked:        {},

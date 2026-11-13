@@ -200,10 +200,15 @@ func (s *AuthService) CreateManagedChildAccount(
 		return nil, fmt.Errorf("%w: a minor cannot create managed child accounts", ErrPermissionDenied)
 	}
 
+	if !s.guardianProfileAllowed(ctx, caller) {
+		s.auditManagedChildFailure(ctx, callerUserID, "adult_profile", ip, userAgent)
+		return nil, fmt.Errorf("%w: a known adult profile is required", ErrPermissionDenied)
+	}
+
 	// 2. Step-up re-authentication + strong verified factor — the same two
 	// mandatory checks as GrantParentalConsent, verified before any state
 	// change so a caller holding only a session token cannot create accounts.
-	admitted, reauthenticated := s.stepUp(caller, req.StepUpPassword)
+	admitted, reauthenticated := s.stepUp(ctx, caller, req.StepUpPassword)
 	if !admitted {
 		s.auditManagedChildFailure(ctx, callerUserID, "step_up", ip, userAgent)
 		return nil, ErrParentalConsentStepUpFailed
