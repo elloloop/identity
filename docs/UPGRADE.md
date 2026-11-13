@@ -25,12 +25,12 @@ is, so no more guesses are compared than the cap allows.
   none, in one atomic write. A custom driver must implement them (the
   conformance suite checks it, concurrent guesses included).
 
-## Next — phone verification per project: its own switch, one account per number, accepted countries, a message channel, and a tenant that requires a verified phone: `phone.*` in a project's config, `LoginPolicy.require_verified_phone` (all off by default; migration 0060; additive RPC `RemovePhone`, `LoginPolicy` / `UpsertLoginPolicyRequest` fields, `TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED`; additive audit event `phone_removed`; new package `pkg/templatemsg`; two `Repository` methods (Go API))
+## Next — phone verification per project: its own switch, one account per number, accepted calling codes, a message channel, and a tenant that requires a verified phone: `phone.*` in a project's config, `LoginPolicy.require_verified_phone` (all off by default; migration 0060; additive RPC `RemovePhone`, `LoginPolicy` / `UpsertLoginPolicyRequest` fields, `TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED`; additive audit event `phone_removed`; new package `pkg/templatemsg`; two `Repository` methods, `ErrSMSDisabled` renamed (Go API))
 
 Phone verification was one switch for the whole deployment
 (`GATEWAY_SMS_ENABLED`), a number could sit on any number of accounts, every
-country was texted, and nothing could require a phone. Each of those is now a
-setting, and none changes until it is set.
+calling code was texted, and nothing could require a phone. Each of those is
+now a setting, and none changes until it is set.
 
 - **Nothing changes until a project or a tenant opts in.** A project with no
   `phone` block verifies phones exactly as the deployment does, by SMS, and a
@@ -42,9 +42,10 @@ setting, and none changes until it is set.
   | `phone.enabled` | unset (follows the deployment) | `false` turns phone verification off for the project: both RPCs answer `UNAVAILABLE`, as when the deployment has no sender. `true` changes nothing: a project cannot verify phones without a sender. |
   | `phone.unique` | `false` | A verified number belongs to one account of the project. |
   | `phone.reassign_after_seconds` | `0` (never; at most `315360000`, ten years) | With `unique`: how long after its holder verified a number another account that proves it may take it. A larger value is rejected as `INVALID_ARGUMENT`. |
-  | `phone.allowed_calling_codes` | `[]` (every country) | Country calling codes accepted, as 1 to 3 digits without the `+`. |
+  | `phone.allowed_calling_codes` | `[]` (every code) | Country calling codes accepted, as 1 to 3 digits without the `+`. One code can cover several countries. |
   | `phone.channels` | `[]` (`["sms"]`) | Delivery order: `"sms"`, `"message"`. A channel left out is never used. |
-  | `phone.message_template`, `phone.message_language` | `""` | The template the message channel sends; required when `channels` lists `"message"`. |
+  | `phone.message_template` | `""` | The template the message channel sends; required when `channels` lists `"message"`. |
+  | `phone.message_language` | `""` | The template's language code, when the provider needs one. |
 
 - **A project can only narrow.** It can switch verification off, drop a
   channel and refuse countries. It cannot use a channel the deployment has no
@@ -52,7 +53,12 @@ setting, and none changes until it is set.
   channel needs a sender the embedder supplies (below). A project whose
   channels all lack a sender answers `UNAVAILABLE`. That refusal, and the one
   for a code no channel delivered, no longer names SMS: its message is
-  `phone verification is not available`.
+  `phone verification is not available`. The log says why a project cannot
+  verify phones: `phone_verification_unavailable` with
+  `reason: switched_off_by_project`, or, as a warning, with
+  `reason: no_channel_has_a_sender`. `GATEWAY_SMS_ENABLED` now turns on the
+  SMS channel only: a project whose channels list `"message"` verifies phones
+  without it.
 - **One account per number** (`phone.unique`). `RequestPhoneVerification`
   sends a code to a number another account holds like any other;
   `VerifyPhoneCode` then answers `ALREADY_EXISTS` with the stable
@@ -65,9 +71,9 @@ setting, and none changes until it is set.
   are mailed. **Numbers verified before a project turned `unique` on are not
   claimed**: an older account keeps such a number, and it is held to one
   account from the next time it is verified.
-- **Countries** (`phone.allowed_calling_codes`). A number outside the list is
-  refused by both RPCs before anything is sent, with `FAILED_PRECONDITION` and
-  the stable `phone_country_not_allowed` token.
+- **Calling codes** (`phone.allowed_calling_codes`). A number outside the
+  list is refused by both RPCs before anything is sent, with
+  `FAILED_PRECONDITION` and the stable `phone_country_not_allowed` token.
 - **Channels.** `"sms"` is the deployment's SMS provider. `"message"` sends a
   pre-approved messaging-app template message through a
   `templatemsg.Sender`: the template's name and language come from the
@@ -76,7 +82,8 @@ setting, and none changes until it is set.
   is logged and the next is tried. **This server ships no provider for the
   message channel and has no environment variable for one**: an embedder sets
   `identityserver.Options.TemplateMessageSender` (or `app.Deps`), and without
-  one the channel is skipped.
+  one the channel is skipped. A `Sender` must never log the code, nor put it
+  in an error it returns: identity logs those errors.
 - **A merge moves the phone.** When the survivor has no phone, the retired
   account's number, its verified state and its claim move to it; when the
   survivor has one, the survivor keeps it and the retired account's claim is
@@ -91,7 +98,9 @@ setting, and none changes until it is set.
 - **A tenant can require a verified phone.** `LoginPolicy.require_verified_phone`
   makes `RefreshToken` refuse a selection of the tenant for an account with no
   verified phone, so no token for that tenant is minted;
-  `phone_calling_codes` narrows it to numbers of those countries. The refusal
+  `phone_calling_codes` narrows it to numbers under those calling codes, each
+  entry 1 to 3 digits, not starting with 0, listed once, and stored as
+  given: anything else is `INVALID_ARGUMENT`. The refusal
   is `FAILED_PRECONDITION` with the stable `phone_verification_required` token
   and `TenantSelectionRefusedDetails.reason =
   TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED`; like every selection
@@ -101,16 +110,22 @@ setting, and none changes until it is set.
   timeouts) is refused for that first. It is checked at each selection:
   removing the phone ends access at the next refresh. `phone_calling_codes`
   without `require_verified_phone` is rejected. Writing a login policy still
-  needs the admin secret; a tenant operator credential can read it only.
+  needs the admin secret; a tenant operator credential can read it only. The
+  rule is saved whatever the project can do: in a project that cannot verify
+  phones, every selection by an account without a verified phone is refused,
+  so check the project first.
 - **Migration 0060** adds `phone_number_claims` (SQLite: 0029), new and empty,
   and two constant-default columns on `login_policies`
-  (`require_verified_phone`, `phone_calling_codes`).
+  (`require_verified_phone`, and `phone_calling_codes`, a `TEXT[]`).
 - **Go API.** `service.Repository` gains `ClaimPhoneNumber` and
-  `ReleasePhoneNumber`; `AuthService` gains `WithTemplateMessages` and
-  `RemovePhone`; `service.LoginPolicy` gains `RequireVerifiedPhone` and
-  `PhoneCallingCodes`.
+  `ReleasePhoneNumber`, and a custom driver's `DeleteUser` must release the
+  account's claim (the conformance suite checks it); `AuthService` gains
+  `WithTemplateMessages` and `RemovePhone`; `service.LoginPolicy` gains
+  `RequireVerifiedPhone` and `PhoneCallingCodes` (`[]string`).
+  `service.ErrSMSDisabled` is renamed `ErrPhoneVerificationUnavailable`, since
+  it no longer means SMS alone.
 
-## Next — a recovery email signs in to its account, and the session it opens is held from account security changes: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claim `amr`, `ListRecoveryEmailsResponse.hold_until`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; native-gRPC hosts: new `identityserver.Options.GRPCTrustAMR`, **action required**; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` and `ProfileService` signatures (Go API))
+## Next — a recovery email signs in to its account, and the session it opens is held from account security changes: `recovery_emails.sign_in`, `recovery_emails.hold_seconds` (off by default; migration 0059; additive access-token claim `amr`, `ListRecoveryEmailsResponse.hold_until`, `RecoveryEmail.last_sign_in_at`, error detail `RecoveryHoldDetails` and stable token `recovery_session`; additive audit event `recovery_email_sign_in`; native-gRPC hosts: new `identityserver.Options.GRPCTrustAMR`, **action required**; two `Repository` methods, more asked of `CreateRefreshToken` and `RemoveRecoveryEmail`, new record fields and changed `AuthService` and `ProfileService` signatures (Go API))
 
 A project whose accounts sign in by emailed code had no way back in for a
 person who lost their primary mailbox: the email change and the account merge
@@ -123,7 +138,7 @@ both ask for a password. A recovery email can now be that way.
 
   | Key | Default | Meaning |
   | --- | --- | --- |
-  | `recovery_emails.sign_in` | `false` | An emailed code or link sent to a recovery email signs in to the account that holds it. |
+  | `recovery_emails.sign_in` | `false` | An emailed code or link sent to a recovery email signs in to the account that holds it. Independent of `recovery_emails.enabled`: turning `enabled` off leaves held addresses signing in, so clear `sign_in` to stop recovery sign-ins. |
   | `recovery_emails.hold_seconds` | `604800` (`0` selects it; at most `2592000`) | How long after such a sign-in the session it opened is held from account security changes (below). Cannot be turned off. |
 
 - **What it does.** `RequestEmailLoginCode` / `VerifyEmailLoginCode` and
@@ -147,9 +162,16 @@ both ask for a password. A recovery email can now be that way.
 - **Removing the address ends the sessions it opened.** `RemoveRecoveryEmail`
   deletes, in the same transaction as the address, every refresh token a
   sign-in by that address wrote, rotated ones included, and revokes the
-  access session each names: under `GATEWAY_REVOCATION_MODE=session` their
-  access tokens stop working at once, and under `ttl` they last to their
-  expiry and can no longer be refreshed. The account's other sessions,
+  access session each names. Under `GATEWAY_REVOCATION_MODE=session` their
+  access tokens stop working at once on the replica that removed the address,
+  and within `GATEWAY_SESSION_CACHE_TTL_SECONDS` on others; until then such a
+  token makes no account security change on any replica (the held calls below
+  read its session from the store and answer `UNAUTHENTICATED` once it has
+  ended), although the hold its address started ends with it. A merge's
+  retired account now leaves the session cache at once on its replica too.
+  Under `ttl` they last to their expiry and can no longer be refreshed, and
+  in that time, with the address gone, no hold refuses them: a project that
+  relies on the hold should run `session` mode. The account's other sessions,
   including those its other recovery emails opened, are untouched, and the
   refused refreshes do not set off replay detection. A session being opened
   by that address while it is removed (a second factor or a date of birth
@@ -160,31 +182,35 @@ both ask for a password. A recovery email can now be that way.
   leaves `email_verified` as it was.
 - **Every other address is told.** The account's primary email and its other
   recovery emails are mailed a notice naming the address that signed in and
-  when the hold ends.
+  when the hold ends, and saying to remove it by signing in another way: the
+  primary email, a password, a passkey or a linked provider.
 - **The hold binds that session, not the owner.** From that sign-in, for
   `recovery_emails.hold_seconds`, a session a recovery email opened makes no
   account security change: it is refused with `FAILED_PRECONDITION`, the
   stable `recovery_hold` token and a `RecoveryHoldDetails` saying when it
-  ends, by every call that adds a way in or a way to recover the account
-  (`RequestRecoveryEmail`, `VerifyRecoveryEmail`, `RequestPhoneVerification`,
-  `VerifyPhoneCode`, `BeginTotpSetup`, `VerifyTotpSetup`,
+  ends, by these calls: those that add a way in or a way to recover the
+  account (`RequestRecoveryEmail`, `VerifyRecoveryEmail`,
+  `RequestPhoneVerification`, `VerifyPhoneCode`, `BeginTotpSetup`, `VerifyTotpSetup`,
   `RegenerateRecoveryCodes`, `BeginPasskeyRegistration`,
   `CompletePasskeyRegistration`, `LinkIdentity`), takes one away
   (`RemoveRecoveryEmail`, `RemovePhone`, `DisableTotp`, `DeletePasskey`,
   `UnlinkIdentity`), replaces one (`ChangePassword`, `RequestEmailChange`),
   ends another session (`RevokeSession` of any session but its own,
   `RevokeAllSessions`, `SignOutEverywhere`) or deletes the account
-  (`DeleteMyAccount`). Without the removals in that list, whoever got into a
-  recovery mailbox could strip the owner's passkeys, providers and sessions
-  during the hold and leave the owner with nothing but that address. The held
+  (`DeleteMyAccount`). Nothing else is held: deciding an agent's delegated
+  access (`DecideAgentAuthorization`, `RevokeAgentDelegation`) is not.
+  Without the removals in that list, whoever got into a recovery mailbox
+  could strip the owner's passkeys, providers and sessions during the hold and
+  leave the owner with nothing but that address. The held
   session can still sign itself out: `Logout`, or `RevokeSession` of its own
   session, which it can name only under `GATEWAY_REVOCATION_MODE=session`,
   where its token carries a `sid`. A session opened any other way (the
   primary email, a password, a passkey, a provider) is never held, so the
   owner can remove an address they do not recognise at any time; removing the
   address that started the hold ends it. `ListRecoveryEmails` returns the
-  hold's end as `hold_until`. A sign-in from an address whose own hold is
-  still in force does not extend it. The hold is measured with the length
+  hold's end as `hold_until`, and each address's `last_sign_in_at`, so the
+  owner can tell which one started it. A sign-in from an address whose own
+  hold is still in force does not extend it. The hold is measured with the length
   configured now, not the one in force at the sign-in.
 - **Merges are held for everyone.** `MergeAccounts` and the admin
   `MergeUsers` answer the same `recovery_hold` refusal while a hold is in
@@ -199,19 +225,23 @@ both ask for a password. A recovery email can now be that way.
   `RefreshToken` refuses to select, and `ListMyTenants` leaves out, a tenant
   the account belongs to only through its email's domain, so disabling an
   organisational mailbox is not undone by a personal recovery address.
-- **Native gRPC: action required.** The bridge passes `x-authenticated-amr`
-  to the handlers only once the host sets the new
-  `identityserver.Options.GRPCTrustAMR`, separate from `GRPCTrustAuthTime`.
-  Until then it replaces the key with `unvouched`, whatever the client sent,
-  and treats every native-gRPC session as one a recovery email may have
-  opened: while a hold is in force on its account the session makes none of
-  the changes above and approves no QR sign-in (`recovery_session`), and
+- **Native gRPC: action required once a project turns `sign_in` on.** The
+  bridge passes `x-authenticated-amr` to the handlers only once the host sets
+  the new `identityserver.Options.GRPCTrustAMR`, separate from
+  `GRPCTrustAuthTime`. Until then it replaces the key with `unvouched`,
+  whatever the client sent, and treats every native-gRPC session as one a
+  recovery email may have opened: while a hold is in force on its account the
+  session makes none of the changes above and approves no QR sign-in
+  (`recovery_session`), and in a project with `recovery_emails.sign_in` on,
   `ListMyTenants` lists only its explicit memberships, leaving out, hold or
   not, every tenant it belongs to through its email's domain (`RefreshToken`
   still selects such a tenant: its refresh token records how the session was
-  opened). Hosts already on `GRPCTrustAuthTime` are affected too: the
+  opened). A project that never turns `sign_in` on has no hold and sees no
+  change. Hosts already on `GRPCTrustAuthTime` are affected too: the
   embedding guide's earlier sample interceptor forwarded no `amr`, which
-  would otherwise let every recovery session over native gRPC past the hold.
+  would otherwise let every recovery session over native gRPC past the hold;
+  `RegisterGRPC` now logs `grpc_amr_not_trusted` for a host that trusts
+  `auth_time` or the session id but not the `amr`.
   To have sessions treated by how they were opened, make the interceptor
   delete any `x-authenticated-amr` the client sent and set it from the
   verified token, `strings.Join(claims.AMR, " ")` (left out when the token
@@ -249,7 +279,8 @@ now keep a list of addresses it has proved it controls.
 
 - **Nothing changes until a project opts in.** `recovery_emails` in a project's
   `config_json` is off by default: `RequestRecoveryEmail` and
-  `VerifyRecoveryEmail` answer `FAILED_PRECONDITION`. The block is
+  `VerifyRecoveryEmail` answer `FAILED_PRECONDITION` with the stable
+  `recovery_emails_disabled` token. The block is
   control-plane only: the env-configured default project has no `config_json`
   and keeps none.
 
@@ -285,7 +316,9 @@ now keep a list of addresses it has proved it controls.
   `FAILED_PRECONDITION` with the stable `reauthentication_required` token when
   the session's sign-in (`auth_time`) is older than the project's window: sign
   the user in again and retry. Listing needs none. Anonymous accounts and
-  agents hold no recovery email.
+  agents hold no recovery email, and with `GATEWAY_MINOR_DATA_MINIMIZATION`
+  on, `RequestRecoveryEmail` refuses a child account `FAILED_PRECONDITION`
+  as `RequestPhoneVerification` does.
 - **Every change is mailed.** An added address is announced to the account's
   other addresses; a removal to those and to the removed address. The notice
   uses the project's email branding.

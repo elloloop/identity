@@ -155,7 +155,7 @@ SubjectPublicKeyInfo of a P-256 key and an active agent account of the project,
 and consumes the grant: it must name this teammate, placement and company, be
 unexpired and be unused, or used by this claim. Otherwise it is
 <code>PERMISSION_DENIED</code>, counted as
-<code>identity_teammate_keys_registered_total{result="grant_refused"}</code> and
+<code>identity_teammate_keys_registered_total{`{result="grant_refused"}`}</code> and
 audited as <code>hire_grant_refused</code>. The claim is the idempotency key: the
 same registration returns the same <code>key_id</code>, even after the grant
 expired; one claim has one key, so a different key or grant for it, a revoked
@@ -196,8 +196,8 @@ demotion). The token has no client, scope or grant id, so a
 delegated-access verifier refuses it; verify it with
 <code>VerifyTeammateAccessToken</code> or an equivalent check of
 <code>typ</code>, issuer, project and audience.</p>
-<p>Metrics: <code>identity_teammate_keys_registered_total{result}</code>,
-<code>identity_teammate_keys_revoked_total{schedule}</code> (<code>immediate</code>
+<p>Metrics: <code>identity_teammate_keys_registered_total{`{result}`}</code>,
+<code>identity_teammate_keys_revoked_total{`{schedule}`}</code> (<code>immediate</code>
 or <code>deadline</code>) and
-<code>identity_agent_exchanges_total{key_kind,result}</code>.</p>
+<code>identity_agent_exchanges_total{`{key_kind,result}`}</code>.</p>
 </DocsLayout>

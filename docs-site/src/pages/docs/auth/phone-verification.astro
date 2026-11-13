@@ -1,0 +1,215 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Phone verification">
+  <h1>Phone verification</h1>
+  <p>
+    A signed-in user proves they own a phone number with a 6-digit code sent
+    to it. The number is stored on their account with
+    <code>phone_verified</code> set. It is not a way to sign in: it is a fact
+    about the account that a project can keep to one account per number and a
+    tenant can require.
+  </p>
+
+  <h2 id="deployment">On the deployment</h2>
+  <p>
+    A code is sent over a <strong>channel</strong>, and the deployment decides
+    which channels exist:
+  </p>
+  <ul>
+    <li>
+      <code>sms</code> texts the code through the deployment's SMS provider:
+      <code>GATEWAY_SMS_ENABLED=true</code>, <code>GATEWAY_SMS_PROVIDER</code>
+      (<code>twilio</code>, <code>sns</code> or <code>azure</code>) and its
+      credentials (<code>GATEWAY_SMS_*</code>); the server refuses to boot when
+      the provider's are missing.
+    </li>
+    <li>
+      <code>message</code> sends a pre-approved messaging-app template message
+      through a <code>templatemsg.Sender</code>. This server ships no provider
+      for it and has no environment variable for one: an embedder sets
+      <code>identityserver.Options.TemplateMessageSender</code>. The template's
+      one parameter is the code. A <code>Sender</code> must never log the
+      code, nor put it in an error it returns.
+    </li>
+  </ul>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>GATEWAY_PHONE_CODE_TTL_SECONDS</code></td><td><code>300</code></td><td>How long a code lasts.</td></tr>
+    <tr><td><code>GATEWAY_PHONE_CODE_MAX_ATTEMPTS</code></td><td><code>5</code></td><td>Guesses a code takes, the right one included, before it is spent.</td></tr>
+    <tr><td><code>GATEWAY_PHONE_CODE_COOLDOWN_SECONDS</code></td><td><code>60</code></td><td>The least time between two codes for one account.</td></tr>
+  </table>
+
+  <h2 id="project">Per project</h2>
+  <p>
+    A project with no <code>phone</code> block in its <code>config_json</code>
+    verifies phones as the deployment does, by SMS. The block can only narrow
+    that: it can switch verification off, drop a channel and refuse calling
+    codes, but cannot use a channel the deployment has no sender for.
+  </p>
+  <Code lang="json" code={`{
+  "phone": {
+    "unique": true,
+    "reassign_after_seconds": 31536000,
+    "allowed_calling_codes": ["1", "44"],
+    "channels": ["message", "sms"],
+    "message_template": "verification_code",
+    "message_language": "en"
+  }
+}`} />
+  <table>
+    <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
+    <tr>
+      <td><code>enabled</code></td>
+      <td>unset (follows the deployment)</td>
+      <td><code>false</code> turns verification off for the project. <code>true</code> changes nothing: a project cannot verify phones without a sender.</td>
+    </tr>
+    <tr>
+      <td><code>unique</code></td>
+      <td><code>false</code></td>
+      <td>A verified number belongs to one account of the project.</td>
+    </tr>
+    <tr>
+      <td><code>reassign_after_seconds</code></td>
+      <td><code>0</code> (never; at most <code>315360000</code>, ten years)</td>
+      <td>With <code>unique</code>: how long after its holder verified a number another account that proves it may take it.</td>
+    </tr>
+    <tr>
+      <td><code>allowed_calling_codes</code></td>
+      <td><code>[]</code> (every code)</td>
+      <td>Country calling codes accepted, as 1 to 3 digits without the <code>+</code>. One code can cover several countries (<code>1</code> covers the whole North American numbering plan), so this narrows by calling code, not by country.</td>
+    </tr>
+    <tr>
+      <td><code>channels</code></td>
+      <td><code>[]</code> (<code>["sms"]</code>)</td>
+      <td>The delivery order: <code>"sms"</code>, <code>"message"</code>. A channel left out is never used.</td>
+    </tr>
+    <tr>
+      <td><code>message_template</code></td>
+      <td><code>""</code></td>
+      <td>The template the message channel sends, as registered with the provider. Required when <code>channels</code> lists <code>"message"</code>.</td>
+    </tr>
+    <tr>
+      <td><code>message_language</code></td>
+      <td><code>""</code></td>
+      <td>The template's language code, when the provider needs one.</td>
+    </tr>
+  </table>
+  <p>
+    The channels are tried in order and the first that accepts the message
+    wins; one that fails is logged and the next is tried. A project switched
+    off, and one none of whose channels has a sender here, both answer
+    <code>UNAVAILABLE</code> with <code>phone verification is not
+    available</code>. The log tells them apart:
+    <code>phone_verification_unavailable</code> with
+    <code>reason: switched_off_by_project</code>, or, as a warning, with
+    <code>reason: no_channel_has_a_sender</code>, a misconfiguration every
+    request to that project fails on.
+  </p>
+
+  <h2 id="rpcs">Verifying and removing a number</h2>
+  <Code lang="bash" code={`curl -sX POST http://localhost/identity.v1.IdentityService/RequestPhoneVerification \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"phoneNumber":"+14155550123"}'
+
+curl -sX POST http://localhost/identity.v1.IdentityService/VerifyPhoneCode \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"phoneNumber":"+14155550123","code":"123456"}'`} />
+  <p>
+    <code>RequestPhoneVerification</code> sends a code to an E.164 number.
+    <code>VerifyPhoneCode</code> checks it against the number it was sent to
+    and stores the number, verified. A number another account holds is sent a
+    code like any other: whether a number is taken is told only to a caller
+    whose code was right.
+  </p>
+  <table>
+    <tr><th>Answer</th><th>When</th></tr>
+    <tr><td><code>UNAVAILABLE</code></td><td>The project cannot verify phones, or no channel delivered the code.</td></tr>
+    <tr><td><code>INVALID_ARGUMENT</code></td><td>The number is not E.164.</td></tr>
+    <tr><td><code>FAILED_PRECONDITION</code>, <code>phone_country_not_allowed</code></td><td>The number is outside <code>allowed_calling_codes</code>; nothing is sent.</td></tr>
+    <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_hold</code></td><td>The session is held by a <a href="/identity/docs/auth/recovery-emails#the-hold">recovery hold</a>.</td></tr>
+    <tr><td><code>FAILED_PRECONDITION</code></td><td>An anonymous account (upgrade it first), or a child account when <code>GATEWAY_MINOR_DATA_MINIMIZATION</code> is on.</td></tr>
+    <tr><td><code>ALREADY_EXISTS</code></td><td><code>RequestPhoneVerification</code> for the number the account has already verified.</td></tr>
+    <tr><td><code>UNAUTHENTICATED</code></td><td>A missing, expired, used up or wrong code, or one sent to another number.</td></tr>
+    <tr><td><code>ALREADY_EXISTS</code>, <code>phone_number_taken</code></td><td><code>VerifyPhoneCode</code> with a right code for a number another account holds, where the project keeps numbers unique.</td></tr>
+  </table>
+  <p>
+    Every guess, right or wrong, counts against the code's attempt cap in the
+    same write that reads the code, so guesses sent at once cannot pass it.
+  </p>
+  <p>
+    <code>RemovePhone</code> clears the caller's number and its verified state
+    and returns the user; a caller with no number gets their user back
+    unchanged. It works whether or not the project verifies phones, mails the
+    account's addresses, audits <code>phone_removed</code>
+    (<code>reason: removed_by_user</code>), and is refused during a recovery
+    hold like a change of number.
+  </p>
+
+  <h2 id="unique">One account per number</h2>
+  <p>
+    With <code>unique</code>, a verified number belongs to one account. It is
+    free again when its holder removes it, verifies another number, or is
+    deleted. With <code>reassign_after_seconds</code>, a number also moves to
+    another account that proves it once that long has passed since its holder
+    verified it, since carriers give a number its owner gave up to someone
+    else: the previous holder's phone is cleared, <code>phone_removed</code>
+    is audited for them (<code>reason: verified_by_another_account</code>),
+    and their addresses are mailed. Numbers verified before the project turned
+    <code>unique</code> on are not claimed: an older account keeps such a
+    number, and it is held to one account from the next time it is verified.
+  </p>
+  <p>
+    A <a href="/identity/docs/users/merging-accounts">merge</a> moves the
+    retired account's number to a survivor that has none, and otherwise
+    releases it.
+  </p>
+
+  <h2 id="tenant-rule">A tenant that requires a verified phone</h2>
+  <p>
+    A tenant's login policy can require one:
+    <code>LoginPolicy.require_verified_phone</code> makes
+    <code>RefreshToken</code> refuse to select the tenant for an account with
+    no verified phone, so no token for it is minted, and
+    <code>phone_calling_codes</code> narrows the rule to numbers under those
+    calling codes. Each entry is 1 to 3 digits, not starting with 0, listed
+    once; anything else, or codes without the requirement, is
+    <code>INVALID_ARGUMENT</code>.
+  </p>
+  <Code lang="bash" code={`curl -sX POST http://localhost/identity.v1.IdentityService/UpsertLoginPolicy \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"projectId":"<project>","tenantId":"<tenant>","requireVerifiedPhone":true,"phoneCallingCodes":["1","44"]}'`} />
+  <p>
+    The refusal is <code>FAILED_PRECONDITION</code> with the stable
+    <code>phone_verification_required</code> token and
+    <code>TenantSelectionRefusedDetails.reason =
+    TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED</code>, and leaves the
+    refresh token unspent. It is not a sign-in rule: the account keeps signing
+    in, refreshes without <code>tenant_id</code>, verifies a phone with that
+    session, and selects the tenant again. It is checked at every selection,
+    so removing the phone ends access at the next refresh. A session the
+    policy would refuse for another reason is refused for that first.
+  </p>
+  <p>
+    The rule is saved whatever the project can do. In a project that cannot
+    verify phones (switched off, or with no sender), an account with no
+    verified phone can never get one, so every such selection is refused:
+    check the project before you require a phone.
+  </p>
+  <p>
+    See <a href="/identity/docs/concepts/multi-tenancy">Multi-Tenancy</a> for
+    tenant selection.
+  </p>
+
+  <h2 id="audit">Audit events</h2>
+  <ul>
+    <li><code>phone_verification_requested</code>: a code was sent.</li>
+    <li><code>phone_verified</code>: a number was verified and stored.</li>
+    <li><code>phone_removed</code>: a number left an account, with <code>reason</code> <code>removed_by_user</code> or <code>verified_by_another_account</code>.</li>
+  </ul>
+</DocsLayout>

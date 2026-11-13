@@ -821,18 +821,22 @@ default; a control-plane project's `config_json` only).
   before the owner has read the notice. The session can still sign itself
   out. It never approves a QR sign-in, hold or not. A session opened any
   other way is not held: the owner can always remove an address they do not
-  recognise, and removing the one that started the hold ends it. A sign-in
-  from the same address does not extend a hold already in force.
+  recognise (`ListRecoveryEmails` says when each last signed in), and
+  removing the one that started the hold ends it. A sign-in from the same
+  address does not extend a hold already in force.
 - Over native gRPC the session's `amr` reaches identity only from a host
   that forwards it and says so (`GRPCTrustAMR`). Until then every session
   there is treated as one a recovery email may have opened: it is held
-  during a hold, approves no QR sign-in while one is in force, and
-  `ListMyTenants` lists only its explicit memberships.
+  during a hold and approves no QR sign-in while one is in force, and in a
+  project with `recovery_emails.sign_in` on `ListMyTenants` lists only its
+  explicit memberships.
 - Removing a recovery email ends every session it opened, in the same
   transaction: their refresh tokens are deleted, rotated ones included, and
   under `GATEWAY_REVOCATION_MODE=session` their access tokens stop working at
-  once. A session being opened by the address as it is removed is refused,
-  and the account's other sessions are untouched.
+  once on the replica that removed it and within the session cache's TTL on
+  others, where until then they make no account security change. A session
+  being opened by the address as it is removed is refused, and the account's
+  other sessions are untouched.
 - While a hold is in force on either account, a merge is refused, whoever
   asks.
 - A session a recovery email opened acts in a tenant only through an explicit
@@ -855,13 +859,14 @@ narrows the rest and can turn nothing on that the deployment lacks:
 - `phone.enabled: false` switches verification off for the project.
 - `phone.channels` orders the delivery channels (`"message"`, `"sms"`) and
   drops the ones left out.
-- `phone.allowed_calling_codes` limits the countries a code is sent to.
+- `phone.allowed_calling_codes` limits the calling codes a code is sent to
+  (one code can cover several countries).
 - `phone.unique` keeps a verified number on one account; it moves only when
   its holder releases it or, with `phone.reassign_after_seconds` (at most ten
   years), after that long.
 
 A tenant can require a verified phone (`LoginPolicy.require_verified_phone`,
-optionally of some countries): until the account has one, a selection of the
+optionally under some calling codes): until the account has one, a selection of the
 tenant is refused and no token for it is minted. The account still signs in
 and verifies a phone with that unselected session.
 

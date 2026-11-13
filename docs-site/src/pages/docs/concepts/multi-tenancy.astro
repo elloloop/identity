@@ -307,9 +307,9 @@ RestoreTenantMember(tenant_id, user_id)
     A member only through their email's domain must have verified that email
     and still be on a domain the tenant has verified; moving the email off the
     domain ends the membership, and moving back does not rejoin. A session a
-    recovery email opened (its token's <code>amr</code> names
-    <code>recovery_email</code>) is never such a member: it selects a tenant
-    only through an explicit membership. Every refused
+    <a href="/identity/docs/auth/recovery-emails">recovery email</a> opened
+    (its token's <code>amr</code> names <code>recovery_email</code>) is never
+    such a member: it selects a tenant only through an explicit membership. Every refused
     selection carries a <code>TenantSelectionRefusedDetails</code> error
     detail and consumes nothing, so a client that finds the detail refreshes
     again without <code>tenant_id</code>. <code>RefreshToken</code> refuses an

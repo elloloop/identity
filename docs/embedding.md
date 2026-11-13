@@ -150,16 +150,24 @@ a client vouch for its own recent sign-in, and every merge and
 recovery-email change over native gRPC is refused
 `reauthentication_required`.
 
-The calls a recovery hold governs, `ApproveQrLogin` and `ListMyTenants`, read
+Every call that limits a session by how it was opened reads
 `x-authenticated-amr`, the token's `amr` claim with its values separated by
-spaces (absent on most tokens). Forward it the same way, **and** set
-`Options.GRPCTrustAMR`, a separate opt-in: until you do, the bridge replaces
-the key with `unvouched`, whatever the client sent, and treats every session
-as one a recovery email may have opened. While a recovery hold is in force
-on its account such a session makes no account security change and approves
-no QR sign-in, and `ListMyTenants` lists only its explicit memberships. A
-host that forwards `auth_time` but no `amr` must not set `GRPCTrustAMR`: an
-absent key reads as a session no recovery email opened.
+spaces (absent on most tokens): each call a recovery hold refuses (the
+[recovery emails](../docs-site/src/pages/docs/auth/recovery-emails.astro)
+page lists them), `ApproveQrLogin` and `ListMyTenants`. Forward it the same
+way, **and** set `Options.GRPCTrustAMR`, a separate opt-in: until you do, the
+bridge replaces the key with `unvouched`, whatever the client sent, and
+treats every session as one a recovery email may have opened. While a
+recovery hold is in force on its account such a session makes no account
+security change and approves no QR sign-in; and in a project whose recovery
+emails sign in (`recovery_emails.sign_in`), `ListMyTenants` lists only its
+explicit memberships, hold or not, leaving out every tenant it belongs to
+through its email's domain (`RefreshToken` still selects one, since its
+refresh token records how the session was opened). Elsewhere nothing changes
+until a recovery email signs in. `RegisterGRPC` logs `grpc_amr_not_trusted`
+when you trust `auth_time` or the session id but not the `amr`. A host that
+forwards `auth_time` but no `amr` must not set `GRPCTrustAMR`: an absent key
+reads as a session no recovery email opened.
 
 Whether to pin the `tenant` claim depends on tenant selection. With
 `GATEWAY_TENANT_SELECTION_ENABLED` off, the default, every token carries the
