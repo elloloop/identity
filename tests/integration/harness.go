@@ -113,7 +113,7 @@ type HarnessOption func(*harnessOptions)
 type harnessOptions struct {
 	oauthRegistry  *oauth.Registry
 	nativeVerifier *oauth.NativeVerifier
-	nativeProjects service.NativeOAuthProjectStore
+	activeProjects service.ActiveProjectStore
 	config         func(*config.Config)
 	idvProvider    idv.Provider
 }
@@ -142,10 +142,10 @@ func WithConfig(fn func(*config.Config)) HarnessOption {
 
 // WithNativeOAuth injects a native ID-token verifier (typically pointed at a
 // mock JWKS) and the optional product-lookup store used by NativeOAuthLogin.
-func WithNativeOAuth(v *oauth.NativeVerifier, projects service.NativeOAuthProjectStore) HarnessOption {
+func WithNativeOAuth(v *oauth.NativeVerifier, projects service.ActiveProjectStore) HarnessOption {
 	return func(o *harnessOptions) {
 		o.nativeVerifier = v
-		o.nativeProjects = projects
+		o.activeProjects = projects
 	}
 }
 
@@ -189,7 +189,7 @@ func startHarness(
 		EmailTransport:      mailer,
 		OAuthRegistry:       hOpts.oauthRegistry,
 		NativeOAuthVerifier: hOpts.nativeVerifier,
-		NativeOAuthProjects: hOpts.nativeProjects,
+		ActiveProjects:      hOpts.activeProjects,
 		IDVProvider:         hOpts.idvProvider,
 		// Send synchronously so the recording mailer is readable immediately
 		// after a request (the served deployment dispatches async).

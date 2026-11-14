@@ -17,6 +17,7 @@ import (
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type managedChildChainResolver struct{}
@@ -142,5 +143,22 @@ func TestManagedChildAuthorization_NoProjectResolverIsUnavailable(t *testing.T) 
 	rec := postRPC(t, h, "/identity.v1.IdentityService/GetManagedChildAuthorization", `{"childUserId":"child","guardianUserId":"guardian"}`, map[string]string{identityconnect.ManagedChildKeyHeader: chainDirectoryKey, "X-Project-Key": "pk_invalid"})
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("credential store without project policy resolver: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestManagedChildAuthorization_BootReportsAvailability(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		logs, entries := observer.New(zap.InfoLevel)
+		deps := Deps{Config: newTestConfig()}
+		expected := "managed_child_authorization_disabled"
+		if enabled {
+			deps.ProjectResolver = managedChildChainResolver{}
+			deps.DirectoryCredentials = chainCredentials{}
+			expected = "managed_child_authorization_enabled"
+		}
+		svc := buildManagedChildAuthorization(deps, nil, zap.New(logs))
+		if (svc != nil) != enabled || entries.FilterMessage(expected).Len() != 1 {
+			t.Fatalf("availability=%v entries=%v", enabled, entries.All())
+		}
 	}
 }

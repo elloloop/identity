@@ -15,9 +15,9 @@ import (
 // row types and delegate to the typed methods, mirroring project_resolver.go.
 var _ service.ControlPlaneProjectStore = (*ProjectStore)(nil)
 
-// The ProjectStore is also the postgres driver's service.NativeOAuthProjectStore:
+// The ProjectStore is also the postgres driver's service.ActiveProjectStore:
 // the read-side lookup NativeOAuthLogin uses to validate a product→project id.
-var _ service.NativeOAuthProjectStore = (*ProjectStore)(nil)
+var _ service.ActiveProjectStore = (*ProjectStore)(nil)
 
 // The ProjectStore is also the postgres driver's service.DirectoryCredentialStore:
 // the credential read the directory lookup authenticates against.

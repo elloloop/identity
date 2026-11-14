@@ -29,9 +29,10 @@ const (
 // DirectoryService accepts — it authorizes the read-only LookupUsers RPC
 // against its own project and nothing else.
 const (
-	CredentialKindPublishable        = "publishable"
-	CredentialKindSecret             = "secret"
-	CredentialKindDirectoryReader    = "directory_reader"
+	CredentialKindPublishable     = "publishable"
+	CredentialKindSecret          = "secret"
+	CredentialKindDirectoryReader = "directory_reader"
+	// CredentialKindManagedChildReader authorizes only the live guardian-child proof.
 	CredentialKindManagedChildReader = "managed_child_reader"
 	// CredentialKindTeammateKeyManager authorizes TeammateKeyService in its
 	// project, presented in X-Teammate-Key-Manager-Key.
@@ -44,7 +45,8 @@ const (
 
 // Credential public-id prefixes, so a key is self-describing at a glance
 // (Stripe-style): pk_ for publishable, sk_ for secret, dk_ for directory,
-// tk_ for a teammate key manager, ok_ for a tenant operator.
+// ck_ for managed-child authorization, tk_ for a teammate key manager,
+// ok_ for a tenant operator.
 const (
 	publishableKeyPrefix        = "pk_"
 	secretKeyPrefix             = "sk_"

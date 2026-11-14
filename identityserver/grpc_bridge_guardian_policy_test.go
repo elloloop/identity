@@ -47,7 +47,7 @@ func TestGuardianPolicy_DefaultHTTPAndNativeGRPCCannotBypass(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := &service.AdminProject{ID: cfg.DefaultProjectID, Guardian: service.ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true}}
-	built, err := app.New(app.Deps{Config: cfg, Logger: zap.NewNop(), Signer: signer, Repo: repo, DB: repo, Passkeys: pk, TOTPKey: []byte("01234567890123456789012345678901"), TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"), NativeOAuthProjects: guardianPolicyProject{project: project}})
+	built, err := app.New(app.Deps{Config: cfg, Logger: zap.NewNop(), Signer: signer, Repo: repo, DB: repo, Passkeys: pk, TOTPKey: []byte("01234567890123456789012345678901"), TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"), ActiveProjects: guardianPolicyProject{project: project}})
 	if err != nil {
 		t.Fatal(err)
 	}

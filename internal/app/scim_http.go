@@ -49,7 +49,7 @@ type scimHandler struct {
 	// env-configured default project and its account policy, used when the
 	// SCIM project is the default one, exactly as the project-resolution
 	// middleware's default pin uses them.
-	projects         service.NativeOAuthProjectStore
+	projects         service.ActiveProjectStore
 	defaultProjectID string
 	defaultAccounts  service.ProjectAccountsConfig
 }
@@ -71,7 +71,7 @@ func (h *scimHandler) register(mux *http.ServeMux, enabled bool) {
 // plane (memory), where there is nothing to verify against and the check is a
 // no-op — matching how the native-OAuth product→project validation and
 // ensureDefaultProject skip the memory driver.
-func validateSCIMProject(lookup service.NativeOAuthProjectStore, projectID string) error {
+func validateSCIMProject(lookup service.ActiveProjectStore, projectID string) error {
 	if lookup == nil {
 		return nil
 	}

@@ -110,7 +110,7 @@ const (
 	MaxAnonymousRetentionDays = 10000
 
 	// DefaultRateLimitDirectoryPerIP is the per-IP cap per window on the
-	// surfaces a project credential authenticates (RateLimitDirectoryPerIP)
+	// directory/tenant surfaces listed by RateLimitDirectoryPerIP
 	// when none is configured or the configured value is zero, whether it came
 	// from the environment or a Config built in code: those surfaces are never
 	// unthrottled.
@@ -1313,19 +1313,20 @@ type Config struct {
 	RateLimitIDVPerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
 	RateLimitBootstrapPerIP int
-	// RateLimitDirectoryPerIP is the per-IP cap per window on each surface a
-	// project credential authenticates: LookupUsers (directory_reader), the
+	// RateLimitDirectoryPerIP is the per-IP cap per window on these surfaces: LookupUsers (directory_reader), the
 	// TeammateKeyService (teammate_key_manager) and the tenant operations
 	// called with a tenant_operator credential, across the HTTP and native
 	// gRPC surfaces, and HireGrantService over HTTP, called with a person's
 	// session; unlike the other per-IP caps it cannot be switched off,
 	// so zero selects the default and a negative value is refused at boot.
 	// Each surface has its own budget per client IP, which covers both
-	// transports; a LookupUsers call resolves up to 100 addresses.
+	// transports; a LookupUsers call resolves up to 100 addresses. Managed-child
+	// authorization uses its independent RateLimitManagedChildAuthPerIP budget.
 	RateLimitDirectoryPerIP int
 	// RateLimitManagedChildAuthPerIP is the per-IP cap per window for live
 	// guardian-child authorization checks across HTTP and native gRPC.
-	// Zero selects 1200; negative is invalid. It never disables throttling.
+	// Zero selects DefaultRateLimitManagedChildAuthPerIP; negative is invalid.
+	// It never disables throttling.
 	RateLimitManagedChildAuthPerIP int
 	// RateLimitSCIMPerIP is the per-IP cap per window on every request under
 	// /scim/v2/, authenticated or not, so the SCIM bearer token cannot be

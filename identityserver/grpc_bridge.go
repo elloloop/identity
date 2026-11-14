@@ -10,6 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/internal/service"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -42,12 +43,13 @@ import (
 // budgets across transports.
 type grpcBridge struct {
 	identitypb.UnimplementedIdentityServiceServer
-	h              *identityconnect.IdentityHandler
-	directoryLimit middleware.PathLimit
-	machineLimits  map[string]middleware.PathLimit
-	operatorLimits map[string]middleware.PathLimit
-	trustedProxies []*net.IPNet
-	logger         *zap.Logger
+	h               *identityconnect.IdentityHandler
+	directoryLimit  middleware.PathLimit
+	machineLimits   map[string]middleware.PathLimit
+	operatorLimits  map[string]middleware.PathLimit
+	trustedProxies  []*net.IPNet
+	projectResolver service.ProjectResolver
+	logger          *zap.Logger
 	// trustAuthTime: the host's interceptor owns x-authenticated-auth-time
 	// (Options.GRPCTrustAuthTime). Otherwise the bridge drops it.
 	trustAuthTime  bool
@@ -80,14 +82,15 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSes
 		operatorLimits[procedure] = limit
 	}
 	return &grpcBridge{
-		machineLimits:  machineLimits,
-		operatorLimits: operatorLimits,
-		h:              built.ConnectHandler,
-		directoryLimit: directoryLimit,
-		trustedProxies: built.TrustedProxies,
-		logger:         logger,
-		trustAuthTime:  trustAuthTime,
-		trustSessionID: trustSessionID,
+		machineLimits:   machineLimits,
+		operatorLimits:  operatorLimits,
+		h:               built.ConnectHandler,
+		directoryLimit:  directoryLimit,
+		trustedProxies:  built.TrustedProxies,
+		projectResolver: built.ProjectResolver,
+		logger:          logger,
+		trustAuthTime:   trustAuthTime,
+		trustSessionID:  trustSessionID,
 	}
 }
 
@@ -1039,5 +1042,29 @@ func (b *grpcBridge) GetManagedChildAuthorization(ctx context.Context, in *ident
 	if err := b.throttle(ctx, b.machineLimits[identityv1connect.IdentityServiceGetManagedChildAuthorizationProcedure]); err != nil {
 		return nil, err
 	}
+	ctx, err := b.managedChildProjectContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return invoke(ctx, b, in, b.h.GetManagedChildAuthorization)
+}
+
+// Unlike HTTP there is no host/default project middleware on native gRPC.
+// Require an explicit public project key and never downgrade an invalid key.
+func (b *grpcBridge) managedChildProjectContext(ctx context.Context) (context.Context, error) {
+	if b.projectResolver == nil {
+		return nil, status.Error(codes.Unimplemented, "managed child authorization requires a project resolver")
+	}
+	key := incomingMetadata(ctx)(middleware.ProjectKeyHeader)
+	if key == "" {
+		return nil, status.Error(codes.Unauthenticated, "project key is required")
+	}
+	project, err := b.projectResolver.ResolveByCredential(ctx, key)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "project resolution failed")
+	}
+	if project == nil || project.ID == "" {
+		return nil, status.Error(codes.Unauthenticated, "invalid project key")
+	}
+	return service.WithProjectScope(ctx, middleware.ScopeFromResolved(project)), nil
 }

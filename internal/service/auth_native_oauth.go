@@ -26,17 +26,6 @@ type NativeIDTokenVerifier interface {
 	Verify(ctx context.Context, params oauth.NativeVerifyParams) (*oauth.NativeVerification, error)
 }
 
-// NativeOAuthProjectStore is the narrow control-plane lookup NativeOAuthLogin
-// uses to confirm that a product→project id names a real, ACTIVE project
-// before token issuance is scoped to it. It delegates to the postgres
-// control-plane ProjectStore.GetProjectByID; drivers without a control plane
-// inject nil and native login pins to the configured default project. A clean
-// miss (no such project, or a suspended one) returns (nil, nil); only an
-// infrastructure failure returns a non-nil error.
-type NativeOAuthProjectStore interface {
-	ActiveProjectByID(ctx context.Context, projectID string) (*AdminProject, error)
-}
-
 // NativeOAuthLoginParams are the inputs to NativeOAuthLogin. IDToken is the
 // JWT a native SDK returned (Google idToken / Apple identityToken); Nonce is
 // the RAW Apple nonce (empty for Google).
@@ -272,8 +261,8 @@ func (s *AuthService) resolveNativeProject(ctx context.Context, product string) 
 		projectID = mapped
 	}
 
-	if s.nativeProjects != nil {
-		p, err := s.nativeProjects.ActiveProjectByID(ctx, projectID)
+	if s.activeProjects != nil {
+		p, err := s.activeProjects.ActiveProjectByID(ctx, projectID)
 		if err != nil {
 			// An infrastructure failure must not be reported as a client error;
 			// surface it so the handler maps it to Internal.

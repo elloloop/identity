@@ -9,13 +9,16 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
+// ManagedChildKeyHeader carries the backend-only live authorization credential.
 const ManagedChildKeyHeader = "X-Managed-Child-Key"
 
+// WithManagedChildAuthorization wires the narrow machine proof surface.
 func (h *IdentityHandler) WithManagedChildAuthorization(s *service.ManagedChildAuthorizationService) *IdentityHandler {
 	h.managedChildAuthorization = s
 	return h
 }
 
+// GetManagedChildAuthorization returns only the live authorization decision.
 func (h *IdentityHandler) GetManagedChildAuthorization(ctx context.Context, req *connect.Request[identitypb.GetManagedChildAuthorizationRequest]) (*connect.Response[identitypb.GetManagedChildAuthorizationResponse], error) {
 	if h.managedChildAuthorization == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)

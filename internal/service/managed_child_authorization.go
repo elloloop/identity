@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 )
 
@@ -16,6 +15,7 @@ type ManagedChildAuthorizationService struct {
 	auth        *AuthService
 }
 
+// NewManagedChildAuthorizationService builds the narrow live authorization surface.
 func NewManagedChildAuthorizationService(credentials DirectoryCredentialStore, auth *AuthService) *ManagedChildAuthorizationService {
 	if credentials == nil {
 		return nil
@@ -23,8 +23,12 @@ func NewManagedChildAuthorizationService(credentials DirectoryCredentialStore, a
 	return &ManagedChildAuthorizationService{credentials: credentials, auth: auth}
 }
 
+// maxManagedChildAuthorizationIDBytes bounds opaque identifiers before repository reads.
+const maxManagedChildAuthorizationIDBytes = 128
+
 var errInvalidManagedChildKey = fmt.Errorf("%w: invalid managed child reader key or project", ErrUnauthenticated)
 
+// GetManagedChildAuthorization checks one pair without returning profiles or tokens.
 func (s *ManagedChildAuthorizationService) GetManagedChildAuthorization(ctx context.Context, key, childID, guardianID string) (bool, error) {
 	publicID, secret, ok := strings.Cut(key, rawKeySeparator)
 	if !ok || publicID == "" || secret == "" {
@@ -47,8 +51,8 @@ func (s *ManagedChildAuthorizationService) GetManagedChildAuthorization(ctx cont
 		return false, errInvalidManagedChildKey
 	}
 	childID, guardianID = strings.TrimSpace(childID), strings.TrimSpace(guardianID)
-	if childID == "" || guardianID == "" || len(childID) > 128 || len(guardianID) > 128 {
-		return false, fmt.Errorf("%w: child_user_id and guardian_user_id must be 1..128 bytes", ErrInvalidArgument)
+	if childID == "" || guardianID == "" || len(childID) > maxManagedChildAuthorizationIDBytes || len(guardianID) > maxManagedChildAuthorizationIDBytes {
+		return false, fmt.Errorf("%w: child_user_id and guardian_user_id must be 1..%d bytes", ErrInvalidArgument, maxManagedChildAuthorizationIDBytes)
 	}
 	ctx, err = s.auth.guardianContext(ctx)
 	if err != nil {
@@ -86,6 +90,5 @@ func (s *ManagedChildAuthorizationService) check(ctx context.Context, repo Repos
 	}
 	now := s.auth.nowFunc()
 	childBand := s.auth.determinerForUser(ctx, child).Determine(child.DateOfBirthMs, now)
-	guardianBand := s.auth.determinerForUser(ctx, guardian).Determine(guardian.DateOfBirthMs, now)
-	return childBand.IsMinor && guardianBand.Band == agegate.BandAdult, nil
+	return childBand.IsMinor && s.auth.isKnownAdultPerson(ctx, guardian), nil
 }

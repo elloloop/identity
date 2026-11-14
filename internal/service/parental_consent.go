@@ -216,7 +216,7 @@ func (s *AuthService) GrantParentalConsent(
 
 	if !s.guardianProfileAllowed(ctx, adult) {
 		s.auditConsentFailure(ctx, consentingUserID, childUserID, "adult_profile", ip, userAgent)
-		return nil, fmt.Errorf("%w: a known adult profile is required", ErrPermissionDenied)
+		return nil, errGuardianAdultProfileRequired
 	}
 
 	// Check (b): STEP-UP RE-AUTH. Verified before any state changes so a

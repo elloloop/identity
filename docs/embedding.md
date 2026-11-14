@@ -201,11 +201,17 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
 }
 ```
 
-**Rate limits are the host's responsibility too, with three exceptions.**
+**Rate limits are the host's responsibility too, with four exceptions.**
 The per-IP limits on the sign-up, sign-in and other abuse-prone RPCs live in
 the HTTP chain; apply your own in an interceptor. The bridge enforces these
 itself, from the same per-IP budgets the HTTP surface uses:
 
+- `GetManagedChildAuthorization`, using its independent
+  `GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP` budget. Native calls require
+  `x-project-key` metadata for the project publishable key and
+  `x-managed-child-key` for its private managed_child_reader credential. The
+  bridge resolves that explicit project through the same resolver as HTTP; an
+  invalid or unavailable key never falls back to the default project.
 - `LookupUsers`, whose limit cannot be switched off
   (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`).
 - The tenant operations (`AdminGetTenant`, `AdminListTenants`,

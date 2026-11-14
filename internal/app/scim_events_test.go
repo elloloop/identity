@@ -369,14 +369,14 @@ func TestSCIM_ListCountZeroShortCircuits(t *testing.T) {
 	}
 }
 
-// fakeNativeProjects is a control-plane project-by-id lookup for the SCIM
+// fakeActiveProjects is a control-plane project-by-id lookup for the SCIM
 // boot-validation test.
-type fakeNativeProjects struct {
+type fakeActiveProjects struct {
 	proj *service.AdminProject
 	err  error
 }
 
-func (f fakeNativeProjects) ActiveProjectByID(context.Context, string) (*service.AdminProject, error) {
+func (f fakeActiveProjects) ActiveProjectByID(context.Context, string) (*service.AdminProject, error) {
 	return f.proj, f.err
 }
 
@@ -388,7 +388,7 @@ func scimBootConfig() *config.Config {
 	return cfg
 }
 
-func newSCIMBootApp(t *testing.T, cfg *config.Config, lookup service.NativeOAuthProjectStore) (*Built, error) {
+func newSCIMBootApp(t *testing.T, cfg *config.Config, lookup service.ActiveProjectStore) (*Built, error) {
 	t.Helper()
 	signer := jwttest.NewSigner(t, "scim-boot")
 	pk, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: "localhost", RPName: "Identity Test", Origin: "http://localhost:9002"})
@@ -397,15 +397,15 @@ func newSCIMBootApp(t *testing.T, cfg *config.Config, lookup service.NativeOAuth
 	}
 	repo := memory.New()
 	return New(Deps{
-		Config:              cfg,
-		Logger:              zap.NewNop(),
-		Signer:              signer,
-		Repo:                repo,
-		DB:                  repo,
-		Passkeys:            pk,
-		TOTPKey:             []byte("01234567890123456789012345678901"),
-		TOTPRecoveryPepper:  []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
-		NativeOAuthProjects: lookup,
+		Config:             cfg,
+		Logger:             zap.NewNop(),
+		Signer:             signer,
+		Repo:               repo,
+		DB:                 repo,
+		Passkeys:           pk,
+		TOTPKey:            []byte("01234567890123456789012345678901"),
+		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
+		ActiveProjects:     lookup,
 	})
 }
 
@@ -416,21 +416,21 @@ func newSCIMBootApp(t *testing.T, cfg *config.Config, lookup service.NativeOAuth
 // check.
 func TestSCIM_BootValidatesProject(t *testing.T) {
 	t.Run("unknown project id fails startup", func(t *testing.T) {
-		_, err := newSCIMBootApp(t, scimBootConfig(), fakeNativeProjects{proj: nil})
+		_, err := newSCIMBootApp(t, scimBootConfig(), fakeActiveProjects{proj: nil})
 		if err == nil || !strings.Contains(err.Error(), "does not name an active project") {
 			t.Fatalf("boot error = %v, want unknown-project failure", err)
 		}
 	})
 
 	t.Run("lookup error fails startup", func(t *testing.T) {
-		_, err := newSCIMBootApp(t, scimBootConfig(), fakeNativeProjects{err: errors.New("db down")})
+		_, err := newSCIMBootApp(t, scimBootConfig(), fakeActiveProjects{err: errors.New("db down")})
 		if err == nil || !strings.Contains(err.Error(), "verify GATEWAY_SCIM_PROJECT_ID") {
 			t.Fatalf("boot error = %v, want lookup-failure", err)
 		}
 	})
 
 	t.Run("active project boots", func(t *testing.T) {
-		built, err := newSCIMBootApp(t, scimBootConfig(), fakeNativeProjects{proj: &service.AdminProject{ID: "scim-project"}})
+		built, err := newSCIMBootApp(t, scimBootConfig(), fakeActiveProjects{proj: &service.AdminProject{ID: "scim-project"}})
 		if err != nil {
 			t.Fatalf("boot with active project: %v", err)
 		}

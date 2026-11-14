@@ -146,8 +146,8 @@ func TestProjectGuardianPolicy_DefaultAndUnscopedAdmission(t *testing.T) {
 		f := newManagedChildFixture(t, true)
 		f.svc.cfg.GuardianStepUpAllowNoPassword = true
 		projectID := f.svc.cfg.DefaultProjectID
-		projects := &fakeNativeProjects{active: map[string]*AdminProject{projectID: {ID: projectID, Guardian: ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true}}}}
-		f.svc.WithNativeOAuth(nil, projects)
+		projects := &fakeActiveProjects{active: map[string]*AdminProject{projectID: {ID: projectID, Guardian: ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true}}}}
+		f.svc.WithActiveProjects(projects)
 		ctx := context.Background()
 		if scope != nil {
 			ctx = WithProjectScope(ctx, scope)
@@ -185,5 +185,45 @@ func TestProjectGuardianPolicy_DefaultAndUnscopedAdmission(t *testing.T) {
 		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("missing project failed open: %v", err)
 		}
+	}
+}
+
+func TestProjectGuardianPolicy_DoesNotObstructConsentWithdrawal(t *testing.T) {
+	f := newManagedChildFixture(t, true)
+	ctx := context.Background()
+	created, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.adult.PasswordHash = ""
+	f.adult.DateOfBirthMs = 0
+	ctx = WithProjectScope(ctx, &ProjectScope{Guardian: ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true}})
+	_, childStatus, err := f.svc.RevokeParentalConsent(ctx, f.adult.ID, created.Child.ID, "withdrawal")
+	if err != nil || childStatus != StatusPendingParentalConsent {
+		t.Fatalf("withdrawal blocked: %s %v", childStatus, err)
+	}
+	edge, err := f.repo.GetGuardianEdge(ctx, f.adult.ID, created.Child.ID)
+	if err != nil || edge != nil {
+		t.Fatal("withdrawal did not remove guardian access")
+	}
+}
+
+func TestProjectGuardianPolicy_DefaultJurisdictionsRemainConsistent(t *testing.T) {
+	ctx := context.Background()
+	f := newGuardianFixture(ctx, t)
+	f.child.DateOfBirthMs = dobAgeMs(19)
+	projectID := f.svc.cfg.DefaultProjectID
+	policy := ProjectJurisdictionsConfig{Default: "EX", Thresholds: map[string]JurisdictionThresholds{"EX": {ChildMaxAge: 12, AdultAge: 21}}}
+	f.svc.WithActiveProjects(&fakeActiveProjects{active: map[string]*AdminProject{projectID: {ID: projectID, Jurisdictions: policy}}})
+	child, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+	if err != nil || !child.IsMinor {
+		t.Fatalf("default route stamped another policy: %v %v", child, err)
+	}
+	creator := newManagedChildFixture(t, true)
+	creator.svc.WithActiveProjects(&fakeActiveProjects{active: map[string]*AdminProject{creator.svc.cfg.DefaultProjectID: {ID: creator.svc.cfg.DefaultProjectID, Jurisdictions: policy}}})
+	req := creator.req()
+	req.Market = "ZZ"
+	if _, err := creator.svc.CreateManagedChildAccount(ctx, creator.adult.ID, req, "", ""); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("unknown project market accepted: %v", err)
 	}
 }

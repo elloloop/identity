@@ -155,7 +155,7 @@ func nativeITHarness(t *testing.T, signer *nativeITSigner, enabled bool) *Harnes
 		MicrosoftJWKSURL: signer.url,
 		Now:              func() time.Time { return signer.now },
 	})
-	// Memory driver: no control plane, so nativeProjects is nil and the product
+	// Memory driver: no control plane, so activeProjects is nil and the product
 	// must resolve to the default project, whose native audiences come from env.
 	return StartServer(t, cfgFn, WithNativeOAuth(verifier, nil))
 }

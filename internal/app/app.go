@@ -106,11 +106,10 @@ type Deps struct {
 	// DirectoryService is constructed and LookupUsers returns Unimplemented.
 	DirectoryCredentials service.DirectoryCredentialStore
 
-	// NativeOAuthProjects is the control-plane project-by-id lookup
-	// NativeOAuthLogin uses to validate a product→project id. Non-nil ONLY for
-	// the postgres driver; nil on drivers without a control plane, where native
-	// login accepts only the product that resolves to the default project.
-	NativeOAuthProjects service.NativeOAuthProjectStore
+	// ActiveProjects supplies authoritative project policy for guardian admission,
+	// native sign-in and SCIM, regardless of which sign-in methods are enabled.
+	// It is nil only on drivers without a control plane.
+	ActiveProjects service.ActiveProjectStore
 
 	// Projects lists every control-plane project for the stored-email repair
 	// (RepairStoredEmails). Non-nil ONLY for the postgres driver; when nil the
@@ -227,10 +226,11 @@ type Deps struct {
 //   - Start launches the background workers (audit flusher, sweeper);
 //     it is idempotent. Stop drains them; safe to call multiple times.
 type Built struct {
-	Handler        http.Handler
-	ConnectHandler *identityconnect.IdentityHandler
-	RateLimits     []middleware.PathLimit
-	TrustedProxies []*net.IPNet
+	Handler         http.Handler
+	ConnectHandler  *identityconnect.IdentityHandler
+	RateLimits      []middleware.PathLimit
+	TrustedProxies  []*net.IPNet
+	ProjectResolver service.ProjectResolver
 
 	repairEmails func(ctx context.Context, apply bool) (*service.EmailRepairReport, error)
 	drainEvents  func(ctx context.Context) (int, error)
@@ -807,7 +807,8 @@ func New(deps Deps) (*Built, error) {
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
 		WithEventPublisher(eventPublisher).
-		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
+		WithActiveProjects(deps.ActiveProjects).
+		WithNativeOAuth(nativeVerifier).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
 		WithEnvOAuthProviders(envOAuthBuilder).
 		WithReturnAllowlist(returnAllow)
@@ -885,10 +886,7 @@ func New(deps Deps) (*Built, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent exchange metrics: %w", err)
 	}
-	// A credential store alone cannot supply the project jurisdiction policy.
-	if deps.ProjectResolver != nil {
-		handler.WithManagedChildAuthorization(service.NewManagedChildAuthorizationService(deps.DirectoryCredentials, authSvc))
-	}
+	handler.WithManagedChildAuthorization(buildManagedChildAuthorization(deps, authSvc, logger))
 	handler.WithTeammateKeys(teammateKeys).WithAgentExchangeMetrics(exchanges)
 
 	mux := http.NewServeMux()
@@ -1001,6 +999,7 @@ func New(deps Deps) (*Built, error) {
 		logger.Warn("default_project_access_closed",
 			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))
 	}
+	projectResolver := service.NewCachingProjectResolver(deps.ProjectResolver, deps.Config.ProjectResolutionCacheTTL(), deps.Config.ProjectResolutionCacheMaxEntries)
 	chain = middleware.NewProjectResolver(
 		middleware.DefaultProject{
 			ProjectID:         deps.Config.DefaultProjectID,
@@ -1016,11 +1015,7 @@ func New(deps Deps) (*Built, error) {
 			Accounts:  defaultAccounts,
 			Tenants:   service.ProjectTenantsConfig{SelfService: deps.Config.SelfServiceTenantsEnabled},
 		},
-		service.NewCachingProjectResolver(
-			deps.ProjectResolver,
-			deps.Config.ProjectResolutionCacheTTL(),
-			deps.Config.ProjectResolutionCacheMaxEntries,
-		),
+		projectResolver,
 		logger,
 	)(chain)
 	chain = agentOAuthRequestBounds(deps.Config, chain)
@@ -1029,14 +1024,15 @@ func New(deps Deps) (*Built, error) {
 	chain = middleware.LoggingMiddleware(logger)(chain)
 
 	return &Built{
-		Handler:        chain,
-		ConnectHandler: handler,
-		RateLimits:     rateLimits,
-		TrustedProxies: trustedProxies,
-		startWork:      startWork,
-		stopWork:       stopWork,
-		repairEmails:   emailRepair(deps, adminSvc),
-		drainEvents:    drainEvents,
+		Handler:         chain,
+		ConnectHandler:  handler,
+		RateLimits:      rateLimits,
+		TrustedProxies:  trustedProxies,
+		ProjectResolver: projectResolver,
+		startWork:       startWork,
+		stopWork:        stopWork,
+		repairEmails:    emailRepair(deps, adminSvc),
+		drainEvents:     drainEvents,
 	}, nil
 }
 
@@ -1388,6 +1384,17 @@ func buildControlPlaneAdminService(deps Deps, users service.UserDirectory, audit
 	)
 }
 
+// buildManagedChildAuthorization keeps incomplete control-plane wiring disabled
+// and exposes the effective per-operation budget to operators once at boot.
+func buildManagedChildAuthorization(deps Deps, auth *service.AuthService, logger *zap.Logger) *service.ManagedChildAuthorizationService {
+	if deps.ProjectResolver == nil || deps.DirectoryCredentials == nil {
+		logger.Info("managed_child_authorization_disabled", zap.String("hint", "GetManagedChildAuthorization needs a project resolver and managed_child_reader credentials from the postgres control plane"))
+		return nil
+	}
+	logger.Info("managed_child_authorization_enabled", zap.Int("rate_limit_per_ip", deps.Config.RateLimitManagedChildAuthPerIP), zap.Duration("rate_limit_window", rateLimitWindow(deps.Config)))
+	return service.NewManagedChildAuthorizationService(deps.DirectoryCredentials, auth)
+}
+
 // buildDirectoryService returns the DirectoryService backing LookupUsers, or
 // nil when the build has no control plane to hold directory credentials. The
 // Connect handler treats nil as "disabled" and returns CodeUnimplemented.
@@ -1559,7 +1566,7 @@ func mountSCIM(mux *http.ServeMux, deps Deps, repo service.Repository, auditLog 
 	// names a real, ACTIVE project rather than 500-ing on the first request.
 	// Only the postgres driver has a control plane to check against (the
 	// lookup is nil for memory, which pins all data to the default project).
-	if err := validateSCIMProject(deps.NativeOAuthProjects, deps.Config.SCIMProjectID); err != nil {
+	if err := validateSCIMProject(deps.ActiveProjects, deps.Config.SCIMProjectID); err != nil {
 		return err
 	}
 	// The default project's account policy, for a SCIM project that is the
@@ -1580,7 +1587,7 @@ func mountSCIM(mux *http.ServeMux, deps Deps, repo service.Repository, auditLog 
 		tenantID:    deps.Config.DefaultTenantID,
 		logger:      logger,
 
-		projects:         deps.NativeOAuthProjects,
+		projects:         deps.ActiveProjects,
 		defaultProjectID: deps.Config.DefaultProjectID,
 		defaultAccounts:  defaultAccounts,
 	}).register(mux, true)

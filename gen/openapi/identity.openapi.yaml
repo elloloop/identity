@@ -7072,8 +7072,9 @@ components:
           title: kind
           description: |-
             kind selects the credential type: "publishable" (a public lookup key,
-             no secret), "secret" (a key whose secret half is shown ONCE), or
-             "managed_child_reader" (only GetManagedChildAuthorization, no profile/write rights),
+             no secret), "secret" (a key whose secret half is shown ONCE),
+             "managed_child_reader" (a once-shown secret for GetManagedChildAuthorization
+             in X-Managed-Child-Key, no profile/write rights),
              "directory_reader" (a machine credential whose secret half is shown ONCE
              and which authorizes exactly one thing: LookupUsers against this
              project's directory, presented in the X-Directory-Key header), or
@@ -9354,7 +9355,8 @@ components:
       description: |-
         GetManagedChildAuthorizationRequest checks a single guardian-child pair.
          A managed_child_reader credential in X-Managed-Child-Key must belong to the
-         explicitly resolved request project. The credential grants no user or write RPCs.
+         request's resolved project (X-Project-Key, HTTP auth hostname or HTTP default).
+         Native gRPC requires X-Project-Key. The credential grants no user or write RPCs.
     identity.v1.GetManagedChildAuthorizationResponse:
       type: object
       properties:
@@ -9364,7 +9366,9 @@ components:
           description: |-
             True only for an active minor with a live edge to an active person with a known adult age band as
              guardian in this project. Missing, revoked, inactive, and adult targets
-             all return false. No account profile or credentials are disclosed.
+             all return false, as do unknown age bands and disabled age gating.
+             No account profile or credentials are disclosed.
+             JSON omits authorized when false; only an explicit true authorizes access.
              This is a point-in-time check, not a reusable authorization token.
       title: GetManagedChildAuthorizationResponse
       additionalProperties: false

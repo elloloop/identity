@@ -1,3 +1,4 @@
+-- Widen the credential CHECK only; existing rows are unchanged.
 SET LOCAL lock_timeout = '10s';
 ALTER TABLE project_credentials DROP CONSTRAINT project_credentials_kind_check;
 ALTER TABLE project_credentials ADD CONSTRAINT project_credentials_kind_check

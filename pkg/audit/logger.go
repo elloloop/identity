@@ -214,7 +214,10 @@ const (
 	// read the directory and how much without copying it. A refused
 	// presentation of a real directory_reader credential (revoked, or the
 	// wrong secret) is logged with success=false and a `reason`.
-	EventDirectoryLookup           EventType = "directory_lookup"
+	EventDirectoryLookup EventType = "directory_lookup"
+	// EventManagedChildAuthorization records a credential actor and child target
+	// for each decision. Refused credential presentations carry a reason and
+	// omit the requested child target; no profile or secret is recorded.
 	EventManagedChildAuthorization EventType = "managed_child_authorization"
 
 	// EventSCIMAuthFailed records a request to the SCIM surface refused for a

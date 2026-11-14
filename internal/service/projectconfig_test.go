@@ -641,3 +641,16 @@ func TestParseProjectConfig_GuardianStepUp(t *testing.T) {
 	_, err = ParseProjectConfig(`{"guardian":{"require_step_up":"true"}}`)
 	require.Error(t, err)
 }
+
+func TestParseProjectConfig_GuardianAdultProfile(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"guardian":{}}`, `{"guardian":{"require_adult_profile":false}}`} {
+		cfg, err := ParseProjectConfig(raw)
+		require.NoError(t, err)
+		assert.False(t, cfg.Guardian.RequireAdultProfile)
+	}
+	cfg, err := ParseProjectConfig(`{"guardian":{"require_adult_profile":true}}`)
+	require.NoError(t, err)
+	assert.True(t, cfg.Guardian.RequireAdultProfile)
+	_, err = ParseProjectConfig(`{"guardian":{"require_adult_profile":"true"}}`)
+	require.Error(t, err)
+}

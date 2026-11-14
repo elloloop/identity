@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -33,6 +34,11 @@ func TestManagedChildAuthorization_LivePairAndProject(t *testing.T) {
 		}
 	}
 	check(true)
+	auth.WithActiveProjects(&fakeActiveProjects{err: ErrServiceUnavailable})
+	if allowed, err := svc.GetManagedChildAuthorization(ctx, key.RawKey, child.ID, guardian.ID); allowed || !errors.Is(err, ErrServiceUnavailable) {
+		t.Fatalf("authoritative policy error failed open: %v %v", allowed, err)
+	}
+	auth.WithActiveProjects(nil)
 	siblingKey := f.mint(t, dirTestProjectB, CredentialKindManagedChildReader)
 	siblingCtx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: dirTestProjectB})
 	if allowed, err := svc.GetManagedChildAuthorization(siblingCtx, siblingKey.RawKey, child.ID, guardian.ID); allowed || err != nil {
@@ -81,7 +87,6 @@ func TestManagedChildAuthorization_LivePairAndProject(t *testing.T) {
 	guardian.DateOfBirthMs = dobAgeMs(35)
 	child.DateOfBirthMs = dobAgeMs(25)
 	check(false)
-	child.DateOfBirthMs = dobAgeMs(8)
 	child.DateOfBirthMs = 0
 	check(false)
 	child.DateOfBirthMs = dobAgeMs(8)
@@ -140,6 +145,11 @@ func TestManagedChildAuthorization_CredentialFailures(t *testing.T) {
 	f.store.lookupErr = nil
 	if allowed, err := svc.GetManagedChildAuthorization(ctx, fresh.RawKey, "", "guardian"); allowed || !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("malformed: %v %v", allowed, err)
+	}
+	for _, pair := range [][2]string{{strings.Repeat("x", maxManagedChildAuthorizationIDBytes+1), "guardian"}, {"child", strings.Repeat("x", maxManagedChildAuthorizationIDBytes+1)}} {
+		if allowed, err := svc.GetManagedChildAuthorization(ctx, fresh.RawKey, pair[0], pair[1]); allowed || !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("oversized identifier: %v %v", allowed, err)
+		}
 	}
 	if NewManagedChildAuthorizationService(nil, auth) != nil {
 		t.Fatal("enabled without credential store")

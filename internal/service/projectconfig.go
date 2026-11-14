@@ -23,7 +23,7 @@ import (
 // newer server still decodes on an older one, ignoring fields it does not
 // understand.
 type ProjectConfig struct {
-	// Guardian controls fresh reauthentication for child account operations.
+	// Guardian controls fresh reauthentication and known adult admission for child accounts.
 	Guardian ProjectGuardianConfig `json:"guardian"`
 
 	// CORS holds the project's browser cross-origin policy.

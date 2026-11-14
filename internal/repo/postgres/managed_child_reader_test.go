@@ -81,6 +81,7 @@ func TestManagedChildReaderCredentialMigrationRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, insert("ck_one", "managed_child_reader"))
 	require.NoError(t, insert("tk_one", "teammate_key_manager"))
+	require.NoError(t, insert("ok_one", "tenant_operator"))
 	kinds := func() string {
 		var def string
 		require.NoError(t, raw.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'project_credentials_kind_check'`).Scan(&def))
@@ -91,11 +92,12 @@ func TestManagedChildReaderCredentialMigrationRoundTrip(t *testing.T) {
 	migrateToVersion(t, scratch, 58)
 	require.NotContains(t, kinds(), "managed_child_reader")
 	require.Contains(t, kinds(), "teammate_key_manager")
+	require.Contains(t, kinds(), "tenant_operator")
 	rows, err := raw.Query(ctx, `SELECT id FROM project_credentials ORDER BY id`)
 	require.NoError(t, err)
 	left, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	require.NoError(t, err)
-	require.Equal(t, []string{"tk_one"}, left, "the rollback deletes the managed_child_reader credentials alone")
+	require.Equal(t, []string{"ok_one", "tk_one"}, left, "the rollback deletes the managed_child_reader credentials alone")
 	err = insert("ck_two", "managed_child_reader")
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "project_credentials_kind_check"), err.Error())

@@ -152,11 +152,12 @@ func (b *Built) DirectoryCredentialStore() service.DirectoryCredentialStore {
 	return b.ProjectStore
 }
 
-// NativeProjectLookup returns the control-plane project-by-id lookup as the
-// driver-agnostic service.NativeOAuthProjectStore NativeOAuthLogin uses, or a
+// ActiveProjects returns the control-plane project-by-id lookup as the
+// driver-agnostic service.ActiveProjectStore shared by guardian admission,
+// native sign-in and SCIM, or a
 // true nil when this build has no control plane (memory) — avoiding the
 // typed-nil trap.
-func (b *Built) NativeProjectLookup() service.NativeOAuthProjectStore {
+func (b *Built) ActiveProjects() service.ActiveProjectStore {
 	if b.ProjectStore == nil {
 		return nil
 	}

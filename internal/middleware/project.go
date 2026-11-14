@@ -132,7 +132,7 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 			writeConnectError(w, http.StatusUnauthorized, "unauthenticated", "invalid project key")
 			return nil, false
 		}
-		return scopeFromResolved(rp), true
+		return ScopeFromResolved(rp), true
 	}
 
 	// 2. Host → auth-domain.
@@ -145,7 +145,7 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 				return nil, false
 			}
 			if rp != nil {
-				return scopeFromResolved(rp), true
+				return ScopeFromResolved(rp), true
 			}
 		}
 	}
@@ -218,7 +218,8 @@ func oauthProjectKey(w http.ResponseWriter, r *http.Request) (key string, ok boo
 	return key, true
 }
 
-func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
+// ScopeFromResolved carries the same resolved policy on HTTP and native RPC transports.
+func ScopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 	return &service.ProjectScope{
 		ProjectID:          rp.ID,
 		StorageScopeID:     rp.StorageScopeID,

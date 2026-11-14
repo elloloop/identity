@@ -174,16 +174,16 @@ func (s *AuthService) CreateManagedChildAccount(
 	if err := validateCompletionDOB(req.DateOfBirthMs, s.nowFunc()); err != nil {
 		return nil, err
 	}
-	market := normalizeJurisdictionCode(req.Market)
-	if err := s.validateAccountMarket(ctx, market); err != nil {
-		return nil, err
-	}
-
 	var err error
 	ctx, err = s.guardianContext(ctx)
 	if err != nil {
 		return nil, err
 	}
+	market := normalizeJurisdictionCode(req.Market)
+	if err := s.validateAccountMarket(ctx, market); err != nil {
+		return nil, err
+	}
+
 	repo := s.repo(ctx)
 
 	// 1. The caller must exist, be an active account, and — when the age gate
@@ -207,7 +207,7 @@ func (s *AuthService) CreateManagedChildAccount(
 
 	if !s.guardianProfileAllowed(ctx, caller) {
 		s.auditManagedChildFailure(ctx, callerUserID, "adult_profile", ip, userAgent)
-		return nil, fmt.Errorf("%w: a known adult profile is required", ErrPermissionDenied)
+		return nil, errGuardianAdultProfileRequired
 	}
 
 	// 2. Step-up re-authentication + strong verified factor — the same two

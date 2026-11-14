@@ -649,7 +649,18 @@ the birthday itself; the now-adult account's own live sessions are
 deliberately left untouched, because ageing out is not a security event for
 the account holder. Only a *definitive* adult band refuses: with the age gate
 off, or with no date of birth on file, no band can be derived and the edge
-alone authorizes — the pre-gate behaviour, unchanged.
+alone authorizes under the default policy. A project can opt into
+`guardian.require_adult_profile` to instead require a known adult guardian
+with a date of birth; age gating must then be enabled.
+
+The Postgres project policy can also set `guardian.require_step_up` to require
+fresh password proof even when passwordless guardians are allowed globally.
+Both settings default off and apply to child creation, consent grants and all
+management calls. Consent withdrawal remains available. A backend can mint a
+`managed_child_reader` credential for `GetManagedChildAuthorization`: it returns
+only a live boolean for an active known-minor/known-adult guardian pair in one
+project. Recheck each protected use and deny false or errors; no profile or
+session capability is granted.
 
 Each operation emits its own audit event naming the acting guardian
 (`guardian_child_profile_viewed`, `guardian_child_password_set`,
@@ -1237,7 +1248,8 @@ before you ship.
       own server interceptor that verifies the bearer token and forwards
       identity's expected metadata (`x-authenticated-user-id`). This keeps
       the bridge a pure transport adapter rather than re-implementing the
-      middleware twice. The exceptions are `LookupUsers`, the tenant
+      middleware twice. The exceptions are `GetManagedChildAuthorization` (its independent
+      `GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP` budget), `LookupUsers`, the tenant
       operations called with a `tenant_operator` credential, and the agent
       machine calls (see `docs/embedding.md`): the bridge charges them
       against the same per-IP limiters the HTTP chain uses, so each budget

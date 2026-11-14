@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — project guardian admission and live machine authorization
+## Next — project guardian admission and live machine authorization (off by default; migration 0059; additive RPC, credential, audit event and rate-limit config; Go API)
 
 Projects may opt in with `config_json.guardian.require_step_up: true` and
 `config_json.guardian.require_adult_profile: true`. Both default to false; no
@@ -14,8 +14,13 @@ policy, before those operations write. Admission reads the authoritative
 active-project policy by ID, including the default-project fallback and native
 gRPC, rather than trusting the presence of a transport-supplied project scope.
 A missing/suspended project or a failed policy read denies the operation.
-Consent withdrawal remains available
-without adding barriers to removing access.
+Known adult admission requires `GATEWAY_AGEGATE_ENABLED=true` and a guardian
+date of birth; disabled age gating denies every strict adult-profile admission.
+The existing DOB validator accepts only positive epoch milliseconds, so guardians
+born on or before 1970-01-01 cannot currently satisfy the known-adult requirement.
+The authoritative lookup also applies project jurisdiction thresholds to
+default HTTP and native guardian operations that previously used env thresholds.
+Consent withdrawal remains available without adding barriers to removing access.
 
 Migration 0059 adds `managed_child_reader` project credentials (minted through
 `AdminCreateProjectCredential`). Keep their once-shown raw keys server-side.
@@ -33,16 +38,25 @@ refreshing, or using their child-device credentials and fail closed on false,
 errors or unavailability. It grants no other RPC. Requests use the independent
 `GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP` budget (default 1200 per
 `GATEWAY_RATE_LIMIT_WINDOW_SECONDS`, default 60 seconds), shared across HTTP
-and native gRPC, and emit `managed_child_authorization`
+and native gRPC. Native gRPC requires explicit `x-project-key` metadata and
+resolves it through the HTTP project resolver; invalid keys never fall back.
+Requests emit `managed_child_authorization`
 audit events. Size this budget for aggregate backend egress: 100 devices
 with one protected operation every 30 seconds require 200 checks per minute,
-plus refresh and retry headroom. The limit is per IP per replica; larger
+plus refresh and retry headroom. Each decision writes an audit row (288,000
+rows per day at that example rate); size audit storage, queue capacity and
+retention alongside the request budget. The limit is per IP per replica; larger
 installations must configure it for their measured peak, without raising the
 separate directory lookup budget. Zero retains the default and negative values
 refuse boot. The Postgres control plane is required to mint/read keys, and a project
 resolver must supply the project policy. Without either, the RPC is
-unimplemented; legacy memory/sqlite project-key routing is unchanged. Rollback deletes only this new credential kind
+unimplemented; legacy memory/sqlite project-key routing is unchanged. Rollback
+deletes only this new credential kind
 before restoring the previous constraint. No account tables or data change.
+
+Internal wiring names the shared policy dependency `ActiveProjectStore` /
+`ActiveProjects`, with an unconditional `WithActiveProjects` setter independent
+of `WithNativeOAuth`; SCIM and native sign-in use the same authoritative store.
 
 ## Next — `CreateTenantInvitation` reports whether its email was sent: `email_send_status` (additive field and enum; no migration; behaviour change for mail logs and spans when every SMTP provider fails, and for SMTP settings that name no valid provider; `email.ContextWithLogFields`, `service.EmailSendStatus`, `CreatedInvitation.EmailStatus`, a nil mailer in `NewMembershipService` (Go API))
 
@@ -117,7 +131,6 @@ before it writes a response, so none is known to hit the race. Anyone building i
 embedding its `pkg/` libraries should build on Go 1.26.11 or later on the
 1.26 line, or on the patched 1.27 release that
 https://pkg.go.dev/vuln/GO-2026-6859 lists.
-
 
 ## Next — an invite project can let a tenant invitation create the invitee's account: `access.admit_tenant_invitations` and `GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS` (off by default; migration 0058; additive audit event `signup_admitted_by_invitation`; `InvitationStore.OpenInvitationForEmail`, `AuthService.WithOpenInvitations` (Go API))
 
