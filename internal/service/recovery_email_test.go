@@ -186,6 +186,40 @@ func TestRecoveryEmail_RefusedWhileThePrimaryEmailIsUnproven(t *testing.T) {
 	f.add(t, user, "spare@example.net")
 }
 
+// A recovery-email code spends its own per-address cooldown, not the one the
+// address's sign-in codes and password resets spend. Anyone signed in may ask
+// for a code to any address, so sharing that cooldown would let them keep the
+// address's owner from signing in or resetting their password.
+func TestRecoveryEmail_CodeHoldsBackNoSignInOrResetToTheAddress(t *testing.T) {
+	for name, ask := range map[string]func(f *recoveryEmailFixture, addr string) error{
+		"sign-in code": func(f *recoveryEmailFixture, addr string) error {
+			return f.svc.RequestEmailLoginCode(f.ctx, addr)
+		},
+		"password reset": func(f *recoveryEmailFixture, addr string) error {
+			return f.svc.RequestPasswordReset(f.ctx, addr, EmailLinkParams{})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
+			f.svc.emailThrottle = newKeyCooldown(60_000, 0)
+			asker := seedVerified(f.repo, "asker@example.com", "")
+			seedVerified(f.repo, "victim@example.net", hashPW(t, accessTestPassword))
+			if err := f.svc.RequestRecoveryEmail(f.ctx, asker.ID, f.signedInNow(), "victim@example.net"); err != nil {
+				t.Fatalf("RequestRecoveryEmail: %v", err)
+			}
+			if got := f.mailedTo("victim@example.net"); len(got) != 1 {
+				t.Fatalf("%d messages to the address after the recovery request, want its code", len(got))
+			}
+			if err := ask(f, "victim@example.net"); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if got := f.mailedTo("victim@example.net"); len(got) != 2 {
+				t.Fatalf("the %s was held back by the recovery request: %d messages", name, len(got))
+			}
+		})
+	}
+}
+
 func TestRecoveryEmail_RefusedWhereTheProjectKeepsNone(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{})
 	user := seedVerified(f.repo, "owner@example.com", "")

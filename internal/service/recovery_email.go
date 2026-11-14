@@ -131,14 +131,27 @@ func holdsAddress(user *User, held []*RecoveryEmail, addr string) bool {
 // requests. No address holds it: an address always has an '@'.
 func recoveryEmailSenderKey(userID string) string { return "recovery-email-sender:" + userID }
 
+// recoveryEmailAddressKey is the send-cooldown key of the recovery-email
+// codes mailed to addr in the request's project. It is not the bare address,
+// which the address's sign-in codes, links and password resets spend: a
+// request names any address without proving it, so sharing that key would let
+// anyone hold back another person's way back in.
+func recoveryEmailAddressKey(ctx context.Context, addr string) string {
+	projectID := ""
+	if scope := ProjectScopeFromContext(ctx); scope != nil {
+		projectID = scope.ProjectID
+	}
+	return "recovery-email-addr:" + projectID + ":" + addr
+}
+
 // sendRecoveryEmailCodeNow is the body of RequestRecoveryEmail's dispatch.
 // Two cooldowns bound it: one per account, so a session cannot mail a
-// stream of strangers, and the shared per-address one. A code either one
-// holds back spends neither. Silent: a throttled, unrendered or undelivered
-// code is logged, never surfaced.
+// stream of strangers, and one per address, so many accounts cannot flood
+// one inbox. A code either one holds back spends neither. Silent: a
+// throttled, unrendered or undelivered code is logged, never surfaced.
 func (s *AuthService) sendRecoveryEmailCodeNow(ctx context.Context, userID, addr string) {
 	now := s.nowMs()
-	if !s.emailThrottle.allowAll(now, recoveryEmailSenderKey(userID), addr) {
+	if !s.emailThrottle.allowAll(now, recoveryEmailSenderKey(userID), recoveryEmailAddressKey(ctx, addr)) {
 		s.logger.Info("recovery_email_code_throttled", zap.String("user_id", userID))
 		return
 	}

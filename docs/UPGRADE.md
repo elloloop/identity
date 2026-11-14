@@ -453,7 +453,9 @@ now keep a list of addresses it has proved it controls.
   to the address; `VerifyRecoveryEmail` stores it. The request answers the
   same whether or not another account holds the address: that is told, as
   `ALREADY_EXISTS`, only to a caller whose code was right. Past the cap both answer `RESOURCE_EXHAUSTED`. Each request is held to
-  `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS` per account and per address, and
+  `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS` per account and per address (the
+  recovery codes' own per-address cooldown, so a request holds back no
+  sign-in code, magic link or password reset to the address), and
   `RequestRecoveryEmail` and `VerifyRecoveryEmail` each to their own per-IP
   budget of `GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP`, which
   `RemoveRecoveryEmail` shares with `RequestRecoveryEmail`. It is the emailed
