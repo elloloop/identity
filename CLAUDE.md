@@ -18,22 +18,21 @@ Highlights for quick recall:
   references to inaccessible context.
 - **PR review gate on every PR — always, never asked.** Dependabot's,
   docs-only and release-prep PRs included; an agent runs it before merge
-  without asking whether to. A fixed-roster multi-agent gate via
-  `Workflow({name: 'review-gate', args: <pr-number>})`: nine specialist
-  reviewers (Correctness, Security & Auth, Neutrality & Disclosure, API
-  Contract, Data & Migrations, Config & Operability, Maintainability &
-  Tests, Performance & Concurrency, Product & Docs) all launch on every
-  run; each first decides whether its lens applies — from the
-  changed-file list alone, and never for Correctness, Security & Auth or
-  Neutrality & Disclosure, which are non-skippable — then does its
-  complete review single-handed: no triage stage, no verification stage,
-  no sub-agents. Neutrality & Disclosure alone also reviews the PR text,
+  without asking whether to. A two-stage gate via
+  `Workflow({name: 'review-gate', args: <pr-number>})`: Stage 1, Security
+  & Auth (high effort), also owns disclosure and reads the PR text,
   commit messages, linked issues, edit history and force-pushed commits;
-  `args: 'issue:<n>'` runs it alone over an issue. It fails closed on a
-  dropped or self-contradictory reviewer. A maintainer step that runs
-  inside the Claude Code harness; advisory (posts a comment, never blocks
-  merge), runs alongside CI. Clear its blocking findings before merging,
-  or record on the PR why one is being dismissed.
+  Stage 2, one General reviewer (medium effort: correctness, data and
+  migrations, wire compatibility, config, tests, performance, docs,
+  neutrality), runs once, only after Stage 1 is clean. Neither can be
+  skipped; each stays on the diff and what it touches. Only Stage 1
+  repeats (`args: 'security:<n>'` once Stage 2 has run); Stage 2's
+  blocking findings are fixed and recorded on the PR, never re-run.
+  `args: 'issue:<n>'` checks an issue. It fails closed on a dropped or
+  self-contradictory reviewer. A maintainer step that runs inside the
+  Claude Code harness; advisory (posts a comment, never blocks merge),
+  runs alongside CI. Clear its blocking findings before merging, or
+  record on the PR why one is being dismissed.
 - **Keep the repo general and public-safe (AGENTS.md §13).** General
   capabilities, not one client's features; neutral examples (`acme`,
   `example.com`, `example.test`); nothing private in code, docs, commits,
