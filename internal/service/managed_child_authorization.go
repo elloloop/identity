@@ -50,6 +50,10 @@ func (s *ManagedChildAuthorizationService) GetManagedChildAuthorization(ctx cont
 	if childID == "" || guardianID == "" || len(childID) > 128 || len(guardianID) > 128 {
 		return false, fmt.Errorf("%w: child_user_id and guardian_user_id must be 1..128 bytes", ErrInvalidArgument)
 	}
+	ctx, err = s.auth.guardianContext(ctx)
+	if err != nil {
+		return false, err
+	}
 	// The resolved scope supplies age policy; the credential pins the repository.
 	authorized, err := s.check(ctx, s.auth.defaultRepo.WithProject(cred.ProjectID), childID, guardianID)
 	if err != nil {

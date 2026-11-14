@@ -96,6 +96,30 @@ func (s *AuthService) stepUp(ctx context.Context, user *User, stepUpPassword str
 	return ok, ok
 }
 
+// Guardian admission must read the project's policy even when transport routing
+// used the default pin, or a native gRPC host supplied no project scope.
+func (s *AuthService) guardianContext(ctx context.Context) (context.Context, error) {
+	if s.nativeProjects == nil {
+		return ctx, nil
+	}
+	projectID := s.projectID(ctx)
+	project, err := s.nativeProjects.ActiveProjectByID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve guardian project policy: %w", err)
+	}
+	if project == nil || project.ID != projectID {
+		return nil, fmt.Errorf("%w: guardian project is not active", ErrPermissionDenied)
+	}
+	scope := ProjectScope{ProjectID: projectID}
+	if existing := ProjectScopeFromContext(ctx); existing != nil {
+		scope = *existing
+	}
+	scope.ProjectID = projectID
+	scope.Guardian = project.Guardian
+	scope.Jurisdictions = project.Jurisdictions
+	return WithProjectScope(ctx, &scope), nil
+}
+
 func (s *AuthService) guardianProfileAllowed(ctx context.Context, user *User) bool {
 	scope := ProjectScopeFromContext(ctx)
 	if scope == nil || !scope.Guardian.RequireAdultProfile {
@@ -123,6 +147,11 @@ func (s *AuthService) authorizeGuardianAction(
 	childUserID = strings.TrimSpace(childUserID)
 	if childUserID == "" {
 		return nil, nil, fmt.Errorf("%w: child_user_id is required", ErrInvalidArgument)
+	}
+	var err error
+	ctx, err = s.guardianContext(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
 	repo := s.repo(ctx)
 

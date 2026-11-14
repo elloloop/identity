@@ -10,7 +10,11 @@ and guardian account management. Passwordless guardians must establish a
 password through the existing verified account flow before these calls; a
 registered factor or session alone is not fresh proof. The latter requires a
 permanent, active person whose age band is known ADULT under the project age
-policy, before those operations write. Consent withdrawal remains available
+policy, before those operations write. Admission reads the authoritative
+active-project policy by ID, including the default-project fallback and native
+gRPC, rather than trusting the presence of a transport-supplied project scope.
+A missing/suspended project or a failed policy read denies the operation.
+Consent withdrawal remains available
 without adding barriers to removing access.
 
 Migration 0059 adds `managed_child_reader` project credentials (minted through
@@ -26,10 +30,18 @@ credential's project and uses that project's jurisdiction thresholds.
 
 This is a point-in-time decision: consumers must recheck before issuing,
 refreshing, or using their child-device credentials and fail closed on false,
-errors or unavailability. It grants no other RPC. Requests use the existing
-machine-credential per-IP rate limit and emit `managed_child_authorization`
-audit events. The Postgres control plane is required to mint/read keys; without
-it the RPC is unimplemented. Rollback deletes only this new credential kind
+errors or unavailability. It grants no other RPC. Requests use the independent
+`GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP` budget (default 1200 per
+`GATEWAY_RATE_LIMIT_WINDOW_SECONDS`, default 60 seconds), shared across HTTP
+and native gRPC, and emit `managed_child_authorization`
+audit events. Size this budget for aggregate backend egress: 100 devices
+with one protected operation every 30 seconds require 200 checks per minute,
+plus refresh and retry headroom. The limit is per IP per replica; larger
+installations must configure it for their measured peak, without raising the
+separate directory lookup budget. Zero retains the default and negative values
+refuse boot. The Postgres control plane is required to mint/read keys, and a project
+resolver must supply the project policy. Without either, the RPC is
+unimplemented; legacy memory/sqlite project-key routing is unchanged. Rollback deletes only this new credential kind
 before restoring the previous constraint. No account tables or data change.
 
 ## Next — `CreateTenantInvitation` reports whether its email was sent: `email_send_status` (additive field and enum; no migration; behaviour change for mail logs and spans when every SMTP provider fails, and for SMTP settings that name no valid provider; `email.ContextWithLogFields`, `service.EmailSendStatus`, `CreatedInvitation.EmailStatus`, a nil mailer in `NewMembershipService` (Go API))

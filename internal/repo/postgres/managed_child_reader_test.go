@@ -51,6 +51,11 @@ func TestManagedChildReaderCredential_StoredAndReadByPublicID(t *testing.T) {
 	require.NotNil(t, resolved)
 	require.True(t, resolved.Guardian.RequireStepUp)
 	require.True(t, resolved.Guardian.RequireAdultProfile)
+	active, err := store.ActiveProjectByID(ctx, projectID)
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	require.True(t, active.Guardian.RequireStepUp)
+	require.True(t, active.Guardian.RequireAdultProfile)
 }
 
 // 0059 widens the kind check to admit managed_child_reader; rolling it back

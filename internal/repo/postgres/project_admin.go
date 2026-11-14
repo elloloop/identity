@@ -31,7 +31,8 @@ var _ service.ProjectLister = (*ProjectStore)(nil)
 // driver-agnostic service.AdminProject, or (nil, nil) when no such active
 // project exists. It delegates to GetProjectByID and treats a suspended
 // project as a clean miss — a native login may not be scoped to a project that
-// is not serving. It backs the native-OAuth product→project validation.
+// is not serving. It also supplies guardian admission policy independently
+// of transport routing, including default-project and native gRPC calls.
 func (s *ProjectStore) ActiveProjectByID(ctx context.Context, projectID string) (*service.AdminProject, error) {
 	p, err := s.GetProjectByID(ctx, projectID)
 	if err != nil {
@@ -48,6 +49,7 @@ func (s *ProjectStore) ActiveProjectByID(ctx context.Context, projectID string) 
 		return nil, fmt.Errorf("project %q: %w", p.ID, err)
 	}
 	return &service.AdminProject{
+		Guardian:       cfg.Guardian,
 		ID:             p.ID,
 		StorageScopeID: p.StorageScopeID,
 		Name:           p.Name,

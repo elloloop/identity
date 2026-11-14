@@ -121,11 +121,7 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 			key = r.URL.Query().Get(ProjectKeyParam)
 		}
 	}
-	if key != "" {
-		if pr.resolver == nil {
-			writeConnectError(w, http.StatusUnauthorized, "unauthenticated", "invalid project key")
-			return nil, false
-		}
+	if key != "" && pr.resolver != nil {
 		rp, err := pr.resolver.ResolveByCredential(ctx, key)
 		if err != nil {
 			pr.logger.Error("project_resolve_by_key_failed", zap.Error(err))

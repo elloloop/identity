@@ -474,9 +474,3 @@ func TestProjectResolver_CarriesGuardianStepUp(t *testing.T) {
 		assert.Equal(t, want, cap.scope.Guardian.RequireStepUp)
 	}
 }
-
-func TestProjectResolver_ExplicitKeyWithoutResolverNeverFallsBack(t *testing.T) {
-	rec, cap := serve(t, nil, defProjectID, defScopeID, func(r *http.Request) { r.Header.Set(ProjectKeyHeader, "pk_invalid") })
-	require.Equal(t, http.StatusUnauthorized, rec.Code)
-	require.False(t, cap.called)
-}

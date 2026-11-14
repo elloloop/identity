@@ -196,6 +196,11 @@ func (s *AuthService) GrantParentalConsent(
 		return nil, fmt.Errorf("%w: an adult cannot grant parental consent for their own account", ErrInvalidArgument)
 	}
 
+	var err error
+	ctx, err = s.guardianContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	repo := s.repo(ctx)
 
 	adult, err := repo.GetUser(ctx, consentingUserID)

@@ -1448,7 +1448,8 @@ type AuthService struct {
 	// NativeIDTokenVerifier seam (satisfied by *oauth.NativeVerifier) so the
 	// login flow's verification-result branches are unit-testable.
 	nativeVerifier NativeIDTokenVerifier
-	// nativeProjects validates that a native login's resolved product→project
+	// nativeProjects supplies authoritative active-project policy for guardian
+	// admission and validates that a native login's resolved product→project
 	// id names a real, active control-plane project. nil on drivers without a
 	// control plane (memory), where NativeOAuthLogin accepts only the product
 	// that resolves to cfg.DefaultProjectID. Set alongside nativeVerifier.

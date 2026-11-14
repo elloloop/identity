@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+
+	"github.com/elloloop/identity/pkg/audit"
 )
 
 func TestProjectGuardianPolicy_StrictBeforeChildAndConsentWrites(t *testing.T) {
@@ -83,6 +85,9 @@ func TestProjectGuardianPolicy_KnownAdultBeforeWrites(t *testing.T) {
 				if !errors.Is(err, ErrPermissionDenied) {
 					t.Fatalf("create accepted unknown/minor: %v", err)
 				}
+				if age == 0 && f.writer.countByEventTypeAndDetail(string(audit.EventManagedChildAccountCreated), "step", "adult_profile") != 1 {
+					t.Fatal("missing adult profile creation refusal audit")
+				}
 				stored, _ := f.repo.FindUserByUsername(ctx, f.req().Username)
 				if stored != nil {
 					t.Fatal("created before adult check")
@@ -95,6 +100,9 @@ func TestProjectGuardianPolicy_KnownAdultBeforeWrites(t *testing.T) {
 			if age != 35 {
 				if !errors.Is(err, ErrPermissionDenied) {
 					t.Fatalf("consent accepted unknown/minor: %v", err)
+				}
+				if f.writer.countByEventTypeAndDetail(string(audit.EventParentalConsentGranted), "step", "adult_profile") != 1 {
+					t.Fatal("missing adult profile consent refusal audit")
 				}
 				consent, _ := f.repo.GetActiveParentalConsentForChild(ctx, pending.ID)
 				edge, _ := f.repo.GetGuardianEdge(ctx, f.adult.ID, pending.ID)
@@ -114,6 +122,9 @@ func TestProjectGuardianPolicy_ManagementUsesBothGuards(t *testing.T) {
 	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("unknown adult profile: %v", err)
 	}
+	if f.writer.countByEventTypeAndDetail(string(audit.EventGuardianChildProfileViewed), "step", "adult_profile") != 1 {
+		t.Fatal("missing adult profile management refusal audit")
+	}
 	f.guardian.DateOfBirthMs = dobAgeMs(35)
 	f.guardian.PasswordHash = ""
 	f.svc.cfg.GuardianStepUpAllowNoPassword = true
@@ -127,5 +138,52 @@ func TestProjectGuardianPolicy_ManagementUsesBothGuards(t *testing.T) {
 	f.guardian.Kind = UserKindAgent
 	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("agent profile: %v", err)
+	}
+}
+
+func TestProjectGuardianPolicy_DefaultAndUnscopedAdmission(t *testing.T) {
+	for _, scope := range []*ProjectScope{nil, {ProjectID: testConfig().DefaultProjectID}} {
+		f := newManagedChildFixture(t, true)
+		f.svc.cfg.GuardianStepUpAllowNoPassword = true
+		projectID := f.svc.cfg.DefaultProjectID
+		projects := &fakeNativeProjects{active: map[string]*AdminProject{projectID: {ID: projectID, Guardian: ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true}}}}
+		f.svc.WithNativeOAuth(nil, projects)
+		ctx := context.Background()
+		if scope != nil {
+			ctx = WithProjectScope(ctx, scope)
+		}
+		req := f.req()
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("unknown profile through default/native path: %v", err)
+		}
+		f.adult.DateOfBirthMs = dobAgeMs(35)
+		f.adult.PasswordHash = ""
+		req.StepUpPassword = ""
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+			t.Fatalf("passwordless default/native path: %v", err)
+		}
+		child := seedChildPendingConsent(f.repo, "pending@example.test")
+		if _, err := f.svc.GrantParentalConsent(ctx, f.adult.ID, child.ID, consentPolicyVersion, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+			t.Fatalf("consent default/native path: %v", err)
+		}
+		seedGuardianEdge(ctx, t, f.repo, f.adult.ID, child.ID)
+		if _, err := f.svc.GetManagedChildProfile(ctx, f.adult.ID, child.ID, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+			t.Fatalf("management default/native path: %v", err)
+		}
+		if stored, _ := f.repo.FindUserByUsername(ctx, req.Username); stored != nil {
+			t.Fatal("child written without proof")
+		}
+		if consent, _ := f.repo.GetActiveParentalConsentForChild(ctx, child.ID); consent != nil {
+			t.Fatal("consent written without proof")
+		}
+		projects.err = ErrServiceUnavailable
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrServiceUnavailable) {
+			t.Fatalf("policy error failed open: %v", err)
+		}
+		projects.err = nil
+		delete(projects.active, projectID)
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("missing project failed open: %v", err)
+		}
 	}
 }

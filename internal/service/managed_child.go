@@ -179,6 +179,11 @@ func (s *AuthService) CreateManagedChildAccount(
 		return nil, err
 	}
 
+	var err error
+	ctx, err = s.guardianContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	repo := s.repo(ctx)
 
 	// 1. The caller must exist, be an active account, and — when the age gate

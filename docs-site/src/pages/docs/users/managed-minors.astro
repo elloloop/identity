@@ -163,6 +163,12 @@ import { Code } from "astro-expressive-code/components";
     or sign-in credentials are returned. Recheck before granting or using
     child access; false, errors and unavailability must deny it. Never cache
     a true result or treat it as a token. Revoking the edge denies the next call.
+    Size <code>GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP</code> for the total
+    operations from each backend egress IP: its independent default is 1200
+    calls per 60-second window per replica, shared by HTTP and native gRPC.
+    For example, 100 devices making one protected request every 30 seconds
+    need 200 checks per minute plus refresh and retry headroom. Increasing
+    this setting does not widen the account-directory lookup budget.
   </p>
 
   <h2>Managing the account</h2>

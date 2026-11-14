@@ -70,6 +70,8 @@ const authDomainVerifyTXTPrefix = "identity-auth-domain-verify="
 // driver-agnostic value type so the admin service and its tests depend on a
 // contract, not the concrete postgres store type.
 type AdminProject struct {
+	// Guardian is populated on active-project reads and ignored on creation.
+	Guardian       ProjectGuardianConfig
 	ID             string
 	StorageScopeID string
 	Name           string

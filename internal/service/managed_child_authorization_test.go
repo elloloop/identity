@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/elloloop/identity/pkg/audit"
+	"go.uber.org/zap"
 )
 
 func TestManagedChildAuthorization_LivePairAndProject(t *testing.T) {
@@ -140,5 +143,60 @@ func TestManagedChildAuthorization_CredentialFailures(t *testing.T) {
 	}
 	if NewManagedChildAuthorizationService(nil, auth) != nil {
 		t.Fatal("enabled without credential store")
+	}
+}
+
+func TestManagedChildAuthorization_AuditScopeAndDecision(t *testing.T) {
+	for _, scenario := range []string{"allowed", "no_edge", credentialRefusedSecretMismatch, credentialRefusedRevoked, credentialRefusedOtherProject} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newDirectoryFixture(t)
+			repo := f.repos.project(dirTestProjectA)
+			writer := newRecordingAuditWriter()
+			auth := newTestAuthServiceWithAudit(t, repo, writer)
+			auth.defaultRepo = f.repos
+			enableAgeGate(t, auth, false)
+			auth.audit = audit.NewLogger(writer, "boot-project", zap.NewNop()).WithProjectScoper(func(ctx context.Context) (audit.NodeWriter, string) {
+				return writer, ProjectScopeFromContext(ctx).ProjectID
+			})
+			svc := NewManagedChildAuthorizationService(f.store, auth)
+			minted := f.mint(t, dirTestProjectA, CredentialKindManagedChildReader)
+			child := seedPerson(repo, "child@example.test")
+			child.DateOfBirthMs = dobAgeMs(8)
+			parent := seedPerson(repo, "parent@example.test")
+			parent.DateOfBirthMs = dobAgeMs(35)
+			ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: dirTestProjectA})
+			key := minted.RawKey
+			if scenario != "no_edge" {
+				seedGuardianEdge(ctx, t, repo, parent.ID, child.ID)
+			}
+			switch scenario {
+			case credentialRefusedSecretMismatch:
+				key = minted.PublicID + ".wrong"
+			case credentialRefusedRevoked:
+				if err := f.admin.AdminRevokeProjectCredential(ctx, dirTestSecret, dirTestProjectA, minted.ID); err != nil {
+					t.Fatal(err)
+				}
+			case credentialRefusedOtherProject:
+				ctx = WithProjectScope(ctx, &ProjectScope{ProjectID: dirTestProjectB})
+			}
+			allowed, err := svc.GetManagedChildAuthorization(ctx, key, child.ID, parent.ID)
+			refusal := scenario != "allowed" && scenario != "no_edge"
+			if refusal && !errors.Is(err, ErrUnauthenticated) {
+				t.Fatalf("refusal: %v", err)
+			}
+			if !refusal && err != nil {
+				t.Fatal(err)
+			}
+			if len(writer.events) != 1 || writer.events[0] != string(audit.EventManagedChildAuthorization) || writer.projects[0] != dirTestProjectA || writer.actors[0] != "credential:"+minted.ID || writer.successes[0] != (scenario == "allowed") || allowed != (scenario == "allowed") {
+				t.Fatal("audit decision, actor, event or project is incorrect")
+			}
+			if refusal {
+				if writer.targets[0] != "credential:"+minted.ID || writer.countByEventTypeAndDetail(string(audit.EventManagedChildAuthorization), "reason", scenario) != 1 {
+					t.Fatal("credential refusal audit missing reason or exposes target")
+				}
+			} else if writer.targets[0] != child.ID {
+				t.Fatal("decision audit missing child target")
+			}
+		})
 	}
 }

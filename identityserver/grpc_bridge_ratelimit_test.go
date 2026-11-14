@@ -246,12 +246,18 @@ func TestRegisterGRPC_TenantOperatorSharesHTTPBudget(t *testing.T) {
 }
 
 func TestRegisterGRPC_ManagedChildAuthorizationSharesHTTPBudget(t *testing.T) {
-	srv := newTestServerWith(t, func(c *config.Config) { c.RateLimitDirectoryPerIP = 2 }, nil)
+	srv := newTestServerWith(t, func(c *config.Config) { c.RateLimitManagedChildAuthPerIP = 2; c.RateLimitDirectoryPerIP = 1 }, nil)
 	httpSrv := httptest.NewServer(srv.Handler())
 	t.Cleanup(httpSrv.Close)
 	httpClient := identityconnectgen.NewIdentityServiceClient(httpSrv.Client(), httpSrv.URL)
 	grpcClient := serveGRPC(t, srv)
 	request := &identitypb.GetManagedChildAuthorizationRequest{ChildUserId: "child", GuardianUserId: "guardian"}
+	if _, err := grpcClient.LookupUsers(context.Background(), lookupRequest()); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("directory: %v", err)
+	}
+	if _, err := grpcClient.LookupUsers(context.Background(), lookupRequest()); status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("directory over quota: %v", err)
+	}
 	if _, err := httpClient.GetManagedChildAuthorization(context.Background(), connect.NewRequest(request)); connect.CodeOf(err) != connect.CodeUnimplemented {
 		t.Fatalf("HTTP: %v", err)
 	}

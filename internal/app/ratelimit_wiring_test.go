@@ -648,3 +648,14 @@ func TestBuildRateLimits_TenantDomainLimited(t *testing.T) {
 		require.True(t, pl.Allow("198.51.100.9", now), "a zero quota admits attempt %d", i+1)
 	}
 }
+
+func TestManagedChildAuthorization_HasIndependentCapacity(t *testing.T) {
+	cfg := newTestConfig()
+	require.NoError(t, cfg.Validate())
+	cfg.RateLimitDirectoryPerIP = 2
+	handler := middleware.RateLimitMiddleware(buildRateLimits(cfg), nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceLookupUsersProcedure, "9.9.9.9", 2)
+	// One hundred devices with a protected operation every 30 seconds need
+	// 200 checks per minute; that must not consume account-directory capacity.
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceGetManagedChildAuthorizationProcedure, "9.9.9.9", config.DefaultRateLimitManagedChildAuthPerIP)
+}

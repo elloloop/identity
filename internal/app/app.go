@@ -545,7 +545,7 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		},
 		{
 			PathPrefix: identityconnectgen.IdentityServiceGetManagedChildAuthorizationProcedure, Tag: "managed_child_authorization",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitManagedChildAuthPerIP, 0),
 		},
 		{
 			// SCIM: every request carries the deployment-wide bearer token,
@@ -885,7 +885,11 @@ func New(deps Deps) (*Built, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent exchange metrics: %w", err)
 	}
-	handler.WithManagedChildAuthorization(service.NewManagedChildAuthorizationService(deps.DirectoryCredentials, authSvc)).WithTeammateKeys(teammateKeys).WithAgentExchangeMetrics(exchanges)
+	// A credential store alone cannot supply the project jurisdiction policy.
+	if deps.ProjectResolver != nil {
+		handler.WithManagedChildAuthorization(service.NewManagedChildAuthorizationService(deps.DirectoryCredentials, authSvc))
+	}
+	handler.WithTeammateKeys(teammateKeys).WithAgentExchangeMetrics(exchanges)
 
 	mux := http.NewServeMux()
 	if err := mountIdentityService(mux, deps, authSvc, handler, teammateKeys, returnAllow); err != nil {

@@ -30,13 +30,15 @@ import (
 // Event type lives at field "1" of the Data map, and the JSON-encoded
 // WithDetails map at field "7" (see pkg/audit/logger.go).
 type recordingAuditWriter struct {
-	mu      sync.Mutex
-	events  []string
-	actors  []string // actor user id ("2"), index-aligned with events
-	targets []string // target user id ("3"), index-aligned with events
-	ips     []string // client IP ("4"), index-aligned with events
-	uas     []string // user agent ("5"), index-aligned with events
-	details []string // JSON details ("7"), index-aligned with events
+	mu        sync.Mutex
+	events    []string
+	projects  []string
+	successes []bool
+	actors    []string // actor user id ("2"), index-aligned with events
+	targets   []string // target user id ("3"), index-aligned with events
+	ips       []string // client IP ("4"), index-aligned with events
+	uas       []string // user agent ("5"), index-aligned with events
+	details   []string // JSON details ("7"), index-aligned with events
 }
 
 func newRecordingAuditWriter() *recordingAuditWriter {
@@ -44,13 +46,16 @@ func newRecordingAuditWriter() *recordingAuditWriter {
 }
 
 func (w *recordingAuditWriter) ExecuteAtomic(
-	_ context.Context, _, _ string, ops []graph.Operation,
+	_ context.Context, projectID, _ string, ops []graph.Operation,
 ) (*graph.CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, op := range ops {
 		if et, ok := op.Data["1"].(string); ok {
 			w.events = append(w.events, et)
+			w.projects = append(w.projects, projectID)
+			success, _ := op.Data["6"].(bool)
+			w.successes = append(w.successes, success)
 			actor, _ := op.Data["2"].(string)
 			w.actors = append(w.actors, actor)
 			target, _ := op.Data["3"].(string)
