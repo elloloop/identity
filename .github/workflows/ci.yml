@@ -422,7 +422,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 6d. Review gate — the gate's decision logic (fail-closed handling, the
-  # fixed roster, PR vs issue mode, what each reviewer is told) against a
+  # two stages, PR vs issue mode, what each reviewer is told) against a
   # stubbed harness. Plain node, no services.
   # ---------------------------------------------------------------------------
   review-gate:
