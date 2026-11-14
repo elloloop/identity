@@ -185,8 +185,9 @@ const (
 	// with a tagged address). Actor and target are the account; the details
 	// carry the proof's `method` (passwordless | oauth | verification_link)
 	// and what was voided (`password_cleared`, `passkeys_cleared`,
-	// `provider_links_cleared`).
-	// Each voided provider link is also recorded as identity_unlinked.
+	// `provider_links_cleared`, `recovery_emails_cleared`).
+	// Each voided provider link is also recorded as identity_unlinked, and
+	// each removed recovery email as recovery_email_removed.
 	EventUnprovenCredentialsVoided EventType = "unproven_credentials_voided" //nolint:gosec // G101: an audit event name, not a credential
 
 	// EventPlatformAdminBootstrapBlocked records a first-admin bootstrap

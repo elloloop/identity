@@ -68,6 +68,9 @@ func (s *AuthService) RequestRecoveryEmail(ctx context.Context, userID string, s
 	if err != nil {
 		return err
 	}
+	if err := requireProvenPrimaryEmail(user); err != nil {
+		return err
+	}
 	addr, ok := canonicalMailbox(emailAddr)
 	if !ok {
 		return fmt.Errorf("%w: email is not a usable address", ErrInvalidArgument)
@@ -94,6 +97,18 @@ func (s *AuthService) RequestRecoveryEmail(ctx context.Context, userID string, s
 	s.dispatchEmailSend(ctx, "recovery_email_code", func(ctx context.Context) {
 		s.sendRecoveryEmailCodeNow(ctx, userID, string(addr))
 	})
+	return nil
+}
+
+// requireProvenPrimaryEmail refuses a recovery email to an account whose own
+// address is unproven. Whoever signed it up may not own that mailbox, and a
+// recovery email they added would sign in to the account once the owner has
+// proven it; the proof voids any the account holds
+// (markEmailVerifiedViaExternalProof), and this keeps new ones out until then.
+func requireProvenPrimaryEmail(user *User) error {
+	if user.Email != "" && !user.EmailVerified {
+		return fmt.Errorf("%w: prove the account's email before adding a recovery email", ErrEmailVerificationRequired)
+	}
 	return nil
 }
 
@@ -172,6 +187,9 @@ func (s *AuthService) VerifyRecoveryEmail(ctx context.Context, userID string, si
 	}
 	user, err := s.recoveryEmailCaller(ctx, userID, signIn, cfg)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireProvenPrimaryEmail(user); err != nil {
 		return nil, err
 	}
 	addr, ok := canonicalMailbox(emailAddr)

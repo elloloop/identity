@@ -480,6 +480,14 @@ now keep a list of addresses it has proved it controls.
   agents hold no recovery email, and with `GATEWAY_MINOR_DATA_MINIMIZATION`
   on, `RequestRecoveryEmail` refuses a child account `FAILED_PRECONDITION`
   as `RequestPhoneVerification` does.
+- **An account whose own email is unproven keeps none.** `RequestRecoveryEmail`
+  and `VerifyRecoveryEmail` answer it `FAILED_PRECONDITION` (`email
+  verification required`): whoever signed it up may not own the mailbox. The
+  first proof of the address removes every recovery email the account holds,
+  with the sessions each opened, as it voids the password, passkeys and
+  provider links added before it; `unproven_credentials_voided` gains
+  `recovery_emails_cleared`, and each removal is audited as
+  `recovery_email_removed`.
 - **Every change is mailed.** An added address is announced to the account's
   other addresses; a removal to those and to the removed address. The notice
   uses the project's email branding.

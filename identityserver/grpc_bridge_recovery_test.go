@@ -95,7 +95,7 @@ func TestGRPCBridge_ARemovedRecoveryEmailsSessionMakesNoSecurityChange(t *testin
 	ctx := context.Background()
 	cfg := &config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
 		DefaultTenantID: "tenant", DefaultProjectID: config.DefaultProjectIDFallback,
-		DefaultProjectAccessMode: service.AccessModeOpen, AuthAllowLocal: true, PasswordSignupEnabled: true,
+		DefaultProjectAccessMode: service.AccessModeOpen, AuthAllowLocal: true, PasswordlessSignupEnabled: true,
 		AllowedOrigins: "http://localhost:9002", JWTExpirySeconds: 900, RefreshExpirySeconds: 604800,
 		LoginMaxFailedAttempts: 5, LoginLockoutSeconds: 900, LoginChallengeExpirySeconds: 300,
 		PasskeyRPID: "localhost", PasskeyRPName: "Bridge test", PasskeyOrigin: "http://localhost:9002",
@@ -116,7 +116,13 @@ func TestGRPCBridge_ARemovedRecoveryEmailsSessionMakesNoSecurityChange(t *testin
 	t.Cleanup(server.Close)
 	client := identityconnect.NewIdentityServiceClient(server.Client(), server.URL)
 
-	owner, err := client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{Email: "owner@example.com", Password: "Offline-test-Password123!"}))
+	// An emailed code signs the owner up and proves the address, which an
+	// account needs before it keeps a recovery email.
+	_, err = client.RequestEmailLoginCode(ctx, connect.NewRequest(&identitypb.RequestEmailLoginCodeRequest{Email: "owner@example.com"}))
+	require.NoError(t, err)
+	owner, err := client.VerifyEmailLoginCode(ctx, connect.NewRequest(&identitypb.VerifyEmailLoginCodeRequest{
+		Email: "owner@example.com", Code: inbox.code(t, "owner@example.com", 0),
+	}))
 	require.NoError(t, err)
 	_, err = client.RequestRecoveryEmail(ctx, bearerRequest(&identitypb.RequestRecoveryEmailRequest{Email: "spare@example.net"}, owner.Msg.AccessToken))
 	require.NoError(t, err)

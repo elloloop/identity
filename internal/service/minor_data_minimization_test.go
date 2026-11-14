@@ -156,7 +156,7 @@ func requestRecoveryEmailAt(t *testing.T, minimize bool, ageYears int) (int, err
 	}
 	mailer := &recordingMailer{}
 	svc.mailer = mailer
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "account@example.com", Status: "active", DateOfBirthMs: dobAgeMs(ageYears)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "account@example.com", Status: "active", EmailVerified: true, DateOfBirthMs: dobAgeMs(ageYears)})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}

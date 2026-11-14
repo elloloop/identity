@@ -115,7 +115,7 @@ func (f *recoveryEmailFixture) add(t *testing.T, user *User, addr string) {
 
 func TestRecoveryEmail_AddProvesTheAddressThenStoresIt(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 
 	if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "Spare@Example.net"); err != nil {
 		t.Fatalf("RequestRecoveryEmail: %v", err)
@@ -151,7 +151,7 @@ func TestRecoveryEmail_AddProvesTheAddressThenStoresIt(t *testing.T) {
 // mailed a code, nor stored.
 func TestRecoveryEmail_RefusesAnAddressASignUpWould(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	for _, addr := range []string{"someone@mailinator.com", "someone@example.test", "someone@intranet.local"} {
 		sent := f.mailer.count()
 		if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), addr); !errors.Is(err, ErrInvalidArgument) {
@@ -166,9 +166,29 @@ func TestRecoveryEmail_RefusesAnAddressASignUpWould(t *testing.T) {
 	}
 }
 
+// An account whose own address is unproven keeps no recovery email: whoever
+// signed it up may not own that mailbox, and their recovery email would sign
+// in to the account once the owner proved it. Nothing is mailed, and the
+// account takes one once its address is proven.
+func TestRecoveryEmail_RefusedWhileThePrimaryEmailIsUnproven(t *testing.T) {
+	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
+	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "planter@example.net"); !errors.Is(err, ErrEmailVerificationRequired) {
+		t.Fatalf("Request: want ErrEmailVerificationRequired, got %v", err)
+	}
+	if _, err := f.svc.VerifyRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "planter@example.net", "123456"); !errors.Is(err, ErrEmailVerificationRequired) {
+		t.Fatalf("Verify: want ErrEmailVerificationRequired, got %v", err)
+	}
+	if f.mailer.count() != 0 {
+		t.Fatalf("%d messages sent for an account whose address is unproven", f.mailer.count())
+	}
+	user.EmailVerified = true
+	f.add(t, user, "spare@example.net")
+}
+
 func TestRecoveryEmail_RefusedWhereTheProjectKeepsNone(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net"); !errors.Is(err, ErrRecoveryEmailsDisabled) {
 		t.Fatalf("Request: want ErrRecoveryEmailsDisabled, got %v", err)
 	}
@@ -186,7 +206,7 @@ func TestRecoveryEmail_RefusedWhereTheProjectKeepsNone(t *testing.T) {
 
 func TestRecoveryEmail_ChangesNeedARecentSignIn(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true, ReauthMaxAgeSeconds: 600})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 
 	stale := f.now.Add(-601 * time.Second).Unix()
@@ -216,8 +236,8 @@ func TestRecoveryEmail_ChangesNeedARecentSignIn(t *testing.T) {
 
 func TestRecoveryEmail_AnAddressBelongsToOneAccount(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
-	a := seedUser(f.repo, "a@example.com", "", StatusActive)
-	b := seedUser(f.repo, "b@example.com", "", StatusActive)
+	a := seedVerified(f.repo, "a@example.com", "")
+	b := seedVerified(f.repo, "b@example.com", "")
 	f.add(t, a, "shared@example.net")
 
 	// Another account's recovery email and another account's primary email
@@ -263,7 +283,7 @@ func openProject(ctx context.Context) context.Context {
 
 func TestRecoveryEmail_CodeIsBoundToItsAddressAndItsAttempts(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net"); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
@@ -302,7 +322,7 @@ func TestRecoveryEmail_CodeIsBoundToItsAddressAndItsAttempts(t *testing.T) {
 func TestRecoveryEmail_CapAndSendCooldown(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true, Max: 1})
 	f.svc.emailThrottle = newKeyCooldown(60_000, 0)
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 
 	if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "first@example.net"); err != nil {
 		t.Fatalf("Request: %v", err)
@@ -326,7 +346,7 @@ func TestRecoveryEmail_CapAndSendCooldown(t *testing.T) {
 
 func TestRecoveryEmail_RemoveTellsEveryAddress(t *testing.T) {
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "keep@example.net")
 	f.add(t, user, "drop@example.net")
 	before := f.mailer.count()
@@ -395,7 +415,7 @@ func TestRecoveryEmail_AChangeIsAuditedAndToldWhenTheListAfterItFails(t *testing
 	f := newRecoveryEmailFixture(t, ProjectRecoveryEmailsConfig{Enabled: true})
 	w := newRecordingAuditWriter()
 	f.svc.audit = audit.NewLogger(w, "test-tenant", nil)
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	if err := f.svc.RequestRecoveryEmail(f.ctx, user.ID, f.signedInNow(), "spare@example.net"); err != nil {
 		t.Fatalf("RequestRecoveryEmail: %v", err)
 	}
@@ -441,7 +461,7 @@ func TestRecoveryEmail_RefusesAccountsThatKeepNone(t *testing.T) {
 	if err := f.svc.RequestRecoveryEmail(f.ctx, "", f.signedInNow(), "spare@example.net"); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("no caller: want ErrUnauthenticated, got %v", err)
 	}
-	person := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	person := seedVerified(f.repo, "owner@example.com", "")
 	if err := f.svc.RequestRecoveryEmail(f.ctx, person.ID, f.signedInNow(), "not an address"); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("malformed address: want ErrInvalidArgument, got %v", err)
 	}

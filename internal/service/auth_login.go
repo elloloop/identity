@@ -1275,7 +1275,10 @@ func (p externalProof) voids(link *OAuthIdentity, accountEmail string) bool {
 //   - every provider link the proof voids is deleted (see voids). A link
 //     signs in by provider id alone, so one added to the unverified account
 //     (by whoever held it, or by a sign-in from a +tag address outside Gmail
-//     that only resembles this one) would otherwise outlive the proof.
+//     that only resembles this one) would otherwise outlive the proof;
+//   - every recovery email is removed, with the sessions it opened. Whoever
+//     held the unverified account may have added their own mailbox, and a
+//     sign-in from it would reach the account once the owner has proven it.
 //
 // It is a no-op when the email is already verified (the proof adds nothing).
 // It fails closed: if any step before the address is marked verified cannot
@@ -1298,11 +1301,15 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	if err != nil {
 		return s.externalProofSweepFailed(user.ID, proof, "list_provider_links", err)
 	}
+	recovery, err := repo.ListRecoveryEmails(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "list_recovery_emails", err)
+	}
 	plantedLinks := proof.voidedAmong(links, user.Email)
 	hadPassword := user.PasswordHash != ""
 	passkeysCleared := len(passkeys) > 0
 
-	if hadPassword || passkeysCleared || len(plantedLinks) > 0 {
+	if hadPassword || passkeysCleared || len(plantedLinks) > 0 || len(recovery) > 0 {
 		// Sessions go first, as ConfirmPasswordReset ends them for a replaced
 		// password: one opened with a voided credential must not outlive it.
 		// Doing it before the deletions means a failure further on leaves the
@@ -1320,6 +1327,9 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	if err := s.voidProviderLinks(ctx, user.ID, proof, plantedLinks); err != nil {
 		return err
 	}
+	if err := s.voidRecoveryEmails(ctx, user.ID, proof, recovery, nowMs); err != nil {
+		return err
+	}
 
 	// Any password the account holds at this write predates the proof of
 	// email control, including one set since the read above, so it cannot
@@ -1331,7 +1341,9 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	if !verified {
 		s.logger.Info("email_verified_external_address_changed",
 			zap.String("user_id", user.ID), zap.String("method", proof.method))
-		s.auditVoidedCredentials(ctx, user.ID, proof, false, passkeysCleared, len(plantedLinks))
+		s.auditVoidedCredentials(ctx, user.ID, proof, voidedCredentials{
+			passkeys: passkeysCleared, links: len(plantedLinks), recoveryEmails: len(recovery),
+		})
 		return nil
 	}
 	user.EmailVerified = true
@@ -1339,11 +1351,12 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	user.PasswordHash = ""
 	user.PasswordChangeRequired = false
 
-	// A passkey or link a signed-in caller added after the listings above
-	// escaped them. CompletePasskeyRegistration and LinkIdentity re-read the
-	// account after their insert and withdraw what was added while the
-	// address was being proven; listing again now that the address is marked
-	// verified means one of the two sees the other.
+	// A passkey, link or recovery email a signed-in caller added after the
+	// listings above escaped them. CompletePasskeyRegistration and
+	// LinkIdentity re-read the account after their insert and withdraw what
+	// was added while the address was being proven, and VerifyRecoveryEmail
+	// refuses an account whose address is unproven; listing again now that
+	// the address is marked verified means one of the two sees the other.
 	passkeys, err = repo.ListPasskeyCredentials(ctx, user.ID)
 	if err != nil {
 		return s.externalProofSweepFailed(user.ID, proof, "relist_passkeys", err)
@@ -1364,7 +1377,15 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		}
 		plantedLinks = append(plantedLinks, lateLinks...)
 	}
-	if passwordCleared || passkeysCleared || len(plantedLinks) > 0 {
+	lateRecovery, err := repo.ListRecoveryEmails(ctx, user.ID)
+	if err != nil {
+		return s.externalProofSweepFailed(user.ID, proof, "relist_recovery_emails", err)
+	}
+	if err := s.voidRecoveryEmails(ctx, user.ID, proof, lateRecovery, nowMs); err != nil {
+		return err
+	}
+	recovery = append(recovery, lateRecovery...)
+	if passwordCleared || passkeysCleared || len(plantedLinks) > 0 || len(recovery) > 0 {
 		// A sign-in with a voided credential that landed between the first
 		// revocation and the verified write opened a session that revocation
 		// missed; end it now that the credential is gone.
@@ -1373,30 +1394,41 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		}
 	}
 
-	s.auditVoidedCredentials(ctx, user.ID, proof, passwordCleared, passkeysCleared, len(plantedLinks))
+	s.auditVoidedCredentials(ctx, user.ID, proof, voidedCredentials{
+		password: passwordCleared, passkeys: passkeysCleared, links: len(plantedLinks), recoveryEmails: len(recovery),
+	})
 	return nil
 }
 
+// voidedCredentials is what a proof voided on an account: its password, its
+// passkeys, how many provider links and how many recovery emails.
+type voidedCredentials struct {
+	password, passkeys    bool
+	links, recoveryEmails int
+}
+
 // auditVoidedCredentials records what a proof voided, if anything.
-func (s *AuthService) auditVoidedCredentials(ctx context.Context, userID string, proof externalProof, passwordCleared, passkeysCleared bool, linksCleared int) {
-	if !passwordCleared && !passkeysCleared && linksCleared == 0 {
+func (s *AuthService) auditVoidedCredentials(ctx context.Context, userID string, proof externalProof, v voidedCredentials) {
+	if !v.password && !v.passkeys && v.links == 0 && v.recoveryEmails == 0 {
 		return
 	}
 	s.logger.Info("email_verified_external_credentials_cleared",
 		zap.String("user_id", userID),
 		zap.String("method", proof.method),
-		zap.Bool("password_cleared", passwordCleared),
-		zap.Bool("passkeys_cleared", passkeysCleared),
-		zap.Int("provider_links_cleared", linksCleared))
+		zap.Bool("password_cleared", v.password),
+		zap.Bool("passkeys_cleared", v.passkeys),
+		zap.Int("provider_links_cleared", v.links),
+		zap.Int("recovery_emails_cleared", v.recoveryEmails))
 	s.audit.Log(
 		ctx, audit.EventUnprovenCredentialsVoided,
 		audit.WithActor(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
-			"method":                 proof.method,
-			"password_cleared":       passwordCleared,
-			"passkeys_cleared":       passkeysCleared,
-			"provider_links_cleared": linksCleared,
+			"method":                  proof.method,
+			"password_cleared":        v.password,
+			"passkeys_cleared":        v.passkeys,
+			"provider_links_cleared":  v.links,
+			"recovery_emails_cleared": v.recoveryEmails,
 		}),
 	)
 }
@@ -1442,6 +1474,30 @@ func (s *AuthService) voidProviderLinks(ctx context.Context, userID string, proo
 				"provider_user_id": link.ProviderUserID,
 				"reason":           "planted_link_cleared_on_external_email_verification",
 				"method":           proof.method,
+			}),
+		)
+	}
+	return nil
+}
+
+// voidRecoveryEmails removes each of held from the account, which ends the
+// sessions each opened. One already gone is not a failure: what the proof
+// voids is no longer there either way.
+func (s *AuthService) voidRecoveryEmails(ctx context.Context, userID string, proof externalProof, held []*RecoveryEmail, nowMs int64) error {
+	for _, e := range held {
+		ended, err := s.repo(ctx).RemoveRecoveryEmail(ctx, userID, e.Email, nowMs)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return s.externalProofSweepFailed(userID, proof, "delete_recovery_email", err)
+		}
+		s.audit.Log(
+			ctx, audit.EventRecoveryEmailRemoved,
+			audit.WithActor(userID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{
+				"email":          redactEmail(e.Email),
+				"sessions_ended": ended,
+				"reason":         "unproven_recovery_email_cleared_on_external_email_verification",
+				"method":         proof.method,
 			}),
 		)
 	}

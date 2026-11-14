@@ -44,8 +44,7 @@ func (f *recoveryEmailFixture) userCount() int {
 
 func TestRecoveryEmailSignIn_LandsInTheHoldingAccountAndTellsItsOtherAddresses(t *testing.T) {
 	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
-	user.EmailVerified = true
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 	f.add(t, user, "second@example.net")
 	users, sent := f.userCount(), f.mailer.count()
@@ -339,7 +338,7 @@ func (f *recoveryEmailFixture) heldSecurityChanges(userID string, session Sessio
 func TestRecoveryEmailSignIn_MarksTheSessionAndHoldsOnlyIt(t *testing.T) {
 	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
 	f.svc.cfg.SMSEnabled = true
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 	f.repo.mu.Lock()
 	f.repo.users[user.ID].PhoneNumber, f.repo.users[user.ID].PhoneVerified = "+14155550199", true
@@ -424,7 +423,7 @@ func TestRecoveryHold_ARemovedAddressEndsItsSessionsChangesInEitherMode(t *testi
 			f.svc.cfg.RevocationMode = mode
 			f.svc.cfg.SMSEnabled = true
 			f.svc.cfg.AccountMergeEnabled = true
-			user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+			user := seedVerified(f.repo, "owner@example.com", "")
 			f.add(t, user, "spare@example.net")
 			f.add(t, user, "kept@example.net")
 			f.repo.mu.Lock()
@@ -470,7 +469,7 @@ func TestRecoveryHold_ARemovedAddressEndsItsSessionsChangesInEitherMode(t *testi
 // the primary email or a passkey, removes each of them as at any time.
 func TestRecoveryHold_RemovalsAreHeldFromTheRecoverySessionOnly(t *testing.T) {
 	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 	if _, err := f.signInWith(f.ctx, t, "spare@example.net"); err != nil {
 		t.Fatalf("sign-in by the recovery email: %v", err)
@@ -539,7 +538,7 @@ func TestRecoveryHold_AnUnvouchedSessionIsTakenForARecoverySessionWhereOneCouldB
 		ProjectID: "project-a", Access: ProjectAccessConfig{Mode: AccessModeOpen},
 		RecoveryEmails: ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true},
 	})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 	approve := func(ctx context.Context, session SessionSignIn) (string, error) {
 		t.Helper()
@@ -607,7 +606,7 @@ func (r removedOnMarkRepo) MarkRecoveryEmailSignIn(ctx context.Context, userID, 
 // that is not in force.
 func TestRecoveryEmailSignIn_AddressRemovedMidSignInSendsNoNotice(t *testing.T) {
 	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 	f.svc.defaultRepo = removedOnMarkRepo{fakeRepo: f.repo, addr: "spare@example.net"}
 
@@ -652,7 +651,7 @@ func TestRemoveRecoveryEmail_EndsTheSessionsTheAddressOpened(t *testing.T) {
 	f.svc.cfg.RevocationMode = config.RevocationModeSession
 	w := newRecordingAuditWriter()
 	f.svc.audit = audit.NewLogger(w, "test-tenant", nil)
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "stolen@example.net")
 	f.add(t, user, "kept@example.net")
 
@@ -717,7 +716,7 @@ func TestRecoveryEmailSignIn_DOBStepContinuesTheRecoverySessionWhileItsAddressIs
 
 	ticketFor := func(owner, addr string) (*User, string) {
 		t.Helper()
-		user := seedUser(f.repo, owner, "", StatusActive)
+		user := seedVerified(f.repo, owner, "")
 		f.add(t, user, addr)
 		var dob *DOBRequiredError
 		if _, err := f.signInWith(f.ctx, t, addr); !errors.As(err, &dob) {
@@ -767,7 +766,7 @@ func TestRecoveryEmailSignIn_DOBStepContinuesTheRecoverySessionWhileItsAddressIs
 
 func TestRecoveryEmailSignIn_RepeatedSignInsCannotLockTheOwnerOut(t *testing.T) {
 	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 
 	if _, err := f.signInWith(f.ctx, t, "spare@example.net"); err != nil {
@@ -814,7 +813,7 @@ func newRecoverySecondFactorFixture(t *testing.T, gov *LoginGovernance) (*recove
 	if gov != nil {
 		f.svc.WithLoginGovernance(gov)
 	}
-	user := seedUser(f.repo, "owner@acme.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@acme.com", "")
 	f.add(t, user, "spare@example.net")
 	return f, user
 }
@@ -949,7 +948,7 @@ func TestRecoveryEmailSignIn_PolicyThatRefusesEmailCodesRefusesIt(t *testing.T) 
 func TestRecoveryEmailSignIn_MagicLinkSignsInToTheHoldingAccount(t *testing.T) {
 	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
 	f.svc.returnAllow = mustReturnAllowlist(t, "https://app.test/")
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 	users := f.userCount()
 
@@ -974,7 +973,7 @@ func TestRecoveryEmailSignIn_MagicLinkSignsInToTheHoldingAccount(t *testing.T) {
 
 func TestRecoveryEmailSignIn_OffMeansTheAddressSignsInToNothing(t *testing.T) {
 	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 	scope := *ProjectScopeFromContext(f.ctx)
 	scope.RecoveryEmails.SignIn = false
@@ -997,8 +996,8 @@ func TestRecoveryEmailSignIn_OffMeansTheAddressSignsInToNothing(t *testing.T) {
 
 func TestRecoveryEmailSignIn_AccessGoesByTheAccountNotTheRecoveryAddress(t *testing.T) {
 	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"owner@example.com"}})
-	owner := seedUser(f.repo, "owner@example.com", "", StatusActive)
-	outsider := seedUser(f.repo, "outsider@example.com", "", StatusActive)
+	owner := seedVerified(f.repo, "owner@example.com", "")
+	outsider := seedVerified(f.repo, "outsider@example.com", "")
 	f.add(t, owner, "spare@example.net")
 	f.add(t, outsider, "outsider-spare@example.net")
 
@@ -1039,7 +1038,7 @@ func TestRecoveryEmailSignIn_AccessGoesByTheAccountNotTheRecoveryAddress(t *test
 
 func TestRecoveryEmailSignIn_RefusesAnAccountThatMayNotSignIn(t *testing.T) {
 	f := newRecoverySignInFixture(t, ProjectAccessConfig{Mode: AccessModeOpen})
-	user := seedUser(f.repo, "owner@example.com", "", StatusActive)
+	user := seedVerified(f.repo, "owner@example.com", "")
 	f.add(t, user, "spare@example.net")
 	f.repo.mu.Lock()
 	f.repo.users[user.ID].Status = StatusDeactivated

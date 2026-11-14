@@ -452,6 +452,48 @@ func runRecoveryEmailConformance(t *testing.T, driver Driver) {
 		}
 	})
 
+	// The sweep a proof of an unproven address runs: the verified write leaves
+	// a recovery email added while the address was unproven in place, so the
+	// listing after it finds the address, and removing it withdraws it with
+	// the session it opened.
+	t.Run(driver.Name+"/RecoveryEmail_AddedWhileTheAddressIsUnprovenIsWithdrawnByTheProof", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid, err := r.CreateUser(ctx, &service.User{Email: "rec-proof@example.com", Status: "active", Role: "member", PasswordHash: "planted"})
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: uid, Email: "planter@example.net", VerifiedAt: 1}, 5); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		planted := recoveryEmailIDOf(t, r, uid, "planter@example.net")
+		session := "rec-proof-session"
+		if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
+			TokenHash: session, UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 1, LastUsedAt: 1, RecoveryEmailID: planted,
+		}); err != nil {
+			t.Fatalf("CreateRefreshToken: %v", err)
+		}
+
+		if ok, cleared, err := r.SetUserEmailVerified(ctx, uid, "rec-proof@example.com", 100, true); err != nil || !ok || !cleared {
+			t.Fatalf("SetUserEmailVerified = %v %v %v", ok, cleared, err)
+		}
+		if list, err := r.ListRecoveryEmails(ctx, uid); err != nil || len(list) != 1 || list[0].ID != planted {
+			t.Fatalf("List after the verified write = %#v %v, want the planted address still there for the sweep", list, err)
+		}
+		if ended, err := r.RemoveRecoveryEmail(ctx, uid, "planter@example.net", 100); err != nil || ended != 1 {
+			t.Fatalf("Remove = %d %v, want the session it opened ended", ended, err)
+		}
+		if list, err := r.ListRecoveryEmails(ctx, uid); err != nil || len(list) != 0 {
+			t.Fatalf("List after the sweep = %#v %v, want none", list, err)
+		}
+		if holder, err := r.FindRecoveryEmailHolder(ctx, "planter@example.net"); err != nil || holder != nil {
+			t.Fatalf("holder after the sweep = %#v %v, want none", holder, err)
+		}
+		if got, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, session); err != nil || got != nil {
+			t.Fatalf("the planted address's session after the sweep = %#v %v, want gone", got, err)
+		}
+	})
+
 	t.Run(driver.Name+"/RecoveryEmail_RemoveRacingRecoverySessionsLeavesNone", func(t *testing.T) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)

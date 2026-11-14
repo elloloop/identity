@@ -154,10 +154,19 @@ func recoveryHoldUntil(t *testing.T, err error) int64 {
 	return 0
 }
 
+// seedProvenHandlerUser seeds an active account whose email is proven, which
+// an account needs before it keeps a recovery email.
+func seedProvenHandlerUser(t *testing.T, h *testHarness, email string) string {
+	t.Helper()
+	id, err := h.repo.CreateUser(context.Background(), &service.User{Email: email, EmailVerified: true, Status: "active", Role: "member"})
+	require.NoError(t, err)
+	return id
+}
+
 func TestHandler_RecoveryEmails_AddListRemove(t *testing.T) {
 	h, mailer := newRecoveryEmailHarness(t, service.ProjectRecoveryEmailsConfig{Enabled: true})
 	ctx := context.Background()
-	uid := seedHandlerUser(t, h, "owner@example.com")
+	uid := seedProvenHandlerUser(t, h, "owner@example.com")
 
 	_, err := h.client.RequestRecoveryEmail(ctx,
 		signedIn(connect.NewRequest(&identitypb.RequestRecoveryEmailRequest{Email: "spare@example.net"}), uid))
@@ -190,7 +199,7 @@ func TestHandler_RecoveryEmails_AddListRemove(t *testing.T) {
 func TestHandler_RecoveryEmails_Refusals(t *testing.T) {
 	h, _ := newRecoveryEmailHarness(t, service.ProjectRecoveryEmailsConfig{Enabled: true})
 	ctx := context.Background()
-	uid := seedHandlerUser(t, h, "owner@example.com")
+	uid := seedProvenHandlerUser(t, h, "owner@example.com")
 
 	// No session at all.
 	_, err := h.client.RequestRecoveryEmail(ctx, connect.NewRequest(&identitypb.RequestRecoveryEmailRequest{Email: "spare@example.net"}))
@@ -226,6 +235,16 @@ func TestHandler_RecoveryEmails_Refusals(t *testing.T) {
 		signedIn(connect.NewRequest(&identitypb.RequestRecoveryEmailRequest{Email: "spare@example.net"}), offUID))
 	assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
 	require.ErrorContains(t, err, "recovery_emails_disabled", "the refusal carries a token apart from reauthentication_required")
+
+	// An account whose own address is unproven.
+	unproven := seedHandlerUser(t, h, "unproven@example.com")
+	_, err = h.client.RequestRecoveryEmail(ctx,
+		signedIn(connect.NewRequest(&identitypb.RequestRecoveryEmailRequest{Email: "planter@example.net"}), unproven))
+	assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	_, err = h.client.VerifyRecoveryEmail(ctx, signedIn(connect.NewRequest(&identitypb.VerifyRecoveryEmailRequest{
+		Email: "planter@example.net", Code: "123456",
+	}), unproven))
+	assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
 }
 
 // A sign-in by a recovery email holds the session it opened from account

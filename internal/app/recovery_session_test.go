@@ -84,8 +84,8 @@ func authed[T any](msg *T, token string) *connect.Request[T] {
 }
 
 // recoveryDeployment is replicas of one deployment on one store, whose
-// project lets recovery emails sign in: an owner signed in with a password,
-// and a session the owner's recovery email opened.
+// project lets recovery emails sign in: an owner signed in with an emailed
+// code, and a session the owner's recovery email opened.
 type recoveryDeployment struct {
 	repo                      *memory.Repo
 	replicas                  []identityconnect.IdentityServiceClient
@@ -96,6 +96,7 @@ type recoveryDeployment struct {
 func newRecoveryDeployment(t *testing.T, cfg *config.Config, replicas int) *recoveryDeployment {
 	t.Helper()
 	ctx := context.Background()
+	cfg.PasswordlessSignupEnabled = true
 	d := &recoveryDeployment{repo: memory.New()}
 	mail := &codeMailbox{}
 	signer := jwttest.NewSigner(t, "recovery-session-test-key")
@@ -114,7 +115,11 @@ func newRecoveryDeployment(t *testing.T, cfg *config.Config, replicas int) *reco
 	}
 	here := d.replicas[0]
 
-	owner, err := here.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{Email: "owner@example.com", Password: "Offline-test-Password123!"}))
+	// An emailed code signs the owner up and proves the address, which an
+	// account needs before it keeps a recovery email.
+	_, err = here.RequestEmailLoginCode(ctx, connect.NewRequest(&identitypb.RequestEmailLoginCodeRequest{Email: "owner@example.com"}))
+	require.NoError(t, err)
+	owner, err := here.VerifyEmailLoginCode(ctx, connect.NewRequest(&identitypb.VerifyEmailLoginCodeRequest{Email: "owner@example.com", Code: mail.codeFor(t, "owner@example.com", 0)}))
 	require.NoError(t, err)
 	d.ownerID, d.ownerToken = owner.Msg.User.Id, owner.Msg.AccessToken
 	_, err = here.RequestRecoveryEmail(ctx, authed(&identitypb.RequestRecoveryEmailRequest{Email: "spare@example.net"}, d.ownerToken))

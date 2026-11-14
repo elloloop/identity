@@ -78,7 +78,12 @@ import { Code } from "astro-expressive-code/components";
     <code>reauth_max_age_seconds</code> is refused
     <code>FAILED_PRECONDITION</code> with the stable
     <code>reauthentication_required</code> token, so sign the user in again and
-    retry. Anonymous accounts and agents hold no recovery email.
+    retry. Anonymous accounts and agents hold no recovery email, and neither
+    does an account whose own email is unproven: whoever signed it up may not
+    own that mailbox. When the owner proves the address (an emailed code or
+    link, or a provider that vouches for it), every recovery email the account
+    holds is removed with the sessions it opened, along with the password,
+    passkeys and provider links added before the proof.
   </p>
   <p>
     <code>RequestRecoveryEmail</code> mails a 6-digit code to the address. Its
@@ -121,6 +126,7 @@ import { Code } from "astro-expressive-code/components";
     </thead>
     <tbody>
       <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_emails_disabled</code></td><td><code>RequestRecoveryEmail</code> or <code>VerifyRecoveryEmail</code> in a project without <code>enabled</code>.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>email verification required</code></td><td><code>RequestRecoveryEmail</code> or <code>VerifyRecoveryEmail</code> for an account whose own email is unproven.</td></tr>
       <tr><td><code>FAILED_PRECONDITION</code>, <code>reauthentication_required</code></td><td>Adding or removing from a session whose sign-in is too old.</td></tr>
       <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_hold</code></td><td>Adding or removing from a session the <a href="#the-hold">hold</a> binds.</td></tr>
       <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_session</code></td><td>Adding or removing from a session that may be a recovery email's but names none, over <a href="#native-grpc">native gRPC</a>.</td></tr>
