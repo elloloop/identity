@@ -784,19 +784,11 @@ func New(deps Deps) (*Built, error) {
 		repo = middleware.WrapSessionRepository(repo, sessionCache)
 	}
 
-	mailer, mailDelivers := deps.EmailTransport, deps.EmailTransport != nil
-	if mailer == nil {
-		mailer, mailDelivers = buildEmailTransport(deps.Config, logger)
+	senders, err := buildOutboundSenders(deps, logger)
+	if err != nil {
+		return nil, err
 	}
-	mailer = observability.WrapMailer(mailer)
-
-	smsSender := deps.SMSSender
-	if smsSender == nil {
-		smsSender, err = buildSMSSender(deps.Config, logger)
-		if err != nil {
-			return nil, fmt.Errorf("sms sender: %w", err)
-		}
-	}
+	mailer := senders.mailer
 
 	// An embedder's registry is opaque, so only an env-built one can be rebuilt
 	// with a host's own client (ADR-0019).
@@ -830,7 +822,7 @@ func New(deps Deps) (*Built, error) {
 
 	authSvc := service.NewAuthServiceWithOAuth(
 		repo, deps.Config, deps.Signer, deps.Passkeys,
-		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, smsSender, logger,
+		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, senders.sms, logger,
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
@@ -838,7 +830,7 @@ func New(deps Deps) (*Built, error) {
 		// or the driver has no governance stores (memory, SQLite).
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
-		WithTemplateMessages(deps.TemplateMessageSender).
+		WithTemplateMessages(senders.templates).
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger).
@@ -903,7 +895,7 @@ func New(deps Deps) (*Built, error) {
 
 	domainSvc := buildDomainService(deps, repo, auditLog, logger)
 	users := service.RepositoryUserDirectory(repo)
-	membershipSvc := buildMembershipService(deps, repo, users, mailer, mailDelivers, auditLog, logger)
+	membershipSvc := buildMembershipService(deps, repo, users, mailer, senders.mailDelivers, auditLog, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, users, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
@@ -1008,28 +1000,7 @@ func New(deps Deps) (*Built, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
-	// default project denies all auth, so a fresh deployment that forgot to open
-	// it isn't silently locked out with no signal.
-	// Surface the retention adjustment Load makes when the operator never
-	// chose a window: silent is wrong (the effective value differs from the
-	// documented default), but failing the boot is worse — see Load.
-	if from := deps.Config.AnonymousRetentionRaisedFrom; from > 0 {
-		logger.Info("anonymous_retention_raised",
-			zap.Int("from_days", from),
-			zap.Int("to_days", deps.Config.AnonymousRetentionDays),
-			zap.String("reason", "the default window did not outlive GATEWAY_REFRESH_EXPIRY_SECONDS; "+
-				"anonymous users would have been reaped while their only credential was still valid"),
-			zap.String("hint", "set GATEWAY_ANONYMOUS_RETENTION_DAYS explicitly to choose the window"))
-	}
-	if deps.Config.PasskeyRelyingPartiesConfigured() {
-		logger.Info("passkey_relying_parties_per_host",
-			zap.Strings("hosts", deps.Config.PasskeyRelyingPartyHosts()))
-	}
-	if defaultAccess.Mode == service.AccessModeClosed || defaultAccess.Mode == "" {
-		logger.Warn("default_project_access_closed",
-			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))
-	}
+	logBootNotices(deps.Config, defaultAccess, logger)
 	chain = middleware.NewProjectResolver(
 		middleware.DefaultProject{
 			ProjectID:         deps.Config.DefaultProjectID,
@@ -1067,6 +1038,64 @@ func New(deps Deps) (*Built, error) {
 		repairEmails:   emailRepair(deps, adminSvc),
 		drainEvents:    drainEvents,
 	}, nil
+}
+
+// outboundSenders are the transports New hands the services: mail, with
+// whether its Send reports delivery (buildEmailTransport), SMS, and template
+// messages (nil when the embedder wired none, which leaves that channel
+// unavailable).
+type outboundSenders struct {
+	mailer       email.Transport
+	mailDelivers bool
+	sms          sms.Sender
+	templates    templatemsg.Sender
+}
+
+// buildOutboundSenders takes each sender the embedder wired in deps and
+// builds the mail and SMS ones it did not from the config.
+func buildOutboundSenders(deps Deps, logger *zap.Logger) (outboundSenders, error) {
+	out := outboundSenders{
+		mailer: deps.EmailTransport, mailDelivers: deps.EmailTransport != nil,
+		sms: deps.SMSSender, templates: deps.TemplateMessageSender,
+	}
+	if out.mailer == nil {
+		out.mailer, out.mailDelivers = buildEmailTransport(deps.Config, logger)
+	}
+	out.mailer = observability.WrapMailer(out.mailer)
+	if out.sms == nil {
+		var err error
+		if out.sms, err = buildSMSSender(deps.Config, logger); err != nil {
+			return outboundSenders{}, fmt.Errorf("sms sender: %w", err)
+		}
+	}
+	return out, nil
+}
+
+// logBootNotices logs what an operator should know about the config at boot
+// without it failing the boot.
+func logBootNotices(cfg *config.Config, defaultAccess service.ProjectAccessConfig, logger *zap.Logger) {
+	// Surface the retention adjustment Load makes when the operator never
+	// chose a window: silent is wrong (the effective value differs from the
+	// documented default), but failing the boot is worse — see Load.
+	if from := cfg.AnonymousRetentionRaisedFrom; from > 0 {
+		logger.Info("anonymous_retention_raised",
+			zap.Int("from_days", from),
+			zap.Int("to_days", cfg.AnonymousRetentionDays),
+			zap.String("reason", "the default window did not outlive GATEWAY_REFRESH_EXPIRY_SECONDS; "+
+				"anonymous users would have been reaped while their only credential was still valid"),
+			zap.String("hint", "set GATEWAY_ANONYMOUS_RETENTION_DAYS explicitly to choose the window"))
+	}
+	if cfg.PasskeyRelyingPartiesConfigured() {
+		logger.Info("passkey_relying_parties_per_host",
+			zap.Strings("hosts", cfg.PasskeyRelyingPartyHosts()))
+	}
+	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when
+	// the default project denies all auth, so a fresh deployment that forgot to
+	// open it isn't silently locked out with no signal.
+	if defaultAccess.Mode == service.AccessModeClosed || defaultAccess.Mode == "" {
+		logger.Warn("default_project_access_closed",
+			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))
+	}
 }
 
 // emailRepair binds the stored-email repair to every project: the control
