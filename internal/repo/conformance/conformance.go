@@ -1325,9 +1325,12 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
-		t.Run("EmailLoginCode_UpsertFindConsume", func(t *testing.T) {
+		t.Run("EmailLoginCode_UpsertCountConsume", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
+			if got, err := r.CountEmailLoginCodeAttempt(ctx, "otp@example.com", 100); err != nil || got != nil {
+				t.Fatalf("Count before any code = %#v %v, want nil nil", got, err)
+			}
 			id, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
 				Email: "otp@example.com", CodeHash: "hash-1",
 				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
@@ -1338,12 +1341,12 @@ func RunConformance(t *testing.T, driver Driver) {
 			if id == "" {
 				t.Fatal("UpsertEmailLoginCode did not return a node id")
 			}
-			got, err := r.FindEmailLoginCodeByEmail(ctx, "otp@example.com")
+			got, err := r.CountEmailLoginCodeAttempt(ctx, "otp@example.com", 150)
 			if err != nil || got == nil {
-				t.Fatalf("Find: err=%v got=%#v", err, got)
+				t.Fatalf("Count: err=%v got=%#v", err, got)
 			}
-			if got.CodeHash != "hash-1" || got.MaxAttempts != 5 {
-				t.Fatalf("Find returned wrong record: %#v", got)
+			if got.CodeHash != "hash-1" || got.Email != "otp@example.com" || got.MaxAttempts != 5 || got.AttemptCount != 1 || got.NodeID == "" {
+				t.Fatalf("Count returned wrong record: %#v", got)
 			}
 			// Consume succeeds once.
 			rec, err := r.ConsumeEmailLoginCode(ctx, "otp@example.com", 200)
@@ -1356,6 +1359,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			// Replay must fail.
 			if _, err := r.ConsumeEmailLoginCode(ctx, "otp@example.com", 300); !errors.Is(err, service.ErrEmailLoginCodeInvalid) {
 				t.Fatalf("replay Consume: want ErrEmailLoginCodeInvalid, got %v", err)
+			}
+			if got, err := r.CountEmailLoginCodeAttempt(ctx, "otp@example.com", 300); err != nil || got != nil {
+				t.Fatalf("Count of a consumed code = %#v %v, want nil nil", got, err)
 			}
 		})
 
@@ -1374,37 +1380,57 @@ func RunConformance(t *testing.T, driver Driver) {
 			}); err != nil {
 				t.Fatalf("Upsert new: %v", err)
 			}
-			got, err := r.FindEmailLoginCodeByEmail(ctx, "otp-upsert@example.com")
+			got, err := r.CountEmailLoginCodeAttempt(ctx, "otp-upsert@example.com", 300)
 			if err != nil || got == nil {
-				t.Fatalf("Find: err=%v got=%#v", err, got)
+				t.Fatalf("Count: err=%v got=%#v", err, got)
 			}
-			if got.CodeHash != "new" {
-				t.Fatalf("upsert did not replace previous code: hash=%q want new", got.CodeHash)
+			if got.CodeHash != "new" || got.AttemptCount != 1 {
+				t.Fatalf("upsert did not replace previous code: %#v, want the new code with one attempt", got)
 			}
 		})
 
-		t.Run("EmailLoginCode_IncrementAttempts", func(t *testing.T) {
+		t.Run("EmailLoginCode_CountStopsAtTheCapAndAtExpiry", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
-			id, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+			if _, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
 				Email: "otp-attempts@example.com", CodeHash: "h",
-				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
-			})
-			if err != nil {
+				ExpiresAt: 1_000, CreatedAt: 100, MaxAttempts: 2,
+			}); err != nil {
 				t.Fatalf("Upsert: %v", err)
 			}
-			if err := r.IncrementEmailLoginCodeAttempts(ctx, id); err != nil {
-				t.Fatalf("Increment: %v", err)
+			if got, err := r.CountEmailLoginCodeAttempt(ctx, "otp-attempts@example.com", 1_000); err != nil || got != nil {
+				t.Fatalf("Count at expiry = %#v %v, want nil nil", got, err)
 			}
-			if err := r.IncrementEmailLoginCodeAttempts(ctx, id); err != nil {
-				t.Fatalf("Increment 2: %v", err)
+			for want := int64(1); want <= 2; want++ {
+				got, err := r.CountEmailLoginCodeAttempt(ctx, "otp-attempts@example.com", 500)
+				if err != nil || got == nil || got.AttemptCount != want {
+					t.Fatalf("Count %d = %#v %v", want, got, err)
+				}
 			}
-			got, err := r.FindEmailLoginCodeByEmail(ctx, "otp-attempts@example.com")
-			if err != nil || got == nil {
-				t.Fatalf("Find: err=%v got=%#v", err, got)
+			if got, err := r.CountEmailLoginCodeAttempt(ctx, "otp-attempts@example.com", 500); err != nil || got != nil {
+				t.Fatalf("Count past the cap = %#v %v, want nil nil", got, err)
 			}
-			if got.AttemptCount != 2 {
-				t.Fatalf("AttemptCount = %d, want 2", got.AttemptCount)
+		})
+
+		t.Run("EmailLoginCode_ConcurrentGuessesStopAtTheCap", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			const maxAttempts = 3
+			if _, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+				Email: "otp-guess-race@example.com", CodeHash: "h",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: maxAttempts,
+			}); err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			counted, err := countConcurrently(func() (bool, error) {
+				got, err := r.CountEmailLoginCodeAttempt(ctx, "otp-guess-race@example.com", 200)
+				return got != nil, err
+			})
+			if err != nil {
+				t.Fatalf("concurrent Count: %v", err)
+			}
+			if counted != maxAttempts {
+				t.Fatalf("%d of %d concurrent guesses were counted, want the cap of %d", counted, concurrentWriters, maxAttempts)
 			}
 		})
 
@@ -1477,10 +1503,12 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err := r.DeleteExpiredEmailLoginCodes(ctx, 5_000, 100); err != nil {
 				t.Fatalf("DeleteExpired: %v", err)
 			}
-			if got, _ := r.FindEmailLoginCodeByEmail(ctx, "otp-old@example.com"); got != nil {
+			// Counted as of before the old code's expiry, so only a sweep makes
+			// it nil.
+			if got, _ := r.CountEmailLoginCodeAttempt(ctx, "otp-old@example.com", 500); got != nil {
 				t.Fatal("expired code survived the sweep")
 			}
-			if got, _ := r.FindEmailLoginCodeByEmail(ctx, "otp-fresh@example.com"); got == nil {
+			if got, _ := r.CountEmailLoginCodeAttempt(ctx, "otp-fresh@example.com", 500); got == nil {
 				t.Fatal("fresh code was swept")
 			}
 			if err := r.DeleteExpiredEmailLoginCodes(ctx, 5_000, 0); err == nil {
@@ -1985,10 +2013,13 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
-		t.Run("PhoneVerificationCode_UpsertFindConsume", func(t *testing.T) {
+		t.Run("PhoneVerificationCode_UpsertCountConsume", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
 			uid := createTestUser(t, r, "pvc@example.com")
+			if got, err := r.CountPhoneVerificationCodeAttempt(ctx, uid, 100); err != nil || got != nil {
+				t.Fatalf("Count before any code = %#v %v, want nil nil", got, err)
+			}
 			id, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
 				UserID: uid, PhoneNumber: "+14155550123", CodeHash: "hash-1",
 				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
@@ -1999,12 +2030,13 @@ func RunConformance(t *testing.T, driver Driver) {
 			if id == "" {
 				t.Fatal("UpsertPhoneVerificationCode did not return a node id")
 			}
-			got, err := r.FindPhoneVerificationCodeByUser(ctx, uid)
+			got, err := r.CountPhoneVerificationCodeAttempt(ctx, uid, 150)
 			if err != nil || got == nil {
-				t.Fatalf("Find: err=%v got=%#v", err, got)
+				t.Fatalf("Count: err=%v got=%#v", err, got)
 			}
-			if got.CodeHash != "hash-1" || got.PhoneNumber != "+14155550123" || got.MaxAttempts != 5 {
-				t.Fatalf("Find returned wrong record: %#v", got)
+			if got.CodeHash != "hash-1" || got.UserID != uid || got.PhoneNumber != "+14155550123" || got.MaxAttempts != 5 ||
+				got.AttemptCount != 1 || got.NodeID == "" {
+				t.Fatalf("Count returned wrong record: %#v", got)
 			}
 			// Consume succeeds once.
 			rec, err := r.ConsumePhoneVerificationCode(ctx, uid, 200)
@@ -2017,6 +2049,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			// Replay must fail.
 			if _, err := r.ConsumePhoneVerificationCode(ctx, uid, 300); !errors.Is(err, service.ErrPhoneCodeInvalid) {
 				t.Fatalf("replay Consume: want ErrPhoneCodeInvalid, got %v", err)
+			}
+			if got, err := r.CountPhoneVerificationCodeAttempt(ctx, uid, 300); err != nil || got != nil {
+				t.Fatalf("Count of a consumed code = %#v %v, want nil nil", got, err)
 			}
 		})
 
@@ -2036,38 +2071,59 @@ func RunConformance(t *testing.T, driver Driver) {
 			}); err != nil {
 				t.Fatalf("Upsert new: %v", err)
 			}
-			got, err := r.FindPhoneVerificationCodeByUser(ctx, uid)
+			got, err := r.CountPhoneVerificationCodeAttempt(ctx, uid, 300)
 			if err != nil || got == nil {
-				t.Fatalf("Find: err=%v got=%#v", err, got)
+				t.Fatalf("Count: err=%v got=%#v", err, got)
 			}
-			if got.CodeHash != "new" {
-				t.Fatalf("upsert did not replace previous code: hash=%q want new", got.CodeHash)
+			if got.CodeHash != "new" || got.AttemptCount != 1 {
+				t.Fatalf("upsert did not replace previous code: %#v, want the new code with one attempt", got)
 			}
 		})
 
-		t.Run("PhoneVerificationCode_IncrementAttempts", func(t *testing.T) {
+		t.Run("PhoneVerificationCode_CountStopsAtTheCapAndAtExpiry", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
 			uid := createTestUser(t, r, "pvc-attempts@example.com")
-			id, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
 				UserID: uid, PhoneNumber: "+14155550123", CodeHash: "h",
-				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
-			})
-			if err != nil {
+				ExpiresAt: 1_000, CreatedAt: 100, MaxAttempts: 2,
+			}); err != nil {
 				t.Fatalf("Upsert: %v", err)
 			}
-			if err := r.IncrementPhoneVerificationCodeAttempts(ctx, id); err != nil {
-				t.Fatalf("Increment: %v", err)
+			if got, err := r.CountPhoneVerificationCodeAttempt(ctx, uid, 1_000); err != nil || got != nil {
+				t.Fatalf("Count at expiry = %#v %v, want nil nil", got, err)
 			}
-			if err := r.IncrementPhoneVerificationCodeAttempts(ctx, id); err != nil {
-				t.Fatalf("Increment 2: %v", err)
+			for want := int64(1); want <= 2; want++ {
+				got, err := r.CountPhoneVerificationCodeAttempt(ctx, uid, 500)
+				if err != nil || got == nil || got.AttemptCount != want {
+					t.Fatalf("Count %d = %#v %v", want, got, err)
+				}
 			}
-			got, err := r.FindPhoneVerificationCodeByUser(ctx, uid)
-			if err != nil || got == nil {
-				t.Fatalf("Find: err=%v got=%#v", err, got)
+			if got, err := r.CountPhoneVerificationCodeAttempt(ctx, uid, 500); err != nil || got != nil {
+				t.Fatalf("Count past the cap = %#v %v, want nil nil", got, err)
 			}
-			if got.AttemptCount != 2 {
-				t.Fatalf("AttemptCount = %d, want 2", got.AttemptCount)
+		})
+
+		t.Run("PhoneVerificationCode_ConcurrentGuessesStopAtTheCap", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid := createTestUser(t, r, "pvc-guess-race@example.com")
+			const maxAttempts = 3
+			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+				UserID: uid, PhoneNumber: "+14155550123", CodeHash: "h",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: maxAttempts,
+			}); err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			counted, err := countConcurrently(func() (bool, error) {
+				got, err := r.CountPhoneVerificationCodeAttempt(ctx, uid, 200)
+				return got != nil, err
+			})
+			if err != nil {
+				t.Fatalf("concurrent Count: %v", err)
+			}
+			if counted != maxAttempts {
+				t.Fatalf("%d of %d concurrent guesses were counted, want the cap of %d", counted, concurrentWriters, maxAttempts)
 			}
 		})
 
@@ -2145,10 +2201,12 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err := r.DeleteExpiredPhoneVerificationCodes(ctx, 5_000, 100); err != nil {
 				t.Fatalf("DeleteExpired: %v", err)
 			}
-			if got, _ := r.FindPhoneVerificationCodeByUser(ctx, oldUID); got != nil {
+			// Counted as of before the old code's expiry, so only a sweep makes
+			// it nil.
+			if got, _ := r.CountPhoneVerificationCodeAttempt(ctx, oldUID, 500); got != nil {
 				t.Fatal("expired code survived the sweep")
 			}
-			if got, _ := r.FindPhoneVerificationCodeByUser(ctx, freshUID); got == nil {
+			if got, _ := r.CountPhoneVerificationCodeAttempt(ctx, freshUID, 500); got == nil {
 				t.Fatal("fresh code was swept")
 			}
 			if err := r.DeleteExpiredPhoneVerificationCodes(ctx, 5_000, 0); err == nil {
@@ -2481,7 +2539,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			if rec, err := r.GetLatestIdentityVerificationForUser(ctx, uid); err != nil || rec != nil {
 				t.Fatalf("identity verification survived: err=%v rec=%#v", err, rec)
 			}
-			if rec, err := r.FindPhoneVerificationCodeByUser(ctx, uid); err != nil || rec != nil {
+			if rec, err := r.CountPhoneVerificationCodeAttempt(ctx, uid, 100); err != nil || rec != nil {
 				t.Fatalf("phone verification code survived: err=%v rec=%#v", err, rec)
 			}
 			// Every short-lived user-keyed token drained eagerly (#168).
@@ -2826,6 +2884,8 @@ func RunConformance(t *testing.T, driver Driver) {
 	runEmailFoldConformance(t, driver)
 	runAccountAddressConformance(t, driver)
 	runMergedIntoConformance(t, driver)
+	runRecoveryEmailConformance(t, driver)
+	runPhoneClaimConformance(t, driver)
 	runPasswordChangeRequiredConformance(t, driver)
 	runAccountMergeConformance(t, driver)
 	runAgentAccountsConformance(t, driver)

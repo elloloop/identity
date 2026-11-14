@@ -32,18 +32,33 @@ func newKeyCooldown(cooldownMs int64, maxSize int) *keyCooldown {
 // admitted within the cooldown window. A zero or negative cooldown disables
 // the cooldown entirely.
 func (t *keyCooldown) allow(key string, nowMs int64) bool {
-	if t == nil || t.cooldownMs <= 0 || key == "" {
+	return t.allowAll(nowMs, key)
+}
+
+// allowAll admits one event that counts against every key: it returns true
+// and records the event under each only when none was admitted within the
+// cooldown window, so a refusal spends none of them. An empty key is not
+// counted.
+func (t *keyCooldown) allowAll(nowMs int64, keys ...string) bool {
+	if t == nil || t.cooldownMs <= 0 {
 		return true
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if last, ok := t.lastMs[key]; ok && nowMs-last < t.cooldownMs {
-		return false
+	for _, key := range keys {
+		if last, ok := t.lastMs[key]; ok && key != "" && nowMs-last < t.cooldownMs {
+			return false
+		}
 	}
-	if len(t.lastMs) >= t.maxSize {
-		t.evictLocked(nowMs)
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if len(t.lastMs) >= t.maxSize {
+			t.evictLocked(nowMs)
+		}
+		t.lastMs[key] = nowMs
 	}
-	t.lastMs[key] = nowMs
 	return true
 }
 

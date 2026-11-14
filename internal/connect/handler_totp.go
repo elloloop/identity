@@ -23,7 +23,7 @@ func (h *IdentityHandler) BeginTotpSetup(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	secret, qrCodeURI, recoveryCodes, err := h.auth.BeginTotpSetup(ctx, userID)
+	secret, qrCodeURI, recoveryCodes, err := h.auth.BeginTotpSetup(ctx, userID, authenticatedSignIn(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -47,7 +47,7 @@ func (h *IdentityHandler) VerifyTotpSetup(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	verified, err := h.auth.VerifyTotpSetup(ctx, userID, req.Msg.Code)
+	verified, err := h.auth.VerifyTotpSetup(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Code)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -98,7 +98,7 @@ func (h *IdentityHandler) DisableTotp(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	err := h.auth.DisableTotp(ctx, userID, req.Msg.Password)
+	err := h.auth.DisableTotp(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Password)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -117,7 +117,7 @@ func (h *IdentityHandler) RegenerateRecoveryCodes(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	codes, err := h.auth.RegenerateRecoveryCodes(ctx, userID, req.Msg.Password)
+	codes, err := h.auth.RegenerateRecoveryCodes(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.Password)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

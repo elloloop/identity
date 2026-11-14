@@ -253,7 +253,7 @@ func TestListMyTenants_OnlyTheCallersActiveTenants(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, err := f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	got, err := f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Equal(t, []*UserTenant{
 		{TenantID: "t-a", Name: "Alpha", Role: RoleAdmin, Source: MembershipSourceInvited},
@@ -266,25 +266,25 @@ func TestListMyTenants_IncludesACreatedTenant(t *testing.T) {
 	out, err := f.svc.CreateTenant(withTenantsProject(true), ssOwnerID, "Acme", "", "")
 	require.NoError(t, err)
 
-	got, err := f.svc.ListMyTenants(withTenantsProject(true), ssOwnerID)
+	got, err := f.svc.ListMyTenants(withTenantsProject(true), ssOwnerID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Equal(t, []*UserTenant{{TenantID: out.Tenant.ID, Name: "Acme", Role: RoleOwner, Source: MembershipSourceCreated}}, got)
 
-	others, err := f.svc.ListMyTenants(withTenantsProject(true), ssOtherID)
+	others, err := f.svc.ListMyTenants(withTenantsProject(true), ssOtherID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Empty(t, others)
 }
 
 func TestListMyTenants_RequiresCallerAndProject(t *testing.T) {
 	f := newSelfServiceFixture(&config.Config{})
-	_, err := f.svc.ListMyTenants(withTenantsProject(true), "")
+	_, err := f.svc.ListMyTenants(withTenantsProject(true), "", SessionSignIn{})
 	require.ErrorIs(t, err, ErrUnauthenticated)
-	_, err = f.svc.ListMyTenants(context.Background(), ssOwnerID)
+	_, err = f.svc.ListMyTenants(context.Background(), ssOwnerID, SessionSignIn{})
 	require.ErrorIs(t, err, ErrPermissionDenied)
 
 	boom := errors.New("store down")
 	f.members.listErr = boom
-	_, err = f.svc.ListMyTenants(withTenantsProject(true), ssOwnerID)
+	_, err = f.svc.ListMyTenants(withTenantsProject(true), ssOwnerID, SessionSignIn{})
 	require.ErrorIs(t, err, boom)
 }
 
@@ -560,31 +560,119 @@ func TestListMyTenants_DomainMembershipNeedsAVerifiedEmailOnTheDomain(t *testing
 	}
 
 	f.users.set(ssProject, &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive})
-	got, err := f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	got, err := f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{})
 	require.NoError(t, err)
 	require.Len(t, got, 1, "the domain membership is left out while the email is unverified")
 	assert.Equal(t, "t-inv", got[0].TenantID)
 
 	// The domain is matched under FoldEmail, as users.email_domain stores it.
 	f.users.set(ssProject, &User{ID: ssOwnerID, Email: "owner@EXAMPLE.test", Status: StatusActive, EmailVerified: true})
-	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 
 	f.users.set(ssProject, &User{ID: ssOwnerID, Email: "owner@elsewhere.test", Status: StatusActive, EmailVerified: true})
-	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{})
 	require.NoError(t, err)
 	require.Len(t, got, 1, "a verified address off the tenant's domain is no member through it")
 	assert.Equal(t, "t-inv", got[0].TenantID)
 
 	boom := errors.New("directory down")
 	f.users.getErr = boom
-	_, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	_, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{})
 	require.ErrorIs(t, err, boom)
 	f.users.getErr = nil
 	delete(f.users.byID, f.users.key(ssProject, ssOwnerID))
-	_, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID)
+	_, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{})
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// A session a recovery email opened lists no tenant the account belongs to
+// only through its email's domain: that session proved another mailbox. Nor
+// does one no one vouched for how it was opened in a project whose recovery
+// emails sign in, where it may be such a session; in any other project no
+// such session can exist, and it lists the domain's tenants as before.
+func TestListMyTenants_RecoverySessionListsNoDomainMembership(t *testing.T) {
+	f := newSelfServiceFixture(&config.Config{})
+	ctx := context.Background()
+	f.tenants.put(&Tenant{ID: "t-dom", ProjectID: ssProject, Name: "Domain", Status: TenantStatusClaimed})
+	f.members.verifyDomain(ssProject, "t-dom", "example.test")
+	f.tenants.put(&Tenant{ID: "t-inv", ProjectID: ssProject, Name: "Invited", Status: TenantStatusClaimed})
+	for id, source := range map[string]string{"t-dom": MembershipSourceDomain, "t-inv": MembershipSourceInvited} {
+		_, err := f.members.UpsertMembership(ctx, &TenantMembership{
+			ProjectID: ssProject, TenantID: id, UserID: ssOwnerID,
+			Source: source, Role: RoleMember, Status: MembershipStatusActive,
+		})
+		require.NoError(t, err)
+	}
+
+	recoverySignIn := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID:      ssProject,
+		Access:         ProjectAccessConfig{Mode: AccessModeOpen},
+		RecoveryEmails: ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true},
+	})
+	for name, ctx := range map[string]context.Context{"no recovery sign-in": withTenantsProject(false), "recovery sign-in": recoverySignIn} {
+		got, err := f.svc.ListMyTenants(ctx, ssOwnerID, SessionSignIn{})
+		require.NoError(t, err)
+		assert.Len(t, got, 2, name)
+		got, err = f.svc.ListMyTenants(ctx, ssOwnerID, SessionSignIn{AMR: []string{AMRRecoveryEmail}})
+		require.NoError(t, err)
+		require.Len(t, got, 1, name)
+		assert.Equal(t, "t-inv", got[0].TenantID, name)
+	}
+
+	got, err := f.svc.ListMyTenants(recoverySignIn, ssOwnerID, SessionSignIn{AMR: []string{AMRUnvouched}})
+	require.NoError(t, err)
+	require.Len(t, got, 1, "an unvouched session where recovery emails sign in")
+	assert.Equal(t, "t-inv", got[0].TenantID)
+	got, err = f.svc.ListMyTenants(withTenantsProject(false), ssOwnerID, SessionSignIn{AMR: []string{AMRUnvouched}})
+	require.NoError(t, err)
+	assert.Len(t, got, 2, "an unvouched session where no recovery email signs in keeps its domain tenants")
+}
+
+// A session a recovery email opened selects a tenant only through an
+// explicit membership, and keeps its amr on the token that names the tenant.
+func TestRefreshToken_RecoverySessionSelectsNoTenantThroughTheEmailDomain(t *testing.T) {
+	f := newSelectionFixture(t)
+	ctx := context.Background()
+	f.repo.mu.Lock()
+	f.repo.users[f.user.ID].EmailVerified = true
+	f.repo.mu.Unlock()
+	f.tenants.put(&Tenant{ID: "t-dom", ProjectID: f.project(), Name: "t-dom", Status: TenantStatusClaimed})
+	f.members.verifyDomain(f.project(), "t-dom", "example.com")
+	_, err := f.members.UpsertMembership(ctx, &TenantMembership{
+		ProjectID: f.project(), TenantID: "t-dom", UserID: f.user.ID,
+		Source: MembershipSourceDomain, Role: RoleMember, Status: MembershipStatusActive,
+	})
+	require.NoError(t, err)
+	f.seedTenant(t, "t-inv", TenantStatusClaimed, MembershipStatusActive)
+
+	const recovery = "recovery-session-refresh"
+	now := f.svc.nowMs()
+	require.NoError(t, f.repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: f.user.ID, Email: "spare@example.net", VerifiedAt: now}, 5))
+	held, err := f.repo.ListRecoveryEmails(ctx, f.user.ID)
+	require.NoError(t, err)
+	require.Len(t, held, 1)
+	_, err = f.repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
+		TokenHash: hashRefreshToken(recovery), UserID: f.user.ID,
+		ExpiresAt: now + time.Hour.Milliseconds(), CreatedAt: now, LastUsedAt: now, SessionStartedAt: now,
+		AuthTimeMs: now, RecoveryEmailID: held[0].ID,
+	})
+	require.NoError(t, err)
+
+	_, _, _, err = f.svc.RefreshToken(ctx, recovery, "t-dom", "", "")
+	requireSelectionRefusal(t, err, TenantSelectionNotAMember)
+	_, access, _, err := f.svc.RefreshToken(ctx, recovery, "t-inv", "", "")
+	require.NoError(t, err, "the refusal left the refresh token unspent")
+	assert.Equal(t, "t-inv", f.tenantClaim(t, access))
+	claims, err := jwt.VerifyAccessToken(access, f.svc.signer, "", "", false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{AMRRecoveryEmail}, claims.AMR)
+	assert.Equal(t, held[0].ID, claims.RecoveryEmailID)
+
+	_, access, _, err = f.svc.RefreshToken(ctx, f.refresh, "t-dom", "", "")
+	require.NoError(t, err, "a session opened another way still acts through the domain")
+	assert.Equal(t, "t-dom", f.tenantClaim(t, access))
 }
 
 // A tenant_id no tenant could have is refused as malformed before the

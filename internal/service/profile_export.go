@@ -104,7 +104,7 @@ func (s *ProfileService) ExportMyData(ctx context.Context, userID string) (*Data
 
 	return &DataExport{
 		FormatVersion:    ExportFormatVersion,
-		ExportedAtMs:     nowMs(),
+		ExportedAtMs:     s.nowMs(),
 		User:             user,
 		Sessions:         sessions,
 		Passkeys:         passkeys,

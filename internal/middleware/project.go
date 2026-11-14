@@ -235,6 +235,8 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		Jurisdictions:      rp.Jurisdictions,
 		Accounts:           rp.Accounts,
 		Tenants:            rp.Tenants,
+		RecoveryEmails:     rp.RecoveryEmails,
+		Phone:              rp.Phone,
 	}
 }
 

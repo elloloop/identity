@@ -283,7 +283,7 @@ func TestGrantParentalConsent_RecordsResolvedMarket(t *testing.T) {
 			repo.users[child.ID].Market = childMarket
 			repo.mu.Unlock()
 		}
-		rec, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		rec, err := svc.GrantParentalConsent(ctx, adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, strongPW, "", "")
 		require.NoError(t, err)
 		return rec
 	}

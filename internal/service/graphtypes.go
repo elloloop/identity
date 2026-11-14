@@ -101,6 +101,7 @@ const (
 	rfUserAgent  = "8"
 	rfLastUsedAt = "9"
 	rfConsumedAt = "10"
+	rfSID        = "11"
 )
 
 // ── PasswordResetToken field IDs (type_id 19) ──────────────────────

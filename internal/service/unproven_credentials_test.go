@@ -67,9 +67,9 @@ func TestVerificationLink_VoidsWhatAProviderClaimantAdded(t *testing.T) {
 	require.Equal(t, "someone@example.com", claimed.Email)
 	require.False(t, claimed.EmailVerified)
 
-	_, err = svc.LinkIdentity(ctx, claimed.ID, fakeOAuthCode("claimant@example.org", "C", "", "github"), "github", "https://app/cb", "", "", "")
+	_, err = svc.LinkIdentity(ctx, claimed.ID, SessionSignIn{}, fakeOAuthCode("claimant@example.org", "C", "", "github"), "github", "https://app/cb", "", "", "")
 	require.NoError(t, err)
-	_, err = svc.LinkIdentity(ctx, claimed.ID, fakeOAuthCode("someone@example.com", "S", "", "microsoft"), "microsoft", "https://app/cb", "", "", "")
+	_, err = svc.LinkIdentity(ctx, claimed.ID, SessionSignIn{}, fakeOAuthCode("someone@example.com", "S", "", "microsoft"), "microsoft", "https://app/cb", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{
 		"google/sub-someone+news@example.com": "someone+news@example.com",
@@ -276,7 +276,7 @@ func TestLinkIdentity_WithdrawsALinkWhenTheAddressIsProvenMeanwhile(t *testing.T
 		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
 	}
 
-	_, err := svc.LinkIdentity(ctx, user.ID, fakeOAuthCode("planter@example.org", "P", "", "github"), "github", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(ctx, user.ID, SessionSignIn{}, fakeOAuthCode("planter@example.org", "P", "", "github"), "github", "https://app/cb", "", "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	assert.Empty(t, linkedProviders(t, repo, user.ID), "the link is withdrawn")
 }
@@ -292,7 +292,7 @@ func TestLinkIdentity_AccountDeletedMeanwhileIsNotFound(t *testing.T) {
 		require.NoError(t, repo.DeleteUser(ctx, user.ID))
 	}
 
-	_, err := svc.LinkIdentity(ctx, user.ID, fakeOAuthCode("gone@example.org", "G", "", "github"), "github", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(ctx, user.ID, SessionSignIn{}, fakeOAuthCode("gone@example.org", "G", "", "github"), "github", "https://app/cb", "", "", "")
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.NotErrorIs(t, err, ErrUnauthenticated)
 	assert.Empty(t, linkedProviders(t, repo, user.ID), "the link is withdrawn")
@@ -304,7 +304,7 @@ func TestLinkIdentity_KeepsALinkOnAnUnprovenAccount(t *testing.T) {
 	svc, repo, _ := proofSvc(t)
 	user := seedUser(repo, "someone@example.com", hashPW(t, "Owner-Passw0rd!x"), StatusActive)
 
-	_, err := svc.LinkIdentity(context.Background(), user.ID, fakeOAuthCode("someone@example.org", "S", "", "github"), "github", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(context.Background(), user.ID, SessionSignIn{}, fakeOAuthCode("someone@example.org", "S", "", "github"), "github", "https://app/cb", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"github/sub-someone@example.org"}, linkedProviders(t, repo, user.ID))
 }
@@ -336,6 +336,69 @@ func TestExternalProof_VoidsAPasskeyAddedWhileItRuns(t *testing.T) {
 	tok, err := repo.FindRefreshTokenByHash(ctx, lateSession)
 	require.NoError(t, err)
 	assert.Nil(t, tok, "the session that could have added it ends")
+}
+
+// A recovery email on an account whose address is unproven may be the mailbox
+// of whoever signed it up. When the owner proves the address it is removed
+// with the session it opened, so it signs in to the account no longer, and
+// the proof's audit counts it.
+func TestExternalProof_RemovesARecoveryEmailAddedWhileTheAddressWasUnproven(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
+	ctx := context.Background()
+	victim := seedUser(repo, "victim@example.com", hashPW(t, "Planted-Passw0rd!"), StatusActive)
+	require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: victim.ID, Email: "planter@example.org", VerifiedAt: 1}, 5))
+	planted, err := repo.FindRecoveryEmailHolder(ctx, "planter@example.org")
+	require.NoError(t, err)
+	require.NotNil(t, planted)
+	const recoverySession = "planted-recovery-session-hash"
+	_, err = repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
+		TokenHash: recoverySession, UserID: victim.ID, RecoveryEmailID: planted.ID, ExpiresAt: 1 << 62,
+	})
+	require.NoError(t, err)
+
+	res := oauthLoginAs(t, svc, "victim@example.com")
+	require.True(t, res.User.EmailVerified)
+
+	held, err := repo.ListRecoveryEmails(ctx, victim.ID)
+	require.NoError(t, err)
+	assert.Empty(t, held, "the recovery email added while the address was unproven is removed")
+	holder, err := repo.FindRecoveryEmailHolder(ctx, "planter@example.org")
+	require.NoError(t, err)
+	assert.Nil(t, holder, "it signs in to the account no longer")
+	tok, err := repo.FindRefreshTokenByHash(ctx, recoverySession)
+	require.NoError(t, err)
+	assert.Nil(t, tok, "the session it opened ends")
+	details := writer.detailsOf(string(audit.EventUnprovenCredentialsVoided))
+	require.Len(t, details, 1)
+	assert.EqualValues(t, 1, details[0]["recovery_emails_cleared"])
+	assert.Equal(t, 1, writer.countByEventTypeAndDetail(string(audit.EventRecoveryEmailRemoved),
+		"reason", "unproven_recovery_email_cleared_on_external_email_verification"))
+}
+
+// A recovery email added after the proof listed the account's is removed
+// too: the proof lists them again once the address is marked verified.
+func TestExternalProof_RemovesARecoveryEmailAddedWhileItRuns(t *testing.T) {
+	svc, repo, rec := proofSvc(t)
+	ctx := context.Background()
+	victim := seedUser(repo, "victim@example.com", "", StatusActive)
+	added := false
+	repo.listOAuthIdentitiesHook = func() {
+		if u, _ := repo.GetUser(ctx, victim.ID); added || u == nil || !u.EmailVerified {
+			return
+		}
+		added = true
+		require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: victim.ID, Email: "late@example.org", VerifiedAt: 1}, 5))
+	}
+
+	res, err := passwordlessSignIn("victim@example.com")(t, svc, rec)
+	require.NoError(t, err)
+	assert.True(t, res.User.EmailVerified)
+	require.True(t, added, "the recovery email was added after the verified write")
+	held, err := repo.ListRecoveryEmails(ctx, victim.ID)
+	require.NoError(t, err)
+	assert.Empty(t, held, "the recovery email added mid-proof is removed")
 }
 
 // A password set on the account after the proof read it is cleared by the
@@ -394,7 +457,7 @@ func TestCompletePasskeyRegistration_WithdrawsAPasskeyWhenTheAddressIsProvenMean
 		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
 	require.NoError(t, err)
@@ -415,7 +478,7 @@ func TestCompletePasskeyRegistration_VerificationLinkMidRegistrationKeepsEarlier
 		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true, "email_verified_at": int64(1)}))
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
 	require.NoError(t, err)
@@ -442,7 +505,7 @@ func TestCompletePasskeyRegistration_PasskeyAlreadyVoidedIsNotAFailure(t *testin
 		}
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 	assert.NotErrorIs(t, err, ErrUnavailable)
 }
@@ -461,7 +524,7 @@ func TestCompletePasskeyRegistration_FailedRecheckWithdrawsThePasskey(t *testing
 		repo.getUserErr = errors.New("connection reset")
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
 	require.ErrorIs(t, err, ErrUnavailable)
 	repo.getUserErr = nil
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
@@ -494,7 +557,7 @@ func TestCompletePasskeyRegistration_FailedWithdrawIsUnavailable(t *testing.T) {
 		repo.deletePasskeyCredErr = errors.New("connection reset")
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "planted", false, "", "")
 	require.ErrorIs(t, err, ErrUnavailable)
 	assert.NotErrorIs(t, err, ErrUnauthenticated)
 }
@@ -512,7 +575,7 @@ func TestCompletePasskeyRegistration_AccountDeletedMeanwhileIsNotFound(t *testin
 		require.NoError(t, repo.DeleteUser(ctx, user.ID))
 	}
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.NotErrorIs(t, err, ErrUnauthenticated)
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
@@ -528,7 +591,7 @@ func TestCompletePasskeyRegistration_KeepsAPasskeyOnAnUnprovenAccount(t *testing
 	user := seedUser(repo, "someone@example.com", "", StatusActive)
 	challengeID := registrationChallenge(t, repo, user.ID)
 
-	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(ctx, user.ID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "laptop", false, "", "")
 	require.NoError(t, err)
 	creds, err := repo.ListPasskeyCredentials(ctx, user.ID)
 	require.NoError(t, err)

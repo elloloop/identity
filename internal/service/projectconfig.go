@@ -102,6 +102,18 @@ type ProjectConfig struct {
 	// signed-in user may create a tenant they own. Default OFF. See
 	// ProjectTenantsConfig.
 	Tenants ProjectTenantsConfig `json:"tenants"`
+
+	// RecoveryEmails holds the project's policy for the additional addresses
+	// an account may prove and keep. Default OFF. A control-plane project
+	// only: the env-configured default project has no config_json and keeps
+	// none. See ProjectRecoveryEmailsConfig.
+	RecoveryEmails ProjectRecoveryEmailsConfig `json:"recovery_emails"`
+
+	// Phone holds the project's phone-verification policy: its own switch,
+	// whether a number belongs to one account, the countries accepted and
+	// the delivery channels. Unset is the deployment's behaviour unchanged.
+	// A control-plane project only. See ProjectPhoneConfig.
+	Phone ProjectPhoneConfig `json:"phone"`
 }
 
 // ProjectOAuthConfig is a project's per-provider hosted-flow OAuth
@@ -384,6 +396,12 @@ func (c ProjectConfig) Validate() error {
 		return err
 	}
 	if err := c.Accounts.validate(); err != nil {
+		return err
+	}
+	if err := c.RecoveryEmails.validate(); err != nil {
+		return err
+	}
+	if err := c.Phone.validate(); err != nil {
 		return err
 	}
 	return nil

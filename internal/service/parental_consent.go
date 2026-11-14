@@ -164,7 +164,9 @@ func (s *AuthService) strongVerifiedFactors(ctx context.Context, adult *User) ([
 // account and transitions it out of pending_parental_consent to active.
 //
 // consentingUserID is the authenticated adult (derived by the handler from the
-// verified session, NOT from the request body). childUserID is the child the
+// verified session, NOT from the request body), and signIn what that session's
+// token says about it: a session a recovery hold binds, or whose recovery
+// email is gone, is refused (refuseHeldSession). childUserID is the child the
 // consent is for. policyVersion identifies the notice the adult was shown.
 // stepUpPassword re-authenticates the adult. ip/userAgent are recorded for the
 // audit trail.
@@ -179,10 +181,15 @@ func (s *AuthService) strongVerifiedFactors(ctx context.Context, adult *User) ([
 // is visible) and returns without mutating any account.
 func (s *AuthService) GrantParentalConsent(
 	ctx context.Context,
-	consentingUserID, childUserID, policyVersion, stepUpPassword, ip, userAgent string,
+	consentingUserID string, signIn SessionSignIn, childUserID, policyVersion, stepUpPassword, ip, userAgent string,
 ) (*ParentalConsentRecord, error) {
 	if consentingUserID == "" {
 		return nil, ErrUnauthenticated
+	}
+	// Consent makes the adult the child's guardian, a control that outlasts
+	// the session.
+	if err := s.refuseHeldSession(ctx, consentingUserID, signIn); err != nil {
+		return nil, err
 	}
 	childUserID = strings.TrimSpace(childUserID)
 	if childUserID == "" {

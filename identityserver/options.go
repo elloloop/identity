@@ -12,6 +12,7 @@ import (
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/sms"
+	"github.com/elloloop/identity/pkg/templatemsg"
 )
 
 // Config is the full identity configuration, re-exported so embedding
@@ -48,15 +49,34 @@ type Options struct {
 	// logger; the container passes a zap production logger.
 	Logger *zap.Logger
 
-	// GRPCTrustAuthTime lets the native-gRPC bridge pass the
-	// x-authenticated-auth-time metadata through to the handlers. Set it only
-	// when the host's gRPC auth interceptor deletes any value the client sent
-	// and sets it from the verified token's auth_time (see the embedding
-	// guide). Left false, the bridge drops the key, and MergeAccounts over
-	// native gRPC is refused reauthentication_required: a host interceptor
-	// written before the key existed cannot let a client vouch for its own
-	// sign-in.
+	// GRPCTrustAuthTime lets the native-gRPC bridge pass
+	// x-authenticated-auth-time through to the handlers. Set it only when
+	// the host's gRPC auth interceptor deletes any value the client sent and
+	// sets it from the verified token's auth_time claim (see the embedding
+	// guide). Left false, the bridge drops it, and MergeAccounts and the
+	// recovery-email changes over native gRPC are refused
+	// reauthentication_required: a host interceptor written before the key
+	// existed cannot let a client vouch for its own recent sign-in.
 	GRPCTrustAuthTime bool
+	// GRPCTrustAMR lets the native-gRPC bridge pass x-authenticated-amr and
+	// x-authenticated-recovery-email-id through to the handlers. Set it only
+	// when the host's gRPC auth interceptor deletes any value the client sent
+	// for either and sets them from the verified token's amr claim, its values
+	// separated by spaces, and its recovery_email_id claim (see the embedding
+	// guide). Every handler that limits a session by how it was opened reads
+	// them. Left false, the bridge replaces the amr with "unvouched" and drops
+	// the id, so every session over native gRPC is treated as one a recovery
+	// email may have opened, which cannot name its address: in a project
+	// whose recovery emails sign in (recovery_emails.sign_in) it makes no
+	// account security change, approves no QR sign-in and ListMyTenants lists
+	// its explicit memberships only, hold or not; elsewhere it makes no
+	// account security change and approves no QR sign-in while a recovery
+	// hold is in force on its account. Without it a client could say no
+	// recovery email opened its session, or name an address its account still
+	// holds, and an interceptor that forwards no amr would say the first for
+	// every session. RegisterGRPC logs grpc_amr_not_trusted when another key
+	// is trusted and this one is not.
+	GRPCTrustAMR bool
 	// GRPCTrustSessionID requires the host interceptor to strip caller metadata
 	// and supply X-Authenticated-Session-Id from a verified human token.
 	GRPCTrustSessionID bool
@@ -91,6 +111,12 @@ type Options struct {
 	// sender from the GATEWAY_SMS_* settings in Config (log-only when SMS
 	// is disabled).
 	SMSSender sms.Sender
+
+	// TemplateMessageSender delivers phone verification codes as
+	// messaging-app template messages, for projects whose phone.channels
+	// lists "message". nil leaves that channel unavailable: the server
+	// ships no provider for it.
+	TemplateMessageSender templatemsg.Sender
 
 	// OAuthRegistry holds the per-provider exchangers. nil builds one
 	// from the OAuth client credentials in Config. A supplied registry

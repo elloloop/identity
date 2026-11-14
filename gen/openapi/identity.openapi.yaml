@@ -13,7 +13,10 @@ paths:
          session. PERMISSION_DENIED: the caller is not an active person, or is
          neither the teammate's owner nor a project admin, or teammate_id is not
          an active agent account of the project; every such caller gets the same
-         answer. INVALID_ARGUMENT: a blank or malformed id.
+         answer. INVALID_ARGUMENT: a blank or malformed id. FAILED_PRECONDITION
+         (`recovery_hold`, RecoveryHoldDetails): a session a recovery hold binds;
+         UNAUTHENTICATED, too, for a session whose recovery email the account no
+         longer holds.
       operationId: identity.v1.HireGrantService.CreateHireGrant
       parameters:
         - name: Connect-Protocol-Version
@@ -3935,6 +3938,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ListProjectAuthDomainsResponse'
+  /identity.v1.IdentityService/ListRecoveryEmails:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListRecoveryEmails
+      operationId: identity.v1.IdentityService.ListRecoveryEmails
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListRecoveryEmailsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListRecoveryEmailsResponse'
   /identity.v1.IdentityService/ListTenantDomains:
     post:
       tags:
@@ -4211,7 +4249,9 @@ paths:
       summary: MergeUsers
       description: |-
         MergeUsers is the admin form of MergeAccounts: merge other_user_id into
-         survivor_user_id, no password asked. Admin only.
+         survivor_user_id, no password asked. Admin only. Neither account may be
+         the admin's own (FAILED_PRECONDITION): an admin merges another account
+         into theirs with MergeAccounts.
       operationId: identity.v1.IdentityService.MergeUsers
       parameters:
         - name: Connect-Protocol-Version
@@ -4808,6 +4848,83 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RemoveGroupMemberResponse'
+  /identity.v1.IdentityService/RemovePhone:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RemovePhone
+      description: |-
+        RemovePhone clears the caller's phone number and its verified state,
+         freeing the number for another account where the project keeps numbers
+         unique. A caller with no number gets their user back unchanged. A tenant
+         that requires a verified phone can no longer be selected afterwards.
+         Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
+         session a recovery hold binds (RecoveryHoldDetails).
+      operationId: identity.v1.IdentityService.RemovePhone
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RemovePhoneRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RemovePhoneResponse'
+  /identity.v1.IdentityService/RemoveRecoveryEmail:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RemoveRecoveryEmail
+      operationId: identity.v1.IdentityService.RemoveRecoveryEmail
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RemoveRecoveryEmailRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RemoveRecoveryEmailResponse'
   /identity.v1.IdentityService/RemoveTenantMember:
     post:
       tags:
@@ -5040,7 +5157,7 @@ paths:
       tags:
         - identity.v1.IdentityService
       summary: RequestPhoneVerification
-      description: Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+      description: Phone verification (one-time code) — proves the authenticated caller owns a phone number
       operationId: identity.v1.IdentityService.RequestPhoneVerification
       parameters:
         - name: Connect-Protocol-Version
@@ -5071,6 +5188,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RequestPhoneVerificationResponse'
+  /identity.v1.IdentityService/RequestRecoveryEmail:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RequestRecoveryEmail
+      description: |-
+        Recovery emails — additional addresses the authenticated caller has
+         proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+         address another account of the project holds and RESOURCE_EXHAUSTED past
+         the project's cap; RequestRecoveryEmail answers them for the caller's own
+         addresses and its own full list, and INVALID_ARGUMENT for an address a
+         sign-up would refuse. A project that has not turned the feature on
+         refuses RequestRecoveryEmail and VerifyRecoveryEmail with
+         FAILED_PRECONDITION, while addresses already kept can still be listed and
+         removed. Adding or removing an address mails a notice to the account's
+         other addresses, and a removal to the removed address too. During a
+         recovery hold a session a recovery email opened can do neither
+         (RecoveryHoldDetails).
+      operationId: identity.v1.IdentityService.RequestRecoveryEmail
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RequestRecoveryEmailRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RequestRecoveryEmailResponse'
   /identity.v1.IdentityService/ResetUserPassword:
     post:
       tags:
@@ -6501,6 +6666,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.VerifyProjectAuthDomainResponse'
+  /identity.v1.IdentityService/VerifyRecoveryEmail:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: VerifyRecoveryEmail
+      operationId: identity.v1.IdentityService.VerifyRecoveryEmail
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.VerifyRecoveryEmailRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.VerifyRecoveryEmailResponse'
   /identity.v1.IdentityService/VerifyTotp:
     post:
       tags:
@@ -7673,7 +7873,14 @@ components:
           title: approve
       title: ApproveQrLoginRequest
       additionalProperties: false
-      description: 'Step 2b: Authenticated device approves (or rejects) the new device.'
+      description: |-
+        Step 2b: Authenticated device approves (or rejects) the new device. A
+         session a recovery email opened may reject but not approve: it is refused
+         FAILED_PRECONDITION with the stable `recovery_session` token, since the
+         session the hand-off opens could not carry its `amr`. Over native gRPC, a
+         session whose `amr` the host does not forward may be such a session: it is
+         refused the same in a project whose recovery emails sign in, and elsewhere
+         while a recovery hold is in force on its account.
     identity.v1.ApproveQrLoginResponse:
       type: object
       properties:
@@ -10172,7 +10379,11 @@ components:
           description: |-
             tenants are ordered by name, then id. Latent and suspended tenants,
              memberships that are not active, and memberships through the email's
-             domain while that email is unverified are left out.
+             domain while that email is unverified are left out, as are all
+             memberships through the email's domain for a session a recovery email
+             opened, or, in a project whose recovery emails sign in
+             (`recovery_emails.sign_in`), one over native gRPC whose `amr` the host
+             does not forward.
       title: ListMyTenantsResponse
       additionalProperties: false
     identity.v1.ListOAuthClientsRequest:
@@ -10232,6 +10443,30 @@ components:
             $ref: '#/components/schemas/identity.v1.ProjectAuthDomain'
           title: domains
       title: ListProjectAuthDomainsResponse
+      additionalProperties: false
+    identity.v1.ListRecoveryEmailsRequest:
+      type: object
+      title: ListRecoveryEmailsRequest
+      additionalProperties: false
+    identity.v1.ListRecoveryEmailsResponse:
+      type: object
+      properties:
+        recoveryEmails:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.RecoveryEmail'
+          title: recovery_emails
+          description: oldest first
+        holdUntil:
+          type:
+            - integer
+            - string
+          title: hold_until
+          format: int64
+          description: |-
+            hold_until is when the account's recovery hold ends (epoch ms), or 0
+             when none is in force. See RecoveryHoldDetails.
+      title: ListRecoveryEmailsResponse
       additionalProperties: false
     identity.v1.ListTenantDomainsRequest:
       type: object
@@ -10404,6 +10639,24 @@ components:
             session_absolute_timeout_seconds invalidates a session older than this,
              measured from the original login regardless of activity. 0 means "no
              absolute timeout".
+        requireVerifiedPhone:
+          type: boolean
+          title: require_verified_phone
+          description: |-
+            require_verified_phone refuses a selection of this tenant
+             (RefreshToken.tenant_id) until the account has a verified phone number,
+             so no token for the tenant exists before then. It is not a sign-in rule:
+             the account still signs in, and verifies a phone with that session.
+        phoneCallingCodes:
+          type: array
+          items:
+            type: string
+          title: phone_calling_codes
+          description: |-
+            phone_calling_codes narrows require_verified_phone to numbers under these
+             country calling codes, as digits without the '+' (e.g. "1", "44", "91";
+             one code can cover several countries). Empty accepts a verified number
+             under any code.
       title: LoginPolicy
       additionalProperties: false
       description: |-
@@ -11321,6 +11574,93 @@ components:
       type: object
       title: ReactivateUserResponse
       additionalProperties: false
+    identity.v1.RecoveryEmail:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+        verifiedAt:
+          type:
+            - integer
+            - string
+          title: verified_at
+          format: int64
+          description: epoch ms the address was proved
+        lastSignInAt:
+          type:
+            - integer
+            - string
+          title: last_sign_in_at
+          format: int64
+          description: |-
+            last_sign_in_at is when the address last signed in to the account (epoch
+             ms), every sign-in included, 0 when it never has.
+        holdStartedAt:
+          type:
+            - integer
+            - string
+          title: hold_started_at
+          format: int64
+          description: |-
+            hold_started_at is when the latest recovery hold this address started
+             began (epoch ms), 0 when it never signed in: its first sign-in once no
+             hold of its own was in force. A sign-in during that hold moves
+             last_sign_in_at but not this, so it does not extend the hold. The hold
+             ListRecoveryEmailsResponse.hold_until reports runs from the latest
+             hold_started_at among the account's addresses, so it ends early only
+             once every address whose hold is still in force has been removed.
+      title: RecoveryEmail
+      additionalProperties: false
+      description: RecoveryEmail is one verified recovery address of an account.
+    identity.v1.RecoveryHoldDetails:
+      type: object
+      properties:
+        holdUntil:
+          type:
+            - integer
+            - string
+          title: hold_until
+          format: int64
+          description: epoch ms the hold ends
+      title: RecoveryHoldDetails
+      additionalProperties: false
+      description: |-
+        RecoveryHoldDetails is attached to the FAILED_PRECONDITION error (stable
+         `recovery_hold` token) of a hold. A sign-in by a recovery email
+         (`recovery_emails.sign_in`) starts one, once any second factor is proved,
+         for the project's `recovery_emails.hold_seconds` (default 604800, seven
+         days). While it is in force, a session a recovery email opened makes no
+         account security change: it cannot add or remove a recovery email, the
+         phone, a second factor or its recovery codes, a passkey or a linked
+         provider, change the password or the primary email, end another session
+         (RevokeSession of any session but its own, RevokeAllSessions,
+         SignOutEverywhere) or delete the account. Nor does it hand out access that
+         would outlast it, whatever the account's role: it cannot connect an agent
+         or an agent machine (GetAgentAuthorization, DecideAgentAuthorization,
+         RegisterAgentMachine, SelectAgentMachineAgents), hire out a teammate
+         (CreateHireGrant), register or change an OAuth client, take or use a
+         guardian's control over a child (GrantParentalConsent,
+         CreateManagedChildAccount and the ManagedChild calls), give an agent to
+         someone else (TransferAgent), change who belongs to a tenant or with what
+         role (CreateTenantInvitation, RemoveTenantMember, SuspendTenantMember,
+         RestoreTenantMember, TransferTenantOwnership, CreateDomain, VerifyDomain,
+         SetDomainJoin), or, as a project admin, add, merge or reactivate an account
+         or set a role or another account's password (InviteUser, CreateUser,
+         UpdateUser, ResetUserPassword, MergeUsers, ReactivateUser). So whoever got into a recovery mailbox cannot take the
+         rest of the account, take it from the owner, or hand out what removing the
+         address would not take back, before the owner has had the notice. It can
+         still sign itself out: Logout, or RevokeSession of its own session where
+         its token carries a `sid`. A session opened any other way is not held, and
+         removing every address whose hold is still in force
+         (RecoveryEmail.hold_started_at) ends the hold. Merging either account is
+         refused, whoever asks.
+         Once its address is removed, such a session makes none of these calls,
+         hold or not, for as long as its access token lasts: they answer
+         UNAUTHENTICATED. Over native gRPC, a session whose `amr` the host does not
+         forward is held too, and in a project whose recovery emails sign in it is
+         refused these calls outright with the stable `recovery_session` token,
+         since it cannot name the address behind it (see the embedding guide).
     identity.v1.RedeemMagicLinkRequest:
       type: object
       properties:
@@ -11642,6 +11982,38 @@ components:
       type: object
       title: RemoveGroupMemberResponse
       additionalProperties: false
+    identity.v1.RemovePhoneRequest:
+      type: object
+      title: RemovePhoneRequest
+      additionalProperties: false
+    identity.v1.RemovePhoneResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          description: the updated user, with no phone number
+          $ref: '#/components/schemas/identity.v1.User'
+      title: RemovePhoneResponse
+      additionalProperties: false
+    identity.v1.RemoveRecoveryEmailRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+      title: RemoveRecoveryEmailRequest
+      additionalProperties: false
+    identity.v1.RemoveRecoveryEmailResponse:
+      type: object
+      properties:
+        recoveryEmails:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.RecoveryEmail'
+          title: recovery_emails
+          description: what is left, oldest first
+      title: RemoveRecoveryEmailResponse
+      additionalProperties: false
     identity.v1.RemoveTenantMemberRequest:
       type: object
       properties:
@@ -11788,6 +12160,23 @@ components:
       title: RequestPhoneVerificationResponse
       additionalProperties: false
       description: 'Empty: the code is delivered out of band via SMS.'
+    identity.v1.RequestRecoveryEmailRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+          description: the address to add
+      title: RequestRecoveryEmailRequest
+      additionalProperties: false
+    identity.v1.RequestRecoveryEmailResponse:
+      type: object
+      title: RequestRecoveryEmailResponse
+      additionalProperties: false
+      description: |-
+        Empty, and the same whether or not the address is free: the code is
+         mailed to the address, and an address another account holds is refused
+         only by VerifyRecoveryEmail, to whoever proves they control it.
     identity.v1.ResetUserPasswordRequest:
       type: object
       properties:
@@ -11802,6 +12191,11 @@ components:
              If false: create a reset token the admin hands off to the user.
       title: ResetUserPasswordRequest
       additionalProperties: false
+      description: |-
+        ResetUserPasswordRequest names another account: an admin's own is
+         PERMISSION_DENIED, since an admin changes their own password with
+         ChangePassword or the reset email, which hold a session a recovery email
+         opened as they would any account's.
     identity.v1.ResetUserPasswordResponse:
       type: object
       properties:
@@ -12473,6 +12867,7 @@ components:
         - TENANT_SELECTION_REFUSAL_NOT_A_MEMBER
         - TENANT_SELECTION_REFUSAL_UNAVAILABLE
         - TENANT_SELECTION_REFUSAL_LOGIN_POLICY
+        - TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED
       description: TenantSelectionRefusal says why RefreshToken refused a tenant selection.
     identity.v1.TenantSelectionRefusedDetails:
       type: object
@@ -12809,6 +13204,19 @@ components:
             - string
           title: session_absolute_timeout_seconds
           format: int64
+        requireVerifiedPhone:
+          type: boolean
+          title: require_verified_phone
+          description: |-
+            require_verified_phone / phone_calling_codes set the tenant's phone rule
+             (see LoginPolicy). phone_calling_codes is only valid with
+             require_verified_phone; each entry is 1 to 3 digits, not starting with
+             0, listed once, and anything else is INVALID_ARGUMENT.
+        phoneCallingCodes:
+          type: array
+          items:
+            type: string
+          title: phone_calling_codes
       title: UpsertLoginPolicyRequest
       additionalProperties: false
     identity.v1.UpsertLoginPolicyResponse:
@@ -13245,6 +13653,30 @@ components:
           title: domain
           $ref: '#/components/schemas/identity.v1.ProjectAuthDomain'
       title: VerifyProjectAuthDomainResponse
+      additionalProperties: false
+    identity.v1.VerifyRecoveryEmailRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+          description: must match the address the code was sent to
+        code:
+          type: string
+          title: code
+          description: the 6-digit code from the email
+      title: VerifyRecoveryEmailRequest
+      additionalProperties: false
+    identity.v1.VerifyRecoveryEmailResponse:
+      type: object
+      properties:
+        recoveryEmails:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.RecoveryEmail'
+          title: recovery_emails
+          description: the account's addresses, oldest first
+      title: VerifyRecoveryEmailResponse
       additionalProperties: false
     identity.v1.VerifyTotpRequest:
       type: object

@@ -21,6 +21,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -168,6 +169,17 @@ func authenticatedAuthTime(headers headerReader) int64 {
 		return 0
 	}
 	return v
+}
+
+// authenticatedSignIn returns what the verified token the auth middleware
+// read says about the caller's session and the sign-in that opened it.
+func authenticatedSignIn(headers headerReader) service.SessionSignIn {
+	return service.SessionSignIn{
+		AuthTimeSec:     authenticatedAuthTime(headers),
+		AMR:             strings.Fields(headers.Get(middleware.AuthenticatedAMRHeader)),
+		RecoveryEmailID: headers.Get(middleware.AuthenticatedRecoveryEmailIDHeader),
+		SessionID:       headers.Get(middleware.AuthenticatedSessionIDHeader),
+	}
 }
 
 // clientIP returns the client IP resolved by ClientIPMiddleware via the

@@ -18,9 +18,8 @@ func toConnectError(err error) *connect.Error {
 	if err == nil {
 		return nil
 	}
-	var refusal *service.TenantSelectionRefusedError
-	if errors.As(err, &refusal) {
-		return tenantSelectionRefusedConnectError(refusal)
+	if cerr := typedRefusalConnectError(err); cerr != nil {
+		return cerr
 	}
 
 	switch {
@@ -35,6 +34,7 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeNotFound, err)
 
 	case errors.Is(err, service.ErrPermissionDenied),
+		errors.Is(err, service.ErrAdminOwnAccount),
 		errors.Is(err, service.ErrAccessNotAllowed),
 		errors.Is(err, service.ErrSignupByInvitationOnly),
 		errors.Is(err, service.ErrProductAgeRestricted),
@@ -71,7 +71,9 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeUnavailable, err)
 
 	case errors.Is(err, service.ErrAlreadyExists),
-		errors.Is(err, service.ErrPhoneAlreadyVerified):
+		errors.Is(err, service.ErrPhoneAlreadyVerified),
+		errors.Is(err, service.ErrRecoveryEmailTaken),
+		errors.Is(err, service.ErrPhoneNumberTaken):
 		return connect.NewError(connect.CodeAlreadyExists, err)
 
 	case errors.Is(err, service.ErrUnauthenticated),
@@ -81,6 +83,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrEmailLoginCodeInvalid),
 		errors.Is(err, service.ErrMagicLinkInvalid),
 		errors.Is(err, service.ErrPhoneCodeInvalid),
+		errors.Is(err, service.ErrRecoveryEmailCodeInvalid),
 		errors.Is(err, service.ErrNativeTokenReplayed),
 		errors.Is(err, service.ErrParentalConsentStepUpFailed):
 		return connect.NewError(connect.CodeUnauthenticated, err)
@@ -100,7 +103,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrInvitationResendTooSoon),
 		errors.Is(err, service.ErrInviterLimited),
 		errors.Is(err, service.ErrInvitationRecipientLimited),
-		errors.Is(err, service.ErrDomainAttemptsLimited):
+		errors.Is(err, service.ErrDomainAttemptsLimited),
+		errors.Is(err, service.ErrRecoveryEmailLimit):
 		// CodeResourceExhausted: lockout is a per-account quota of failed
 		// attempts. ResourceExhausted matches gRPC's documented semantics
 		// for "the resource is exhausted" / rate-limit-style failures and
@@ -138,6 +142,11 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrTeammateKeysDisabled),
 		errors.Is(err, service.ErrTeammateKeyConflict),
 		errors.Is(err, service.ErrReauthenticationRequired),
+		errors.Is(err, service.ErrRecoveryReauthenticationRequired),
+		errors.Is(err, service.ErrRecoverySession),
+		errors.Is(err, service.ErrRecoveryEmailsDisabled),
+		errors.Is(err, service.ErrPhoneCountryNotAllowed),
+		errors.Is(err, service.ErrPhoneVerificationRequired),
 		errors.Is(err, service.ErrAccountKindOff),
 		errors.Is(err, service.ErrPasskeySignupDisabled),
 		errors.Is(err, service.ErrNativeOAuthDisabled),
@@ -204,7 +213,7 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrLocalAuthDisabled),
 		errors.Is(err, service.ErrOAuthDisabled),
-		errors.Is(err, service.ErrSMSDisabled):
+		errors.Is(err, service.ErrPhoneVerificationUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
 
 	case errors.Is(err, service.ErrUnimplemented):
@@ -217,7 +226,7 @@ func toConnectError(err error) *connect.Error {
 	switch {
 	case containsAny(msg, "not found", "user not found", "group not found", "help request not found"):
 		return connect.NewError(connect.CodeNotFound, err)
-	case containsAny(msg, "admin role required", "admins cannot deactivate"):
+	case containsAny(msg, "admin role required"):
 		return connect.NewError(connect.CodePermissionDenied, err)
 	case containsAny(msg, "already exists"):
 		return connect.NewError(connect.CodeAlreadyExists, err)
@@ -226,6 +235,20 @@ func toConnectError(err error) *connect.Error {
 	}
 
 	return connect.NewError(connect.CodeInternal, err)
+}
+
+// typedRefusalConnectError maps the refusals that carry their own detail,
+// and returns nil for any other error.
+func typedRefusalConnectError(err error) *connect.Error {
+	var refusal *service.TenantSelectionRefusedError
+	if errors.As(err, &refusal) {
+		return tenantSelectionRefusedConnectError(refusal)
+	}
+	var hold *service.RecoveryHoldError
+	if errors.As(err, &hold) {
+		return recoveryHoldConnectError(hold)
+	}
+	return nil
 }
 
 func dobRequiredConnectError(err error) *connect.Error {
@@ -264,9 +287,21 @@ func tenantSelectionRefusalToProto(r service.TenantSelectionRefusal) identitypb.
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNAVAILABLE
 	case service.TenantSelectionLoginPolicy:
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_LOGIN_POLICY
+	case service.TenantSelectionPhoneRequired:
+		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED
 	default:
 		return identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_UNSPECIFIED
 	}
+}
+
+// recoveryHoldConnectError is the hold's refusal, carrying when it ends so a
+// client can say so.
+func recoveryHoldConnectError(hold *service.RecoveryHoldError) *connect.Error {
+	cerr := connect.NewError(connect.CodeFailedPrecondition, hold)
+	if detail, err := connect.NewErrorDetail(&identitypb.RecoveryHoldDetails{HoldUntil: hold.UntilMs}); err == nil {
+		cerr.AddDetail(detail)
+	}
+	return cerr
 }
 
 func passwordChangeRequiredConnectError(err error) *connect.Error {

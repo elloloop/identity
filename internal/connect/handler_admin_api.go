@@ -264,6 +264,8 @@ func (h *IdentityHandler) UpsertLoginPolicy(
 		PasswordMinLength:             int(req.Msg.PasswordMinLength),
 		SessionIdleTimeoutSeconds:     req.Msg.SessionIdleTimeoutSeconds,
 		SessionAbsoluteTimeoutSeconds: req.Msg.SessionAbsoluteTimeoutSeconds,
+		RequireVerifiedPhone:          req.Msg.RequireVerifiedPhone,
+		PhoneCallingCodes:             req.Msg.PhoneCallingCodes,
 	})
 	if err != nil {
 		return nil, toConnectError(err)
@@ -627,6 +629,8 @@ func loginPolicyToProto(p *service.LoginPolicy) *identitypb.LoginPolicy {
 		PasswordMinLength:             intToProtoInt32(p.PasswordMinLength),
 		SessionIdleTimeoutSeconds:     p.SessionIdleTimeoutSeconds,
 		SessionAbsoluteTimeoutSeconds: p.SessionAbsoluteTimeoutSeconds,
+		RequireVerifiedPhone:          p.RequireVerifiedPhone,
+		PhoneCallingCodes:             p.PhoneCallingCodes,
 	}
 }
 

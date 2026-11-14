@@ -668,13 +668,22 @@ message RedeemMagicLinkResponse {
   string return_to = 5; // allowlist-validated app URL bound at request time
 }
 
-// ─── Phone verification (SMS OTP) ───────────────────────────────────
+// ─── Phone verification (one-time code) ─────────────────────────────
 //
 // RequestPhoneVerification and VerifyPhoneCode prove the authenticated
 // caller (identified by the access-token `sub`, not a field here) owns a
-// phone number. RequestPhoneVerification texts a 6-digit code to the
-// supplied number; VerifyPhoneCode confirms it and marks the user's
-// phone verified. Both require auth.
+// phone number. RequestPhoneVerification sends a 6-digit code to the
+// supplied number, by SMS or as a messaging-app template message (the
+// project's `phone.channels`); VerifyPhoneCode confirms it and marks the
+// user's phone verified. RemovePhone clears it. All require auth.
+//
+// A project may narrow the feature (`phone` in its config): switch it off
+// (UNAVAILABLE, as when the deployment has no sender), accept only some
+// countries (FAILED_PRECONDITION, stable `phone_country_not_allowed`
+// token), and keep a number on one account (`phone.unique`):
+// VerifyPhoneCode then answers ALREADY_EXISTS with the stable
+// `phone_number_taken` token for a number another account holds, and only
+// to a caller whose code was right.
 
 message RequestPhoneVerificationRequest {
   string phone_number = 1; // E.164 number to verify (e.g. "+14155550123")
@@ -691,6 +700,125 @@ message VerifyPhoneCodeRequest {
 
 message VerifyPhoneCodeResponse {
   User user = 1; // the updated user with phone_verified=true
+}
+
+message RemovePhoneRequest {}
+
+message RemovePhoneResponse {
+  User user = 1; // the updated user, with no phone number
+}
+
+// ─── Recovery emails ────────────────────────────────────────────────
+//
+// A recovery email is an additional address the authenticated caller
+// (identified by the access-token `sub`) has proved they control. An address
+// is stored only once the code mailed to it is confirmed, and within a project
+// it belongs to one account only: the primary address or a recovery address
+// of another account is refused. Where the project allows it
+// (`recovery_emails.sign_in`), RequestEmailLoginCode / VerifyEmailLoginCode
+// and RequestMagicLink / RedeemMagicLink on a recovery address sign in to the
+// account that holds it, after any second factor the account owes; every other
+// address of the account is told, and the session it opens carries the
+// access-token claims `amr: ["recovery_email"]` and `recovery_email_id`, an
+// opaque reference to the address that never names it, and is held from
+// account security changes (RecoveryHoldDetails). The project turns the
+// feature on (`recovery_emails.enabled`) and caps the addresses per account
+// (`recovery_emails.max`, default 5). All four RPCs require auth; the three
+// that change the list also need a sign-in within the project's
+// `recovery_emails.reauth_max_age_seconds` (default 900) and answer
+// FAILED_PRECONDITION with the stable `reauthentication_required` token
+// otherwise: sign the user in again and retry.
+
+// RecoveryEmail is one verified recovery address of an account.
+message RecoveryEmail {
+  string email = 1;
+  int64 verified_at = 2; // epoch ms the address was proved
+  // last_sign_in_at is when the address last signed in to the account (epoch
+  // ms), every sign-in included, 0 when it never has.
+  int64 last_sign_in_at = 3;
+  // hold_started_at is when the latest recovery hold this address started
+  // began (epoch ms), 0 when it never signed in: its first sign-in once no
+  // hold of its own was in force. A sign-in during that hold moves
+  // last_sign_in_at but not this, so it does not extend the hold. The hold
+  // ListRecoveryEmailsResponse.hold_until reports runs from the latest
+  // hold_started_at among the account's addresses, so it ends early only
+  // once every address whose hold is still in force has been removed.
+  int64 hold_started_at = 4;
+}
+
+message RequestRecoveryEmailRequest {
+  string email = 1; // the address to add
+}
+
+message RequestRecoveryEmailResponse {
+  // Empty, and the same whether or not the address is free: the code is
+  // mailed to the address, and an address another account holds is refused
+  // only by VerifyRecoveryEmail, to whoever proves they control it.
+}
+
+message VerifyRecoveryEmailRequest {
+  string email = 1; // must match the address the code was sent to
+  string code = 2; // the 6-digit code from the email
+}
+
+message VerifyRecoveryEmailResponse {
+  repeated RecoveryEmail recovery_emails = 1; // the account's addresses, oldest first
+}
+
+message ListRecoveryEmailsRequest {}
+
+message ListRecoveryEmailsResponse {
+  repeated RecoveryEmail recovery_emails = 1; // oldest first
+  // hold_until is when the account's recovery hold ends (epoch ms), or 0
+  // when none is in force. See RecoveryHoldDetails.
+  int64 hold_until = 2;
+}
+
+// RecoveryHoldDetails is attached to the FAILED_PRECONDITION error (stable
+// `recovery_hold` token) of a hold. A sign-in by a recovery email
+// (`recovery_emails.sign_in`) starts one, once any second factor is proved,
+// for the project's `recovery_emails.hold_seconds` (default 604800, seven
+// days). While it is in force, a session a recovery email opened makes no
+// account security change: it cannot add or remove a recovery email, the
+// phone, a second factor or its recovery codes, a passkey or a linked
+// provider, change the password or the primary email, end another session
+// (RevokeSession of any session but its own, RevokeAllSessions,
+// SignOutEverywhere) or delete the account. Nor does it hand out access that
+// would outlast it, whatever the account's role: it cannot connect an agent
+// or an agent machine (GetAgentAuthorization, DecideAgentAuthorization,
+// RegisterAgentMachine, SelectAgentMachineAgents), hire out a teammate
+// (CreateHireGrant), register or change an OAuth client, take or use a
+// guardian's control over a child (GrantParentalConsent,
+// CreateManagedChildAccount and the ManagedChild calls), give an agent to
+// someone else (TransferAgent), change who belongs to a tenant or with what
+// role (CreateTenantInvitation, RemoveTenantMember, SuspendTenantMember,
+// RestoreTenantMember, TransferTenantOwnership, CreateDomain, VerifyDomain,
+// SetDomainJoin), or, as a project admin, add, merge or reactivate an account
+// or set a role or another account's password (InviteUser, CreateUser,
+// UpdateUser, ResetUserPassword, MergeUsers, ReactivateUser). So whoever got into a recovery mailbox cannot take the
+// rest of the account, take it from the owner, or hand out what removing the
+// address would not take back, before the owner has had the notice. It can
+// still sign itself out: Logout, or RevokeSession of its own session where
+// its token carries a `sid`. A session opened any other way is not held, and
+// removing every address whose hold is still in force
+// (RecoveryEmail.hold_started_at) ends the hold. Merging either account is
+// refused, whoever asks.
+// Once its address is removed, such a session makes none of these calls,
+// hold or not, for as long as its access token lasts: they answer
+// UNAUTHENTICATED. Over native gRPC, a session whose `amr` the host does not
+// forward is held too, and in a project whose recovery emails sign in it is
+// refused these calls outright with the stable `recovery_session` token,
+// since it cannot name the address behind it (see the embedding guide).
+message RecoveryHoldDetails {
+  int64 hold_until = 1; // epoch ms the hold ends
+}
+
+message RemoveRecoveryEmailRequest {
+  string email = 1;
+}
+
+message RemoveRecoveryEmailResponse {
+  repeated RecoveryEmail recovery_emails = 1; // what is left, oldest first
 }
 
 // ─── Session / Token Auth ───────────────────────────────────────────
@@ -760,8 +888,9 @@ enum TenantSelectionRefusal {
   // The caller may not act in the tenant: it is not a claimed tenant of the
   // session's project, the caller holds no active membership in it, or they
   // belong to it only through their email's domain while that email is
-  // unverified or not on a domain the tenant has verified. The refusal does
-  // not say which. The code is PERMISSION_DENIED.
+  // unverified or not on a domain the tenant has verified, or while the
+  // session is one a recovery email opened (see RecoveryEmail). The refusal
+  // does not say which. The code is PERMISSION_DENIED.
   TENANT_SELECTION_REFUSAL_NOT_A_MEMBER = 2;
   // The membership or the tenant's login policy could not be read. The code
   // is UNAVAILABLE; retry, with or without tenant_id.
@@ -774,6 +903,14 @@ enum TenantSelectionRefusal {
   // refused, and so is a session past the policy's idle or absolute
   // timeout. The code is PERMISSION_DENIED; retry without tenant_id.
   TENANT_SELECTION_REFUSAL_LOGIN_POLICY = 4;
+  // The tenant's login policy requires a verified phone number
+  // (LoginPolicy.require_verified_phone) and the account has none, or none
+  // of the countries the policy names. The code is FAILED_PRECONDITION with
+  // the stable `phone_verification_required` token. The refresh token was
+  // not consumed: refresh without tenant_id, verify a phone with that
+  // session (RequestPhoneVerification, VerifyPhoneCode), then select the
+  // tenant again.
+  TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED = 5;
 }
 
 message LogoutRequest {
@@ -1746,7 +1883,13 @@ message GetQrLoginSessionResponse {
   google.protobuf.Timestamp expires_at = 4;
 }
 
-// Step 2b: Authenticated device approves (or rejects) the new device.
+// Step 2b: Authenticated device approves (or rejects) the new device. A
+// session a recovery email opened may reject but not approve: it is refused
+// FAILED_PRECONDITION with the stable `recovery_session` token, since the
+// session the hand-off opens could not carry its `amr`. Over native gRPC, a
+// session whose `amr` the host does not forward may be such a session: it is
+// refused the same in a project whose recovery emails sign in, and elsewhere
+// while a recovery hold is in force on its account.
 message ApproveQrLoginRequest {
   string session_id = 1;
   bool approve = 2;
@@ -1934,6 +2077,10 @@ message ReactivateUserRequest {
 
 message ReactivateUserResponse {}
 
+// ResetUserPasswordRequest names another account: an admin's own is
+// PERMISSION_DENIED, since an admin changes their own password with
+// ChangePassword or the reset email, which hold a session a recovery email
+// opened as they would any account's.
 message ResetUserPasswordRequest {
   string user_id = 1;
   // If true: generate a random temp password and return it to the admin.
@@ -2208,7 +2355,11 @@ message ListMyTenantsRequest {}
 message ListMyTenantsResponse {
   // tenants are ordered by name, then id. Latent and suspended tenants,
   // memberships that are not active, and memberships through the email's
-  // domain while that email is unverified are left out.
+  // domain while that email is unverified are left out, as are all
+  // memberships through the email's domain for a session a recovery email
+  // opened, or, in a project whose recovery emails sign in
+  // (`recovery_emails.sign_in`), one over native gRPC whose `amr` the host
+  // does not forward.
   repeated UserTenant tenants = 1;
 }
 
@@ -2548,6 +2699,16 @@ message LoginPolicy {
   // measured from the original login regardless of activity. 0 means "no
   // absolute timeout".
   int64 session_absolute_timeout_seconds = 11;
+  // require_verified_phone refuses a selection of this tenant
+  // (RefreshToken.tenant_id) until the account has a verified phone number,
+  // so no token for the tenant exists before then. It is not a sign-in rule:
+  // the account still signs in, and verifies a phone with that session.
+  bool require_verified_phone = 12;
+  // phone_calling_codes narrows require_verified_phone to numbers under these
+  // country calling codes, as digits without the '+' (e.g. "1", "44", "91";
+  // one code can cover several countries). Empty accepts a verified number
+  // under any code.
+  repeated string phone_calling_codes = 13;
 }
 
 message UpsertLoginPolicyRequest {
@@ -2564,6 +2725,12 @@ message UpsertLoginPolicyRequest {
   // tenant's idle and absolute session timeouts (0 = no timeout).
   int64 session_idle_timeout_seconds = 8;
   int64 session_absolute_timeout_seconds = 9;
+  // require_verified_phone / phone_calling_codes set the tenant's phone rule
+  // (see LoginPolicy). phone_calling_codes is only valid with
+  // require_verified_phone; each entry is 1 to 3 digits, not starting with
+  // 0, listed once, and anything else is INVALID_ARGUMENT.
+  bool require_verified_phone = 10;
+  repeated string phone_calling_codes = 11;
 }
 
 message UpsertLoginPolicyResponse {
@@ -3434,9 +3601,33 @@ service IdentityService {
   rpc IssueAssuranceToken(IssueAssuranceTokenRequest) returns (IssueAssuranceTokenResponse);
   rpc RefreshAssuranceToken(RefreshAssuranceTokenRequest) returns (RefreshAssuranceTokenResponse);
 
-  // Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+  // Phone verification (one-time code) — proves the authenticated caller owns a phone number
   rpc RequestPhoneVerification(RequestPhoneVerificationRequest) returns (RequestPhoneVerificationResponse);
   rpc VerifyPhoneCode(VerifyPhoneCodeRequest) returns (VerifyPhoneCodeResponse);
+  // RemovePhone clears the caller's phone number and its verified state,
+  // freeing the number for another account where the project keeps numbers
+  // unique. A caller with no number gets their user back unchanged. A tenant
+  // that requires a verified phone can no longer be selected afterwards.
+  // Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
+  // session a recovery hold binds (RecoveryHoldDetails).
+  rpc RemovePhone(RemovePhoneRequest) returns (RemovePhoneResponse);
+
+  // Recovery emails — additional addresses the authenticated caller has
+  // proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+  // address another account of the project holds and RESOURCE_EXHAUSTED past
+  // the project's cap; RequestRecoveryEmail answers them for the caller's own
+  // addresses and its own full list, and INVALID_ARGUMENT for an address a
+  // sign-up would refuse. A project that has not turned the feature on
+  // refuses RequestRecoveryEmail and VerifyRecoveryEmail with
+  // FAILED_PRECONDITION, while addresses already kept can still be listed and
+  // removed. Adding or removing an address mails a notice to the account's
+  // other addresses, and a removal to the removed address too. During a
+  // recovery hold a session a recovery email opened can do neither
+  // (RecoveryHoldDetails).
+  rpc RequestRecoveryEmail(RequestRecoveryEmailRequest) returns (RequestRecoveryEmailResponse);
+  rpc VerifyRecoveryEmail(VerifyRecoveryEmailRequest) returns (VerifyRecoveryEmailResponse);
+  rpc ListRecoveryEmails(ListRecoveryEmailsRequest) returns (ListRecoveryEmailsResponse);
+  rpc RemoveRecoveryEmail(RemoveRecoveryEmailRequest) returns (RemoveRecoveryEmailResponse);
 
   // Session / Token Auth
   rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
@@ -3793,7 +3984,9 @@ service IdentityService {
   // servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
   rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
   // MergeUsers is the admin form of MergeAccounts: merge other_user_id into
-  // survivor_user_id, no password asked. Admin only.
+  // survivor_user_id, no password asked. Admin only. Neither account may be
+  // the admin's own (FAILED_PRECONDITION): an admin merges another account
+  // into theirs with MergeAccounts.
   rpc MergeUsers(MergeUsersRequest) returns (MergeUsersResponse);
   rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse);
   rpc DeactivateUser(DeactivateUserRequest) returns (DeactivateUserResponse);
@@ -4192,6 +4385,9 @@ service HireGrantService {
   // session. PERMISSION_DENIED: the caller is not an active person, or is
   // neither the teammate's owner nor a project admin, or teammate_id is not
   // an active agent account of the project; every such caller gets the same
-  // answer. INVALID_ARGUMENT: a blank or malformed id.
+  // answer. INVALID_ARGUMENT: a blank or malformed id. FAILED_PRECONDITION
+  // (`recovery_hold`, RecoveryHoldDetails): a session a recovery hold binds;
+  // UNAUTHENTICATED, too, for a session whose recovery email the account no
+  // longer holds.
   rpc CreateHireGrant(CreateHireGrantRequest) returns (CreateHireGrantResponse);
 }

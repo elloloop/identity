@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"math/big"
@@ -82,7 +81,7 @@ func (s *AuthService) RequestEmailLoginCode(ctx context.Context, emailAddr strin
 	// A closed or off-list project must not emit an OTP to an arbitrary address.
 	// The response is unchanged (nil) whether or not we send, preserving
 	// anti-enumeration; the authoritative deny is at VerifyEmailLoginCode.
-	if !s.accessAllowsCodeSend(ctx, cemail) {
+	if !s.loginCodeSendAllowed(ctx, cemail) {
 		s.logger.Info("email_login_code_send_suppressed_by_access",
 			zap.String("email", redactEmail(string(cemail))))
 		return nil
@@ -164,8 +163,8 @@ func (s *AuthService) sendEmailLoginCodeNow(ctx context.Context, emailAddr strin
 // Failure modes (missing/expired/consumed code, wrong code, exhausted
 // attempts, and — when auto-create is disabled — an unknown email) all
 // collapse to ErrEmailLoginCodeInvalid so the endpoint reveals nothing.
-// A wrong guess bumps the per-code attempt counter; once it reaches the
-// cap captured at mint time the code is consumed (invalidated) to stop a
+// Every guess counts against the cap captured at mint time, and the wrong
+// guess that reaches it consumes (invalidates) the code to stop a
 // brute-force walk of the 6-digit space.
 func (s *AuthService) VerifyEmailLoginCode(ctx context.Context, emailAddr, code string, ipAddr, userAgent string) (*LoginResult, error) {
 	// Canonicalize ONCE: the OTP was stored under the canonical key by
@@ -192,49 +191,35 @@ func (s *AuthService) VerifyEmailLoginCode(ctx context.Context, emailAddr, code 
 //
 // Every failure mode — missing/expired/consumed code, wrong code, exhausted
 // attempts — collapses to ErrEmailLoginCodeInvalid, so the caller can surface
-// one generic error with no existence oracle. A wrong guess bumps the per-code
-// attempt counter; once it reaches the cap captured at mint time the code is
-// consumed (invalidated) to stop a brute-force walk of the 6-digit space.
-// method tags the failure audit event ("email_code" or "passkey_signup").
+// one generic error with no existence oracle. Every guess is counted against
+// the cap captured at mint time in the same write that reads the code, so
+// concurrent guesses never pass it, and a wrong one that reaches the cap
+// consumes (invalidates) the code to stop a brute-force walk of the 6-digit
+// space (settleGuess). method tags the failure audit event ("email_code" or
+// "passkey_signup").
 func (s *AuthService) verifyAndConsumeEmailLoginCode(ctx context.Context, emailAddr, code, method, ipAddr, userAgent string) error {
-	rec, err := s.repo(ctx).FindEmailLoginCodeByEmail(ctx, emailAddr)
+	rec, err := s.repo(ctx).CountEmailLoginCodeAttempt(ctx, emailAddr, s.nowMs())
 	if err != nil {
 		return fmt.Errorf("looking up email login code: %w", err)
 	}
-	if rec == nil || rec.ConsumedAt != 0 || rec.ExpiresAt <= s.nowMs() {
+	if rec == nil {
 		return ErrEmailLoginCodeInvalid
 	}
-	if rec.MaxAttempts > 0 && rec.AttemptCount >= rec.MaxAttempts {
-		return ErrEmailLoginCodeInvalid
-	}
-
-	// Constant-time compare so a timing oracle can't shortcut the guess.
-	if subtle.ConstantTimeCompare([]byte(rec.CodeHash), []byte(sha256Hex(code))) != 1 {
-		if err := s.repo(ctx).IncrementEmailLoginCodeAttempts(ctx, rec.NodeID); err != nil {
-			s.logger.Warn("email_login_code_attempt_increment_failed",
-				zap.String("email", redactEmail(emailAddr)), zap.Error(err))
-		}
-		// At the cap, consume the code so the (now-final) wrong guess
-		// burns it — no further attempts against this code are possible.
-		if rec.MaxAttempts > 0 && rec.AttemptCount+1 >= rec.MaxAttempts {
-			if _, cErr := s.repo(ctx).ConsumeEmailLoginCode(ctx, emailAddr, s.nowMs()); cErr != nil &&
-				!errors.Is(cErr, ErrEmailLoginCodeInvalid) {
-				s.logger.Warn("email_login_code_lock_failed",
-					zap.String("email", redactEmail(emailAddr)), zap.Error(cErr))
-			}
-		}
+	right, err := s.settleGuess(ctx, oneTimeCode{
+		kind: "email_login_code", hash: rec.CodeHash,
+		attempts: rec.AttemptCount, maxAttempts: rec.MaxAttempts,
+		invalid: ErrEmailLoginCodeInvalid,
+		consume: func(ctx context.Context) error {
+			_, err := s.repo(ctx).ConsumeEmailLoginCode(ctx, emailAddr, s.nowMs())
+			return err
+		},
+	}, code, zap.String("email", redactEmail(emailAddr)))
+	if !right {
 		s.audit.Log(ctx, audit.EventLoginFailure,
 			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent), audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"method": method, "reason": "code_mismatch"}))
-		return ErrEmailLoginCodeInvalid
 	}
-
-	// Correct code: consume single-use (CAS) before the caller proceeds so
-	// a replay racing this verify loses.
-	if _, err := s.repo(ctx).ConsumeEmailLoginCode(ctx, emailAddr, s.nowMs()); err != nil {
-		return ErrEmailLoginCodeInvalid
-	}
-	return nil
+	return err
 }
 
 // ── RequestMagicLink ───────────────────────────────────────────────────
@@ -266,7 +251,7 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 	// A closed or off-list project must not email a sign-in link to an arbitrary
 	// address. Response is unchanged (nil) either way, preserving
 	// anti-enumeration; the authoritative deny is at RedeemMagicLink.
-	if !s.accessAllowsCodeSend(ctx, cemail) {
+	if !s.loginCodeSendAllowed(ctx, cemail) {
 		s.logger.Info("magic_link_send_suppressed_by_access",
 			zap.String("email", redactEmail(string(cemail))))
 		return nil
@@ -383,6 +368,13 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 		invalidErr = ErrMagicLinkInvalid
 	}
 
+	// An address an account holds as a recovery email signs in to that
+	// account, or to nothing; it never reaches the resolver, which would try
+	// to make a new account on it.
+	if result, handled, err := s.completeRecoveryEmailLogin(ctx, emailStr, method, invalidErr, ipAddr, userAgent); handled {
+		return result, err
+	}
+
 	// Project access mode is enforced inside resolveOrCreateUserByEmail below,
 	// which is the only place that can tell a NEW account (self-signup context —
 	// denied by invite/closed) apart from an EXISTING one (login context —
@@ -437,7 +429,7 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 	// email_otp is a single-factor primary: a Require2FA tenant (or a user who
 	// enrolled TOTP) must complete a second factor before full tokens issue.
 	if user.TotpRequired || decision.RequireSecondFactor {
-		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, ipAddr, userAgent)
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, "", ipAddr, userAgent)
 	}
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)

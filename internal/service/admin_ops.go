@@ -146,7 +146,7 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 		return errors.New("user_id is required")
 	}
 	if targetUserID == actorID {
-		return errors.New("admins cannot delete themselves")
+		return fmt.Errorf("%w: delete your own account with DeleteMyAccount", ErrAdminOwnAccount)
 	}
 	u, err := s.repo(ctx).GetUser(ctx, targetUserID)
 	if err != nil {
@@ -190,8 +190,8 @@ func (s *AdminService) deleteGroupMembershipsForUser(ctx context.Context, userID
 }
 
 // UpdateUser patches name, role, and/or avatar_url for a user.
-func (s *AdminService) UpdateUser(ctx context.Context, actorID, userID, name, role, avatarURL string) (*User, error) {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+func (s *AdminService) UpdateUser(ctx context.Context, actorID string, signIn SessionSignIn, userID, name, role, avatarURL string) (*User, error) {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return nil, err
 	}
 	if userID == "" {

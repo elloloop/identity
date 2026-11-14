@@ -174,12 +174,8 @@ func (StubRepository) UpsertEmailLoginCode(context.Context, *EmailLoginCodeRecor
 	return "", ErrServiceUnavailable
 }
 
-func (StubRepository) FindEmailLoginCodeByEmail(context.Context, string) (*EmailLoginCodeRecord, error) {
+func (StubRepository) CountEmailLoginCodeAttempt(context.Context, string, int64) (*EmailLoginCodeRecord, error) {
 	return nil, ErrServiceUnavailable
-}
-
-func (StubRepository) IncrementEmailLoginCodeAttempts(context.Context, string) error {
-	return ErrServiceUnavailable
 }
 
 func (StubRepository) ConsumeEmailLoginCode(context.Context, string, int64) (*EmailLoginCodeRecord, error) {
@@ -198,12 +194,8 @@ func (StubRepository) UpsertPhoneVerificationCode(context.Context, *PhoneVerific
 	return "", ErrServiceUnavailable
 }
 
-func (StubRepository) FindPhoneVerificationCodeByUser(context.Context, string) (*PhoneVerificationCodeRecord, error) {
+func (StubRepository) CountPhoneVerificationCodeAttempt(context.Context, string, int64) (*PhoneVerificationCodeRecord, error) {
 	return nil, ErrServiceUnavailable
-}
-
-func (StubRepository) IncrementPhoneVerificationCodeAttempts(context.Context, string) error {
-	return ErrServiceUnavailable
 }
 
 func (StubRepository) ConsumePhoneVerificationCode(context.Context, string, int64) (*PhoneVerificationCodeRecord, error) {
@@ -211,6 +203,46 @@ func (StubRepository) ConsumePhoneVerificationCode(context.Context, string, int6
 }
 
 func (StubRepository) SetUserPhoneVerified(context.Context, string, string, int64) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) ClaimPhoneNumber(context.Context, string, string, int64, int64) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) ReleasePhoneNumber(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) UpsertRecoveryEmailCode(context.Context, *RecoveryEmailCodeRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) CountRecoveryEmailCodeAttempt(context.Context, string, int64) (*RecoveryEmailCodeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) ConsumeRecoveryEmailCode(context.Context, string, int64) (*RecoveryEmailCodeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) AddRecoveryEmail(context.Context, *RecoveryEmail, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) ListRecoveryEmails(context.Context, string) ([]*RecoveryEmail, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) RemoveRecoveryEmail(context.Context, string, string, int64) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
+func (StubRepository) FindRecoveryEmailHolder(context.Context, string) (*RecoveryEmail, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) MarkRecoveryEmailSignIn(context.Context, string, string, int64, int64) error {
 	return ErrServiceUnavailable
 }
 
@@ -467,6 +499,10 @@ func (StubRepository) DeleteExpiredMagicLinkTokens(context.Context, int64, int) 
 }
 
 func (StubRepository) DeleteExpiredPhoneVerificationCodes(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredRecoveryEmailCodes(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
 

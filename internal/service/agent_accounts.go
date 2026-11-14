@@ -435,9 +435,16 @@ func (s *AuthService) UpdateAgent(
 //
 // Transferring to the current owner is a no-op and leaves any pending offer
 // as it is.
+//
+// The recipient keeps the agent, and whatever it may do, for good, so a
+// session a recovery hold binds, or whose recovery email is gone, may offer
+// none (refuseHeldSession).
 func (s *AuthService) TransferAgent(
-	ctx context.Context, callerID, agentID, newOwnerID, ip, userAgent string,
+	ctx context.Context, callerID string, signIn SessionSignIn, agentID, newOwnerID, ip, userAgent string,
 ) (*User, error) {
+	if err := s.refuseHeldSession(ctx, callerID, signIn); err != nil {
+		return nil, err
+	}
 	agent, err := s.authorizeAgentAction(ctx, agentOpTransfer, callerID, agentID, ip, userAgent)
 	if err != nil {
 		return nil, err

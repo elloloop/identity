@@ -18,13 +18,18 @@ import (
 // ── BeginPasskeyRegistration ───────────────────────────────────────────
 
 // BeginPasskeyRegistration generates WebAuthn registration options for the
-// authenticated user. Returns (optionsJSON, challengeID, error).
-func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, deviceName string) (string, string, error) {
+// authenticated user. Returns (optionsJSON, challengeID, error). A session a
+// recovery hold binds is refused (RecoveryHoldError): a passkey it
+// registered would outlast the hold.
+func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID string, signIn SessionSignIn, deviceName string) (string, string, error) {
 	// Refused at BEGIN, not only at completion: this call persists a
 	// challenge row, and the anonymous retention sweep does not reach the
 	// challenge tables (no FK to users), so an anonymous caller could
 	// accumulate rows the sweep never reclaims. Completion is guarded too.
 	if err := s.refuseCredentialAttach(ctx, userID); err != nil {
+		return "", "", err
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return "", "", err
 	}
 	user, err := s.repo(ctx).GetUser(ctx, userID)
@@ -111,14 +116,17 @@ func (s *AuthService) VerifyPasskeyEnrolmentTicket(ctx context.Context, ticket s
 // session yet — it also issues the account's first token pair through the
 // normal issuance chokepoint; the returned LoginResult is nil otherwise and
 // the response shape is exactly what a session-authenticated completion
-// returns today.
-func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, challengeID, credentialJSON, deviceName string, issueSession bool, ipAddr, userAgent string) (*PasskeyInfo, *LoginResult, error) {
+// returns. Refused like BeginPasskeyRegistration during a recovery hold.
+func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID string, signIn SessionSignIn, challengeID, credentialJSON, deviceName string, issueSession bool, ipAddr, userAgent string) (*PasskeyInfo, *LoginResult, error) {
 	if challengeID == "" || credentialJSON == "" {
 		return nil, nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
 	}
 	// A passkey is a permanent credential; an anonymous caller must go
 	// through UpgradeAnonymousAccount so the flag is cleared with it.
 	if err := s.refuseCredentialAttach(ctx, userID); err != nil {
+		return nil, nil, err
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return nil, nil, err
 	}
 

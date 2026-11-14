@@ -189,12 +189,12 @@ func TestMergeUsers_EmitsUserMergedEvent(t *testing.T) {
 	other := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)
 	other.Username = "ann"
 
-	_, err := svc.MergeUsers(ctx, "member-1", survivor.ID, other.ID, false)
+	_, err := svc.MergeUsers(ctx, "member-1", SessionSignIn{}, survivor.ID, other.ID, false)
 	require.Error(t, err)
 	_, found := eventByType(pub.all(), events.EventUserMerged)
 	require.False(t, found, "a refused merge emits no event")
 
-	_, err = svc.MergeUsers(ctx, "admin-1", survivor.ID, other.ID, false)
+	_, err = svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, survivor.ID, other.ID, false)
 	require.NoError(t, err)
 	requireOneMergedEvent(t, pub.all(), other.ID, survivor.ID)
 }

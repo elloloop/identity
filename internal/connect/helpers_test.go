@@ -58,6 +58,7 @@ const (
 	tRfUserID    = "2"
 	tRfExpiresAt = "4"
 	tRfCreatedAt = "5"
+	tRfSID       = "11"
 )
 
 // Passkey payload field IDs.
@@ -98,6 +99,9 @@ type fakeRepo struct {
 	emailLoginCodes     map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens     map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes    map[string]*service.PhoneVerificationCodeRecord
+	recoveryEmailCodes  map[string]*service.RecoveryEmailCodeRecord
+	recoveryEmails      map[string][]*service.RecoveryEmail
+	phoneClaims         map[string]phoneClaim
 	totpCreds           map[string]*service.TotpCredRecord
 	recoveryCodes       map[string]*service.RecoveryCodeRecord
 	loginChallenges     map[string]*service.LoginChallengeRecord
@@ -136,6 +140,9 @@ func newFakeRepo() *fakeRepo {
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
+		recoveryEmailCodes: make(map[string]*service.RecoveryEmailCodeRecord),
+		recoveryEmails:     make(map[string][]*service.RecoveryEmail),
+		phoneClaims:        make(map[string]phoneClaim),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -409,6 +416,9 @@ func (r *fakeRepo) CreateRefreshToken(_ context.Context, rec *service.RefreshTok
 	defer r.mu.Unlock()
 	if r.errIssueToken != nil {
 		return "", r.errIssueToken
+	}
+	if rec.RecoveryEmailID != "" && r.heldRecoveryEmailLocked(rec.UserID, recoveryEmailWithID(rec.RecoveryEmailID)) < 0 {
+		return "", fmt.Errorf("fake: CreateRefreshToken: %w", service.ErrNotFound)
 	}
 	id := nextID()
 	rec.NodeID = id
@@ -761,27 +771,21 @@ func (r *fakeRepo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLog
 	return id, nil
 }
 
-func (r *fakeRepo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+func (r *fakeRepo) CountEmailLoginCodeAttempt(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.emailLoginCodes {
-		if c.Email == email {
-			cp := *c
-			return &cp, nil
+		if c.Email != email {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *fakeRepo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.emailLoginCodes[nodeID]
-	if !ok {
-		return errors.New("email login code not found")
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *fakeRepo) ConsumeEmailLoginCode(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
@@ -843,27 +847,21 @@ func (r *fakeRepo) UpsertPhoneVerificationCode(_ context.Context, rec *service.P
 	return id, nil
 }
 
-func (r *fakeRepo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*service.PhoneVerificationCodeRecord, error) {
+func (r *fakeRepo) CountPhoneVerificationCodeAttempt(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.phoneVerifyCodes {
-		if c.UserID == userID {
-			cp := *c
-			return &cp, nil
+		if c.UserID != userID {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *fakeRepo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.phoneVerifyCodes[nodeID]
-	if !ok {
-		return errors.New("phone verification code not found")
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *fakeRepo) ConsumePhoneVerificationCode(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
@@ -2553,9 +2551,10 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// A missing account is nil, which ApplyToUsers refuses.
-	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
+	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID], r.recoveryEmails); err != nil {
 		return err
 	}
+	r.mergePhoneClaimsLocked(m)
 	service.InvalidateAgentCreationReceipts(r.agentCreations, m.OtherID)
 	for _, u := range r.users {
 		before := *u

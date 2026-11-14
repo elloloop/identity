@@ -28,7 +28,7 @@ func TestOAuthLogin_LinkedProviderDoesNotVerifyAnotherAddress(t *testing.T) {
 	ctx := context.Background()
 	user := seedUser(repo, "claimed@example.com", hashPW(t, strongPW), StatusActive)
 
-	_, err := svc.LinkIdentity(ctx, user.ID, fakeOAuthCode("linker@example.com", "Linker", "", "google"),
+	_, err := svc.LinkIdentity(ctx, user.ID, SessionSignIn{}, fakeOAuthCode("linker@example.com", "Linker", "", "google"),
 		"google", "https://app/cb", "", "", "")
 	require.NoError(t, err)
 

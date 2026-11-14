@@ -52,6 +52,10 @@ const (
 	// TenantSelectionLoginPolicy: the tenant's login policy does not admit
 	// the session (ErrPermissionDenied).
 	TenantSelectionLoginPolicy
+	// TenantSelectionPhoneRequired: the tenant's login policy requires a
+	// verified phone number the account does not have
+	// (ErrPhoneVerificationRequired).
+	TenantSelectionPhoneRequired
 )
 
 // TenantSelectionRefusedError is RefreshToken's refusal of the tenant it was
@@ -159,9 +163,14 @@ func (s *MembershipService) CreateTenant(ctx context.Context, callerID, name, ip
 // the membership began — except one they belong to only through their
 // email's domain while that email is unverified or no longer on a domain the
 // tenant has verified. Suspended tenants and memberships that are not active
-// are left out too, so the list is exactly the set RefreshToken may select
-// from.
-func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string) ([]*UserTenant, error) {
+// are left out too, and for a session a recovery email opened every
+// membership the email's domain gave, so the list is exactly the set
+// RefreshToken may select from. A session no one vouched for how it was
+// opened (AMRUnvouched) is treated as one a recovery email opened in a
+// project whose recovery emails sign in (recovery_emails.sign_in), and is
+// listed its explicit memberships only there
+// (SessionSignIn.treatedAsRecoverySession).
+func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string, signIn SessionSignIn) ([]*UserTenant, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
@@ -176,30 +185,43 @@ func (s *MembershipService) ListMyTenants(ctx context.Context, callerID string) 
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
-	tenants, err := s.memberships.ListActiveTenantsForUser(ctx, projectID, callerID, verifiedEmailDomain(caller))
+	domain := memberDomain(caller, signIn.treatedAsRecoverySession(recoveryEmailsConfig(ProjectScopeFromContext(ctx))))
+	tenants, err := s.memberships.ListActiveTenantsForUser(ctx, projectID, callerID, domain)
 	if err != nil {
 		return nil, err
 	}
 	out := tenants[:0]
 	for _, t := range tenants {
-		if actsInTenant(caller, t) {
+		if actsInTenant(t, domain) {
 			out = append(out, t)
 		}
 	}
 	return out, nil
 }
 
-// actsInTenant reports whether user may act in t, a tenant a
-// UserTenantReader returned for them. A membership derived from the email's
-// domain proves nothing until the email is: with
-// GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL off, anyone may sign up with an
-// address on a company's domain, and must not be able to act as that
-// company's member. The reader applies the whole rule, since only it holds
-// the tenant's verified domains; this checks again the part the service can,
-// so a reader that ignores emailDomain still never admits an unverified
-// address.
-func actsInTenant(user *User, t *UserTenant) bool {
-	return t.Source != MembershipSourceDomain || verifiedEmailDomain(user) != ""
+// actsInTenant reports whether a session may act in t, a tenant a
+// UserTenantReader returned for its account when asked with domain
+// (memberDomain). A membership derived from the email's domain proves
+// nothing until the email is: with GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL off,
+// anyone may sign up with an address on a company's domain, and must not be
+// able to act as that company's member. The reader applies the whole rule,
+// since only it holds the tenant's verified domains; this checks again the
+// part the service can, so a reader that ignores emailDomain still never
+// admits a session the domain may not.
+func actsInTenant(t *UserTenant, domain string) bool {
+	return t.Source != MembershipSourceDomain || domain != ""
+}
+
+// memberDomain is the domain a session's account may be a tenant's member
+// through: verifiedEmailDomain, or "" for a session a recovery email opened.
+// That session proved a mailbox other than the account's email, so a tenant
+// that admits by the email's domain does not admit it. Explicit memberships
+// (an invitation, an operator's add) still apply.
+func memberDomain(user *User, byRecoveryEmail bool) string {
+	if byRecoveryEmail {
+		return ""
+	}
+	return verifiedEmailDomain(user)
 }
 
 // verifiedEmailDomain is the domain user's email may make them a member

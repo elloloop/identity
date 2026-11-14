@@ -64,6 +64,9 @@ type Repo struct {
 	emailLoginCodes           map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens           map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes          map[string]*service.PhoneVerificationCodeRecord
+	recoveryEmailCodes        map[string]*service.RecoveryEmailCodeRecord
+	recoveryEmails            map[string][]*service.RecoveryEmail
+	phoneClaims               map[string]phoneClaim
 	totpCreds                 map[string]*service.TotpCredRecord
 	recoveryCodes             map[string]*service.RecoveryCodeRecord
 	loginChallenges           map[string]*service.LoginChallengeRecord
@@ -124,6 +127,9 @@ func newStore() *Repo {
 		emailLoginCodes:           make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:           make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:          make(map[string]*service.PhoneVerificationCodeRecord),
+		recoveryEmailCodes:        make(map[string]*service.RecoveryEmailCodeRecord),
+		recoveryEmails:            make(map[string][]*service.RecoveryEmail),
+		phoneClaims:               make(map[string]phoneClaim),
 		totpCreds:                 make(map[string]*service.TotpCredRecord),
 		recoveryCodes:             make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:           make(map[string]*service.LoginChallengeRecord),
@@ -365,6 +371,9 @@ func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int
 func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if u.Email != "" && r.recoveryEmailHeldLocked(u.Email) {
+		return "", fmt.Errorf("email %q is a recovery email: %w", u.Email, service.ErrAlreadyExists)
+	}
 	for _, existing := range r.users {
 		// Under FoldEmail, mirroring the SQL drivers' folded-email unique
 		// index: every backend signals a duplicate identically (the SCIM
@@ -412,6 +421,9 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if email, _ := fields["email"].(string); email != "" && r.recoveryEmailHeldLocked(email) {
+		return fmt.Errorf("email %q is a recovery email: %w", email, service.ErrAlreadyExists)
 	}
 	if v, ok := fields["external_id"]; ok {
 		if ext, _ := v.(string); ext != "" {
@@ -576,6 +588,9 @@ func (r *Repo) deleteUserLocked(userID string) {
 	deleteByUser(r.oauthIdentities, userID, func(o *service.OAuthIdentity) string { return o.UserID })
 	deleteByUser(r.idvRecords, userID, func(rec *service.IdentityVerificationRecord) string { return rec.UserID })
 	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
+	delete(r.recoveryEmailCodes, userID)
+	delete(r.recoveryEmails, userID)
+	r.releasePhoneClaimsLocked(userID)
 	// Guardian edges are live authorization state, so — matching the SQL
 	// drivers' ON DELETE CASCADE on both user FK columns — they drain when
 	// the user is deleted as guardian OR as child.
@@ -760,6 +775,9 @@ func (r *Repo) FindRefreshTokenByHashIncludingConsumed(_ context.Context, hash s
 func (r *Repo) CreateRefreshToken(_ context.Context, rec *service.RefreshTokenRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if rec.RecoveryEmailID != "" && r.heldRecoveryEmailLocked(rec.UserID, recoveryEmailWithID(rec.RecoveryEmailID)) < 0 {
+		return "", fmt.Errorf("memory: CreateRefreshToken: %w", service.ErrNotFound)
+	}
 	id := r.nextID()
 	rec.NodeID = id
 	cp := *rec
@@ -1063,27 +1081,21 @@ func (r *Repo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLoginCo
 	return id, nil
 }
 
-func (r *Repo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+func (r *Repo) CountEmailLoginCodeAttempt(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.emailLoginCodes {
-		if c.Email == email {
-			cp := *c
-			return &cp, nil
+		if c.Email != email {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *Repo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.emailLoginCodes[nodeID]
-	if !ok {
-		return fmt.Errorf("memory: IncrementEmailLoginCodeAttempts: %s not found", nodeID)
-	}
-	c.AttemptCount++
-	return nil
 }
 
 // ConsumeEmailLoginCode atomically marks the email's unconsumed,
@@ -1163,27 +1175,21 @@ func (r *Repo) UpsertPhoneVerificationCode(_ context.Context, rec *service.Phone
 	return id, nil
 }
 
-func (r *Repo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*service.PhoneVerificationCodeRecord, error) {
+func (r *Repo) CountPhoneVerificationCodeAttempt(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.phoneVerifyCodes {
-		if c.UserID == userID {
-			cp := *c
-			return &cp, nil
+		if c.UserID != userID {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *Repo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.phoneVerifyCodes[nodeID]
-	if !ok {
-		return fmt.Errorf("memory: IncrementPhoneVerificationCodeAttempts: %s not found", nodeID)
-	}
-	c.AttemptCount++
-	return nil
 }
 
 // ConsumePhoneVerificationCode atomically marks the user's unconsumed,
@@ -1550,6 +1556,9 @@ func (r *Repo) UpdateUserEmail(_ context.Context, userID, newEmail string, atMs 
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if newEmail != "" && r.recoveryEmailHeldLocked(newEmail) {
+		return fmt.Errorf("email %q is a recovery email: %w", newEmail, service.ErrAlreadyExists)
 	}
 	// The SQL drivers' folded-email unique index, as in UpdateUser.
 	for id, other := range r.users {
@@ -2284,21 +2293,26 @@ func (r *Repo) GetSessionBySid(_ context.Context, sid string) (*service.SessionR
 // or is already revoked. Concurrent revoke calls converge on the same
 // final state rather than racing each other into failure.
 func (r *Repo) RevokeSession(_ context.Context, sid string, atMs int64) error {
-	if sid == "" {
-		return nil
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.revokeSessionLocked(sid, atMs)
+	return nil
+}
+
+// revokeSessionLocked is RevokeSession with r.mu held.
+func (r *Repo) revokeSessionLocked(sid string, atMs int64) {
+	if sid == "" {
+		return
+	}
 	for _, s := range r.sessions {
 		if s.SID == sid {
 			if s.RevokedAtMs == 0 {
 				s.RevokedAtMs = atMs
 				r.revokeAgentOAuthSIDLocked(s.SID, atMs)
 			}
-			return nil
+			return
 		}
 	}
-	return nil
 }
 
 // RevokeSessionsForUser revokes every active session for the user.
@@ -2448,9 +2462,10 @@ func (r *Repo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) erro
 		}
 	}()
 	// A missing account is nil, which ApplyToUsers refuses.
-	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
+	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID], r.recoveryEmails); err != nil {
 		return err
 	}
+	r.mergePhoneClaimsLocked(m)
 	r.invalidateAgentCreations(m.OtherID)
 	for _, u := range r.users {
 		before := *u

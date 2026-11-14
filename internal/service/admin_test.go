@@ -39,7 +39,7 @@ func TestAdminService_InviteUser_HappyPath(t *testing.T) {
 	svc := newTestAdminService(db)
 
 	result, err := svc.InviteUser(
-		context.Background(), "admin-1",
+		context.Background(), "admin-1", SessionSignIn{},
 		"new@test.com", "New User", "member", "recover@test.com",
 		1024*1024, false,
 	)
@@ -72,7 +72,7 @@ func TestAdminService_InviteUser_CreateImmediately(t *testing.T) {
 	svc := newTestAdminService(db)
 
 	result, err := svc.InviteUser(
-		context.Background(), "admin-1",
+		context.Background(), "admin-1", SessionSignIn{},
 		"imm@test.com", "Immediate", "member", "", 0, true,
 	)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestAdminService_InviteUser_NonAdminDenied(t *testing.T) {
 	svc := newTestAdminService(db)
 
 	_, err := svc.InviteUser(
-		context.Background(), "member-1",
+		context.Background(), "member-1", SessionSignIn{},
 		"new@test.com", "New", "member", "", 0, false,
 	)
 	if err == nil {
@@ -112,7 +112,7 @@ func TestAdminService_InviteUser_StoresCanonicalEmail(t *testing.T) {
 	db.addUser("existing-1", "dup@test.com", "Existing", "member", "active")
 	svc := newTestAdminService(db)
 
-	result, err := svc.InviteUser(context.Background(), "admin-1",
+	result, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{},
 		"  New.User+Team@GoogleMail.com ", "New User", "member", "", 0, false)
 	if err != nil {
 		t.Fatalf("InviteUser: %v", err)
@@ -120,7 +120,7 @@ func TestAdminService_InviteUser_StoresCanonicalEmail(t *testing.T) {
 	if result.User.Email != "newuser@gmail.com" {
 		t.Errorf("stored email = %q, want the canonical newuser@gmail.com", result.User.Email)
 	}
-	if _, err := svc.InviteUser(context.Background(), "admin-1",
+	if _, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{},
 		"DUP+x@test.com", "Dup", "member", "", 0, false); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("InviteUser of a variant of an existing mailbox: err = %v, want already exists", err)
 	}
@@ -133,7 +133,7 @@ func TestAdminService_InviteUser_RejectsAddressWithNoCanonicalMailbox(t *testing
 	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
 	svc := newTestAdminService(db)
 	for _, bad := range []string{"+x@corp.com", "  +@corp.com ", "@corp.com", "nobody"} {
-		if _, err := svc.InviteUser(context.Background(), "admin-1", bad, "", "member", "", 0, false); err == nil ||
+		if _, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{}, bad, "", "member", "", 0, false); err == nil ||
 			!strings.Contains(err.Error(), "valid email is required") {
 			t.Errorf("InviteUser(%q): err = %v, want valid email is required", bad, err)
 		}
@@ -147,7 +147,7 @@ func TestAdminService_InviteUser_DuplicateEmail(t *testing.T) {
 	svc := newTestAdminService(db)
 
 	_, err := svc.InviteUser(
-		context.Background(), "admin-1",
+		context.Background(), "admin-1", SessionSignIn{},
 		"dup@test.com", "Dup", "member", "", 0, false,
 	)
 	if err == nil {
@@ -164,7 +164,7 @@ func TestAdminService_InviteUser_InvalidEmail(t *testing.T) {
 	svc := newTestAdminService(db)
 
 	_, err := svc.InviteUser(
-		context.Background(), "admin-1",
+		context.Background(), "admin-1", SessionSignIn{},
 		"bademail", "Bad", "member", "", 0, false,
 	)
 	if err == nil {
@@ -183,7 +183,7 @@ func TestAdminService_InviteUser_DeniedByAccessMode(t *testing.T) {
 		ProjectID: "test-tenant",
 		Access:    ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"allowed@test.com"}},
 	})
-	_, err := svc.InviteUser(ctx, "admin-1", "outsider@test.com", "Outsider", "member", "", 1024, false)
+	_, err := svc.InviteUser(ctx, "admin-1", SessionSignIn{}, "outsider@test.com", "Outsider", "member", "", 1024, false)
 	if !errors.Is(err, ErrAccessNotAllowed) {
 		t.Fatalf("expected ErrAccessNotAllowed, got %v", err)
 	}
@@ -199,7 +199,7 @@ func TestAdminService_InviteUser_AllowedByAccessMode(t *testing.T) {
 		ProjectID: "test-tenant",
 		Access:    ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"allowed@test.com"}},
 	})
-	result, err := svc.InviteUser(ctx, "admin-1", "allowed@test.com", "Allowed", "member", "", 1024, false)
+	result, err := svc.InviteUser(ctx, "admin-1", SessionSignIn{}, "allowed@test.com", "Allowed", "member", "", 1024, false)
 	if err != nil {
 		t.Fatalf("unexpected error for on-list invitee: %v", err)
 	}
@@ -235,11 +235,8 @@ func TestAdminService_DeactivateUser_CannotSelf(t *testing.T) {
 	svc := newTestAdminService(db)
 
 	err := svc.DeactivateUser(context.Background(), "admin-1", "admin-1", "")
-	if err == nil {
-		t.Fatal("expected error when deactivating self")
-	}
-	if !strings.Contains(err.Error(), "cannot deactivate themselves") {
-		t.Errorf("unexpected error: %v", err)
+	if !errors.Is(err, ErrAdminOwnAccount) {
+		t.Fatalf("deactivating self = %v, want ErrAdminOwnAccount", err)
 	}
 }
 
@@ -249,7 +246,7 @@ func TestAdminService_ReactivateUser_HappyPath(t *testing.T) {
 	db.addUser("target-1", "target@test.com", "Target", "member", "deactivated")
 	svc := newTestAdminService(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "target-1")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "target-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -271,7 +268,7 @@ func TestAdminService_ReactivateUser_PendingParentalConsentRejected(t *testing.T
 	db.addUser("child-1", "child@test.com", "Child", "member", StatusPendingParentalConsent)
 	svc := newTestAdminService(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "child-1")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "child-1")
 	if !errors.Is(err, ErrParentalConsentRequired) {
 		t.Fatalf("expected ErrParentalConsentRequired, got %v", err)
 	}
@@ -290,7 +287,7 @@ func TestAdminService_ResetUserPassword_TempPassword(t *testing.T) {
 	db.addUser("target-1", "target@test.com", "Target", "member", "active")
 	svc := newTestAdminService(db)
 
-	result, err := svc.ResetUserPassword(context.Background(), "admin-1", "target-1", true)
+	result, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "target-1", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -308,7 +305,7 @@ func TestAdminService_ResetUserPassword_ResetToken(t *testing.T) {
 	db.addUser("target-1", "target@test.com", "Target", "member", "active")
 	svc := newTestAdminService(db)
 
-	result, err := svc.ResetUserPassword(context.Background(), "admin-1", "target-1", false)
+	result, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "target-1", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -317,6 +314,32 @@ func TestAdminService_ResetUserPassword_ResetToken(t *testing.T) {
 	}
 	if result.TemporaryPassword != "" {
 		t.Error("expected no temp password when generating reset token")
+	}
+}
+
+// An admin's own password is not theirs to reset from the admin seat, by
+// temporary password or by reset token: either would hand whoever holds the
+// admin's session, a recovery email's included, a password sign-in no
+// recovery email marks. Nothing is written.
+func TestAdminService_ResetUserPassword_RefusesTheAdminsOwnAccount(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	svc := newTestAdminService(db)
+	before, _ := db.GetNode(context.Background(), "", "", typeUser, "admin-1")
+	hash := pstr(before.Payload, ufPasswordHash)
+
+	for _, temp := range []bool{true, false} {
+		result, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "admin-1", temp)
+		if !errors.Is(err, ErrAdminOwnAccount) || result != nil {
+			t.Fatalf("resetting own password (temp=%t) = %+v %v, want ErrAdminOwnAccount", temp, result, err)
+		}
+	}
+	after, _ := db.GetNode(context.Background(), "", "", typeUser, "admin-1")
+	if pstr(after.Payload, ufPasswordHash) != hash || pbool(after.Payload, ufPasswordChangeRequired) {
+		t.Fatal("a refused reset changed the admin's password")
+	}
+	if resets, _ := db.QueryNodes(context.Background(), "", tenantAdminActor, typePasswordReset, map[string]any{prfUserID: "admin-1"}); len(resets) != 0 {
+		t.Fatalf("a refused reset stored %d reset tokens", len(resets))
 	}
 }
 
@@ -386,7 +409,7 @@ func TestAdminService_UpdateUser_HappyPath(t *testing.T) {
 	db.addUser("user-1", "user@test.com", "Old Name", "member", "active")
 	svc := newTestAdminService(db)
 
-	user, err := svc.UpdateUser(context.Background(), "admin-1", "user-1", "New Name", "guest", "")
+	user, err := svc.UpdateUser(context.Background(), "admin-1", SessionSignIn{}, "user-1", "New Name", "guest", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -403,7 +426,7 @@ func TestAdminService_DBError_Propagated(t *testing.T) {
 	db.err = errors.New("db unavailable")
 	svc := newTestAdminService(db)
 
-	_, err := svc.InviteUser(context.Background(), "admin-1", "a@b.com", "", "member", "", 0, false)
+	_, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{}, "a@b.com", "", "member", "", 0, false)
 	if err == nil {
 		t.Fatal("expected error when DB fails")
 	}
@@ -550,8 +573,8 @@ func TestAdminService_DeleteUser_CannotSelf(t *testing.T) {
 	svc := newTestAdminServiceWithRepo(db, repo)
 
 	err := svc.DeleteUser(context.Background(), "admin-1", "admin-1")
-	if err == nil || !strings.Contains(err.Error(), "cannot delete themselves") {
-		t.Fatalf("expected cannot-delete-self error, got %v", err)
+	if !errors.Is(err, ErrAdminOwnAccount) {
+		t.Fatalf("deleting self = %v, want ErrAdminOwnAccount", err)
 	}
 }
 
@@ -706,7 +729,7 @@ func TestAdminService_ResetUserPassword_RefusesAnonymous(t *testing.T) {
 
 	before := db.nodes["anon-1"].Payload[ufPasswordHash]
 
-	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "anon-1", true)
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "anon-1", true)
 	if !errors.Is(err, ErrAnonymousMustUpgrade) {
 		t.Fatalf("ResetUserPassword on an anonymous account = %v, want ErrAnonymousMustUpgrade", err)
 	}
@@ -769,7 +792,7 @@ func TestAdminService_InviteUser_LinkAndEmailFollowTheProject(t *testing.T) {
 				ctx = WithProjectScope(ctx, tc.scope)
 			}
 
-			result, err := svc.InviteUser(ctx, "admin-1", "new@test.com", "New User", "member", "", 0, false)
+			result, err := svc.InviteUser(ctx, "admin-1", SessionSignIn{}, "new@test.com", "New User", "member", "", 0, false)
 			if err != nil {
 				t.Fatalf("InviteUser: %v", err)
 			}

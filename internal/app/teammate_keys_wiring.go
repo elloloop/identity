@@ -11,7 +11,7 @@ import (
 )
 
 func buildTeammateKeys(deps Deps, auditLog *audit.Logger, logger *zap.Logger) (*service.TeammateKeyService, error) {
-	keys, err := service.NewTeammateKeyService(deps.Config, deps.DirectoryCredentials, deps.Repo, deps.Signer, auditLog, deps.MetricsRegistry)
+	keys, err := service.NewTeammateKeyService(deps.Config, deps.DirectoryCredentials, deps.Repo, deps.Signer, auditLog, logger, deps.MetricsRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("teammate keys: %w", err)
 	}

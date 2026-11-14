@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -68,6 +69,149 @@ func runAccountMergeConformance(t *testing.T, driver Driver) {
 			}
 			if old, err := r.GetSessionBySid(ctx, "am-sid-old"); err != nil || old == nil || old.RevokedAtMs != 700 {
 				t.Fatalf("an already-revoked session keeps its time: %#v %v", old, err)
+			}
+		})
+
+		t.Run("MovesRecoveryEmailsAndThePhoneClaim", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			survivor := createTestUser(t, r, "am-rec-s@example.com")
+			other := createTestUser(t, r, "am-rec-o@example.com")
+			third := createTestUser(t, r, "am-rec-t@example.com")
+			// Proved in an order that interleaves the two accounts', so the
+			// survivor's list after the merge is oldest first across both.
+			proved := []struct {
+				user, addr string
+				at         int64
+			}{{other, "o-spare@example.net", 1}, {survivor, "s-spare@example.net", 2}, {other, "o-second@example.net", 3}}
+			ids := make(map[string]string, len(proved))
+			for _, p := range proved {
+				if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: p.user, Email: p.addr, VerifiedAt: p.at}, 5); err != nil {
+					t.Fatalf("AddRecoveryEmail %s: %v", p.addr, err)
+				}
+				ids[p.addr] = recoveryEmailIDOf(t, r, p.user, p.addr)
+			}
+			const number = "+14155550142"
+			if _, err := r.ClaimPhoneNumber(ctx, other, number, 10, 0); err != nil {
+				t.Fatalf("ClaimPhoneNumber: %v", err)
+			}
+
+			if err := r.ApplyAccountMerge(ctx, service.AccountMerge{SurvivorID: survivor, OtherID: other, MovePhone: true, RecoveryEmailsMax: 3, AtMs: 1000}); err != nil {
+				t.Fatalf("ApplyAccountMerge: %v", err)
+			}
+			list, err := r.ListRecoveryEmails(ctx, survivor)
+			if err != nil || len(list) != 3 {
+				t.Fatalf("survivor's recovery emails = %#v %v, want all three", list, err)
+			}
+			for i, p := range proved {
+				if list[i].Email != p.addr || list[i].ID != ids[p.addr] || list[i].UserID != survivor {
+					t.Fatalf("survivor's recovery email %d = %#v, want %s oldest first with its own ID", i, list[i], p.addr)
+				}
+			}
+			if gone, _ := r.ListRecoveryEmails(ctx, other); len(gone) != 0 {
+				t.Fatalf("the retired account keeps recovery emails: %#v", gone)
+			}
+			if holder, err := r.FindRecoveryEmailHolder(ctx, "o-spare@example.net"); err != nil || holder == nil || holder.UserID != survivor {
+				t.Fatalf("holder of a moved address = %#v %v, want the survivor", holder, err)
+			}
+			s, _ := r.GetUser(ctx, survivor)
+			o, _ := r.GetUser(ctx, other)
+			if s.PhoneNumber != number || !s.PhoneVerified || s.PhoneVerifiedAt != 10 {
+				t.Fatalf("survivor's phone after merge: %q %t %d", s.PhoneNumber, s.PhoneVerified, s.PhoneVerifiedAt)
+			}
+			if o.PhoneNumber != "" || o.PhoneVerified {
+				t.Fatalf("the retired account keeps the moved phone: %q %t", o.PhoneNumber, o.PhoneVerified)
+			}
+			// The claim moved with the number: another account still may not
+			// take it, and the survivor holds it already.
+			if _, err := r.ClaimPhoneNumber(ctx, third, number, 2000, 0); !errors.Is(err, service.ErrPhoneNumberTaken) {
+				t.Fatalf("a third account claims the moved number: want ErrPhoneNumberTaken, got %v", err)
+			}
+			if previous, err := r.ClaimPhoneNumber(ctx, survivor, number, 2000, 0); err != nil || previous != "" {
+				t.Fatalf("the survivor claims its own number = %q %v", previous, err)
+			}
+		})
+
+		t.Run("RecoveryEmailsPastTheCapRefuseTheMerge", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			survivor := createTestUser(t, r, "am-cap-s@example.com")
+			other := createTestUser(t, r, "am-cap-o@example.com")
+			for user, addr := range map[string]string{survivor: "cap-s@example.net", other: "cap-o@example.net"} {
+				if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: user, Email: addr, VerifiedAt: 1}, 5); err != nil {
+					t.Fatalf("AddRecoveryEmail: %v", err)
+				}
+			}
+			if err := r.ApplyAccountMerge(ctx, service.AccountMerge{SurvivorID: survivor, OtherID: other, RecoveryEmailsMax: 1, AtMs: 1000}); !errors.Is(err, service.ErrRecoveryEmailLimit) {
+				t.Fatalf("want ErrRecoveryEmailLimit, got %v", err)
+			}
+			if o, _ := r.GetUser(ctx, other); o.Status != "active" {
+				t.Fatalf("a refused merge retired the other account: %#v", o)
+			}
+			if list, _ := r.ListRecoveryEmails(ctx, other); len(list) != 1 {
+				t.Fatalf("a refused merge moved recovery emails: %#v", list)
+			}
+		})
+
+		// The hold is read in the merge's own transaction, so a recovery
+		// sign-in that lands after the caller's checks still stops it.
+		t.Run("RecoveryHoldOnEitherAccountRefusesTheMerge", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			for _, heldOn := range []string{"survivor", "other"} {
+				survivor := createTestUser(t, r, "am-hold-s-"+heldOn+"@example.com")
+				other := createTestUser(t, r, "am-hold-o-"+heldOn+"@example.com")
+				holder := map[string]string{"survivor": survivor, "other": other}[heldOn]
+				addr := "am-hold-" + heldOn + "@example.net"
+				if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: holder, Email: addr, VerifiedAt: 1}, 5); err != nil {
+					t.Fatalf("AddRecoveryEmail: %v", err)
+				}
+				const signedInAt, hold = int64(1_000), int64(500)
+				if err := r.MarkRecoveryEmailSignIn(ctx, holder, recoveryEmailIDOf(t, r, holder, addr), signedInAt, hold); err != nil {
+					t.Fatalf("MarkRecoveryEmailSignIn: %v", err)
+				}
+				merge := service.AccountMerge{SurvivorID: survivor, OtherID: other, RecoveryEmailsMax: 5, RecoveryHold: time.Duration(hold) * time.Millisecond, AtMs: signedInAt + hold - 1}
+				var refusal *service.RecoveryHoldError
+				if err := r.ApplyAccountMerge(ctx, merge); !errors.As(err, &refusal) || refusal.UntilMs != signedInAt+hold {
+					t.Fatalf("merge while the %s is held = %v (%+v), want a RecoveryHoldError until %d", heldOn, err, refusal, signedInAt+hold)
+				}
+				if o, _ := r.GetUser(ctx, other); o.Status != "active" || o.MergedIntoUserID != "" {
+					t.Fatalf("a held merge retired the other account: %#v", o)
+				}
+				if list, _ := r.ListRecoveryEmails(ctx, holder); len(list) != 1 || list[0].UserID != holder {
+					t.Fatalf("a held merge moved recovery emails: %#v", list)
+				}
+				merge.AtMs = signedInAt + hold
+				if err := r.ApplyAccountMerge(ctx, merge); err != nil {
+					t.Fatalf("merge once the hold on the %s has ended: %v", heldOn, err)
+				}
+			}
+		})
+
+		t.Run("ReleasesTheRetiredNumberWhenTheSurvivorHasOne", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			survivor := createTestUser(t, r, "am-ph-s@example.com")
+			other := createTestUser(t, r, "am-ph-o@example.com")
+			third := createTestUser(t, r, "am-ph-t@example.com")
+			if _, err := r.ClaimPhoneNumber(ctx, survivor, "+14155550143", 10, 0); err != nil {
+				t.Fatalf("ClaimPhoneNumber survivor: %v", err)
+			}
+			if _, err := r.ClaimPhoneNumber(ctx, other, "+14155550144", 10, 0); err != nil {
+				t.Fatalf("ClaimPhoneNumber other: %v", err)
+			}
+			// MovePhone was decided while the survivor had no number; it has one.
+			if err := r.ApplyAccountMerge(ctx, service.AccountMerge{SurvivorID: survivor, OtherID: other, MovePhone: true, RecoveryEmailsMax: 5, AtMs: 1000}); !errors.Is(err, service.ErrMergeConflict) {
+				t.Fatalf("MovePhone onto a survivor with a phone: want ErrMergeConflict, got %v", err)
+			}
+			if err := r.ApplyAccountMerge(ctx, service.AccountMerge{SurvivorID: survivor, OtherID: other, RecoveryEmailsMax: 5, AtMs: 1000}); err != nil {
+				t.Fatalf("ApplyAccountMerge: %v", err)
+			}
+			if s, _ := r.GetUser(ctx, survivor); s.PhoneNumber != "+14155550143" {
+				t.Fatalf("survivor's phone = %q, want its own", s.PhoneNumber)
+			}
+			if previous, err := r.ClaimPhoneNumber(ctx, third, "+14155550144", 2000, 0); err != nil || previous != "" {
+				t.Fatalf("the retired account's number is not free: %q %v", previous, err)
 			}
 		})
 

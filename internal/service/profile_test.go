@@ -130,7 +130,7 @@ func TestProfileService_RevokeSession_HappyPath(t *testing.T) {
 	db.addRefreshToken("sess-1", "user-1", nowMs()+3600*1000)
 	svc := newTestProfileService(db)
 
-	err := svc.RevokeSession(context.Background(), "user-1", "sess-1")
+	err := svc.RevokeSession(context.Background(), "user-1", SessionSignIn{}, "sess-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestProfileService_RevokeSession_WrongUser(t *testing.T) {
 	db.addRefreshToken("sess-1", "user-1", nowMs()+3600*1000)
 	svc := newTestProfileService(db)
 
-	err := svc.RevokeSession(context.Background(), "user-2", "sess-1")
+	err := svc.RevokeSession(context.Background(), "user-2", SessionSignIn{}, "sess-1")
 	if err == nil {
 		t.Fatal("expected error for wrong user")
 	}
@@ -164,7 +164,7 @@ func TestProfileService_RevokeAllSessions_HappyPath(t *testing.T) {
 	db.addRefreshToken("sess-2", "user-1", nowMs()+3600*1000)
 	svc := newTestProfileService(db)
 
-	count, err := svc.RevokeAllSessions(context.Background(), "user-1", "Str0ng!Pass")
+	count, err := svc.RevokeAllSessions(context.Background(), "user-1", SessionSignIn{}, "Str0ng!Pass")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestProfileService_RevokeAllSessions_WrongPassword(t *testing.T) {
 	db.addUserWithPassword("user-1", "alice@test.com", "Alice", "member", "active", pwHash)
 	svc := newTestProfileService(db)
 
-	_, err := svc.RevokeAllSessions(context.Background(), "user-1", "WrongPassword!")
+	_, err := svc.RevokeAllSessions(context.Background(), "user-1", SessionSignIn{}, "WrongPassword!")
 	if err == nil {
 		t.Fatal("expected error for wrong password")
 	}
@@ -208,7 +208,7 @@ func TestProfileService_DeletePasskey_HappyPath(t *testing.T) {
 	db.addPasskey("pk-1", "user-1", "cred-abc", "YubiKey 5")
 	svc := newTestProfileService(db)
 
-	err := svc.DeletePasskey(context.Background(), "user-1", "cred-abc")
+	err := svc.DeletePasskey(context.Background(), "user-1", SessionSignIn{}, "cred-abc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestProfileService_DeletePasskey_WrongUser(t *testing.T) {
 	db.addPasskey("pk-1", "user-1", "cred-abc", "YubiKey 5")
 	svc := newTestProfileService(db)
 
-	err := svc.DeletePasskey(context.Background(), "user-2", "cred-abc")
+	err := svc.DeletePasskey(context.Background(), "user-2", SessionSignIn{}, "cred-abc")
 	if err == nil {
 		t.Fatal("expected error for wrong user")
 	}
@@ -234,7 +234,7 @@ func TestProfileService_ChangePassword_HappyPath(t *testing.T) {
 	db.addUserWithPassword("user-1", "alice@test.com", "Alice", "member", "active", pwHash)
 	svc := newTestProfileService(db)
 
-	err := svc.ChangePassword(context.Background(), "user-1", "OldStr0ng!Pass", "NewStr0ng!Pass")
+	err := svc.ChangePassword(context.Background(), "user-1", SessionSignIn{}, "OldStr0ng!Pass", "NewStr0ng!Pass")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestProfileService_ChangePassword_RevokesSessions(t *testing.T) {
 	db.addRefreshToken("other-sess", "user-2", future)
 
 	svc := newTestProfileService(db)
-	if err := svc.ChangePassword(context.Background(), "user-1", "OldStr0ng!Pass", "NewStr0ng!Pass"); err != nil {
+	if err := svc.ChangePassword(context.Background(), "user-1", SessionSignIn{}, "OldStr0ng!Pass", "NewStr0ng!Pass"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -291,7 +291,7 @@ func TestProfileService_ChangePassword_WrongCurrent(t *testing.T) {
 	db.addUserWithPassword("user-1", "alice@test.com", "Alice", "member", "active", pwHash)
 	svc := newTestProfileService(db)
 
-	err := svc.ChangePassword(context.Background(), "user-1", "WrongPass!", "NewStr0ng!Pass")
+	err := svc.ChangePassword(context.Background(), "user-1", SessionSignIn{}, "WrongPass!", "NewStr0ng!Pass")
 	if err == nil {
 		t.Fatal("expected error for wrong current password")
 	}
@@ -306,7 +306,7 @@ func TestProfileService_ChangePassword_WeakNew(t *testing.T) {
 	db.addUserWithPassword("user-1", "alice@test.com", "Alice", "member", "active", pwHash)
 	svc := newTestProfileService(db)
 
-	err := svc.ChangePassword(context.Background(), "user-1", "OldStr0ng!Pass", "weak")
+	err := svc.ChangePassword(context.Background(), "user-1", SessionSignIn{}, "OldStr0ng!Pass", "weak")
 	if err == nil {
 		t.Fatal("expected error for weak new password")
 	}
@@ -328,12 +328,12 @@ func TestProfileService_ChangePassword_EnforcesTenantMinLength(t *testing.T) {
 
 	// A 10-char all-class password clears the global 8 floor but not the
 	// tenant's 16 — it must be rejected.
-	err := svc.ChangePassword(ctx, "user-1", "OldStr0ng!Pass", "Aa1!aaaaaa")
+	err := svc.ChangePassword(ctx, "user-1", SessionSignIn{}, "OldStr0ng!Pass", "Aa1!aaaaaa")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrWeakPassword))
 
 	// A 16-char password satisfies the tightened policy.
-	require.NoError(t, svc.ChangePassword(ctx, "user-1", "OldStr0ng!Pass", "Aa1!aaaaaaaaaaaa"))
+	require.NoError(t, svc.ChangePassword(ctx, "user-1", SessionSignIn{}, "OldStr0ng!Pass", "Aa1!aaaaaaaaaaaa"))
 }
 
 // A user outside any governed tenant keeps the global 8-char baseline even when
@@ -347,7 +347,7 @@ func TestProfileService_ChangePassword_UngovernedUsesGlobalBaseline(t *testing.T
 
 	// 8-char all-class password: meets the global baseline, and no governed
 	// policy applies to other.example, so it is accepted.
-	require.NoError(t, svc.ChangePassword(ctx, "user-2", "OldStr0ng!Pass", "Aa1!aaaa"))
+	require.NoError(t, svc.ChangePassword(ctx, "user-2", SessionSignIn{}, "OldStr0ng!Pass", "Aa1!aaaa"))
 }
 
 func TestProfileService_ListAuditEvents_AdminOnly(t *testing.T) {

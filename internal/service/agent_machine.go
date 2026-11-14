@@ -58,14 +58,14 @@ func (s *AgentOAuthService) RegisterMachine(ctx context.Context, human AgentOAut
 			break
 		}
 	}
-	authority, err := s.repo(ctx).AgentOAuthAuthority(ctx, human.UserID, "", human.SID, input.ClientID)
+	authority, err := s.repo(ctx).AgentOAuthAuthority(ctx, human.UserID, "", human.SignIn.SessionID, input.ClientID)
 	if err != nil {
 		return nil, err
 	}
 	if err = s.admitOwner(ctx, authority.Owner, product); err != nil {
 		return nil, err
 	}
-	machine := &AgentMachine{ID: input.ID, OwnerID: human.UserID, ClientID: input.ClientID, ClientRevision: client.Revision, Resource: input.Resource, Product: product, Scopes: slices.Clone(input.Scopes), DisplayName: input.DisplayName, PublicKey: input.PublicKey, RegistrationSID: human.SID, AllAgents: input.AllAgents, AgentIDs: slices.Clone(input.AgentIDs), ExcludedAgentIDs: slices.Clone(input.ExcludedAgentIDs), CreatedAtMs: s.auth.nowMs(), Revision: 1}
+	machine := &AgentMachine{ID: input.ID, OwnerID: human.UserID, ClientID: input.ClientID, ClientRevision: client.Revision, Resource: input.Resource, Product: product, Scopes: slices.Clone(input.Scopes), DisplayName: input.DisplayName, PublicKey: input.PublicKey, RegistrationSID: human.SignIn.SessionID, AllAgents: input.AllAgents, AgentIDs: slices.Clone(input.AgentIDs), ExcludedAgentIDs: slices.Clone(input.ExcludedAgentIDs), CreatedAtMs: s.auth.nowMs(), Revision: 1}
 	if err = ValidateAgentMachine(machine); err != nil {
 		return nil, err
 	}

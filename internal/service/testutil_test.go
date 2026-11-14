@@ -262,6 +262,9 @@ type fakeRepo struct {
 	emailLoginCodes     map[string]*EmailLoginCodeRecord
 	magicLinkTokens     map[string]*MagicLinkTokenRecord
 	phoneVerifyCodes    map[string]*PhoneVerificationCodeRecord
+	recoveryEmailCodes  map[string]*RecoveryEmailCodeRecord
+	recoveryEmails      map[string][]*RecoveryEmail
+	phoneClaims         map[string]phoneClaim
 	totpCreds           map[string]*TotpCredRecord
 	recoveryCodes       map[string]*RecoveryCodeRecord
 	loginChallenges     map[string]*LoginChallengeRecord
@@ -294,6 +297,9 @@ func newFakeRepo() *fakeRepo {
 		emailLoginCodes:    make(map[string]*EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*PhoneVerificationCodeRecord),
+		recoveryEmailCodes: make(map[string]*RecoveryEmailCodeRecord),
+		recoveryEmails:     make(map[string][]*RecoveryEmail),
+		phoneClaims:        make(map[string]phoneClaim),
 		totpCreds:          make(map[string]*TotpCredRecord),
 		recoveryCodes:      make(map[string]*RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*LoginChallengeRecord),
@@ -446,6 +452,9 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if u.Email != "" && r.recoveryEmailHeldLocked(u.Email) {
+		return "", fmt.Errorf("email %q is a recovery email: %w", u.Email, ErrAlreadyExists)
+	}
 	for _, existing := range r.users {
 		// Mirrors the drivers' PARTIAL unique index (WHERE email <> ''):
 		// users without an address — every anonymous user — never collide.
@@ -487,6 +496,9 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 	}
 	// Mirrors the drivers' (project_id, email_fold) partial unique index.
 	if addr, _ := fields["email"].(string); addr != "" {
+		if r.recoveryEmailHeldLocked(addr) {
+			return fmt.Errorf("%w: email is a recovery email", ErrAlreadyExists)
+		}
 		for id, other := range r.users {
 			if id != userID && other.Email != "" && FoldEmail(other.Email) == FoldEmail(addr) {
 				return fmt.Errorf("%w: email already exists", ErrAlreadyExists)
@@ -664,6 +676,9 @@ func (r *fakeRepo) FindRefreshTokenByHashIncludingConsumed(_ context.Context, ha
 func (r *fakeRepo) CreateRefreshToken(_ context.Context, rec *RefreshTokenRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if rec.RecoveryEmailID != "" && r.heldRecoveryEmailLocked(rec.UserID, recoveryEmailWithID(rec.RecoveryEmailID)) < 0 {
+		return "", fmt.Errorf("fake: CreateRefreshToken: %w", ErrNotFound)
+	}
 	id := nextNodeID()
 	rec.NodeID = id
 	cp := *rec
@@ -702,6 +717,9 @@ func (r *fakeRepo) DeleteUser(_ context.Context, userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	InvalidateAgentCreationReceipts(r.agentCreations, userID)
+	delete(r.recoveryEmailCodes, userID)
+	delete(r.recoveryEmails, userID)
+	r.releasePhoneClaimsLocked(userID)
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
 			delete(r.refreshTokens, id)
@@ -1045,27 +1063,21 @@ func (r *fakeRepo) UpsertEmailLoginCode(_ context.Context, rec *EmailLoginCodeRe
 	return id, nil
 }
 
-func (r *fakeRepo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*EmailLoginCodeRecord, error) {
+func (r *fakeRepo) CountEmailLoginCodeAttempt(_ context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.emailLoginCodes {
-		if c.Email == email {
-			cp := *c
-			return &cp, nil
+		if c.Email != email {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *fakeRepo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.emailLoginCodes[nodeID]
-	if !ok {
-		return errors.New("email login code not found")
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *fakeRepo) ConsumeEmailLoginCode(_ context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error) {
@@ -1127,27 +1139,21 @@ func (r *fakeRepo) UpsertPhoneVerificationCode(_ context.Context, rec *PhoneVeri
 	return id, nil
 }
 
-func (r *fakeRepo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*PhoneVerificationCodeRecord, error) {
+func (r *fakeRepo) CountPhoneVerificationCodeAttempt(_ context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.phoneVerifyCodes {
-		if c.UserID == userID {
-			cp := *c
-			return &cp, nil
+		if c.UserID != userID {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *fakeRepo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.phoneVerifyCodes[nodeID]
-	if !ok {
-		return errors.New("phone verification code not found")
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *fakeRepo) ConsumePhoneVerificationCode(_ context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error) {
@@ -1688,6 +1694,9 @@ func (r *fakeRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, a
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if newEmail != "" && r.recoveryEmailHeldLocked(newEmail) {
+		return fmt.Errorf("email %q is a recovery email: %w", newEmail, ErrAlreadyExists)
 	}
 	for id, other := range r.users {
 		if id != userID && other.Email == newEmail {
@@ -2640,9 +2649,10 @@ func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m AccountMerge) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// A missing account is nil, which ApplyToUsers refuses.
-	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
+	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID], r.recoveryEmails); err != nil {
 		return err
 	}
+	r.mergePhoneClaimsLocked(m)
 	InvalidateAgentCreationReceipts(r.agentCreations, m.OtherID)
 	for _, u := range r.users {
 		before := *u

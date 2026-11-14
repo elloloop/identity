@@ -31,7 +31,7 @@ func (h *IdentityHandler) GetManagedChildProfile(
 	}
 
 	child, err := h.auth.GetManagedChildProfile(
-		ctx, guardianUserID,
+		ctx, guardianUserID, authenticatedSignIn(req.Header()),
 		req.Msg.GetChildUserId(), req.Msg.GetStepUpPassword(),
 		clientIP(req.Header()), clientUserAgent(req.Header()),
 	)
@@ -55,7 +55,7 @@ func (h *IdentityHandler) SetManagedChildPassword(
 	}
 
 	if err := h.auth.SetManagedChildPassword(
-		ctx, guardianUserID,
+		ctx, guardianUserID, authenticatedSignIn(req.Header()),
 		req.Msg.GetChildUserId(), req.Msg.GetNewPassword(), req.Msg.GetStepUpPassword(),
 		clientIP(req.Header()), clientUserAgent(req.Header()),
 	); err != nil {
@@ -75,7 +75,7 @@ func (h *IdentityHandler) SetManagedChildUsername(
 	}
 
 	child, err := h.auth.SetManagedChildUsername(
-		ctx, guardianUserID,
+		ctx, guardianUserID, authenticatedSignIn(req.Header()),
 		req.Msg.GetChildUserId(), req.Msg.GetUsername(), req.Msg.GetStepUpPassword(),
 		clientIP(req.Header()), clientUserAgent(req.Header()),
 	)
@@ -99,7 +99,7 @@ func (h *IdentityHandler) RevokeManagedChildSessions(
 	}
 
 	if err := h.auth.RevokeManagedChildSessions(
-		ctx, guardianUserID,
+		ctx, guardianUserID, authenticatedSignIn(req.Header()),
 		req.Msg.GetChildUserId(), req.Msg.GetStepUpPassword(),
 		clientIP(req.Header()), clientUserAgent(req.Header()),
 	); err != nil {
@@ -119,7 +119,7 @@ func (h *IdentityHandler) DeactivateManagedChildAccount(
 	}
 
 	if err := h.auth.DeactivateManagedChildAccount(
-		ctx, guardianUserID,
+		ctx, guardianUserID, authenticatedSignIn(req.Header()),
 		req.Msg.GetChildUserId(), req.Msg.GetReason(), req.Msg.GetStepUpPassword(),
 		clientIP(req.Header()), clientUserAgent(req.Header()),
 	); err != nil {
@@ -140,7 +140,7 @@ func (h *IdentityHandler) ReactivateManagedChildAccount(
 	}
 
 	if err := h.auth.ReactivateManagedChildAccount(
-		ctx, guardianUserID,
+		ctx, guardianUserID, authenticatedSignIn(req.Header()),
 		req.Msg.GetChildUserId(), req.Msg.GetStepUpPassword(),
 		clientIP(req.Header()), clientUserAgent(req.Header()),
 	); err != nil {
@@ -161,7 +161,7 @@ func (h *IdentityHandler) DeleteManagedChildAccount(
 	}
 
 	if err := h.auth.DeleteManagedChildAccount(
-		ctx, guardianUserID,
+		ctx, guardianUserID, authenticatedSignIn(req.Header()),
 		req.Msg.GetChildUserId(), req.Msg.GetStepUpPassword(),
 		clientIP(req.Header()), clientUserAgent(req.Header()),
 	); err != nil {

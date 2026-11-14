@@ -145,6 +145,21 @@ const (
 	// IdentityServiceVerifyPhoneCodeProcedure is the fully-qualified name of the IdentityService's
 	// VerifyPhoneCode RPC.
 	IdentityServiceVerifyPhoneCodeProcedure = "/identity.v1.IdentityService/VerifyPhoneCode"
+	// IdentityServiceRemovePhoneProcedure is the fully-qualified name of the IdentityService's
+	// RemovePhone RPC.
+	IdentityServiceRemovePhoneProcedure = "/identity.v1.IdentityService/RemovePhone"
+	// IdentityServiceRequestRecoveryEmailProcedure is the fully-qualified name of the IdentityService's
+	// RequestRecoveryEmail RPC.
+	IdentityServiceRequestRecoveryEmailProcedure = "/identity.v1.IdentityService/RequestRecoveryEmail"
+	// IdentityServiceVerifyRecoveryEmailProcedure is the fully-qualified name of the IdentityService's
+	// VerifyRecoveryEmail RPC.
+	IdentityServiceVerifyRecoveryEmailProcedure = "/identity.v1.IdentityService/VerifyRecoveryEmail"
+	// IdentityServiceListRecoveryEmailsProcedure is the fully-qualified name of the IdentityService's
+	// ListRecoveryEmails RPC.
+	IdentityServiceListRecoveryEmailsProcedure = "/identity.v1.IdentityService/ListRecoveryEmails"
+	// IdentityServiceRemoveRecoveryEmailProcedure is the fully-qualified name of the IdentityService's
+	// RemoveRecoveryEmail RPC.
+	IdentityServiceRemoveRecoveryEmailProcedure = "/identity.v1.IdentityService/RemoveRecoveryEmail"
 	// IdentityServiceGetCurrentUserProcedure is the fully-qualified name of the IdentityService's
 	// GetCurrentUser RPC.
 	IdentityServiceGetCurrentUserProcedure = "/identity.v1.IdentityService/GetCurrentUser"
@@ -621,9 +636,32 @@ type IdentityServiceClient interface {
 	CreateAssuranceChallenge(context.Context, *connect.Request[v1.CreateAssuranceChallengeRequest]) (*connect.Response[v1.CreateAssuranceChallengeResponse], error)
 	IssueAssuranceToken(context.Context, *connect.Request[v1.IssueAssuranceTokenRequest]) (*connect.Response[v1.IssueAssuranceTokenResponse], error)
 	RefreshAssuranceToken(context.Context, *connect.Request[v1.RefreshAssuranceTokenRequest]) (*connect.Response[v1.RefreshAssuranceTokenResponse], error)
-	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	// Phone verification (one-time code) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *connect.Request[v1.RequestPhoneVerificationRequest]) (*connect.Response[v1.RequestPhoneVerificationResponse], error)
 	VerifyPhoneCode(context.Context, *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error)
+	// RemovePhone clears the caller's phone number and its verified state,
+	// freeing the number for another account where the project keeps numbers
+	// unique. A caller with no number gets their user back unchanged. A tenant
+	// that requires a verified phone can no longer be selected afterwards.
+	// Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
+	// session a recovery hold binds (RecoveryHoldDetails).
+	RemovePhone(context.Context, *connect.Request[v1.RemovePhoneRequest]) (*connect.Response[v1.RemovePhoneResponse], error)
+	// Recovery emails — additional addresses the authenticated caller has
+	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+	// address another account of the project holds and RESOURCE_EXHAUSTED past
+	// the project's cap; RequestRecoveryEmail answers them for the caller's own
+	// addresses and its own full list, and INVALID_ARGUMENT for an address a
+	// sign-up would refuse. A project that has not turned the feature on
+	// refuses RequestRecoveryEmail and VerifyRecoveryEmail with
+	// FAILED_PRECONDITION, while addresses already kept can still be listed and
+	// removed. Adding or removing an address mails a notice to the account's
+	// other addresses, and a removal to the removed address too. During a
+	// recovery hold a session a recovery email opened can do neither
+	// (RecoveryHoldDetails).
+	RequestRecoveryEmail(context.Context, *connect.Request[v1.RequestRecoveryEmailRequest]) (*connect.Response[v1.RequestRecoveryEmailResponse], error)
+	VerifyRecoveryEmail(context.Context, *connect.Request[v1.VerifyRecoveryEmailRequest]) (*connect.Response[v1.VerifyRecoveryEmailResponse], error)
+	ListRecoveryEmails(context.Context, *connect.Request[v1.ListRecoveryEmailsRequest]) (*connect.Response[v1.ListRecoveryEmailsResponse], error)
+	RemoveRecoveryEmail(context.Context, *connect.Request[v1.RemoveRecoveryEmailRequest]) (*connect.Response[v1.RemoveRecoveryEmailResponse], error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *connect.Request[v1.GetCurrentUserRequest]) (*connect.Response[v1.GetCurrentUserResponse], error)
 	RefreshToken(context.Context, *connect.Request[v1.RefreshTokenRequest]) (*connect.Response[v1.RefreshTokenResponse], error)
@@ -952,7 +990,9 @@ type IdentityServiceClient interface {
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
 	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
-	// survivor_user_id, no password asked. Admin only.
+	// survivor_user_id, no password asked. Admin only. Neither account may be
+	// the admin's own (FAILED_PRECONDITION): an admin merges another account
+	// into theirs with MergeAccounts.
 	MergeUsers(context.Context, *connect.Request[v1.MergeUsersRequest]) (*connect.Response[v1.MergeUsersResponse], error)
 	AcceptInvitation(context.Context, *connect.Request[v1.AcceptInvitationRequest]) (*connect.Response[v1.AcceptInvitationResponse], error)
 	DeactivateUser(context.Context, *connect.Request[v1.DeactivateUserRequest]) (*connect.Response[v1.DeactivateUserResponse], error)
@@ -1456,6 +1496,36 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceVerifyPhoneCodeProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("VerifyPhoneCode")),
+			connect.WithClientOptions(opts...),
+		),
+		removePhone: connect.NewClient[v1.RemovePhoneRequest, v1.RemovePhoneResponse](
+			httpClient,
+			baseURL+IdentityServiceRemovePhoneProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RemovePhone")),
+			connect.WithClientOptions(opts...),
+		),
+		requestRecoveryEmail: connect.NewClient[v1.RequestRecoveryEmailRequest, v1.RequestRecoveryEmailResponse](
+			httpClient,
+			baseURL+IdentityServiceRequestRecoveryEmailProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RequestRecoveryEmail")),
+			connect.WithClientOptions(opts...),
+		),
+		verifyRecoveryEmail: connect.NewClient[v1.VerifyRecoveryEmailRequest, v1.VerifyRecoveryEmailResponse](
+			httpClient,
+			baseURL+IdentityServiceVerifyRecoveryEmailProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("VerifyRecoveryEmail")),
+			connect.WithClientOptions(opts...),
+		),
+		listRecoveryEmails: connect.NewClient[v1.ListRecoveryEmailsRequest, v1.ListRecoveryEmailsResponse](
+			httpClient,
+			baseURL+IdentityServiceListRecoveryEmailsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListRecoveryEmails")),
+			connect.WithClientOptions(opts...),
+		),
+		removeRecoveryEmail: connect.NewClient[v1.RemoveRecoveryEmailRequest, v1.RemoveRecoveryEmailResponse](
+			httpClient,
+			baseURL+IdentityServiceRemoveRecoveryEmailProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RemoveRecoveryEmail")),
 			connect.WithClientOptions(opts...),
 		),
 		getCurrentUser: connect.NewClient[v1.GetCurrentUserRequest, v1.GetCurrentUserResponse](
@@ -2309,6 +2379,11 @@ type identityServiceClient struct {
 	refreshAssuranceToken             *connect.Client[v1.RefreshAssuranceTokenRequest, v1.RefreshAssuranceTokenResponse]
 	requestPhoneVerification          *connect.Client[v1.RequestPhoneVerificationRequest, v1.RequestPhoneVerificationResponse]
 	verifyPhoneCode                   *connect.Client[v1.VerifyPhoneCodeRequest, v1.VerifyPhoneCodeResponse]
+	removePhone                       *connect.Client[v1.RemovePhoneRequest, v1.RemovePhoneResponse]
+	requestRecoveryEmail              *connect.Client[v1.RequestRecoveryEmailRequest, v1.RequestRecoveryEmailResponse]
+	verifyRecoveryEmail               *connect.Client[v1.VerifyRecoveryEmailRequest, v1.VerifyRecoveryEmailResponse]
+	listRecoveryEmails                *connect.Client[v1.ListRecoveryEmailsRequest, v1.ListRecoveryEmailsResponse]
+	removeRecoveryEmail               *connect.Client[v1.RemoveRecoveryEmailRequest, v1.RemoveRecoveryEmailResponse]
 	getCurrentUser                    *connect.Client[v1.GetCurrentUserRequest, v1.GetCurrentUserResponse]
 	refreshToken                      *connect.Client[v1.RefreshTokenRequest, v1.RefreshTokenResponse]
 	logout                            *connect.Client[v1.LogoutRequest, v1.LogoutResponse]
@@ -2624,6 +2699,31 @@ func (c *identityServiceClient) RequestPhoneVerification(ctx context.Context, re
 // VerifyPhoneCode calls identity.v1.IdentityService.VerifyPhoneCode.
 func (c *identityServiceClient) VerifyPhoneCode(ctx context.Context, req *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error) {
 	return c.verifyPhoneCode.CallUnary(ctx, req)
+}
+
+// RemovePhone calls identity.v1.IdentityService.RemovePhone.
+func (c *identityServiceClient) RemovePhone(ctx context.Context, req *connect.Request[v1.RemovePhoneRequest]) (*connect.Response[v1.RemovePhoneResponse], error) {
+	return c.removePhone.CallUnary(ctx, req)
+}
+
+// RequestRecoveryEmail calls identity.v1.IdentityService.RequestRecoveryEmail.
+func (c *identityServiceClient) RequestRecoveryEmail(ctx context.Context, req *connect.Request[v1.RequestRecoveryEmailRequest]) (*connect.Response[v1.RequestRecoveryEmailResponse], error) {
+	return c.requestRecoveryEmail.CallUnary(ctx, req)
+}
+
+// VerifyRecoveryEmail calls identity.v1.IdentityService.VerifyRecoveryEmail.
+func (c *identityServiceClient) VerifyRecoveryEmail(ctx context.Context, req *connect.Request[v1.VerifyRecoveryEmailRequest]) (*connect.Response[v1.VerifyRecoveryEmailResponse], error) {
+	return c.verifyRecoveryEmail.CallUnary(ctx, req)
+}
+
+// ListRecoveryEmails calls identity.v1.IdentityService.ListRecoveryEmails.
+func (c *identityServiceClient) ListRecoveryEmails(ctx context.Context, req *connect.Request[v1.ListRecoveryEmailsRequest]) (*connect.Response[v1.ListRecoveryEmailsResponse], error) {
+	return c.listRecoveryEmails.CallUnary(ctx, req)
+}
+
+// RemoveRecoveryEmail calls identity.v1.IdentityService.RemoveRecoveryEmail.
+func (c *identityServiceClient) RemoveRecoveryEmail(ctx context.Context, req *connect.Request[v1.RemoveRecoveryEmailRequest]) (*connect.Response[v1.RemoveRecoveryEmailResponse], error) {
+	return c.removeRecoveryEmail.CallUnary(ctx, req)
 }
 
 // GetCurrentUser calls identity.v1.IdentityService.GetCurrentUser.
@@ -3365,9 +3465,32 @@ type IdentityServiceHandler interface {
 	CreateAssuranceChallenge(context.Context, *connect.Request[v1.CreateAssuranceChallengeRequest]) (*connect.Response[v1.CreateAssuranceChallengeResponse], error)
 	IssueAssuranceToken(context.Context, *connect.Request[v1.IssueAssuranceTokenRequest]) (*connect.Response[v1.IssueAssuranceTokenResponse], error)
 	RefreshAssuranceToken(context.Context, *connect.Request[v1.RefreshAssuranceTokenRequest]) (*connect.Response[v1.RefreshAssuranceTokenResponse], error)
-	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	// Phone verification (one-time code) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *connect.Request[v1.RequestPhoneVerificationRequest]) (*connect.Response[v1.RequestPhoneVerificationResponse], error)
 	VerifyPhoneCode(context.Context, *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error)
+	// RemovePhone clears the caller's phone number and its verified state,
+	// freeing the number for another account where the project keeps numbers
+	// unique. A caller with no number gets their user back unchanged. A tenant
+	// that requires a verified phone can no longer be selected afterwards.
+	// Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
+	// session a recovery hold binds (RecoveryHoldDetails).
+	RemovePhone(context.Context, *connect.Request[v1.RemovePhoneRequest]) (*connect.Response[v1.RemovePhoneResponse], error)
+	// Recovery emails — additional addresses the authenticated caller has
+	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+	// address another account of the project holds and RESOURCE_EXHAUSTED past
+	// the project's cap; RequestRecoveryEmail answers them for the caller's own
+	// addresses and its own full list, and INVALID_ARGUMENT for an address a
+	// sign-up would refuse. A project that has not turned the feature on
+	// refuses RequestRecoveryEmail and VerifyRecoveryEmail with
+	// FAILED_PRECONDITION, while addresses already kept can still be listed and
+	// removed. Adding or removing an address mails a notice to the account's
+	// other addresses, and a removal to the removed address too. During a
+	// recovery hold a session a recovery email opened can do neither
+	// (RecoveryHoldDetails).
+	RequestRecoveryEmail(context.Context, *connect.Request[v1.RequestRecoveryEmailRequest]) (*connect.Response[v1.RequestRecoveryEmailResponse], error)
+	VerifyRecoveryEmail(context.Context, *connect.Request[v1.VerifyRecoveryEmailRequest]) (*connect.Response[v1.VerifyRecoveryEmailResponse], error)
+	ListRecoveryEmails(context.Context, *connect.Request[v1.ListRecoveryEmailsRequest]) (*connect.Response[v1.ListRecoveryEmailsResponse], error)
+	RemoveRecoveryEmail(context.Context, *connect.Request[v1.RemoveRecoveryEmailRequest]) (*connect.Response[v1.RemoveRecoveryEmailResponse], error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *connect.Request[v1.GetCurrentUserRequest]) (*connect.Response[v1.GetCurrentUserResponse], error)
 	RefreshToken(context.Context, *connect.Request[v1.RefreshTokenRequest]) (*connect.Response[v1.RefreshTokenResponse], error)
@@ -3696,7 +3819,9 @@ type IdentityServiceHandler interface {
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[v1.InviteUserRequest]) (*connect.Response[v1.InviteUserResponse], error)
 	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
-	// survivor_user_id, no password asked. Admin only.
+	// survivor_user_id, no password asked. Admin only. Neither account may be
+	// the admin's own (FAILED_PRECONDITION): an admin merges another account
+	// into theirs with MergeAccounts.
 	MergeUsers(context.Context, *connect.Request[v1.MergeUsersRequest]) (*connect.Response[v1.MergeUsersResponse], error)
 	AcceptInvitation(context.Context, *connect.Request[v1.AcceptInvitationRequest]) (*connect.Response[v1.AcceptInvitationResponse], error)
 	DeactivateUser(context.Context, *connect.Request[v1.DeactivateUserRequest]) (*connect.Response[v1.DeactivateUserResponse], error)
@@ -4196,6 +4321,36 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceVerifyPhoneCodeProcedure,
 		svc.VerifyPhoneCode,
 		connect.WithSchema(identityServiceMethods.ByName("VerifyPhoneCode")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRemovePhoneHandler := connect.NewUnaryHandler(
+		IdentityServiceRemovePhoneProcedure,
+		svc.RemovePhone,
+		connect.WithSchema(identityServiceMethods.ByName("RemovePhone")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRequestRecoveryEmailHandler := connect.NewUnaryHandler(
+		IdentityServiceRequestRecoveryEmailProcedure,
+		svc.RequestRecoveryEmail,
+		connect.WithSchema(identityServiceMethods.ByName("RequestRecoveryEmail")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceVerifyRecoveryEmailHandler := connect.NewUnaryHandler(
+		IdentityServiceVerifyRecoveryEmailProcedure,
+		svc.VerifyRecoveryEmail,
+		connect.WithSchema(identityServiceMethods.ByName("VerifyRecoveryEmail")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListRecoveryEmailsHandler := connect.NewUnaryHandler(
+		IdentityServiceListRecoveryEmailsProcedure,
+		svc.ListRecoveryEmails,
+		connect.WithSchema(identityServiceMethods.ByName("ListRecoveryEmails")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRemoveRecoveryEmailHandler := connect.NewUnaryHandler(
+		IdentityServiceRemoveRecoveryEmailProcedure,
+		svc.RemoveRecoveryEmail,
+		connect.WithSchema(identityServiceMethods.ByName("RemoveRecoveryEmail")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceGetCurrentUserHandler := connect.NewUnaryHandler(
@@ -5082,6 +5237,16 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceRequestPhoneVerificationHandler.ServeHTTP(w, r)
 		case IdentityServiceVerifyPhoneCodeProcedure:
 			identityServiceVerifyPhoneCodeHandler.ServeHTTP(w, r)
+		case IdentityServiceRemovePhoneProcedure:
+			identityServiceRemovePhoneHandler.ServeHTTP(w, r)
+		case IdentityServiceRequestRecoveryEmailProcedure:
+			identityServiceRequestRecoveryEmailHandler.ServeHTTP(w, r)
+		case IdentityServiceVerifyRecoveryEmailProcedure:
+			identityServiceVerifyRecoveryEmailHandler.ServeHTTP(w, r)
+		case IdentityServiceListRecoveryEmailsProcedure:
+			identityServiceListRecoveryEmailsHandler.ServeHTTP(w, r)
+		case IdentityServiceRemoveRecoveryEmailProcedure:
+			identityServiceRemoveRecoveryEmailHandler.ServeHTTP(w, r)
 		case IdentityServiceGetCurrentUserProcedure:
 			identityServiceGetCurrentUserHandler.ServeHTTP(w, r)
 		case IdentityServiceRefreshTokenProcedure:
@@ -5503,6 +5668,26 @@ func (UnimplementedIdentityServiceHandler) RequestPhoneVerification(context.Cont
 
 func (UnimplementedIdentityServiceHandler) VerifyPhoneCode(context.Context, *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.VerifyPhoneCode is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RemovePhone(context.Context, *connect.Request[v1.RemovePhoneRequest]) (*connect.Response[v1.RemovePhoneResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RemovePhone is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RequestRecoveryEmail(context.Context, *connect.Request[v1.RequestRecoveryEmailRequest]) (*connect.Response[v1.RequestRecoveryEmailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RequestRecoveryEmail is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) VerifyRecoveryEmail(context.Context, *connect.Request[v1.VerifyRecoveryEmailRequest]) (*connect.Response[v1.VerifyRecoveryEmailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.VerifyRecoveryEmail is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListRecoveryEmails(context.Context, *connect.Request[v1.ListRecoveryEmailsRequest]) (*connect.Response[v1.ListRecoveryEmailsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListRecoveryEmails is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RemoveRecoveryEmail(context.Context, *connect.Request[v1.RemoveRecoveryEmailRequest]) (*connect.Response[v1.RemoveRecoveryEmailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RemoveRecoveryEmail is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) GetCurrentUser(context.Context, *connect.Request[v1.GetCurrentUserRequest]) (*connect.Response[v1.GetCurrentUserResponse], error) {
@@ -6175,7 +6360,10 @@ type HireGrantServiceClient interface {
 	// session. PERMISSION_DENIED: the caller is not an active person, or is
 	// neither the teammate's owner nor a project admin, or teammate_id is not
 	// an active agent account of the project; every such caller gets the same
-	// answer. INVALID_ARGUMENT: a blank or malformed id.
+	// answer. INVALID_ARGUMENT: a blank or malformed id. FAILED_PRECONDITION
+	// (`recovery_hold`, RecoveryHoldDetails): a session a recovery hold binds;
+	// UNAUTHENTICATED, too, for a session whose recovery email the account no
+	// longer holds.
 	CreateHireGrant(context.Context, *connect.Request[v1.CreateHireGrantRequest]) (*connect.Response[v1.CreateHireGrantResponse], error)
 }
 
@@ -6217,7 +6405,10 @@ type HireGrantServiceHandler interface {
 	// session. PERMISSION_DENIED: the caller is not an active person, or is
 	// neither the teammate's owner nor a project admin, or teammate_id is not
 	// an active agent account of the project; every such caller gets the same
-	// answer. INVALID_ARGUMENT: a blank or malformed id.
+	// answer. INVALID_ARGUMENT: a blank or malformed id. FAILED_PRECONDITION
+	// (`recovery_hold`, RecoveryHoldDetails): a session a recovery hold binds;
+	// UNAUTHENTICATED, too, for a session whose recovery email the account no
+	// longer holds.
 	CreateHireGrant(context.Context, *connect.Request[v1.CreateHireGrantRequest]) (*connect.Response[v1.CreateHireGrantResponse], error)
 }
 

@@ -48,8 +48,17 @@ type LoginPolicy struct {
 	// many seconds regardless of activity (compared against the refresh
 	// token's CreatedAt). 0 means "no absolute timeout".
 	SessionAbsoluteTimeoutSeconds int64
-	CreatedAtMs                   int64
-	UpdatedAtMs                   int64
+	// RequireVerifiedPhone refuses a selection of the tenant until the
+	// account has a verified phone number. It is not a sign-in rule: the
+	// account still signs in, and uses that session to verify a phone.
+	RequireVerifiedPhone bool
+	// PhoneCallingCodes narrows RequireVerifiedPhone to numbers under these
+	// country calling codes, as digits without the '+' ("1", "44"). Empty
+	// accepts a verified number under any code. It is only valid with
+	// RequireVerifiedPhone.
+	PhoneCallingCodes []string
+	CreatedAtMs       int64
+	UpdatedAtMs       int64
 }
 
 // LoginPolicyStore persists at most one LoginPolicy per (project, tenant).

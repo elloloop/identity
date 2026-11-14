@@ -39,7 +39,7 @@ func TestSuspendTenantMember_SuspendsAndRestoresAndAudits(t *testing.T) {
 	ctx := withTenantsProject(false)
 	suspended, restored := string(audit.EventTenantMemberSuspended), string(audit.EventTenantMemberRestored)
 
-	got, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, " "+ownTenant+" ", " "+joinerID+" ", "203.0.113.7", "test-agent")
+	got, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, " "+ownTenant+" ", " "+joinerID+" ", "203.0.113.7", "test-agent")
 	require.NoError(t, err)
 	assert.Equal(t, MembershipStatusSuspended, got.Status)
 	assert.Equal(t, RoleMember, got.Role)
@@ -52,7 +52,7 @@ func TestSuspendTenantMember_SuspendsAndRestoresAndAudits(t *testing.T) {
 	}}, f.audit.detailsOf(suspended))
 	assert.Equal(t, [][2]string{{"203.0.113.7", "test-agent"}}, f.audit.clientsOf(suspended))
 
-	mine, err := f.svc.ListMyTenants(ctx, joinerID)
+	mine, err := f.svc.ListMyTenants(ctx, joinerID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Empty(t, mine, "a suspended member's tenant is not theirs to choose")
 	members, err := f.svc.ListTenantMembers(ctx, ssOwnerID, ownTenant)
@@ -60,12 +60,12 @@ func TestSuspendTenantMember_SuspendsAndRestoresAndAudits(t *testing.T) {
 	assert.Len(t, members, 2, "the member list still shows them")
 
 	// Suspending them again changes and records nothing.
-	again, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	again, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, got, again)
 	assert.Equal(t, 1, f.audit.countByEventType(suspended))
 
-	back, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "198.51.100.2", "other-agent")
+	back, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "198.51.100.2", "other-agent")
 	require.NoError(t, err)
 	assert.Equal(t, MembershipStatusActive, back.Status)
 	assert.Equal(t, RoleMember, back.Role)
@@ -75,13 +75,13 @@ func TestSuspendTenantMember_SuspendsAndRestoresAndAudits(t *testing.T) {
 		"project_id": ssProject, "tenant_id": ownTenant,
 		"role": RoleMember, "source": MembershipSourceDomain, "status": MembershipStatusActive,
 	}}, f.audit.detailsOf(restored))
-	mine, err = f.svc.ListMyTenants(ctx, joinerID)
+	mine, err = f.svc.ListMyTenants(ctx, joinerID, SessionSignIn{})
 	require.NoError(t, err)
 	require.Len(t, mine, 1)
 	assert.Equal(t, ownTenant, mine[0].TenantID)
 
 	// Restoring an active member changes and records nothing.
-	again, err = f.svc.RestoreTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	again, err = f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, back, again)
 	assert.Equal(t, 1, f.audit.countByEventType(restored))
@@ -93,10 +93,10 @@ func TestSuspendTenantMember_WithoutAnAuditTrail(t *testing.T) {
 	f.svc.WithAudit(nil)
 	ctx := withTenantsProject(false)
 
-	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, MembershipStatusSuspended, f.membership(t, joinerID).Status)
-	_, err = f.svc.RestoreTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	_, err = f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, MembershipStatusActive, f.membership(t, joinerID).Status)
 }
@@ -107,7 +107,7 @@ func TestSuspendTenantMember_WithoutAnAuditTrail(t *testing.T) {
 func TestSuspendTenantMember_KeepsTheMemberOut(t *testing.T) {
 	f := suspensionFixture(t)
 	ctx := withTenantsProject(false)
-	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
 
 	assert.Empty(t, f.joinable(t, joinerID))
@@ -118,13 +118,13 @@ func TestSuspendTenantMember_KeepsTheMemberOut(t *testing.T) {
 
 	// An admin suspended can neither list, remove nor suspend anyone.
 	f.seed(ssOtherID, MembershipSourceInvited, RoleAdmin, MembershipStatusActive)
-	_, err = f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, ssOtherID, "", "")
+	_, err = f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.NoError(t, err)
 	_, err = f.svc.ListTenantMembers(ctx, ssOtherID, ownTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied)
-	_, err = f.svc.RestoreTenantMember(ctx, ssOtherID, ownTenant, ssOtherID, "", "")
+	_, err = f.svc.RestoreTenantMember(ctx, ssOtherID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "nobody restores themselves")
-	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, ssOtherID, ownTenant, joinerID, "", ""), ErrPermissionDenied)
+	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, ssOtherID, SessionSignIn{}, ownTenant, joinerID, "", ""), ErrPermissionDenied)
 }
 
 // An invitation the suspended member accepts leaves the suspension, and the
@@ -135,7 +135,7 @@ func TestSuspendTenantMember_AnInvitationDoesNotLiftIt(t *testing.T) {
 	f.users.put(mTestProject, mInviteeID, mInvitee)
 	f.seedMember(mTestProject, mTestTenant, mInviteeID, RoleMember)
 	ctx := withProject(mTestProject)
-	_, err := f.svc.SuspendTenantMember(ctx, mAdminID, mTestTenant, mInviteeID, "", "")
+	_, err := f.svc.SuspendTenantMember(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInviteeID, "", "")
 	require.NoError(t, err)
 
 	_, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
@@ -148,7 +148,7 @@ func TestSuspendTenantMember_AnInvitationDoesNotLiftIt(t *testing.T) {
 	assert.Equal(t, InvitationStatusPending, invs[0].Status)
 
 	// Once restored, the invitation is accepted as any other.
-	_, err = f.svc.RestoreTenantMember(ctx, mAdminID, mTestTenant, mInviteeID, "", "")
+	_, err = f.svc.RestoreTenantMember(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInviteeID, "", "")
 	require.NoError(t, err)
 	m, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
 	require.NoError(t, err)
@@ -163,17 +163,17 @@ func TestSuspendTenantMember_KeepsAnOwner(t *testing.T) {
 	ctx := withTenantsProject(false)
 	f.seed(ssOtherID, MembershipSourceInvited, RoleAdmin, MembershipStatusActive)
 
-	_, err := f.svc.SuspendTenantMember(ctx, ssOtherID, ownTenant, ssOwnerID, "", "")
+	_, err := f.svc.SuspendTenantMember(ctx, ssOtherID, SessionSignIn{}, ownTenant, ssOwnerID, "", "")
 	require.ErrorIs(t, err, ErrLastOwner)
 	assert.Equal(t, MembershipStatusActive, f.membership(t, ssOwnerID).Status)
 	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantMemberSuspended)))
 
 	f.seed(joinerID, MembershipSourceInvited, RoleOwner, MembershipStatusActive)
-	got, err := f.svc.SuspendTenantMember(ctx, ssOtherID, ownTenant, ssOwnerID, "", "")
+	got, err := f.svc.SuspendTenantMember(ctx, ssOtherID, SessionSignIn{}, ownTenant, ssOwnerID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, RoleOwner, got.Role)
 	assert.Equal(t, MembershipStatusSuspended, got.Status)
-	_, err = f.svc.SuspendTenantMember(ctx, ssOtherID, ownTenant, joinerID, "", "")
+	_, err = f.svc.SuspendTenantMember(ctx, ssOtherID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.ErrorIs(t, err, ErrLastOwner, "the other owner is now the last active one")
 }
 
@@ -182,11 +182,11 @@ func TestSuspendTenantMember_KeepsAnOwner(t *testing.T) {
 func TestRestoreTenantMember_ADomainMemberOffTheDomainEnds(t *testing.T) {
 	f := suspensionFixture(t)
 	ctx := withTenantsProject(false)
-	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
 	f.users.set(ssProject, &User{ID: joinerID, Email: "joiner@elsewhere.test", Status: StatusActive, EmailVerified: true})
 
-	got, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	got, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, MembershipStatusInactive, got.Status)
 	assert.Equal(t, MembershipStatusInactive, f.membership(t, joinerID).Status)
@@ -195,10 +195,10 @@ func TestRestoreTenantMember_ADomainMemberOffTheDomainEnds(t *testing.T) {
 	// A membership from any other source comes back active wherever the
 	// email is.
 	f.seed(ssOtherID, MembershipSourceInvited, RoleMember, MembershipStatusActive)
-	_, err = f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, ssOtherID, "", "")
+	_, err = f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.NoError(t, err)
 	f.users.set(ssProject, &User{ID: ssOtherID, Email: "other@elsewhere.test", Status: StatusActive, EmailVerified: true})
-	got, err = f.svc.RestoreTenantMember(ctx, ssOwnerID, ownTenant, ssOtherID, "", "")
+	got, err = f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, MembershipStatusActive, got.Status)
 }
@@ -206,11 +206,11 @@ func TestRestoreTenantMember_ADomainMemberOffTheDomainEnds(t *testing.T) {
 func TestSuspendAndRestoreTenantMember_Refusals(t *testing.T) {
 	type call func(f *joinFixture, ctx context.Context, caller, tenant, target string) error
 	suspend := func(f *joinFixture, ctx context.Context, caller, tenant, target string) error {
-		_, err := f.svc.SuspendTenantMember(ctx, caller, tenant, target, "", "")
+		_, err := f.svc.SuspendTenantMember(ctx, caller, SessionSignIn{}, tenant, target, "", "")
 		return err
 	}
 	restore := func(f *joinFixture, ctx context.Context, caller, tenant, target string) error {
-		_, err := f.svc.RestoreTenantMember(ctx, caller, tenant, target, "", "")
+		_, err := f.svc.RestoreTenantMember(ctx, caller, SessionSignIn{}, tenant, target, "", "")
 		return err
 	}
 	for name, do := range map[string]call{"suspend": suspend, "restore": restore} {
@@ -242,9 +242,9 @@ func TestSuspendAndRestoreTenantMember_Refusals(t *testing.T) {
 	f := suspensionFixture(t)
 	f.seed(ssOtherID, MembershipSourceInvited, RoleMember, MembershipStatusActive)
 	ctx := withTenantsProject(false)
-	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, " "+ssOwnerID, "", "")
+	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, " "+ssOwnerID, "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument, "nobody suspends themselves")
-	_, err = f.svc.SuspendTenantMember(ctx, ssOtherID, ownTenant, ssOtherID, "", "")
+	_, err = f.svc.SuspendTenantMember(ctx, ssOtherID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "a member is not an admin, of themselves either")
 	assert.Equal(t, MembershipStatusActive, f.membership(t, ssOwnerID).Status)
 }
@@ -256,13 +256,13 @@ func TestRestoreTenantMember_ACallerSuspendedMeanwhileLiftsNothing(t *testing.T)
 	f := suspensionFixture(t)
 	ctx := withTenantsProject(false)
 	f.seed(ssOtherID, MembershipSourceInvited, RoleAdmin, MembershipStatusActive)
-	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	_, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
 	f.members.onRestore = func() {
 		f.members.byKey[f.members.key(ssProject, ownTenant, ssOtherID)].Status = MembershipStatusSuspended
 	}
 
-	_, err = f.svc.RestoreTenantMember(ctx, ssOtherID, ownTenant, joinerID, "", "")
+	_, err = f.svc.RestoreTenantMember(ctx, ssOtherID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	assert.Equal(t, MembershipStatusSuspended, f.membership(t, joinerID).Status)
 	assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantMemberRestored)))
@@ -273,7 +273,7 @@ func TestRestoreTenantMember_ACallerSuspendedMeanwhileLiftsNothing(t *testing.T)
 func TestRestoreTenantMember_RefusesYourself(t *testing.T) {
 	f := suspensionFixture(t)
 	ctx := withTenantsProject(false)
-	_, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, ownTenant, " "+ssOwnerID, "", "")
+	_, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, " "+ssOwnerID, "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
 	assert.Equal(t, MembershipStatusActive, f.membership(t, ssOwnerID).Status)
 }
@@ -382,7 +382,7 @@ func TestVerifyDomain_ASuspensionDuringTheCheckStands(t *testing.T) {
 		m.Role, m.Status = RoleAdmin, MembershipStatusSuspended
 	}
 
-	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.NoError(t, err)
 	assert.Equal(t, DomainStatusVerified, got.Status)
 	m, _ := f.members.GetMembership(context.Background(), testProject, testTenant, testCaller)

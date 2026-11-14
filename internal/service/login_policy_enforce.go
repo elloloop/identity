@@ -69,7 +69,9 @@ func breachedSessionTimeout(p *LoginPolicy, nowMs, sessionStartedAtMs, lastUsedA
 // that restricts sign-in (restrictsSignIn) admits only a session whose
 // sign-in it governed: one whose account email is on a domain the tenant has
 // verified. Any session is held to the policy's timeouts, measured from its
-// own start and last use. Every refusal is a TenantSelectionRefusedError,
+// own start and last use, and to its phone rule: a policy that requires a
+// verified phone admits no account without one, of the policy's countries
+// when it names any. Every refusal is a TenantSelectionRefusedError,
 // made before the refresh token is spent. Without the governance plane no
 // tenant has a policy, and a lookup that fails refuses as unavailable.
 func (s *AuthService) checkSelectedTenantPolicy(ctx context.Context, projectID string, user *User, session *RefreshTokenRecord, tenantID string) error {
@@ -97,7 +99,27 @@ func (s *AuthService) checkSelectedTenantPolicy(ctx context.Context, projectID s
 		return s.loginPolicyRefusal(projectID, tenantID, "session_timeout",
 			"the session is past the tenant's session timeout")
 	}
+	// Last, so a session the policy would refuse anyway is not sent to
+	// verify a phone first. The account keeps its unselected session, which
+	// is what it verifies the phone with before selecting again.
+	if policy.RequireVerifiedPhone && !phoneSatisfies(user, policy) {
+		s.logPhoneRuleRefusal(ctx, projectID, tenantID)
+		return &TenantSelectionRefusedError{Reason: TenantSelectionPhoneRequired, Err: ErrPhoneVerificationRequired}
+	}
 	return nil
+}
+
+// logPhoneRuleRefusal logs a selection the tenant's phone rule refused, as a
+// warning when the project cannot verify phones: then no account without a
+// verified phone can ever meet the rule, which only the operator can fix.
+func (s *AuthService) logPhoneRuleRefusal(ctx context.Context, projectID, tenantID string) {
+	fields := []zap.Field{zap.String("project_id", projectID), zap.String("tenant_id", tenantID)}
+	reason := s.phoneUnverifiableReason(phoneConfig(ProjectScopeFromContext(ctx)))
+	if reason == "" {
+		s.logger.Info("tenant_selection_refused_phone_required", fields...)
+		return
+	}
+	s.logger.Warn("tenant_selection_refused_phone_required", append(fields, zap.String("phone_unverifiable", reason))...)
 }
 
 // restrictsSignIn reports whether a policy limits how its users sign in, as
@@ -411,7 +433,11 @@ func projectLoginControls(ctx context.Context) loginControls {
 //
 // The verified-email gate runs first: a sign-in that cannot yield a session
 // is not asked for a second factor (which could spend a recovery code on it).
-func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, policyForced bool, ipAddr, userAgent string) (*LoginResult, error) {
+//
+// recoveryEmailID is the RecoveryEmail.ID of the recovery email a sign-in by
+// one was made with, kept on the challenge for VerifyTotp to open the session
+// as that sign-in's; empty for every other sign-in.
+func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, policyForced bool, recoveryEmailID, ipAddr, userAgent string) (*LoginResult, error) {
 	if err := s.enforceVerifiedEmail(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, err
 	}
@@ -419,7 +445,7 @@ func (s *AuthService) requireSecondFactor(ctx context.Context, user *User, polic
 		return nil, err
 	}
 
-	challengeID, err := s.issueLoginChallenge(ctx, user.ID)
+	challengeID, err := s.issueLoginChallenge(ctx, user.ID, recoveryEmailID)
 	if err != nil {
 		return nil, err
 	}

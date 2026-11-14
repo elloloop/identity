@@ -56,8 +56,12 @@ type DomainService struct {
 	cfg         *config.Config
 	logger      *zap.Logger
 	// audit records SetDomainJoin changes (WithAudit); nil records nothing.
-	audit   *audit.Logger
-	nowFunc func() time.Time
+	audit *audit.Logger
+	// accounts is the account store a recovery hold is read from
+	// (WithAccounts); nil refuses every domain change by a session a
+	// recovery email may have opened.
+	accounts Repository
+	nowFunc  func() time.Time
 }
 
 // NewDomainService wires a DomainService. resolver may be nil, in which
@@ -104,13 +108,16 @@ type CreatedDomain struct {
 // tenant's domain-attempt cap, refused or not, so the ALREADY_EXISTS answer
 // for a name another tenant verified cannot be used to sweep a project's
 // verified domains.
-func (s *DomainService) CreateDomain(ctx context.Context, callerID, tenantID, domain, method string) (*CreatedDomain, error) {
+func (s *DomainService) CreateDomain(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, domain, method string) (*CreatedDomain, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if callerID == "" {
 		return nil, ErrUnauthenticated
+	}
+	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
+		return nil, err
 	}
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
@@ -169,13 +176,16 @@ func (s *DomainService) CreateDomain(ctx context.Context, callerID, tenantID, do
 //
 // Only the DNS-TXT method is implemented; the email method returns
 // ErrUnimplemented rather than faking success.
-func (s *DomainService) VerifyDomain(ctx context.Context, callerID, domainID string) (*Domain, error) {
+func (s *DomainService) VerifyDomain(ctx context.Context, callerID string, signIn SessionSignIn, domainID string) (*Domain, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if callerID == "" {
 		return nil, ErrUnauthenticated
+	}
+	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
+		return nil, err
 	}
 	domainID = strings.TrimSpace(domainID)
 	if domainID == "" {
@@ -319,6 +329,21 @@ func (s *DomainService) recordAttempt(ctx context.Context, projectID, tenantID s
 			zap.String("project_id", projectID), zap.String("tenant_id", tenantID))
 	}
 	return err
+}
+
+// WithAccounts sets the account store a recovery hold on the caller's
+// account is read from.
+func (s *DomainService) WithAccounts(accounts Repository) *DomainService {
+	s.accounts = accounts
+	return s
+}
+
+// refuseHeldSession refuses a domain registration, verification or join
+// setting asked for by a session a recovery hold binds or whose recovery
+// email is gone (refuseHeldSession): each decides who may belong to a
+// tenant, which outlasts the session.
+func (s *DomainService) refuseHeldSession(ctx context.Context, projectID, callerID string, signIn SessionSignIn) error {
+	return refuseHeldSessionInProject(ctx, s.accounts, s.logger, projectID, callerID, signIn, s.nowFunc().UnixMilli())
 }
 
 // requireTenantAdmin is authorizeTenantAdmin over this service's stores.

@@ -18,7 +18,7 @@ func TestAgentStanding_InheritsOwnerEmailVerification(t *testing.T) {
 	agent := seedAgent(f.repo, f.owner.ID)
 	ctx := context.Background()
 
-	access, refresh, err := f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0, 0, "")
+	access, refresh, err := f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0, 0, "", "")
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Empty(t, access)
 	assert.Empty(t, refresh)

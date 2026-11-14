@@ -28,25 +28,72 @@ type AccountMerge struct {
 	// SwapAddress gives the survivor the retired account's account address
 	// and the retired account the survivor's old one.
 	SwapAddress bool
-	AtMs        int64
+	// MovePhone moves the retired account's phone number, its verified state
+	// and its claim on the number (phone.unique) to the survivor, which has
+	// none. Without it the retired account's claim is released, so a number
+	// is never held by an account that can no longer sign in.
+	MovePhone bool
+	// RecoveryEmailsMax caps the survivor's recovery emails once the retired
+	// account's have moved to it: when together they hold more, the merge is
+	// ErrRecoveryEmailLimit and changes nothing.
+	RecoveryEmailsMax int
+	// RecoveryHold is the project's recovery hold. While one is in force on
+	// either account at AtMs the merge is a RecoveryHoldError (HoldRefusal)
+	// and changes nothing. It is read under the merge's lock, so a recovery
+	// sign-in that lands after the caller's checks still stops the merge.
+	RecoveryHold time.Duration
+	AtMs         int64
 }
 
-// ApplyToUsers is the merge's change to the two account records, for a store
-// that holds them in memory (the memory driver and the test stores): the
-// guards the SQL drivers apply in their transaction, then the moves. It
-// changes nothing and returns ErrMergeConflict when either account is no
-// longer active, unmerged people, or a move would overwrite a field the
-// survivor has filled. The caller re-points the other account's linked
-// providers, applies ApplyToAgent to its users, and ends its sessions,
-// under the same lock.
-func (m AccountMerge) ApplyToUsers(survivor, other *User) error {
+// HoldRefusal is the RecoveryHoldError the merge answers while the hold the
+// two accounts' latest recovery sign-in started (latestHoldStartedAtMs, 0 for
+// none) is in force at AtMs, or nil.
+func (m AccountMerge) HoldRefusal(latestHoldStartedAtMs int64) error {
+	if until := recoveryHoldEnd(latestHoldStartedAtMs, m.RecoveryHold, m.AtMs); until != 0 {
+		return &RecoveryHoldError{UntilMs: until}
+	}
+	return nil
+}
+
+// ApplyToUsers is the merge's change to the two account records and to the
+// recovery-email table (by account id), for a store that holds them in
+// memory (the memory driver and the test stores): the guards the SQL drivers
+// apply in their transaction, then the moves. It changes nothing and returns
+// ErrMergeConflict when either account is no longer active, unmerged people,
+// or a move would overwrite a field the survivor has filled, HoldRefusal's
+// RecoveryHoldError while a recovery hold is in force on either, and
+// ErrRecoveryEmailLimit when the survivor could not take the other account's
+// recovery emails. The caller re-points the other account's linked
+// providers, moves or releases its phone claim (MovePhone), applies
+// ApplyToAgent to its users, and ends its sessions, under the same lock.
+func (m AccountMerge) ApplyToUsers(survivor, other *User, recoveryEmails map[string][]*RecoveryEmail) error {
 	mergeable := func(u *User) bool { return u.Status == StatusActive && u.MergedIntoUserID == "" && !u.IsAgent() }
 	if survivor == nil || other == nil || m.OtherID == m.SurvivorID || !mergeable(other) || !mergeable(survivor) {
 		return ErrMergeConflict
 	}
 	if (m.MoveUsername && survivor.Username != "") || (m.MovePassword && survivor.PasswordHash != "") ||
-		(m.MoveEmail && survivor.Email != "") {
+		(m.MoveEmail && survivor.Email != "") || (m.MovePhone && survivor.PhoneNumber != "") {
 		return ErrMergeConflict
+	}
+	moving := recoveryEmails[m.OtherID]
+	var latestHold int64
+	for _, id := range []string{m.SurvivorID, m.OtherID} {
+		for _, e := range recoveryEmails[id] {
+			latestHold = max(latestHold, e.HoldStartedAt)
+		}
+	}
+	if err := m.HoldRefusal(latestHold); err != nil {
+		return err
+	}
+	if len(moving) > 0 && len(recoveryEmails[m.SurvivorID])+len(moving) > m.RecoveryEmailsMax {
+		return ErrRecoveryEmailLimit
+	}
+	for _, e := range moving {
+		e.UserID = m.SurvivorID
+	}
+	if len(moving) > 0 {
+		recoveryEmails[m.SurvivorID] = append(recoveryEmails[m.SurvivorID], moving...)
+		delete(recoveryEmails, m.OtherID)
 	}
 	if m.MoveUsername {
 		survivor.Username, other.Username = other.Username, ""
@@ -60,6 +107,10 @@ func (m AccountMerge) ApplyToUsers(survivor, other *User) error {
 	}
 	if m.SwapAddress {
 		survivor.AccountAddress, other.AccountAddress = other.AccountAddress, survivor.AccountAddress
+	}
+	if m.MovePhone {
+		survivor.PhoneNumber, survivor.PhoneVerified, survivor.PhoneVerifiedAt = other.PhoneNumber, other.PhoneVerified, other.PhoneVerifiedAt
+		other.PhoneNumber, other.PhoneVerified, other.PhoneVerifiedAt = "", false, 0
 	}
 	other.Status, other.MergedIntoUserID = StatusDeactivated, m.SurvivorID
 	other.UpdatedAt, survivor.UpdatedAt = time.UnixMilli(m.AtMs), time.UnixMilli(m.AtMs)
@@ -120,10 +171,13 @@ var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in
 //
 // Everything that lets the person sign in the way they used to moves to the
 // survivor, in one transaction (Repository.ApplyAccountMerge): its linked
-// provider identities always; its username, password and email
-// where the survivor has none of its own; and, on request (takeAddress), its
-// account address, the survivor's old address moving to the retired account
-// so neither is freed for someone else. Passkeys do not move: a passkey is
+// provider identities and its recovery emails always (refused when together
+// the two accounts would hold more recovery emails than one may keep); its
+// username, password, email and phone number where the survivor has none of
+// its own (a phone the survivor already has keeps it, and the retired
+// account's number is released); and, on request (takeAddress), its account
+// address, the survivor's old address moving to the retired account so
+// neither is freed for someone else. Passkeys do not move: a passkey is
 // bound to the account it was registered for (its WebAuthn user handle), so
 // it would not sign in to the survivor. The person registers passkeys again
 // on the survivor.
@@ -133,8 +187,14 @@ var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in
 //
 // Refused: merging an account with itself; an account that is not active;
 // an anonymous account (upgrade it instead); an agent; a managed child's account (it
-// stays with its guardian), and an account that is any child's guardian
-// (its children's guardian edges would point at a retired account).
+// stays with its guardian); an account that is any child's guardian
+// (its children's guardian edges would point at a retired account); and,
+// whoever asks, either account while a recovery hold is in force on it
+// (RecoveryHoldError): a merge moves the recovery emails and the sign-in
+// methods the hold is keeping where they are. MergeAccounts also refuses a
+// session that may have been opened by a recovery email whatever
+// refuseHeldSession refuses: the other account's password could arrive on
+// the caller's account as a way in of its own.
 
 // MergeAccounts merges the account identified by otherIdentifier (an email,
 // or a username) into the caller's own account, survivorID. The proof that
@@ -144,7 +204,7 @@ var ErrReauthenticationRequired = errors.New("reauthentication_required: sign in
 // second factor protects — enrolled two-step, or a policy requiring one —
 // cannot be merged by its password alone. The deployment must have turned
 // merging on (GATEWAY_ACCOUNT_MERGE_ENABLED).
-func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, authTimeSec int64, otherIdentifier, otherPassword, ipAddr, userAgent string, takeAddress bool) (*User, error) {
+func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, signIn SessionSignIn, otherIdentifier, otherPassword, ipAddr, userAgent string, takeAddress bool) (*User, error) {
 	if !s.cfg.AccountMergeEnabled {
 		return nil, ErrAccountMergeDisabled
 	}
@@ -154,8 +214,11 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, auth
 	// The account that is kept proves itself as freshly as the other one: a
 	// session is not enough, a recent sign-in is. Before any password check,
 	// so a stale session learns nothing about the other account.
-	if !s.recentlyAuthenticated(authTimeSec) {
+	if !s.recentlyAuthenticated(signIn.AuthTimeSec) {
 		return nil, ErrReauthenticationRequired
+	}
+	if err := s.refuseHeldSession(ctx, survivorID, signIn); err != nil {
+		return nil, err
 	}
 	repo := s.repo(ctx)
 	survivor, err := repo.GetUser(ctx, survivorID)
@@ -211,12 +274,24 @@ func (s *AuthService) auditMerge(ctx context.Context, actorID, targetID, ipAddr,
 // MergeUsers is the admin form of MergeAccounts: an admin merges otherID into
 // survivorID. The admin's role is the authority, so no password of either
 // account is asked for, and it does not depend on the self-service switch.
-func (s *AdminService) MergeUsers(ctx context.Context, actorID, survivorID, otherID string, takeAddress bool) (*User, error) {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+// It is refused like MergeAccounts while a recovery hold is in force on
+// either account: the owner ends one early by removing, signed in some other
+// way, every recovery email whose hold is still in force. A merge can move a
+// password onto an account that had none, so it is also refused to an
+// admin's session a recovery hold binds (requireAdminChange). Neither account
+// may be the admin's own: merging one away retires the admin, and merging one
+// in gives the admin's account the other's password and sign-ins, which only
+// MergeAccounts, with that account's password and the caller's session
+// checked, may do.
+func (s *AdminService) MergeUsers(ctx context.Context, actorID string, signIn SessionSignIn, survivorID, otherID string, takeAddress bool) (*User, error) {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return nil, err
 	}
 	if otherID == actorID {
 		return nil, fmt.Errorf("%w: an admin cannot merge away their own account", ErrMergeRefused)
+	}
+	if survivorID == actorID {
+		return nil, fmt.Errorf("%w: an admin merges another account into their own with MergeAccounts", ErrMergeRefused)
 	}
 	repo := s.repo(ctx)
 	survivor, err := repo.GetUser(ctx, survivorID)
@@ -265,22 +340,34 @@ func announceMerge(ctx context.Context, a mergeAnnouncer, retiredBefore, merged,
 }
 
 // mergeAccounts checks the pair, applies the merge in one transaction and
-// returns both accounts as stored afterwards.
+// returns both accounts as stored afterwards. The other account's recovery
+// hold is read only in that transaction, once the caller has proved it is
+// theirs.
 func mergeAccounts(ctx context.Context, repo Repository, survivor, other *User, takeAddress bool, now int64) (*User, *User, error) {
 	if err := checkMergeable(ctx, repo, survivor, other); err != nil {
 		return nil, nil, err
 	}
-	if err := repo.ApplyAccountMerge(ctx, AccountMerge{
+	recoveryCfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
+	recoveryMax := recoveryCfg.max()
+	err := repo.ApplyAccountMerge(ctx, AccountMerge{
 		SurvivorID:   survivor.ID,
 		OtherID:      other.ID,
 		MoveUsername: other.Username != "" && survivor.Username == "",
 		// A password a second factor protected does not move: on the
 		// survivor it would sign in without one.
-		MovePassword: other.PasswordHash != "" && survivor.PasswordHash == "" && !other.TotpRequired,
-		MoveEmail:    other.Email != "" && survivor.Email == "",
-		SwapAddress:  takeAddress && other.AccountAddress != "",
-		AtMs:         now,
-	}); err != nil {
+		MovePassword:      other.PasswordHash != "" && survivor.PasswordHash == "" && !other.TotpRequired,
+		MoveEmail:         other.Email != "" && survivor.Email == "",
+		SwapAddress:       takeAddress && other.AccountAddress != "",
+		MovePhone:         other.PhoneNumber != "" && survivor.PhoneNumber == "",
+		RecoveryEmailsMax: recoveryMax,
+		RecoveryHold:      recoveryCfg.hold(),
+		AtMs:              now,
+	})
+	if errors.Is(err, ErrRecoveryEmailLimit) {
+		return nil, nil, fmt.Errorf("%w: together the two accounts hold more than the %d recovery emails one account may keep; remove some from either first",
+			ErrMergeRefused, recoveryMax)
+	}
+	if err != nil {
 		return nil, nil, err
 	}
 	merged, err := repo.GetUser(ctx, survivor.ID)
@@ -413,6 +500,13 @@ const authTimeClockSkew = 30 * time.Second
 // seconds) is within GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS of now. A
 // session with no recorded sign-in time, or one in the future, is not.
 func (s *AuthService) recentlyAuthenticated(authTimeSec int64) bool {
+	return s.signedInWithin(authTimeSec, s.cfg.AccountMergeReauthMaxAge())
+}
+
+// signedInWithin reports whether a session's sign-in (the access token's
+// auth_time, in epoch seconds; 0 when no sign-in opened the session) is at
+// most maxAge old.
+func (s *AuthService) signedInWithin(authTimeSec int64, maxAge time.Duration) bool {
 	if authTimeSec <= 0 {
 		return false
 	}
@@ -420,5 +514,5 @@ func (s *AuthService) recentlyAuthenticated(authTimeSec int64) bool {
 	// sign-in stamped by a replica whose clock runs slightly ahead is still a
 	// sign-in; anything further in the future is not.
 	age := s.nowMs()/1000 - authTimeSec
-	return age >= -int64(authTimeClockSkew.Seconds()) && age <= int64(s.cfg.AccountMergeReauthMaxAge().Seconds())
+	return age >= -int64(authTimeClockSkew.Seconds()) && age <= int64(maxAge.Seconds())
 }

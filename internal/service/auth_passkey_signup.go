@@ -243,7 +243,7 @@ func (s *AuthService) CompletePasskeySignup(
 	// Anti-takeover + enumeration-safety: an existing account is never given a
 	// new passkey by an unauthenticated caller, and its existence is never
 	// disclosed. Mirror the duplicate-PasswordSignup decoy exactly.
-	existing, err := s.repo(ctx).FindUserByEmail(ctx, boundEmailStr)
+	existing, err := s.signupAddressHolder(ctx, boundEmailStr)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +271,7 @@ func (s *AuthService) CompletePasskeySignup(
 		// Lost a create race (a concurrent caller registered the email between
 		// our lookup and insert). Treat as duplicate: enumeration-safe, and the
 		// passkey is NOT attached to the winner's account.
-		if raced, lookupErr := s.repo(ctx).FindUserByEmail(ctx, boundEmailStr); lookupErr == nil && raced != nil {
+		if raced, lookupErr := s.signupAddressHolder(ctx, boundEmailStr); lookupErr == nil && raced != nil {
 			return s.handleDuplicatePasskeySignup(ctx, raced, boundEmailStr)
 		}
 		return nil, fmt.Errorf("creating user: %w", err)

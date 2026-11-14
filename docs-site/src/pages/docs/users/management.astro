@@ -95,7 +95,18 @@ import { Code } from "astro-expressive-code/components";
     <li>
       <strong><code>ResetUserPassword</code></strong> — generate a temp
       password (return to admin) or a reset token (admin delivers
-      manually).
+      manually). Not for the admin's own account
+      (<code>PERMISSION_DENIED</code>): an admin changes their own password
+      with <code>ChangePassword</code> or the reset email, as anyone does.
+      Neither <code>DeleteUser</code> nor <code>DeactivateUser</code> acts on
+      the caller's own account either: an admin deletes it with
+      <code>DeleteMyAccount</code>, as anyone does, and has it deactivated by
+      another admin. While a <a href="/identity/docs/auth/recovery-emails#the-hold">recovery
+      hold</a> is in force, a session a recovery email opened adds, merges or
+      reactivates no account, sets no role and resets no account's password
+      from the admin seat (<code>InviteUser</code>, <code>CreateUser</code>,
+      <code>UpdateUser</code>, <code>ResetUserPassword</code>,
+      <code>MergeUsers</code>, <code>ReactivateUser</code>).
     </li>
     <li>
       <strong><code>SetUserQuota</code></strong> — set per-user

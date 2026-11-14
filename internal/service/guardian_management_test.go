@@ -113,27 +113,27 @@ func allGuardianOps() []guardianOpCase {
 	ctx := context.Background()
 	return []guardianOpCase{
 		{"view_profile", func(f *guardianFixture, c, ch, su string) error {
-			_, err := f.svc.GetManagedChildProfile(ctx, c, ch, su, "", "")
+			_, err := f.svc.GetManagedChildProfile(ctx, c, SessionSignIn{}, ch, su, "", "")
 			return err
 		}},
 		{"set_password", func(f *guardianFixture, c, ch, su string) error {
-			return f.svc.SetManagedChildPassword(ctx, c, ch, "An0ther!Str0ng", su, "", "")
+			return f.svc.SetManagedChildPassword(ctx, c, SessionSignIn{}, ch, "An0ther!Str0ng", su, "", "")
 		}},
 		{"set_username", func(f *guardianFixture, c, ch, su string) error {
-			_, err := f.svc.SetManagedChildUsername(ctx, c, ch, "kid.renamed", su, "", "")
+			_, err := f.svc.SetManagedChildUsername(ctx, c, SessionSignIn{}, ch, "kid.renamed", su, "", "")
 			return err
 		}},
 		{"revoke_sessions", func(f *guardianFixture, c, ch, su string) error {
-			return f.svc.RevokeManagedChildSessions(ctx, c, ch, su, "", "")
+			return f.svc.RevokeManagedChildSessions(ctx, c, SessionSignIn{}, ch, su, "", "")
 		}},
 		{"deactivate", func(f *guardianFixture, c, ch, su string) error {
-			return f.svc.DeactivateManagedChildAccount(ctx, c, ch, "lost tablet", su, "", "")
+			return f.svc.DeactivateManagedChildAccount(ctx, c, SessionSignIn{}, ch, "lost tablet", su, "", "")
 		}},
 		{"reactivate", func(f *guardianFixture, c, ch, su string) error {
-			return f.svc.ReactivateManagedChildAccount(ctx, c, ch, su, "", "")
+			return f.svc.ReactivateManagedChildAccount(ctx, c, SessionSignIn{}, ch, su, "", "")
 		}},
 		{"delete", func(f *guardianFixture, c, ch, su string) error {
-			return f.svc.DeleteManagedChildAccount(ctx, c, ch, su, "", "")
+			return f.svc.DeleteManagedChildAccount(ctx, c, SessionSignIn{}, ch, su, "", "")
 		}},
 	}
 }
@@ -277,8 +277,8 @@ func TestGuardianManagement_DenialIsAccountAgnostic(t *testing.T) {
 	f := newGuardianFixture(ctx, t)
 	stranger := seedConsentingAdult(t, f.repo, "stranger@example.com", hashPW(t, strongPW), adultFactors{phoneVerified: true})
 
-	_, errExisting := f.svc.GetManagedChildProfile(ctx, stranger.ID, f.child.ID, strongPW, "", "")
-	_, errMissing := f.svc.GetManagedChildProfile(ctx, stranger.ID, "no-such-child", strongPW, "", "")
+	_, errExisting := f.svc.GetManagedChildProfile(ctx, stranger.ID, SessionSignIn{}, f.child.ID, strongPW, "", "")
+	_, errMissing := f.svc.GetManagedChildProfile(ctx, stranger.ID, SessionSignIn{}, "no-such-child", strongPW, "", "")
 	if !errors.Is(errExisting, ErrPermissionDenied) || !errors.Is(errMissing, ErrPermissionDenied) {
 		t.Fatalf("denials = %v / %v, want ErrPermissionDenied for both", errExisting, errMissing)
 	}
@@ -295,7 +295,7 @@ func TestGuardianManagement_RevokedConsentEndsRightsImmediately(t *testing.T) {
 	f := newGuardianFixture(ctx, t)
 
 	// Rights hold while the edge does.
-	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); err != nil {
+	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); err != nil {
 		t.Fatalf("GetManagedChildProfile before revoke: %v", err)
 	}
 
@@ -303,7 +303,7 @@ func TestGuardianManagement_RevokedConsentEndsRightsImmediately(t *testing.T) {
 		t.Fatalf("DeleteGuardianEdge: %v", err)
 	}
 
-	_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+	_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", "")
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("after edge removal: err = %v, want ErrPermissionDenied", err)
 	}
@@ -321,7 +321,7 @@ func TestGuardianManagement_AgedOutLeavesChildSessionsAlone(t *testing.T) {
 	if err := f.repo.UpdateUser(ctx, f.child.ID, map[string]any{"date_of_birth_ms": dobAgeMs(21)}); err != nil {
 		t.Fatalf("age the child out: %v", err)
 	}
-	if err := f.svc.RevokeManagedChildSessions(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrGuardianRightsExpired) {
+	if err := f.svc.RevokeManagedChildSessions(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrGuardianRightsExpired) {
 		t.Fatalf("err = %v, want ErrGuardianRightsExpired", err)
 	}
 	if !f.childSessionsLive(t) {
@@ -340,7 +340,7 @@ func TestGuardianManagement_GateOffEdgeIsTheAuthority(t *testing.T) {
 	child := seedManagedChild(t, repo, "kid.one", 0) // no DOB at all
 	seedGuardianEdge(ctx, t, repo, guardian.ID, child.ID)
 
-	if _, err := svc.GetManagedChildProfile(ctx, guardian.ID, child.ID, strongPW, "", ""); err != nil {
+	if _, err := svc.GetManagedChildProfile(ctx, guardian.ID, SessionSignIn{}, child.ID, strongPW, "", ""); err != nil {
 		t.Fatalf("gate off: %v", err)
 	}
 }
@@ -351,7 +351,7 @@ func TestGetManagedChildProfile_ReturnsStoredAccount(t *testing.T) {
 	ctx := context.Background()
 	f := newGuardianFixture(ctx, t)
 
-	child, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "1.2.3.4", "agent/1.0")
+	child, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "1.2.3.4", "agent/1.0")
 	if err != nil {
 		t.Fatalf("GetManagedChildProfile: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestSetManagedChildPassword_SetsAndCutsSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, f.child.ID, newPW, strongPW, "", ""); err != nil {
+	if err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, newPW, strongPW, "", ""); err != nil {
 		t.Fatalf("SetManagedChildPassword: %v", err)
 	}
 
@@ -404,7 +404,7 @@ func TestSetManagedChildPassword_EnforcesPasswordPolicy(t *testing.T) {
 	ctx := context.Background()
 	f := newGuardianFixture(ctx, t)
 
-	err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, f.child.ID, "short", strongPW, "", "")
+	err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "short", strongPW, "", "")
 	if !errors.Is(err, ErrWeakPassword) {
 		t.Fatalf("err = %v, want ErrWeakPassword", err)
 	}
@@ -419,7 +419,7 @@ func TestSetManagedChildUsername(t *testing.T) {
 
 	t.Run("changes the handle", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
-		child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "  Kid.Two  ", strongPW, "", "")
+		child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "  Kid.Two  ", strongPW, "", "")
 		if err != nil {
 			t.Fatalf("SetManagedChildUsername: %v", err)
 		}
@@ -438,7 +438,7 @@ func TestSetManagedChildUsername(t *testing.T) {
 	t.Run("rejects a taken handle", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		seedManagedChild(t, f.repo, "kid.two", dobAgeMs(9))
-		_, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "kid.two", strongPW, "", "")
+		_, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "kid.two", strongPW, "", "")
 		if !errors.Is(err, ErrAlreadyExists) {
 			t.Fatalf("err = %v, want ErrAlreadyExists", err)
 		}
@@ -447,7 +447,7 @@ func TestSetManagedChildUsername(t *testing.T) {
 	t.Run("rejects a malformed handle", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		for _, bad := range []string{"ab", "Kid Two", "kid@two", "kid!"} {
-			if _, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, bad, strongPW, "", ""); !errors.Is(err, ErrInvalidArgument) {
+			if _, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, bad, strongPW, "", ""); !errors.Is(err, ErrInvalidArgument) {
 				t.Fatalf("username %q: err = %v, want ErrInvalidArgument", bad, err)
 			}
 		}
@@ -455,7 +455,7 @@ func TestSetManagedChildUsername(t *testing.T) {
 
 	t.Run("is idempotent for the same handle", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
-		child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "kid.one", strongPW, "", "")
+		child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "kid.one", strongPW, "", "")
 		if err != nil || child.Username != "kid.one" {
 			t.Fatalf("same handle: %v %+v", err, child)
 		}
@@ -470,13 +470,13 @@ func TestSetManagedChildUsername(t *testing.T) {
 		}
 		// Re-submitting it is the idempotent no-op: any write would fail.
 		f.repo.updateUserErr = errors.New("no write expected")
-		child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "pat-at-home", strongPW, "", "")
+		child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "pat-at-home", strongPW, "", "")
 		if err != nil || child.Username != "pat-at-home" {
 			t.Fatalf("same legacy handle: %v %+v", err, child)
 		}
 		f.repo.updateUserErr = nil
 		// Renaming to a different handle the rules refuse is still refused.
-		if _, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "sam-at-home", strongPW, "", ""); !errors.Is(err, ErrInvalidArgument) {
+		if _, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "sam-at-home", strongPW, "", ""); !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("new -at- handle: err = %v, want ErrInvalidArgument", err)
 		}
 	})
@@ -484,7 +484,7 @@ func TestSetManagedChildUsername(t *testing.T) {
 	t.Run("maps a racing unique-index violation", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		f.repo.updateUserErr = fmt.Errorf("unique index: %w", ErrAlreadyExists)
-		_, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "kid.three", strongPW, "", "")
+		_, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "kid.three", strongPW, "", "")
 		if !errors.Is(err, ErrAlreadyExists) {
 			t.Fatalf("err = %v, want ErrAlreadyExists", err)
 		}
@@ -496,7 +496,7 @@ func TestRevokeManagedChildSessions(t *testing.T) {
 	f := newGuardianFixture(ctx, t)
 	seedChildSession(t, f.repo, f.child.ID)
 
-	if err := f.svc.RevokeManagedChildSessions(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); err != nil {
+	if err := f.svc.RevokeManagedChildSessions(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); err != nil {
 		t.Fatalf("RevokeManagedChildSessions: %v", err)
 	}
 	if f.childSessionsLive(t) {
@@ -512,7 +512,7 @@ func TestDeactivateAndReactivateManagedChildAccount(t *testing.T) {
 	f := newGuardianFixture(ctx, t)
 	seedChildSession(t, f.repo, f.child.ID)
 
-	if err := f.svc.DeactivateManagedChildAccount(ctx, f.guardian.ID, f.child.ID, "lost tablet", strongPW, "", ""); err != nil {
+	if err := f.svc.DeactivateManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "lost tablet", strongPW, "", ""); err != nil {
 		t.Fatalf("DeactivateManagedChildAccount: %v", err)
 	}
 	stored, _ := f.repo.GetUser(ctx, f.child.ID)
@@ -523,12 +523,12 @@ func TestDeactivateAndReactivateManagedChildAccount(t *testing.T) {
 		t.Fatal("deactivation must cut the child's access immediately")
 	}
 	// Idempotent.
-	if err := f.svc.DeactivateManagedChildAccount(ctx, f.guardian.ID, f.child.ID, "", strongPW, "", ""); err != nil {
+	if err := f.svc.DeactivateManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "", strongPW, "", ""); err != nil {
 		t.Fatalf("second deactivate: %v", err)
 	}
 
 	// Reversible by the same guardian.
-	if err := f.svc.ReactivateManagedChildAccount(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); err != nil {
+	if err := f.svc.ReactivateManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); err != nil {
 		t.Fatalf("ReactivateManagedChildAccount: %v", err)
 	}
 	stored, _ = f.repo.GetUser(ctx, f.child.ID)
@@ -549,7 +549,7 @@ func TestReactivateManagedChildAccount_CannotBypassConsentGate(t *testing.T) {
 		t.Fatalf("gate the child: %v", err)
 	}
 
-	err := f.svc.ReactivateManagedChildAccount(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+	err := f.svc.ReactivateManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", "")
 	if !errors.Is(err, ErrParentalConsentRequired) {
 		t.Fatalf("err = %v, want ErrParentalConsentRequired", err)
 	}
@@ -569,7 +569,7 @@ func TestDeactivateManagedChildAccount_RefusesOtherStates(t *testing.T) {
 		if err := f.repo.UpdateUser(ctx, f.child.ID, map[string]any{"status": status}); err != nil {
 			t.Fatalf("seed status: %v", err)
 		}
-		err := f.svc.DeactivateManagedChildAccount(ctx, f.guardian.ID, f.child.ID, "", strongPW, "", "")
+		err := f.svc.DeactivateManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "", strongPW, "", "")
 		if !errors.Is(err, ErrAccountNotActive) {
 			t.Fatalf("status %q: err = %v, want ErrAccountNotActive", status, err)
 		}
@@ -594,7 +594,7 @@ func TestDeleteManagedChildAccount_RunsTheSharedCascade(t *testing.T) {
 		t.Fatalf("seed consent: %v", err)
 	}
 
-	if err := f.svc.DeleteManagedChildAccount(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); err != nil {
+	if err := f.svc.DeleteManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); err != nil {
 		t.Fatalf("DeleteManagedChildAccount: %v", err)
 	}
 	if want := f.guardian.ID + "->" + f.child.ID; len(f.purger.calls) != 1 || f.purger.calls[0] != want {
@@ -621,7 +621,7 @@ func TestDeleteManagedChildAccount_UnwiredPurger(t *testing.T) {
 	f := newGuardianFixture(ctx, t)
 	f.svc.purger = nil
 
-	if err := f.svc.DeleteManagedChildAccount(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrServiceUnavailable) {
+	if err := f.svc.DeleteManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrServiceUnavailable) {
 		t.Fatalf("err = %v, want ErrServiceUnavailable", err)
 	}
 	if u, _ := f.repo.GetUser(ctx, f.child.ID); u == nil {
@@ -636,14 +636,14 @@ func TestGuardianManagement_RefusalsAreAudited(t *testing.T) {
 	f := newGuardianFixture(ctx, t)
 	stranger := seedConsentingAdult(t, f.repo, "stranger@example.com", hashPW(t, strongPW), adultFactors{phoneVerified: true})
 
-	if _, err := f.svc.GetManagedChildProfile(ctx, stranger.ID, f.child.ID, strongPW, "", ""); err == nil {
+	if _, err := f.svc.GetManagedChildProfile(ctx, stranger.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); err == nil {
 		t.Fatal("expected a refusal")
 	}
 	if n := f.writer.countByEventTypeAndDetail(string(audit.EventGuardianChildProfileViewed), "step", "not_guardian"); n != 1 {
 		t.Fatalf("not_guardian refusals = %d, want 1", n)
 	}
 
-	if err := f.svc.RevokeManagedChildSessions(ctx, f.guardian.ID, f.child.ID, "wrong", "", ""); err == nil {
+	if err := f.svc.RevokeManagedChildSessions(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "wrong", "", ""); err == nil {
 		t.Fatal("expected a step-up refusal")
 	}
 	if n := f.writer.countByEventTypeAndDetail(string(audit.EventGuardianChildSessionsRevoked), "step", "step_up"); n != 1 {
@@ -660,7 +660,7 @@ func TestGuardianManagement_InactiveGuardianRefused(t *testing.T) {
 		t.Fatalf("deactivate guardian: %v", err)
 	}
 
-	_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+	_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", "")
 	if !errors.Is(err, ErrAccountNotActive) {
 		t.Fatalf("err = %v, want ErrAccountNotActive", err)
 	}
@@ -679,7 +679,7 @@ func TestGuardianManagement_RepoFailuresPropagate(t *testing.T) {
 	t.Run("edge lookup fails", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		f.repo.getGuardianEdgeErr = errConsentInjected
-		_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+		_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
@@ -691,7 +691,7 @@ func TestGuardianManagement_RepoFailuresPropagate(t *testing.T) {
 	t.Run("guardian lookup fails", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		f.repo.getUserErrByID = map[string]error{f.guardian.ID: errConsentInjected}
-		_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+		_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
@@ -700,7 +700,7 @@ func TestGuardianManagement_RepoFailuresPropagate(t *testing.T) {
 	t.Run("child lookup fails", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		f.repo.getUserErrByID = map[string]error{f.child.ID: errConsentInjected}
-		_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+		_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
@@ -709,10 +709,10 @@ func TestGuardianManagement_RepoFailuresPropagate(t *testing.T) {
 	t.Run("write fails", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		f.repo.updateUserErr = errConsentInjected
-		if err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, f.child.ID, "An0ther!Str0ng", strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+		if err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "An0ther!Str0ng", strongPW, "", ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("set password: err = %v, want the injected failure", err)
 		}
-		if err := f.svc.DeactivateManagedChildAccount(ctx, f.guardian.ID, f.child.ID, "", strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+		if err := f.svc.DeactivateManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "", strongPW, "", ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("deactivate: err = %v, want the injected failure", err)
 		}
 	})
@@ -720,7 +720,7 @@ func TestGuardianManagement_RepoFailuresPropagate(t *testing.T) {
 	t.Run("session revocation fails", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		f.repo.deleteRefreshTokensErr = errConsentInjected
-		if err := f.svc.RevokeManagedChildSessions(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+		if err := f.svc.RevokeManagedChildSessions(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
@@ -730,7 +730,7 @@ func TestGuardianManagement_RepoFailuresPropagate(t *testing.T) {
 		f.repo.findUserByEmailErr = nil
 		f.repo.getUserErr = nil
 		f.repo.updateUserErr = errConsentInjected
-		if _, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "kid.renamed", strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+		if _, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "kid.renamed", strongPW, "", ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
@@ -738,7 +738,7 @@ func TestGuardianManagement_RepoFailuresPropagate(t *testing.T) {
 	t.Run("erasure fails", func(t *testing.T) {
 		f := newGuardianFixture(ctx, t)
 		f.purger.err = errConsentInjected
-		if err := f.svc.DeleteManagedChildAccount(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+		if err := f.svc.DeleteManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
@@ -751,7 +751,7 @@ func TestGuardianManagement_ReactivateIdempotentAndRefusals(t *testing.T) {
 
 	// Already active: a no-op success, not an error.
 	f := newGuardianFixture(ctx, t)
-	if err := f.svc.ReactivateManagedChildAccount(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); err != nil {
+	if err := f.svc.ReactivateManagedChildAccount(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); err != nil {
 		t.Fatalf("reactivating an active account must be a no-op: %v", err)
 	}
 
@@ -761,7 +761,7 @@ func TestGuardianManagement_ReactivateIdempotentAndRefusals(t *testing.T) {
 	if err := f2.repo.UpdateUser(ctx, f2.child.ID, map[string]any{"status": StatusPendingDeletion}); err != nil {
 		t.Fatalf("seed status: %v", err)
 	}
-	if err := f2.svc.ReactivateManagedChildAccount(ctx, f2.guardian.ID, f2.child.ID, strongPW, "", ""); !errors.Is(err, ErrAccountNotActive) {
+	if err := f2.svc.ReactivateManagedChildAccount(ctx, f2.guardian.ID, SessionSignIn{}, f2.child.ID, strongPW, "", ""); !errors.Is(err, ErrAccountNotActive) {
 		t.Fatalf("err = %v, want ErrAccountNotActive", err)
 	}
 
@@ -771,7 +771,7 @@ func TestGuardianManagement_ReactivateIdempotentAndRefusals(t *testing.T) {
 	if err := f3.repo.UpdateUser(ctx, f3.child.ID, map[string]any{"status": " active "}); err != nil {
 		t.Fatalf("seed status: %v", err)
 	}
-	if err := f3.svc.ReactivateManagedChildAccount(ctx, f3.guardian.ID, f3.child.ID, strongPW, "", ""); !errors.Is(err, ErrAccountNotActive) {
+	if err := f3.svc.ReactivateManagedChildAccount(ctx, f3.guardian.ID, SessionSignIn{}, f3.child.ID, strongPW, "", ""); !errors.Is(err, ErrAccountNotActive) {
 		t.Fatalf("padded status: err = %v, want ErrAccountNotActive", err)
 	}
 }
@@ -791,7 +791,7 @@ func TestSetManagedChildPassword_ClearsLockout(t *testing.T) {
 	}
 
 	const newPW = "An0ther!Str0ng"
-	if err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, f.child.ID, newPW, strongPW, "", ""); err != nil {
+	if err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, newPW, strongPW, "", ""); err != nil {
 		t.Fatalf("SetManagedChildPassword: %v", err)
 	}
 	stored, _ := f.repo.GetUser(ctx, f.child.ID)

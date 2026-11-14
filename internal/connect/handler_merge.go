@@ -23,7 +23,7 @@ func (h *IdentityHandler) MergeAccounts(
 	if err := h.requireAssurance(ctx, h.assuranceEnforcePasswordLogin(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
-	user, err := h.auth.MergeAccounts(ctx, callerID, authenticatedAuthTime(req.Header()), req.Msg.OtherIdentifier, req.Msg.OtherPassword,
+	user, err := h.auth.MergeAccounts(ctx, callerID, authenticatedSignIn(req.Header()), req.Msg.OtherIdentifier, req.Msg.OtherPassword,
 		clientIP(req.Header()), clientUserAgent(req.Header()), req.Msg.TakeAddress)
 	if err != nil {
 		return nil, toConnectError(err)
@@ -40,7 +40,7 @@ func (h *IdentityHandler) MergeUsers(
 	if callerID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
-	user, err := h.admin.MergeUsers(ctx, callerID, req.Msg.SurvivorUserId, req.Msg.OtherUserId, req.Msg.TakeAddress)
+	user, err := h.admin.MergeUsers(ctx, callerID, authenticatedSignIn(req.Header()), req.Msg.SurvivorUserId, req.Msg.OtherUserId, req.Msg.TakeAddress)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

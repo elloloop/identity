@@ -31,7 +31,8 @@ const loginPolicyColumns = `
 	id, project_id, tenant_id, allowed_methods, sso_required,
 	sso_connection_json, require_2fa, password_min_length,
 	session_idle_timeout_seconds,
-	session_absolute_timeout_seconds, created_at_ms, updated_at_ms`
+	session_absolute_timeout_seconds, require_verified_phone,
+	phone_calling_codes, created_at_ms, updated_at_ms`
 
 func scanLoginPolicy(row pgx.Row) (*service.LoginPolicy, error) {
 	var p service.LoginPolicy
@@ -39,7 +40,8 @@ func scanLoginPolicy(row pgx.Row) (*service.LoginPolicy, error) {
 		&p.ID, &p.ProjectID, &p.TenantID, &p.AllowedMethods, &p.SSORequired,
 		&p.SSOConnectionJSON, &p.Require2FA, &p.PasswordMinLength,
 		&p.SessionIdleTimeoutSeconds,
-		&p.SessionAbsoluteTimeoutSeconds, &p.CreatedAtMs, &p.UpdatedAtMs,
+		&p.SessionAbsoluteTimeoutSeconds, &p.RequireVerifiedPhone,
+		&p.PhoneCallingCodes, &p.CreatedAtMs, &p.UpdatedAtMs,
 	); err != nil {
 		return nil, err
 	}
@@ -77,8 +79,9 @@ func (s *LoginPolicyStore) UpsertLoginPolicy(ctx context.Context, p *service.Log
 			id, project_id, tenant_id, allowed_methods, sso_required,
 			sso_connection_json, require_2fa, password_min_length,
 			session_idle_timeout_seconds,
-			session_absolute_timeout_seconds, created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $11)
+			session_absolute_timeout_seconds, require_verified_phone,
+			phone_calling_codes, created_at_ms, updated_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $12, COALESCE($13::text[], '{}'), $11, $11)
 		ON CONFLICT (project_id, tenant_id) DO UPDATE SET
 			allowed_methods                  = EXCLUDED.allowed_methods,
 			sso_required                     = EXCLUDED.sso_required,
@@ -87,6 +90,8 @@ func (s *LoginPolicyStore) UpsertLoginPolicy(ctx context.Context, p *service.Log
 			password_min_length              = EXCLUDED.password_min_length,
 			session_idle_timeout_seconds     = EXCLUDED.session_idle_timeout_seconds,
 			session_absolute_timeout_seconds = EXCLUDED.session_absolute_timeout_seconds,
+			require_verified_phone           = EXCLUDED.require_verified_phone,
+			phone_calling_codes              = EXCLUDED.phone_calling_codes,
 			updated_at_ms                    = EXCLUDED.updated_at_ms
 		RETURNING id`
 	var outID string
@@ -95,6 +100,7 @@ func (s *LoginPolicyStore) UpsertLoginPolicy(ctx context.Context, p *service.Log
 		id, p.ProjectID, p.TenantID, p.AllowedMethods, p.SSORequired,
 		ssoConn, p.Require2FA, p.PasswordMinLength,
 		p.SessionIdleTimeoutSeconds, p.SessionAbsoluteTimeoutSeconds, now,
+		p.RequireVerifiedPhone, p.PhoneCallingCodes,
 	).Scan(&outID); err != nil {
 		return "", wrapPgErr("UpsertLoginPolicy", err)
 	}

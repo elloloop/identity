@@ -118,15 +118,103 @@ func TestMergeUsers_AdminOnlyNoPassword(t *testing.T) {
 	other := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)
 	other.Username = "ann"
 
-	_, err := svc.MergeUsers(ctx, "member-1", survivor.ID, other.ID, false)
+	_, err := svc.MergeUsers(ctx, "member-1", SessionSignIn{}, survivor.ID, other.ID, false)
 	require.Error(t, err)
-	merged, err := svc.MergeUsers(ctx, "admin-1", survivor.ID, other.ID, false)
+	merged, err := svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, survivor.ID, other.ID, false)
 	require.NoError(t, err)
 	require.Equal(t, "ann", merged.Username)
 	retired, _ := repo.GetUser(ctx, other.ID)
 	require.Equal(t, StatusDeactivated, retired.Status)
-	_, err = svc.MergeUsers(ctx, "admin-1", survivor.ID, "missing", false)
+	_, err = svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, survivor.ID, "missing", false)
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// Everything that lets the person back in moves with a merge: the other
+// account's recovery emails, and its phone where the survivor has none.
+func TestMergeAccounts_MovesRecoveryEmailsAndThePhone(t *testing.T) {
+	svc, repo, survivor, native, ctx := mergeFixture(t)
+	require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: native.ID, Email: "native-spare@example.net", VerifiedAt: 1}, 5))
+	native.PhoneNumber, native.PhoneVerified, native.PhoneVerifiedAt = "+14155550145", true, 7
+
+	merged, err := svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	require.NoError(t, err)
+	require.Equal(t, "+14155550145", merged.PhoneNumber)
+	require.True(t, merged.PhoneVerified)
+	holder, err := repo.FindRecoveryEmailHolder(ctx, "native-spare@example.net")
+	require.NoError(t, err)
+	require.NotNil(t, holder)
+	require.Equal(t, survivor.ID, holder.UserID, "the recovery email signs in to the survivor now")
+	retired, _ := repo.GetUser(ctx, native.ID)
+	require.Empty(t, retired.PhoneNumber)
+}
+
+// A merge that would leave the survivor with more recovery emails than the
+// project lets one account keep is refused, naming what to do first.
+func TestMergeAccounts_RefusedPastTheRecoveryEmailCap(t *testing.T) {
+	svc, repo, survivor, native, ctx := mergeFixture(t)
+	scope := *ProjectScopeFromContext(ctx)
+	scope.RecoveryEmails.Max = 1
+	ctx = WithProjectScope(context.Background(), &scope)
+	require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: survivor.ID, Email: "bob-spare@example.net", VerifiedAt: 1}, 5))
+	require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: native.ID, Email: "native-spare@example.net", VerifiedAt: 1}, 5))
+
+	_, err := svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	require.ErrorIs(t, err, ErrMergeRefused)
+	require.ErrorContains(t, err, "recovery emails")
+	other, _ := repo.GetUser(ctx, native.ID)
+	require.Equal(t, StatusActive, other.Status)
+}
+
+// holdAccount puts a recovery hold on userID's account: one of its recovery
+// emails signed in now.
+func holdAccount(ctx context.Context, t *testing.T, repo *fakeRepo, userID, addr string, nowMs int64) {
+	t.Helper()
+	require.NoError(t, repo.AddRecoveryEmail(ctx, &RecoveryEmail{UserID: userID, Email: addr, VerifiedAt: 1}, 5))
+	held, err := repo.FindRecoveryEmailHolder(ctx, addr)
+	require.NoError(t, err)
+	require.NotNil(t, held)
+	require.NoError(t, repo.MarkRecoveryEmailSignIn(ctx, userID, held.ID, nowMs, (7*24*time.Hour).Milliseconds()))
+}
+
+// A merge moves the recovery emails and sign-in methods a recovery hold is
+// keeping where they are, so while either account is held it is refused,
+// whatever session asks; the other account's hold is told only to a caller
+// who proved its password.
+func TestMergeAccounts_RefusedWhileEitherAccountIsHeld(t *testing.T) {
+	svc, repo, survivor, native, ctx := mergeFixture(t)
+	var hold *RecoveryHoldError
+
+	holdAccount(ctx, t, repo, survivor.ID, "bob-spare@example.net", svc.nowMs())
+	_, err := svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	require.ErrorAs(t, err, &hold, "the survivor is held")
+	_, err = repo.RemoveRecoveryEmail(ctx, survivor.ID, "bob-spare@example.net", svc.nowMs())
+	require.NoError(t, err)
+
+	holdAccount(ctx, t, repo, native.ID, "native-spare@example.net", svc.nowMs())
+	_, err = svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", "Wr0ng!Passw0rd", "203.0.113.10", "agent", false)
+	require.ErrorIs(t, err, ErrUnauthenticated, "a wrong password learns nothing of the other account's hold")
+	_, err = svc.MergeAccounts(ctx, survivor.ID, freshAuth(svc), "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	require.ErrorAs(t, err, &hold, "the other account is held")
+	other, _ := repo.GetUser(ctx, native.ID)
+	require.Equal(t, StatusActive, other.Status, "a refused merge retires nothing")
+}
+
+func TestMergeUsers_RefusedWhileEitherAccountIsHeld(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@example.test", "Admin", "admin", "active")
+	repo := newFakeRepo()
+	svc := newTestAdminServiceWithRepo(db, repo)
+	ctx := accountsScope(t, "accounts.example.test")
+	survivor := seedUser(repo, "a@mail.example.test", "", StatusActive)
+	other := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)
+	other.Username = "ann"
+	holdAccount(ctx, t, repo, other.ID, "ann-spare@example.net", nowMs())
+
+	var hold *RecoveryHoldError
+	_, err := svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, survivor.ID, other.ID, false)
+	require.ErrorAs(t, err, &hold)
+	retired, _ := repo.GetUser(ctx, other.ID)
+	require.Equal(t, StatusActive, retired.Status)
 }
 
 func TestReactivateUser_RefusesAMergedAccount(t *testing.T) {
@@ -135,7 +223,7 @@ func TestReactivateUser_RefusesAMergedAccount(t *testing.T) {
 	db.addUser("gone-1", "gone@example.test", "Gone", "member", "deactivated")
 	db.nodes["gone-1"].Payload[ufMergedInto] = "survivor-1"
 	svc := newTestAdminService(db)
-	err := svc.ReactivateUser(context.Background(), "admin-1", "gone-1")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "gone-1")
 	require.ErrorIs(t, err, ErrMergeRefused)
 }
 
@@ -247,14 +335,16 @@ func TestMergeUsers_RefusesTheAdminsOwnAccountAndKeepsTOTPPasswords(t *testing.T
 	svc := newTestAdminServiceWithRepo(db, repo)
 	ctx := accountsScope(t, "accounts.example.test")
 
-	_, err := svc.MergeUsers(ctx, "admin-1", "someone", "admin-1", false)
-	require.ErrorIs(t, err, ErrMergeRefused)
+	_, err := svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, "someone", "admin-1", false)
+	require.ErrorIs(t, err, ErrMergeRefused, "the admin's account is not merged away")
+	_, err = svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, "admin-1", "someone", false)
+	require.ErrorIs(t, err, ErrMergeRefused, "nor is another merged into it")
 
 	survivor := seedUser(repo, "a@mail.example.com", "", StatusActive)
 	other := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)
 	other.Username = "tia"
 	other.TotpRequired = true
-	merged, err := svc.MergeUsers(ctx, "admin-1", survivor.ID, other.ID, false)
+	merged, err := svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, survivor.ID, other.ID, false)
 	require.NoError(t, err)
 	require.Empty(t, merged.PasswordHash, "a password a second factor protected does not move")
 	require.Equal(t, "tia", merged.Username)
@@ -280,7 +370,7 @@ func TestAcceptInvitation_RefusesAMergedAccount(t *testing.T) {
 }
 
 // freshAuth is a session signed in just now.
-func freshAuth(svc *AuthService) int64 { return svc.nowMs() / 1000 }
+func freshAuth(svc *AuthService) SessionSignIn { return SessionSignIn{AuthTimeSec: svc.nowMs() / 1000} }
 
 // The account that is kept must have signed in recently: a session alone —
 // stolen, or simply long-lived — cannot pull another account onto it.
@@ -294,18 +384,18 @@ func TestMergeAccounts_RequiresARecentSignIn(t *testing.T) {
 		"too long ago":    now - maxAge - 1,
 		"in the future":   now + 120,
 	} {
-		_, err := svc.MergeAccounts(ctx, survivor.ID, authTime, "bob", accessTestPassword, "203.0.113.10", "agent", false)
+		_, err := svc.MergeAccounts(ctx, survivor.ID, SessionSignIn{AuthTimeSec: authTime}, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 		require.ErrorIs(t, err, ErrReauthenticationRequired, name)
 		require.Contains(t, err.Error(), "reauthentication_required")
 	}
 	// A refused merge looked at nothing: the other account's lockout counter
 	// did not move on a wrong password.
-	_, err := svc.MergeAccounts(ctx, survivor.ID, 0, "bob", "Wr0ng!Passw0rd", "203.0.113.10", "agent", false)
+	_, err := svc.MergeAccounts(ctx, survivor.ID, SessionSignIn{AuthTimeSec: 0}, "bob", "Wr0ng!Passw0rd", "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrReauthenticationRequired)
 	still, _ := repo.GetUser(ctx, native.ID)
 	require.Zero(t, still.FailedLoginCount)
 
-	_, err = svc.MergeAccounts(ctx, survivor.ID, now-maxAge+5, "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	_, err = svc.MergeAccounts(ctx, survivor.ID, SessionSignIn{AuthTimeSec: now - maxAge + 5}, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.NoError(t, err, "a sign-in within the window is enough")
 }
 
@@ -345,7 +435,7 @@ func TestTokens_AuthTimeIsTheSignIn(t *testing.T) {
 
 	// An hour-old sign-in is outside the merge's recent-sign-in window however
 	// fresh the token that carries it.
-	_, err = svc.MergeAccounts(ctx, user.ID, claims.AuthTime, "other@example.com", strongPW, "203.0.113.10", "agent", false)
+	_, err = svc.MergeAccounts(ctx, user.ID, SessionSignIn{AuthTimeSec: claims.AuthTime}, "other@example.com", strongPW, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrReauthenticationRequired)
 }
 
@@ -368,7 +458,7 @@ func TestMergeAccounts_AcceptsATokenRefreshedFromARecentSignIn(t *testing.T) {
 	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 	require.NoError(t, err)
 
-	_, err = svc.MergeAccounts(ctx, user.ID, claims.AuthTime, "other@example.com", strongPW, "203.0.113.10", "agent", false)
+	_, err = svc.MergeAccounts(ctx, user.ID, SessionSignIn{AuthTimeSec: claims.AuthTime}, "other@example.com", strongPW, "203.0.113.10", "agent", false)
 	require.NoError(t, err, "the sign-in behind the refreshed token is recent")
 }
 

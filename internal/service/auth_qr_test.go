@@ -17,7 +17,7 @@ func approvedQrLogin(ctx context.Context, t *testing.T, svc *AuthService, user *
 	t.Helper()
 	init, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
 	require.NoError(t, err)
-	status, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "", "approver")
+	status, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, SessionSignIn{}, "", "approver")
 	require.NoError(t, err)
 	require.Equal(t, "approved", status)
 	return init.SessionID, init.PollSecret
@@ -302,12 +302,12 @@ func TestApproveQrLogin_IneligibleApproverRefused(t *testing.T) {
 			init, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
 			require.NoError(t, err)
 
-			status, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "10.0.0.2", "approver")
+			status, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, SessionSignIn{}, "10.0.0.2", "approver")
 			require.ErrorIs(t, err, tc.wantErr)
 			assert.Empty(t, status)
 			requireQrSessionStatus(ctx, t, repo, init.SessionID, "pending")
 
-			status, err = svc.ApproveQrLogin(ctx, init.SessionID, false, user.ID, "10.0.0.2", "approver")
+			status, err = svc.ApproveQrLogin(ctx, init.SessionID, false, user.ID, SessionSignIn{}, "10.0.0.2", "approver")
 			require.NoError(t, err)
 			assert.Equal(t, "rejected", status)
 		})
@@ -332,14 +332,14 @@ func TestApproveQrLogin_LockedApproverAuditPaced(t *testing.T) {
 	locked := func() int { return writer.countByEventTypeAndDetail("login_locked", "gate", "qr_approve") }
 
 	for range 5 {
-		_, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "10.0.0.2", "approver")
+		_, err := svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, SessionSignIn{}, "10.0.0.2", "approver")
 		require.ErrorIs(t, err, ErrAccountLocked)
 	}
 	assert.Equal(t, 1, locked())
 	assert.Equal(t, 1, writer.countByEventType("login_locked"))
 
 	now = now.Add(replayedRefusalAuditWindow)
-	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "10.0.0.2", "approver")
+	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, SessionSignIn{}, "10.0.0.2", "approver")
 	require.ErrorIs(t, err, ErrAccountLocked)
 	assert.Equal(t, 2, locked(), "the next window records the refusal again")
 }
@@ -352,7 +352,7 @@ func TestApproveQrLogin_UnknownApproverRefused(t *testing.T) {
 	init, err := svc.InitiateQrLogin(ctx, "Phone", "agent", "10.0.0.1")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, "ghost", "10.0.0.2", "approver")
+	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, "ghost", SessionSignIn{}, "10.0.0.2", "approver")
 	require.ErrorIs(t, err, ErrNotFound)
 	requireQrSessionStatus(ctx, t, repo, init.SessionID, "pending")
 }
@@ -379,7 +379,7 @@ func TestPollQrLogin_ApprovalCollectableJustPastWindow(t *testing.T) {
 
 	at(window - time.Second)
 	for _, id := range []string{collected.SessionID, late.SessionID} {
-		_, err = svc.ApproveQrLogin(ctx, id, true, user.ID, "10.0.0.2", "approver")
+		_, err = svc.ApproveQrLogin(ctx, id, true, user.ID, SessionSignIn{}, "10.0.0.2", "approver")
 		require.NoError(t, err)
 	}
 

@@ -110,6 +110,16 @@ type ProjectScope struct {
 	// GATEWAY_SELF_SERVICE_TENANTS_ENABLED. Zero (disabled) for a project
 	// that configures none.
 	Tenants ProjectTenantsConfig
+
+	// RecoveryEmails is the project's recovery-email policy, parsed from
+	// config_json. Zero (disabled) for a project that configures none and
+	// for the env default project.
+	RecoveryEmails ProjectRecoveryEmailsConfig
+
+	// Phone is the project's phone-verification policy, parsed from
+	// config_json. Zero for a project that configures none and for the env
+	// default project: the deployment's behaviour, unchanged.
+	Phone ProjectPhoneConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -167,6 +177,8 @@ type ResolvedProject struct {
 	Jurisdictions      ProjectJurisdictionsConfig
 	Accounts           ProjectAccountsConfig
 	Tenants            ProjectTenantsConfig
+	RecoveryEmails     ProjectRecoveryEmailsConfig
+	Phone              ProjectPhoneConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

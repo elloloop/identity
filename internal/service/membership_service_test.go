@@ -303,7 +303,7 @@ func TestCreateTenantInvitation_AdminInvitesAndEmails(t *testing.T) {
 	f := newMembershipFixture()
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, "Invitee@ACME.com", RoleAdmin)
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, "Invitee@ACME.com", RoleAdmin)
 	require.NoError(t, err)
 	require.NotNil(t, out.Invitation)
 	require.NotEmpty(t, out.Invitation.ID)
@@ -365,7 +365,7 @@ func TestCreateTenantInvitation_EmailLinkLandsOnTheConfiguredPage(t *testing.T) 
 				Access:            ProjectAccessConfig{Mode: AccessModeOpen},
 			})
 
-			out, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+			out, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 			require.NoError(t, err)
 			require.Equal(t, 1, f.mailer.count())
 			link := regexp.MustCompile(regexp.QuoteMeta(tc.wantPage) + `\?token=([0-9a-f]+)(\S*)`)
@@ -383,7 +383,7 @@ func TestCreateTenantInvitation_NoMailerReturnsRawToken(t *testing.T) {
 	f := newMembershipFixtureNoMail()
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, "")
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, "")
 	require.NoError(t, err)
 	require.Equal(t, RoleMember, out.Invitation.Role, "blank role defaults to member")
 	require.NotEmpty(t, out.RawToken, "raw token returned when no mailer is configured")
@@ -400,7 +400,7 @@ func TestCreateTenantInvitation_SendFailureReportsFailed(t *testing.T) {
 	f.mailer.sendErr = email.ErrTransport
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 	require.Equal(t, EmailSendFailed, out.EmailStatus)
 	require.Empty(t, out.RawToken, "a configured mailer that failed never surfaces the token")
@@ -419,7 +419,7 @@ func TestCreateTenantInvitation_UnbuildableEmailReportsFailed(t *testing.T) {
 		email.NewChain(zap.NewNop(), provider), true, &config.Config{SMTPFrom: "not an address"}, nil)
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 	require.Equal(t, EmailSendFailed, out.EmailStatus)
 	require.Empty(t, out.RawToken)
@@ -433,7 +433,7 @@ func TestNewMembershipService_NilMailerIsNotConfigured(t *testing.T) {
 	f.svc = NewMembershipService(f.invitations, f.memberships, f.tenants, f.users, nil, true, &config.Config{}, nil)
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 	require.Equal(t, EmailNotConfigured, out.EmailStatus)
 	require.NotEmpty(t, out.RawToken)
@@ -474,7 +474,7 @@ func TestCreateTenantInvitation_EmailLogLinesCarryInvitationAndTrace(t *testing.
 			f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
 			ctx := trace.ContextWithSpanContext(withProject(mTestProject), span)
-			out, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+			out, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, out.EmailStatus)
 
@@ -494,13 +494,13 @@ func TestCreateTenantInvitation_RejectsNonAdmin(t *testing.T) {
 	// caller is only a plain member, not admin/owner.
 	f.seedMember(mTestProject, mTestTenant, mAdminID, RoleMember)
 
-	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
 func TestCreateTenantInvitation_RejectsNonMember(t *testing.T) {
 	f := newMembershipFixture()
-	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -509,16 +509,16 @@ func TestCreateTenantInvitation_RejectsBadInput(t *testing.T) {
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	ctx := withProject(mTestProject)
 
-	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, "", mInvitee, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, "", mInvitee, RoleMember)
 	require.ErrorIs(t, err, ErrInvalidArgument, "blank tenant")
 
-	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "not-an-email", RoleMember)
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "not-an-email", RoleMember)
 	require.ErrorIs(t, err, ErrInvalidArgument, "email without @")
 
-	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "   ", RoleMember)
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "   ", RoleMember)
 	require.ErrorIs(t, err, ErrInvalidArgument, "blank email")
 
-	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, "superuser")
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, "superuser")
 	require.ErrorIs(t, err, ErrInvalidArgument, "unknown role")
 }
 
@@ -526,10 +526,10 @@ func TestCreateTenantInvitation_RejectsMissingProjectAndCaller(t *testing.T) {
 	f := newMembershipFixture()
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-	_, err := f.svc.CreateTenantInvitation(context.Background(), mAdminID, mTestTenant, mInvitee, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(context.Background(), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.ErrorIs(t, err, ErrPermissionDenied, "no project")
 
-	_, err = f.svc.CreateTenantInvitation(withProject(mTestProject), "", mTestTenant, mInvitee, RoleMember)
+	_, err = f.svc.CreateTenantInvitation(withProject(mTestProject), "", SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.ErrorIs(t, err, ErrUnauthenticated, "no caller")
 }
 
@@ -538,13 +538,13 @@ func TestCreateTenantInvitation_OneOpenInviteRevokesPrior(t *testing.T) {
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	ctx := withProject(mTestProject)
 
-	first, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+	first, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 
 	// A resend waits out the per-recipient cooldown.
 	later := time.Now().Add(config.DefaultTenantInvitationResendCooldownSeconds*time.Second + time.Second)
 	f.svc.nowFunc = func() time.Time { return later }
-	second, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleAdmin)
+	second, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleAdmin)
 	require.NoError(t, err)
 	require.NotEqual(t, first.Invitation.ID, second.Invitation.ID)
 
@@ -585,7 +585,7 @@ func TestCreateTenantInvitation_SelfServiceTenantNameLeftOut(t *testing.T) {
 			})
 			f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-			_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+			_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 			require.NoError(t, err)
 			require.Equal(t, 1, f.mailer.count())
 			msg := f.mailer.last()
@@ -613,7 +613,7 @@ func TestCreateTenantInvitation_PassesConfiguredLimits(t *testing.T) {
 	f.svc.nowFunc = func() time.Time { return now }
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 	require.Equal(t, InvitationLimits{
 		MaxPerTenant:          7,
@@ -624,7 +624,7 @@ func TestCreateTenantInvitation_PassesConfiguredLimits(t *testing.T) {
 	}, f.invitations.lastLimits)
 
 	f.svc.cfg = nil
-	_, err = f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, "second@acme.com", RoleMember)
+	_, err = f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, "second@acme.com", RoleMember)
 	require.NoError(t, err)
 	require.Equal(t, config.DefaultTenantInvitationMaxPerTenant, f.invitations.lastLimits.MaxPerTenant,
 		"no configuration falls back to the defaults")
@@ -640,21 +640,21 @@ func TestCreateTenantInvitation_ResendCooldown(t *testing.T) {
 	start := time.Now()
 	f.svc.nowFunc = func() time.Time { return start }
 
-	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 
 	f.svc.nowFunc = func() time.Time { return start.Add(time.Minute) }
-	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "INVITEE@acme.com", RoleMember)
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "INVITEE@acme.com", RoleMember)
 	require.ErrorIs(t, err, ErrInvitationResendTooSoon)
 	require.Equal(t, 1, f.mailer.count(), "a refused resend sends no email")
 
-	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "colleague@acme.com", RoleMember)
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "colleague@acme.com", RoleMember)
 	require.NoError(t, err, "the cooldown is per recipient")
 
 	f.svc.nowFunc = func() time.Time {
 		return start.Add(config.DefaultTenantInvitationResendCooldownSeconds*time.Second + time.Second)
 	}
-	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err, "a resend after the cooldown is accepted")
 }
 
@@ -670,18 +670,18 @@ func TestCreateTenantInvitation_PerTenantCap(t *testing.T) {
 	f.svc.nowFunc = func() time.Time { return start }
 
 	for _, addr := range []string{"a@acme.com", "b@acme.com"} {
-		_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, addr, RoleMember)
+		_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, addr, RoleMember)
 		require.NoError(t, err)
 	}
-	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "c@acme.com", RoleMember)
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "c@acme.com", RoleMember)
 	require.ErrorIs(t, err, ErrInvitationLimited)
 	require.Equal(t, 2, f.mailer.count(), "a refused invitation sends no email")
 
-	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, "tenant-2", "c@acme.com", RoleMember)
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, "tenant-2", "c@acme.com", RoleMember)
 	require.NoError(t, err, "the cap is per tenant")
 
 	f.svc.nowFunc = func() time.Time { return start.Add(time.Hour + time.Second) }
-	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "c@acme.com", RoleMember)
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "c@acme.com", RoleMember)
 	require.NoError(t, err, "the window has moved on")
 }
 
@@ -690,7 +690,7 @@ func TestCreateTenantInvitation_PropagatesStoreError(t *testing.T) {
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	f.invitations.createErr = errBoom
 
-	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -700,7 +700,7 @@ func TestCreateTenantInvitation_PropagatesStoreError(t *testing.T) {
 func (f *membershipFixture) seedInvite(t *testing.T) string {
 	t.Helper()
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
-	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleAdmin)
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleAdmin)
 	require.NoError(t, err)
 	// Recover the raw token regardless of mailer config: re-derive it is not
 	// possible (hash is one-way), so seedInvite always uses the no-mail path.
@@ -782,7 +782,7 @@ func TestAcceptTenantInvitation_ComparesCanonicalAddresses(t *testing.T) {
 func TestCreateTenantInvitation_StoresCanonicalEmail(t *testing.T) {
 	f := newMembershipFixtureNoMail()
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
-	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, "  Invitee+Team@ACME.com ", RoleMember)
+	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, "  Invitee+Team@ACME.com ", RoleMember)
 	require.NoError(t, err)
 	invs, err := f.invitations.ListInvitationsForTenant(context.Background(), mTestProject, mTestTenant)
 	require.NoError(t, err)
@@ -902,7 +902,7 @@ func TestListTenantInvitations_AdminGated(t *testing.T) {
 	f := newMembershipFixtureNoMail()
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	ctx := withProject(mTestProject)
-	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 
 	invs, err := f.svc.ListTenantInvitations(ctx, mAdminID, mTestTenant)
@@ -936,7 +936,7 @@ func TestRemoveTenantMember_RemovesNonOwner(t *testing.T) {
 	f.seedMember(mTestProject, mTestTenant, "user-bob", RoleMember)
 	ctx := withProject(mTestProject)
 
-	err := f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "user-bob", "", "")
+	err := f.svc.RemoveTenantMember(ctx, mAdminID, SessionSignIn{}, mTestTenant, "user-bob", "", "")
 	require.NoError(t, err)
 
 	stored, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, "user-bob")
@@ -949,7 +949,7 @@ func TestRemoveTenantMember_LastOwnerGuard(t *testing.T) {
 	ctx := withProject(mTestProject)
 
 	// Removing the sole owner (even self-removal) is refused.
-	err := f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, mAdminID, "", "")
+	err := f.svc.RemoveTenantMember(ctx, mAdminID, SessionSignIn{}, mTestTenant, mAdminID, "", "")
 	require.ErrorIs(t, err, ErrLastOwner)
 
 	// The owner is still present.
@@ -964,7 +964,7 @@ func TestRemoveTenantMember_OwnerRemovableWhenAnotherOwnerRemains(t *testing.T) 
 	ctx := withProject(mTestProject)
 
 	// Self-removal is fine because another active owner remains.
-	err := f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, mAdminID, "", "")
+	err := f.svc.RemoveTenantMember(ctx, mAdminID, SessionSignIn{}, mTestTenant, mAdminID, "", "")
 	require.NoError(t, err)
 
 	stored, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mAdminID)
@@ -978,7 +978,7 @@ func TestRemoveTenantMember_RejectsNonAdmin(t *testing.T) {
 	f := newMembershipFixture()
 	f.seedMember(mTestProject, mTestTenant, "user-bob", RoleMember)
 
-	err := f.svc.RemoveTenantMember(withProject(mTestProject), "user-bob", mTestTenant, "user-bob", "", "")
+	err := f.svc.RemoveTenantMember(withProject(mTestProject), "user-bob", SessionSignIn{}, mTestTenant, "user-bob", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -986,7 +986,7 @@ func TestRemoveTenantMember_UnknownTargetIsNoOp(t *testing.T) {
 	f := newMembershipFixture()
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 
-	err := f.svc.RemoveTenantMember(withProject(mTestProject), mAdminID, mTestTenant, "nobody", "", "")
+	err := f.svc.RemoveTenantMember(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, "nobody", "", "")
 	require.NoError(t, err)
 }
 
@@ -995,16 +995,16 @@ func TestRemoveTenantMember_RejectsBadInput(t *testing.T) {
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	ctx := withProject(mTestProject)
 
-	err := f.svc.RemoveTenantMember(ctx, mAdminID, "", "user-bob", "", "")
+	err := f.svc.RemoveTenantMember(ctx, mAdminID, SessionSignIn{}, "", "user-bob", "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument, "blank tenant")
 
-	err = f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "", "", "")
+	err = f.svc.RemoveTenantMember(ctx, mAdminID, SessionSignIn{}, mTestTenant, "", "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument, "blank user")
 
-	err = f.svc.RemoveTenantMember(context.Background(), mAdminID, mTestTenant, "user-bob", "", "")
+	err = f.svc.RemoveTenantMember(context.Background(), mAdminID, SessionSignIn{}, mTestTenant, "user-bob", "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "no project")
 
-	err = f.svc.RemoveTenantMember(withProject(mTestProject), "", mTestTenant, "user-bob", "", "")
+	err = f.svc.RemoveTenantMember(withProject(mTestProject), "", SessionSignIn{}, mTestTenant, "user-bob", "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated, "no caller")
 }
 
@@ -1062,14 +1062,14 @@ func TestCreateTenantInvitation_SenderLimits(t *testing.T) {
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	ctx := withProject(mTestProject)
 
-	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, mInvitee, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 	require.Equal(t, 7, f.invitations.lastLimits.MaxPerInviter)
 	require.Equal(t, 2, f.invitations.lastLimits.MaxPerRecipient)
 
 	for _, refusal := range []error{ErrInviterLimited, ErrInvitationRecipientLimited} {
 		f.invitations.createErr = refusal
-		_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "colleague@acme.com", RoleMember)
+		_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "colleague@acme.com", RoleMember)
 		require.ErrorIs(t, err, refusal)
 	}
 	entries := logs.FilterMessage("tenant_invitation_limited").All()
@@ -1080,7 +1080,7 @@ func TestCreateTenantInvitation_SenderLimits(t *testing.T) {
 	}
 
 	f.invitations.createErr = errBoom
-	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "colleague@acme.com", RoleMember)
+	_, err = f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "colleague@acme.com", RoleMember)
 	require.ErrorIs(t, err, errBoom)
 	require.Len(t, logs.FilterMessage("tenant_invitation_limited").All(), 2, "a store failure is not a limit")
 }
@@ -1124,13 +1124,13 @@ func TestTenantAdmin_SuspendedTenantRefusesEveryAdminAction(t *testing.T) {
 	f.tenants.byID[mTestProject+"/"+mTestTenant].Status = TenantStatusSuspended
 	ctx := withProject(mTestProject)
 
-	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, mTestTenant, "colleague@acme.com", RoleMember)
+	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "colleague@acme.com", RoleMember)
 	require.ErrorIs(t, err, ErrPermissionDenied, "invite")
 	_, err = f.svc.ListTenantInvitations(ctx, mAdminID, mTestTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied, "list invitations")
 	_, err = f.svc.ListTenantMembers(ctx, mAdminID, mTestTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied, "list members")
-	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, mAdminID, mTestTenant, "user-bob", "", ""), ErrPermissionDenied, "remove")
+	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, mAdminID, SessionSignIn{}, mTestTenant, "user-bob", "", ""), ErrPermissionDenied, "remove")
 	_, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
 	require.ErrorIs(t, err, ErrPermissionDenied, "accept")
 

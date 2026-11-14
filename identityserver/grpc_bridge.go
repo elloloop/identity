@@ -24,6 +24,7 @@ import (
 	"github.com/elloloop/identity/internal/app"
 	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/middleware"
+	"github.com/elloloop/identity/internal/service"
 )
 
 // grpcBridge adapts identity's Connect service implementation to the
@@ -48,13 +49,21 @@ type grpcBridge struct {
 	operatorLimits map[string]middleware.PathLimit
 	trustedProxies []*net.IPNet
 	logger         *zap.Logger
-	// trustAuthTime: the host's interceptor owns x-authenticated-auth-time
-	// (Options.GRPCTrustAuthTime). Otherwise the bridge drops it.
-	trustAuthTime  bool
-	trustSessionID bool
+	trust          grpcTrust
 }
 
-func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSessionID bool) *grpcBridge {
+// grpcTrust names the x-authenticated-* keys besides the user id that the
+// host said its interceptor sets from the verified token, after deleting any
+// value the client sent (Options.GRPCTrustAuthTime, GRPCTrustAMR, which
+// covers x-authenticated-amr and x-authenticated-recovery-email-id, and
+// GRPCTrustSessionID). The bridge drops every other one.
+type grpcTrust struct {
+	authTime  bool
+	amr       bool
+	sessionID bool
+}
+
+func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcBridge {
 	directoryLimit, ok := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceLookupUsersProcedure)
 	if !ok {
 		// app.Build always configures this limit; reaching here means the
@@ -86,8 +95,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSes
 		directoryLimit: directoryLimit,
 		trustedProxies: built.TrustedProxies,
 		logger:         logger,
-		trustAuthTime:  trustAuthTime,
-		trustSessionID: trustSessionID,
+		trust:          trust,
 	}
 }
 
@@ -188,13 +196,22 @@ func invoke[Req, Resp any](
 	if ip := b.clientIP(ctx); ip != "" {
 		creq.Header().Set(middleware.ClientIPHeader, ip)
 	}
-	// The sign-in time vouches for a recent sign-in; only a host that said
-	// its interceptor sets it from the verified token may pass it on.
-	if !b.trustSessionID {
+	// An interceptor written before a key existed may pass on whatever the
+	// client sent for it, so a key reaches the handlers only once the host
+	// said its interceptor owns it.
+	if !b.trust.sessionID {
 		creq.Header().Del(middleware.AuthenticatedSessionIDHeader)
 	}
-	if !b.trustAuthTime {
+	if !b.trust.authTime {
 		creq.Header().Del(middleware.AuthenticatedAuthTimeHeader)
+	}
+	// A missing amr would read as a session no recovery email opened, so a
+	// session whose amr no one vouches for is marked as possibly one, and
+	// names no recovery email: a client-chosen one could be an address the
+	// account still holds.
+	if !b.trust.amr {
+		creq.Header().Set(middleware.AuthenticatedAMRHeader, service.AMRUnvouched)
+		creq.Header().Del(middleware.AuthenticatedRecoveryEmailIDHeader)
 	}
 	cresp, err := fn(ctx, creq)
 	if err != nil {
@@ -886,6 +903,26 @@ func (b *grpcBridge) ListJoinableTenants(ctx context.Context, in *identitypb.Lis
 
 func (b *grpcBridge) JoinTenantByDomain(ctx context.Context, in *identitypb.JoinTenantByDomainRequest) (*identitypb.JoinTenantByDomainResponse, error) {
 	return invoke(ctx, b, in, b.h.JoinTenantByDomain)
+}
+
+func (b *grpcBridge) RequestRecoveryEmail(ctx context.Context, in *identitypb.RequestRecoveryEmailRequest) (*identitypb.RequestRecoveryEmailResponse, error) {
+	return invoke(ctx, b, in, b.h.RequestRecoveryEmail)
+}
+
+func (b *grpcBridge) VerifyRecoveryEmail(ctx context.Context, in *identitypb.VerifyRecoveryEmailRequest) (*identitypb.VerifyRecoveryEmailResponse, error) {
+	return invoke(ctx, b, in, b.h.VerifyRecoveryEmail)
+}
+
+func (b *grpcBridge) ListRecoveryEmails(ctx context.Context, in *identitypb.ListRecoveryEmailsRequest) (*identitypb.ListRecoveryEmailsResponse, error) {
+	return invoke(ctx, b, in, b.h.ListRecoveryEmails)
+}
+
+func (b *grpcBridge) RemoveRecoveryEmail(ctx context.Context, in *identitypb.RemoveRecoveryEmailRequest) (*identitypb.RemoveRecoveryEmailResponse, error) {
+	return invoke(ctx, b, in, b.h.RemoveRecoveryEmail)
+}
+
+func (b *grpcBridge) RemovePhone(ctx context.Context, in *identitypb.RemovePhoneRequest) (*identitypb.RemovePhoneResponse, error) {
+	return invoke(ctx, b, in, b.h.RemovePhone)
 }
 
 func (b *grpcBridge) RequestPhoneVerification(ctx context.Context, in *identitypb.RequestPhoneVerificationRequest) (*identitypb.RequestPhoneVerificationResponse, error) {

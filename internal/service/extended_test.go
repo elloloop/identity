@@ -298,7 +298,7 @@ func TestBeginPasskeyRegistration_UserNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "no-such-user", "Key")
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "no-such-user", SessionSignIn{}, "Key")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -317,7 +317,7 @@ func TestBeginPasskeyRegistration_WithExistingCreds(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, "Key")
+	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, SessionSignIn{}, "Key")
 	require.NoError(t, err)
 	assert.NotEmpty(t, optionsJSON)
 	assert.NotEmpty(t, challengeID)
@@ -329,7 +329,7 @@ func TestCompletePasskeyRegistration_MissingArgs(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", "", "", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, "", "", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -338,7 +338,7 @@ func TestCompletePasskeyRegistration_ChallengeNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", "no-such-challenge", "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, "no-such-challenge", "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -358,7 +358,7 @@ func TestCompletePasskeyRegistration_WrongChallengeType(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -378,7 +378,7 @@ func TestCompletePasskeyRegistration_WrongUser(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-2", id, "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-2", SessionSignIn{}, id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrPermissionDenied))
 }
@@ -398,7 +398,7 @@ func TestCompletePasskeyRegistration_ExpiredChallenge(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTokenExpired))
 }
@@ -419,7 +419,7 @@ func TestCompletePasskeyRegistration_VerifyFails(t *testing.T) {
 	repo.mu.Unlock()
 
 	// Bogus credential JSON — verification will fail.
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, `{"id":"x"}`, "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, id, `{"id":"x"}`, "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -537,7 +537,7 @@ func TestBeginTotpSetup_UserNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), "no-such")
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), "no-such", SessionSignIn{})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -555,7 +555,7 @@ func TestBeginTotpSetup_CleansUnverifiedCred(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, _, err := svc.BeginTotpSetup(context.Background(), u.ID)
+	_, _, _, err := svc.BeginTotpSetup(context.Background(), u.ID, SessionSignIn{})
 	require.NoError(t, err)
 
 	// The unverified credential should be replaced.
@@ -570,7 +570,7 @@ func TestBeginTotpSetup_UserWithoutEmailUsesID(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "", "", "active")
 
-	_, qrURI, _, err := svc.BeginTotpSetup(context.Background(), u.ID)
+	_, qrURI, _, err := svc.BeginTotpSetup(context.Background(), u.ID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.NotEmpty(t, qrURI)
 }
@@ -581,7 +581,7 @@ func TestVerifyTotpSetup_EmptyCode(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	ok, err := svc.VerifyTotpSetup(context.Background(), "user-1", "")
+	ok, err := svc.VerifyTotpSetup(context.Background(), "user-1", SessionSignIn{}, "")
 	require.Error(t, err)
 	assert.False(t, ok)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
@@ -591,7 +591,7 @@ func TestVerifyTotpSetup_NoSetupInProgress(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	ok, err := svc.VerifyTotpSetup(context.Background(), "no-cred-user", "123456")
+	ok, err := svc.VerifyTotpSetup(context.Background(), "no-cred-user", SessionSignIn{}, "123456")
 	require.Error(t, err)
 	assert.False(t, ok)
 	assert.True(t, errors.Is(err, ErrNotFound))
@@ -609,7 +609,7 @@ func TestVerifyTotpSetup_DecryptFails(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, "123456")
+	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, SessionSignIn{}, "123456")
 	require.Error(t, err)
 	assert.False(t, ok)
 }
@@ -634,7 +634,7 @@ func TestVerifyTotpSetup_HappyPath(t *testing.T) {
 	code, err := totpGenerateCode(secret)
 	require.NoError(t, err)
 
-	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, code)
+	ok, err := svc.VerifyTotpSetup(context.Background(), u.ID, SessionSignIn{}, code)
 	require.NoError(t, err)
 	assert.True(t, ok)
 
@@ -774,7 +774,7 @@ func TestDisableTotp_EmptyPassword(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	err := svc.DisableTotp(context.Background(), "u", "")
+	err := svc.DisableTotp(context.Background(), "u", SessionSignIn{}, "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -783,7 +783,7 @@ func TestDisableTotp_UserNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	err := svc.DisableTotp(context.Background(), "no-user", "any")
+	err := svc.DisableTotp(context.Background(), "no-user", SessionSignIn{}, "any")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -793,7 +793,7 @@ func TestDisableTotp_NoPasswordSet(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "nopw@example.com", "", "active")
 
-	err := svc.DisableTotp(context.Background(), u.ID, "anything")
+	err := svc.DisableTotp(context.Background(), u.ID, SessionSignIn{}, "anything")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -804,7 +804,7 @@ func TestRegenerateRecoveryCodes_EmptyPassword(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.RegenerateRecoveryCodes(context.Background(), "u", "")
+	_, err := svc.RegenerateRecoveryCodes(context.Background(), "u", SessionSignIn{}, "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -813,7 +813,7 @@ func TestRegenerateRecoveryCodes_UserNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.RegenerateRecoveryCodes(context.Background(), "no-user", "x")
+	_, err := svc.RegenerateRecoveryCodes(context.Background(), "no-user", SessionSignIn{}, "x")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -823,7 +823,7 @@ func TestRegenerateRecoveryCodes_NoPasswordSet(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "rc-nopw@example.com", "", "active")
 
-	_, err := svc.RegenerateRecoveryCodes(context.Background(), u.ID, "x")
+	_, err := svc.RegenerateRecoveryCodes(context.Background(), u.ID, SessionSignIn{}, "x")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -878,7 +878,7 @@ func TestApproveQrLogin_EmptyID(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.ApproveQrLogin(context.Background(), "", true, "u", "", "")
+	_, err := svc.ApproveQrLogin(context.Background(), "", true, "u", SessionSignIn{}, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -887,7 +887,7 @@ func TestApproveQrLogin_NotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.ApproveQrLogin(context.Background(), "ghost", true, "u", "", "")
+	_, err := svc.ApproveQrLogin(context.Background(), "ghost", true, "u", SessionSignIn{}, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -900,7 +900,7 @@ func TestApproveQrLogin_ExpiredPending(t *testing.T) {
 	require.NoError(t, err)
 	svc.nowFunc = func() time.Time { return time.Now().Add(time.Hour) }
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, "u", "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, "u", SessionSignIn{}, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrQrLoginExpired))
 }
@@ -912,11 +912,11 @@ func TestApproveQrLogin_AlreadyConsumed(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 
 	// Approving twice should fail with ErrQrLoginNotPending.
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, SessionSignIn{}, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrQrLoginNotPending))
 }
@@ -970,7 +970,7 @@ func TestPollQrLogin_ApprovedUserDeleted(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 
 	repo.mu.Lock()
@@ -988,7 +988,7 @@ func TestAdminService_RequireAdmin_ActorMissing(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestAdminService(db)
 
-	_, err := svc.InviteUser(context.Background(), "ghost-actor", "x@example.com", "X", "member", "", 0, false)
+	_, err := svc.InviteUser(context.Background(), "ghost-actor", SessionSignIn{}, "x@example.com", "X", "member", "", 0, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "actor user not found")
 }
@@ -998,7 +998,7 @@ func TestAdminService_InviteUser_InvalidRole(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.InviteUser(context.Background(), "admin-1", "x@test.com", "", "owner", "", 0, false)
+	_, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{}, "x@test.com", "", "owner", "", 0, false)
 	require.Error(t, err)
 }
 
@@ -1007,7 +1007,7 @@ func TestAdminService_InviteUser_DefaultsRoleToMember(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	res, err := svc.InviteUser(context.Background(), "admin-1", "rolemiss@test.com", "", "", "", 0, false)
+	res, err := svc.InviteUser(context.Background(), "admin-1", SessionSignIn{}, "rolemiss@test.com", "", "", "", 0, false)
 	require.NoError(t, err)
 	assert.Equal(t, "member", res.User.Role)
 }
@@ -1035,7 +1035,7 @@ func TestAdminService_ReactivateUser_EmptyTarget(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "")
 	require.Error(t, err)
 }
 
@@ -1044,7 +1044,7 @@ func TestAdminService_ReactivateUser_NotFound(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "ghost")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "ghost")
 	require.Error(t, err)
 }
 
@@ -1053,7 +1053,7 @@ func TestAdminService_ResetUserPassword_EmptyTarget(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "", true)
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "", true)
 	require.Error(t, err)
 }
 
@@ -1062,7 +1062,7 @@ func TestAdminService_ResetUserPassword_NotFound(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "ghost", true)
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", SessionSignIn{}, "ghost", true)
 	require.Error(t, err)
 }
 
@@ -1098,7 +1098,7 @@ func TestAdminService_UpdateUser_NonAdmin(t *testing.T) {
 	db.addUser("member-1", "m@test.com", "M", "member", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.UpdateUser(context.Background(), "member-1", "user-1", "Name", "", "")
+	_, err := svc.UpdateUser(context.Background(), "member-1", SessionSignIn{}, "user-1", "Name", "", "")
 	require.Error(t, err)
 }
 
@@ -1107,7 +1107,7 @@ func TestAdminService_UpdateUser_EmptyID(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.UpdateUser(context.Background(), "admin-1", "", "N", "", "")
+	_, err := svc.UpdateUser(context.Background(), "admin-1", SessionSignIn{}, "", "N", "", "")
 	require.Error(t, err)
 }
 
@@ -1117,7 +1117,7 @@ func TestAdminService_UpdateUser_AvatarOnly(t *testing.T) {
 	db.addUser("user-1", "u@test.com", "U", "member", "active")
 	svc := newTestAdminService(db)
 
-	user, err := svc.UpdateUser(context.Background(), "admin-1", "user-1", "", "", "https://x.example.com/p.png")
+	user, err := svc.UpdateUser(context.Background(), "admin-1", SessionSignIn{}, "user-1", "", "", "https://x.example.com/p.png")
 	require.NoError(t, err)
 	assert.Equal(t, "https://x.example.com/p.png", user.AvatarURL)
 }
@@ -1304,7 +1304,7 @@ func TestProfileService_RevokeSession_EmptyID(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestProfileService(db)
 
-	err := svc.RevokeSession(context.Background(), "u", "")
+	err := svc.RevokeSession(context.Background(), "u", SessionSignIn{}, "")
 	require.Error(t, err)
 }
 
@@ -1312,7 +1312,7 @@ func TestProfileService_RevokeSession_NotFound(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestProfileService(db)
 
-	err := svc.RevokeSession(context.Background(), "u", "ghost")
+	err := svc.RevokeSession(context.Background(), "u", SessionSignIn{}, "ghost")
 	require.Error(t, err)
 }
 
@@ -1320,7 +1320,7 @@ func TestProfileService_RevokeAllSessions_EmptyPassword(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestProfileService(db)
 
-	_, err := svc.RevokeAllSessions(context.Background(), "u", "")
+	_, err := svc.RevokeAllSessions(context.Background(), "u", SessionSignIn{}, "")
 	require.Error(t, err)
 }
 
@@ -1328,7 +1328,7 @@ func TestProfileService_RevokeAllSessions_UserNotFound(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestProfileService(db)
 
-	_, err := svc.RevokeAllSessions(context.Background(), "ghost", "anything")
+	_, err := svc.RevokeAllSessions(context.Background(), "ghost", SessionSignIn{}, "anything")
 	require.Error(t, err)
 }
 
@@ -1337,7 +1337,7 @@ func TestProfileService_RevokeAllSessions_NoPasswordSet(t *testing.T) {
 	db.addUser("user-1", "x@test.com", "X", "member", "active")
 	svc := newTestProfileService(db)
 
-	_, err := svc.RevokeAllSessions(context.Background(), "user-1", "anything")
+	_, err := svc.RevokeAllSessions(context.Background(), "user-1", SessionSignIn{}, "anything")
 	require.Error(t, err)
 }
 
@@ -1353,7 +1353,7 @@ func TestProfileService_DeletePasskey_EmptyCred(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestProfileService(db)
 
-	err := svc.DeletePasskey(context.Background(), "u", "")
+	err := svc.DeletePasskey(context.Background(), "u", SessionSignIn{}, "")
 	require.Error(t, err)
 }
 
@@ -1361,7 +1361,7 @@ func TestProfileService_DeletePasskey_NotFound(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestProfileService(db)
 
-	err := svc.DeletePasskey(context.Background(), "u", "no-such-cred")
+	err := svc.DeletePasskey(context.Background(), "u", SessionSignIn{}, "no-such-cred")
 	require.Error(t, err)
 }
 
@@ -1369,9 +1369,9 @@ func TestProfileService_ChangePassword_EmptyArgs(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestProfileService(db)
 
-	err := svc.ChangePassword(context.Background(), "u", "", "new")
+	err := svc.ChangePassword(context.Background(), "u", SessionSignIn{}, "", "new")
 	require.Error(t, err)
-	err = svc.ChangePassword(context.Background(), "u", "old", "")
+	err = svc.ChangePassword(context.Background(), "u", SessionSignIn{}, "old", "")
 	require.Error(t, err)
 }
 
@@ -1379,7 +1379,7 @@ func TestProfileService_ChangePassword_UserNotFound(t *testing.T) {
 	db := newFakeDB()
 	svc := newTestProfileService(db)
 
-	err := svc.ChangePassword(context.Background(), "ghost", "old", "NewStr0ng!Pass")
+	err := svc.ChangePassword(context.Background(), "ghost", SessionSignIn{}, "old", "NewStr0ng!Pass")
 	require.Error(t, err)
 }
 
@@ -1388,7 +1388,7 @@ func TestProfileService_ChangePassword_NoPasswordSet(t *testing.T) {
 	db.addUser("user-1", "x@test.com", "X", "member", "active")
 	svc := newTestProfileService(db)
 
-	err := svc.ChangePassword(context.Background(), "user-1", "old", "NewStr0ng!Pass")
+	err := svc.ChangePassword(context.Background(), "user-1", SessionSignIn{}, "old", "NewStr0ng!Pass")
 	// The sentinel, not a plain error: it maps to FailedPrecondition, so a
 	// passkey/OAuth-only account gets an actionable "set a password first"
 	// instead of a 500 the client has to string-match.
@@ -1800,6 +1800,9 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	}
 	if err := r.DeleteExpiredPhoneVerificationCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredPhoneVerificationCodes: %v", err)
+	}
+	if err := r.DeleteExpiredRecoveryEmailCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredRecoveryEmailCodes: %v", err)
 	}
 	if err := r.DeleteExpiredQrLoginSessions(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredQrLoginSessions: %v", err)

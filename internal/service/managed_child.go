@@ -150,10 +150,15 @@ func (s *AuthService) auditManagedChildFailure(ctx context.Context, actorID, ste
 // authenticated, non-minor account in the project — so the call succeeds
 // under invite and closed modes alike.
 func (s *AuthService) CreateManagedChildAccount(
-	ctx context.Context, callerUserID string, req ManagedChildAccountRequest, ip, userAgent string,
+	ctx context.Context, callerUserID string, signIn SessionSignIn, req ManagedChildAccountRequest, ip, userAgent string,
 ) (*ManagedChildAccountResult, error) {
 	if callerUserID == "" {
 		return nil, ErrUnauthenticated
+	}
+	// The caller becomes the child's guardian, a control that outlasts the
+	// session.
+	if err := s.refuseHeldSession(ctx, callerUserID, signIn); err != nil {
+		return nil, err
 	}
 
 	// Request shape, checked before any lookup so every malformed call fails

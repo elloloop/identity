@@ -35,7 +35,7 @@ func TestSetDomainJoin_TurnsJoinOnAndOffAndAudits(t *testing.T) {
 	ctx := withProject(testProject)
 	event := string(audit.EventDomainJoinSet)
 
-	on, err := f.svc.SetDomainJoin(ctx, testCaller, " "+joinDomainID+" ", true, "203.0.113.7", "test-agent")
+	on, err := f.svc.SetDomainJoin(ctx, testCaller, SessionSignIn{}, " "+joinDomainID+" ", true, "203.0.113.7", "test-agent")
 	require.NoError(t, err)
 	assert.True(t, on.AllowJoin)
 	assert.Equal(t, joinDomainID, on.ID)
@@ -47,12 +47,12 @@ func TestSetDomainJoin_TurnsJoinOnAndOffAndAudits(t *testing.T) {
 	}, details[0])
 
 	// Asking for the value the domain has changes and records nothing.
-	again, err := f.svc.SetDomainJoin(ctx, testCaller, joinDomainID, true, "", "")
+	again, err := f.svc.SetDomainJoin(ctx, testCaller, SessionSignIn{}, joinDomainID, true, "", "")
 	require.NoError(t, err)
 	assert.True(t, again.AllowJoin)
 	assert.Equal(t, 1, w.countByEventType(event))
 
-	off, err := f.svc.SetDomainJoin(ctx, testCaller, joinDomainID, false, "", "")
+	off, err := f.svc.SetDomainJoin(ctx, testCaller, SessionSignIn{}, joinDomainID, false, "", "")
 	require.NoError(t, err)
 	assert.False(t, off.AllowJoin)
 	stored, err := f.domains.GetDomain(ctx, testProject, joinDomainID)
@@ -69,7 +69,7 @@ func TestSetDomainJoin_OnAPendingDomain(t *testing.T) {
 	f, _ := newDomainJoinFixture()
 	f.domains.byID[f.domains.key(testProject, joinDomainID)].Status = DomainStatusPending
 
-	out, err := f.svc.SetDomainJoin(withProject(testProject), testCaller, joinDomainID, true, "", "")
+	out, err := f.svc.SetDomainJoin(withProject(testProject), testCaller, SessionSignIn{}, joinDomainID, true, "", "")
 	require.NoError(t, err)
 	assert.True(t, out.AllowJoin)
 	assert.Equal(t, DomainStatusPending, out.Status)
@@ -80,7 +80,7 @@ func TestSetDomainJoin_WithoutAnAuditTrail(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, testCaller)
 	_, _ = f.domains.CreateDomain(context.Background(), &Domain{ID: joinDomainID, ProjectID: testProject, TenantID: testTenant, Domain: testDomain})
 
-	out, err := f.svc.SetDomainJoin(withProject(testProject), testCaller, joinDomainID, true, "", "")
+	out, err := f.svc.SetDomainJoin(withProject(testProject), testCaller, SessionSignIn{}, joinDomainID, true, "", "")
 	require.NoError(t, err)
 	assert.True(t, out.AllowJoin)
 }
@@ -89,15 +89,15 @@ func TestSetDomainJoin_RefusesBadRequests(t *testing.T) {
 	f, w := newDomainJoinFixture()
 	ctx := withProject(testProject)
 
-	_, err := f.svc.SetDomainJoin(context.Background(), testCaller, joinDomainID, true, "", "")
+	_, err := f.svc.SetDomainJoin(context.Background(), testCaller, SessionSignIn{}, joinDomainID, true, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "no project in scope")
-	_, err = f.svc.SetDomainJoin(ctx, "", joinDomainID, true, "", "")
+	_, err = f.svc.SetDomainJoin(ctx, "", SessionSignIn{}, joinDomainID, true, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
-	_, err = f.svc.SetDomainJoin(ctx, testCaller, " ", true, "", "")
+	_, err = f.svc.SetDomainJoin(ctx, testCaller, SessionSignIn{}, " ", true, "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
-	_, err = f.svc.SetDomainJoin(ctx, testCaller, "dom-unknown", true, "", "")
+	_, err = f.svc.SetDomainJoin(ctx, testCaller, SessionSignIn{}, "dom-unknown", true, "", "")
 	require.ErrorIs(t, err, ErrNotFound)
-	_, err = f.svc.SetDomainJoin(withProject("proj-other"), testCaller, joinDomainID, true, "", "")
+	_, err = f.svc.SetDomainJoin(withProject("proj-other"), testCaller, SessionSignIn{}, joinDomainID, true, "", "")
 	require.ErrorIs(t, err, ErrNotFound, "another project's domain is not found")
 
 	assert.Zero(t, w.countByEventType(string(audit.EventDomainJoinSet)))
@@ -121,7 +121,7 @@ func TestSetDomainJoin_OnlyAnAdminOfAGovernableTenant(t *testing.T) {
 	} {
 		f, w := newDomainJoinFixture()
 		setup(f)
-		_, err := f.svc.SetDomainJoin(withProject(testProject), testCaller, joinDomainID, true, "", "")
+		_, err := f.svc.SetDomainJoin(withProject(testProject), testCaller, SessionSignIn{}, joinDomainID, true, "", "")
 		require.ErrorIs(t, err, ErrPermissionDenied, name)
 		stored, _ := f.domains.GetDomain(context.Background(), testProject, joinDomainID)
 		assert.False(t, stored.AllowJoin, name)
@@ -139,7 +139,7 @@ func TestSetDomainJoin_PropagatesStoreErrors(t *testing.T) {
 	} {
 		f, w := newDomainJoinFixture()
 		setup(f)
-		_, err := f.svc.SetDomainJoin(withProject(testProject), testCaller, joinDomainID, true, "", "")
+		_, err := f.svc.SetDomainJoin(withProject(testProject), testCaller, SessionSignIn{}, joinDomainID, true, "", "")
 		require.ErrorIs(t, err, boom, name)
 		assert.Zero(t, w.countByEventType(string(audit.EventDomainJoinSet)), name)
 	}
@@ -164,7 +164,7 @@ func TestSetDomainJoin_ADomainRemovedMeanwhile(t *testing.T) {
 	svc := NewDomainService(store, f.tenants, f.members, f.resolver, &config.Config{}, nil).
 		WithAudit(audit.NewLogger(w, "test-tenant", nil))
 
-	got, err := svc.SetDomainJoin(withProject(testProject), testCaller, joinDomainID, true, "", "")
+	got, err := svc.SetDomainJoin(withProject(testProject), testCaller, SessionSignIn{}, joinDomainID, true, "", "")
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.Nil(t, got)
 	assert.Zero(t, w.countByEventType(string(audit.EventDomainJoinSet)))
@@ -490,7 +490,7 @@ func TestJoinTenantByDomain_RefusesAPersonRemovedFromTheTenant(t *testing.T) {
 
 	_, err := f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
 	require.NoError(t, err)
-	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "203.0.113.7", "test-agent"))
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "203.0.113.7", "test-agent"))
 
 	assert.Empty(t, f.joinable(t, joinerID), "a removed person has nothing to join")
 	_, err = f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
@@ -512,7 +512,7 @@ func TestJoinTenantByDomain_RefusesAPersonRemovedFromTheTenant(t *testing.T) {
 	assert.Equal(t, 1, f.audit.countByEventType(joined))
 
 	// Removed again, they are recorded again, and the join is refused.
-	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", ""))
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", ""))
 	_, err = f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
 	require.ErrorIs(t, err, ErrRemovedFromTenant)
 }
@@ -543,7 +543,7 @@ func TestRemoveTenantMember_IsAudited(t *testing.T) {
 	_, err := f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
 	require.NoError(t, err)
 
-	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "203.0.113.7", "test-agent"))
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "203.0.113.7", "test-agent"))
 	assert.Equal(t, 1, f.audit.countByEventTypeActorTarget(event, ssOwnerID, joinerID))
 	details := f.audit.detailsOf(event)
 	require.Len(t, details, 1)
@@ -553,11 +553,11 @@ func TestRemoveTenantMember_IsAudited(t *testing.T) {
 	}, details[0])
 
 	// Nothing left to remove: no record.
-	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", ""))
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", ""))
 	assert.Equal(t, 1, f.audit.countByEventType(event))
 
 	// The last owner is refused: no record.
-	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, ssOwnerID, "", ""), ErrLastOwner)
+	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOwnerID, "", ""), ErrLastOwner)
 	assert.Equal(t, 1, f.audit.countByEventType(event))
 
 	// Removing a suspended member records the status it had.
@@ -566,9 +566,9 @@ func TestRemoveTenantMember_IsAudited(t *testing.T) {
 		Source: MembershipSourceInvited, Role: RoleMember,
 	})
 	require.NoError(t, err)
-	_, err = f.svc.SuspendTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", "")
+	_, err = f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
-	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, joinerID, "", ""))
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", ""))
 	details = f.audit.detailsOf(event)
 	require.Len(t, details, 2)
 	assert.Equal(t, MembershipStatusSuspended, details[1]["status"])
@@ -580,7 +580,7 @@ func TestRemoveTenantMember_IsAudited(t *testing.T) {
 		Source: MembershipSourceInvited, Role: RoleMember,
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, ownTenant, ssOtherID, "", ""))
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", ""))
 	held, _ := f.members.GetMembership(context.Background(), ssProject, ownTenant, ssOtherID)
 	assert.Nil(t, held)
 }
@@ -596,7 +596,7 @@ func TestRemoveTenantMember_LeavingIsARemoval(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, f.svc.RemoveTenantMember(ctx, joinerID, ownTenant, joinerID, "", ""))
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, joinerID, SessionSignIn{}, ownTenant, joinerID, "", ""))
 	assert.Equal(t, 1, f.audit.countByEventTypeActorTarget(string(audit.EventTenantMemberRemoved), joinerID, joinerID))
 	_, err = f.svc.JoinTenantByDomain(ctx, joinerID, ownTenant, "", "")
 	require.ErrorIs(t, err, ErrRemovedFromTenant)
