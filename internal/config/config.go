@@ -2428,23 +2428,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: GATEWAY_SESSION_CACHE_TTL_SECONDS=%d must be >= 0", c.SessionCacheTTLSeconds)
 	}
 
-	switch {
-	case c.RateLimitDirectoryPerIP == 0:
-		c.RateLimitDirectoryPerIP = DefaultRateLimitDirectoryPerIP
-	case c.RateLimitDirectoryPerIP < 0:
-		return fmt.Errorf(
-			"config: GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP=%d must not be negative (0 selects the default, %d; the limit cannot be disabled)",
-			c.RateLimitDirectoryPerIP, DefaultRateLimitDirectoryPerIP,
-		)
-	}
-	if c.RateLimitSCIMPerIP < 0 {
-		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_SCIM_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitSCIMPerIP)
-	}
-	if c.RateLimitQrPollPerIP < 0 {
-		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_QR_POLL_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitQrPollPerIP)
-	}
-	if c.RateLimitUsernameTakenPerIP < 0 {
-		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitUsernameTakenPerIP)
+	if err := c.validateRateLimits(); err != nil {
+		return err
 	}
 	if c.AgentsMaxPerOwner < 0 || c.AgentsMaxPerOwner > MaxAgentsMaxPerOwner {
 		return fmt.Errorf(
@@ -2463,13 +2448,7 @@ func (c *Config) Validate() error {
 		)
 	}
 
-	if err := c.validateSMS(); err != nil {
-		return err
-	}
-	if err := c.validateTemplateMessages(); err != nil {
-		return err
-	}
-	if err := c.validatePhoneCodeCapture(); err != nil {
+	if err := c.validatePhoneDelivery(); err != nil {
 		return err
 	}
 
@@ -2796,6 +2775,44 @@ func (c *Config) validateSAML() error {
 		)
 	}
 	return nil
+}
+
+// validateRateLimits fills in the directory limit's default and refuses a
+// negative per-IP limit. The directory limit cannot be turned off; the SCIM,
+// QR-poll and username-taken limits are off at 0.
+func (c *Config) validateRateLimits() error {
+	switch {
+	case c.RateLimitDirectoryPerIP == 0:
+		c.RateLimitDirectoryPerIP = DefaultRateLimitDirectoryPerIP
+	case c.RateLimitDirectoryPerIP < 0:
+		return fmt.Errorf(
+			"config: GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP=%d must not be negative (0 selects the default, %d; the limit cannot be disabled)",
+			c.RateLimitDirectoryPerIP, DefaultRateLimitDirectoryPerIP,
+		)
+	}
+	if c.RateLimitSCIMPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_SCIM_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitSCIMPerIP)
+	}
+	if c.RateLimitQrPollPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_QR_POLL_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitQrPollPerIP)
+	}
+	if c.RateLimitUsernameTakenPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitUsernameTakenPerIP)
+	}
+	return nil
+}
+
+// validatePhoneDelivery checks the phone-code senders: the SMS provider, the
+// template-message provider, and local capture, which reads what the other
+// two chose.
+func (c *Config) validatePhoneDelivery() error {
+	if err := c.validateSMS(); err != nil {
+		return err
+	}
+	if err := c.validateTemplateMessages(); err != nil {
+		return err
+	}
+	return c.validatePhoneCodeCapture()
 }
 
 // validateSMS enforces the SMS-provider invariant: when phone
