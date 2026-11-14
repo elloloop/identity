@@ -18,7 +18,8 @@ var _ service.ProjectResolver = (*ProjectStore)(nil)
 
 // projectSelectorKinds are the credential kinds whose public id selects a
 // request's project (X-Project-Key / ?project_key=). A directory_reader key is
-// not one: it authorizes LookupUsers alone, which reads the key's own project.
+// not one: it authorizes the directory reads alone, which read the key's own
+// project.
 var projectSelectorKinds = map[string]bool{
 	service.CredentialKindPublishable: true,
 	service.CredentialKindSecret:      true,

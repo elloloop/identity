@@ -2902,7 +2902,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	return user, accessToken, newRefresh, nil
 }
 
-// maxTenantIDLen bounds the tenant_id a refresh may name. Identity mints
+// maxTenantIDLen bounds the tenant_id a caller may name. Identity mints
 // tenant ids of 32 hex characters; the bound leaves room for a store that
 // mints its own and refuses what no tenant id could be before anything is
 // read for it.
@@ -2917,10 +2917,20 @@ func (s *AuthService) selectedTenant(ctx context.Context, tenantID string) (stri
 	if tenantID == "" || tenantID == s.tenantID(ctx) {
 		return "", nil
 	}
-	if len(tenantID) > maxTenantIDLen || strings.IndexFunc(tenantID, notTenantIDRune) >= 0 {
-		return "", fmt.Errorf("%w: tenant_id must be at most %d ASCII letters, digits, '-' or '_'", ErrInvalidArgument, maxTenantIDLen)
+	if err := checkTenantIDShape(tenantID); err != nil {
+		return "", err
 	}
 	return tenantID, nil
+}
+
+// checkTenantIDShape refuses, as ErrInvalidArgument, an id no tenant could
+// have: longer than maxTenantIDLen, or holding anything but ASCII letters,
+// digits, '-' and '_'.
+func checkTenantIDShape(tenantID string) error {
+	if len(tenantID) > maxTenantIDLen || strings.IndexFunc(tenantID, notTenantIDRune) >= 0 {
+		return fmt.Errorf("%w: tenant_id must be at most %d ASCII letters, digits, '-' or '_'", ErrInvalidArgument, maxTenantIDLen)
+	}
+	return nil
 }
 
 // notTenantIDRune reports whether r may not appear in a tenant id.

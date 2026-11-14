@@ -142,6 +142,10 @@ type connectMembershipStore struct {
 	// changeErr, when set, is the store's answer to a change of a
 	// membership's status.
 	changeErr error
+	// phoneTenant is the one tenant MatchTenantMemberPhones finds, and
+	// phoneMatches what it answers for it.
+	phoneTenant  string
+	phoneMatches []string
 }
 
 func (s *connectMembershipStore) UpsertMembership(_ context.Context, m *service.TenantMembership) (string, error) {
@@ -245,6 +249,15 @@ func (s *connectMembershipStore) TransferOwnership(_ context.Context, projectID,
 
 func (s *connectMembershipStore) ListActiveTenantsForUser(context.Context, string, string, string) ([]*service.UserTenant, error) {
 	return s.active, nil
+}
+
+// MatchTenantMemberPhones returns phoneMatches for the tenant phoneTenant,
+// and ErrNotFound for any other.
+func (s *connectMembershipStore) MatchTenantMemberPhones(_ context.Context, _, tenantID string, _ [][]byte) ([]string, error) {
+	if tenantID != s.phoneTenant {
+		return nil, service.ErrNotFound
+	}
+	return s.phoneMatches, nil
 }
 
 func (s *connectMembershipStore) GetActiveTenantForUser(_ context.Context, _, tenantID, _, _ string) (*service.UserTenant, error) {

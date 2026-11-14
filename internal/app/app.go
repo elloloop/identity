@@ -102,9 +102,10 @@ type Deps struct {
 	// service.ControlPlaneAdminService).
 	ControlPlaneStore service.ControlPlaneProjectStore
 
-	// DirectoryCredentials is the control-plane credential read LookupUsers
-	// authenticates against. Non-nil ONLY for the postgres driver; when nil no
-	// DirectoryService is constructed and LookupUsers returns Unimplemented.
+	// DirectoryCredentials is the control-plane credential read the directory
+	// reads (LookupUsers, MatchTenantMemberPhones) authenticate against.
+	// Non-nil ONLY for the postgres driver; when nil no DirectoryService is
+	// constructed and both return Unimplemented.
 	DirectoryCredentials service.DirectoryCredentialStore
 
 	// NativeOAuthProjects is the control-plane project-by-id lookup
@@ -578,6 +579,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// that, and bounds how fast even a valid credential can walk the
 			// directory by guessing addresses.
 			PathPrefix: identityconnectgen.IdentityServiceLookupUsersProcedure, Tag: "directory_lookup",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
+		},
+		{
+			// Phone match: authenticated like LookupUsers, so it gets the
+			// same per-IP bound on credential reads, as a budget of its own.
+			// The service counts each credential's calls per tenant besides.
+			PathPrefix: identityconnectgen.IdentityServiceMatchTenantMemberPhonesProcedure, Tag: "directory_phone_match",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
 		},
 		{
@@ -1456,21 +1464,29 @@ func buildControlPlaneAdminService(deps Deps, users service.UserDirectory, audit
 	)
 }
 
-// buildDirectoryService returns the DirectoryService backing LookupUsers, or
-// nil when the build has no control plane to hold directory credentials. The
-// Connect handler treats nil as "disabled" and returns CodeUnimplemented.
-// Either way the outcome is logged once at boot, as SCIM's is.
+// buildDirectoryService returns the DirectoryService backing LookupUsers and,
+// where tenant memberships are stored, MatchTenantMemberPhones, or nil when
+// the build has no control plane to hold directory credentials. The Connect
+// handler treats nil as "disabled" and returns CodeUnimplemented. Either way
+// the outcome is logged once at boot, as SCIM's is.
 func buildDirectoryService(deps Deps, users service.Repository, auditLog *audit.Logger, logger *zap.Logger) *service.DirectoryService {
 	if deps.DirectoryCredentials == nil {
 		logger.Info("directory_lookup_disabled",
-			zap.String("hint", "LookupUsers needs directory_reader credentials, which only the postgres driver's control plane holds"))
+			zap.String("hint", "LookupUsers and MatchTenantMemberPhones need directory_reader credentials, which only the postgres driver's control plane holds"))
 		return nil
 	}
+	window := rateLimitWindow(deps.Config)
 	logger.Info("directory_lookup_enabled",
 		zap.Int("rate_limit_per_ip", deps.Config.RateLimitDirectoryPerIP),
-		zap.Duration("rate_limit_window", rateLimitWindow(deps.Config)),
-		zap.Bool("require_verified_email", deps.Config.AuthRequireVerifiedEmail))
-	return service.NewDirectoryService(deps.DirectoryCredentials, users, deps.Config.AuthRequireVerifiedEmail, auditLog)
+		zap.Duration("rate_limit_window", window),
+		zap.Bool("require_verified_email", deps.Config.AuthRequireVerifiedEmail),
+		zap.Bool("tenant_member_phone_match", deps.MembershipStore != nil),
+		zap.Int("phone_match_per_tenant", deps.Config.RateLimitPhoneMatchPerTenant))
+	directory := service.NewDirectoryService(deps.DirectoryCredentials, users, deps.Config.AuthRequireVerifiedEmail, auditLog)
+	if deps.MembershipStore != nil {
+		directory.WithTenantMemberPhones(deps.MembershipStore, deps.Config.RateLimitPhoneMatchPerTenant, window.Milliseconds())
+	}
+	return directory
 }
 
 // wrapOAuthRegistry returns a registry whose Exchangers are wrapped

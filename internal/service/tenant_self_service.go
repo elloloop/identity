@@ -66,6 +66,10 @@ const (
 type TenantSelectionRefusedError struct {
 	Reason TenantSelectionRefusal
 	Err    error
+	// PhoneCallingCodes, on a TenantSelectionPhoneRequired refusal, are the
+	// country calling codes the tenant accepts a verified phone of, in the
+	// policy's order; empty when it accepts any country.
+	PhoneCallingCodes []string
 }
 
 func (e *TenantSelectionRefusedError) Error() string { return e.Err.Error() }

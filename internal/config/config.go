@@ -118,6 +118,13 @@ const (
 	// unthrottled.
 	DefaultRateLimitDirectoryPerIP = 120
 
+	// DefaultRateLimitPhoneMatchPerTenant is the cap per window on the
+	// MatchTenantMemberPhones calls one directory_reader credential makes
+	// against one tenant (RateLimitPhoneMatchPerTenant) when none is
+	// configured or the configured value is zero: the match is never
+	// unthrottled.
+	DefaultRateLimitPhoneMatchPerTenant = 60
+
 	// DefaultRateLimitSCIMPerIP is the per-IP cap per window on requests
 	// under /scim/v2/ when GATEWAY_RATE_LIMIT_SCIM_PER_IP is unset.
 	DefaultRateLimitSCIMPerIP = 300
@@ -1352,7 +1359,8 @@ type Config struct {
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
 	RateLimitBootstrapPerIP int
 	// RateLimitDirectoryPerIP is the per-IP cap per window on each surface a
-	// project credential authenticates: LookupUsers (directory_reader), the
+	// project credential authenticates: LookupUsers and
+	// MatchTenantMemberPhones (directory_reader, a budget each), the
 	// TeammateKeyService (teammate_key_manager) and the tenant operations
 	// called with a tenant_operator credential, across the HTTP and native
 	// gRPC surfaces, and HireGrantService over HTTP, called with a person's
@@ -1361,6 +1369,13 @@ type Config struct {
 	// Each surface has its own budget per client IP, which covers both
 	// transports; a LookupUsers call resolves up to 100 addresses.
 	RateLimitDirectoryPerIP int
+	// RateLimitPhoneMatchPerTenant is the cap per window on the
+	// MatchTenantMemberPhones calls one directory_reader credential makes
+	// against one tenant, each matching up to 3000 phone-number hashes. It is
+	// counted per replica once the credential is accepted, on top of the
+	// per-IP cap, and like that cap it cannot be switched off: zero selects
+	// the default and a negative value is refused at boot.
+	RateLimitPhoneMatchPerTenant int
 	// RateLimitSCIMPerIP is the per-IP cap per window on every request under
 	// /scim/v2/, authenticated or not, so the SCIM bearer token cannot be
 	// guessed at line rate and refused attempts cannot flood the audit trail.
@@ -1879,22 +1894,23 @@ func loadFromEnv() *Config {
 			"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32,::1/128",
 		),
 
-		RateLimitWindowSeconds:      envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
-		RateLimitSignupPerIP:        envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
-		RateLimitUsernameTakenPerIP: envInt("GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP", 5),
-		RateLimitLoginPerIP:         envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
-		RateLimitResetPerIP:         envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
-		RateLimitVerifyPerIP:        envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
-		RateLimitPasswordlessPerIP:  envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
-		RateLimitAssurancePerIP:     envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
-		RateLimitPhonePerIP:         envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
-		RateLimitInvitationPerIP:    envInt("GATEWAY_RATE_LIMIT_INVITATION_PER_IP", 20),
-		RateLimitDomainPerIP:        envInt("GATEWAY_RATE_LIMIT_DOMAIN_PER_IP", 20),
-		RateLimitIDVPerIP:           envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
-		RateLimitBootstrapPerIP:     envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
-		RateLimitDirectoryPerIP:     envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
-		RateLimitSCIMPerIP:          envInt("GATEWAY_RATE_LIMIT_SCIM_PER_IP", DefaultRateLimitSCIMPerIP),
-		RateLimitQrPollPerIP:        envInt("GATEWAY_RATE_LIMIT_QR_POLL_PER_IP", DefaultRateLimitQrPollPerIP),
+		RateLimitWindowSeconds:       envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
+		RateLimitSignupPerIP:         envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
+		RateLimitUsernameTakenPerIP:  envInt("GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP", 5),
+		RateLimitLoginPerIP:          envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
+		RateLimitResetPerIP:          envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
+		RateLimitVerifyPerIP:         envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
+		RateLimitPasswordlessPerIP:   envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
+		RateLimitAssurancePerIP:      envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
+		RateLimitPhonePerIP:          envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
+		RateLimitInvitationPerIP:     envInt("GATEWAY_RATE_LIMIT_INVITATION_PER_IP", 20),
+		RateLimitDomainPerIP:         envInt("GATEWAY_RATE_LIMIT_DOMAIN_PER_IP", 20),
+		RateLimitIDVPerIP:            envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
+		RateLimitBootstrapPerIP:      envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
+		RateLimitDirectoryPerIP:      envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
+		RateLimitPhoneMatchPerTenant: envInt("GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT", DefaultRateLimitPhoneMatchPerTenant),
+		RateLimitSCIMPerIP:           envInt("GATEWAY_RATE_LIMIT_SCIM_PER_IP", DefaultRateLimitSCIMPerIP),
+		RateLimitQrPollPerIP:         envInt("GATEWAY_RATE_LIMIT_QR_POLL_PER_IP", DefaultRateLimitQrPollPerIP),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
@@ -2777,8 +2793,8 @@ func (c *Config) validateSAML() error {
 	return nil
 }
 
-// validateRateLimits fills in the directory limit's default and refuses a
-// negative per-IP limit. The directory limit cannot be turned off; the SCIM,
+// validateRateLimits fills in the directory and phone-match limits' defaults
+// and refuses a negative limit. Those two cannot be turned off; the SCIM,
 // QR-poll and username-taken limits are off at 0.
 func (c *Config) validateRateLimits() error {
 	switch {
@@ -2788,6 +2804,15 @@ func (c *Config) validateRateLimits() error {
 		return fmt.Errorf(
 			"config: GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP=%d must not be negative (0 selects the default, %d; the limit cannot be disabled)",
 			c.RateLimitDirectoryPerIP, DefaultRateLimitDirectoryPerIP,
+		)
+	}
+	switch {
+	case c.RateLimitPhoneMatchPerTenant == 0:
+		c.RateLimitPhoneMatchPerTenant = DefaultRateLimitPhoneMatchPerTenant
+	case c.RateLimitPhoneMatchPerTenant < 0:
+		return fmt.Errorf(
+			"config: GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT=%d must not be negative (0 selects the default, %d; the limit cannot be disabled)",
+			c.RateLimitPhoneMatchPerTenant, DefaultRateLimitPhoneMatchPerTenant,
 		)
 	}
 	if c.RateLimitSCIMPerIP < 0 {

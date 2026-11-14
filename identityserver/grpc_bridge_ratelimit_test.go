@@ -93,6 +93,35 @@ func TestRegisterGRPC_LookupUsersThrottled(t *testing.T) {
 	}
 }
 
+// MatchTenantMemberPhones is throttled on the bridge from its own per-IP
+// budget, before the handler runs: an admitted call reaches the handler
+// (UNIMPLEMENTED on the memory driver), an over-quota one is
+// RESOURCE_EXHAUSTED, and LookupUsers keeps its own budget meanwhile.
+func TestRegisterGRPC_MatchTenantMemberPhonesThrottled(t *testing.T) {
+	t.Parallel()
+	srv := newTestServerWith(t, func(c *config.Config) {
+		c.RateLimitDirectoryPerIP = 1
+		c.RateLimitWindowSeconds = 30
+	}, nil)
+	client := serveGRPC(t, srv)
+	req := &identitypb.MatchTenantMemberPhonesRequest{TenantId: "t-acme", PhoneNumberHashes: [][]byte{make([]byte, 32)}}
+
+	if _, err := client.MatchTenantMemberPhones(context.Background(), req); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("first call: %v, want Unimplemented from the handler", err)
+	}
+	var header metadata.MD
+	_, err := client.MatchTenantMemberPhones(context.Background(), req, grpc.Header(&header))
+	if status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("over quota: %v, want ResourceExhausted", err)
+	}
+	if got := header.Get("retry-after"); len(got) != 1 || got[0] != "30" {
+		t.Fatalf("retry-after = %v, want [30]", got)
+	}
+	if _, err := client.LookupUsers(context.Background(), lookupRequest()); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("LookupUsers after the phone match spent its budget: %v, want Unimplemented from the handler", err)
+	}
+}
+
 // HTTP and native gRPC draw on one directory budget per client IP: calls on
 // either surface count against the same limiter, so serving both does not
 // double what one caller may spend.

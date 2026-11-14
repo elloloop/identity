@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -27,6 +28,7 @@ const (
 	chainDirectorySecret  = "chain-directory-secret"
 	chainDirectoryKey     = chainDirectoryPublic + "." + chainDirectorySecret
 	lookupUsersPath       = "/identity.v1.IdentityService/LookupUsers"
+	phoneMatchPath        = "/identity.v1.IdentityService/MatchTenantMemberPhones"
 )
 
 // chainCredentials is a one-credential DirectoryCredentialStore standing in
@@ -44,7 +46,33 @@ func (c chainCredentials) CredentialByPublicIDInActiveProject(_ context.Context,
 	return &cp, nil
 }
 
+// chainPhoneMembers stands in for the postgres membership store's phone
+// match: it answers matches for tenant in project, and records the project
+// and hashes it was asked about.
+type chainPhoneMembers struct {
+	service.MembershipStore
+	project, tenant string
+	matches         []string
+	askedProject    string
+	askedHashes     [][]byte
+}
+
+func (c *chainPhoneMembers) MatchTenantMemberPhones(_ context.Context, projectID, tenantID string, hashes [][]byte) ([]string, error) {
+	c.askedProject, c.askedHashes = projectID, hashes
+	if projectID != c.project || tenantID != c.tenant {
+		return nil, service.ErrNotFound
+	}
+	return c.matches, nil
+}
+
 func newDirectoryChainApp(t *testing.T, cfg *config.Config) (http.Handler, service.Repository) {
+	t.Helper()
+	return newDirectoryChainAppWith(t, cfg, nil)
+}
+
+// newDirectoryChainAppWith serves the chain with members as its membership
+// store, when given, so the phone match is wired.
+func newDirectoryChainAppWith(t *testing.T, cfg *config.Config, members service.MembershipStore) (http.Handler, service.Repository) {
 	t.Helper()
 	sum := sha256.Sum256([]byte(chainDirectorySecret))
 	pk, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: "localhost", RPName: "Identity Test", Origin: "http://localhost:9002"})
@@ -68,6 +96,7 @@ func newDirectoryChainApp(t *testing.T, cfg *config.Config) (http.Handler, servi
 			PublicID:   chainDirectoryPublic,
 			SecretHash: hex.EncodeToString(sum[:]),
 		}},
+		MembershipStore: members,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -192,12 +221,51 @@ func TestDirectoryLookup_ServedWithVerifiedEmailRequired(t *testing.T) {
 	}
 }
 
+// TestMatchTenantMemberPhones_ServedThroughFullChain proves the JWT-exempt
+// match reaches its handler with only a directory key, asks about the
+// credential's project (not the Host-resolved default one), and is refused
+// without the key or with it as a bearer token.
+func TestMatchTenantMemberPhones_ServedThroughFullChain(t *testing.T) {
+	members := &chainPhoneMembers{project: chainDirectoryProject, tenant: "t-acme", matches: []string{"member-1"}}
+	h, _ := newDirectoryChainAppWith(t, newTestConfig(), members)
+	hash := sha256.Sum256([]byte("+14155550123"))
+	body := `{"tenantId":"t-acme","phoneNumberHashes":["` + base64.StdEncoding.EncodeToString(hash[:]) + `"]}`
+
+	rec := postRPC(t, h, phoneMatchPath, body, map[string]string{identityconnect.DirectoryKeyHeader: chainDirectoryKey})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("MatchTenantMemberPhones: status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		UserIDs []string `json:"userIds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.UserIDs) != 1 || resp.UserIDs[0] != "member-1" {
+		t.Fatalf("userIds = %v, want the store's match", resp.UserIDs)
+	}
+	if members.askedProject != chainDirectoryProject || len(members.askedHashes) != 1 || string(members.askedHashes[0]) != string(hash[:]) {
+		t.Fatalf("store asked about project %q with %d hashes, want the credential's project and the one hash", members.askedProject, len(members.askedHashes))
+	}
+
+	for name, hdr := range map[string]map[string]string{
+		"no key":       nil,
+		"wrong secret": {identityconnect.DirectoryKeyHeader: chainDirectoryPublic + ".nope"},
+		"as bearer":    {"Authorization": "Bearer " + chainDirectoryKey},
+	} {
+		if rec := postRPC(t, h, phoneMatchPath, body, hdr); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: status = %d body=%s, want 401", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 // TestDirectoryKey_GrantsNothingElse walks EVERY IdentityService RPC and
 // asserts presenting the directory key — in its own header and as a Bearer
-// token — changes nothing: each RPC answers exactly as it does for a caller
-// holding no credential at all. That is the read-only, single-RPC guarantee,
-// held for RPCs added later too, since the list comes from the descriptor.
-// The user-management RPCs are additionally pinned to 401.
+// token — changes nothing but the directory reads it authorizes: each other
+// RPC answers exactly as it does for a caller holding no credential at all.
+// That is the read-only guarantee, held for RPCs added later too, since the
+// list comes from the descriptor. The user-management RPCs are additionally
+// pinned to 401.
 func TestDirectoryKey_GrantsNothingElse(t *testing.T) {
 	h, repo := newDirectoryChainApp(t, newTestConfig())
 	target, err := repo.WithProject(chainDirectoryProject).CreateUser(context.Background(),
@@ -213,7 +281,7 @@ func TestDirectoryKey_GrantsNothingElse(t *testing.T) {
 	methods := identitypb.File_identity_v1_identity_proto.Services().ByName("IdentityService").Methods()
 	for i := 0; i < methods.Len(); i++ {
 		name := string(methods.Get(i).Name())
-		if name == "LookupUsers" {
+		if name == "LookupUsers" || name == "MatchTenantMemberPhones" {
 			continue
 		}
 		path := "/identity.v1.IdentityService/" + name

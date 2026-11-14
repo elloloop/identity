@@ -877,6 +877,12 @@ message RefreshTokenResponse {
 // detail says so; see RefreshTokenRequest.tenant_id.
 message TenantSelectionRefusedDetails {
   TenantSelectionRefusal reason = 1;
+  // phone_calling_codes, on a PHONE_VERIFICATION_REQUIRED refusal, are the
+  // country calling codes the tenant accepts a verified phone number of
+  // (LoginPolicy.phone_calling_codes), as digits without the '+' (e.g.
+  // "91"), in the policy's order, so an app can offer only those countries.
+  // Empty there means a number of any country; empty on every other reason.
+  repeated string phone_calling_codes = 2;
 }
 
 // TenantSelectionRefusal says why RefreshToken refused a tenant selection.
@@ -906,10 +912,11 @@ enum TenantSelectionRefusal {
   // The tenant's login policy requires a verified phone number
   // (LoginPolicy.require_verified_phone) and the account has none, or none
   // of the countries the policy names. The code is FAILED_PRECONDITION with
-  // the stable `phone_verification_required` token. The refresh token was
-  // not consumed: refresh without tenant_id, verify a phone with that
-  // session (RequestPhoneVerification, VerifyPhoneCode), then select the
-  // tenant again.
+  // the stable `phone_verification_required` token, and the detail's
+  // phone_calling_codes names those countries. The refresh token was not
+  // consumed: refresh without tenant_id, verify a phone with that session
+  // (RequestPhoneVerification, VerifyPhoneCode), then select the tenant
+  // again.
   TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED = 5;
 }
 
@@ -2394,8 +2401,8 @@ message AdminCreateProjectCredentialRequest {
   // kind selects the credential type: "publishable" (a public lookup key,
   // no secret), "secret" (a key whose secret half is shown ONCE), or
   // "directory_reader" (a machine credential whose secret half is shown ONCE
-  // and which authorizes exactly one thing: LookupUsers against this
-  // project's directory, presented in the X-Directory-Key header), or
+  // and which authorizes only reads of this project's directory, LookupUsers
+  // and MatchTenantMemberPhones, presented in the X-Directory-Key header), or
   // "teammate_key_manager" (a machine credential whose secret half is shown
   // ONCE and which authorizes only TeammateKeyService in this project,
   // presented in the X-Teammate-Key-Manager-Key header), or
@@ -3074,6 +3081,35 @@ message LookupUsersResponse {
   // request order, but omissions shift positions: match each entry to the
   // requests it answers by its requested_emails, never by index or by email.
   repeated DirectoryUser users = 1;
+}
+
+// MatchTenantMemberPhonesRequest asks which members of a tenant hold one of
+// a set of phone numbers, given as hashes, in the project the presented
+// directory_reader credential belongs to.
+message MatchTenantMemberPhonesRequest {
+  // tenant_id is a tenant of the credential's project. A blank id, or one
+  // longer than 64 characters or holding anything but ASCII letters, digits,
+  // '-' and '_', is INVALID_ARGUMENT; any other id the project holds no
+  // tenant by, another project's included, is PERMISSION_DENIED.
+  string tenant_id = 1;
+  // phone_number_hashes are 1 to 3000 SHA-256 digests, 32 bytes each, of
+  // E.164 numbers: each the hash of the number's UTF-8 text with its leading
+  // '+', e.g. SHA-256("+14155550123"). Repeats count once. They are compared
+  // and discarded, never stored or logged.
+  repeated bytes phone_number_hashes = 2;
+}
+
+message MatchTenantMemberPhonesResponse {
+  // user_ids are the accounts, in ascending order, that are members of the
+  // tenant and whose VERIFIED phone number hashes to one of the request's
+  // hashes. A member is one who may act in the tenant: an active membership
+  // of a claimed tenant, where one through the email's domain counts only
+  // while that email is verified and on a domain the tenant has verified,
+  // as ListMyTenants applies it; a suspended or latent tenant has none. The
+  // account must be an active person's (not anonymous, not an agent). An
+  // account whose number is unverified, or that has none, never matches,
+  // and the response does not say which hash matched which account.
+  repeated string user_ids = 1;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────
@@ -4270,6 +4306,26 @@ service IdentityService {
   // registration with RESOURCE_EXHAUSTED and the same value in the
   // "retry-after" response metadata.
   rpc LookupUsers(LookupUsersRequest) returns (LookupUsersResponse);
+  // MatchTenantMemberPhones matches a service's phone-number hashes (a
+  // person's contacts, say) against the members of one tenant and returns
+  // the members whose verified number is among them. Like LookupUsers it is
+  // called by a service, never an end user: a user's access token does not
+  // authorize it, only a directory_reader project credential in the
+  // "X-Directory-Key" header, scoped to that credential's project whatever
+  // the request Host. UNAUTHENTICATED for a missing, wrong, revoked or
+  // non-directory key; INVALID_ARGUMENT for a bad tenant_id, an empty batch,
+  // more than 3000 hashes or one that is not 32 bytes, checked before the key
+  // is looked up; PERMISSION_DENIED for a tenant the credential's project
+  // does not hold; UNIMPLEMENTED on a build with no control plane. Each
+  // credential has a budget per tenant of
+  // GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT calls per
+  // GATEWAY_RATE_LIMIT_WINDOW_SECONDS, counted once the key is accepted:
+  // over it the call is RESOURCE_EXHAUSTED. Calls are also limited per
+  // client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window, a budget of
+  // their own, refused as LookupUsers' are). Each answered call is audited
+  // as directory_phone_match with the tenant and the number of hashes asked
+  // for and matched, never the hashes.
+  rpc MatchTenantMemberPhones(MatchTenantMemberPhonesRequest) returns (MatchTenantMemberPhonesResponse);
 }
 
 // ─── Teammate keys (machine credential) ─────────────────────────────

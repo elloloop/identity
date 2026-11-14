@@ -232,6 +232,16 @@ const (
 	// wrong secret) is logged with success=false and a `reason`.
 	EventDirectoryLookup EventType = "directory_lookup"
 
+	// EventDirectoryPhoneMatch records a service matching phone-number
+	// hashes against a tenant's members through MatchTenantMemberPhones with
+	// a directory_reader credential. The actor is "credential:<id>"; the
+	// details carry the tenant id and the number of hashes asked for and
+	// matched, never the hashes or the accounts matched. A refused
+	// presentation of a real directory_reader credential, and a tenant the
+	// credential's project does not hold, are logged with success=false and
+	// a `reason`.
+	EventDirectoryPhoneMatch EventType = "directory_phone_match"
+
 	// EventSCIMAuthFailed records a request to the SCIM surface refused for a
 	// missing or wrong bearer token. The actor is "system:scim" (the caller is
 	// unknown by definition); the details carry a `reason` (missing_token |
@@ -518,6 +528,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectCredentialCreated:      {},
 	EventProjectCredentialRevoked:      {},
 	EventDirectoryLookup:               {},
+	EventDirectoryPhoneMatch:           {},
 	EventSCIMAuthFailed:                {},
 	EventParentalConsentGranted:        {},
 	EventParentalConsentRevoked:        {},

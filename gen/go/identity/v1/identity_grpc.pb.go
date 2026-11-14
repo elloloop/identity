@@ -195,6 +195,7 @@ const (
 	IdentityService_AdminSetProjectOAuthHostClient_FullMethodName    = "/identity.v1.IdentityService/AdminSetProjectOAuthHostClient"
 	IdentityService_AdminDeleteProjectOAuthHostClient_FullMethodName = "/identity.v1.IdentityService/AdminDeleteProjectOAuthHostClient"
 	IdentityService_LookupUsers_FullMethodName                       = "/identity.v1.IdentityService/LookupUsers"
+	IdentityService_MatchTenantMemberPhones_FullMethodName           = "/identity.v1.IdentityService/MatchTenantMemberPhones"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -894,6 +895,26 @@ type IdentityServiceClient interface {
 	// registration with RESOURCE_EXHAUSTED and the same value in the
 	// "retry-after" response metadata.
 	LookupUsers(ctx context.Context, in *LookupUsersRequest, opts ...grpc.CallOption) (*LookupUsersResponse, error)
+	// MatchTenantMemberPhones matches a service's phone-number hashes (a
+	// person's contacts, say) against the members of one tenant and returns
+	// the members whose verified number is among them. Like LookupUsers it is
+	// called by a service, never an end user: a user's access token does not
+	// authorize it, only a directory_reader project credential in the
+	// "X-Directory-Key" header, scoped to that credential's project whatever
+	// the request Host. UNAUTHENTICATED for a missing, wrong, revoked or
+	// non-directory key; INVALID_ARGUMENT for a bad tenant_id, an empty batch,
+	// more than 3000 hashes or one that is not 32 bytes, checked before the key
+	// is looked up; PERMISSION_DENIED for a tenant the credential's project
+	// does not hold; UNIMPLEMENTED on a build with no control plane. Each
+	// credential has a budget per tenant of
+	// GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT calls per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, counted once the key is accepted:
+	// over it the call is RESOURCE_EXHAUSTED. Calls are also limited per
+	// client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window, a budget of
+	// their own, refused as LookupUsers' are). Each answered call is audited
+	// as directory_phone_match with the tenant and the number of hashes asked
+	// for and matched, never the hashes.
+	MatchTenantMemberPhones(ctx context.Context, in *MatchTenantMemberPhonesRequest, opts ...grpc.CallOption) (*MatchTenantMemberPhonesResponse, error)
 }
 
 type identityServiceClient struct {
@@ -2664,6 +2685,16 @@ func (c *identityServiceClient) LookupUsers(ctx context.Context, in *LookupUsers
 	return out, nil
 }
 
+func (c *identityServiceClient) MatchTenantMemberPhones(ctx context.Context, in *MatchTenantMemberPhonesRequest, opts ...grpc.CallOption) (*MatchTenantMemberPhonesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MatchTenantMemberPhonesResponse)
+	err := c.cc.Invoke(ctx, IdentityService_MatchTenantMemberPhones_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
@@ -3361,6 +3392,26 @@ type IdentityServiceServer interface {
 	// registration with RESOURCE_EXHAUSTED and the same value in the
 	// "retry-after" response metadata.
 	LookupUsers(context.Context, *LookupUsersRequest) (*LookupUsersResponse, error)
+	// MatchTenantMemberPhones matches a service's phone-number hashes (a
+	// person's contacts, say) against the members of one tenant and returns
+	// the members whose verified number is among them. Like LookupUsers it is
+	// called by a service, never an end user: a user's access token does not
+	// authorize it, only a directory_reader project credential in the
+	// "X-Directory-Key" header, scoped to that credential's project whatever
+	// the request Host. UNAUTHENTICATED for a missing, wrong, revoked or
+	// non-directory key; INVALID_ARGUMENT for a bad tenant_id, an empty batch,
+	// more than 3000 hashes or one that is not 32 bytes, checked before the key
+	// is looked up; PERMISSION_DENIED for a tenant the credential's project
+	// does not hold; UNIMPLEMENTED on a build with no control plane. Each
+	// credential has a budget per tenant of
+	// GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT calls per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, counted once the key is accepted:
+	// over it the call is RESOURCE_EXHAUSTED. Calls are also limited per
+	// client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window, a budget of
+	// their own, refused as LookupUsers' are). Each answered call is audited
+	// as directory_phone_match with the tenant and the number of hashes asked
+	// for and matched, never the hashes.
+	MatchTenantMemberPhones(context.Context, *MatchTenantMemberPhonesRequest) (*MatchTenantMemberPhonesResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
 }
 
@@ -3898,6 +3949,9 @@ func (UnimplementedIdentityServiceServer) AdminDeleteProjectOAuthHostClient(cont
 }
 func (UnimplementedIdentityServiceServer) LookupUsers(context.Context, *LookupUsersRequest) (*LookupUsersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LookupUsers not implemented")
+}
+func (UnimplementedIdentityServiceServer) MatchTenantMemberPhones(context.Context, *MatchTenantMemberPhonesRequest) (*MatchTenantMemberPhonesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MatchTenantMemberPhones not implemented")
 }
 func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
 func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
@@ -7088,6 +7142,24 @@ func _IdentityService_LookupUsers_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_MatchTenantMemberPhones_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MatchTenantMemberPhonesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).MatchTenantMemberPhones(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_MatchTenantMemberPhones_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).MatchTenantMemberPhones(ctx, req.(*MatchTenantMemberPhonesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -7798,6 +7870,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "LookupUsers",
 			Handler:    _IdentityService_LookupUsers_Handler,
+		},
+		{
+			MethodName: "MatchTenantMemberPhones",
+			Handler:    _IdentityService_MatchTenantMemberPhones_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

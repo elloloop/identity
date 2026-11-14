@@ -563,6 +563,9 @@ const (
 	// IdentityServiceLookupUsersProcedure is the fully-qualified name of the IdentityService's
 	// LookupUsers RPC.
 	IdentityServiceLookupUsersProcedure = "/identity.v1.IdentityService/LookupUsers"
+	// IdentityServiceMatchTenantMemberPhonesProcedure is the fully-qualified name of the
+	// IdentityService's MatchTenantMemberPhones RPC.
+	IdentityServiceMatchTenantMemberPhonesProcedure = "/identity.v1.IdentityService/MatchTenantMemberPhones"
 	// TeammateKeyServiceRegisterTeammateKeyProcedure is the fully-qualified name of the
 	// TeammateKeyService's RegisterTeammateKey RPC.
 	TeammateKeyServiceRegisterTeammateKeyProcedure = "/identity.v1.TeammateKeyService/RegisterTeammateKey"
@@ -1269,6 +1272,26 @@ type IdentityServiceClient interface {
 	// registration with RESOURCE_EXHAUSTED and the same value in the
 	// "retry-after" response metadata.
 	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
+	// MatchTenantMemberPhones matches a service's phone-number hashes (a
+	// person's contacts, say) against the members of one tenant and returns
+	// the members whose verified number is among them. Like LookupUsers it is
+	// called by a service, never an end user: a user's access token does not
+	// authorize it, only a directory_reader project credential in the
+	// "X-Directory-Key" header, scoped to that credential's project whatever
+	// the request Host. UNAUTHENTICATED for a missing, wrong, revoked or
+	// non-directory key; INVALID_ARGUMENT for a bad tenant_id, an empty batch,
+	// more than 3000 hashes or one that is not 32 bytes, checked before the key
+	// is looked up; PERMISSION_DENIED for a tenant the credential's project
+	// does not hold; UNIMPLEMENTED on a build with no control plane. Each
+	// credential has a budget per tenant of
+	// GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT calls per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, counted once the key is accepted:
+	// over it the call is RESOURCE_EXHAUSTED. Calls are also limited per
+	// client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window, a budget of
+	// their own, refused as LookupUsers' are). Each answered call is audited
+	// as directory_phone_match with the tenant and the number of hashes asked
+	// for and matched, never the hashes.
+	MatchTenantMemberPhones(context.Context, *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error)
 }
 
 // NewIdentityServiceClient constructs a client for the identity.v1.IdentityService service. By
@@ -2338,6 +2361,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("LookupUsers")),
 			connect.WithClientOptions(opts...),
 		),
+		matchTenantMemberPhones: connect.NewClient[v1.MatchTenantMemberPhonesRequest, v1.MatchTenantMemberPhonesResponse](
+			httpClient,
+			baseURL+IdentityServiceMatchTenantMemberPhonesProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("MatchTenantMemberPhones")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -2519,6 +2548,7 @@ type identityServiceClient struct {
 	adminSetProjectOAuthHostClient    *connect.Client[v1.AdminSetProjectOAuthHostClientRequest, v1.AdminSetProjectOAuthHostClientResponse]
 	adminDeleteProjectOAuthHostClient *connect.Client[v1.AdminDeleteProjectOAuthHostClientRequest, v1.AdminDeleteProjectOAuthHostClientResponse]
 	lookupUsers                       *connect.Client[v1.LookupUsersRequest, v1.LookupUsersResponse]
+	matchTenantMemberPhones           *connect.Client[v1.MatchTenantMemberPhonesRequest, v1.MatchTenantMemberPhonesResponse]
 }
 
 // CreateAgentMachineChallenge calls identity.v1.IdentityService.CreateAgentMachineChallenge.
@@ -3403,6 +3433,11 @@ func (c *identityServiceClient) LookupUsers(ctx context.Context, req *connect.Re
 	return c.lookupUsers.CallUnary(ctx, req)
 }
 
+// MatchTenantMemberPhones calls identity.v1.IdentityService.MatchTenantMemberPhones.
+func (c *identityServiceClient) MatchTenantMemberPhones(ctx context.Context, req *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error) {
+	return c.matchTenantMemberPhones.CallUnary(ctx, req)
+}
+
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
 type IdentityServiceHandler interface {
 	CreateAgentMachineChallenge(context.Context, *connect.Request[v1.CreateAgentMachineChallengeRequest]) (*connect.Response[v1.CreateAgentMachineChallengeResponse], error)
@@ -4098,6 +4133,26 @@ type IdentityServiceHandler interface {
 	// registration with RESOURCE_EXHAUSTED and the same value in the
 	// "retry-after" response metadata.
 	LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error)
+	// MatchTenantMemberPhones matches a service's phone-number hashes (a
+	// person's contacts, say) against the members of one tenant and returns
+	// the members whose verified number is among them. Like LookupUsers it is
+	// called by a service, never an end user: a user's access token does not
+	// authorize it, only a directory_reader project credential in the
+	// "X-Directory-Key" header, scoped to that credential's project whatever
+	// the request Host. UNAUTHENTICATED for a missing, wrong, revoked or
+	// non-directory key; INVALID_ARGUMENT for a bad tenant_id, an empty batch,
+	// more than 3000 hashes or one that is not 32 bytes, checked before the key
+	// is looked up; PERMISSION_DENIED for a tenant the credential's project
+	// does not hold; UNIMPLEMENTED on a build with no control plane. Each
+	// credential has a budget per tenant of
+	// GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT calls per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, counted once the key is accepted:
+	// over it the call is RESOURCE_EXHAUSTED. Calls are also limited per
+	// client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window, a budget of
+	// their own, refused as LookupUsers' are). Each answered call is audited
+	// as directory_phone_match with the tenant and the number of hashes asked
+	// for and matched, never the hashes.
+	MatchTenantMemberPhones(context.Context, *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error)
 }
 
 // NewIdentityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -5163,6 +5218,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("LookupUsers")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceMatchTenantMemberPhonesHandler := connect.NewUnaryHandler(
+		IdentityServiceMatchTenantMemberPhonesProcedure,
+		svc.MatchTenantMemberPhones,
+		connect.WithSchema(identityServiceMethods.ByName("MatchTenantMemberPhones")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case IdentityServiceCreateAgentMachineChallengeProcedure:
@@ -5517,6 +5578,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminDeleteProjectOAuthHostClientHandler.ServeHTTP(w, r)
 		case IdentityServiceLookupUsersProcedure:
 			identityServiceLookupUsersHandler.ServeHTTP(w, r)
+		case IdentityServiceMatchTenantMemberPhonesProcedure:
+			identityServiceMatchTenantMemberPhonesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -6228,6 +6291,10 @@ func (UnimplementedIdentityServiceHandler) AdminDeleteProjectOAuthHostClient(con
 
 func (UnimplementedIdentityServiceHandler) LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.LookupUsers is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) MatchTenantMemberPhones(context.Context, *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.MatchTenantMemberPhones is not implemented"))
 }
 
 // TeammateKeyServiceClient is a client for the identity.v1.TeammateKeyService service.

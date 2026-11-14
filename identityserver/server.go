@@ -328,8 +328,10 @@ func (s *Server) Handler() http.Handler {
 // HTTP-only. Over native gRPC the host is responsible for authentication
 // — supply a server interceptor that verifies the bearer token and
 // forwards identity's expected metadata (see docs/embedding.md) — and for
-// every per-IP limit except LookupUsers', which the bridge enforces from
-// the same budget as the HTTP surface.
+// every per-IP limit except those of the calls a machine credential makes
+// (the directory reads, the tenant operations and the agent machine
+// calls), which the bridge enforces from the same budgets as the HTTP
+// surface.
 func (s *Server) RegisterGRPC(reg grpc.ServiceRegistrar) {
 	if (s.grpcTrust.authTime || s.grpcTrust.sessionID) && !s.grpcTrust.amr {
 		s.logger.Warn("grpc_amr_not_trusted",

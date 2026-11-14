@@ -29,6 +29,7 @@
   "anonymous_upgraded",
   "assurance_attested",
   "directory_lookup",
+  "directory_phone_match",
   "domain_join_set",
   "email_canonicalized",
   "email_unverified",

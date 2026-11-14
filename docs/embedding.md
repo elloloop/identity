@@ -253,8 +253,11 @@ checks a code: `RequestRecoveryEmail`, `VerifyRecoveryEmail`,
 bridge enforces these
 itself, from the same per-IP budgets the HTTP surface uses:
 
-- `LookupUsers`, whose limit cannot be switched off
-  (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`).
+- `LookupUsers` and `MatchTenantMemberPhones`, a budget each, whose limit
+  cannot be switched off (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`).
+  `MatchTenantMemberPhones` is also held to its per-credential, per-tenant
+  budget (`GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT`), which the service
+  counts whichever surface the call arrives on.
 - The tenant operations (`AdminGetTenant`, `AdminListTenants`,
   `AdminSuspendTenant`, `AdminRestoreTenant`, `AdminRecoverTenantOwnership`,
   `AdminCreateTenant`, `AdminAddTenantAdmin`, `AdminAddTenantMember` and

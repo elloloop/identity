@@ -477,21 +477,26 @@ func TestToConnectError_RecoveryAndPhoneSentinels(t *testing.T) {
 		service.ErrPhoneCountryNotAllowed:           connect.CodeFailedPrecondition,
 		service.ErrPhoneVerificationRequired:        connect.CodeFailedPrecondition,
 		service.ErrRecoverySession:                  connect.CodeFailedPrecondition,
+		service.ErrPhoneMatchLimited:                connect.CodeResourceExhausted,
 	} {
 		assert.Equal(t, want, connect.CodeOf(toConnectError(err)), "%v", err)
 		assert.Equal(t, want, connect.CodeOf(toConnectError(fmt.Errorf("%w: detail", err))), "wrapped %v", err)
 	}
 
-	cerr := toConnectError(fmt.Errorf("refreshing: %w", &service.TenantSelectionRefusedError{
-		Reason: service.TenantSelectionPhoneRequired, Err: service.ErrPhoneVerificationRequired,
-	}))
-	assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(cerr))
-	require.Len(t, cerr.Details(), 1)
-	msg, err := cerr.Details()[0].Value()
-	require.NoError(t, err)
-	details, ok := msg.(*identitypb.TenantSelectionRefusedDetails)
-	require.True(t, ok)
-	assert.Equal(t, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED, details.GetReason())
+	for _, codes := range [][]string{nil, {"91", "44"}} {
+		cerr := toConnectError(fmt.Errorf("refreshing: %w", &service.TenantSelectionRefusedError{
+			Reason: service.TenantSelectionPhoneRequired, Err: service.ErrPhoneVerificationRequired,
+			PhoneCallingCodes: codes,
+		}))
+		assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(cerr))
+		require.Len(t, cerr.Details(), 1)
+		msg, err := cerr.Details()[0].Value()
+		require.NoError(t, err)
+		details, ok := msg.(*identitypb.TenantSelectionRefusedDetails)
+		require.True(t, ok)
+		assert.Equal(t, identitypb.TenantSelectionRefusal_TENANT_SELECTION_REFUSAL_PHONE_VERIFICATION_REQUIRED, details.GetReason())
+		assert.Equal(t, codes, details.GetPhoneCallingCodes(), "the detail names the countries the tenant accepts")
+	}
 }
 
 func TestLoginPolicyPhoneRuleRoundTripsThroughTheProto(t *testing.T) {

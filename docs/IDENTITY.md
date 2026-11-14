@@ -887,9 +887,19 @@ turn nothing on that the deployment lacks:
   years), after that long.
 
 A tenant can require a verified phone (`LoginPolicy.require_verified_phone`,
-optionally under some calling codes): until the account has one, a selection of the
-tenant is refused and no token for it is minted. The account still signs in
-and verifies a phone with that unselected session.
+optionally under some calling codes): until the account has one, a selection
+of the tenant is refused and no token for it is minted. The refusal's
+`TenantSelectionRefusedDetails.phone_calling_codes` names the calling codes
+the tenant accepts (empty for any), so an app can offer only those. The
+account still signs in and verifies a phone with that unselected session.
+
+A service holding a `directory_reader` credential can ask which members of
+one of its project's tenants hold any of a set of phone numbers, sent as
+SHA-256 hashes of their E.164 text (`MatchTenantMemberPhones`, at most 3000
+per call). Only a verified number matches, only members who may act in the
+tenant are returned, and the hashes are never stored or logged. Each
+credential has a budget per tenant
+(`GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT`). No end user can call it.
 
 ## Onboarding flows
 
@@ -1339,7 +1349,8 @@ before you ship.
       own server interceptor that verifies the bearer token and forwards
       identity's expected metadata (`x-authenticated-user-id`). This keeps
       the bridge a pure transport adapter rather than re-implementing the
-      middleware twice. The exceptions are `LookupUsers`, the tenant
+      middleware twice. The exceptions are the directory reads
+      (`LookupUsers`, `MatchTenantMemberPhones`), the tenant
       operations called with a `tenant_operator` credential, and the agent
       machine calls (see `docs/embedding.md`): the bridge charges them
       against the same per-IP limiters the HTTP chain uses, so each budget

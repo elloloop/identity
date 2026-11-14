@@ -366,7 +366,8 @@ func TestHasCallingCode(t *testing.T) {
 // A tenant whose login policy requires a verified phone admits no session
 // of an account without one: no token for the tenant is minted, the refresh
 // token is left unspent, and the unselected session it leaves is what the
-// account verifies a phone with.
+// account verifies a phone with. The refusal names the countries the tenant
+// accepts, in the policy's order, so an app can offer only those.
 func TestRefreshToken_SelectionNeedsTheVerifiedPhoneTheTenantRequires(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -374,11 +375,13 @@ func TestRefreshToken_SelectionNeedsTheVerifiedPhoneTheTenantRequires(t *testing
 		phone    string
 		verified bool
 		admitted bool
+		codes    []string
 	}{
 		{name: "required, no phone", policy: &LoginPolicy{RequireVerifiedPhone: true}},
 		{name: "required, number stored but unverified", policy: &LoginPolicy{RequireVerifiedPhone: true}, phone: "+14155550123"},
 		{name: "required, verified", policy: &LoginPolicy{RequireVerifiedPhone: true}, phone: "+14155550123", verified: true, admitted: true},
-		{name: "required of one country, verified in another", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}}, phone: "+14155550123", verified: true},
+		{name: "required of one country, no phone", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}}, codes: []string{"91", "44"}},
+		{name: "required of one country, verified in another", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}}, phone: "+14155550123", verified: true, codes: []string{"91", "44"}},
 		{name: "required of one country, verified there", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}}, phone: "+447700900123", verified: true, admitted: true},
 		{name: "not required, no phone", policy: &LoginPolicy{SessionAbsoluteTimeoutSeconds: 3600}, admitted: true},
 	} {
@@ -401,6 +404,9 @@ func TestRefreshToken_SelectionNeedsTheVerifiedPhoneTheTenantRequires(t *testing
 			}
 			require.ErrorIs(t, err, ErrPhoneVerificationRequired)
 			requireSelectionRefusal(t, err, TenantSelectionPhoneRequired)
+			var refusal *TenantSelectionRefusedError
+			require.ErrorAs(t, err, &refusal)
+			assert.Equal(t, tc.codes, refusal.PhoneCallingCodes)
 			_, access, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
 			require.NoError(t, err, "the refused selection left the refresh token unspent")
 			assert.Equal(t, f.svc.cfg.DefaultTenantID, f.tenantClaim(t, access))
@@ -446,6 +452,9 @@ func TestRefreshToken_LoginPolicyRefusalComesBeforeThePhoneRule(t *testing.T) {
 
 	_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
 	requireSelectionRefusal(t, err, TenantSelectionLoginPolicy)
+	var refusal *TenantSelectionRefusedError
+	require.ErrorAs(t, err, &refusal)
+	assert.Empty(t, refusal.PhoneCallingCodes, "only the phone refusal names countries")
 }
 
 func TestUpsertLoginPolicy_PhoneRule(t *testing.T) {

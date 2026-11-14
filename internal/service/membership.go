@@ -136,10 +136,24 @@ func (r Restorer) IsOperator() bool { return r.operator }
 // an operator, which the store refuses before it reads anything.
 func (r Restorer) NamesNobody() bool { return !r.operator && r.userID == "" }
 
+// TenantMemberPhoneMatcher finds a tenant's members by their phone number,
+// given only its hash.
+type TenantMemberPhoneMatcher interface {
+	// MatchTenantMemberPhones returns, in ascending order, the ids of the
+	// members of tenantID in projectID whose verified phone number's SHA-256
+	// (of its E.164 text) is one of phoneHashes. A member is one who may act
+	// in the tenant, the UserTenantReader rule, whose account is an active
+	// person's: neither anonymous nor an agent. An account whose number is
+	// unverified, or that has none, never matches. ErrNotFound when the
+	// project holds no such tenant.
+	MatchTenantMemberPhones(ctx context.Context, projectID, tenantID string, phoneHashes [][]byte) ([]string, error)
+}
+
 // MembershipStore persists TenantMemberships within a Project. Reads that
 // miss return (nil, nil).
 type MembershipStore interface {
 	UserTenantReader
+	TenantMemberPhoneMatcher
 
 	// UpsertMembership inserts or, on a (project, tenant, user) conflict,
 	// updates source/role/status in place (keeping id + created_at_ms). A
