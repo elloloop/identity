@@ -165,13 +165,17 @@ import { Code } from "astro-expressive-code/components";
   <h2>Checking a child device's authorization</h2>
   <h3>Issue a narrowly scoped key</h3>
   <p>
-    Apply migration 0059 and use <code>AdminCreateProjectCredential</code> with
+    Apply migration 0061 and use <code>AdminCreateProjectCredential</code> with
     <code>kind="managed_child_reader"</code>. Its <code>ck_</code> raw key is shown
     once: store it only on your backend and keep the credential ID for revocation.
     It grants no account-profile, session-creation or write RPCs. The Postgres
     credential store and project resolver are required; without them the endpoint
     returns <code>UNIMPLEMENTED</code>.
   </p>
+  <p>Every check also reads the active project and parses its policy afresh.
+    Include that database read, along with the credential, guardian edge, account
+    and audit operations, when sizing capacity; a cached authorization would
+    delay policy and revocation changes.</p>
   <h3>Make a live check</h3>
   <p>
     Send <code>child_user_id</code> and <code>guardian_user_id</code> to

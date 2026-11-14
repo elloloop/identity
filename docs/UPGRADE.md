@@ -45,7 +45,10 @@ audit events. Size this budget for aggregate backend egress: 100 devices
 with one protected operation every 30 seconds require 200 checks per minute,
 plus refresh and retry headroom. Each decision writes an audit row (288,000
 rows per day at that example rate); size audit storage, queue capacity and
-retention alongside the request budget. The limit is per IP per replica; larger
+retention alongside the request budget. Every check also reads the active project
+and parses its policy afresh, in addition to the credential, guardian edge, account
+and audit operations; include these database operations in capacity planning.
+The limit is per IP per replica; larger
 installations must configure it for their measured peak, without raising the
 separate directory lookup budget. Zero retains the default and negative values
 refuse boot. The Postgres control plane is required to mint/read keys, and a project
