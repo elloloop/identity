@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/elloloop/identity/pkg/templatemsg"
 )
 
 // RevocationMode names the two refresh-token revocation models the
@@ -947,9 +949,13 @@ type Config struct {
 
 	// SMSEnabled turns on the SMS channel of phone verification. A project
 	// whose phone.channels lists "message" verifies phones without it, by the
-	// template sender an embedder wires.
+	// template-message sender (GATEWAY_TEMPLATEMSG_PROVIDER, or one an
+	// embedder wires).
 	SMSEnabled bool
-	// SMSProvider selects the SMS backend: "twilio", "sns", or "azure".
+	// SMSProvider selects the SMS backend: "twilio", "sns", "azure", or
+	// "local_capture", which mails each code to the account's own email
+	// address instead of texting it and is refused at boot unless every
+	// public URL, host and issuer the config names is a loopback host.
 	SMSProvider string
 
 	// SMSTwilioAccountSID is the Twilio Account SID (provider "twilio").
@@ -973,6 +979,37 @@ type Config struct {
 	SMSAzureConnectionString string
 	// SMSAzureFrom is the Azure Communication Services sender number (provider "azure").
 	SMSAzureFrom string
+
+	// Template messages — the messaging-app delivery channel ("message") a
+	// project's phone.channels may list, which sends a code as a pre-approved
+	// template the project names (phone.message_template). Unset leaves the
+	// channel to a sender an embedder supplies.
+
+	// TemplateMessageProvider selects the template-message backend:
+	// "whatsapp_cloud" (the WhatsApp Business Cloud API), or "local_capture",
+	// which mails each code to the account's own email address instead and is
+	// refused at boot unless every public URL, host and issuer the config
+	// names is a loopback host. Empty wires none.
+	TemplateMessageProvider string
+	// TemplateMessageWhatsAppAccessToken is the WhatsApp Business Cloud API
+	// access token, a system user's token with the
+	// whatsapp_business_messaging permission (provider "whatsapp_cloud").
+	TemplateMessageWhatsAppAccessToken string
+	// TemplateMessageWhatsAppPhoneNumberID is the id of the business phone
+	// number messages are sent from, as WhatsApp Manager shows it, not the
+	// number itself (provider "whatsapp_cloud").
+	TemplateMessageWhatsAppPhoneNumberID string
+	// TemplateMessageWhatsAppAPIVersion is the Graph API version called, such
+	// as v26.0 (provider "whatsapp_cloud").
+	TemplateMessageWhatsAppAPIVersion string
+	// TemplateMessageWhatsAppLanguage is the template language code, such as
+	// en_US, used for a project whose phone.message_language is empty
+	// (provider "whatsapp_cloud").
+	TemplateMessageWhatsAppLanguage string
+	// TemplateMessageWhatsAppCodeButton says the templates have a
+	// one-time-password (copy code) button, as authentication templates do,
+	// so each send gives the button the code too (provider "whatsapp_cloud").
+	TemplateMessageWhatsAppCodeButton bool
 
 	// PhoneCodeTTLSeconds is the phone-verification OTP lifetime in seconds.
 	PhoneCodeTTLSeconds int
@@ -1750,6 +1787,14 @@ func loadFromEnv() *Config {
 		SMSAWSSenderID:           envStr("GATEWAY_SMS_AWS_SENDER_ID", ""),
 		SMSAzureConnectionString: envStr("GATEWAY_SMS_AZURE_CONNECTION_STRING", ""),
 		SMSAzureFrom:             envStr("GATEWAY_SMS_AZURE_FROM", ""),
+
+		TemplateMessageProvider:              strings.ToLower(envStr("GATEWAY_TEMPLATEMSG_PROVIDER", "")),
+		TemplateMessageWhatsAppAccessToken:   envStr("GATEWAY_TEMPLATEMSG_WHATSAPP_ACCESS_TOKEN", ""),
+		TemplateMessageWhatsAppPhoneNumberID: envStr("GATEWAY_TEMPLATEMSG_WHATSAPP_PHONE_NUMBER_ID", ""),
+		TemplateMessageWhatsAppAPIVersion:    envStr("GATEWAY_TEMPLATEMSG_WHATSAPP_API_VERSION", DefaultWhatsAppCloudAPIVersion),
+		TemplateMessageWhatsAppLanguage:      envStr("GATEWAY_TEMPLATEMSG_WHATSAPP_LANGUAGE", ""),
+		TemplateMessageWhatsAppCodeButton:    envBool("GATEWAY_TEMPLATEMSG_WHATSAPP_CODE_BUTTON", true),
+
 		PhoneCodeTTLSeconds:      envInt("GATEWAY_PHONE_CODE_TTL_SECONDS", 300),
 		PhoneCodeMaxAttempts:     envInt("GATEWAY_PHONE_CODE_MAX_ATTEMPTS", 5),
 		PhoneCodeCooldownSeconds: envInt("GATEWAY_PHONE_CODE_COOLDOWN_SECONDS", 60),
@@ -1910,7 +1955,37 @@ const (
 	SMSProviderTwilio = "twilio"
 	SMSProviderSNS    = "sns"
 	SMSProviderAzure  = "azure"
+	// SMSProviderLocalCapture mails each code to the account's own email
+	// address instead of texting it, for a local deployment
+	// (validatePhoneCodeCapture).
+	SMSProviderLocalCapture = "local_capture"
 )
+
+// Template-message provider names for GATEWAY_TEMPLATEMSG_PROVIDER.
+const (
+	TemplateMessageProviderWhatsAppCloud = "whatsapp_cloud"
+	// TemplateMessageProviderLocalCapture mails each code to the account's
+	// own email address instead of sending it, for a local deployment
+	// (validatePhoneCodeCapture).
+	TemplateMessageProviderLocalCapture = "local_capture"
+)
+
+// DefaultWhatsAppCloudAPIVersion is the Graph API version the WhatsApp
+// Cloud sender calls unless GATEWAY_TEMPLATEMSG_WHATSAPP_API_VERSION names
+// another. Pinned (AGENTS.md §10); bump it in a deliberate change.
+const DefaultWhatsAppCloudAPIVersion = "v26.0"
+
+// CapturesSMS reports whether SMS verification codes are mailed to the
+// account's own email address instead of texted.
+func (c *Config) CapturesSMS() bool {
+	return c.SMSEnabled && c.SMSProvider == SMSProviderLocalCapture
+}
+
+// CapturesTemplateMessages reports whether template-message verification
+// codes are mailed to the account's own email address instead of sent.
+func (c *Config) CapturesTemplateMessages() bool {
+	return c.TemplateMessageProvider == TemplateMessageProviderLocalCapture
+}
 
 // OIDCScopeList returns the configured generic-OIDC scopes split on
 // whitespace, dropping blanks. An empty config yields nil, which lets the
@@ -2353,23 +2428,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: GATEWAY_SESSION_CACHE_TTL_SECONDS=%d must be >= 0", c.SessionCacheTTLSeconds)
 	}
 
-	switch {
-	case c.RateLimitDirectoryPerIP == 0:
-		c.RateLimitDirectoryPerIP = DefaultRateLimitDirectoryPerIP
-	case c.RateLimitDirectoryPerIP < 0:
-		return fmt.Errorf(
-			"config: GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP=%d must not be negative (0 selects the default, %d; the limit cannot be disabled)",
-			c.RateLimitDirectoryPerIP, DefaultRateLimitDirectoryPerIP,
-		)
-	}
-	if c.RateLimitSCIMPerIP < 0 {
-		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_SCIM_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitSCIMPerIP)
-	}
-	if c.RateLimitQrPollPerIP < 0 {
-		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_QR_POLL_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitQrPollPerIP)
-	}
-	if c.RateLimitUsernameTakenPerIP < 0 {
-		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitUsernameTakenPerIP)
+	if err := c.validateRateLimits(); err != nil {
+		return err
 	}
 	if c.AgentsMaxPerOwner < 0 || c.AgentsMaxPerOwner > MaxAgentsMaxPerOwner {
 		return fmt.Errorf(
@@ -2388,7 +2448,7 @@ func (c *Config) Validate() error {
 		)
 	}
 
-	if err := c.validateSMS(); err != nil {
+	if err := c.validatePhoneDelivery(); err != nil {
 		return err
 	}
 
@@ -2717,6 +2777,44 @@ func (c *Config) validateSAML() error {
 	return nil
 }
 
+// validateRateLimits fills in the directory limit's default and refuses a
+// negative per-IP limit. The directory limit cannot be turned off; the SCIM,
+// QR-poll and username-taken limits are off at 0.
+func (c *Config) validateRateLimits() error {
+	switch {
+	case c.RateLimitDirectoryPerIP == 0:
+		c.RateLimitDirectoryPerIP = DefaultRateLimitDirectoryPerIP
+	case c.RateLimitDirectoryPerIP < 0:
+		return fmt.Errorf(
+			"config: GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP=%d must not be negative (0 selects the default, %d; the limit cannot be disabled)",
+			c.RateLimitDirectoryPerIP, DefaultRateLimitDirectoryPerIP,
+		)
+	}
+	if c.RateLimitSCIMPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_SCIM_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitSCIMPerIP)
+	}
+	if c.RateLimitQrPollPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_QR_POLL_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitQrPollPerIP)
+	}
+	if c.RateLimitUsernameTakenPerIP < 0 {
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitUsernameTakenPerIP)
+	}
+	return nil
+}
+
+// validatePhoneDelivery checks the phone-code senders: the SMS provider, the
+// template-message provider, and local capture, which reads what the other
+// two chose.
+func (c *Config) validatePhoneDelivery() error {
+	if err := c.validateSMS(); err != nil {
+		return err
+	}
+	if err := c.validateTemplateMessages(); err != nil {
+		return err
+	}
+	return c.validatePhoneCodeCapture()
+}
+
 // validateSMS enforces the SMS-provider invariant: when phone
 // verification is enabled, the provider must be one of the supported
 // values and its required credentials must be set. Failing closed at
@@ -2744,11 +2842,49 @@ func (c *Config) validateSMS() error {
 				"config: GATEWAY_SMS_PROVIDER=azure requires GATEWAY_SMS_AZURE_CONNECTION_STRING and GATEWAY_SMS_AZURE_FROM",
 			)
 		}
+	case SMSProviderLocalCapture:
 	default:
 		return fmt.Errorf(
-			"config: GATEWAY_SMS_ENABLED=true requires GATEWAY_SMS_PROVIDER to be one of %q, %q, %q; got %q",
-			SMSProviderTwilio, SMSProviderSNS, SMSProviderAzure, c.SMSProvider,
+			"config: GATEWAY_SMS_ENABLED=true requires GATEWAY_SMS_PROVIDER to be one of %q, %q, %q, %q; got %q",
+			SMSProviderTwilio, SMSProviderSNS, SMSProviderAzure, SMSProviderLocalCapture, c.SMSProvider,
 		)
+	}
+	return nil
+}
+
+// WhatsAppCloud is the WhatsApp Business Cloud sender's configuration
+// (provider "whatsapp_cloud").
+func (c *Config) WhatsAppCloud() templatemsg.WhatsAppCloudConfig {
+	return templatemsg.WhatsAppCloudConfig{
+		AccessToken:     c.TemplateMessageWhatsAppAccessToken,
+		PhoneNumberID:   c.TemplateMessageWhatsAppPhoneNumberID,
+		APIVersion:      c.TemplateMessageWhatsAppAPIVersion,
+		DefaultLanguage: c.TemplateMessageWhatsAppLanguage,
+		CodeButton:      c.TemplateMessageWhatsAppCodeButton,
+	}
+}
+
+// validateTemplateMessages holds the template-message provider to a known
+// name and the WhatsApp Cloud sender to the values it cannot send without,
+// so a deployment fails at boot rather than at its first code.
+func (c *Config) validateTemplateMessages() error {
+	switch c.TemplateMessageProvider {
+	case "", TemplateMessageProviderLocalCapture:
+		return nil
+	case TemplateMessageProviderWhatsAppCloud:
+	default:
+		return fmt.Errorf(
+			"config: GATEWAY_TEMPLATEMSG_PROVIDER must be empty, %q or %q; got %q",
+			TemplateMessageProviderWhatsAppCloud, TemplateMessageProviderLocalCapture, c.TemplateMessageProvider,
+		)
+	}
+	if c.TemplateMessageWhatsAppAccessToken == "" || c.TemplateMessageWhatsAppPhoneNumberID == "" {
+		return errors.New(
+			"config: GATEWAY_TEMPLATEMSG_PROVIDER=whatsapp_cloud requires GATEWAY_TEMPLATEMSG_WHATSAPP_ACCESS_TOKEN and GATEWAY_TEMPLATEMSG_WHATSAPP_PHONE_NUMBER_ID",
+		)
+	}
+	if err := c.WhatsAppCloud().Validate(); err != nil {
+		return fmt.Errorf("config: GATEWAY_TEMPLATEMSG_PROVIDER=whatsapp_cloud: %w", err)
 	}
 	return nil
 }

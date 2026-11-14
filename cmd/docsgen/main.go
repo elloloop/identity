@@ -492,6 +492,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_QR_LOGIN_", "QR cross-device login"},
 	{"GATEWAY_SMS_", "Phone / SMS verification"},
 	{"GATEWAY_PHONE_", "Phone / SMS verification"},
+	{"GATEWAY_TEMPLATEMSG_", "Phone / SMS verification"},
 	{"GATEWAY_ASSURANCE_", "Client assurance"},
 	{"GATEWAY_ANONYMOUS_", "Anonymous identity"},
 	{"GATEWAY_AGENTS_", "Agent accounts"},

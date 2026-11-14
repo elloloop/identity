@@ -9,7 +9,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/sms"
 	"github.com/elloloop/identity/pkg/templatemsg"
 )
@@ -24,37 +26,106 @@ import (
 // and a per-user send cooldown.
 //
 // The deployment decides which senders exist (an SMS provider, and a
-// template-message sender an embedder wires); the request's project decides
-// the rest (ProjectPhoneConfig): whether it verifies phones at all, the
-// order the channels are tried in, the countries it accepts, and whether a
-// number belongs to one account.
+// template-message sender); the request's project decides the rest
+// (ProjectPhoneConfig): whether it verifies phones at all, the order the
+// channels are tried in, the countries it accepts, and whether a number
+// belongs to one account. A local deployment may capture a channel instead
+// (local_capture): its codes are mailed to the account's own address.
 
 // WithTemplateMessages wires the sender of the message delivery channel
 // (PhoneChannelMessage) and returns the service for chaining. Without one
-// the channel is skipped wherever a project lists it.
+// the channel is skipped wherever a project lists it, unless the deployment
+// captures it.
 func (s *AuthService) WithTemplateMessages(sender templatemsg.Sender) *AuthService {
 	s.templateSender = sender
 	return s
 }
 
-// phoneChannelUsable reports whether the deployment has a sender for ch.
+// phoneChannelUsable reports whether the deployment has a sender for ch, or
+// captures it.
 func (s *AuthService) phoneChannelUsable(ch string) bool {
 	switch ch {
 	case PhoneChannelSMS:
 		return s.cfg.SMSEnabled
 	case PhoneChannelMessage:
-		return s.templateSender != nil
+		return s.templateSender != nil || s.cfg.CapturesTemplateMessages()
 	default:
 		return false
 	}
 }
 
+// capturesPhoneCodes reports whether ch's codes are mailed to the account
+// instead of sent. Capture takes precedence over a sender the embedder wired.
+func (s *AuthService) capturesPhoneCodes(ch string) bool {
+	if ch == PhoneChannelMessage {
+		return s.cfg.CapturesTemplateMessages()
+	}
+	return s.cfg.CapturesSMS()
+}
+
+// warnPhoneCodeCapture says at construction, loudly, which channels have
+// their codes mailed to the account instead of sent: a deployment that logs
+// it proves no phone.
+func warnPhoneCodeCapture(cfg *config.Config, logger *zap.Logger) {
+	var channels []string
+	if cfg.CapturesSMS() {
+		channels = append(channels, PhoneChannelSMS)
+	}
+	if cfg.CapturesTemplateMessages() {
+		channels = append(channels, PhoneChannelMessage)
+	}
+	if len(channels) == 0 {
+		return
+	}
+	logger.Warn("phone_codes_captured_to_email",
+		zap.Strings("channels", channels),
+		zap.String("hint", "local development only: each phone verification code on these channels is mailed to "+
+			"the account's own email address instead of being sent, so no phone is proved; never use local_capture "+
+			"outside a local stack"))
+}
+
+// phoneChannelNames is how a captured code's email names the channel it
+// would have gone by.
+var phoneChannelNames = map[string]string{
+	PhoneChannelSMS:     "SMS",
+	PhoneChannelMessage: "a messaging-app message",
+}
+
+// mailCapturedPhoneCode mails code to the account's own address instead of
+// sending it to phone. config.Validate allows capture only on a deployment
+// whose every public address is loopback. The send is synchronous, like a
+// provider's, so a failure moves on to the next channel.
+func (s *AuthService) mailCapturedPhoneCode(ctx context.Context, user *User, ch, phone, code string, ttl time.Duration) error {
+	if user.Email == "" {
+		return errors.New("the account has no email address to mail the captured code to")
+	}
+	brand := resolveBranding(ctx, s.cfg, "")
+	html, text, err := email.Render(email.TemplatePhoneCodeCapture, brand.templateData(map[string]any{
+		"Code":      code,
+		"Phone":     sms.Redact(phone),
+		"Channel":   phoneChannelNames[ch],
+		"ExpiresIn": formatExpiresIn(ttl),
+	}))
+	if err != nil {
+		return fmt.Errorf("rendering the captured phone code: %w", err)
+	}
+	msg := email.Message{To: user.Email, From: s.cfg.SMTPFrom, Subject: "Your phone verification code", HTML: html, Text: text}
+	brand.applyTo(&msg)
+	if err := s.mailer.Send(ctx, msg); err != nil {
+		return fmt.Errorf("mailing the captured phone code: %w", err)
+	}
+	s.logger.Warn("phone_code_captured_to_email",
+		zap.String("user_id", user.ID), zap.String("phone", sms.Redact(phone)),
+		zap.String("channel", ch), zap.String("email", redactEmail(user.Email)))
+	return nil
+}
+
 // refusePhoneVerificationOff returns ErrPhoneVerificationUnavailable when
 // the project does not verify phones: it switched the feature off, or the
-// deployment has a sender for none of the channels it uses. The answer is
-// the same either way, so the log says which. The second is a warning when
-// the project names its channels: one that names only channels this
-// deployment cannot send on is misconfigured, and every request it gets
+// deployment has a sender for, or captures, none of the channels it uses.
+// The answer is the same either way, so the log says which. The second is a
+// warning when the project names its channels: one that names only channels
+// this deployment cannot send on is misconfigured, and every request it gets
 // fails. A project that names none uses the deployment's SMS, and a
 // deployment without SMS verifies no phones by design.
 func (s *AuthService) refusePhoneVerificationOff(ctx context.Context, cfg ProjectPhoneConfig) error {
@@ -103,17 +174,20 @@ func (s *AuthService) phoneUnverifiableReason(cfg ProjectPhoneConfig) string {
 // tried. When none accepts it the caller gets ErrPhoneVerificationUnavailable
 // alone: a sender's error stays in the log, since its text is the
 // provider's and is not the caller's to read.
-func (s *AuthService) deliverPhoneCode(ctx context.Context, cfg ProjectPhoneConfig, userID, phone, code string, ttl time.Duration) error {
+func (s *AuthService) deliverPhoneCode(ctx context.Context, cfg ProjectPhoneConfig, user *User, phone, code string, ttl time.Duration) error {
 	for _, ch := range cfg.channels() {
 		if !s.phoneChannelUsable(ch) {
 			continue
 		}
 		var sendErr error
-		if ch == PhoneChannelMessage {
+		switch {
+		case s.capturesPhoneCodes(ch):
+			sendErr = s.mailCapturedPhoneCode(ctx, user, ch, phone, code, ttl)
+		case ch == PhoneChannelMessage:
 			sendErr = s.templateSender.Send(ctx, templatemsg.Message{
 				To: phone, Template: cfg.MessageTemplate, Language: cfg.MessageLanguage, Params: []string{code},
 			})
-		} else {
+		default:
 			body := fmt.Sprintf("Your verification code is %s. It expires in %s.", code, formatExpiresIn(ttl))
 			sendErr = s.smsSender.Send(ctx, sms.Message{To: phone, Body: body})
 		}
@@ -121,7 +195,7 @@ func (s *AuthService) deliverPhoneCode(ctx context.Context, cfg ProjectPhoneConf
 			return nil
 		}
 		s.logger.Warn("phone_verification_send_failed",
-			zap.String("user_id", userID), zap.String("phone", sms.Redact(phone)),
+			zap.String("user_id", user.ID), zap.String("phone", sms.Redact(phone)),
 			zap.String("channel", ch), zap.Error(sendErr))
 	}
 	return ErrPhoneVerificationUnavailable
@@ -250,7 +324,7 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID strin
 	// The code is already stored; a delivery failure is surfaced so the
 	// caller knows it did not arrive (unlike the anti-enumeration email
 	// path, the caller here is authenticated and owns the flow).
-	if err := s.deliverPhoneCode(ctx, phoneCfg, userID, phone, code, ttl); err != nil {
+	if err := s.deliverPhoneCode(ctx, phoneCfg, user, phone, code, ttl); err != nil {
 		return err
 	}
 

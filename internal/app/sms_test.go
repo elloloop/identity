@@ -58,6 +58,13 @@ func TestBuildSMSSender(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "local_capture returns a usable sender the service does not call",
+			cfg: &config.Config{
+				SMSEnabled:  true,
+				SMSProvider: config.SMSProviderLocalCapture,
+			},
+		},
+		{
 			name: "unsupported provider errors",
 			cfg: &config.Config{
 				SMSEnabled:  true,

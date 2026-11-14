@@ -28,13 +28,23 @@ import { Code } from "astro-expressive-code/components";
     </li>
     <li>
       <code>message</code> sends a pre-approved messaging-app template message
-      through a <code>templatemsg.Sender</code>. This server ships no provider
-      for it and has no environment variable for one: an embedder sets
-      <code>identityserver.Options.TemplateMessageSender</code>. The template's
-      one parameter is the code. A <code>Sender</code> must never log the
-      code, nor put it in an error it returns.
+      through a <code>templatemsg.Sender</code>:
+      <code>GATEWAY_TEMPLATEMSG_PROVIDER=whatsapp_cloud</code> sends it through
+      the WhatsApp Business Cloud API (<code>GATEWAY_TEMPLATEMSG_WHATSAPP_*</code>),
+      and an embedder can set
+      <code>identityserver.Options.TemplateMessageSender</code> instead. The
+      template's one parameter is the code. A <code>Sender</code> must never
+      log the code, nor put it in an error it returns.
     </li>
   </ul>
+  <p>
+    On a developer's machine, <code>local_capture</code> as either provider
+    mails each code of that channel to the account's own email address
+    instead, so a mail catcher shows it. It proves no phone, so the server
+    refuses to boot with it unless every public address the configuration
+    names is a loopback host.
+  </p>
+
   <div class="table-scroll" tabindex="0" role="region" aria-label="On the deployment">
   <table>
     <thead>
