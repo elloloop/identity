@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/emailaddr"
@@ -101,13 +102,15 @@ type MembershipService struct {
 	// JoinTenantByDomain unimplemented.
 	domains DomainStore
 	mailer  email.Transport
-	// mailerConfigured reports whether a real outbound mail provider is wired
-	// (not just the log-only fallback). When false, CreateTenantInvitation
-	// returns the raw token in its response so a headless/dev deployment can
-	// still complete the flow; when true the token travels only in the email.
-	mailerConfigured bool
-	cfg              *config.Config
-	logger           *zap.Logger
+	// mailerDelivers reports whether mailer delivers: its Send returns nil
+	// only when a mail provider accepted the message. When false, mailer is
+	// the log-only fallback of a server with no mail provider configured, and
+	// CreateTenantInvitation returns the raw token in its response so a
+	// headless/dev deployment can still complete the flow; when true the
+	// token travels only in the email.
+	mailerDelivers bool
+	cfg            *config.Config
+	logger         *zap.Logger
 	// audit records CreateTenant outcomes, ownership transfers and joins by
 	// domain (WithAudit); nil records nothing.
 	audit *audit.Logger
@@ -118,51 +121,72 @@ type MembershipService struct {
 	nowFunc  func() time.Time
 }
 
-// NewMembershipService wires a MembershipService. mailer must be non-nil (the
-// app builds a log-only transport when no provider is configured);
-// mailerConfigured tells the service whether that transport actually
-// delivers, which governs whether the raw token is returned in the RPC
-// response. A nil logger defaults to a no-op.
+// NewMembershipService wires a MembershipService. mailerDelivers tells the
+// service whether mailer actually delivers, which governs whether the raw
+// token is returned in the RPC response. A nil mailer defaults to a log-only
+// transport, which never delivers, and a nil logger to a no-op.
 func NewMembershipService(
 	invitations InvitationStore,
 	memberships MembershipStore,
 	tenants TenantStore,
 	users UserDirectory,
 	mailer email.Transport,
-	mailerConfigured bool,
+	mailerDelivers bool,
 	cfg *config.Config,
 	logger *zap.Logger,
 ) *MembershipService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+	if mailer == nil {
+		mailer, mailerDelivers = email.NewLogOnly(logger), false
+	}
 	return &MembershipService{
-		invitations:      invitations,
-		memberships:      memberships,
-		tenants:          tenants,
-		users:            users,
-		mailer:           mailer,
-		mailerConfigured: mailerConfigured,
-		cfg:              cfg,
-		logger:           logger,
-		nowFunc:          time.Now,
+		invitations:    invitations,
+		memberships:    memberships,
+		tenants:        tenants,
+		users:          users,
+		mailer:         mailer,
+		mailerDelivers: mailerDelivers,
+		cfg:            cfg,
+		logger:         logger,
+		nowFunc:        time.Now,
 	}
 }
 
 // CreatedInvitation is the result of CreateTenantInvitation: the stored
-// invitation plus, ONLY when no mailer is configured, the raw token (so a
-// headless deployment can hand it to the recipient out-of-band). When a
-// mailer delivered the invitation, RawToken is empty.
+// invitation, what became of its email's one synchronous send, and, ONLY
+// when no mailer is configured, the raw token (so a headless deployment can hand it to the
+// recipient out-of-band). With a mailer configured RawToken is empty.
 type CreatedInvitation struct {
-	Invitation *TenantInvitation
-	RawToken   string
+	Invitation  *TenantInvitation
+	RawToken    string
+	EmailStatus EmailSendStatus
 }
+
+// EmailSendStatus says whether an email was handed to a mail provider.
+type EmailSendStatus int
+
+const (
+	// EmailSent: a configured mail provider accepted the email.
+	EmailSent EmailSendStatus = iota + 1
+	// EmailSendFailed: no configured provider accepted the email, none is
+	// valid, or the email could not be built (an invalid sender address, say).
+	EmailSendFailed
+	// EmailNotConfigured: no mail provider is configured, so nothing was
+	// sent.
+	EmailNotConfigured
+)
 
 // CreateTenantInvitation invites an email address to join a tenant. callerID
 // must be an active owner/admin member of the tenant. It generates a random
 // token, stores its hash via InvitationStore.CreateInvitation (which
 // atomically revokes any prior open invite for the same recipient), and
-// best-effort dispatches a branded invitation email carrying the raw token.
+// then sends a branded invitation email carrying the raw token, once and in
+// the request. A failed send does not fail the call: the invitation stays
+// stored and open, and EmailStatus reports that attempt. Calling again once
+// the resend cooldown has passed revokes the open invitation and sends a new
+// one.
 //
 // Every invitation sends an email, so the store refuses one past the limits
 // (see invitationLimits): ErrInvitationLimited past the per-tenant cap,
@@ -226,15 +250,19 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	}
 	inv.ID = id
 
+	sendErr := s.sendInvitationEmail(ctx, inv, rawToken)
 	out := &CreatedInvitation{Invitation: inv}
-	if s.mailerConfigured {
-		// The token belongs in the recipient's inbox, not the API response.
-		s.sendInvitationEmail(ctx, inv, rawToken)
-	} else {
-		// No delivery channel — surface the token so the caller can hand it
-		// over out-of-band. Still best-effort log-send so it appears in logs.
-		s.sendInvitationEmail(ctx, inv, rawToken)
+	switch {
+	case !s.mailerDelivers:
+		// No delivery channel: surface the token so the caller can hand it
+		// over out-of-band. The token never accompanies a configured mailer,
+		// even one that failed, as it belongs in the recipient's inbox.
 		out.RawToken = rawToken
+		out.EmailStatus = EmailNotConfigured
+	case sendErr != nil:
+		out.EmailStatus = EmailSendFailed
+	default:
+		out.EmailStatus = EmailSent
 	}
 	return out, nil
 }
@@ -533,14 +561,13 @@ func memberChangeDetails(m *TenantMembership) map[string]any {
 	}
 }
 
-// sendInvitationEmail renders and best-effort dispatches the branded tenant
-// invitation email carrying the raw token. Failures are logged, never
-// propagated — a mail outage must not fail the RPC (the invitation is already
-// persisted).
-func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *TenantInvitation, rawToken string) {
-	if s.mailer == nil {
-		return
-	}
+// sendInvitationEmail renders and sends the branded tenant invitation email
+// carrying the raw token, and returns why it was not sent. Every line it and
+// the mailer log carries the invitation id and the request's trace id.
+func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *TenantInvitation, rawToken string) error {
+	fields := invitationLogFields(ctx, inv.ID)
+	ctx = email.ContextWithLogFields(ctx, fields...)
+	logger := s.logger.With(fields...)
 	link := tenantInvitationLink(ctx, s.cfg, rawToken)
 	var brand resolvedBranding
 	if s.cfg != nil {
@@ -555,8 +582,8 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 		"Link":        link,
 	}))
 	if err != nil {
-		s.logger.Warn("tenant_invitation_render_failed", zap.String("to", redactEmail(inv.Email)), zap.Error(err))
-		return
+		logger.Warn("tenant_invitation_render_failed", zap.String("to", redactEmail(inv.Email)), zap.Error(err))
+		return err
 	}
 	from := ""
 	if s.cfg != nil {
@@ -571,8 +598,20 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	}
 	brand.applyTo(&msg)
 	if err := s.mailer.Send(ctx, msg); err != nil {
-		s.logger.Warn("tenant_invitation_send_failed", zap.String("to", redactEmail(inv.Email)), zap.Error(err))
+		logger.Warn("tenant_invitation_send_failed", zap.String("to", redactEmail(inv.Email)), zap.Error(err))
+		return err
 	}
+	return nil
+}
+
+// invitationLogFields ties a log line to invitation invitationID and, when
+// ctx carries a recording span, to the request's trace.
+func invitationLogFields(ctx context.Context, invitationID string) []zap.Field {
+	fields := []zap.Field{zap.String("invitation_id", invitationID)}
+	if traceID := observability.TraceIDFromContext(ctx); traceID != "" {
+		fields = append(fields, zap.String(observability.TraceIDLogField, traceID))
+	}
+	return fields
 }
 
 // tenantDisplayName is the tenant name an invitation email shows: the name

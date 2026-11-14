@@ -29,9 +29,23 @@ func (h *IdentityHandler) CreateTenantInvitation(
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.CreateTenantInvitationResponse{
-		Invitation: invitationToProto(created.Invitation),
-		RawToken:   created.RawToken,
+		Invitation:      invitationToProto(created.Invitation),
+		RawToken:        created.RawToken,
+		EmailSendStatus: emailSendStatusToProto(created.EmailStatus),
 	}), nil
+}
+
+func emailSendStatusToProto(s service.EmailSendStatus) identitypb.EmailSendStatus {
+	switch s {
+	case service.EmailSent:
+		return identitypb.EmailSendStatus_EMAIL_SEND_STATUS_SENT
+	case service.EmailSendFailed:
+		return identitypb.EmailSendStatus_EMAIL_SEND_STATUS_FAILED
+	case service.EmailNotConfigured:
+		return identitypb.EmailSendStatus_EMAIL_SEND_STATUS_NOT_CONFIGURED
+	default:
+		return identitypb.EmailSendStatus_EMAIL_SEND_STATUS_UNSPECIFIED
+	}
 }
 
 // AcceptTenantInvitation redeems a raw invitation token for the authenticated

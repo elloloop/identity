@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"errors"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -124,6 +125,20 @@ func (m *TracedMailer) Send(ctx context.Context, msg email.Message) error {
 		attribute.String("email.subject", msg.Subject),
 	)
 	err := m.inner.Send(ctx, msg)
-	end(err)
+	end(addressFreeSendError(err))
 	return err
+}
+
+// addressFreeSendError is the email package sentinel err wraps, recorded on
+// the span in its place: a send error can quote the recipient's address (an
+// invalid To, a provider's reply to RCPT TO), and the span must not.
+func addressFreeSendError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, email.ErrInvalidMessage):
+		return email.ErrInvalidMessage
+	default:
+		return email.ErrTransport
+	}
 }

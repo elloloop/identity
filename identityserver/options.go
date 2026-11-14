@@ -102,7 +102,9 @@ type Options struct {
 	DB   service.DB
 
 	// EmailTransport delivers outbound mail. nil builds a transport from
-	// the SMTP settings in Config (falling back to log-only).
+	// the SMTP settings in Config (falling back to log-only). A supplied
+	// transport is taken to deliver: Send returning nil reports a tenant
+	// invitation's email as sent, and an error as failed.
 	EmailTransport email.Transport
 
 	// SMSSender delivers outbound SMS for phone verification. nil builds a

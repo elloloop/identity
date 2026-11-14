@@ -32,7 +32,7 @@ func TestBuildMembershipService(t *testing.T) {
 		MembershipStore: &stubMembershipStore{},
 		TenantStore:     &stubTenantStore{},
 	}
-	if got := buildMembershipService(full, nil, users, mailer, nil, logger); got == nil {
+	if got := buildMembershipService(full, nil, users, mailer, false, nil, logger); got == nil {
 		t.Fatal("all stores present: want non-nil MembershipService, got nil")
 	}
 
@@ -44,27 +44,8 @@ func TestBuildMembershipService(t *testing.T) {
 	} {
 		d := full
 		mutate(&d)
-		if got := buildMembershipService(d, nil, users, mailer, nil, logger); got != nil {
+		if got := buildMembershipService(d, nil, users, mailer, false, nil, logger); got != nil {
 			t.Errorf("%s: want nil MembershipService, got non-nil", name)
-		}
-	}
-}
-
-func TestMailDeliveryConfigured(t *testing.T) {
-	cases := []struct {
-		name string
-		deps Deps
-		want bool
-	}{
-		{"injected transport", Deps{EmailTransport: email.NewLogOnly(zap.NewNop())}, true},
-		{"nil config, no transport", Deps{}, false},
-		{"smtp host set", Deps{Config: &config.Config{SMTPHost: "smtp.example.com"}}, true},
-		{"smtp providers set", Deps{Config: &config.Config{SMTPProviders: `[{"host":"x"}]`}}, true},
-		{"nothing configured", Deps{Config: &config.Config{}}, false},
-	}
-	for _, tc := range cases {
-		if got := mailDeliveryConfigured(tc.deps); got != tc.want {
-			t.Errorf("%s: mailDeliveryConfigured = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
