@@ -179,6 +179,11 @@ func (s *AuthService) CreateManagedChildAccount(
 	if err := validateCompletionDOB(req.DateOfBirthMs, s.nowFunc()); err != nil {
 		return nil, err
 	}
+	var err error
+	ctx, err = s.guardianContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	market := normalizeJurisdictionCode(req.Market)
 	if err := s.validateAccountMarket(ctx, market); err != nil {
 		return nil, err
@@ -205,10 +210,15 @@ func (s *AuthService) CreateManagedChildAccount(
 		return nil, fmt.Errorf("%w: a minor cannot create managed child accounts", ErrPermissionDenied)
 	}
 
+	if !s.guardianProfileAllowed(ctx, caller) {
+		s.auditManagedChildFailure(ctx, callerUserID, "adult_profile", ip, userAgent)
+		return nil, errGuardianAdultProfileRequired
+	}
+
 	// 2. Step-up re-authentication + strong verified factor — the same two
 	// mandatory checks as GrantParentalConsent, verified before any state
 	// change so a caller holding only a session token cannot create accounts.
-	admitted, reauthenticated := s.stepUp(caller, req.StepUpPassword)
+	admitted, reauthenticated := s.stepUp(ctx, caller, req.StepUpPassword)
 	if !admitted {
 		s.auditManagedChildFailure(ctx, callerUserID, "step_up", ip, userAgent)
 		return nil, ErrParentalConsentStepUpFailed

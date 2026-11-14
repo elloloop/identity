@@ -60,7 +60,7 @@ func TestSCIM_ProjectPolicyUnavailableIs503(t *testing.T) {
 		projectID:        testSCIMProjectID,
 		bearerToken:      testSCIMToken,
 		logger:           zap.NewNop(),
-		projects:         &fakeNativeProjects{},
+		projects:         &fakeActiveProjects{},
 		defaultProjectID: "another-project",
 	}).register(mux, true)
 	rec := scimReq(t, mux, http.MethodGet, "/scim/v2/Users", testSCIMToken, "")

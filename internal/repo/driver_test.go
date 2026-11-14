@@ -44,8 +44,8 @@ func assertNoGovernancePlane(t *testing.T, built *Built, driver string) {
 	if dc := built.DirectoryCredentialStore(); dc != nil {
 		t.Errorf("Build %s: DirectoryCredentialStore() = %v, want true nil", driver, dc)
 	}
-	if np := built.NativeProjectLookup(); np != nil {
-		t.Errorf("Build %s: NativeProjectLookup() = %v, want true nil", driver, np)
+	if np := built.ActiveProjects(); np != nil {
+		t.Errorf("Build %s: ActiveProjects() = %v, want true nil", driver, np)
 	}
 	if pl := built.ProjectLister(); pl != nil {
 		t.Errorf("Build %s: ProjectLister() = %v, want true nil", driver, pl)
@@ -118,8 +118,8 @@ func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
 	if empty.DirectoryCredentialStore() != nil {
 		t.Error("empty DirectoryCredentialStore: want nil interface")
 	}
-	if empty.NativeProjectLookup() != nil {
-		t.Error("empty NativeProjectLookup: want nil interface")
+	if empty.ActiveProjects() != nil {
+		t.Error("empty ActiveProjects: want nil interface")
 	}
 	if empty.TenantAutoFormer() != nil {
 		t.Error("empty TenantAutoFormer: want nil interface")
@@ -161,8 +161,8 @@ func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
 	if full.DirectoryCredentialStore() == nil {
 		t.Error("full DirectoryCredentialStore: want non-nil")
 	}
-	if full.NativeProjectLookup() == nil {
-		t.Error("full NativeProjectLookup: want non-nil")
+	if full.ActiveProjects() == nil {
+		t.Error("full ActiveProjects: want non-nil")
 	}
 	if full.TenantAutoFormer() == nil {
 		t.Error("full TenantAutoFormer: want non-nil")

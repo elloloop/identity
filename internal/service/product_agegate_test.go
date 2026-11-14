@@ -546,7 +546,7 @@ func TestProductAgeGate_NativeOAuthLogin(t *testing.T) {
 			const restrictedProject = "proj-restricted"
 			proj := nativeProjWithAuds(restrictedProject, "scope-restricted")
 			proj.Products = ProjectProductsConfig{restrictedProduct: {MinimumAgeBand: MinimumAgeBandTeen}}
-			projects := &fakeNativeProjects{active: map[string]*AdminProject{restrictedProject: proj}}
+			projects := &fakeActiveProjects{active: map[string]*AdminProject{restrictedProject: proj}}
 
 			signer := newNativeTokenSigner(t)
 			svc := newNativeTestAuthService(t, repo, signer, projects, func(c *config.Config) {

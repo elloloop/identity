@@ -110,7 +110,7 @@ func newNativeHarness(t *testing.T, signer *nativeHandlerSigner, enabled bool) *
 	}
 
 	authSvc := service.NewAuthServiceWithOAuth(repo, cfg, kr, pkSvc, auditLog, totpKey, totpRecoveryPepper, nil, nil, zap.NewNop(), nil).
-		WithNativeOAuth(verifier, nil) // nil project store: default-project only
+		WithNativeOAuth(verifier) // nil project store: default-project only
 	adminSvc := service.NewAdminService(repo, db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())

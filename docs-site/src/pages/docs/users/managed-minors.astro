@@ -141,6 +141,80 @@ import { Code } from "astro-expressive-code/components";
     <code>invite</code> and <code>closed</code> too.
   </p>
 
+  <h2>Project guardian policy</h2>
+  <p>
+    The Postgres control plane supports two opt-in project settings. Set
+    <code>guardian.require_step_up: true</code> to require fresh password proof
+    even when the deployment permits passwordless guardians. A registered
+    passkey or signed-in session alone is not fresh proof. A passwordless parent
+    can use <code>RequestPasswordReset</code> and the verified reset link to
+    establish a password first. A failed proof returns <code>UNAUTHENTICATED</code>.
+  </p>
+  <p>
+    Set <code>guardian.require_adult_profile: true</code> to require an active
+    person with a date of birth on file and a known adult age band. This requires
+    <code>GATEWAY_AGEGATE_ENABLED=true</code>; otherwise every admission is denied.
+    The current date-of-birth validator accepts only positive epoch milliseconds,
+    so dates on or before 1970-01-01 cannot satisfy this policy yet.
+    Both project settings default to false and apply before child creation,
+    consent grants, and all seven guardian management calls, including the profile
+    read. They do not obstruct withdrawing consent. On Postgres, admission reads
+    the active project's policy and jurisdiction thresholds even on default HTTP
+    and native gRPC routes; unavailable policy denies admission.
+  </p>
+  <h2>Checking a child device's authorization</h2>
+  <h3>Issue a narrowly scoped key</h3>
+  <p>
+    Apply migration 0061 and use <code>AdminCreateProjectCredential</code> with
+    <code>kind="managed_child_reader"</code>. Its <code>ck_</code> raw key is shown
+    once: store it only on your backend and keep the credential ID for revocation.
+    It grants no account-profile, session-creation or write RPCs. The Postgres
+    credential store and project resolver are required; without them the endpoint
+    returns <code>UNIMPLEMENTED</code>.
+  </p>
+  <p>Every check also reads the active project and parses its policy afresh.
+    Include that database read, along with the credential, guardian edge, account
+    and audit operations, when sizing capacity; a cached authorization would
+    delay policy and revocation changes.</p>
+  <h3>Make a live check</h3>
+  <p>
+    Send <code>child_user_id</code> and <code>guardian_user_id</code> to
+    <code>GetManagedChildAuthorization</code>, with the private key in
+    <code>X-Managed-Child-Key</code> and the project's publishable routing key in
+    <code>X-Project-Key</code>. HTTP also supports the resolved auth hostname or
+    configured default project; native gRPC requires the explicit project key.
+    An invalid explicit key never falls back to a default project.
+  </p>
+  <p>
+    The only result is <code>authorized</code>: both accounts must be active people,
+    the child a known minor, the guardian a known adult, and their guardian edge
+    live in the credential's project. Age gating must be enabled and both accounts
+    need dates of birth; unknown bands or disabled age gating return false.
+    JSON omits <code>authorized</code> when false: only an explicit true permits
+    access, including for handwritten JSON clients. No profile or sign-in
+    credentials are returned. Recheck before issuing,
+    refreshing or using child access; false, errors and unavailability must deny
+    it. Never cache true or treat it as a token. Revoking the edge denies the next call.
+  </p>
+  <h3>Errors, limits and audit</h3>
+  <p>
+    Invalid, revoked or mismatched credentials return <code>UNAUTHENTICATED</code>;
+    blank or oversized IDs return <code>INVALID_ARGUMENT</code>. An unavailable
+    project lookup denies the call. The independent
+    <code>GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP</code> budget defaults to
+    1200 per <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> (default 60 seconds),
+    per egress IP per replica, shared by HTTP and native gRPC. Throttling returns
+    HTTP 429 (Connect reports <code>UNAVAILABLE</code>) or native gRPC
+    <code>RESOURCE_EXHAUSTED</code>. Increasing this budget does not widen directory access.
+  </p>
+  <p>
+    Size the budget for all protected operations, refreshes and retries from each
+    backend egress IP. For example, 100 devices making one request every 30 seconds
+    need 200 checks per minute. Each decision writes a
+    <code>managed_child_authorization</code> audit event: that example can generate
+    288,000 rows per day, so size audit storage, queue capacity and retention too.
+  </p>
+
   <h2>Managing the account</h2>
   <p>
     Seven RPCs cover what a parent actually does. None of them needs the child's
@@ -223,9 +297,10 @@ import { Code } from "astro-expressive-code/components";
       running; ageing out is not a security event for the account holder.
     </li>
     <li>
-      <strong>With age-gating off nothing changes.</strong> No band can be
-      derived, so the edge alone authorizes — the behaviour a pre-gate
-      deployment already had.
+      <strong>With age-gating off the default management policy is unchanged.</strong>
+      The edge alone authorizes unless the project opts into
+      <code>require_adult_profile</code>. The machine authorization check always
+      requires known bands and denies access when age gating is off.
     </li>
     <li>
       <strong>Deletion is immediate.</strong> It is the admin erasure cascade,
@@ -248,7 +323,9 @@ import { Code } from "astro-expressive-code/components";
     refusal. A refusal carries <code>success=false</code> and a
     <code>step</code> detail naming the check that failed, so probing a child
     account is as visible in the trail as managing one. Account creation is
-    audited as <code>managed_child_account_created</code>, and edges as
+    audited as <code>managed_child_account_created</code>; a guardian age-policy
+    refusal uses the <code>adult_profile</code> step. Live machine checks emit
+    <code>managed_child_authorization</code>, and edges are audited as
     <code>guardian_edge_created</code> / <code>guardian_edge_removed</code>.
   </p>
 

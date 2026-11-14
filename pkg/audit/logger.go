@@ -231,6 +231,10 @@ const (
 	// presentation of a real directory_reader credential (revoked, or the
 	// wrong secret) is logged with success=false and a `reason`.
 	EventDirectoryLookup EventType = "directory_lookup"
+	// EventManagedChildAuthorization records a credential actor and child target
+	// for each decision. Refused credential presentations carry a reason and
+	// omit the requested child target; no profile or secret is recorded.
+	EventManagedChildAuthorization EventType = "managed_child_authorization"
 
 	// EventDirectoryPhoneMatch records a service matching phone-number
 	// hashes against a tenant's members through MatchTenantMemberPhones with
@@ -528,6 +532,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectCredentialCreated:      {},
 	EventProjectCredentialRevoked:      {},
 	EventDirectoryLookup:               {},
+	EventManagedChildAuthorization:     {},
 	EventDirectoryPhoneMatch:           {},
 	EventSCIMAuthFailed:                {},
 	EventParentalConsentGranted:        {},

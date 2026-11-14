@@ -161,3 +161,31 @@ func TestRateLimitQrPollPerIP_RejectsNegative(t *testing.T) {
 		t.Fatalf("Validate = %v, want an error naming %s=-1", err, qrPollRateLimitEnv)
 	}
 }
+
+func TestRateLimitManagedChildAuthPerIP(t *testing.T) {
+	const key = "GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP"
+	for raw, want := range map[string]int{"": 1200, "0": 1200, "invalid": 1200, "3000": 3000} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv(key, raw)
+			cfg := Load()
+			if err := cfg.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.RateLimitManagedChildAuthPerIP != want {
+				t.Fatalf("got %d want %d", cfg.RateLimitManagedChildAuthPerIP, want)
+			}
+		})
+	}
+	t.Setenv(key, "-1")
+	if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), key) {
+		t.Fatalf("negative budget accepted: %v", err)
+	}
+	cfg := Load()
+	cfg.RateLimitManagedChildAuthPerIP = 0
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RateLimitManagedChildAuthPerIP != DefaultRateLimitManagedChildAuthPerIP {
+		t.Fatal("zero disabled limit")
+	}
+}

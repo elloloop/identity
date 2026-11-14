@@ -58,8 +58,9 @@ type IdentityHandler struct {
 	// by a directory_reader project credential rather than a user JWT. nil
 	// when the build has no control plane (memory, sqlite), which disables
 	// both (CodeUnimplemented).
-	directory *service.DirectoryService
-	cfg       *config.Config
+	directory                 *service.DirectoryService
+	cfg                       *config.Config
+	managedChildAuthorization *service.ManagedChildAuthorizationService
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service

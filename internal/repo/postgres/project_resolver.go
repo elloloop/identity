@@ -73,6 +73,7 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 		return nil, fmt.Errorf("project %q: %w", p.ID, err)
 	}
 	return &service.ResolvedProject{
+		Guardian:           cfg.Guardian,
 		ID:                 p.ID,
 		StorageScopeID:     p.StorageScopeID,
 		PrimaryAuthDomain:  primary,

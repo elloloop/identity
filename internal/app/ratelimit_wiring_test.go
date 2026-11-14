@@ -670,6 +670,17 @@ func TestBuildRateLimits_TenantDomainLimited(t *testing.T) {
 	}
 }
 
+func TestManagedChildAuthorization_HasIndependentCapacity(t *testing.T) {
+	cfg := newTestConfig()
+	require.NoError(t, cfg.Validate())
+	cfg.RateLimitDirectoryPerIP = 2
+	handler := middleware.RateLimitMiddleware(buildRateLimits(cfg), nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceLookupUsersProcedure, "9.9.9.9", 2)
+	// One hundred devices with a protected operation every 30 seconds need
+	// 200 checks per minute; that must not consume account-directory capacity.
+	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceGetManagedChildAuthorizationProcedure, "9.9.9.9", config.DefaultRateLimitManagedChildAuthPerIP)
+}
+
 // Removing a recovery email spends the budget adding one does, and removing
 // the phone the budget requesting a phone code does: a removal that ends
 // sessions clears the session cache, so one source cannot loop on it.

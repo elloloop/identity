@@ -203,6 +203,11 @@ func (s *AuthService) GrantParentalConsent(
 		return nil, fmt.Errorf("%w: an adult cannot grant parental consent for their own account", ErrInvalidArgument)
 	}
 
+	var err error
+	ctx, err = s.guardianContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	repo := s.repo(ctx)
 
 	adult, err := repo.GetUser(ctx, consentingUserID)
@@ -216,10 +221,15 @@ func (s *AuthService) GrantParentalConsent(
 		return nil, ErrAccountNotActive
 	}
 
+	if !s.guardianProfileAllowed(ctx, adult) {
+		s.auditConsentFailure(ctx, consentingUserID, childUserID, "adult_profile", ip, userAgent)
+		return nil, errGuardianAdultProfileRequired
+	}
+
 	// Check (b): STEP-UP RE-AUTH. Verified before any state changes so a
 	// caller holding only a session token (a hijacked session, a shared
 	// device) cannot consent.
-	admitted, reauthenticated := s.stepUp(adult, stepUpPassword)
+	admitted, reauthenticated := s.stepUp(ctx, adult, stepUpPassword)
 	if !admitted {
 		s.auditConsentFailure(ctx, consentingUserID, childUserID, "step_up", ip, userAgent)
 		return nil, ErrParentalConsentStepUpFailed

@@ -1542,11 +1542,12 @@ type AuthService struct {
 	// NativeIDTokenVerifier seam (satisfied by *oauth.NativeVerifier) so the
 	// login flow's verification-result branches are unit-testable.
 	nativeVerifier NativeIDTokenVerifier
-	// nativeProjects validates that a native login's resolved product→project
+	// activeProjects supplies authoritative active-project policy for guardian
+	// admission and validates that a native login's resolved product→project
 	// id names a real, active control-plane project. nil on drivers without a
 	// control plane (memory), where NativeOAuthLogin accepts only the product
-	// that resolves to cfg.DefaultProjectID. Set alongside nativeVerifier.
-	nativeProjects NativeOAuthProjectStore
+	// that resolves to cfg.DefaultProjectID. Set independently of nativeVerifier.
+	activeProjects ActiveProjectStore
 	// nativeProductProjects is the parsed GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS
 	// map (lower-cased product → verbatim project id), precomputed once at
 	// wiring so a native login does not re-split the CSV and allocate a map per
@@ -1737,15 +1738,17 @@ func (s *AuthService) WithEnvOAuthProviders(build EnvOAuthProviderBuilder) *Auth
 	return s
 }
 
-// WithNativeOAuth wires the native mobile sign-in dependencies (the ID-token
-// verifier and the optional control-plane project lookup) and returns the
-// service for chaining. app.New calls it once at construction: with a non-nil
-// verifier when native login is enabled and audiences are configured, and with
-// the postgres project store (nil on drivers without a control plane). A nil
-// verifier leaves NativeOAuthLogin disabled.
-func (s *AuthService) WithNativeOAuth(v NativeIDTokenVerifier, projects NativeOAuthProjectStore) *AuthService {
+// WithActiveProjects wires authoritative project policy independently of sign-in
+// features. app.New always calls it; nil denotes a driver without a control plane.
+func (s *AuthService) WithActiveProjects(projects ActiveProjectStore) *AuthService {
+	s.activeProjects = projects
+	return s
+}
+
+// WithNativeOAuth wires the native ID-token verifier and product mapping.
+// A nil verifier leaves native sign-in disabled without changing project policy.
+func (s *AuthService) WithNativeOAuth(v NativeIDTokenVerifier) *AuthService {
 	s.nativeVerifier = v
-	s.nativeProjects = projects
 	s.nativeProductProjects = s.cfg.NativeOAuthProductProjectMap()
 	return s
 }

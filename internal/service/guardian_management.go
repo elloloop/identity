@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -23,7 +25,7 @@ import (
 //
 // Every operation passes through ONE guard, authorizeGuardianAction, rather
 // than re-implementing the checks per RPC — so an operation added later is
-// gated by construction. The guard requires BOTH:
+// gated by construction. The guard applies the project adult-profile policy and requires:
 //
 //  1. an ACTIVE guardianOf EDGE from the caller to the child. The caller is
 //     the authenticated session user, never a request field. Revoking
@@ -83,19 +85,62 @@ func (s *AuthService) auditGuardianAction(
 // stepUp is the one guardian step-up rule. admitted is whether the caller may
 // proceed; reauthenticated is whether they actually proved a password, which
 // the consent record persists as evidence and so must never be inferred from
-// admitted alone. The two differ only under GuardianStepUpAllowNoPassword,
-// which admits an account holding no password hash without any proof — an
+// admitted alone. The two differ when GuardianStepUpAllowNoPassword is enabled
+// and the project does not require step-up; then a passwordless account may
+// proceed without proof. An
 // account that does hold a hash must still present the matching password.
-func (s *AuthService) stepUp(user *User, stepUpPassword string) (admitted, reauthenticated bool) {
+func (s *AuthService) stepUp(ctx context.Context, user *User, stepUpPassword string) (admitted, reauthenticated bool) {
 	if user.PasswordHash == "" {
-		return s.cfg.GuardianStepUpAllowNoPassword, false
+		scope := ProjectScopeFromContext(ctx)
+		strict := scope != nil && scope.Guardian.RequireStepUp
+		return s.cfg.GuardianStepUpAllowNoPassword && !strict, false
 	}
 	ok := stepUpPassword != "" && passwords.Verify(stepUpPassword, user.PasswordHash)
 	return ok, ok
 }
 
+// Guardian admission must read the project's policy even when transport routing
+// used the default pin, or a native gRPC host supplied no project scope.
+func (s *AuthService) guardianContext(ctx context.Context) (context.Context, error) {
+	if s.activeProjects == nil {
+		return ctx, nil
+	}
+	projectID := s.projectID(ctx)
+	project, err := s.activeProjects.ActiveProjectByID(ctx, projectID)
+	if err != nil {
+		s.logger.Warn("guardian_project_policy_unavailable", zap.Error(err))
+		return nil, fmt.Errorf("%w: guardian project policy unavailable", ErrServiceUnavailable)
+	}
+	if project == nil || project.ID != projectID {
+		return nil, fmt.Errorf("%w: guardian project is not active", ErrPermissionDenied)
+	}
+	scope := ProjectScope{ProjectID: projectID}
+	if existing := ProjectScopeFromContext(ctx); existing != nil {
+		scope = *existing
+	}
+	scope.ProjectID = projectID
+	scope.Guardian = project.Guardian
+	scope.Jurisdictions = project.Jurisdictions
+	return WithProjectScope(ctx, &scope), nil
+}
+
+func (s *AuthService) guardianProfileAllowed(ctx context.Context, user *User) bool {
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil || !scope.Guardian.RequireAdultProfile {
+		return true
+	}
+	return s.isKnownAdultPerson(ctx, user)
+}
+
+// isKnownAdultPerson is shared by strict guardian admission and machine proofs.
+func (s *AuthService) isKnownAdultPerson(ctx context.Context, user *User) bool {
+	return isActivePerson(user) && s.determinerForUser(ctx, user).Determine(user.DateOfBirthMs, s.nowFunc()).Band == agegate.BandAdult
+}
+
+var errGuardianAdultProfileRequired = fmt.Errorf("%w: a known adult profile is required", ErrPermissionDenied)
+
 // authorizeGuardianAction is the single chokepoint every guardian management
-// operation passes through. It returns the guardian and the child on
+// operation passes through. It returns the resolved policy context and child on
 // success; on refusal it audits the failing step and returns the error the
 // caller propagates unchanged.
 //
@@ -106,11 +151,11 @@ func (s *AuthService) stepUp(user *User, stepUpPassword string) (admitted, reaut
 // edge lookup runs next and keys on (caller, child) without touching the
 // users table, so a stranger probing a child id — real or invented — gets
 // the identical ErrPermissionDenied and learns nothing. Only a caller who
-// already holds the edge reaches the step-up check, and only a stepped-up
+// already holds the edge reaches the adult-profile and step-up checks, and only an admitted
 // guardian reaches the band check.
 func (s *AuthService) authorizeGuardianAction(
 	ctx context.Context, op guardianOperation, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
-) (*User, *User, error) {
+) (context.Context, *User, error) {
 	if guardianUserID == "" {
 		return nil, nil, ErrUnauthenticated
 	}
@@ -120,6 +165,11 @@ func (s *AuthService) authorizeGuardianAction(
 	childUserID = strings.TrimSpace(childUserID)
 	if childUserID == "" {
 		return nil, nil, fmt.Errorf("%w: child_user_id is required", ErrInvalidArgument)
+	}
+	var err error
+	ctx, err = s.guardianContext(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
 	repo := s.repo(ctx)
 
@@ -151,8 +201,13 @@ func (s *AuthService) authorizeGuardianAction(
 		return nil, nil, ErrAccountNotActive
 	}
 
+	if !s.guardianProfileAllowed(ctx, guardian) {
+		s.auditGuardianAction(ctx, op, guardianUserID, childUserID, false, ip, userAgent, map[string]any{"step": "adult_profile"})
+		return nil, nil, errGuardianAdultProfileRequired
+	}
+
 	// (2) Step-up re-authentication, verified before any state change.
-	if admitted, _ := s.stepUp(guardian, stepUpPassword); !admitted {
+	if admitted, _ := s.stepUp(ctx, guardian, stepUpPassword); !admitted {
 		s.auditGuardianAction(ctx, op, guardianUserID, childUserID, false, ip, userAgent,
 			map[string]any{"step": "step_up"})
 		return nil, nil, ErrParentalConsentStepUpFailed
@@ -181,7 +236,7 @@ func (s *AuthService) authorizeGuardianAction(
 		return nil, nil, ErrGuardianRightsExpired
 	}
 
-	return guardian, child, nil
+	return ctx, child, nil
 }
 
 // GetManagedChildProfile returns the managed child's stored account record.
@@ -191,7 +246,7 @@ func (s *AuthService) authorizeGuardianAction(
 func (s *AuthService) GetManagedChildProfile(
 	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
 ) (*User, error) {
-	_, child, err := s.authorizeGuardianAction(ctx, guardianOpViewProfile, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpViewProfile, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +263,7 @@ func (s *AuthService) GetManagedChildProfile(
 func (s *AuthService) SetManagedChildPassword(
 	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, newPassword, stepUpPassword, ip, userAgent string,
 ) error {
-	_, child, err := s.authorizeGuardianAction(ctx, guardianOpSetPassword, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpSetPassword, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
 	if err != nil {
 		return err
 	}
@@ -253,7 +308,7 @@ func (s *AuthService) SetManagedChildPassword(
 func (s *AuthService) SetManagedChildUsername(
 	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, username, stepUpPassword, ip, userAgent string,
 ) (*User, error) {
-	_, child, err := s.authorizeGuardianAction(ctx, guardianOpSetUsername, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpSetUsername, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +364,7 @@ func (s *AuthService) SetManagedChildUsername(
 func (s *AuthService) RevokeManagedChildSessions(
 	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
 ) error {
-	_, child, err := s.authorizeGuardianAction(ctx, guardianOpRevokeSessions, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpRevokeSessions, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
 	if err != nil {
 		return err
 	}
@@ -329,7 +384,7 @@ func (s *AuthService) RevokeManagedChildSessions(
 func (s *AuthService) DeactivateManagedChildAccount(
 	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, reason, stepUpPassword, ip, userAgent string,
 ) error {
-	_, child, err := s.authorizeGuardianAction(ctx, guardianOpDeactivate, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpDeactivate, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
 	if err != nil {
 		return err
 	}
@@ -379,7 +434,7 @@ func (s *AuthService) DeactivateManagedChildAccount(
 func (s *AuthService) ReactivateManagedChildAccount(
 	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
 ) error {
-	_, child, err := s.authorizeGuardianAction(ctx, guardianOpReactivate, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpReactivate, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
 	if err != nil {
 		return err
 	}
@@ -423,7 +478,7 @@ func (s *AuthService) ReactivateManagedChildAccount(
 func (s *AuthService) DeleteManagedChildAccount(
 	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
 ) error {
-	_, child, err := s.authorizeGuardianAction(ctx, guardianOpDeleteChild, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpDeleteChild, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
 	if err != nil {
 		return err
 	}

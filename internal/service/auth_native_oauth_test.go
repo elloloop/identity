@@ -105,15 +105,15 @@ func nativeNonceHex(raw string) string {
 // project config and use to stamp matching `iss` claims.
 const msSvcIssuerFormat = "https://login.microsoftonline.com/%s/v2.0"
 
-// fakeNativeProjects is a stub NativeOAuthProjectStore mapping known ids to
+// fakeActiveProjects is a stub ActiveProjectStore mapping known ids to
 // active projects (with their per-project OAuth config). When err is set,
 // ActiveProjectByID returns it (simulating an infrastructure failure).
-type fakeNativeProjects struct {
+type fakeActiveProjects struct {
 	active map[string]*AdminProject
 	err    error
 }
 
-func (f *fakeNativeProjects) ActiveProjectByID(_ context.Context, id string) (*AdminProject, error) {
+func (f *fakeActiveProjects) ActiveProjectByID(_ context.Context, id string) (*AdminProject, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -152,15 +152,15 @@ func nativeProjWithAuds(id, scope string) *AdminProject {
 // defaultNativeProjects wires the projects the product map points at. proj-default
 // is the DEFAULT project and deliberately carries NO OAuth config so it exercises
 // the env-seed fallback; the non-default products carry their own audiences.
-func defaultNativeProjects() *fakeNativeProjects {
-	return &fakeNativeProjects{active: map[string]*AdminProject{
+func defaultNativeProjects() *fakeActiveProjects {
+	return &fakeActiveProjects{active: map[string]*AdminProject{
 		"proj-default": {ID: "proj-default", StorageScopeID: "scope-default", Name: "proj-default"},
 		"proj-acme":    nativeProjWithAuds("proj-acme", "scope-acme"),
 		"proj-kids":    nativeProjWithAuds("proj-kids", "scope-kids"),
 	}}
 }
 
-func newNativeTestAuthService(t *testing.T, repo *fakeRepo, signer *nativeTokenSigner, projects NativeOAuthProjectStore, mutate func(*config.Config)) *AuthService {
+func newNativeTestAuthService(t *testing.T, repo *fakeRepo, signer *nativeTokenSigner, projects ActiveProjectStore, mutate func(*config.Config)) *AuthService {
 	t.Helper()
 	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
 		GoogleJWKSURL:    signer.url,
@@ -175,7 +175,7 @@ func newNativeTestAuthService(t *testing.T, repo *fakeRepo, signer *nativeTokenS
 // arbitrary Repository and verifier seam. The error-branch tests use it to
 // inject a failing repo (errorRepo) or a stub verifier (fakeNativeVerifier)
 // that returns a chosen identity/error without minting signed JWTs.
-func newNativeTestAuthServiceWith(t *testing.T, repo Repository, verifier NativeIDTokenVerifier, projects NativeOAuthProjectStore, mutate func(*config.Config)) *AuthService {
+func newNativeTestAuthServiceWith(t *testing.T, repo Repository, verifier NativeIDTokenVerifier, projects ActiveProjectStore, mutate func(*config.Config)) *AuthService {
 	t.Helper()
 	cfg := testConfig()
 	cfg.DefaultProjectID = "proj-default"
@@ -197,7 +197,7 @@ func newNativeTestAuthServiceWith(t *testing.T, repo Repository, verifier Native
 		audit.NewLogger(nil, "test", nil),
 		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), nil, zap.NewNop(),
 		nil,
-	).WithNativeOAuth(verifier, projects)
+	).WithActiveProjects(projects).WithNativeOAuth(verifier)
 }
 
 // fakeNativeVerifier is a stub NativeIDTokenVerifier: it returns a fixed
@@ -302,7 +302,7 @@ func TestNativeOAuthLogin_Allowlist_NonCanonical(t *testing.T) {
 	access, err := NewProjectAccessConfig(ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"alicesmith@gmail.com"}})
 	require.NoError(t, err)
 	proj.Access = access
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-kids": proj}}
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{"proj-kids": proj}}
 	svc := newNativeTestAuthService(t, repo, signer, projects, nil)
 
 	// A dotted/+tagged/mixed-case token variant is JIT-provisioned under canonical.
@@ -380,7 +380,7 @@ func TestNativeOAuthLogin_PerProject_AcceptsOnlyProjectAudiences(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)
 	const audA = "projA-ios.apps.googleusercontent.com"
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{
 		"proj-a": {ID: "proj-a", StorageScopeID: "scope-a", Name: "proj-a", OAuth: ProjectOAuthConfig{
 			Google: &ProjectOAuthGoogle{NativeAudiences: []string{audA}},
 		}},
@@ -428,7 +428,7 @@ func TestNativeOAuthLogin_NonDefaultProject_NoAudiences_Rejected(t *testing.T) {
 	signer := newNativeTokenSigner(t)
 	// proj-noauth is active but configures no native audiences: it cannot use
 	// native login and never inherits the env seed.
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{
 		"proj-noauth": {ID: "proj-noauth", StorageScopeID: "scope-noauth", Name: "proj-noauth"},
 	}}
 	svc := newNativeTestAuthService(t, repo, signer, projects, func(c *config.Config) {
@@ -447,7 +447,7 @@ func TestNativeOAuthLogin_TokenForProjectX_RejectedUnderProjectY(t *testing.T) {
 	signer := newNativeTokenSigner(t)
 	const audX = "x-ios.apps.googleusercontent.com"
 	const audY = "y-ios.apps.googleusercontent.com"
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{
 		"proj-x": {ID: "proj-x", StorageScopeID: "scope-x", Name: "proj-x", OAuth: ProjectOAuthConfig{
 			Google: &ProjectOAuthGoogle{NativeAudiences: []string{audX}},
 		}},
@@ -483,7 +483,7 @@ func TestNativeOAuthLogin_Microsoft_Accepted(t *testing.T) {
 	signer := newNativeTokenSigner(t)
 	const tid = "tenant-1"
 	const msAud = "ms-app-client"
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{
 		"proj-ms": {ID: "proj-ms", StorageScopeID: "scope-ms", Name: "proj-ms", OAuth: ProjectOAuthConfig{
 			Microsoft: &ProjectOAuthMicrosoft{
 				NativeAudiences: []string{msAud}, TenantID: tid, IssuerFormat: msSvcIssuerFormat,
@@ -588,7 +588,7 @@ func TestNativeOAuthLogin_Microsoft_DefaultProject_NativeOnlyBlock_KeepsEnvPin(t
 	signer := newNativeTokenSigner(t)
 	const msAud = "ms-default-app"
 	const envTenant = "11111111-1111-1111-1111-111111111111"
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{
 		"proj-default": {ID: "proj-default", StorageScopeID: "scope-default", Name: "proj-default", OAuth: ProjectOAuthConfig{
 			Microsoft: &ProjectOAuthMicrosoft{NativeAudiences: []string{msAud}, IssuerFormat: msSvcIssuerFormat},
 		}},
@@ -698,7 +698,7 @@ func TestNativeOAuthLogin_ProductFallsBackToProjectID(t *testing.T) {
 // the project's sender and links to the project's link base.
 func TestResolveNativeProject_CarriesProjectBranding(t *testing.T) {
 	branding := ProjectBrandingConfig{EmailFrom: "no-reply@acme.example", EmailLinkBaseURL: "https://signin.acme.example"}
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{
 		"proj-branded": {ID: "proj-branded", StorageScopeID: "scope-branded", Branding: branding},
 	}}
 	svc := newNativeTestAuthService(t, newFakeRepo(), newNativeTokenSigner(t), projects, func(cfg *config.Config) {
@@ -752,7 +752,7 @@ func TestNativeOAuthLogin_EmptyProduct_InvalidArgument(t *testing.T) {
 func TestNativeOAuthLogin_ProjectStoreError_NotInvalidArgument(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)
-	failing := &fakeNativeProjects{err: errors.New("db down")}
+	failing := &fakeActiveProjects{err: errors.New("db down")}
 	svc := newNativeTestAuthService(t, repo, signer, failing, nil)
 
 	tok := signer.googleToken(t, "g", "u@example.com", nativeGoogleAud)
@@ -769,7 +769,7 @@ func TestNativeOAuthLogin_UppercaseProjectIDFallback(t *testing.T) {
 	signer := newNativeTokenSigner(t)
 	// A mixed-case project id reached via the implicit fallback (NOT in the
 	// product map). It must be looked up verbatim, not lower-cased.
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{
 		"Proj-MixedCase": nativeProjWithAuds("Proj-MixedCase", "scope-mixed"),
 	}}
 	svc := newNativeTestAuthService(t, repo, signer, projects, func(c *config.Config) {
@@ -900,7 +900,7 @@ func TestNativeOAuthLogin_SSORequiredPolicy_Blocked(t *testing.T) {
 	}}
 	// The governance fixtures key on project "proj-1"; map the product to it so
 	// the resolved ProjectScope matches the tenant/domain/policy fixtures.
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-1": {ID: "proj-1", StorageScopeID: "scope-1", Name: "proj-1"}}}
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{"proj-1": {ID: "proj-1", StorageScopeID: "scope-1", Name: "proj-1"}}}
 	svc := newNativeTestAuthServiceWith(t, repo, verifier, projects, func(c *config.Config) {
 		c.NativeOAuthProductProjects = "acme=proj-1"
 	}).WithLoginGovernance(withSSORequired())
@@ -1010,7 +1010,7 @@ func TestNativeOAuthLogin_PolicyRequires2FA_NoFactorEnrolled(t *testing.T) {
 	verifier := &fakeNativeVerifier{identity: &oauth.Identity{
 		Provider: "google", ProviderUserID: "g-2fa", Email: "needs2fa@acme.com", EmailVerified: true,
 	}}
-	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-1": {ID: "proj-1", StorageScopeID: "scope-1", Name: "proj-1"}}}
+	projects := &fakeActiveProjects{active: map[string]*AdminProject{"proj-1": {ID: "proj-1", StorageScopeID: "scope-1", Name: "proj-1"}}}
 	svc := newNativeTestAuthServiceWith(t, repo, verifier, projects, func(c *config.Config) {
 		c.NativeOAuthProductProjects = "acme=proj-1"
 	}).WithLoginGovernance(withRequire2FA())

@@ -1,5 +1,65 @@
 # Upgrade guide
 
+## Next — project guardian admission and live machine authorization (off by default; migration 0061; additive RPC, credential, audit event and rate-limit config; Go API)
+
+Projects may opt in with `config_json.guardian.require_step_up: true` and
+`config_json.guardian.require_adult_profile: true`. Both default to false; no
+other project's deployment policy changes. The former overrides
+`GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD` for child creation, consent grants,
+and guardian account management. Passwordless guardians must establish a
+password through the existing verified account flow before these calls; a
+registered factor or session alone is not fresh proof. The latter requires a
+permanent, active person whose age band is known ADULT under the project age
+policy, before those operations write. Admission reads the authoritative
+active-project policy by ID, including the default-project fallback and native
+gRPC, rather than trusting the presence of a transport-supplied project scope.
+A missing/suspended project or a failed policy read denies the operation.
+Known adult admission requires `GATEWAY_AGEGATE_ENABLED=true` and a guardian
+date of birth; disabled age gating denies every strict adult-profile admission.
+The existing DOB validator accepts only positive epoch milliseconds, so guardians
+born on or before 1970-01-01 cannot currently satisfy the known-adult requirement.
+The authoritative lookup also applies project jurisdiction thresholds to
+default HTTP and native guardian operations that previously used env thresholds.
+Consent withdrawal remains available without adding barriers to removing access.
+
+Migration 0061 adds `managed_child_reader` project credentials (minted through
+`AdminCreateProjectCredential`). Keep their once-shown raw keys server-side.
+`GetManagedChildAuthorization` accepts `child_user_id` and `guardian_user_id`,
+a private `X-Managed-Child-Key`, and the matching resolved project (normally
+`X-Project-Key`). It returns only `authorized`, true for active permanent people
+with a live guardian edge, a known minor child and a known adult guardian.
+Unknown ages and disabled age gating return false. No account profile or
+credential is returned. A credential from another project, a revoked credential,
+or an invalid explicit project is refused. The service binds all reads to the
+credential's project and uses that project's jurisdiction thresholds.
+
+This is a point-in-time decision: consumers must recheck before issuing,
+refreshing, or using their child-device credentials and fail closed on false,
+errors or unavailability. It grants no other RPC. Requests use the independent
+`GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP` budget (default 1200 per
+`GATEWAY_RATE_LIMIT_WINDOW_SECONDS`, default 60 seconds), shared across HTTP
+and native gRPC. Native gRPC requires explicit `x-project-key` metadata and
+resolves it through the HTTP project resolver; invalid keys never fall back.
+Requests emit `managed_child_authorization`
+audit events. Size this budget for aggregate backend egress: 100 devices
+with one protected operation every 30 seconds require 200 checks per minute,
+plus refresh and retry headroom. Each decision writes an audit row (288,000
+rows per day at that example rate); size audit storage, queue capacity and
+retention alongside the request budget. Every check also reads the active project
+and parses its policy afresh, in addition to the credential, guardian edge, account
+and audit operations; include these database operations in capacity planning.
+The limit is per IP per replica; larger
+installations must configure it for their measured peak, without raising the
+separate directory lookup budget. Zero retains the default and negative values
+refuse boot. The Postgres control plane is required to mint/read keys, and a project
+resolver must supply the project policy. Without either, the RPC is
+unimplemented; legacy memory/sqlite project-key routing is unchanged. Rollback
+deletes only this new credential kind
+before restoring the previous constraint. No account tables or data change.
+
+Internal wiring names the shared policy dependency `ActiveProjectStore` /
+`ActiveProjects`, with an unconditional `WithActiveProjects` setter independent
+of `WithNativeOAuth`; SCIM and native sign-in use the same authoritative store.
 ## Next — match phone-number hashes against a tenant's members: `MatchTenantMemberPhones` (additive RPC for `directory_reader` credentials; new setting `GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT`, default 60; additive audit event `directory_phone_match`; `MembershipStore.MatchTenantMemberPhones` (Go API))
 
 A service that holds a person's contacts had no way to tell which of them are

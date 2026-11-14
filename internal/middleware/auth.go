@@ -143,6 +143,8 @@ var AuthExemptPaths = map[string]bool{
 	// directory service verifies (hash compare, kind, revocation) and which
 	// scopes the lookup to that credential's project.
 	"/identity.v1.IdentityService/LookupUsers": true,
+	// Only a project-scoped managed_child_reader machine credential authorizes this read.
+	"/identity.v1.IdentityService/GetManagedChildAuthorization": true,
 	// MatchTenantMemberPhones is authenticated the same way, by the
 	// directory service, and never by a user's token.
 	"/identity.v1.IdentityService/MatchTenantMemberPhones": true,

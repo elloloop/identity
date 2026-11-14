@@ -50,6 +50,7 @@ type grpcBridge struct {
 	machineLimits   map[string]middleware.PathLimit
 	operatorLimits  map[string]middleware.PathLimit
 	trustedProxies  []*net.IPNet
+	projectResolver service.ProjectResolver
 	logger          *zap.Logger
 	trust           grpcTrust
 }
@@ -77,7 +78,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 		directoryLimits[procedure] = limit
 	}
 	machineLimits := make(map[string]middleware.PathLimit)
-	for _, procedure := range []string{identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
+	for _, procedure := range []string{identityv1connect.IdentityServiceGetManagedChildAuthorizationProcedure, identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
 		if limit, found := middleware.MatchPathLimit(built.RateLimits, procedure); found {
 			machineLimits[procedure] = limit
 		}
@@ -99,6 +100,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 		h:               built.ConnectHandler,
 		directoryLimits: directoryLimits,
 		trustedProxies:  built.TrustedProxies,
+		projectResolver: built.ProjectResolver,
 		logger:          logger,
 		trust:           trust,
 	}
@@ -1082,4 +1084,35 @@ func (b *grpcBridge) RegisterAgentMachineAgentKey(ctx context.Context, in *ident
 		return nil, err
 	}
 	return invoke(ctx, b, in, b.h.RegisterAgentMachineAgentKey)
+}
+
+func (b *grpcBridge) GetManagedChildAuthorization(ctx context.Context, in *identitypb.GetManagedChildAuthorizationRequest) (*identitypb.GetManagedChildAuthorizationResponse, error) {
+	if err := b.throttle(ctx, b.machineLimits[identityv1connect.IdentityServiceGetManagedChildAuthorizationProcedure]); err != nil {
+		return nil, err
+	}
+	ctx, err := b.managedChildProjectContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.GetManagedChildAuthorization)
+}
+
+// Unlike HTTP there is no host/default project middleware on native gRPC.
+// Require an explicit public project key and never downgrade an invalid key.
+func (b *grpcBridge) managedChildProjectContext(ctx context.Context) (context.Context, error) {
+	if b.projectResolver == nil {
+		return nil, status.Error(codes.Unimplemented, "managed child authorization requires a project resolver")
+	}
+	key := incomingMetadata(ctx)(middleware.ProjectKeyHeader)
+	if key == "" {
+		return nil, status.Error(codes.Unauthenticated, "project key is required")
+	}
+	project, err := b.projectResolver.ResolveByCredential(ctx, key)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "project resolution failed")
+	}
+	if project == nil || project.ID == "" {
+		return nil, status.Error(codes.Unauthenticated, "invalid project key")
+	}
+	return service.WithProjectScope(ctx, middleware.ScopeFromResolved(project)), nil
 }

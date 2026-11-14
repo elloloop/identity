@@ -461,3 +461,16 @@ func TestProjectResolver_RecordsRequestHost(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectResolver_CarriesGuardianStepUp(t *testing.T) {
+	resolver := &fakeProjectResolver{byKey: map[string]*service.ResolvedProject{
+		"pk_strict":   {ID: "strict", Guardian: service.ProjectGuardianConfig{RequireStepUp: true}},
+		"pk_ordinary": {ID: "ordinary"},
+	}}
+	for key, want := range map[string]bool{"pk_strict": true, "pk_ordinary": false} {
+		rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) { r.Header.Set("X-Project-Key", key) })
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.NotNil(t, cap.scope)
+		assert.Equal(t, want, cap.scope.Guardian.RequireStepUp)
+	}
+}

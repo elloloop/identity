@@ -33,6 +33,8 @@ const (
 	CredentialKindPublishable     = "publishable"
 	CredentialKindSecret          = "secret"
 	CredentialKindDirectoryReader = "directory_reader"
+	// CredentialKindManagedChildReader authorizes only the live guardian-child proof.
+	CredentialKindManagedChildReader = "managed_child_reader"
 	// CredentialKindTeammateKeyManager authorizes TeammateKeyService in its
 	// project, presented in X-Teammate-Key-Manager-Key.
 	CredentialKindTeammateKeyManager = "teammate_key_manager"
@@ -44,13 +46,15 @@ const (
 
 // Credential public-id prefixes, so a key is self-describing at a glance
 // (Stripe-style): pk_ for publishable, sk_ for secret, dk_ for directory,
-// tk_ for a teammate key manager, ok_ for a tenant operator.
+// ck_ for managed-child authorization, tk_ for a teammate key manager,
+// ok_ for a tenant operator.
 const (
-	publishableKeyPrefix     = "pk_"
-	secretKeyPrefix          = "sk_"
-	directoryReaderKeyPrefix = "dk_"
-	teammateKeyManagerPrefix = "tk_"
-	tenantOperatorKeyPrefix  = "ok_"
+	publishableKeyPrefix        = "pk_"
+	secretKeyPrefix             = "sk_"
+	directoryReaderKeyPrefix    = "dk_"
+	managedChildReaderKeyPrefix = "ck_"
+	teammateKeyManagerPrefix    = "tk_"
+	tenantOperatorKeyPrefix     = "ok_"
 )
 
 // rawKeySeparator joins a credential's public id and secret half in the raw
@@ -69,6 +73,8 @@ const authDomainVerifyTXTPrefix = "identity-auth-domain-verify="
 // driver-agnostic value type so the admin service and its tests depend on a
 // contract, not the concrete postgres store type.
 type AdminProject struct {
+	// Guardian is populated on active-project reads and ignored on creation.
+	Guardian       ProjectGuardianConfig
 	ID             string
 	StorageScopeID string
 	Name           string
@@ -919,6 +925,8 @@ func normalizeCredentialKind(kind string) (canonical, prefix string, err error) 
 		return CredentialKindPublishable, publishableKeyPrefix, nil
 	case CredentialKindSecret:
 		return CredentialKindSecret, secretKeyPrefix, nil
+	case CredentialKindManagedChildReader:
+		return CredentialKindManagedChildReader, managedChildReaderKeyPrefix, nil
 	case CredentialKindDirectoryReader:
 		return CredentialKindDirectoryReader, directoryReaderKeyPrefix, nil
 	case CredentialKindTeammateKeyManager:
@@ -926,9 +934,9 @@ func normalizeCredentialKind(kind string) (canonical, prefix string, err error) 
 	case CredentialKindTenantOperator:
 		return CredentialKindTenantOperator, tenantOperatorKeyPrefix, nil
 	default:
-		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q, %q, %q or %q)",
+		return "", "", fmt.Errorf("%w: credential kind %q (want %q, %q, %q, %q, %q or %q)",
 			ErrInvalidArgument, kind, CredentialKindPublishable, CredentialKindSecret, CredentialKindDirectoryReader,
-			CredentialKindTeammateKeyManager, CredentialKindTenantOperator)
+			CredentialKindTeammateKeyManager, CredentialKindTenantOperator, CredentialKindManagedChildReader)
 	}
 }
 

@@ -1611,6 +1611,15 @@
     "anchor": "rate-limiting"
   },
   {
+    "name": "GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP",
+    "type": "integer",
+    "default": "1200",
+    "required": false,
+    "description": "is the per-IP cap per window for live guardian-child authorization checks across HTTP and native gRPC.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
     "name": "GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP",
     "type": "integer",
     "default": "5",
