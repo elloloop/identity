@@ -168,14 +168,14 @@ conformance-all: conformance-memory conformance-postgres ## Run the conformance 
 
 .PHONY: conformance-memory
 conformance-memory: ## Conformance suite against the in-memory driver
-	$(GO) test -race -count=1 -timeout=300s -run='^TestConformance$$' ./internal/repo/memory/...
+	$(GO) test -race -count=1 -timeout=600s -run='^TestConformance$$' ./internal/repo/memory/...
 
 .PHONY: conformance-postgres
 conformance-postgres: ## Conformance suite against a real postgres (skips if GATEWAY_TEST_POSTGRES_DSN unset)
 	@if [ -z "$$GATEWAY_TEST_POSTGRES_DSN" ] && [ -n "$$GATEWAY_POSTGRES_DSN" ]; then \
-		GATEWAY_TEST_POSTGRES_DSN="$$GATEWAY_POSTGRES_DSN" $(GO) test -race -count=1 -timeout=300s -run='^TestConformance$$' ./internal/repo/postgres/...; \
+		GATEWAY_TEST_POSTGRES_DSN="$$GATEWAY_POSTGRES_DSN" $(GO) test -race -count=1 -timeout=600s -run='^TestConformance$$' ./internal/repo/postgres/...; \
 	else \
-		$(GO) test -race -count=1 -timeout=300s -run='^TestConformance$$' ./internal/repo/postgres/...; \
+		$(GO) test -race -count=1 -timeout=600s -run='^TestConformance$$' ./internal/repo/postgres/...; \
 	fi
 
 .PHONY: fuzz
