@@ -34,10 +34,11 @@ var (
 )
 
 type (
+	// AgentOAuthHuman is the person behind a delegated-access call: their
+	// account and what their verified access token says about the session.
 	AgentOAuthHuman struct {
-		UserID   string
-		SID      string
-		AuthTime int64
+		UserID string
+		SignIn SessionSignIn
 	}
 	AgentOAuthStart struct {
 		ClientID    string
@@ -176,14 +177,22 @@ func (s *AgentOAuthService) Start(ctx context.Context, input AgentOAuthStart) (*
 	return request, nil
 }
 
-func (s *AgentOAuthService) human(ctx context.Context, human AgentOAuthHuman, recent bool) (*User, error) {
-	if human.UserID == "" || human.SID == "" {
+// human resolves the person behind a delegated-access call. grants is
+// whether the call grants, or decides whether to grant, authority that
+// outlasts the session (a delegation, a machine, the agents a machine acts
+// as): such a call needs a recent sign-in, and is refused to a session a
+// recovery hold binds or whose recovery email is gone (refuseHeldSession).
+func (s *AgentOAuthService) human(ctx context.Context, human AgentOAuthHuman, grants bool) (*User, error) {
+	if human.UserID == "" || human.SignIn.SessionID == "" {
 		return nil, ErrAgentOAuthReauthenticationRequired
 	}
-	if recent {
-		age := s.auth.nowMs()/1000 - human.AuthTime
-		if human.AuthTime <= 0 || age < -int64(authTimeClockSkew.Seconds()) || age > int64(config.AgentOAuthRecentSignIn.Seconds()) {
+	if grants {
+		age := s.auth.nowMs()/1000 - human.SignIn.AuthTimeSec
+		if human.SignIn.AuthTimeSec <= 0 || age < -int64(authTimeClockSkew.Seconds()) || age > int64(config.AgentOAuthRecentSignIn.Seconds()) {
 			return nil, ErrAgentOAuthReauthenticationRequired
+		}
+		if err := s.auth.refuseHeldSession(ctx, human.UserID, human.SignIn); err != nil {
+			return nil, err
 		}
 	}
 	user, err := s.base.WithProject(s.auth.projectID(ctx)).GetUser(ctx, human.UserID)
@@ -193,7 +202,7 @@ func (s *AgentOAuthService) human(ctx context.Context, human AgentOAuthHuman, re
 	if !isEligibleAgentOwner(user) {
 		return nil, ErrPermissionDenied
 	}
-	session, err := s.base.WithProject(s.auth.projectID(ctx)).GetSessionBySid(ctx, human.SID)
+	session, err := s.base.WithProject(s.auth.projectID(ctx)).GetSessionBySid(ctx, human.SignIn.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +295,7 @@ func (s *AgentOAuthService) GetConsent(ctx context.Context, human AgentOAuthHuma
 		}
 		out.NextAgentOffset = int32(nextOffset)
 	}
-	session, err := s.base.WithProject(s.auth.projectID(ctx)).GetSessionBySid(ctx, human.SID)
+	session, err := s.base.WithProject(s.auth.projectID(ctx)).GetSessionBySid(ctx, human.SignIn.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -317,19 +326,19 @@ func (s *AgentOAuthService) Decide(ctx context.Context, human AgentOAuthHuman, i
 	if !approve {
 		agentID = ""
 	}
-	authority, err := s.repo(ctx).AgentOAuthAuthority(ctx, human.UserID, agentID, human.SID, request.ClientID)
+	authority, err := s.repo(ctx).AgentOAuthAuthority(ctx, human.UserID, agentID, human.SignIn.SessionID, request.ClientID)
 	if err != nil {
 		return "", err
 	}
 	op := AgentOAuthDeny
 	code := ""
 	now := s.auth.nowMs()
-	m := AgentOAuthMutation{Operation: op, AtMs: now, ExpectedRevision: revision, OwnerID: human.UserID, AgentID: agentID, HumanSID: human.SID, AuthorityFingerprint: authority.Fingerprint()}
+	m := AgentOAuthMutation{Operation: op, AtMs: now, ExpectedRevision: revision, OwnerID: human.UserID, AgentID: agentID, HumanSID: human.SignIn.SessionID, AuthorityFingerprint: authority.Fingerprint()}
 	if approve {
 		candidate := request.Clone()
 		candidate.OwnerID = human.UserID
 		candidate.AgentID = agentID
-		candidate.HumanSID = human.SID
+		candidate.HumanSID = human.SignIn.SessionID
 		if !authority.Valid(candidate) {
 			return "", ErrPermissionDenied
 		}

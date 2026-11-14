@@ -9,9 +9,9 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// ─── Phone Verification (SMS OTP) RPCs ──────────────────────────────────────
+// ─── Phone Verification (one-time code) RPCs ────────────────────────────────
 //
-// Both RPCs require auth: the caller is identified by the verified `sub`
+// All three RPCs require auth: the caller is identified by the verified `sub`
 // the auth middleware injects (authenticatedUserID), NOT by a field in
 // the request. They are intentionally absent from AuthExemptPaths.
 
@@ -25,7 +25,7 @@ func (h *IdentityHandler) RequestPhoneVerification(
 	if userID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
 	}
-	if err := h.auth.RequestPhoneVerification(ctx, userID, req.Msg.PhoneNumber); err != nil {
+	if err := h.auth.RequestPhoneVerification(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.PhoneNumber); err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.RequestPhoneVerificationResponse{}), nil
@@ -41,11 +41,30 @@ func (h *IdentityHandler) VerifyPhoneCode(
 	if userID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
 	}
-	user, err := h.auth.VerifyPhoneCode(ctx, userID, req.Msg.PhoneNumber, req.Msg.Code)
+	user, err := h.auth.VerifyPhoneCode(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.PhoneNumber, req.Msg.Code)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.VerifyPhoneCodeResponse{
+		User: userToProto(user),
+	}), nil
+}
+
+// RemovePhone clears the authenticated caller's phone number, returning the
+// updated user.
+func (h *IdentityHandler) RemovePhone(
+	ctx context.Context,
+	req *connect.Request[identitypb.RemovePhoneRequest],
+) (*connect.Response[identitypb.RemovePhoneResponse], error) {
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, service.ErrUnauthenticated)
+	}
+	user, err := h.auth.RemovePhone(ctx, userID, authenticatedSignIn(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.RemovePhoneResponse{
 		User: userToProto(user),
 	}), nil
 }

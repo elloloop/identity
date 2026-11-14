@@ -20,8 +20,8 @@ import (
 //
 // Username accounts sign in through PasswordLogin with the username as the
 // identifier, like managed child accounts.
-func (s *AdminService) CreateUsernameUser(ctx context.Context, actorID, username, name, role string) (*InviteResult, error) {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+func (s *AdminService) CreateUsernameUser(ctx context.Context, actorID string, signIn SessionSignIn, username, name, role string) (*InviteResult, error) {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return nil, err
 	}
 	scope := ProjectScopeFromContext(ctx)

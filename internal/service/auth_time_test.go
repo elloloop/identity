@@ -32,7 +32,7 @@ func TestAuthTime_QrHandoffIsNotASignIn(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(ctx, "Pixel 8", "agent", "203.0.113.10")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "", "ApproverAgent")
+	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, SessionSignIn{}, "", "ApproverAgent")
 	require.NoError(t, err)
 	res, err := svc.PollQrLogin(ctx, init.SessionID, init.PollSecret, "203.0.113.10", "agent")
 	require.NoError(t, err)
@@ -40,7 +40,7 @@ func TestAuthTime_QrHandoffIsNotASignIn(t *testing.T) {
 	authTime := authTimeOf(t, svc, res.AccessToken)
 	require.Zero(t, authTime, "a QR session has no sign-in on record")
 
-	_, err = svc.MergeAccounts(ctx, user.ID, authTime, "other@example.com", strongPW, "203.0.113.10", "agent", false)
+	_, err = svc.MergeAccounts(ctx, user.ID, SessionSignIn{AuthTimeSec: authTime}, "other@example.com", strongPW, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrReauthenticationRequired)
 	_, newAccess, _, err := svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
 	require.NoError(t, err)
@@ -221,7 +221,7 @@ func TestMergeAccounts_AbsurdAuthTimeIsNotRecent(t *testing.T) {
 		"wraps to now in milliseconds": time.Now().Unix() + 1<<61,
 		"the largest value":            math.MaxInt64,
 	} {
-		_, err := svc.MergeAccounts(ctx, survivor.ID, authTime, "bob", accessTestPassword, "203.0.113.10", "agent", false)
+		_, err := svc.MergeAccounts(ctx, survivor.ID, SessionSignIn{AuthTimeSec: authTime}, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 		require.ErrorIs(t, err, ErrReauthenticationRequired, name)
 	}
 }

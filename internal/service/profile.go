@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
@@ -43,6 +44,8 @@ type ProfileService struct {
 	// falls back to DefaultExportMaxAuditEvents so an export can never trigger
 	// an unbounded audit scan. Wired from config via WithExportMaxAuditEvents.
 	exportMaxAuditEvents int
+
+	nowFunc func() time.Time // overridable for testing
 }
 
 // NewProfileService creates a ProfileService.
@@ -61,8 +64,11 @@ func NewProfileService(repo Repository, db DB, projectID string, auditLog *audit
 		defaultProjectID: projectID,
 		audit:            auditLog,
 		logger:           logger,
+		nowFunc:          time.Now,
 	}
 }
+
+func (s *ProfileService) nowMs() int64 { return s.nowFunc().UnixMilli() }
 
 // WithMinorDataMinimizer wires COPPA data-minimization: when active, a
 // CHILD-band account's profile updates drop non-essential PII (avatar URL).
@@ -130,7 +136,7 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userID, name, avatar
 	// Adults/teens and minimization-off deployments are unaffected.
 	minimizeChild := s.minorData.BlocksChildFor(ctx, user)
 
-	patch := map[string]any{"updated_at": nowMs()}
+	patch := map[string]any{"updated_at": s.nowMs()}
 	if n := strings.TrimSpace(name); n != "" {
 		patch["name"] = n
 	}
@@ -173,7 +179,7 @@ func (s *ProfileService) ListMySessions(ctx context.Context, userID string) ([]*
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
 
-	now := nowMs()
+	now := s.nowMs()
 	sessions := make([]*Session, 0, len(nodes))
 	for _, n := range nodes {
 		sess := sessionFromNode(n)
@@ -185,8 +191,11 @@ func (s *ProfileService) ListMySessions(ctx context.Context, userID string) ([]*
 }
 
 // RevokeSession revokes a specific session. The session must belong
-// to the calling user.
-func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID string) error {
+// to the calling user. During a recovery hold a session that may have been
+// opened by a recovery email may revoke only itself (RecoveryHoldError
+// otherwise), which it can name only under GATEWAY_REVOCATION_MODE=session,
+// where its token carries its id; Logout ends it in either mode.
+func (s *ProfileService) RevokeSession(ctx context.Context, userID string, signIn SessionSignIn, sessionID string) error {
 	if sessionID == "" {
 		return errors.New("session_id is required")
 	}
@@ -200,6 +209,11 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 	}
 	if pstr(node.Payload, rfUserID) != userID {
 		return errors.New("session does not belong to you")
+	}
+	if signIn.SessionID == "" || pstr(node.Payload, rfSID) != signIn.SessionID {
+		if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+			return err
+		}
 	}
 
 	op := graph.Operation{Type: graph.OpDeleteNode, TypeID: typeRefreshToken, NodeID: sessionID}
@@ -217,10 +231,14 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 }
 
 // RevokeAllSessions revokes every session for the user. Requires
-// password confirmation.
-func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password string) (int, error) {
+// password confirmation. Refused (RecoveryHoldError) to a session a recovery
+// hold binds, which may end only itself.
+func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID string, signIn SessionSignIn, password string) (int, error) {
 	if password == "" {
 		return 0, errors.New("password confirmation required")
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return 0, err
 	}
 
 	userNode, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
@@ -295,10 +313,15 @@ func (s *ProfileService) ListMyPasskeys(ctx context.Context, userID string) ([]*
 	return passkeys, nil
 }
 
-// DeletePasskey deletes a passkey belonging to the user.
-func (s *ProfileService) DeletePasskey(ctx context.Context, userID, credentialID string) error {
+// DeletePasskey deletes a passkey belonging to the user. Refused
+// (RecoveryHoldError) to a session a recovery hold binds: it would take a way
+// in from the owner.
+func (s *ProfileService) DeletePasskey(ctx context.Context, userID string, signIn SessionSignIn, credentialID string) error {
 	if credentialID == "" {
 		return errors.New("credential_id is required")
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return err
 	}
 
 	// Find the passkey by credential_id.

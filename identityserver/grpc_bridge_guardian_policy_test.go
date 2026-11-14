@@ -58,7 +58,7 @@ func TestGuardianPolicy_DefaultHTTPAndNativeGRPCCannotBypass(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := &identitypb.CreateManagedChildAccountRequest{Username: "kid.one", DateOfBirthMs: time.Now().AddDate(-8, 0, 0).UnixMilli(), Password: "Strong-child-password-42!", PolicyVersion: "policy-v1"}
-	bridge := newGRPCBridge(built, zap.NewNop(), false, false)
+	bridge := newGRPCBridge(built, zap.NewNop(), grpcTrust{})
 	nativeCtx := metadata.NewIncomingContext(ctx, metadata.Pairs("x-authenticated-user-id", parent))
 	if _, err := bridge.CreateManagedChildAccount(nativeCtx, req); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("native passwordless bypass: %v", err)

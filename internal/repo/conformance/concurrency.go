@@ -19,6 +19,35 @@ import (
 // data-race bug) surfaces deterministically rather than only in CI.
 const concurrentWriters = 64
 
+// countConcurrently runs guess from concurrentWriters goroutines released at
+// once, and returns how many reported a counted guess, or the first error
+// one returned.
+func countConcurrently(guess func() (bool, error)) (int64, error) {
+	var wg sync.WaitGroup
+	var counted atomic.Int64
+	start := make(chan struct{})
+	errs := make(chan error, concurrentWriters)
+	for range concurrentWriters {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			ok, err := guess()
+			if err != nil {
+				errs <- err
+				return
+			}
+			if ok {
+				counted.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	return counted.Load(), <-errs
+}
+
 // RunConcurrencyConformance stresses the Repository under concurrent
 // writers: no write may be lost, and a write must still be visible to
 // the issuing goroutine's immediate read even while other writers load

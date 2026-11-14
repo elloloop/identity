@@ -154,6 +154,21 @@ const (
 
 	EventPhoneVerificationRequested EventType = "phone_verification_requested"
 	EventPhoneVerified              EventType = "phone_verified"
+	// EventPhoneRemoved records the actor's account losing its phone
+	// number: removed by its owner (reason removed_by_user) or moved to
+	// another account that proved it (verified_by_another_account).
+	EventPhoneRemoved EventType = "phone_removed"
+
+	// EventRecoveryEmailAdded and EventRecoveryEmailRemoved record a proved
+	// recovery email being stored on, or removed from, the actor's account.
+	// The details carry the address redacted.
+	EventRecoveryEmailAdded   EventType = "recovery_email_added"
+	EventRecoveryEmailRemoved EventType = "recovery_email_removed"
+	// EventRecoveryEmailSignIn records a sign-in to the actor's account by
+	// an emailed code or link sent to one of its recovery emails, once every
+	// factor it owed is proved: the moment the account's recovery hold
+	// starts.
+	EventRecoveryEmailSignIn EventType = "recovery_email_sign_in"
 
 	// EventIdentityLinked records a provider identity being attached to a
 	// user — both implicit login-time auto-linking and the self-service
@@ -170,8 +185,9 @@ const (
 	// with a tagged address). Actor and target are the account; the details
 	// carry the proof's `method` (passwordless | oauth | verification_link)
 	// and what was voided (`password_cleared`, `passkeys_cleared`,
-	// `provider_links_cleared`).
-	// Each voided provider link is also recorded as identity_unlinked.
+	// `provider_links_cleared`, `recovery_emails_cleared`).
+	// Each voided provider link is also recorded as identity_unlinked, and
+	// each removed recovery email as recovery_email_removed.
 	EventUnprovenCredentialsVoided EventType = "unproven_credentials_voided" //nolint:gosec // G101: an audit event name, not a credential
 
 	// EventPlatformAdminBootstrapBlocked records a first-admin bootstrap
@@ -219,6 +235,16 @@ const (
 	// for each decision. Refused credential presentations carry a reason and
 	// omit the requested child target; no profile or secret is recorded.
 	EventManagedChildAuthorization EventType = "managed_child_authorization"
+
+	// EventDirectoryPhoneMatch records a service matching phone-number
+	// hashes against a tenant's members through MatchTenantMemberPhones with
+	// a directory_reader credential. The actor is "credential:<id>"; the
+	// details carry the tenant id and the number of hashes asked for and
+	// matched, never the hashes or the accounts matched. A refused
+	// presentation of a real directory_reader credential, and a tenant the
+	// credential's project does not hold, are logged with success=false and
+	// a `reason`.
+	EventDirectoryPhoneMatch EventType = "directory_phone_match"
 
 	// EventSCIMAuthFailed records a request to the SCIM surface refused for a
 	// missing or wrong bearer token. The actor is "system:scim" (the caller is
@@ -490,6 +516,10 @@ var validEventTypes = map[EventType]struct{}{
 	EventAdminHelpResolved:             {},
 	EventPhoneVerificationRequested:    {},
 	EventPhoneVerified:                 {},
+	EventPhoneRemoved:                  {},
+	EventRecoveryEmailAdded:            {},
+	EventRecoveryEmailRemoved:          {},
+	EventRecoveryEmailSignIn:           {},
 	EventPlatformAdminBootstrapBlocked: {},
 	EventIdentityLinked:                {},
 	EventIdentityUnlinked:              {},
@@ -503,6 +533,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectCredentialRevoked:      {},
 	EventDirectoryLookup:               {},
 	EventManagedChildAuthorization:     {},
+	EventDirectoryPhoneMatch:           {},
 	EventSCIMAuthFailed:                {},
 	EventParentalConsentGranted:        {},
 	EventParentalConsentRevoked:        {},

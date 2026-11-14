@@ -47,7 +47,7 @@ func TestCreateManagedChildAccount_Password_HappyPath(t *testing.T) {
 	f := newManagedChildFixture(t, true)
 	ctx := context.Background()
 
-	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "1.2.3.4", "agent/1.0")
+	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "1.2.3.4", "agent/1.0")
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestCreateManagedChildAccount_AllowNoPassword(t *testing.T) {
 		f := federated(t)
 		req := f.req()
 		req.StepUpPassword = ""
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
 			t.Fatalf("err = %v, want ErrParentalConsentStepUpFailed", err)
 		}
 	})
@@ -128,7 +128,7 @@ func TestCreateManagedChildAccount_AllowNoPassword(t *testing.T) {
 		f.svc.cfg.GuardianStepUpAllowNoPassword = true
 		req := f.req()
 		req.StepUpPassword = ""
-		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 		if err != nil {
 			t.Fatalf("CreateManagedChildAccount: %v", err)
 		}
@@ -147,11 +147,11 @@ func TestCreateManagedChildAccount_AllowNoPassword(t *testing.T) {
 		for _, stepUp := range []string{"", "not-the-password"} {
 			req := f.req()
 			req.StepUpPassword = stepUp
-			if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+			if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
 				t.Fatalf("stepUp=%q: err = %v, want ErrParentalConsentStepUpFailed", stepUp, err)
 			}
 		}
-		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", "")
 		if err != nil || !res.Consent.SteppedUp {
 			t.Fatalf("correct password: err = %v, want nil and stepped_up=true", err)
 		}
@@ -165,7 +165,7 @@ func TestCreateManagedChildAccount_PasskeyEnrolment_HappyPath(t *testing.T) {
 	req := f.req()
 	req.Password = ""
 	req.PasskeyEnrolment = true
-	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestCreateManagedChildAccount_Refusals(t *testing.T) {
 				callerID = tc.callerID
 			}
 
-			res, err := f.svc.CreateManagedChildAccount(context.Background(), callerID, req, "1.2.3.4", "agent/1.0")
+			res, err := f.svc.CreateManagedChildAccount(context.Background(), callerID, SessionSignIn{}, req, "1.2.3.4", "agent/1.0")
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
@@ -362,7 +362,7 @@ func TestCreateManagedChildAccount_DuplicateUsername_LeavesNothing(t *testing.T)
 	f := newManagedChildFixture(t, true)
 	ctx := context.Background()
 
-	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", ""); err != nil {
+	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", ""); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
 
@@ -371,7 +371,7 @@ func TestCreateManagedChildAccount_DuplicateUsername_LeavesNothing(t *testing.T)
 	// first child.
 	req := f.req()
 	req.Username = "Kid.One"
-	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 	if !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("err = %v, want ErrAlreadyExists", err)
 	}
@@ -402,7 +402,7 @@ func TestCreateManagedChildAccount_AccessModes(t *testing.T) {
 				ProjectID: "project-a",
 				Access:    cfg.Access,
 			})
-			res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+			res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", "")
 			if err != nil {
 				t.Fatalf("CreateManagedChildAccount under mode %q: %v", mode, err)
 			}
@@ -422,7 +422,7 @@ func TestCreateManagedChildAccount_GateOff(t *testing.T) {
 
 	req := f.req()
 	req.DateOfBirthMs = dobAgeMs(8)
-	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
 	}
@@ -438,13 +438,13 @@ func TestCreateManagedChildAccount_GateOff(t *testing.T) {
 	req2 := f.req()
 	req2.Username = "grown.kid"
 	req2.DateOfBirthMs = dobAgeMs(30)
-	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req2, "", ""); err != nil {
+	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req2, "", ""); err != nil {
 		t.Fatalf("gate-off adult-age dob: %v", err)
 	}
 	req3 := f.req()
 	req3.Username = "no.dob"
 	req3.DateOfBirthMs = 0
-	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req3, "", ""); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req3, "", ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("gate-off missing dob: err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -461,7 +461,7 @@ func TestCreateManagedChildAccount_MarketValidation(t *testing.T) {
 	req := f.req()
 	req.DateOfBirthMs = dobAgeMs(13)
 	req.Market = "in" // canonicalized on store
-	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestCreateManagedChildAccount_MarketValidation(t *testing.T) {
 	req2 := f.req()
 	req2.Username = "kid.two"
 	req2.Market = "BR" // not configured in this project
-	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req2, "", ""); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req2, "", ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("unconfigured market: err = %v, want ErrInvalidArgument", err)
 	}
 
@@ -484,7 +484,7 @@ func TestCreateManagedChildAccount_MarketValidation(t *testing.T) {
 	req3 := f.req()
 	req3.Username = "kid.three"
 	req3.DateOfBirthMs = dobAgeMs(10)
-	res3, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req3, "", "")
+	res3, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req3, "", "")
 	if err != nil {
 		t.Fatalf("no-market create: %v", err)
 	}
@@ -505,7 +505,7 @@ func TestManagedChild_UsernameLogin_EndToEnd(t *testing.T) {
 	// unusable on every stock deployment.
 	f.svc.cfg.AuthRequireVerifiedEmail = true
 
-	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -542,7 +542,7 @@ func TestPasskeyEnrolmentTicket_RoundTrip(t *testing.T) {
 	req := f.req()
 	req.Password = ""
 	req.PasskeyEnrolment = true
-	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -620,7 +620,7 @@ func TestCreateManagedChildAccount_RepoFailuresAndBranches(t *testing.T) {
 	t.Run("caller lookup fails", func(t *testing.T) {
 		f := newManagedChildFixture(t, true)
 		f.repo.getUserErr = errConsentInjected
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
@@ -628,7 +628,7 @@ func TestCreateManagedChildAccount_RepoFailuresAndBranches(t *testing.T) {
 	t.Run("factor lookup fails", func(t *testing.T) {
 		f := newManagedChildFixture(t, true)
 		f.repo.listPasskeyCredsErr = errConsentInjected
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
@@ -636,7 +636,7 @@ func TestCreateManagedChildAccount_RepoFailuresAndBranches(t *testing.T) {
 	t.Run("username pre-check fails", func(t *testing.T) {
 		f := newManagedChildFixture(t, true)
 		f.repo.findUserByUsernameErr = errConsentInjected
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
@@ -644,7 +644,7 @@ func TestCreateManagedChildAccount_RepoFailuresAndBranches(t *testing.T) {
 	t.Run("transaction fails", func(t *testing.T) {
 		f := newManagedChildFixture(t, true)
 		f.repo.createManagedChildErr = errConsentInjected
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
@@ -655,7 +655,7 @@ func TestCreateManagedChildAccount_RepoFailuresAndBranches(t *testing.T) {
 		// arm a concurrent create takes. It must answer exactly as the
 		// pre-check does, disclosing nothing extra.
 		f.repo.createManagedChildErr = fmt.Errorf("unique index: %w", ErrAlreadyExists)
-		_, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+		_, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", "")
 		if !errors.Is(err, ErrAlreadyExists) {
 			t.Fatalf("err = %v, want ErrAlreadyExists", err)
 		}
@@ -672,7 +672,7 @@ func TestCreateManagedChildAccount_RepoFailuresAndBranches(t *testing.T) {
 		req := f.req()
 		req.AvatarURL = "https://example.org/kid.png"
 
-		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 		if err != nil {
 			t.Fatalf("CreateManagedChildAccount: %v", err)
 		}
@@ -693,7 +693,7 @@ func TestCreateManagedChildAccount_RepoFailuresAndBranches(t *testing.T) {
 		req.DateOfBirthMs = dobAgeMs(15) // TEEN: minimization covers CHILD only
 		req.AvatarURL = "https://example.org/teen.png"
 
-		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 		if err != nil {
 			t.Fatalf("CreateManagedChildAccount: %v", err)
 		}

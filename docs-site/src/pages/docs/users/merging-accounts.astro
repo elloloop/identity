@@ -28,6 +28,8 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       survivor, in one transaction:
       <ul>
         <li>the retired account's <strong>linked providers</strong> (Google, Apple, …), always;</li>
+        <li>its <strong>recovery emails</strong>, always. A merge that would leave the survivor with more than the project lets one account keep is refused: remove some first;</li>
+        <li>its <strong>phone number</strong>, with its verified state, where the survivor has none. Where the survivor has one it keeps it, and the retired account's number is released for whoever proves it next;</li>
         <li>its <strong>username</strong>, <strong>password</strong> and <strong>email</strong>, each only where the survivor has none of its own (a password that two-step verification protected does not move), so <code>bob</code> now signs in to the survivor;</li>
         <li>with <code>take_address</code>, its account address. The survivor's old address moves to the retired account, so neither is freed for someone else.</li>
       </ul>
@@ -95,7 +97,9 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
     </li>
     <li>
       <strong>An admin</strong>, with <code>MergeUsers</code>, naming both
-      accounts. No password is asked.
+      accounts. No password is asked, so neither account may be the admin's
+      own: an admin merges another account into theirs with
+      <code>MergeAccounts</code>.
     </li>
   </ul>
 
@@ -113,6 +117,13 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       control. An admin can merge it.
     </li>
     <li>An admin's own account, by that admin.</li>
+    <li>
+      Either account, whoever asks, while a recovery hold is in force on it: a
+      recovery email signed in to it recently. The refusal carries the stable
+      <code>recovery_hold</code> token and when the hold ends. The owner ends it
+      early by removing, signed in some other way, every recovery email whose
+      hold is still in force.
+    </li>
   </ul>
   <p>These refusals answer <code>FAILED_PRECONDITION</code>.</p>
 

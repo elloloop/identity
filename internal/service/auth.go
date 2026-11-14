@@ -39,6 +39,7 @@ import (
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/passwords"
 	"github.com/elloloop/identity/pkg/sms"
+	"github.com/elloloop/identity/pkg/templatemsg"
 	"github.com/elloloop/identity/pkg/totp"
 )
 
@@ -409,6 +410,11 @@ type Repository interface {
 	// consumed_at != 0, so the replay-detection branch can identify the
 	// user_id whose sessions must be invalidated.
 	FindRefreshTokenByHashIncludingConsumed(ctx context.Context, hash string) (*RefreshTokenRecord, error)
+	// CreateRefreshToken stores a refresh token. One whose RecoveryEmailID
+	// is set is stored only while r.UserID holds the recovery email with that
+	// ID, checked atomically against RemoveRecoveryEmail, and is ErrNotFound
+	// otherwise, so no session can outlive the address that opened it by
+	// being issued while it is removed.
 	CreateRefreshToken(ctx context.Context, r *RefreshTokenRecord) (string, error)
 	DeleteRefreshToken(ctx context.Context, nodeID string) error
 	DeleteRefreshTokensForUser(ctx context.Context, userID string) error
@@ -544,22 +550,17 @@ type Repository interface {
 	// email; the unique index makes the upsert a delete-then-create or an
 	// in-place overwrite depending on the backend.
 	//
-	// FindEmailLoginCodeByEmail returns the live row (consumed or not) so
-	// the verify path can compare the code hash, count attempts, and
-	// distinguish expired/consumed from a hash mismatch. Returns nil when
-	// no row exists for the email.
-	//
-	// IncrementEmailLoginCodeAttempts bumps attempt_count by one. Used on
-	// a wrong-code guess; the service invalidates the code once the count
-	// reaches the cap captured on the record.
+	// CountEmailLoginCodeAttempt counts one guess against the email's live
+	// code (unconsumed, unexpired at atMs, under its attempt cap) in one
+	// write and returns it with the guess counted, or nil when there is
+	// none, so concurrent guesses never pass the cap captured on the record.
 	//
 	// ConsumeEmailLoginCode is the single-winner compare-and-set: it marks
 	// the row consumed (consumed_at = atMs) only when currently unconsumed
 	// AND unexpired, returning the bound record on success. A replay, an
 	// expired code, or a missing code all return ErrEmailLoginCodeInvalid.
 	UpsertEmailLoginCode(ctx context.Context, r *EmailLoginCodeRecord) (string, error)
-	FindEmailLoginCodeByEmail(ctx context.Context, email string) (*EmailLoginCodeRecord, error)
-	IncrementEmailLoginCodeAttempts(ctx context.Context, nodeID string) error
+	CountEmailLoginCodeAttempt(ctx context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error)
 	ConsumeEmailLoginCode(ctx context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error)
 
 	// Magic-link tokens (magic-link arm of passwordless email login).
@@ -580,14 +581,10 @@ type Repository interface {
 	// valid at a time (a re-request invalidates the previous code). It is
 	// keyed on user_id.
 	//
-	// FindPhoneVerificationCodeByUser returns the live row (consumed or
-	// not) so the verify path can compare the code hash, count attempts,
-	// and distinguish expired/consumed from a hash mismatch. Returns nil
-	// when no row exists for the user.
-	//
-	// IncrementPhoneVerificationCodeAttempts bumps attempt_count by one,
-	// used on a wrong-code guess; the service invalidates the code once
-	// the count reaches the cap captured on the record.
+	// CountPhoneVerificationCodeAttempt counts one guess against the user's
+	// live code (unconsumed, unexpired at atMs, under its attempt cap) in one
+	// write and returns it with the guess counted, or nil when there is
+	// none, so concurrent guesses never pass the cap captured on the record.
 	//
 	// ConsumePhoneVerificationCode is the single-winner compare-and-set:
 	// it marks the row consumed (consumed_at = atMs) only when currently
@@ -598,10 +595,72 @@ type Repository interface {
 	// SetUserPhoneVerified records the verified phone on the user and
 	// flips phone_verified, mirroring SetUserEmailVerified.
 	UpsertPhoneVerificationCode(ctx context.Context, r *PhoneVerificationCodeRecord) (string, error)
-	FindPhoneVerificationCodeByUser(ctx context.Context, userID string) (*PhoneVerificationCodeRecord, error)
-	IncrementPhoneVerificationCodeAttempts(ctx context.Context, nodeID string) error
+	CountPhoneVerificationCodeAttempt(ctx context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error)
 	ConsumePhoneVerificationCode(ctx context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error)
 	SetUserPhoneVerified(ctx context.Context, userID, phoneNumber string, atMs int64) error
+	// ClaimPhoneNumber is SetUserPhoneVerified for a project that keeps
+	// numbers unique: in one transaction it makes userID the one account
+	// that holds phoneNumber and records the number verified on the user.
+	// A number another account holds is ErrPhoneNumberTaken, unless that
+	// claim was made before takeOverBeforeMs (0 = no claim is ever old
+	// enough): then the claim moves, the previous holder's phone is cleared
+	// and its id is returned. A number the user held before is released. An
+	// unknown user, or one merged into another, is ErrNotFound: a retired
+	// account's token may outlive the merge, and no one could sign in to
+	// release a number it claimed.
+	//
+	// ReleasePhoneNumber clears the user's phone number and verified state
+	// and deletes any claim the user holds; it changes nothing for a user
+	// with no number.
+	ClaimPhoneNumber(ctx context.Context, userID, phoneNumber string, atMs, takeOverBeforeMs int64) (previousHolderID string, err error)
+	ReleasePhoneNumber(ctx context.Context, userID string, atMs int64) error
+
+	// Recovery emails (additional verified addresses of an account).
+	//
+	// The *RecoveryEmailCode methods keep the emailed code that proves an
+	// address, keyed on user_id: Upsert replaces the user's live code;
+	// CountRecoveryEmailCodeAttempt counts one guess against the live code
+	// (unconsumed, unexpired at atMs, under its attempt cap) in one write and
+	// returns it with the guess counted, or nil when there is none, so
+	// concurrent guesses never pass the cap; and Consume is the
+	// single-winner compare-and-set that returns ErrRecoveryEmailCodeInvalid
+	// for a replay, an expired code or a missing one.
+	//
+	// AddRecoveryEmail stores a proved address on e.UserID, taking only its
+	// Email and VerifiedAt: the row gets an ID of the driver's and no sign-in
+	// yet. It does so atomically with its refusals: ErrNotFound when the
+	// account is missing, not active or
+	// merged away; ErrRecoveryEmailTaken when the address (under
+	// FoldEmail) is any account's primary email or another account's
+	// recovery email in the project, and ErrRecoveryEmailLimit when the
+	// account already holds max addresses. Adding an address the account
+	// already holds changes nothing and returns nil. The reverse rule is
+	// the user writes': CreateUser, UpdateUser and UpdateUserEmail return
+	// ErrAlreadyExists for an email that is any account's recovery email.
+	//
+	// ListRecoveryEmails returns the account's addresses, oldest first (by
+	// VerifiedAt, then ID). RemoveRecoveryEmail deletes one (matched under
+	// FoldEmail) and, in the same transaction, ends every session it opened:
+	// it deletes each of the account's refresh tokens whose RecoveryEmailID
+	// is that address's ID, rotated or not, and revokes at atMs the session
+	// each names. It returns how many of those tokens were unrotated, and
+	// ErrNotFound when the account holds no such address.
+	UpsertRecoveryEmailCode(ctx context.Context, r *RecoveryEmailCodeRecord) (string, error)
+	CountRecoveryEmailCodeAttempt(ctx context.Context, userID string, atMs int64) (*RecoveryEmailCodeRecord, error)
+	ConsumeRecoveryEmailCode(ctx context.Context, userID string, atMs int64) (*RecoveryEmailCodeRecord, error)
+	AddRecoveryEmail(ctx context.Context, e *RecoveryEmail, max int) error
+	ListRecoveryEmails(ctx context.Context, userID string) ([]*RecoveryEmail, error)
+	RemoveRecoveryEmail(ctx context.Context, userID, email string, atMs int64) (int, error)
+	// FindRecoveryEmailHolder returns the recovery-email row holding the
+	// address (under FoldEmail) in the project, whose UserID is the account
+	// it signs in to, or nil when no account holds it.
+	// MarkRecoveryEmailSignIn stamps LastSignInAt = atMs on the account's
+	// address whose ID is id, and HoldStartedAt = atMs too unless the hold
+	// that address started is still in force at atMs (HoldStartedAt within
+	// holdMs before it): a sign-in does not extend its own address's hold.
+	// An address the account does not hold is ErrNotFound.
+	FindRecoveryEmailHolder(ctx context.Context, email string) (*RecoveryEmail, error)
+	MarkRecoveryEmailSignIn(ctx context.Context, userID, id string, atMs, holdMs int64) error
 
 	// TOTP credentials
 	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)
@@ -861,6 +920,7 @@ type Repository interface {
 	DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredRecoveryEmailCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredQrLoginSessions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error
 }
@@ -929,6 +989,12 @@ type RefreshTokenRecord struct {
 	// session's tokens carry no auth_time. Accepting an invitation proves the
 	// mailbox it went to, so it is a sign-in and sets it.
 	AuthTimeMs int64 // epoch ms
+	// RecoveryEmailID is the RecoveryEmail.ID of the recovery email whose
+	// sign-in opened the session, empty for a session opened any other way.
+	// Every rotation copies it unchanged, and while it is set the session's
+	// access tokens carry the amr claim AMRRecoveryEmail and the id itself.
+	// Removing the address ends the session (Repository.RemoveRecoveryEmail).
+	RecoveryEmailID string
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
@@ -1019,8 +1085,8 @@ type NativeTokenRedemptionRecord struct {
 // EmailLoginCodeRecord is the OTP arm of passwordless email login. The
 // record is keyed by Email (at most one live code per address); a new
 // request overwrites the previous one. CodeHash is sha256 of the 6-digit
-// code. AttemptCount tracks failed verifies; once it reaches MaxAttempts
-// the code is invalidated (brute-force cap). The record carries no user
+// code. AttemptCount counts every guess, the right one included; a guess
+// past MaxAttempts is refused (brute-force cap). The record carries no user
 // id — the account may not exist until VerifyEmailLoginCode resolves or
 // creates it.
 type EmailLoginCodeRecord struct {
@@ -1048,13 +1114,13 @@ type MagicLinkTokenRecord struct {
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
 }
 
-// PhoneVerificationCodeRecord is the SMS-OTP arm of phone-ownership
-// verification. The record is keyed by UserID (at most one live code per
-// user); a new request overwrites the previous one. CodeHash is sha256
-// of the 6-digit code. AttemptCount tracks failed verifies; once it
-// reaches MaxAttempts the code is invalidated (brute-force cap). Unlike
-// EmailLoginCodeRecord this always carries a UserID — the caller is an
-// already-authenticated user proving ownership of PhoneNumber.
+// PhoneVerificationCodeRecord is the one-time code that proves a phone
+// number. The record is keyed by UserID (at most one live code per user); a
+// new request overwrites the previous one. CodeHash is sha256 of the 6-digit
+// code. AttemptCount counts every guess, the right one included; a guess
+// past MaxAttempts is refused (brute-force cap). Unlike EmailLoginCodeRecord
+// this always carries a UserID — the caller is an already-authenticated
+// user proving ownership of PhoneNumber.
 type PhoneVerificationCodeRecord struct {
 	NodeID       string
 	UserID       string
@@ -1092,8 +1158,13 @@ type LoginChallengeRecord struct {
 	NodeID      string
 	ChallengeID string
 	UserID      string
-	ExpiresAt   int64
-	CreatedAt   int64
+	// RecoveryEmailID is the RecoveryEmail.ID of the recovery email the
+	// sign-in waiting on its second factor was made with, which the session
+	// it opens is tied to and whose hold starts only once the factor is
+	// proved; empty for every other sign-in.
+	RecoveryEmailID string
+	ExpiresAt       int64
+	CreatedAt       int64
 }
 
 // PasswordResetToken represents a stored password-reset token.
@@ -1330,23 +1401,46 @@ var (
 	// ErrMagicLinkInvalid is returned when a passwordless magic-link token
 	// is missing, expired, or already consumed. Maps to CodeUnauthenticated.
 	ErrMagicLinkInvalid = errors.New("magic link is invalid or already used")
-	// ErrPhoneCodeInvalid is returned when an SMS-OTP phone-verification
-	// code is missing, expired, already consumed, the wrong code, or has
-	// exhausted its attempt budget. The Connect handler maps it to
+	// ErrPhoneCodeInvalid is returned when a phone-verification code is
+	// missing, expired, already consumed, the wrong code, or has exhausted
+	// its attempt budget. The Connect handler maps it to
 	// CodeUnauthenticated so all failure modes look identical to a
 	// brute-force attacker.
 	ErrPhoneCodeInvalid = errors.New("phone verification code is invalid or expired")
-	// ErrSMSDisabled is returned by the phone-verification RPCs when
-	// GATEWAY_SMS_ENABLED is false. Maps to CodeUnavailable.
-	ErrSMSDisabled = errors.New("sms phone verification is not configured")
+	// ErrPhoneVerificationUnavailable is returned by RequestPhoneVerification and
+	// VerifyPhoneCode when the caller's project cannot verify phones: it
+	// turned phone verification off (phone.enabled), or none of the channels
+	// it uses (phone.channels) has a sender on this deployment, as when
+	// GATEWAY_SMS_ENABLED is false and no templatemsg.Sender is wired.
+	// RequestPhoneVerification also returns it wrapped around the last
+	// failure when every channel with a sender failed to deliver the code.
+	// Maps to CodeUnavailable.
+	ErrPhoneVerificationUnavailable = errors.New("phone verification is not available")
 	// ErrPhoneAlreadyVerified is returned by RequestPhoneVerification when
 	// the caller has already verified the same number. Maps to
 	// CodeAlreadyExists.
 	ErrPhoneAlreadyVerified = errors.New("phone number is already verified")
-	ErrInvitationUsed       = errors.New("invitation has already been accepted")
-	ErrInvitationExpired    = errors.New("invitation has expired")
-	ErrLocalAuthDisabled    = errors.New("local auth disabled")
-	ErrOAuthDisabled        = errors.New("oauth login is not configured")
+	// ErrPhoneNumberTaken is returned by VerifyPhoneCode, to a caller whose
+	// code was right, when another account of the project holds the number
+	// and the project keeps numbers unique (phone.unique). Maps to
+	// CodeAlreadyExists; its message leads with the stable
+	// `phone_number_taken` token clients match on.
+	ErrPhoneNumberTaken = errors.New("phone_number_taken: that phone number belongs to another account")
+	// ErrPhoneCountryNotAllowed is returned by the phone-verification RPCs
+	// for a number outside the project's phone.allowed_calling_codes. Maps
+	// to CodeFailedPrecondition; its message leads with the stable
+	// `phone_country_not_allowed` token.
+	ErrPhoneCountryNotAllowed = errors.New("phone_country_not_allowed: phone numbers with that country calling code are not accepted here")
+	// ErrPhoneVerificationRequired is the refusal, inside a
+	// TenantSelectionRefusedError, of a tenant whose login policy requires a
+	// verified phone the account does not have. Maps to
+	// CodeFailedPrecondition; its message leads with the stable
+	// `phone_verification_required` token.
+	ErrPhoneVerificationRequired = errors.New("phone_verification_required: this tenant requires a verified phone number")
+	ErrInvitationUsed            = errors.New("invitation has already been accepted")
+	ErrInvitationExpired         = errors.New("invitation has expired")
+	ErrLocalAuthDisabled         = errors.New("local auth disabled")
+	ErrOAuthDisabled             = errors.New("oauth login is not configured")
 	// ErrNativeOAuthDisabled is returned by NativeOAuthLogin when
 	// GATEWAY_NATIVE_OAUTH_ENABLED is false or no native verifier is
 	// configured. It maps to FailedPrecondition (the feature is off), distinct
@@ -1475,6 +1569,9 @@ type AuthService struct {
 	// (config.RateLimitUsernameTakenPerIP).
 	usernameProbes *probeBudget
 	phoneThrottle  *keyCooldown
+	// templateSender delivers the message channel's verification codes; nil
+	// when the embedder wired none (WithTemplateMessages).
+	templateSender templatemsg.Sender
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
 	// OAuth flow uses. Injected with WithReturnAllowlist; the zero value
@@ -1717,6 +1814,7 @@ func NewAuthServiceWithOAuth(
 	if !cfg.PasswordResetEnabled {
 		logger.Warn("password_reset_disabled")
 	}
+	warnPhoneCodeCapture(cfg, logger)
 	if len(totpRecoveryPepper) < totp.MinRecoveryPepperBytes {
 		// Refuse to construct an AuthService with a too-short pepper:
 		// any recovery-code path would silently fail, which is worse
@@ -2039,7 +2137,7 @@ func generateChallengeID() string {
 // directly so the anchor propagates unchanged across rotations.
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
 	now := s.nowMs()
-	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now)
+	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, "")
 }
 
 // issueSignInTokens issues the tokens of an interactive sign-in into an
@@ -2051,7 +2149,9 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // back in during the grace window has reclaimed the account. It is also the
 // one place a sign-in is recorded as the account's last login, once the
 // session is issued: a sign-in refused on the way is not a login.
-func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64) (string, string, error) {
+// recoveryEmailID is the RecoveryEmail.ID of the recovery email the sign-in
+// was made with, empty for most.
+func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64, recoveryEmailID string) (string, string, error) {
 	// An agent account has no sign-in method. Refused here, before anything
 	// is written, so no credential a corrupt row might hold opens one.
 	if err := s.refuseAgentSignIn(ctx, user, ipAddr, userAgent); err != nil {
@@ -2064,7 +2164,7 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 		return "", "", err
 	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, authTimeMs, "")
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, authTimeMs, recoveryEmailID, "")
 	if err != nil {
 		return "", "", err
 	}
@@ -2172,12 +2272,17 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 // sign-in. A sign-in passes its own time; the refresh path passes the consumed
 // record's AuthTimeMs; a flow no sign-in opened passes 0, and its tokens carry
 // no auth_time. A reader that needs a recent sign-in compares the claim with
-// now, so it ages as it should.
+// now, so it ages as it should. recoveryEmailID, the RecoveryEmail.ID of the
+// recovery email whose sign-in opened the session, travels the same way, on
+// the refresh record and the DOB ticket, and gives the access token its amr
+// and recovery_email_id claims. Its refresh token is stored only while the
+// account holds that address, so a session whose address was removed while
+// it was being issued is refused rather than opened (ErrUnauthenticated).
 //
 // tenantID becomes the access token's tenant claim. It is a tenant the caller
 // has already checked the user may act in; empty keeps the deployment's
 // default tenant.
-func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, tenantID string) (string, string, error) {
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, recoveryEmailID, tenantID string) (string, string, error) {
 	// The verified-email gate's backstop: every path that mints a session (and
 	// any added later) honours it. Sign-ins and refreshes run the audited gate
 	// before reaching here, so this refuses silently.
@@ -2216,7 +2321,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// written. Like the product gate it lives here, at the chokepoint, so
 	// every session-issuing path — initial login, refresh, and any path
 	// added later — is covered by construction.
-	if err := s.enforceDOBRequired(ctx, user, claimAuthTimeMs, ipAddr, userAgent, gate); err != nil {
+	if err := s.enforceDOBRequired(ctx, user, claimAuthTimeMs, recoveryEmailID, ipAddr, userAgent, gate); err != nil {
 		return "", "", err
 	}
 
@@ -2232,6 +2337,8 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	claims := s.accessTokenClaims(ctx, user, claimAuthTimeMs)
+	claims.AMR = recoverySessionAMR(recoveryEmailID)
+	claims.RecoveryEmailID = recoveryEmailID
 	if tenantID != "" {
 		claims.Tenant = tenantID
 	}
@@ -2270,7 +2377,14 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		SessionStartedAt: sessionStart,
 		SID:              sid,
 		AuthTimeMs:       claimAuthTimeMs,
+		RecoveryEmailID:  recoveryEmailID,
 	})
+	if recoveryEmailID != "" && errors.Is(err, ErrNotFound) {
+		s.revokeSessionIfModeSession(ctx, sid, user.ID, "recovery_email_removed")
+		s.logger.Info("recovery_session_refused_address_removed",
+			zap.String("user_id", user.ID), zap.String("recovery_email_id", recoveryEmailID))
+		return "", "", errRecoveryEmailGone
+	}
 	if err != nil {
 		return "", "", fmt.Errorf("storing refresh token: %w", err)
 	}
@@ -2377,15 +2491,17 @@ func (s *AuthService) updateLastLogin(ctx context.Context, userID string) {
 	}
 }
 
-// issueLoginChallenge creates a pending 2FA login challenge.
-func (s *AuthService) issueLoginChallenge(ctx context.Context, userID string) (string, error) {
+// issueLoginChallenge creates a pending 2FA login challenge, for a sign-in
+// by the recovery email recoveryEmailID when it is not empty.
+func (s *AuthService) issueLoginChallenge(ctx context.Context, userID, recoveryEmailID string) (string, error) {
 	now := s.nowMs()
 	challengeID := generateChallengeID()
 	_, err := s.repo(ctx).CreateLoginChallenge(ctx, &LoginChallengeRecord{
-		ChallengeID: challengeID,
-		UserID:      userID,
-		ExpiresAt:   now + int64(s.cfg.LoginChallengeExpirySeconds)*1000,
-		CreatedAt:   now,
+		ChallengeID:     challengeID,
+		UserID:          userID,
+		RecoveryEmailID: recoveryEmailID,
+		ExpiresAt:       now + int64(s.cfg.LoginChallengeExpirySeconds)*1000,
+		CreatedAt:       now,
 	})
 	if err != nil {
 		return "", fmt.Errorf("creating login challenge: %w", err)
@@ -2659,7 +2775,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// issueTokensWithSessionStart (so nothing is bypassed); this early pass
 	// exists only so the refusal is non-destructive and the client can
 	// complete the step and rotate normally.
-	if err := s.enforceDOBRequired(ctx, timeoutUser, record.AuthTimeMs, ipAddr, userAgent, sessionGateRefresh); err != nil {
+	if err := s.enforceDOBRequired(ctx, timeoutUser, record.AuthTimeMs, record.RecoveryEmailID, ipAddr, userAgent, sessionGateRefresh); err != nil {
 		return nil, "", "", err
 	}
 
@@ -2780,15 +2896,16 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// absolute timeout keeps measuring from the original login. A legacy row
 	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
 	// issueTokensWithSessionStart. The sign-in's auth_time is carried over
-	// unchanged too; the gates get 0 because a rotation is not a sign-in.
-	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, tenantID)
+	// unchanged too, and so is the recovery email that opened it; the gates
+	// get 0 because a rotation is not a sign-in.
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, record.RecoveryEmailID, tenantID)
 	if err != nil {
 		return nil, "", "", err
 	}
 	return user, accessToken, newRefresh, nil
 }
 
-// maxTenantIDLen bounds the tenant_id a refresh may name. Identity mints
+// maxTenantIDLen bounds the tenant_id a caller may name. Identity mints
 // tenant ids of 32 hex characters; the bound leaves room for a store that
 // mints its own and refuses what no tenant id could be before anything is
 // read for it.
@@ -2803,10 +2920,20 @@ func (s *AuthService) selectedTenant(ctx context.Context, tenantID string) (stri
 	if tenantID == "" || tenantID == s.tenantID(ctx) {
 		return "", nil
 	}
-	if len(tenantID) > maxTenantIDLen || strings.IndexFunc(tenantID, notTenantIDRune) >= 0 {
-		return "", fmt.Errorf("%w: tenant_id must be at most %d ASCII letters, digits, '-' or '_'", ErrInvalidArgument, maxTenantIDLen)
+	if err := checkTenantIDShape(tenantID); err != nil {
+		return "", err
 	}
 	return tenantID, nil
+}
+
+// checkTenantIDShape refuses, as ErrInvalidArgument, an id no tenant could
+// have: longer than maxTenantIDLen, or holding anything but ASCII letters,
+// digits, '-' and '_'.
+func checkTenantIDShape(tenantID string) error {
+	if len(tenantID) > maxTenantIDLen || strings.IndexFunc(tenantID, notTenantIDRune) >= 0 {
+		return fmt.Errorf("%w: tenant_id must be at most %d ASCII letters, digits, '-' or '_'", ErrInvalidArgument, maxTenantIDLen)
+	}
+	return nil
 }
 
 // notTenantIDRune reports whether r may not appear in a tenant id.
@@ -2822,7 +2949,8 @@ func notTenantIDRune(r rune) bool {
 // checkTenantSelection refuses a tenant the user may not act in: one that is
 // not a claimed tenant of the request's project, one where the user holds no
 // active membership, or one they belong to only through their email's domain
-// while that email is unverified or not on a domain the tenant has verified.
+// while that email is unverified or not on a domain the tenant has verified,
+// or while the session is one a recovery email opened (memberDomain).
 // The refusal does not say which. A member is then held to the tenant's
 // login policy (checkSelectedTenantPolicy). Without a reader
 // (GATEWAY_TENANT_SELECTION_ENABLED off, or a driver with no tenants) every
@@ -2833,11 +2961,12 @@ func (s *AuthService) checkTenantSelection(ctx context.Context, user *User, sess
 		return &TenantSelectionRefusedError{Reason: TenantSelectionNotEnabled, Err: ErrTenantSelectionDisabled}
 	}
 	projectID := s.projectID(ctx)
-	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, projectID, tenantID, user.ID, verifiedEmailDomain(user))
+	domain := memberDomain(user, session.RecoveryEmailID != "")
+	t, err := s.tenantSelection.GetActiveTenantForUser(ctx, projectID, tenantID, user.ID, domain)
 	if err != nil {
 		return s.tenantSelectionUnavailable(projectID, tenantID, err)
 	}
-	if t == nil || !actsInTenant(user, t) {
+	if t == nil || !actsInTenant(t, domain) {
 		return &TenantSelectionRefusedError{
 			Reason: TenantSelectionNotAMember,
 			Err:    fmt.Errorf("%w: not an active member of that tenant", ErrPermissionDenied),

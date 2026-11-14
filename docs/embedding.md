@@ -68,6 +68,7 @@ exactly as the container does. Set one to inject your own:
 | `Repo` + `DB`                      | built from `Config.RepoDriver` (must be set together)   |
 | `EmailTransport`                   | built from SMTP settings (falls back to log-only); a supplied one is taken to deliver, so its `Send` result is reported as a tenant invitation's `email_send_status` |
 | `SMSSender`                        | built from `GATEWAY_SMS_*` (log-only when SMS disabled)  |
+| `TemplateMessageSender`            | built from `GATEWAY_TEMPLATEMSG_*` (none, and the message channel unavailable, when no provider is named) |
 | `OAuthRegistry`                    | built from the OAuth client credentials in `Config`; a supplied one cannot be rebuilt with a host's own client (ADR-0019), so such an override is unavailable |
 | `IDVProvider`                      | built from `Config.IDVProvider` (may be disabled)       |
 | `AssuranceWebVerifier`             | built from `Config.AssuranceWebProvider`; nil (and no configured provider) means NO web verifier, so browser clients cannot obtain an assurance token |
@@ -139,14 +140,46 @@ metadata. Two rules it must follow, both of them load-bearing:
    win. Delete every `x-authenticated-` key before appending your own,
    including any a later identity release starts reading.
 
-`MergeAccounts` also reads `x-authenticated-auth-time`, the token's
-`auth_time` claim (epoch seconds, the session's sign-in; a refresh keeps
-it, a QR hand-off or anonymous session has none). Forward it from the
-verified token, after deleting any value the
+`MergeAccounts` and the recovery-email changes also read
+`x-authenticated-auth-time`, the token's `auth_time` claim (epoch seconds,
+the session's sign-in; a refresh keeps it, a QR hand-off or anonymous session
+has none). Forward it from the verified token, after deleting any value the
 client sent, **and** set `Options.GRPCTrustAuthTime`: until you do, the
 bridge drops the key, so an interceptor written before it existed cannot let
-a client vouch for its own sign-in, and every merge over native gRPC is
-refused `reauthentication_required`.
+a client vouch for its own recent sign-in, and every merge and
+recovery-email change over native gRPC is refused
+`reauthentication_required`.
+
+Every call that limits a session by how it was opened reads
+`x-authenticated-amr`, the token's `amr` claim with its values separated by
+spaces (absent on most tokens): each call a recovery hold refuses (the
+[recovery emails](https://elloloop.github.io/identity/docs/auth/recovery-emails#the-hold)
+page lists them), `MergeAccounts`, `ApproveQrLogin` and `ListMyTenants`. The
+calls a hold refuses, and `MergeAccounts`, also read
+`x-authenticated-recovery-email-id`, the token's `recovery_email_id` claim
+(present only beside `amr: ["recovery_email"]`): the recovery email that
+opened the session, which they refuse once the account no longer holds it.
+Forward both the same way, **and** set `Options.GRPCTrustAMR`, a separate
+opt-in that covers both keys: until you do, the bridge replaces the `amr` with
+`unvouched` and drops the id, whatever the client sent, and treats every
+session as one a recovery email may have opened that cannot name its
+address. In a project whose recovery emails sign in
+(`recovery_emails.sign_in`) such a session makes none of the calls a hold
+refuses (the account security changes, and the calls that hand out access
+that outlasts the session, such as `CreateTenantInvitation`, `InviteUser` or
+`DecideAgentAuthorization`) and approves no QR sign-in
+(`FAILED_PRECONDITION`, `recovery_session`), and
+`ListMyTenants` lists only its explicit memberships, hold or not, leaving out
+every tenant it belongs to through its email's domain (`RefreshToken` still
+selects one, since its refresh token records how the session was opened).
+Elsewhere it makes none of them and approves no QR sign-in while a recovery
+hold is in force on its account, which happens only once a
+recovery email has signed in. `RegisterGRPC` logs `grpc_amr_not_trusted` when
+you trust `auth_time` or the session id but not the `amr`. A host that
+forwards `auth_time` but no `amr` must not set `GRPCTrustAMR`: an absent key
+reads as a session no recovery email opened. One that forwards the `amr` but
+not the id leaves every recovery session refused those calls, with
+`recovery_session`.
 
 Whether to pin the `tenant` claim depends on tenant selection. With
 `GATEWAY_TENANT_SELECTION_ENABLED` off, the default, every token carries the
@@ -194,6 +227,12 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
                 if claims.AuthTime > 0 {
                     md.Set("x-authenticated-auth-time", strconv.FormatInt(claims.AuthTime, 10))
                 }
+                if len(claims.AMR) > 0 {
+                    md.Set("x-authenticated-amr", strings.Join(claims.AMR, " "))
+                }
+                if claims.RecoveryEmailID != "" {
+                    md.Set("x-authenticated-recovery-email-id", claims.RecoveryEmailID)
+                }
             }
         }
         return handler(metadata.NewIncomingContext(ctx, md), req)
@@ -201,9 +240,17 @@ func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud boo
 }
 ```
 
+This interceptor owns every sign-in key, so a host that installs it sets
+`opts.GRPCTrustAuthTime = true` and `opts.GRPCTrustAMR = true` before
+`identityserver.New`.
+
 **Rate limits are the host's responsibility too, with four exceptions.**
 The per-IP limits on the sign-up, sign-in and other abuse-prone RPCs live in
-the HTTP chain; apply your own in an interceptor. The bridge enforces these
+the HTTP chain; apply your own in an interceptor. Among them are the
+recovery-email and phone calls, each of which mails or texts someone or
+checks a code: `RequestRecoveryEmail`, `VerifyRecoveryEmail`,
+`RemoveRecoveryEmail`, `RequestPhoneVerification` and `RemovePhone`. The
+bridge enforces these
 itself, from the same per-IP budgets the HTTP surface uses:
 
 - `GetManagedChildAuthorization`, using its independent
@@ -212,8 +259,11 @@ itself, from the same per-IP budgets the HTTP surface uses:
   `x-managed-child-key` for its private managed_child_reader credential. The
   bridge resolves that explicit project through the same resolver as HTTP; an
   invalid or unavailable key never falls back to the default project.
-- `LookupUsers`, whose limit cannot be switched off
-  (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`).
+- `LookupUsers` and `MatchTenantMemberPhones`, a budget each, whose limit
+  cannot be switched off (`GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP`).
+  `MatchTenantMemberPhones` is also held to its per-credential, per-tenant
+  budget (`GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT`), which the service
+  counts whichever surface the call arrives on.
 - The tenant operations (`AdminGetTenant`, `AdminListTenants`,
   `AdminSuspendTenant`, `AdminRestoreTenant`, `AdminRecoverTenantOwnership`,
   `AdminCreateTenant`, `AdminAddTenantAdmin`, `AdminAddTenantMember` and

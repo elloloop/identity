@@ -16,8 +16,13 @@ import (
 // ── BeginTotpSetup ─────────────────────────────────────────────────────
 
 // BeginTotpSetup starts TOTP enrollment for the authenticated user.
-// Returns (secret, qrURI, recoveryCodes, error).
-func (s *AuthService) BeginTotpSetup(ctx context.Context, userID string) (string, string, []string, error) {
+// Returns (secret, qrURI, recoveryCodes, error). A session a recovery hold
+// binds is refused (RecoveryHoldError): a second factor it enrolled would
+// outlast the hold.
+func (s *AuthService) BeginTotpSetup(ctx context.Context, userID string, signIn SessionSignIn) (string, string, []string, error) {
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return "", "", nil, err
+	}
 	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return "", "", nil, err
@@ -76,10 +81,14 @@ func (s *AuthService) BeginTotpSetup(ctx context.Context, userID string) (string
 
 // ── VerifyTotpSetup ────────────────────────────────────────────────────
 
-// VerifyTotpSetup completes TOTP enrollment by verifying a code. Returns (verified, error).
-func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID, code string) (bool, error) {
+// VerifyTotpSetup completes TOTP enrollment by verifying a code. Returns
+// (verified, error). Refused like BeginTotpSetup during a recovery hold.
+func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID string, signIn SessionSignIn, code string) (bool, error) {
 	if code == "" {
 		return false, fmt.Errorf("%w: code is required", ErrInvalidArgument)
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return false, err
 	}
 
 	cred, err := s.repo(ctx).GetTotpCredential(ctx, userID)
@@ -128,7 +137,9 @@ func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID, code string) 
 // ── VerifyTotp ────────────────────────────────────────────────────────���
 
 // VerifyTotp completes a pending login by verifying a TOTP or recovery code.
-// Returns (user, accessToken, refreshToken, error).
+// Returns (user, accessToken, refreshToken, error). A challenge a sign-in by a
+// recovery email left opens that sign-in's session, and only now starts its
+// hold (startRecoveryEmailSession).
 func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr, userAgent string) (*LoginResult, error) {
 	if challengeID == "" {
 		return nil, fmt.Errorf("%w: login_challenge_id is required", ErrInvalidArgument)
@@ -162,7 +173,14 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 		return nil, err
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	loginMethod := "password+totp"
+	var accessToken, refreshToken string
+	if record.RecoveryEmailID != "" {
+		loginMethod = "recovery_email+totp"
+		accessToken, refreshToken, err = s.startRecoveryEmailSession(ctx, user, record.RecoveryEmailID, "totp", ipAddr, userAgent)
+	} else {
+		accessToken, refreshToken, err = s.issueTokens(ctx, user, ipAddr, userAgent)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +195,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 		ctx, audit.EventLoginSuccess,
 		audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"method": "password+totp"}),
+		audit.WithDetails(map[string]any{"method": loginMethod}),
 	)
 
 	s.logger.Info(
@@ -196,10 +214,14 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 
 // ── DisableTotp ────────────────────────────────────────────────────────
 
-// DisableTotp disables 2FA for the authenticated user. Requires password confirmation.
-func (s *AuthService) DisableTotp(ctx context.Context, userID, password string) error {
+// DisableTotp disables 2FA for the authenticated user. Requires password
+// confirmation. Refused like BeginTotpSetup during a recovery hold.
+func (s *AuthService) DisableTotp(ctx context.Context, userID string, signIn SessionSignIn, password string) error {
 	if password == "" {
 		return fmt.Errorf("%w: password confirmation required", ErrInvalidArgument)
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return err
 	}
 
 	user, err := s.repo(ctx).GetUser(ctx, userID)
@@ -233,10 +255,15 @@ func (s *AuthService) DisableTotp(ctx context.Context, userID, password string) 
 // ── RegenerateRecoveryCodes ────────────────────────────────────────────
 
 // RegenerateRecoveryCodes issues a fresh batch of recovery codes.
-// Requires password confirmation and TOTP to be enabled.
-func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, userID, password string) ([]string, error) {
+// Requires password confirmation and TOTP to be enabled. Refused like
+// BeginTotpSetup during a recovery hold: the new codes stand in for the
+// second factor and the old ones stop working.
+func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, userID string, signIn SessionSignIn, password string) ([]string, error) {
 	if password == "" {
 		return nil, fmt.Errorf("%w: password confirmation required", ErrInvalidArgument)
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return nil, err
 	}
 
 	user, err := s.repo(ctx).GetUser(ctx, userID)

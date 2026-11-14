@@ -43,7 +43,7 @@ func TestDeleteMyAccount_SchedulesDisablesAndRevokes(t *testing.T) {
 	u := seedRevocableUser(t, repo, "self@example.com", StatusActive)
 
 	before := nowMs()
-	scheduledAt, err := svc.DeleteMyAccount(ctx, u.ID, "no longer needed")
+	scheduledAt, err := svc.DeleteMyAccount(ctx, u.ID, SessionSignIn{}, "no longer needed")
 	if err != nil {
 		t.Fatalf("DeleteMyAccount: %v", err)
 	}
@@ -82,11 +82,11 @@ func TestDeleteMyAccount_Idempotent(t *testing.T) {
 	svc := newTestProfileServiceForDeletion(repo, newRecordingAuditWriter())
 	u := seedRevocableUser(t, repo, "self@example.com", StatusActive)
 
-	first, err := svc.DeleteMyAccount(ctx, u.ID, "")
+	first, err := svc.DeleteMyAccount(ctx, u.ID, SessionSignIn{}, "")
 	if err != nil {
 		t.Fatalf("first DeleteMyAccount: %v", err)
 	}
-	second, err := svc.DeleteMyAccount(ctx, u.ID, "")
+	second, err := svc.DeleteMyAccount(ctx, u.ID, SessionSignIn{}, "")
 	if err != nil {
 		t.Fatalf("second DeleteMyAccount: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestDeleteMyAccount_RejectsAdminDisabledStates(t *testing.T) {
 		svc := newTestProfileServiceForDeletion(repo, newRecordingAuditWriter())
 		u := seedUser(repo, status+"@example.com", "hash", status)
 
-		_, err := svc.DeleteMyAccount(ctx, u.ID, "")
+		_, err := svc.DeleteMyAccount(ctx, u.ID, SessionSignIn{}, "")
 		if !errors.Is(err, ErrAccountDeletionNotAllowed) {
 			t.Fatalf("status %q: want ErrAccountDeletionNotAllowed, got %v", status, err)
 		}
@@ -116,7 +116,7 @@ func TestDeleteMyAccount_RejectsAdminDisabledStates(t *testing.T) {
 
 func TestDeleteMyAccount_Unauthenticated(t *testing.T) {
 	svc := newTestProfileServiceForDeletion(newFakeRepo(), newRecordingAuditWriter())
-	if _, err := svc.DeleteMyAccount(context.Background(), "", ""); !errors.Is(err, ErrUnauthenticated) {
+	if _, err := svc.DeleteMyAccount(context.Background(), "", SessionSignIn{}, ""); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("empty actor: want ErrUnauthenticated, got %v", err)
 	}
 }
@@ -128,7 +128,7 @@ func TestCancelAccountDeletion_RestoresActive(t *testing.T) {
 	svc := newTestProfileServiceForDeletion(repo, writer)
 	u := seedRevocableUser(t, repo, "self@example.com", StatusActive)
 
-	if _, err := svc.DeleteMyAccount(ctx, u.ID, ""); err != nil {
+	if _, err := svc.DeleteMyAccount(ctx, u.ID, SessionSignIn{}, ""); err != nil {
 		t.Fatalf("DeleteMyAccount: %v", err)
 	}
 	status, err := svc.CancelAccountDeletion(ctx, u.ID)

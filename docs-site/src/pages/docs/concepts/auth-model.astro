@@ -46,6 +46,8 @@ import { Code } from "astro-expressive-code/components";
   "sid": "sess_01HZ...",       // session ID
   "auth_time": 1730000000,     // sign-in time, kept across refreshes; absent when no sign-in opened the session (QR, anonymous, sessions older than this release)
   "kind": "agent",             // only on an agent account's token; absent for a person
+  "amr": ["recovery_email"],   // only on a session a recovery email opened; absent on every other token
+  "recovery_email_id": "01HZ...", // beside that amr only: which recovery email opened the session, never the address
   "iat": 1730000000,
   "exp": 1730000900
 }`} lang="json" />
@@ -78,6 +80,19 @@ import { Code } from "astro-expressive-code/components";
     configuration. A service that grants anything on the strength of an
     email address should require <code>email_verified: true</code>, and treat
     a token without the claim (minted by an earlier release) as unproven.
+  </p>
+  <p>
+    <code>amr</code> (RFC 8176) says how the sign-in that opened the session
+    proved itself, where that limits what the session may do. Identity sets it
+    only on a session a
+    <a href="/identity/docs/auth/recovery-emails">recovery email</a> opened,
+    as <code>["recovery_email"]</code>, beside <code>recovery_email_id</code>,
+    an opaque reference to that address which never names it, and keeps both
+    across refreshes. Such a session is held from account security changes
+    for a while, makes none once its address is removed, never approves a QR
+    sign-in, and acts in a tenant only through an explicit membership. A
+    relying party that wants to treat such a session as weaker reads the
+    claim; a token without it was opened another way.
   </p>
   <p>
     Access tokens intentionally carry identity and a coarse

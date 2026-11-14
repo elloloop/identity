@@ -145,6 +145,9 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/LookupUsers": true,
 	// Only a project-scoped managed_child_reader machine credential authorizes this read.
 	"/identity.v1.IdentityService/GetManagedChildAuthorization": true,
+	// MatchTenantMemberPhones is authenticated the same way, by the
+	// directory service, and never by a user's token.
+	"/identity.v1.IdentityService/MatchTenantMemberPhones": true,
 	// TeammateKeyService is called by a service holding a teammate_key_manager
 	// project credential in X-Teammate-Key-Manager-Key, which the service
 	// verifies and which selects the project.
@@ -370,6 +373,17 @@ const AuthenticatedAuthTimeHeader = "X-Authenticated-Auth-Time"
 
 const AuthenticatedSessionIDHeader = "X-Authenticated-Session-Id"
 
+// AuthenticatedAMRHeader carries the verified `amr` claim, its values
+// separated by spaces, to the handlers whose rules depend on how the
+// session was opened. Absent when the token has none.
+const AuthenticatedAMRHeader = "X-Authenticated-Amr"
+
+// AuthenticatedRecoveryEmailIDHeader carries the verified
+// `recovery_email_id` claim, the recovery email that opened the session, to
+// the handlers that refuse such a session once its address is gone. Absent
+// when the token has none.
+const AuthenticatedRecoveryEmailIDHeader = "X-Authenticated-Recovery-Email-Id"
+
 // setAuthHeaders writes the verified identity headers from claims. Only
 // called after VerifyAccessToken succeeds, so the values are trusted.
 func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
@@ -386,6 +400,12 @@ func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
 	if claims.AuthTime > 0 {
 		r.Header.Set(AuthenticatedAuthTimeHeader, strconv.FormatInt(claims.AuthTime, 10))
 	}
+	if len(claims.AMR) > 0 {
+		r.Header.Set(AuthenticatedAMRHeader, strings.Join(claims.AMR, " "))
+	}
+	if claims.RecoveryEmailID != "" {
+		r.Header.Set(AuthenticatedRecoveryEmailIDHeader, claims.RecoveryEmailID)
+	}
 }
 
 // clearAuthHeaders removes any inbound copies of the identity headers so
@@ -397,6 +417,8 @@ func clearAuthHeaders(r *http.Request) {
 	r.Header.Del(AuthenticatedProjectHeader)
 	r.Header.Del(AuthenticatedAuthTimeHeader)
 	r.Header.Del(AuthenticatedSessionIDHeader)
+	r.Header.Del(AuthenticatedAMRHeader)
+	r.Header.Del(AuthenticatedRecoveryEmailIDHeader)
 }
 
 // extractBearerToken returns the token portion of an "Authorization: Bearer <token>"

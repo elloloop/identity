@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -87,6 +90,35 @@ func TestRegisterGRPC_LookupUsersThrottled(t *testing.T) {
 		Email: "after-throttle@example.com", Password: "Password-12345678a",
 	}); err != nil {
 		t.Fatalf("PasswordSignup after the directory throttle: %v", err)
+	}
+}
+
+// MatchTenantMemberPhones is throttled on the bridge from its own per-IP
+// budget, before the handler runs: an admitted call reaches the handler
+// (UNIMPLEMENTED on the memory driver), an over-quota one is
+// RESOURCE_EXHAUSTED, and LookupUsers keeps its own budget meanwhile.
+func TestRegisterGRPC_MatchTenantMemberPhonesThrottled(t *testing.T) {
+	t.Parallel()
+	srv := newTestServerWith(t, func(c *config.Config) {
+		c.RateLimitDirectoryPerIP = 1
+		c.RateLimitWindowSeconds = 30
+	}, nil)
+	client := serveGRPC(t, srv)
+	req := &identitypb.MatchTenantMemberPhonesRequest{TenantId: "t-acme", PhoneNumberHashes: [][]byte{make([]byte, 32)}}
+
+	if _, err := client.MatchTenantMemberPhones(context.Background(), req); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("first call: %v, want Unimplemented from the handler", err)
+	}
+	var header metadata.MD
+	_, err := client.MatchTenantMemberPhones(context.Background(), req, grpc.Header(&header))
+	if status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("over quota: %v, want ResourceExhausted", err)
+	}
+	if got := header.Get("retry-after"); len(got) != 1 || got[0] != "30" {
+		t.Fatalf("retry-after = %v, want [30]", got)
+	}
+	if _, err := client.LookupUsers(context.Background(), lookupRequest()); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("LookupUsers after the phone match spent its budget: %v, want Unimplemented from the handler", err)
 	}
 }
 
@@ -269,5 +301,34 @@ func TestRegisterGRPC_ManagedChildAuthorizationSharesHTTPBudget(t *testing.T) {
 	}
 	if _, err := httpClient.GetManagedChildAuthorization(context.Background(), connect.NewRequest(request)); connect.CodeOf(err) != connect.CodeUnavailable {
 		t.Fatalf("HTTP over quota: %v", err)
+	}
+}
+
+// A host whose interceptor forwards the token's other keys but not its amr
+// has every native-gRPC session treated as one a recovery email may have
+// opened, which it may not know: RegisterGRPC says so once. A host that
+// forwards the amr, or forwards nothing, is not told.
+func TestRegisterGRPC_WarnsWhenOtherKeysAreTrustedButNotTheAMR(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts func(*identityserver.Options)
+		warn bool
+	}{
+		{name: "auth time without amr", opts: func(o *identityserver.Options) { o.GRPCTrustAuthTime = true }, warn: true},
+		{name: "session id without amr", opts: func(o *identityserver.Options) { o.GRPCTrustSessionID = true }, warn: true},
+		{name: "auth time and amr", opts: func(o *identityserver.Options) { o.GRPCTrustAuthTime, o.GRPCTrustAMR = true, true }},
+		{name: "nothing trusted", opts: func(*identityserver.Options) {}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			core, logs := observer.New(zapcore.WarnLevel)
+			srv := newTestServerWith(t, nil, func(o *identityserver.Options) {
+				o.Logger = zap.New(core)
+				tc.opts(o)
+			})
+			srv.RegisterGRPC(grpc.NewServer())
+			if got := logs.FilterMessage("grpc_amr_not_trusted").Len(); got != map[bool]int{true: 1}[tc.warn] {
+				t.Fatalf("grpc_amr_not_trusted logged %d times, want warn=%t", got, tc.warn)
+			}
+		})
 	}
 }

@@ -1,0 +1,105 @@
+package service
+
+import "errors"
+
+// RecoveryEmail is an additional address an account has proved it controls.
+// Within a project an address is held once: as one account's primary email
+// or as one account's recovery email, never both and never by two accounts.
+type RecoveryEmail struct {
+	// ID is the row's opaque id. A session the address opens is tied to it
+	// rather than to the address, so no token names the address, and an
+	// address removed and added again is a new row whose old sessions stay
+	// ended.
+	ID     string
+	UserID string
+	// Email is the canonical address (canonicalMailbox), unique under
+	// FoldEmail like a primary email.
+	Email      string
+	VerifiedAt int64 // epoch ms
+	// LastSignInAt is when the address last signed in to the account (epoch
+	// ms; 0 = never), every sign-in included.
+	LastSignInAt int64
+	// HoldStartedAt is when the latest recovery hold this address started
+	// began (epoch ms; 0 = never): the time of its first sign-in once no hold
+	// of its own was in force. A sign-in within that hold leaves it, so no
+	// sign-in extends its own hold. The latest across an account's addresses
+	// is what the account's hold is measured from.
+	HoldStartedAt int64
+}
+
+// RecoveryEmailCodeRecord is the emailed code that proves a recovery address
+// before it is stored. It is keyed by UserID (at most one live code per
+// account); a new request overwrites the previous one. CodeHash is sha256 of
+// the 6-digit code. AttemptCount counts every guess, the right one included;
+// a guess past MaxAttempts is refused.
+type RecoveryEmailCodeRecord struct {
+	NodeID       string
+	UserID       string
+	Email        string
+	CodeHash     string
+	ExpiresAt    int64 // epoch ms
+	CreatedAt    int64 // epoch ms
+	ConsumedAt   int64 // epoch ms; 0 = unconsumed
+	AttemptCount int64
+	MaxAttempts  int64
+}
+
+var (
+	// ErrRecoveryEmailsDisabled is returned by RequestRecoveryEmail and
+	// VerifyRecoveryEmail when the caller's project has not turned recovery
+	// emails on (recovery_emails.enabled). Mapped to CodeFailedPrecondition;
+	// its message leads with the stable `recovery_emails_disabled` token
+	// clients match on.
+	ErrRecoveryEmailsDisabled = errors.New("recovery_emails_disabled: this project does not keep recovery emails")
+	// ErrRecoveryReauthenticationRequired is returned by the calls that
+	// change an account's recovery settings when the caller's session was not
+	// opened by a sign-in within the project's
+	// recovery_emails.reauth_max_age_seconds. Mapped to
+	// CodeFailedPrecondition; its message leads with the stable
+	// `reauthentication_required` token clients match on to sign the user in
+	// again and retry, as ErrReauthenticationRequired's does.
+	ErrRecoveryReauthenticationRequired = errors.New("reauthentication_required: sign in again to change your recovery settings")
+	// ErrRecoveryHold is returned, inside a RecoveryHoldError, when a
+	// session which may have been opened by a recovery email asks for an
+	// account security change while a sign-in by a recovery email holds the
+	// account (recovery_emails.hold_seconds), and to anyone asking to merge
+	// the account then. Mapped to CodeFailedPrecondition; its message leads
+	// with the stable `recovery_hold` token clients match on.
+	ErrRecoveryHold = errors.New("recovery_hold: a recovery email signed in to this account recently; account security changes are held until the hold ends")
+	// ErrRecoverySession is returned when a session a recovery email opened
+	// asks for what only a session opened another way may do: approving
+	// another device's QR sign-in, whose session could not say a recovery
+	// email stands behind it. A session no one vouched for how it was opened
+	// (AMRUnvouched) is refused it too where it is treated as a recovery
+	// session (a project whose recovery emails sign in), and elsewhere while
+	// a recovery hold is in force on its account. It is also the answer to
+	// any account security change asked for by a session treated as a
+	// recovery session that names no recovery email, since nothing can show
+	// its address is still the account's. Mapped to CodeFailedPrecondition;
+	// its message leads with the stable `recovery_session` token clients
+	// match on to send the person to sign in another way.
+	ErrRecoverySession = errors.New("recovery_session: a session that may have been opened by a recovery email cannot do this")
+	// ErrRecoveryEmailCodeInvalid is returned when a recovery-email code is
+	// missing, expired, already consumed, the wrong code, sent to another
+	// address, or has exhausted its attempt budget. Mapped to
+	// CodeUnauthenticated, one answer for every case.
+	ErrRecoveryEmailCodeInvalid = errors.New("recovery email code is invalid or expired")
+	// ErrRecoveryEmailTaken is returned when the address is already an
+	// account's primary or recovery email in the project. It is only ever
+	// returned to a caller who proved control of the address. Mapped to
+	// CodeAlreadyExists.
+	ErrRecoveryEmailTaken = errors.New("that address already belongs to an account")
+	// ErrRecoveryEmailLimit is returned when the account already holds the
+	// project's cap of recovery emails (recovery_emails.max). Mapped to
+	// CodeResourceExhausted.
+	ErrRecoveryEmailLimit = errors.New("this account has the most recovery emails it may hold")
+)
+
+// RecoveryHoldError is ErrRecoveryHold with when the hold ends.
+type RecoveryHoldError struct {
+	UntilMs int64 // epoch ms
+}
+
+func (e *RecoveryHoldError) Error() string { return ErrRecoveryHold.Error() }
+
+func (e *RecoveryHoldError) Unwrap() error { return ErrRecoveryHold }

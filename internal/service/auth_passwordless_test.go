@@ -400,7 +400,7 @@ func TestRequestEmailLoginCode_MailerFailureSwallowed(t *testing.T) {
 	rec.fail = errTransportFailure
 	ctx := context.Background()
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "mailfail@test.com"))
-	got, _ := repo.FindEmailLoginCodeByEmail(ctx, "mailfail@test.com")
+	got, _ := repo.CountEmailLoginCodeAttempt(ctx, "mailfail@test.com", svc.nowMs())
 	assert.NotNil(t, got, "code persisted even when mail send fails")
 }
 
@@ -501,10 +501,29 @@ func TestRequestMagicLink_StorageFailureSwallowed(t *testing.T) {
 	assert.Empty(t, rec.Sent())
 }
 
-// A wrong guess whose attempt-increment AND lock-consume both fail is
-// still rejected; the failures are logged but never leak. Covers the
-// increment-failure and lock-failure branches.
-func TestVerifyEmailLoginCode_AttemptBookkeepingFailuresSwallowed(t *testing.T) {
+// A guess that cannot be counted is never compared: the right code fails
+// closed with the store's error and stays unspent for a retry.
+func TestVerifyEmailLoginCode_UncountedGuessFailsClosed(t *testing.T) {
+	repo := newErrorRepo()
+	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
+	ctx := context.Background()
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, "bookkeep@test.com"))
+	code := extractCodeFromEmail(t, rec.Sent()[0].Text)
+
+	repo.failCountEmailLoginCodeAttempt = true
+	res, err := svc.VerifyEmailLoginCode(ctx, "bookkeep@test.com", code, "", "")
+	require.ErrorIs(t, err, errInjected)
+	require.Nil(t, res)
+
+	repo.failCountEmailLoginCodeAttempt = false
+	res, err = svc.VerifyEmailLoginCode(ctx, "bookkeep@test.com", code, "", "")
+	require.NoError(t, err)
+	assert.NotEmpty(t, res.AccessToken)
+}
+
+// A wrong guess at the cap whose lock-consume fails is still rejected; the
+// failure is logged but never leaks.
+func TestVerifyEmailLoginCode_LockFailureSwallowed(t *testing.T) {
 	repo := newErrorRepo()
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
 	svc.cfg.PasswordlessCodeMaxAttempts = 1 // next wrong guess hits the cap
@@ -512,7 +531,6 @@ func TestVerifyEmailLoginCode_AttemptBookkeepingFailuresSwallowed(t *testing.T) 
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "bookkeep@test.com"))
 	_ = extractCodeFromEmail(t, rec.Sent()[0].Text)
 
-	repo.failIncrEmailLoginCodeAttempts = true
 	repo.failConsumeEmailLoginCode = true
 	_, err := svc.VerifyEmailLoginCode(ctx, "bookkeep@test.com", "000000", "", "")
 	require.ErrorIs(t, err, ErrEmailLoginCodeInvalid)

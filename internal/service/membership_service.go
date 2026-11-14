@@ -113,8 +113,12 @@ type MembershipService struct {
 	logger         *zap.Logger
 	// audit records CreateTenant outcomes, ownership transfers and joins by
 	// domain (WithAudit); nil records nothing.
-	audit   *audit.Logger
-	nowFunc func() time.Time
+	audit *audit.Logger
+	// accounts is the account store a recovery hold is read from
+	// (WithAccounts); nil refuses every tenant role change by a session a
+	// recovery email may have opened.
+	accounts Repository
+	nowFunc  func() time.Time
 }
 
 // NewMembershipService wires a MembershipService. mailerDelivers tells the
@@ -190,13 +194,16 @@ const (
 // ErrInvitationRecipientLimited past the tenant's cap for the address,
 // and ErrInvitationResendTooSoon inside the per-recipient cooldown. Each
 // refusal is logged.
-func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID, tenantID, emailAddr, role string) (*CreatedInvitation, error) {
+func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, emailAddr, role string) (*CreatedInvitation, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if callerID == "" {
 		return nil, ErrUnauthenticated
+	}
+	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
+		return nil, err
 	}
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
@@ -408,9 +415,12 @@ func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, ten
 // owner remains, is allowed, including an owner removing themselves. The
 // store checks and removes in one step (MembershipStore.RemoveMembership),
 // so a concurrent removal or ownership transfer cannot slip between them.
-func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID, tenantID, targetUserID, ip, userAgent string) error {
+func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, targetUserID, ip, userAgent string) error {
 	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
 	if err != nil {
+		return err
+	}
+	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
 		return err
 	}
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
@@ -444,9 +454,12 @@ func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID, te
 // A target that is not an active or suspended member is ErrNotFound.
 // Suspending a suspended member returns the membership unchanged and records
 // nothing; a suspension is audited as EventTenantMemberSuspended.
-func (s *MembershipService) SuspendTenantMember(ctx context.Context, callerID, tenantID, targetUserID, ip, userAgent string) (*TenantMembership, error) {
+func (s *MembershipService) SuspendTenantMember(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, targetUserID, ip, userAgent string) (*TenantMembership, error) {
 	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
@@ -477,9 +490,12 @@ func (s *MembershipService) SuspendTenantMember(ctx context.Context, callerID, t
 // that is not an active or suspended member is ErrNotFound. Restoring an
 // active member returns the membership unchanged and records nothing; a
 // restore is audited as EventTenantMemberRestored, with the status it left.
-func (s *MembershipService) RestoreTenantMember(ctx context.Context, callerID, tenantID, targetUserID, ip, userAgent string) (*TenantMembership, error) {
+func (s *MembershipService) RestoreTenantMember(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, targetUserID, ip, userAgent string) (*TenantMembership, error) {
 	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
@@ -652,6 +668,21 @@ func (s *MembershipService) requireProject(ctx context.Context) (string, error) 
 		return scope.ProjectID, nil
 	}
 	return "", fmt.Errorf("%w: no project in request scope", ErrPermissionDenied)
+}
+
+// WithAccounts sets the account store a recovery hold on the caller's
+// account is read from.
+func (s *MembershipService) WithAccounts(accounts Repository) *MembershipService {
+	s.accounts = accounts
+	return s
+}
+
+// refuseHeldSession refuses a change to who belongs to a tenant, or with
+// what role, asked for by a session a recovery hold binds or whose recovery
+// email is gone (refuseHeldSession): a membership, a role or an ownership it
+// hands out outlasts the session.
+func (s *MembershipService) refuseHeldSession(ctx context.Context, projectID, callerID string, signIn SessionSignIn) error {
+	return refuseHeldSessionInProject(ctx, s.accounts, s.logger, projectID, callerID, signIn, s.nowFunc().UnixMilli())
 }
 
 // requireTenantAdmin is authorizeTenantAdmin over this service's stores.

@@ -34,20 +34,20 @@ func TestBuildRateLimits_PasswordlessPathsLimited(t *testing.T) {
 	for _, l := range limits {
 		byPath[l.PathPrefix] = l
 	}
-	for _, p := range []string{
+	paths := []string{
 		"/identity.v1.IdentityService/RequestEmailLoginCode",
 		"/identity.v1.IdentityService/RequestMagicLink",
-	} {
+		"/identity.v1.IdentityService/RequestRecoveryEmail",
+		"/identity.v1.IdentityService/VerifyRecoveryEmail",
+	}
+	for _, p := range paths {
 		require.Contains(t, byPath, p, "passwordless path %s must have a rate limit", p)
 	}
 
 	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	for _, p := range []string{
-		"/identity.v1.IdentityService/RequestEmailLoginCode",
-		"/identity.v1.IdentityService/RequestMagicLink",
-	} {
+	for _, p := range paths {
 		codes := make([]int, 3)
 		for i := 0; i < 3; i++ {
 			req := httptest.NewRequest(http.MethodPost, p, nil)
@@ -338,6 +338,27 @@ func TestBuildRateLimits_DirectoryLookupLimited(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	assertQuotaExhausts(t, handler, path, "9.9.9.9", 2)
+}
+
+// MatchTenantMemberPhones is authenticated like LookupUsers, so it carries
+// the same per-IP bound on the credential reads a caller can drive, as a
+// budget of its own: spending one directory read's budget leaves the other's.
+func TestBuildRateLimits_PhoneMatchLimited(t *testing.T) {
+	const (
+		path   = "/identity.v1.IdentityService/MatchTenantMemberPhones"
+		lookup = "/identity.v1.IdentityService/LookupUsers"
+	)
+	limits := buildRateLimits(&config.Config{RateLimitWindowSeconds: 60, RateLimitDirectoryPerIP: 2})
+	pl, ok := middleware.MatchPathLimit(limits, path)
+	require.True(t, ok, "MatchTenantMemberPhones must carry a rate limit")
+	require.Equal(t, "directory_phone_match", pl.Tag)
+	require.Empty(t, pl.Header, "every call is counted, whatever it presents")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, path, "9.9.9.6", 2)
+	assertQuotaExhausts(t, handler, lookup, "9.9.9.6", 2)
 }
 
 // The tenant-operator procedures share one per-IP budget, drawn only by
@@ -658,4 +679,38 @@ func TestManagedChildAuthorization_HasIndependentCapacity(t *testing.T) {
 	// One hundred devices with a protected operation every 30 seconds need
 	// 200 checks per minute; that must not consume account-directory capacity.
 	assertQuotaExhausts(t, handler, identityconnectgen.IdentityServiceGetManagedChildAuthorizationProcedure, "9.9.9.9", config.DefaultRateLimitManagedChildAuthPerIP)
+}
+
+// Removing a recovery email spends the budget adding one does, and removing
+// the phone the budget requesting a phone code does: a removal that ends
+// sessions clears the session cache, so one source cannot loop on it.
+func TestBuildRateLimits_RemovalsShareTheirSurfacesBudget(t *testing.T) {
+	cfg := &config.Config{
+		RateLimitWindowSeconds:     60,
+		RateLimitPasswordlessPerIP: 2,
+		RateLimitPhonePerIP:        2,
+		RateLimitSignupPerIP:       10,
+		RateLimitLoginPerIP:        30,
+		RateLimitResetPerIP:        5,
+		RateLimitVerifyPerIP:       20,
+	}
+	handler := middleware.RateLimitMiddleware(buildRateLimits(cfg), nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	call := func(path string) int {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "9.9.9.9")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	for request, remove := range map[string]string{
+		"/identity.v1.IdentityService/RequestRecoveryEmail":     "/identity.v1.IdentityService/RemoveRecoveryEmail",
+		"/identity.v1.IdentityService/RequestPhoneVerification": "/identity.v1.IdentityService/RemovePhone",
+	} {
+		assert.Equal(t, http.StatusOK, call(request), request)
+		assert.Equal(t, http.StatusOK, call(remove), remove)
+		assert.Equal(t, http.StatusTooManyRequests, call(remove), "%s after %s spent the budget", remove, request)
+		assert.Equal(t, http.StatusTooManyRequests, call(request), "%s after %s spent the budget", request, remove)
+	}
 }

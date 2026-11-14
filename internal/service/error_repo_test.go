@@ -55,7 +55,7 @@ type errorRepo struct {
 	failRevokeSessionsForUser      bool
 	failUpsertEmailLoginCode       bool
 	failCreateMagicLinkToken       bool
-	failIncrEmailLoginCodeAttempts bool
+	failCountEmailLoginCodeAttempt bool
 	failConsumeEmailLoginCode      bool
 	failDeleteUser                 bool
 	failRecordNativeTokenRedeem    bool
@@ -92,11 +92,11 @@ func (r *errorRepo) CreateMagicLinkToken(ctx context.Context, rec *MagicLinkToke
 	return r.fakeRepo.CreateMagicLinkToken(ctx, rec)
 }
 
-func (r *errorRepo) IncrementEmailLoginCodeAttempts(ctx context.Context, nodeID string) error {
-	if r.failIncrEmailLoginCodeAttempts {
-		return errInjected
+func (r *errorRepo) CountEmailLoginCodeAttempt(ctx context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error) {
+	if r.failCountEmailLoginCodeAttempt {
+		return nil, errInjected
 	}
-	return r.fakeRepo.IncrementEmailLoginCodeAttempts(ctx, nodeID)
+	return r.fakeRepo.CountEmailLoginCodeAttempt(ctx, email, atMs)
 }
 
 func (r *errorRepo) ConsumeEmailLoginCode(ctx context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error) {

@@ -10,7 +10,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/elloloop/identity/internal/config"
-	"github.com/elloloop/identity/internal/service"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -25,6 +24,7 @@ import (
 	"github.com/elloloop/identity/internal/app"
 	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/middleware"
+	"github.com/elloloop/identity/internal/service"
 )
 
 // grpcBridge adapts identity's Connect service implementation to the
@@ -43,26 +43,39 @@ import (
 // budgets across transports.
 type grpcBridge struct {
 	identitypb.UnimplementedIdentityServiceServer
-	h               *identityconnect.IdentityHandler
-	directoryLimit  middleware.PathLimit
+	h *identityconnect.IdentityHandler
+	// directoryLimits holds the per-IP limit of each directory read, by
+	// procedure.
+	directoryLimits map[string]middleware.PathLimit
 	machineLimits   map[string]middleware.PathLimit
 	operatorLimits  map[string]middleware.PathLimit
 	trustedProxies  []*net.IPNet
 	projectResolver service.ProjectResolver
 	logger          *zap.Logger
-	// trustAuthTime: the host's interceptor owns x-authenticated-auth-time
-	// (Options.GRPCTrustAuthTime). Otherwise the bridge drops it.
-	trustAuthTime  bool
-	trustSessionID bool
+	trust           grpcTrust
 }
 
-func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSessionID bool) *grpcBridge {
-	directoryLimit, ok := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceLookupUsersProcedure)
-	if !ok {
-		// app.Build always configures this limit; reaching here means the
-		// wiring drifted and LookupUsers runs unthrottled on this surface.
-		logger.Error("directory_lookup_grpc_unthrottled",
-			zap.String("procedure", identityv1connect.IdentityServiceLookupUsersProcedure))
+// grpcTrust names the x-authenticated-* keys besides the user id that the
+// host said its interceptor sets from the verified token, after deleting any
+// value the client sent (Options.GRPCTrustAuthTime, GRPCTrustAMR, which
+// covers x-authenticated-amr and x-authenticated-recovery-email-id, and
+// GRPCTrustSessionID). The bridge drops every other one.
+type grpcTrust struct {
+	authTime  bool
+	amr       bool
+	sessionID bool
+}
+
+func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcBridge {
+	directoryLimits := make(map[string]middleware.PathLimit, 2)
+	for _, procedure := range []string{identityv1connect.IdentityServiceLookupUsersProcedure, identityv1connect.IdentityServiceMatchTenantMemberPhonesProcedure} {
+		limit, found := middleware.MatchPathLimit(built.RateLimits, procedure)
+		if !found {
+			// app.Build always configures these; reaching here means the
+			// wiring drifted and the read runs unthrottled on this surface.
+			logger.Error("directory_lookup_grpc_unthrottled", zap.String("procedure", procedure))
+		}
+		directoryLimits[procedure] = limit
 	}
 	machineLimits := make(map[string]middleware.PathLimit)
 	for _, procedure := range []string{identityv1connect.IdentityServiceGetManagedChildAuthorizationProcedure, identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
@@ -85,12 +98,11 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trustAuthTime, trustSes
 		machineLimits:   machineLimits,
 		operatorLimits:  operatorLimits,
 		h:               built.ConnectHandler,
-		directoryLimit:  directoryLimit,
+		directoryLimits: directoryLimits,
 		trustedProxies:  built.TrustedProxies,
 		projectResolver: built.ProjectResolver,
 		logger:          logger,
-		trustAuthTime:   trustAuthTime,
-		trustSessionID:  trustSessionID,
+		trust:           trust,
 	}
 }
 
@@ -191,13 +203,22 @@ func invoke[Req, Resp any](
 	if ip := b.clientIP(ctx); ip != "" {
 		creq.Header().Set(middleware.ClientIPHeader, ip)
 	}
-	// The sign-in time vouches for a recent sign-in; only a host that said
-	// its interceptor sets it from the verified token may pass it on.
-	if !b.trustSessionID {
+	// An interceptor written before a key existed may pass on whatever the
+	// client sent for it, so a key reaches the handlers only once the host
+	// said its interceptor owns it.
+	if !b.trust.sessionID {
 		creq.Header().Del(middleware.AuthenticatedSessionIDHeader)
 	}
-	if !b.trustAuthTime {
+	if !b.trust.authTime {
 		creq.Header().Del(middleware.AuthenticatedAuthTimeHeader)
+	}
+	// A missing amr would read as a session no recovery email opened, so a
+	// session whose amr no one vouches for is marked as possibly one, and
+	// names no recovery email: a client-chosen one could be an address the
+	// account still holds.
+	if !b.trust.amr {
+		creq.Header().Set(middleware.AuthenticatedAMRHeader, service.AMRUnvouched)
+		creq.Header().Del(middleware.AuthenticatedRecoveryEmailIDHeader)
 	}
 	cresp, err := fn(ctx, creq)
 	if err != nil {
@@ -712,10 +733,17 @@ func (b *grpcBridge) AdminRevokeProjectCredential(ctx context.Context, in *ident
 }
 
 func (b *grpcBridge) LookupUsers(ctx context.Context, in *identitypb.LookupUsersRequest) (*identitypb.LookupUsersResponse, error) {
-	if err := b.throttle(ctx, b.directoryLimit); err != nil {
+	if err := b.throttle(ctx, b.directoryLimits[identityv1connect.IdentityServiceLookupUsersProcedure]); err != nil {
 		return nil, err
 	}
 	return invoke(ctx, b, in, b.h.LookupUsers)
+}
+
+func (b *grpcBridge) MatchTenantMemberPhones(ctx context.Context, in *identitypb.MatchTenantMemberPhonesRequest) (*identitypb.MatchTenantMemberPhonesResponse, error) {
+	if err := b.throttle(ctx, b.directoryLimits[identityv1connect.IdentityServiceMatchTenantMemberPhonesProcedure]); err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.MatchTenantMemberPhones)
 }
 
 func (b *grpcBridge) AdminCreateProjectCredential(ctx context.Context, in *identitypb.AdminCreateProjectCredentialRequest) (*identitypb.AdminCreateProjectCredentialResponse, error) {
@@ -889,6 +917,26 @@ func (b *grpcBridge) ListJoinableTenants(ctx context.Context, in *identitypb.Lis
 
 func (b *grpcBridge) JoinTenantByDomain(ctx context.Context, in *identitypb.JoinTenantByDomainRequest) (*identitypb.JoinTenantByDomainResponse, error) {
 	return invoke(ctx, b, in, b.h.JoinTenantByDomain)
+}
+
+func (b *grpcBridge) RequestRecoveryEmail(ctx context.Context, in *identitypb.RequestRecoveryEmailRequest) (*identitypb.RequestRecoveryEmailResponse, error) {
+	return invoke(ctx, b, in, b.h.RequestRecoveryEmail)
+}
+
+func (b *grpcBridge) VerifyRecoveryEmail(ctx context.Context, in *identitypb.VerifyRecoveryEmailRequest) (*identitypb.VerifyRecoveryEmailResponse, error) {
+	return invoke(ctx, b, in, b.h.VerifyRecoveryEmail)
+}
+
+func (b *grpcBridge) ListRecoveryEmails(ctx context.Context, in *identitypb.ListRecoveryEmailsRequest) (*identitypb.ListRecoveryEmailsResponse, error) {
+	return invoke(ctx, b, in, b.h.ListRecoveryEmails)
+}
+
+func (b *grpcBridge) RemoveRecoveryEmail(ctx context.Context, in *identitypb.RemoveRecoveryEmailRequest) (*identitypb.RemoveRecoveryEmailResponse, error) {
+	return invoke(ctx, b, in, b.h.RemoveRecoveryEmail)
+}
+
+func (b *grpcBridge) RemovePhone(ctx context.Context, in *identitypb.RemovePhoneRequest) (*identitypb.RemovePhoneResponse, error) {
+	return invoke(ctx, b, in, b.h.RemovePhone)
 }
 
 func (b *grpcBridge) RequestPhoneVerification(ctx context.Context, in *identitypb.RequestPhoneVerificationRequest) (*identitypb.RequestPhoneVerificationResponse, error) {

@@ -35,7 +35,7 @@ func TestRequestEmailChange_Success_BothEmailsSent(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
 
-	if err := svc.RequestEmailChange(context.Background(), user.ID, "new@test.com", "Str0ng!Pass1"); err != nil {
+	if err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, "new@test.com", "Str0ng!Pass1"); err != nil {
 		t.Fatalf("RequestEmailChange: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func TestRequestEmailChange_NewEmailNormalisedLowercase(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
 
-	if err := svc.RequestEmailChange(context.Background(), user.ID, "  NEW@Test.COM  ", "Str0ng!Pass1"); err != nil {
+	if err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, "  NEW@Test.COM  ", "Str0ng!Pass1"); err != nil {
 		t.Fatalf("RequestEmailChange: %v", err)
 	}
 	sent := rec.Sent()
@@ -99,7 +99,7 @@ func TestRequestEmailChange_WrongPasswordRejected(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
 	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
 
-	err := svc.RequestEmailChange(context.Background(), user.ID, "new@test.com", "WrongPass1!")
+	err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, "new@test.com", "WrongPass1!")
 	if !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("wrong password: want ErrUnauthenticated, got %v", err)
 	}
@@ -114,7 +114,7 @@ func TestRequestEmailChange_NewEmailAlreadyInUseRejected(t *testing.T) {
 	seedUserWithPassword(t, repo, "taken@test.com", "Other!Pass99")
 	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
 
-	err := svc.RequestEmailChange(context.Background(), user.ID, "taken@test.com", "Str0ng!Pass1")
+	err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, "taken@test.com", "Str0ng!Pass1")
 	if !errors.Is(err, ErrAlreadyExists) {
 		t.Errorf("conflict: want ErrAlreadyExists, got %v", err)
 	}
@@ -130,7 +130,7 @@ func TestRequestEmailChange_UniquenessLookupErrorFailsClosed(t *testing.T) {
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
 
 	repo.failFindUserByEmail = true
-	err := svc.RequestEmailChange(context.Background(), user.ID, "new@test.com", "Str0ng!Pass1")
+	err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, "new@test.com", "Str0ng!Pass1")
 	if err == nil {
 		t.Fatal("expected uniqueness lookup error, got nil")
 	}
@@ -151,7 +151,7 @@ func TestRequestEmailChange_UserLookupErrorFailsClosed(t *testing.T) {
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
 
 	repo.failGetUser = true
-	err := svc.RequestEmailChange(context.Background(), user.ID, "new@test.com", "Str0ng!Pass1")
+	err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, "new@test.com", "Str0ng!Pass1")
 	if err == nil {
 		t.Fatal("expected user lookup error, got nil")
 	}
@@ -167,7 +167,7 @@ func TestRequestEmailChange_TokenCreateFailureDoesNotSendEmails(t *testing.T) {
 	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
 
 	repo.failCreateEmailChangeToken = true
-	err := svc.RequestEmailChange(context.Background(), user.ID, "new@test.com", "Str0ng!Pass1")
+	err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, "new@test.com", "Str0ng!Pass1")
 	if err == nil {
 		t.Fatal("expected token create error, got nil")
 	}
@@ -180,7 +180,7 @@ func TestRequestEmailChange_SameAsCurrentRejected(t *testing.T) {
 	t.Parallel()
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
-	err := svc.RequestEmailChange(context.Background(), user.ID, "OLD@test.com", "Str0ng!Pass1")
+	err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, "OLD@test.com", "Str0ng!Pass1")
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Errorf("same email: want ErrInvalidArgument, got %v", err)
 	}
@@ -193,7 +193,7 @@ func TestRequestEmailChange_SameCanonicalAddressRejected(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
 	for _, same := range []string{"OLD+x@test.com", " old@TEST.com "} {
-		if err := svc.RequestEmailChange(context.Background(), user.ID, same, "Str0ng!Pass1"); !errors.Is(err, ErrInvalidArgument) {
+		if err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, same, "Str0ng!Pass1"); !errors.Is(err, ErrInvalidArgument) {
 			t.Errorf("RequestEmailChange(%q): want ErrInvalidArgument, got %v", same, err)
 		}
 	}
@@ -205,7 +205,7 @@ func TestRequestEmailChange_StoresCanonicalNewEmail(t *testing.T) {
 	t.Parallel()
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
-	if err := svc.RequestEmailChange(context.Background(), user.ID, " New.Me+Work@GoogleMail.com ", "Str0ng!Pass1"); err != nil {
+	if err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, " New.Me+Work@GoogleMail.com ", "Str0ng!Pass1"); err != nil {
 		t.Fatalf("RequestEmailChange: %v", err)
 	}
 	var got []string
@@ -223,7 +223,7 @@ func TestRequestEmailChange_InvalidNewEmailRejected(t *testing.T) {
 	t.Parallel()
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
-	err := svc.RequestEmailChange(context.Background(), user.ID, "not-an-email", "Str0ng!Pass1")
+	err := svc.RequestEmailChange(context.Background(), user.ID, SessionSignIn{}, "not-an-email", "Str0ng!Pass1")
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Errorf("invalid: want ErrInvalidArgument, got %v", err)
 	}
@@ -232,7 +232,7 @@ func TestRequestEmailChange_InvalidNewEmailRejected(t *testing.T) {
 func TestRequestEmailChange_UnknownUser(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newAuthSvcWithMailer(t)
-	err := svc.RequestEmailChange(context.Background(), "no-such-user", "new@test.com", "Str0ng!Pass1")
+	err := svc.RequestEmailChange(context.Background(), "no-such-user", SessionSignIn{}, "new@test.com", "Str0ng!Pass1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown user: want ErrNotFound, got %v", err)
 	}
@@ -256,7 +256,7 @@ func TestRequestEmailChange_RejectsMissingRequiredFields(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			err := svc.RequestEmailChange(context.Background(), tt.id, tt.email, tt.pass)
+			err := svc.RequestEmailChange(context.Background(), tt.id, SessionSignIn{}, tt.email, tt.pass)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("want %v, got %v", tt.want, err)
 			}
@@ -274,7 +274,7 @@ func TestRequestEmailChange_RejectsMissingRequiredFields(t *testing.T) {
 func requestAndExtractChangeToken(t *testing.T, svc *AuthService, repo *fakeRepo, rec *recordingTransport, userID, newEmail, password string) string {
 	t.Helper()
 	rec.Reset()
-	if err := svc.RequestEmailChange(context.Background(), userID, newEmail, password); err != nil {
+	if err := svc.RequestEmailChange(context.Background(), userID, SessionSignIn{}, newEmail, password); err != nil {
 		t.Fatalf("request email change: %v", err)
 	}
 	sent := rec.Sent()

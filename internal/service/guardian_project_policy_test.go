@@ -18,7 +18,7 @@ func TestProjectGuardianPolicy_StrictBeforeChildAndConsentWrites(t *testing.T) {
 			ctx := WithProjectScope(context.Background(), &ProjectScope{Guardian: ProjectGuardianConfig{RequireStepUp: strict}})
 			req := f.req()
 			req.StepUpPassword = ""
-			result, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+			result, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 			if strict {
 				if !errors.Is(err, ErrParentalConsentStepUpFailed) {
 					t.Fatalf("create: %v", err)
@@ -35,7 +35,7 @@ func TestProjectGuardianPolicy_StrictBeforeChildAndConsentWrites(t *testing.T) {
 				t.Fatalf("unchanged deployment policy: %v", err)
 			}
 			pending := seedChildPendingConsent(f.repo, "pending@example.com")
-			_, err = f.svc.GrantParentalConsent(ctx, f.adult.ID, pending.ID, consentPolicyVersion, "", "", "")
+			_, err = f.svc.GrantParentalConsent(ctx, f.adult.ID, SessionSignIn{}, pending.ID, consentPolicyVersion, "", "", "")
 			if strict {
 				if !errors.Is(err, ErrParentalConsentStepUpFailed) {
 					t.Fatalf("consent: %v", err)
@@ -80,7 +80,7 @@ func TestProjectGuardianPolicy_KnownAdultBeforeWrites(t *testing.T) {
 				f.adult.DateOfBirthMs = dobAgeMs(age)
 			}
 			ctx := WithProjectScope(context.Background(), &ProjectScope{Guardian: ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true}})
-			result, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+			result, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", "")
 			if age != 35 {
 				if !errors.Is(err, ErrPermissionDenied) {
 					t.Fatalf("create accepted unknown/minor: %v", err)
@@ -96,7 +96,7 @@ func TestProjectGuardianPolicy_KnownAdultBeforeWrites(t *testing.T) {
 				t.Fatalf("adult with proof: %v", err)
 			}
 			pending := seedChildPendingConsent(f.repo, "pending@example.test")
-			_, err = f.svc.GrantParentalConsent(ctx, f.adult.ID, pending.ID, consentPolicyVersion, strongPW, "", "")
+			_, err = f.svc.GrantParentalConsent(ctx, f.adult.ID, SessionSignIn{}, pending.ID, consentPolicyVersion, strongPW, "", "")
 			if age != 35 {
 				if !errors.Is(err, ErrPermissionDenied) {
 					t.Fatalf("consent accepted unknown/minor: %v", err)
@@ -119,7 +119,7 @@ func TestProjectGuardianPolicy_KnownAdultBeforeWrites(t *testing.T) {
 func TestProjectGuardianPolicy_ManagementUsesBothGuards(t *testing.T) {
 	ctx := WithProjectScope(context.Background(), &ProjectScope{Guardian: ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true}})
 	f := newGuardianFixture(ctx, t)
-	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrPermissionDenied) {
+	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("unknown adult profile: %v", err)
 	}
 	if f.writer.countByEventTypeAndDetail(string(audit.EventGuardianChildProfileViewed), "step", "adult_profile") != 1 {
@@ -128,15 +128,15 @@ func TestProjectGuardianPolicy_ManagementUsesBothGuards(t *testing.T) {
 	f.guardian.DateOfBirthMs = dobAgeMs(35)
 	f.guardian.PasswordHash = ""
 	f.svc.cfg.GuardianStepUpAllowNoPassword = true
-	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
 		t.Fatalf("no fresh proof: %v", err)
 	}
 	f.guardian.PasswordHash = hashPW(t, strongPW)
-	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); err != nil {
+	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	f.guardian.Kind = UserKindAgent
-	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrPermissionDenied) {
+	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", ""); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("agent profile: %v", err)
 	}
 }
@@ -153,21 +153,21 @@ func TestProjectGuardianPolicy_DefaultAndUnscopedAdmission(t *testing.T) {
 			ctx = WithProjectScope(ctx, scope)
 		}
 		req := f.req()
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrPermissionDenied) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("unknown profile through default/native path: %v", err)
 		}
 		f.adult.DateOfBirthMs = dobAgeMs(35)
 		f.adult.PasswordHash = ""
 		req.StepUpPassword = ""
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
 			t.Fatalf("passwordless default/native path: %v", err)
 		}
 		child := seedChildPendingConsent(f.repo, "pending@example.test")
-		if _, err := f.svc.GrantParentalConsent(ctx, f.adult.ID, child.ID, consentPolicyVersion, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+		if _, err := f.svc.GrantParentalConsent(ctx, f.adult.ID, SessionSignIn{}, child.ID, consentPolicyVersion, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
 			t.Fatalf("consent default/native path: %v", err)
 		}
 		seedGuardianEdge(ctx, t, f.repo, f.adult.ID, child.ID)
-		if _, err := f.svc.GetManagedChildProfile(ctx, f.adult.ID, child.ID, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+		if _, err := f.svc.GetManagedChildProfile(ctx, f.adult.ID, SessionSignIn{}, child.ID, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
 			t.Fatalf("management default/native path: %v", err)
 		}
 		if stored, _ := f.repo.FindUserByUsername(ctx, req.Username); stored != nil {
@@ -177,12 +177,12 @@ func TestProjectGuardianPolicy_DefaultAndUnscopedAdmission(t *testing.T) {
 			t.Fatal("consent written without proof")
 		}
 		projects.err = ErrServiceUnavailable
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrServiceUnavailable) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrServiceUnavailable) {
 			t.Fatalf("policy error failed open: %v", err)
 		}
 		projects.err = nil
 		delete(projects.active, projectID)
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrPermissionDenied) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("missing project failed open: %v", err)
 		}
 	}
@@ -191,7 +191,7 @@ func TestProjectGuardianPolicy_DefaultAndUnscopedAdmission(t *testing.T) {
 func TestProjectGuardianPolicy_DoesNotObstructConsentWithdrawal(t *testing.T) {
 	f := newManagedChildFixture(t, true)
 	ctx := context.Background()
-	created, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+	created, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestProjectGuardianPolicy_DefaultJurisdictionsRemainConsistent(t *testing.T
 	projectID := f.svc.cfg.DefaultProjectID
 	policy := ProjectJurisdictionsConfig{Default: "EX", Thresholds: map[string]JurisdictionThresholds{"EX": {ChildMaxAge: 12, AdultAge: 21}}}
 	f.svc.WithActiveProjects(&fakeActiveProjects{active: map[string]*AdminProject{projectID: {ID: projectID, Jurisdictions: policy}}})
-	child, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+	child, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, strongPW, "", "")
 	if err != nil || !child.IsMinor {
 		t.Fatalf("default route stamped another policy: %v %v", child, err)
 	}
@@ -223,7 +223,35 @@ func TestProjectGuardianPolicy_DefaultJurisdictionsRemainConsistent(t *testing.T
 	creator.svc.WithActiveProjects(&fakeActiveProjects{active: map[string]*AdminProject{creator.svc.cfg.DefaultProjectID: {ID: creator.svc.cfg.DefaultProjectID, Jurisdictions: policy}}})
 	req := creator.req()
 	req.Market = "ZZ"
-	if _, err := creator.svc.CreateManagedChildAccount(ctx, creator.adult.ID, req, "", ""); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := creator.svc.CreateManagedChildAccount(ctx, creator.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("unknown project market accepted: %v", err)
+	}
+}
+
+// A fresh password and an adult profile cannot override the provenance of
+// a recovery session whose address is no longer held by the account.
+func TestProjectGuardianPolicy_DoesNotBypassRecoverySessionRefusal(t *testing.T) {
+	f := newManagedChildFixture(t, true)
+	f.adult.DateOfBirthMs = dobAgeMs(35)
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		Guardian:       ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true},
+		RecoveryEmails: ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true},
+	})
+	signIn := SessionSignIn{AMR: []string{AMRRecoveryEmail}, RecoveryEmailID: "removed-recovery-address"}
+	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, signIn, f.req(), "", ""); !errors.Is(err, errRecoveryEmailGone) {
+		t.Fatalf("create with removed recovery address: %v", err)
+	}
+	if child, err := f.repo.FindUserByUsername(ctx, f.req().Username); err != nil || child != nil {
+		t.Fatalf("child written before recovery admission: %v %v", child, err)
+	}
+	pending := seedChildPendingConsent(f.repo, "pending@example.test")
+	if _, err := f.svc.GrantParentalConsent(ctx, f.adult.ID, signIn, pending.ID, consentPolicyVersion, strongPW, "", ""); !errors.Is(err, errRecoveryEmailGone) {
+		t.Fatalf("consent with removed recovery address: %v", err)
+	}
+	if consent, err := f.repo.GetActiveParentalConsentForChild(ctx, pending.ID); err != nil || consent != nil {
+		t.Fatalf("consent written before recovery admission: %v %v", consent, err)
+	}
+	if _, err := f.svc.GetManagedChildProfile(ctx, f.adult.ID, signIn, pending.ID, strongPW, "", ""); !errors.Is(err, errRecoveryEmailGone) {
+		t.Fatalf("management with removed recovery address: %v", err)
 	}
 }

@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -332,26 +333,162 @@ func TestSessionMetrics_RecordsLookupOutcome(t *testing.T) {
 type fakeRepo struct {
 	service.Repository
 	stub *stubLookup
+	// beforeWrite, when set, runs inside each write before it changes a
+	// row: a request reading the session while the write is in flight.
+	beforeWrite func()
+	// refuse, when set, is what RemoveRecoveryEmail and ApplyAccountMerge
+	// return instead of writing.
+	refuse error
 }
 
 func (r *fakeRepo) WithProject(projectID string) service.Repository {
-	return &fakeRepo{stub: r.stub.project(projectID)}
+	return &fakeRepo{stub: r.stub.project(projectID), beforeWrite: r.beforeWrite, refuse: r.refuse}
+}
+
+func (r *fakeRepo) inFlight() {
+	if r.beforeWrite != nil {
+		r.beforeWrite()
+	}
 }
 
 func (r *fakeRepo) RevokeSession(_ context.Context, sid string, atMs int64) error {
+	r.inFlight()
 	r.stub.revoke(sid, atMs)
 	return nil
 }
 
 func (r *fakeRepo) RevokeSessionsForUser(_ context.Context, userID string, atMs int64) error {
+	r.inFlight()
+	r.revokeUser(userID, atMs)
+	return nil
+}
+
+// RemoveRecoveryEmail ends every session of userID's, standing in for the
+// sessions the address opened.
+func (r *fakeRepo) RemoveRecoveryEmail(_ context.Context, userID, _ string, atMs int64) (int, error) {
+	if r.refuse != nil {
+		return 0, r.refuse
+	}
+	r.inFlight()
+	return r.revokeUser(userID, atMs), nil
+}
+
+// ApplyAccountMerge ends the retired account's sessions.
+func (r *fakeRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) error {
+	if r.refuse != nil {
+		return r.refuse
+	}
+	r.inFlight()
+	r.revokeUser(m.OtherID, m.AtMs)
+	return nil
+}
+
+func (r *fakeRepo) revokeUser(userID string, atMs int64) int {
 	r.stub.mu.Lock()
 	defer r.stub.mu.Unlock()
+	ended := 0
 	for _, row := range r.stub.rows {
 		if row.UserID == userID && row.RevokedAtMs == 0 {
 			row.RevokedAtMs = atMs
+			ended++
 		}
 	}
-	return nil
+	return ended
+}
+
+// Every write that ends sessions drops the cache entries of the sessions it
+// ended, so the very next lookup in the process reads them revoked — even
+// when a request read the session, and cached it active, while the write
+// was in flight.
+func TestRevokingSessionRepository_EveryWriteThatEndsSessionsInvalidates(t *testing.T) {
+	t.Parallel()
+	for name, end := range map[string]func(context.Context, service.Repository) error{
+		"RevokeSession": func(ctx context.Context, r service.Repository) error {
+			return r.RevokeSession(ctx, "s1", 200)
+		},
+		"RevokeSessionsForUser": func(ctx context.Context, r service.Repository) error {
+			return r.RevokeSessionsForUser(ctx, "u1", 200)
+		},
+		"RemoveRecoveryEmail": func(ctx context.Context, r service.Repository) error {
+			_, err := r.RemoveRecoveryEmail(ctx, "u1", "spare@example.net", 200)
+			return err
+		},
+		"ApplyAccountMerge": func(ctx context.Context, r service.Repository) error {
+			return r.ApplyAccountMerge(ctx, service.AccountMerge{SurvivorID: "u2", OtherID: "u1", AtMs: 200})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			src := newStubLookup()
+			src.put(&service.SessionRecord{SID: "s1", UserID: "u1"})
+			cache := NewSessionCache(src, time.Minute, nil)
+			wrap := WrapSessionRepository(&fakeRepo{stub: src, beforeWrite: func() {
+				if state, err := cache.Lookup(ctx, "s1"); err != nil || state != SessionStateActive {
+					t.Errorf("lookup while the write is in flight: state=%v err=%v, want Active", state, err)
+				}
+			}}, cache)
+
+			if err := end(ctx, wrap); err != nil {
+				t.Fatal(err)
+			}
+			if state, err := cache.Lookup(ctx, "s1"); err != nil || state != SessionStateRevoked {
+				t.Fatalf("after %s: state=%v err=%v, want Revoked", name, state, err)
+			}
+		})
+	}
+}
+
+// A removal of an address the account does not hold, and a merge the driver
+// refuses, wrote nothing and ended no session, so they leave the cache whole:
+// another session is still answered from it, with no read of the store.
+// Anyone signed in can ask for such a removal in a loop, and clearing the
+// cache each time would send every session on the replica to the store. A
+// write whose outcome is unknown, such as a failed commit, still clears it.
+func TestRevokingSessionRepository_AWriteThatEndedNothingKeepsTheCache(t *testing.T) {
+	t.Parallel()
+	commitFailed := errors.New("commit failed")
+	remove := func(ctx context.Context, r service.Repository) error {
+		_, err := r.RemoveRecoveryEmail(ctx, "u1", "spare@example.net", 200)
+		return err
+	}
+	merge := func(ctx context.Context, r service.Repository) error {
+		return r.ApplyAccountMerge(ctx, service.AccountMerge{SurvivorID: "u2", OtherID: "u1", AtMs: 200})
+	}
+	for name, tc := range map[string]struct {
+		write func(context.Context, service.Repository) error
+		err   error
+		keeps bool
+	}{
+		"RemoveRecoveryEmail of an address not held": {remove, fmt.Errorf("driver: %w", service.ErrNotFound), true},
+		"ApplyAccountMerge conflict":                 {merge, service.ErrMergeConflict, true},
+		"ApplyAccountMerge past the cap":             {merge, service.ErrRecoveryEmailLimit, true},
+		"RemoveRecoveryEmail commit failed":          {remove, commitFailed, false},
+		"ApplyAccountMerge commit failed":            {merge, commitFailed, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			src := newStubLookup()
+			src.put(&service.SessionRecord{SID: "other", UserID: "u9"})
+			cache := NewSessionCache(src, time.Minute, nil)
+			if state, err := cache.Lookup(ctx, "other"); err != nil || state != SessionStateActive {
+				t.Fatalf("warming the cache: state=%v err=%v", state, err)
+			}
+			wrap := WrapSessionRepository(&fakeRepo{stub: src, refuse: tc.err}, cache)
+
+			if err := tc.write(ctx, wrap); !errors.Is(err, tc.err) {
+				t.Fatalf("write = %v, want %v", err, tc.err)
+			}
+			before := src.reads.Load()
+			if state, err := cache.Lookup(ctx, "other"); err != nil || state != SessionStateActive {
+				t.Fatalf("after the write: state=%v err=%v, want Active", state, err)
+			}
+			if read := src.reads.Load() != before; read == tc.keeps {
+				t.Fatalf("the other session was read from the store: %t, want %t", read, !tc.keeps)
+			}
+		})
+	}
 }
 
 // ── Middleware integration ────────────────────────────────────────────

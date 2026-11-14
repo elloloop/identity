@@ -9,6 +9,7 @@ const (
 	directoryRateLimitEnv = "GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP"
 	scimRateLimitEnv      = "GATEWAY_RATE_LIMIT_SCIM_PER_IP"
 	qrPollRateLimitEnv    = "GATEWAY_RATE_LIMIT_QR_POLL_PER_IP"
+	phoneMatchLimitEnv    = "GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT"
 )
 
 // The directory cap is parsed like every other GATEWAY_* integer: a positive
@@ -62,6 +63,47 @@ func TestRateLimitDirectoryPerIP_BuiltInCode(t *testing.T) {
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), directoryRateLimitEnv+"=-3") {
 		t.Fatalf("Validate = %v, want the negative cap refused", err)
 	}
+}
+
+// The phone-match cap is held like the directory cap: unset, zero or
+// malformed input keeps the default, a negative value is refused at boot,
+// and a Config built in code that leaves it zero gets the default.
+func TestRateLimitPhoneMatchPerTenant(t *testing.T) {
+	for raw, want := range map[string]int{
+		"":    DefaultRateLimitPhoneMatchPerTenant,
+		"0":   DefaultRateLimitPhoneMatchPerTenant,
+		"abc": DefaultRateLimitPhoneMatchPerTenant,
+		"5":   5,
+	} {
+		t.Run("env="+raw, func(t *testing.T) {
+			t.Setenv(phoneMatchLimitEnv, raw)
+			cfg := Load()
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			if cfg.RateLimitPhoneMatchPerTenant != want {
+				t.Fatalf("RateLimitPhoneMatchPerTenant = %d, want %d", cfg.RateLimitPhoneMatchPerTenant, want)
+			}
+		})
+	}
+
+	t.Run("negative", func(t *testing.T) {
+		t.Setenv(phoneMatchLimitEnv, "-2")
+		if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), phoneMatchLimitEnv+"=-2") {
+			t.Fatalf("Validate = %v, want an error naming %s=-2", err, phoneMatchLimitEnv)
+		}
+	})
+
+	t.Run("built in code", func(t *testing.T) {
+		cfg := Load()
+		cfg.RateLimitPhoneMatchPerTenant = 0
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+		if cfg.RateLimitPhoneMatchPerTenant != DefaultRateLimitPhoneMatchPerTenant {
+			t.Fatalf("zero field = %d after Validate, want the default %d", cfg.RateLimitPhoneMatchPerTenant, DefaultRateLimitPhoneMatchPerTenant)
+		}
+	})
 }
 
 func TestRateLimitSCIMPerIP_FromEnv(t *testing.T) {

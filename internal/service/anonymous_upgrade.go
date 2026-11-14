@@ -97,14 +97,19 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 	}
 
 	// Now the address. Checked before hashing (bcrypt-class work) so a taken
-	// address costs nothing; the unique index remains the authority, this is
-	// the friendly error.
+	// address costs nothing, whichever account holds it and as what: a
+	// recovery email answers as fast as a primary one. The store remains the
+	// authority; this is the friendly error.
 	existing, err := s.repo(ctx).FindUserByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil {
-		return nil, fmt.Errorf("%w: email already registered", ErrAlreadyExists)
+	holder, err := s.repo(ctx).FindRecoveryEmailHolder(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil || holder != nil {
+		return nil, errUpgradeAddressTaken
 	}
 
 	hash, err := passwords.Hash(cred.Password)
@@ -332,7 +337,7 @@ func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, u
 		s.revokeUserSessionsIfModeSession(ctx, userID, "anonymous_upgrade_pending_verification")
 		return &LoginResult{User: u}, nil
 	}
-	access, refresh, err := s.issueSignInTokens(ctx, u, ipAddr, userAgent, s.nowMs(), authTimeMs)
+	access, refresh, err := s.issueSignInTokens(ctx, u, ipAddr, userAgent, s.nowMs(), authTimeMs, "")
 	if err != nil {
 		return nil, err
 	}
@@ -349,8 +354,12 @@ func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, u
 // window but cannot close it: two requests can both find an address free and
 // both proceed, and the index is what actually decides.
 func (s *AuthService) mapUpgradeConflict(err error) error {
-	if errors.Is(err, ErrAlreadyExists) {
-		return fmt.Errorf("%w: email already registered", ErrAlreadyExists)
+	if errors.Is(err, ErrAlreadyExists) || errors.Is(err, ErrRecoveryEmailTaken) {
+		return errUpgradeAddressTaken
 	}
 	return err
 }
+
+// errUpgradeAddressTaken is the one answer to an upgrade to an address an
+// account holds, as its primary email or as a recovery email.
+var errUpgradeAddressTaken = fmt.Errorf("%w: email already registered", ErrAlreadyExists)

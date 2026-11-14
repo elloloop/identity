@@ -92,7 +92,7 @@ func nativeChildFixture(t *testing.T) (identitypb.IdentityServiceClient, service
 	}
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
-	identitypb.RegisterIdentityServiceServer(server, newGRPCBridge(built, zap.NewNop(), false, false))
+	identitypb.RegisterIdentityServiceServer(server, newGRPCBridge(built, zap.NewNop(), grpcTrust{}))
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
 	t.Cleanup(func() { _ = listener.Close() })

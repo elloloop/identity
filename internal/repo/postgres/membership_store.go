@@ -497,6 +497,63 @@ func (s *MembershipStore) GetActiveTenantForUser(ctx context.Context, projectID,
 	return &ut, nil
 }
 
+// matchTenantMemberPhonesQuery finds the tenant's members whose verified
+// number hashes to one of $3. It applies the rule activeUserTenantsQuery
+// applies to one user, here to every member at once, reading each member's
+// email domain from users itself. The number is hashed where it is stored,
+// so only the matching ids leave the statement, and the hashes are probed
+// as a set, not compared one by one per member.
+var matchTenantMemberPhonesQuery = `
+	SELECT m.user_id
+	FROM tenant_memberships m
+	JOIN users u ON u.project_id = m.project_id AND u.id = m.user_id
+	WHERE m.project_id = $1 AND m.tenant_id = $2 AND m.status = 'active'
+	  AND (m.source <> 'domain' OR (u.email_verified AND ` + onVerifiedDomain("m", "u.email_domain") + `))
+	  AND lower(u.status) IN ('', 'active') AND u.kind <> 'agent' AND NOT u.is_anonymous
+	  AND u.phone_verified AND u.phone_number <> ''
+	  AND sha256(convert_to(u.phone_number, 'UTF8')) IN (SELECT unnest($3::bytea[]))
+	ORDER BY m.user_id`
+
+// MatchTenantMemberPhones implements service.TenantMemberPhoneMatcher. A
+// tenant that is not claimed has no member who may act in it, so it matches
+// nobody; one the project does not hold is service.ErrNotFound. users is
+// under row-level security (migration 0016) and this store's pool is bound
+// to the server's own project, so both reads run bound to projectID.
+func (s *MembershipStore) MatchTenantMemberPhones(ctx context.Context, projectID, tenantID string, phoneHashes [][]byte) ([]string, error) {
+	if projectID == "" || tenantID == "" {
+		return nil, fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
+	}
+	pool := s.pool.forProject(projectID)
+	var status string
+	err := pool.QueryRow(ctx, `SELECT status FROM tenants WHERE project_id = $1 AND id = $2`, projectID, tenantID).Scan(&status)
+	if noRows(err) {
+		return nil, fmt.Errorf("%w: tenant", service.ErrNotFound)
+	}
+	if err != nil {
+		return nil, wrapPgErr("MatchTenantMemberPhones tenant", err)
+	}
+	if status != service.TenantStatusClaimed || len(phoneHashes) == 0 {
+		return nil, nil
+	}
+	rows, err := pool.Query(ctx, matchTenantMemberPhonesQuery, projectID, tenantID, phoneHashes)
+	if err != nil {
+		return nil, wrapPgErr("MatchTenantMemberPhones", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, wrapPgErr("MatchTenantMemberPhones scan", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapPgErr("MatchTenantMemberPhones rows", err)
+	}
+	return out, nil
+}
+
 // ListMembershipsForTenant returns every membership in a tenant, newest
 // first.
 func (s *MembershipStore) ListMembershipsForTenant(ctx context.Context, projectID, tenantID string) ([]*service.TenantMembership, error) {

@@ -1,0 +1,12 @@
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Your phone verification code for {{.Phone}} is:
+
+{{.Code}}
+
+Enter it to verify the number. The code expires in {{.ExpiresIn}}.
+
+This server is set up for local development: it emails phone verification codes to the account instead of sending them to the phone by {{.Channel}}, so it does not prove the phone is yours.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}

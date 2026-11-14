@@ -54,7 +54,7 @@ func TestSecurity_AdminCheck_RejectsNonAdmin(t *testing.T) {
 	db.addUser("member-1", "member@test.com", "Member", "member", "active")
 	svc := newTestAdminService(db)
 
-	_, err := svc.InviteUser(context.Background(), "member-1", "x@test.com", "X", "member", "", 0, false)
+	_, err := svc.InviteUser(context.Background(), "member-1", SessionSignIn{}, "x@test.com", "X", "member", "", 0, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "admin role required")
 }
@@ -66,7 +66,7 @@ func TestSecurity_SessionRevoke_WrongUserDenied(t *testing.T) {
 	db.addRefreshToken("sess-1", "user-1", nowMs()+3600*1000)
 	svc := newTestProfileService(db)
 
-	err := svc.RevokeSession(context.Background(), "user-2", "sess-1")
+	err := svc.RevokeSession(context.Background(), "user-2", SessionSignIn{}, "sess-1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not belong")
 }
@@ -76,7 +76,7 @@ func TestSecurity_SessionRevoke_OwnerSucceeds(t *testing.T) {
 	db.addRefreshToken("sess-1", "user-1", nowMs()+3600*1000)
 	svc := newTestProfileService(db)
 
-	err := svc.RevokeSession(context.Background(), "user-1", "sess-1")
+	err := svc.RevokeSession(context.Background(), "user-1", SessionSignIn{}, "sess-1")
 	require.NoError(t, err)
 }
 
@@ -87,7 +87,7 @@ func TestSecurity_PasskeyDelete_WrongUserDenied(t *testing.T) {
 	db.addPasskey("pk-1", "user-1", "cred-abc", "YubiKey")
 	svc := newTestProfileService(db)
 
-	err := svc.DeletePasskey(context.Background(), "user-2", "cred-abc")
+	err := svc.DeletePasskey(context.Background(), "user-2", SessionSignIn{}, "cred-abc")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not belong")
 }
@@ -100,7 +100,7 @@ func TestSecurity_ChangePassword_WrongCurrentRejected(t *testing.T) {
 	db.addUserWithPassword("user-1", "alice@test.com", "Alice", "member", "active", pwHash)
 	svc := newTestProfileService(db)
 
-	err := svc.ChangePassword(context.Background(), "user-1", "WrongCurrent!", "NewStr0ng!Pass")
+	err := svc.ChangePassword(context.Background(), "user-1", SessionSignIn{}, "WrongCurrent!", "NewStr0ng!Pass")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "incorrect")
 }
@@ -208,7 +208,7 @@ func TestSecurity_QRLoginSession_SingleUse(t *testing.T) {
 	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, SessionSignIn{}, "", "")
 	require.NoError(t, err)
 
 	// First poll: returns tokens.

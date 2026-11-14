@@ -1,0 +1,477 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Recovery emails">
+  <h1>Recovery emails</h1>
+  <p>
+    An account can keep additional email addresses it has proved it controls.
+    Where the project allows it, such an address also signs in to the account,
+    so a person who lost their primary mailbox still has a way back in. A
+    session opened that way is held for a while from account security changes
+    and from handing out access that would outlast it, and every other address
+    of the account is told.
+  </p>
+
+  <h2 id="turning-it-on">Turning it on</h2>
+  <p>
+    Recovery emails are off by default and set per project, in the project's
+    <code>config_json</code>. The env-configured default project has no
+    <code>config_json</code>, so it keeps none.
+  </p>
+  <Code lang="json" code={`{
+  "recovery_emails": {
+    "enabled": true,
+    "max": 5,
+    "reauth_max_age_seconds": 900,
+    "sign_in": true,
+    "hold_seconds": 604800
+  }
+}`} />
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Recovery email settings">
+  <table>
+    <thead>
+      <tr><th scope="col">Key</th><th scope="col">Default</th><th scope="col">Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>enabled</code></td>
+        <td><code>false</code></td>
+        <td>Lets a signed-in user add recovery emails.</td>
+      </tr>
+      <tr>
+        <td><code>max</code></td>
+        <td><code>5</code> (<code>0</code> selects it; at most <code>20</code>)</td>
+        <td>How many recovery emails one account holds.</td>
+      </tr>
+      <tr>
+        <td><code>reauth_max_age_seconds</code></td>
+        <td><code>900</code> (<code>0</code> selects it; at most <code>3600</code>)</td>
+        <td>How recent a sign-in adding or removing an address needs. It cannot be turned off.</td>
+      </tr>
+      <tr>
+        <td><code>sign_in</code></td>
+        <td><code>false</code></td>
+        <td>An emailed code or link sent to a recovery email signs in to the account that holds it.</td>
+      </tr>
+      <tr>
+        <td><code>hold_seconds</code></td>
+        <td><code>604800</code>, seven days (<code>0</code> selects it; at most <code>2592000</code>)</td>
+        <td>How long after such a sign-in the session it opened is <a href="#the-hold">held</a>. It cannot be turned off.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  <p>
+    The two switches are independent. Turning <code>enabled</code> off stops
+    new addresses but keeps the ones held: their owners can still list and
+    remove them, they still cannot become any account's primary email, and,
+    while <code>sign_in</code> is on, they still sign in. Clear
+    <code>sign_in</code> to stop recovery sign-ins.
+  </p>
+
+  <h2 id="managing">Adding and removing addresses</h2>
+  <p>
+    All four RPCs need a session. Adding and removing also need a recent
+    sign-in: a session whose <code>auth_time</code> is older than
+    <code>reauth_max_age_seconds</code> is refused
+    <code>FAILED_PRECONDITION</code> with the stable
+    <code>reauthentication_required</code> token, so sign the user in again and
+    retry. Anonymous accounts and agents hold no recovery email, and neither
+    does an account whose own email is unproven: whoever signed it up may not
+    own that mailbox. When the owner proves the address (an emailed code or
+    link, or a provider that vouches for it), every recovery email the account
+    holds is removed with the sessions it opened, along with the password,
+    passkeys and provider links added before the proof.
+  </p>
+  <p>
+    <code>RequestRecoveryEmail</code> mails a 6-digit code to the address. Its
+    answer is the same whether or not another account holds the address.
+  </p>
+  <Code lang="bash" code={`curl -sX POST http://localhost/identity.v1.IdentityService/RequestRecoveryEmail \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"alice.spare@example.net"}'`} />
+  <p>
+    <code>VerifyRecoveryEmail</code> confirms the code and stores the address,
+    returning the account's addresses. An address is stored only once it is
+    proved.
+  </p>
+  <Code lang="bash" code={`curl -sX POST http://localhost/identity.v1.IdentityService/VerifyRecoveryEmail \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"alice.spare@example.net","code":"123456"}'`} />
+  <p>
+    <code>ListRecoveryEmails</code> returns the addresses, oldest first, each
+    with <code>verified_at</code>, <code>last_sign_in_at</code>, its latest
+    sign-in, and <code>hold_started_at</code>, when the latest
+    <a href="#the-hold">hold</a> it started began (epoch ms, 0 when it never
+    signed in), and <code>hold_until</code>, when the account's hold ends (0
+    when none is in force). It needs no recent sign-in and works
+    with the feature off. <code>RemoveRecoveryEmail</code> removes one address
+    and returns what is left; it too works with the feature off.
+  </p>
+  <Code lang="json" code={`{
+  "recoveryEmails": [
+    { "email": "alice.spare@example.net", "verifiedAt": "1730000000000",
+      "lastSignInAt": "1730700000000", "holdStartedAt": "1730500000000" }
+  ],
+  "holdUntil": "1731104800000"
+}`} />
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Answers when adding and removing addresses">
+  <table>
+    <thead>
+      <tr><th scope="col">Answer</th><th scope="col">When</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_emails_disabled</code></td><td><code>RequestRecoveryEmail</code> or <code>VerifyRecoveryEmail</code> in a project without <code>enabled</code>.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>email verification required</code></td><td><code>RequestRecoveryEmail</code> or <code>VerifyRecoveryEmail</code> for an account whose own email is unproven.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>reauthentication_required</code></td><td>Adding or removing from a session whose sign-in is too old.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_hold</code></td><td>Adding or removing from a session the <a href="#the-hold">hold</a> binds.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code>, <code>recovery_session</code></td><td>Adding or removing from a session that may be a recovery email's but names none, over <a href="#native-grpc">native gRPC</a>.</td></tr>
+      <tr><td><code>FAILED_PRECONDITION</code></td><td><code>RequestRecoveryEmail</code> for a child account when <code>GATEWAY_MINOR_DATA_MINIMIZATION</code> is on.</td></tr>
+      <tr><td><code>INVALID_ARGUMENT</code></td><td><code>RequestRecoveryEmail</code> for an address a sign-up would refuse: malformed, on a disposable-mailbox domain, or under a reserved or non-routable top-level domain.</td></tr>
+      <tr><td><code>UNAUTHENTICATED</code></td><td>A missing, expired, used up or wrong code, or one sent to another address; or a session a <a href="#removal">removed</a> address opened.</td></tr>
+      <tr><td><code>ALREADY_EXISTS</code></td><td>The address is the account's own (<code>RequestRecoveryEmail</code>), or another account's, told only by <code>VerifyRecoveryEmail</code> to a caller whose code was right.</td></tr>
+      <tr><td><code>RESOURCE_EXHAUSTED</code></td><td>The account already holds <code>max</code> addresses, or the caller's IP has spent its budget (below).</td></tr>
+      <tr><td><code>NOT_FOUND</code></td><td><code>RemoveRecoveryEmail</code> for an address the account does not hold.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>
+    The code has the passwordless code's lifetime and attempt cap
+    (<code>GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS</code>,
+    <code>GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS</code>), and every guess,
+    right or wrong, counts against the cap. Requests are held to
+    <code>GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS</code> per account and per
+    address. The per-address cooldown is the recovery codes' own, so a request
+    holds back no sign-in code, magic link or password reset to the address.
+    <code>RequestRecoveryEmail</code> and
+    <code>RemoveRecoveryEmail</code> share one per-IP budget of
+    <code>GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP</code>, and
+    <code>VerifyRecoveryEmail</code> has its own of that size. It is the
+    emailed sign-in code's variable too, so <code>0</code> turns off all of
+    them. These per-IP limits are the HTTP surface's: a host serving native
+    gRPC applies its own.
+  </p>
+
+  <h3>One address, one account</h3>
+  <p>
+    Within a project an address is held once: as one account's primary email
+    or as one account's recovery email. A primary email cannot be added as a
+    recovery email, and a recovery email cannot become any account's primary
+    email. A caller who is not signed in cannot tell a recovery email from a
+    free or a taken address: <code>PasswordSignup</code> and passkey sign-up
+    answer with the decoy a taken primary email gets, and an OAuth sign-in
+    with the <code>UNAUTHENTICATED</code> "sign in and link this provider" answer.
+    Callers that already hold an account or an admin's authority are told
+    plainly with <code>ALREADY_EXISTS</code>.
+  </p>
+
+  <h2 id="sign-in">Signing in with a recovery email</h2>
+  <p>
+    With <code>sign_in</code> on, <code>RequestEmailLoginCode</code> /
+    <code>VerifyEmailLoginCode</code> and <code>RequestMagicLink</code> /
+    <code>RedeemMagicLink</code> on a recovery email sign in to the account
+    that holds it. They never create an account, and they apply the
+    account's status, lockout, required second factor and tenant login policy
+    as any sign-in does. The project's access policy and the login policy go
+    by the account's primary email; an address on a blocked domain, or any
+    address in a <code>closed</code> project, is mailed nothing. OAuth and
+    passkey sign-in are unchanged: a provider asserting a recovery email does
+    not sign in to the holding account. With <code>sign_in</code> off, a code
+    or link redeemed for a recovery email is refused exactly as a wrong code
+    is, and no account is made on it.
+  </p>
+  <ul>
+    <li>
+      <strong>A second factor comes first.</strong> An account with two-step
+      verification, or a tenant policy requiring it, gets the usual
+      <code>totp_required</code> challenge, and nothing below happens until
+      <code>VerifyTotp</code> proves the factor.
+    </li>
+    <li>
+      <strong>The primary email is not proved by it.</strong> The sign-in
+      leaves <code>email_verified</code> as it was.
+    </li>
+    <li>
+      <strong>The session says how it was opened.</strong> Its access tokens
+      carry <code>amr: ["recovery_email"]</code> and
+      <code>recovery_email_id</code>, an opaque reference to the address that
+      never names it (see
+      <a href="/identity/docs/concepts/auth-model">the access token claims</a>),
+      and its refresh token keeps that reference across every rotation.
+    </li>
+    <li>
+      <strong>A hold starts</strong>, unless one the same address started is
+      still in force, and every other address of the account is mailed.
+    </li>
+  </ul>
+
+  <h2 id="the-hold">The recovery hold</h2>
+  <p>
+    Whoever got into a recovery mailbox must not be able to take the rest of
+    the account, take it from the owner, or hand out access the owner cannot
+    take back by removing the address, before the owner has read the notice.
+    So for <code>hold_seconds</code> after a sign-in by a recovery email, a
+    session a recovery email opened is refused
+    <code>FAILED_PRECONDITION</code>, with the stable
+    <code>recovery_hold</code> token and a <code>RecoveryHoldDetails</code>
+    detail carrying <code>hold_until</code>, by these calls, whatever the
+    account's role:
+  </p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Calls the hold refuses">
+  <table>
+    <thead>
+      <tr><th scope="col">What the call does</th><th scope="col">Calls</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Adds a way in or a way to recover the account</td>
+        <td><code>RequestRecoveryEmail</code>, <code>VerifyRecoveryEmail</code>, <code>RequestPhoneVerification</code>, <code>VerifyPhoneCode</code>, <code>BeginTotpSetup</code>, <code>VerifyTotpSetup</code>, <code>RegenerateRecoveryCodes</code>, <code>BeginPasskeyRegistration</code>, <code>CompletePasskeyRegistration</code>, <code>LinkIdentity</code></td>
+      </tr>
+      <tr>
+        <td>Takes one away</td>
+        <td><code>RemoveRecoveryEmail</code>, <code>RemovePhone</code>, <code>DisableTotp</code>, <code>DeletePasskey</code>, <code>UnlinkIdentity</code></td>
+      </tr>
+      <tr>
+        <td>Replaces one</td>
+        <td><code>ChangePassword</code>, <code>RequestEmailChange</code></td>
+      </tr>
+      <tr>
+        <td>Ends another session</td>
+        <td><code>RevokeSession</code> of any session but its own, <code>RevokeAllSessions</code>, <code>SignOutEverywhere</code></td>
+      </tr>
+      <tr>
+        <td>Deletes the account</td>
+        <td><code>DeleteMyAccount</code></td>
+      </tr>
+      <tr>
+        <td>Connects an agent or an agent machine</td>
+        <td><code>GetAgentAuthorization</code>, <code>DecideAgentAuthorization</code> (either decision), <code>RegisterAgentMachine</code>, <code>SelectAgentMachineAgents</code></td>
+      </tr>
+      <tr>
+        <td>Hires out a teammate</td>
+        <td><code>CreateHireGrant</code></td>
+      </tr>
+      <tr>
+        <td>Registers or changes an OAuth client</td>
+        <td><code>CreateOAuthClient</code>, <code>UpdateOAuthClient</code></td>
+      </tr>
+      <tr>
+        <td>Takes or uses a guardian's control over a child</td>
+        <td><code>GrantParentalConsent</code>, <code>CreateManagedChildAccount</code>, <code>GetManagedChildProfile</code>, <code>SetManagedChildPassword</code>, <code>SetManagedChildUsername</code>, <code>RevokeManagedChildSessions</code>, <code>DeactivateManagedChildAccount</code>, <code>ReactivateManagedChildAccount</code>, <code>DeleteManagedChildAccount</code></td>
+      </tr>
+      <tr>
+        <td>Gives an agent to someone else</td>
+        <td><code>TransferAgent</code></td>
+      </tr>
+      <tr>
+        <td>Changes who belongs to a tenant, or with what role</td>
+        <td><code>CreateTenantInvitation</code>, <code>RemoveTenantMember</code>, <code>SuspendTenantMember</code>, <code>RestoreTenantMember</code>, <code>TransferTenantOwnership</code>, <code>CreateDomain</code>, <code>VerifyDomain</code>, <code>SetDomainJoin</code></td>
+      </tr>
+      <tr>
+        <td>Adds, merges or reactivates an account, or sets a role or another account's password, as a project admin</td>
+        <td><code>InviteUser</code>, <code>CreateUser</code>, <code>UpdateUser</code>, <code>ResetUserPassword</code>, <code>MergeUsers</code>, <code>ReactivateUser</code></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  <p>
+    Nothing else is held. That covers the other reads of the account and
+    what it holds; calls that take access away rather than hand it out
+    (<code>RevokeAgentDelegation</code>, <code>RevokeAgentMachine</code>,
+    <code>CancelAgentTransfer</code>, <code>RevokeParentalConsent</code>, a
+    project admin's <code>DeactivateUser</code> and <code>DeleteUser</code>);
+    the account's own agents (<code>CreateAgent</code>,
+    <code>UpdateAgent</code>, <code>AcceptAgentTransfer</code> and the like);
+    accepting a tenant invitation or creating a tenant of its own; and the
+    other project-admin calls, such as listing users, quotas, groups and help
+    requests. <code>RegisterTeammateKey</code> is not a session's call: the
+    key manager makes it with a project credential, and it registers a key
+    only for a hire grant, which <code>CreateHireGrant</code> makes. In a
+    tenant the session acts only through an explicit membership, as the
+    limits below describe.
+  </p>
+  <ul>
+    <li>
+      <strong>The hold binds that session, not the owner.</strong> A session
+      opened any other way (the primary email, a password, a passkey, a linked
+      provider) is never held, so the owner can remove an address they do not
+      recognise at any time. <code>hold_started_at</code> says which address
+      is keeping the account held: the hold runs from the latest one among the
+      account's addresses, so removing addresses ends it early only once every
+      address whose hold is still in force is gone.
+    </li>
+    <li>
+      <strong>The held session can still sign itself out</strong>:
+      <code>Logout</code>, or <code>RevokeSession</code> of its own session,
+      which it can name only under <code>GATEWAY_REVOCATION_MODE=session</code>,
+      where its token carries a <code>sid</code>. One more way it can end the
+      other sessions is not held: presenting one of its own rotated refresh
+      tokens again sets off replay detection, which signs the whole account
+      out, the owner included, as it would for any session. The owner then
+      signs in again another way, and the recovery session is gone too.
+    </li>
+    <li>
+      <strong>A sign-in does not extend its own address's hold.</strong> A
+      sign-in from an address whose hold is still in force moves its
+      <code>last_sign_in_at</code> but not its <code>hold_started_at</code>, so
+      the hold's end stays where it was. The hold is measured with the
+      <code>hold_seconds</code> configured now, not the one in force at the
+      sign-in.
+    </li>
+    <li>
+      <strong>Merges are held for everyone.</strong> <code>MergeAccounts</code>
+      and the admin <code>MergeUsers</code> answer the same
+      <code>recovery_hold</code> refusal while a hold is in force on either
+      account, whoever asks.
+    </li>
+  </ul>
+  <p>
+    Two limits last for the whole recovery session, hold or not:
+  </p>
+  <ul>
+    <li>
+      <strong>No hand-off.</strong> <code>ApproveQrLogin</code> from a session
+      a recovery email opened answers <code>FAILED_PRECONDITION</code> with
+      the stable <code>recovery_session</code> token (rejecting is still
+      allowed): the session the hand-off would open could not say a recovery
+      email stands behind it.
+    </li>
+    <li>
+      <strong>No membership through the email's domain.</strong> Such a
+      session acts in a tenant only through an explicit membership:
+      <code>RefreshToken</code> refuses to select, and
+      <code>ListMyTenants</code> leaves out, a tenant the account belongs to
+      only through its email's domain (see
+      <a href="/identity/docs/concepts/multi-tenancy">Multi-Tenancy</a>).
+    </li>
+  </ul>
+  <p>
+    These limits bind the sessions a recovery email opens, not the account.
+    Once the hold has ended, such a session makes every call above, from every
+    seat the account holds: a project admin's recovery session administers the
+    project as their other sessions do. A project whose admins, guardians or
+    tenant owners must not be reachable through a mailbox other than their
+    primary one leaves <code>sign_in</code> off. Once the hold has ended, such
+    a session may also register a passkey or link a provider, and a sign-in
+    with either opens an ordinary session, which acts
+    in a tenant through the email's domain like any other, as long as the
+    account's primary email is verified and on that domain. So disabling a
+    member's organisational mailbox does not by itself end their access: a
+    personal recovery address can lead back to it a hold later, as a passkey
+    enrolled before the mailbox was disabled always could. An organisation
+    that wants a departing member out ends the membership itself, with
+    <code>SuspendTenantMember</code> or <code>RemoveTenantMember</code>, or
+    requires single sign-on in the tenant's login policy
+    (<code>sso_required</code>), which no recovery email can satisfy.
+  </p>
+
+  <h2 id="after-the-hold">After the hold: back to an ordinary session</h2>
+  <p>
+    A person who lost their primary mailbox signs in with a recovery email and
+    waits out the hold (<code>hold_until</code> says when it ends). Then, from
+    that session, they register a passkey
+    (<code>BeginPasskeyRegistration</code>) or link an identity provider
+    (<code>LinkIdentity</code>), and sign in with it from then on: that session
+    is an ordinary one, with no recovery limit. To replace the lost primary
+    email itself, <code>RequestEmailChange</code> needs the account's password;
+    an account without one keeps its primary email and signs in another way.
+  </p>
+
+  <h2 id="removal">Removing an address ends its sessions</h2>
+  <p>
+    <code>RemoveRecoveryEmail</code> deletes, in the same transaction as the
+    address, every refresh token a sign-in by that address wrote, rotated ones
+    included, and revokes the session each names. The account's other
+    sessions, including those its other recovery emails opened, are untouched,
+    and the refused refreshes do not set off replay detection. A session being
+    opened by that address while it is removed (a second factor or a date of
+    birth being completed) is refused <code>UNAUTHENTICATED</code> instead. The
+    ended sessions are audited as <code>session_revoked</code> with
+    <code>scope: recovery_email</code> and <code>revoked_count</code>.
+  </p>
+  <p>
+    An access token outlives the removal for a while: under
+    <code>GATEWAY_REVOCATION_MODE=ttl</code> until it expires
+    (<code>GATEWAY_JWT_EXPIRY_SECONDS</code>), and under <code>session</code>
+    until the session cache of the replica it reaches drops it (at once on the
+    replica that removed the address, within
+    <code>GATEWAY_SESSION_CACHE_TTL_SECONDS</code> on others). In either mode
+    such a token makes no account security change and hands out no access in
+    that time, hold or not: every call the hold refuses, and
+    <code>MergeAccounts</code>, answer it <code>UNAUTHENTICATED</code>, since
+    its <code>recovery_email_id</code> names an address the account no longer
+    holds. An address removed and added again is a new address, so the
+    sessions it opened before stay refused. The other calls, such as
+    <code>ListRecoveryEmails</code>, still answer until the token expires.
+    Removing the address does not take back what its sessions handed out
+    after the hold; the <a href="#notices">notice</a> says what to check.
+  </p>
+
+  <h2 id="notices">Notices</h2>
+  <ul>
+    <li>
+      A sign-in by a recovery email is mailed to the primary email and to the
+      account's other recovery emails. It names the address and when the hold
+      ends, lists what the session cannot do until then and says it can do
+      everything else, and tells the owner to sign in another way and remove
+      the address, which ends the session. A session that outlived the hold
+      may already have handed out access that removing the address does not
+      take back, so the notice also lists what to check: the account's
+      sign-in methods, its connected agents and their delegations
+      (<code>ListAgentDelegations</code>, <code>RevokeAgentDelegation</code>),
+      its agent machines (<code>ListAgentMachines</code>,
+      <code>RevokeAgentMachine</code>) and teammate keys, and the owners and
+      roles of its tenants (<code>ListTenantMembers</code>).
+    </li>
+    <li>
+      An added address is announced to the account's other addresses; a
+      removal to those and to the removed address.
+    </li>
+  </ul>
+  <p>
+    Every notice uses the project's email branding. A notice that cannot be
+    sent is logged, and the change stands.
+  </p>
+
+  <h2 id="merging">Merging accounts</h2>
+  <p>
+    <code>MergeAccounts</code> and <code>MergeUsers</code> move the retired
+    account's recovery emails to the survivor in the merge's transaction, so
+    each still signs in to, and is removed from, a live account. A merge that
+    would leave the survivor holding more than <code>max</code> is refused
+    <code>FAILED_PRECONDITION</code>: remove some first. See
+    <a href="/identity/docs/users/merging-accounts">Merging accounts</a>.
+  </p>
+
+  <h2 id="native-grpc">Native gRPC</h2>
+  <p>
+    A host that serves identity over native gRPC verifies tokens in its own
+    interceptor. The calls above read <code>x-authenticated-amr</code> and
+    <code>x-authenticated-recovery-email-id</code>, the token's
+    <code>amr</code> and <code>recovery_email_id</code>, only once the host
+    sets <code>identityserver.Options.GRPCTrustAMR</code>, meaning its
+    interceptor deletes whatever the client sent for either and sets both from
+    the verified token. Until then the bridge marks every session
+    <code>unvouched</code>, drops the id, and treats the session as one a
+    recovery email may have opened that cannot name its address. In a project
+    with <code>sign_in</code> on, such a session makes none of the changes
+    above and approves no QR sign-in, hold or not
+    (<code>FAILED_PRECONDITION</code>, <code>recovery_session</code>), and
+    <code>ListMyTenants</code> lists only its explicit memberships. Elsewhere
+    it is refused the same only while a hold is in force on its account.
+    <code>RegisterGRPC</code> logs <code>grpc_amr_not_trusted</code> when the
+    host trusts the token's other keys but not these. See
+    <code>docs/embedding.md</code> in the repository for the interceptor.
+  </p>
+
+  <h2 id="audit">Audit events</h2>
+  <ul>
+    <li><code>recovery_email_added</code>, <code>recovery_email_removed</code>: an address was proved and stored, or removed.</li>
+    <li><code>recovery_email_sign_in</code>: a recovery email signed in to the account, with the method that proved it.</li>
+    <li><code>session_revoked</code> with <code>scope: recovery_email</code>: the sessions a removed address opened.</li>
+  </ul>
+</DocsLayout>

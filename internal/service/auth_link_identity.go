@@ -23,13 +23,18 @@ import (
 // logging) so the caller learns whether the link was created. If the provider
 // identity is already linked — to this user or another — it returns
 // ErrAlreadyExists; the caller must not be able to steal another account's
-// provider identity, and a no-op re-link should not look like success.
+// provider identity, and a no-op re-link should not look like success. A
+// session a recovery hold binds is refused (RecoveryHoldError): a provider
+// it linked would sign in after the hold.
 func (s *AuthService) LinkIdentity(
 	ctx context.Context,
-	userID, code, provider, redirectURI, codeVerifier, state, stateToken string,
+	userID string, signIn SessionSignIn, code, provider, redirectURI, codeVerifier, state, stateToken string,
 ) (*OAuthIdentity, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, fmt.Errorf("%w: missing user ID", ErrUnauthenticated)
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return nil, err
 	}
 	// An anonymous caller must not gain a permanent credential here. The
 	// retention sweep keys on is_anonymous, so a link that leaves the flag

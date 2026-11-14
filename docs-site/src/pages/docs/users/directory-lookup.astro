@@ -8,8 +8,10 @@ import { Code } from "astro-expressive-code/components";
   <p>
     <code>LookupUsers</code> resolves a batch of email addresses to the
     accounts they name in one project, whether or not those accounts have
-    ever used the calling service. It is authorized by a machine credential
-    that can do nothing else: a <strong>directory reader</strong> key.
+    ever used the calling service, and <code>MatchTenantMemberPhones</code>
+    tells it which of a set of phone numbers, sent as hashes, belong to the
+    members of one tenant. Both are authorized by a machine credential that
+    can do nothing else: a <strong>directory reader</strong> key.
   </p>
   <p>
     Use it instead of giving a service an admin account. An admin session can
@@ -21,18 +23,19 @@ import { Code } from "astro-expressive-code/components";
   <aside role="note" class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
     <strong>Postgres deployments only.</strong> Directory keys are project
     credentials, which live in the control plane. On a build without one
-    (the memory and SQLite drivers) <code>LookupUsers</code> returns
-    <code>UNIMPLEMENTED</code>. The <code>directory_reader</code> kind needs
+    (the memory and SQLite drivers) <code>LookupUsers</code> and
+    <code>MatchTenantMemberPhones</code> return <code>UNIMPLEMENTED</code>. The <code>directory_reader</code> kind needs
     migration 0033: run <code>identity migrate</code>, or set
     <code>GATEWAY_POSTGRES_AUTO_MIGRATE</code>, before minting one. The boot
     log says which applies: <code>directory_lookup_enabled</code>, with the
-    effective rate limit, or <code>directory_lookup_disabled</code>.
+    effective rate limits, or <code>directory_lookup_disabled</code>.
   </aside>
 
   <h2>What the key can and cannot do</h2>
   <ul>
     <li>
-      It authorizes <code>LookupUsers</code> and no other RPC. Presented to
+      It authorizes <code>LookupUsers</code> and
+      <code>MatchTenantMemberPhones</code> and no other RPC. Presented to
       anything else — as <code>X-Directory-Key</code> or as a Bearer token — it
       is ignored, and the call is answered as if no credential were present
       (<code>UNAUTHENTICATED</code> on every user-management RPC).
@@ -190,6 +193,79 @@ import { Code } from "astro-expressive-code/components";
     <code>INVALID_ARGUMENT</code>.
   </p>
 
+  <h2 id="phone-match">Match phone numbers against a tenant's members</h2>
+  <p>
+    <code>MatchTenantMemberPhones</code> answers which members of a tenant
+    hold any of a set of phone numbers, such as a person's contacts, without
+    the service ever learning a member's number. Send the SHA-256 of each
+    number's E.164 text with its leading <code>+</code>: the digest of
+    <code>+14155550123</code>, not of <code>14155550123</code> or a
+    formatted spelling. Normalize the numbers to E.164 before hashing, or
+    they will not match.
+  </p>
+  <Code
+    lang="bash"
+    code={`HASH=$(printf '%s' '+14155550123' | openssl dgst -sha256 -binary | base64)
+curl -sS -X POST https://auth.example.com/identity.v1.IdentityService/MatchTenantMemberPhones \
+  -H "X-Directory-Key: $DIRECTORY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"tenantId": "<tenant-id>", "phoneNumberHashes": ["'"$HASH"'"]}'
+
+# {"userIds":["u_31…"]}`}
+  />
+  <ul>
+    <li>
+      The tenant must be one of the key's project. Any other id, a tenant of
+      another project included, is <code>PERMISSION_DENIED</code>, and the
+      answer does not say whether such a tenant exists elsewhere.
+    </li>
+    <li>
+      A member is one who may act in the tenant, as for
+      <code>ListMyTenants</code>: an active membership of a claimed tenant,
+      where one through the email's domain counts only while that email is
+      verified and on a domain the tenant has verified. A suspended or
+      latent tenant has no members to match. The account must be an active
+      person's, not anonymous and not an agent.
+    </li>
+    <li>
+      Only a <strong>verified</strong> number matches. A member whose number
+      is unverified, or who has none, is never returned, whatever was sent.
+    </li>
+    <li>
+      The response is the matching accounts' ids, in ascending order. It does
+      not say which hash matched which account.
+    </li>
+    <li>
+      A batch holds 1 to 3000 hashes of 32 bytes each; repeats count once.
+      An empty batch, more than 3000 hashes, a hash of any other length, or a
+      tenant id that is blank, longer than 64 characters or holds anything
+      but ASCII letters, digits, <code>-</code> and <code>_</code>, is
+      <code>INVALID_ARGUMENT</code>, checked before the key is looked up.
+    </li>
+    <li>
+      The hashes are compared and dropped. They are never stored or logged,
+      and the audit record carries only how many were asked for and matched.
+    </li>
+    <li>
+      Each key has its own budget per tenant,
+      <code>GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT</code> (default 60) per
+      <code>GATEWAY_RATE_LIMIT_WINDOW_SECONDS</code> window, counted on each
+      replica once the key is accepted, so a deployment of N replicas admits
+      up to N times as many. Over it the call is
+      <code>RESOURCE_EXHAUSTED</code>; wait for the window to roll over. The
+      budget cannot be switched off: unset or zero keeps the default, and a
+      negative value fails the boot. The call is also limited per client IP
+      by <code>GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP</code>, a budget of its
+      own apart from <code>LookupUsers</code>', refused as described above.
+    </li>
+  </ul>
+  <p>
+    A SHA-256 of a phone number hides it from a casual reader, not from
+    someone who tries every number: the space of numbers is small enough to
+    hash in full. Treat the hashes as the numbers they are, keep them on the
+    server, and send only those of people who chose to share their contacts.
+  </p>
+
   <h2 id="verified-email">Verified email</h2>
   <p>
     <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code> (default
@@ -257,6 +333,11 @@ import { Code } from "astro-expressive-code/components";
     recorded with <code>success=false</code> and a <code>reason</code>.
     Presenting the public id of another kind of credential, such as a
     publishable key, is refused without an audit row. The raw key and its
-    hash are never logged.
+    hash are never logged. Every phone match records
+    <code>directory_phone_match</code>, with the same actor, the tenant and
+    the number of hashes requested and matched, never a hash or a matched
+    account; a match against a tenant the key's project does not hold is
+    recorded with <code>success=false</code> and the reason
+    <code>tenant_not_in_project</code>.
   </p>
 </DocsLayout>

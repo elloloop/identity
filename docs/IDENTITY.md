@@ -800,6 +800,118 @@ per-project `config_json` lives only in the Postgres control plane, and the
 default project's variable refuses to boot on memory or SQLite. See the
 multi-tenancy docs, "invited sign-up".
 
+## Recovery emails
+
+A project can let its accounts keep **recovery emails**: additional addresses
+the account has proved it controls (`recovery_emails.enabled`, off by
+default; a control-plane project's `config_json` only).
+
+- An address is stored only after the 6-digit code mailed to it is confirmed
+  (`RequestRecoveryEmail` then `VerifyRecoveryEmail`), so nothing unproved is
+  ever held.
+- Within a project an address belongs to one account, as its primary email or
+  as one of its recovery emails. The request never says whether an address is
+  taken; only a caller who proves the address learns it.
+- An account holds at most `recovery_emails.max` addresses (default 5).
+- Adding and removing need a sign-in within
+  `recovery_emails.reauth_max_age_seconds` (default 900), and every change is
+  mailed to the account's other addresses.
+- With `recovery_emails.sign_in`, an emailed code or link sent to a recovery
+  email signs in to the account that holds it, which is the way back in for an
+  account whose primary mailbox is gone. Any second factor the account or its
+  tenant requires is asked for as at any sign-in.
+- Such a sign-in opens a session marked with the `amr` value
+  `recovery_email` and tied to the address by `recovery_email_id`, an opaque
+  reference that never names it, and once every factor is proved it starts a
+  hold for
+  `recovery_emails.hold_seconds` (default seven days) and tells the account's
+  other addresses. During the hold that session makes no account security
+  change: it cannot add or remove a recovery email, the phone, a second
+  factor or its recovery codes, a passkey or a linked identity provider,
+  change the password or the primary email, end the account's other
+  sessions, or delete the account. Nor does it hand out access that would
+  outlast the hold, from any seat the account holds: it connects no agent or
+  agent machine, hires out no teammate, registers or changes no OAuth client,
+  takes or uses no guardian's control over a child, gives no agent away,
+  changes no tenant's members or roles (domains included), and, as a project
+  admin, adds, merges or reactivates no account and sets no role or other
+  account's password. So whoever got into one recovery mailbox can neither
+  take the rest of the account, nor take it away from the owner, nor hand out
+  what removing the address would not take back, before the owner has read
+  the notice. The
+  notice says what to check if the owner acts only after the hold. The
+  session can still sign itself out. It never approves a QR sign-in, hold or not. A session opened any
+  other way is not held: the owner can always remove an address they do not
+  recognise (`ListRecoveryEmails` says when each last signed in and when the
+  latest hold it started began), and removing every address whose hold is
+  still in force ends the hold. A sign-in from the same address does not
+  extend a hold already in force.
+- Over native gRPC the session's `amr` and `recovery_email_id` reach
+  identity only from a host that forwards them and says so (`GRPCTrustAMR`).
+  Until then every session there is treated as one a recovery email may have
+  opened that cannot name its address: in a project with
+  `recovery_emails.sign_in` on it makes none of the changes a hold refuses,
+  approves no QR sign-in and `ListMyTenants` lists only its explicit
+  memberships; elsewhere it is held during a hold.
+- Removing a recovery email ends every session it opened, in the same
+  transaction: their refresh tokens are deleted, rotated ones included, and
+  under `GATEWAY_REVOCATION_MODE=session` their access tokens stop working at
+  once on the replica that removed it and within the session cache's TTL on
+  others. Under either mode an access token left over makes none of the
+  changes a hold refuses until it expires: it names an address the account
+  no longer holds. A session being opened by the address as it is removed is
+  refused, and the account's other sessions are untouched.
+- While a hold is in force on either account, a merge is refused, whoever
+  asks.
+- A session a recovery email opened acts in a tenant only through an explicit
+  membership: a tenant that admits members by their email's domain does not
+  admit it. The limit binds that session, not the account: once the hold has
+  ended it may register a passkey or link a provider, whose sign-ins are
+  ordinary and act through the email's domain again. Disabling a member's
+  organisational mailbox therefore does not by itself end their access; the
+  organisation ends it with `SuspendTenantMember` or `RemoveTenantMember`, or
+  requires SSO in the tenant's login policy.
+
+## Phone verification
+
+A signed-in user proves a phone number with a one-time code
+(`RequestPhoneVerification`, `VerifyPhoneCode`) and can remove it
+(`RemovePhone`). A phone is a proof of ownership, never a way to sign in or to
+recover an account.
+
+The deployment decides which senders exist: an SMS provider
+(`GATEWAY_SMS_*`), and optionally a messaging-app template sender, the
+WhatsApp Business Cloud API (`GATEWAY_TEMPLATEMSG_*`) or one an embedder wires
+(`pkg/templatemsg`). A local deployment can capture either channel instead
+(`local_capture`): each code is mailed to the account's own address, and the
+server refuses to start with it unless every public address it is configured
+with is a loopback host. A project's `phone` block narrows the rest and can
+turn nothing on that the deployment lacks:
+
+- `phone.enabled: false` switches verification off for the project.
+- `phone.channels` orders the delivery channels (`"message"`, `"sms"`) and
+  drops the ones left out.
+- `phone.allowed_calling_codes` limits the calling codes a code is sent to
+  (one code can cover several countries).
+- `phone.unique` keeps a verified number on one account; it moves only when
+  its holder releases it or, with `phone.reassign_after_seconds` (at most ten
+  years), after that long.
+
+A tenant can require a verified phone (`LoginPolicy.require_verified_phone`,
+optionally under some calling codes): until the account has one, a selection
+of the tenant is refused and no token for it is minted. The refusal's
+`TenantSelectionRefusedDetails.phone_calling_codes` names the calling codes
+the tenant accepts (empty for any), so an app can offer only those. The
+account still signs in and verifies a phone with that unselected session.
+
+A service holding a `directory_reader` credential can ask which members of
+one of its project's tenants hold any of a set of phone numbers, sent as
+SHA-256 hashes of their E.164 text (`MatchTenantMemberPhones`, at most 3000
+per call). Only a verified number matches, only members who may act in the
+tenant are returned, and the hashes are never stored or logged. Each
+credential has a budget per tenant
+(`GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT`). No end user can call it.
+
 ## Onboarding flows
 
 Every signup creates a `User` inside the resolved project's data plane,
@@ -1249,7 +1361,8 @@ before you ship.
       identity's expected metadata (`x-authenticated-user-id`). This keeps
       the bridge a pure transport adapter rather than re-implementing the
       middleware twice. The exceptions are `GetManagedChildAuthorization` (its independent
-      `GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP` budget), `LookupUsers`, the tenant
+      `GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP` budget), the directory reads
+      (`LookupUsers`, `MatchTenantMemberPhones`), the tenant
       operations called with a `tenant_operator` credential, and the agent
       machine calls (see `docs/embedding.md`): the bridge charges them
       against the same per-IP limiters the HTTP chain uses, so each budget
@@ -1338,7 +1451,9 @@ before you ship.
       via the existing `PathLimit` middleware); a per-email send cooldown
       reusing `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS` so one inbox can't be
       flooded; an OTP brute-force cap (`GATEWAY_PASSWORDLESS_CODE_MAX_
-      ATTEMPTS`, default 5) that invalidates the code once exhausted; a
+      ATTEMPTS`, default 5) that invalidates the code once exhausted, every
+      guess counted against it in the one write that reads the code
+      (`CountEmailLoginCodeAttempt`) so concurrent guesses cannot pass it; a
       short OTP TTL (`GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS`, default
       300); single-use replay rejection on both arms via the `consumed_at`
       CAS; and anti-enumeration on every Request response (identical

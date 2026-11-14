@@ -58,7 +58,7 @@ func TestManagedChildReaderCredential_StoredAndReadByPublicID(t *testing.T) {
 	require.True(t, active.Guardian.RequireAdultProfile)
 }
 
-// 0059 widens the kind check to admit managed_child_reader; rolling it back
+// 0061 widens the kind check to admit managed_child_reader; rolling it back
 // deletes those credentials alone and narrows the check again.
 func TestManagedChildReaderCredentialMigrationRoundTrip(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
@@ -68,7 +68,7 @@ func TestManagedChildReaderCredentialMigrationRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	scratch := createScratchDatabase(ctx, t, dsn)
-	migrateToVersion(t, scratch, 59)
+	migrateToVersion(t, scratch, 61)
 	raw, err := pgx.Connect(ctx, scratch)
 	require.NoError(t, err)
 	defer func() { _ = raw.Close(ctx) }()
@@ -89,7 +89,7 @@ func TestManagedChildReaderCredentialMigrationRoundTrip(t *testing.T) {
 	}
 	require.Contains(t, kinds(), "managed_child_reader")
 
-	migrateToVersion(t, scratch, 58)
+	migrateToVersion(t, scratch, 60)
 	require.NotContains(t, kinds(), "managed_child_reader")
 	require.Contains(t, kinds(), "teammate_key_manager")
 	require.Contains(t, kinds(), "tenant_operator")
@@ -102,6 +102,6 @@ func TestManagedChildReaderCredentialMigrationRoundTrip(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "project_credentials_kind_check"), err.Error())
 
-	migrateToVersion(t, scratch, 59)
+	migrateToVersion(t, scratch, 61)
 	require.NoError(t, insert("ck_two", "managed_child_reader"))
 }

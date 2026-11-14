@@ -55,6 +55,11 @@ const (
 	IdentityService_RefreshAssuranceToken_FullMethodName             = "/identity.v1.IdentityService/RefreshAssuranceToken"
 	IdentityService_RequestPhoneVerification_FullMethodName          = "/identity.v1.IdentityService/RequestPhoneVerification"
 	IdentityService_VerifyPhoneCode_FullMethodName                   = "/identity.v1.IdentityService/VerifyPhoneCode"
+	IdentityService_RemovePhone_FullMethodName                       = "/identity.v1.IdentityService/RemovePhone"
+	IdentityService_RequestRecoveryEmail_FullMethodName              = "/identity.v1.IdentityService/RequestRecoveryEmail"
+	IdentityService_VerifyRecoveryEmail_FullMethodName               = "/identity.v1.IdentityService/VerifyRecoveryEmail"
+	IdentityService_ListRecoveryEmails_FullMethodName                = "/identity.v1.IdentityService/ListRecoveryEmails"
+	IdentityService_RemoveRecoveryEmail_FullMethodName               = "/identity.v1.IdentityService/RemoveRecoveryEmail"
 	IdentityService_GetCurrentUser_FullMethodName                    = "/identity.v1.IdentityService/GetCurrentUser"
 	IdentityService_RefreshToken_FullMethodName                      = "/identity.v1.IdentityService/RefreshToken"
 	IdentityService_Logout_FullMethodName                            = "/identity.v1.IdentityService/Logout"
@@ -191,6 +196,7 @@ const (
 	IdentityService_AdminDeleteProjectOAuthHostClient_FullMethodName = "/identity.v1.IdentityService/AdminDeleteProjectOAuthHostClient"
 	IdentityService_GetManagedChildAuthorization_FullMethodName      = "/identity.v1.IdentityService/GetManagedChildAuthorization"
 	IdentityService_LookupUsers_FullMethodName                       = "/identity.v1.IdentityService/LookupUsers"
+	IdentityService_MatchTenantMemberPhones_FullMethodName           = "/identity.v1.IdentityService/MatchTenantMemberPhones"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -257,9 +263,32 @@ type IdentityServiceClient interface {
 	CreateAssuranceChallenge(ctx context.Context, in *CreateAssuranceChallengeRequest, opts ...grpc.CallOption) (*CreateAssuranceChallengeResponse, error)
 	IssueAssuranceToken(ctx context.Context, in *IssueAssuranceTokenRequest, opts ...grpc.CallOption) (*IssueAssuranceTokenResponse, error)
 	RefreshAssuranceToken(ctx context.Context, in *RefreshAssuranceTokenRequest, opts ...grpc.CallOption) (*RefreshAssuranceTokenResponse, error)
-	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	// Phone verification (one-time code) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(ctx context.Context, in *RequestPhoneVerificationRequest, opts ...grpc.CallOption) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(ctx context.Context, in *VerifyPhoneCodeRequest, opts ...grpc.CallOption) (*VerifyPhoneCodeResponse, error)
+	// RemovePhone clears the caller's phone number and its verified state,
+	// freeing the number for another account where the project keeps numbers
+	// unique. A caller with no number gets their user back unchanged. A tenant
+	// that requires a verified phone can no longer be selected afterwards.
+	// Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
+	// session a recovery hold binds (RecoveryHoldDetails).
+	RemovePhone(ctx context.Context, in *RemovePhoneRequest, opts ...grpc.CallOption) (*RemovePhoneResponse, error)
+	// Recovery emails — additional addresses the authenticated caller has
+	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+	// address another account of the project holds and RESOURCE_EXHAUSTED past
+	// the project's cap; RequestRecoveryEmail answers them for the caller's own
+	// addresses and its own full list, and INVALID_ARGUMENT for an address a
+	// sign-up would refuse. A project that has not turned the feature on
+	// refuses RequestRecoveryEmail and VerifyRecoveryEmail with
+	// FAILED_PRECONDITION, while addresses already kept can still be listed and
+	// removed. Adding or removing an address mails a notice to the account's
+	// other addresses, and a removal to the removed address too. During a
+	// recovery hold a session a recovery email opened can do neither
+	// (RecoveryHoldDetails).
+	RequestRecoveryEmail(ctx context.Context, in *RequestRecoveryEmailRequest, opts ...grpc.CallOption) (*RequestRecoveryEmailResponse, error)
+	VerifyRecoveryEmail(ctx context.Context, in *VerifyRecoveryEmailRequest, opts ...grpc.CallOption) (*VerifyRecoveryEmailResponse, error)
+	ListRecoveryEmails(ctx context.Context, in *ListRecoveryEmailsRequest, opts ...grpc.CallOption) (*ListRecoveryEmailsResponse, error)
+	RemoveRecoveryEmail(ctx context.Context, in *RemoveRecoveryEmailRequest, opts ...grpc.CallOption) (*RemoveRecoveryEmailResponse, error)
 	// Session / Token Auth
 	GetCurrentUser(ctx context.Context, in *GetCurrentUserRequest, opts ...grpc.CallOption) (*GetCurrentUserResponse, error)
 	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error)
@@ -588,7 +617,9 @@ type IdentityServiceClient interface {
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*InviteUserResponse, error)
 	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
-	// survivor_user_id, no password asked. Admin only.
+	// survivor_user_id, no password asked. Admin only. Neither account may be
+	// the admin's own (FAILED_PRECONDITION): an admin merges another account
+	// into theirs with MergeAccounts.
 	MergeUsers(ctx context.Context, in *MergeUsersRequest, opts ...grpc.CallOption) (*MergeUsersResponse, error)
 	AcceptInvitation(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*AcceptInvitationResponse, error)
 	DeactivateUser(ctx context.Context, in *DeactivateUserRequest, opts ...grpc.CallOption) (*DeactivateUserResponse, error)
@@ -869,6 +900,26 @@ type IdentityServiceClient interface {
 	// registration with RESOURCE_EXHAUSTED and the same value in the
 	// "retry-after" response metadata.
 	LookupUsers(ctx context.Context, in *LookupUsersRequest, opts ...grpc.CallOption) (*LookupUsersResponse, error)
+	// MatchTenantMemberPhones matches a service's phone-number hashes (a
+	// person's contacts, say) against the members of one tenant and returns
+	// the members whose verified number is among them. Like LookupUsers it is
+	// called by a service, never an end user: a user's access token does not
+	// authorize it, only a directory_reader project credential in the
+	// "X-Directory-Key" header, scoped to that credential's project whatever
+	// the request Host. UNAUTHENTICATED for a missing, wrong, revoked or
+	// non-directory key; INVALID_ARGUMENT for a bad tenant_id, an empty batch,
+	// more than 3000 hashes or one that is not 32 bytes, checked before the key
+	// is looked up; PERMISSION_DENIED for a tenant the credential's project
+	// does not hold; UNIMPLEMENTED on a build with no control plane. Each
+	// credential has a budget per tenant of
+	// GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT calls per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, counted once the key is accepted:
+	// over it the call is RESOURCE_EXHAUSTED. Calls are also limited per
+	// client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window, a budget of
+	// their own, refused as LookupUsers' are). Each answered call is audited
+	// as directory_phone_match with the tenant and the number of hashes asked
+	// for and matched, never the hashes.
+	MatchTenantMemberPhones(ctx context.Context, in *MatchTenantMemberPhonesRequest, opts ...grpc.CallOption) (*MatchTenantMemberPhonesResponse, error)
 }
 
 type identityServiceClient struct {
@@ -1233,6 +1284,56 @@ func (c *identityServiceClient) VerifyPhoneCode(ctx context.Context, in *VerifyP
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(VerifyPhoneCodeResponse)
 	err := c.cc.Invoke(ctx, IdentityService_VerifyPhoneCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RemovePhone(ctx context.Context, in *RemovePhoneRequest, opts ...grpc.CallOption) (*RemovePhoneResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemovePhoneResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RemovePhone_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RequestRecoveryEmail(ctx context.Context, in *RequestRecoveryEmailRequest, opts ...grpc.CallOption) (*RequestRecoveryEmailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestRecoveryEmailResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RequestRecoveryEmail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) VerifyRecoveryEmail(ctx context.Context, in *VerifyRecoveryEmailRequest, opts ...grpc.CallOption) (*VerifyRecoveryEmailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyRecoveryEmailResponse)
+	err := c.cc.Invoke(ctx, IdentityService_VerifyRecoveryEmail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListRecoveryEmails(ctx context.Context, in *ListRecoveryEmailsRequest, opts ...grpc.CallOption) (*ListRecoveryEmailsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRecoveryEmailsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListRecoveryEmails_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RemoveRecoveryEmail(ctx context.Context, in *RemoveRecoveryEmailRequest, opts ...grpc.CallOption) (*RemoveRecoveryEmailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveRecoveryEmailResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RemoveRecoveryEmail_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2599,6 +2700,16 @@ func (c *identityServiceClient) LookupUsers(ctx context.Context, in *LookupUsers
 	return out, nil
 }
 
+func (c *identityServiceClient) MatchTenantMemberPhones(ctx context.Context, in *MatchTenantMemberPhonesRequest, opts ...grpc.CallOption) (*MatchTenantMemberPhonesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MatchTenantMemberPhonesResponse)
+	err := c.cc.Invoke(ctx, IdentityService_MatchTenantMemberPhones_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
@@ -2663,9 +2774,32 @@ type IdentityServiceServer interface {
 	CreateAssuranceChallenge(context.Context, *CreateAssuranceChallengeRequest) (*CreateAssuranceChallengeResponse, error)
 	IssueAssuranceToken(context.Context, *IssueAssuranceTokenRequest) (*IssueAssuranceTokenResponse, error)
 	RefreshAssuranceToken(context.Context, *RefreshAssuranceTokenRequest) (*RefreshAssuranceTokenResponse, error)
-	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	// Phone verification (one-time code) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *RequestPhoneVerificationRequest) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error)
+	// RemovePhone clears the caller's phone number and its verified state,
+	// freeing the number for another account where the project keeps numbers
+	// unique. A caller with no number gets their user back unchanged. A tenant
+	// that requires a verified phone can no longer be selected afterwards.
+	// Like RequestPhoneVerification and VerifyPhoneCode, it is refused to a
+	// session a recovery hold binds (RecoveryHoldDetails).
+	RemovePhone(context.Context, *RemovePhoneRequest) (*RemovePhoneResponse, error)
+	// Recovery emails — additional addresses the authenticated caller has
+	// proved they control. VerifyRecoveryEmail answers ALREADY_EXISTS for an
+	// address another account of the project holds and RESOURCE_EXHAUSTED past
+	// the project's cap; RequestRecoveryEmail answers them for the caller's own
+	// addresses and its own full list, and INVALID_ARGUMENT for an address a
+	// sign-up would refuse. A project that has not turned the feature on
+	// refuses RequestRecoveryEmail and VerifyRecoveryEmail with
+	// FAILED_PRECONDITION, while addresses already kept can still be listed and
+	// removed. Adding or removing an address mails a notice to the account's
+	// other addresses, and a removal to the removed address too. During a
+	// recovery hold a session a recovery email opened can do neither
+	// (RecoveryHoldDetails).
+	RequestRecoveryEmail(context.Context, *RequestRecoveryEmailRequest) (*RequestRecoveryEmailResponse, error)
+	VerifyRecoveryEmail(context.Context, *VerifyRecoveryEmailRequest) (*VerifyRecoveryEmailResponse, error)
+	ListRecoveryEmails(context.Context, *ListRecoveryEmailsRequest) (*ListRecoveryEmailsResponse, error)
+	RemoveRecoveryEmail(context.Context, *RemoveRecoveryEmailRequest) (*RemoveRecoveryEmailResponse, error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error)
 	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error)
@@ -2994,7 +3128,9 @@ type IdentityServiceServer interface {
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error)
 	// MergeUsers is the admin form of MergeAccounts: merge other_user_id into
-	// survivor_user_id, no password asked. Admin only.
+	// survivor_user_id, no password asked. Admin only. Neither account may be
+	// the admin's own (FAILED_PRECONDITION): an admin merges another account
+	// into theirs with MergeAccounts.
 	MergeUsers(context.Context, *MergeUsersRequest) (*MergeUsersResponse, error)
 	AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error)
 	DeactivateUser(context.Context, *DeactivateUserRequest) (*DeactivateUserResponse, error)
@@ -3275,6 +3411,26 @@ type IdentityServiceServer interface {
 	// registration with RESOURCE_EXHAUSTED and the same value in the
 	// "retry-after" response metadata.
 	LookupUsers(context.Context, *LookupUsersRequest) (*LookupUsersResponse, error)
+	// MatchTenantMemberPhones matches a service's phone-number hashes (a
+	// person's contacts, say) against the members of one tenant and returns
+	// the members whose verified number is among them. Like LookupUsers it is
+	// called by a service, never an end user: a user's access token does not
+	// authorize it, only a directory_reader project credential in the
+	// "X-Directory-Key" header, scoped to that credential's project whatever
+	// the request Host. UNAUTHENTICATED for a missing, wrong, revoked or
+	// non-directory key; INVALID_ARGUMENT for a bad tenant_id, an empty batch,
+	// more than 3000 hashes or one that is not 32 bytes, checked before the key
+	// is looked up; PERMISSION_DENIED for a tenant the credential's project
+	// does not hold; UNIMPLEMENTED on a build with no control plane. Each
+	// credential has a budget per tenant of
+	// GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT calls per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, counted once the key is accepted:
+	// over it the call is RESOURCE_EXHAUSTED. Calls are also limited per
+	// client IP (GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP per window, a budget of
+	// their own, refused as LookupUsers' are). Each answered call is audited
+	// as directory_phone_match with the tenant and the number of hashes asked
+	// for and matched, never the hashes.
+	MatchTenantMemberPhones(context.Context, *MatchTenantMemberPhonesRequest) (*MatchTenantMemberPhonesResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
 }
 
@@ -3392,6 +3548,21 @@ func (UnimplementedIdentityServiceServer) RequestPhoneVerification(context.Conte
 }
 func (UnimplementedIdentityServiceServer) VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VerifyPhoneCode not implemented")
+}
+func (UnimplementedIdentityServiceServer) RemovePhone(context.Context, *RemovePhoneRequest) (*RemovePhoneResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemovePhone not implemented")
+}
+func (UnimplementedIdentityServiceServer) RequestRecoveryEmail(context.Context, *RequestRecoveryEmailRequest) (*RequestRecoveryEmailResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestRecoveryEmail not implemented")
+}
+func (UnimplementedIdentityServiceServer) VerifyRecoveryEmail(context.Context, *VerifyRecoveryEmailRequest) (*VerifyRecoveryEmailResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyRecoveryEmail not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListRecoveryEmails(context.Context, *ListRecoveryEmailsRequest) (*ListRecoveryEmailsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRecoveryEmails not implemented")
+}
+func (UnimplementedIdentityServiceServer) RemoveRecoveryEmail(context.Context, *RemoveRecoveryEmailRequest) (*RemoveRecoveryEmailResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveRecoveryEmail not implemented")
 }
 func (UnimplementedIdentityServiceServer) GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCurrentUser not implemented")
@@ -3800,6 +3971,9 @@ func (UnimplementedIdentityServiceServer) GetManagedChildAuthorization(context.C
 }
 func (UnimplementedIdentityServiceServer) LookupUsers(context.Context, *LookupUsersRequest) (*LookupUsersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LookupUsers not implemented")
+}
+func (UnimplementedIdentityServiceServer) MatchTenantMemberPhones(context.Context, *MatchTenantMemberPhonesRequest) (*MatchTenantMemberPhonesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MatchTenantMemberPhones not implemented")
 }
 func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
 func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
@@ -4466,6 +4640,96 @@ func _IdentityService_VerifyPhoneCode_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).VerifyPhoneCode(ctx, req.(*VerifyPhoneCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RemovePhone_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemovePhoneRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RemovePhone(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RemovePhone_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RemovePhone(ctx, req.(*RemovePhoneRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RequestRecoveryEmail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestRecoveryEmailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RequestRecoveryEmail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RequestRecoveryEmail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RequestRecoveryEmail(ctx, req.(*RequestRecoveryEmailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_VerifyRecoveryEmail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyRecoveryEmailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).VerifyRecoveryEmail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_VerifyRecoveryEmail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).VerifyRecoveryEmail(ctx, req.(*VerifyRecoveryEmailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListRecoveryEmails_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRecoveryEmailsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListRecoveryEmails(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListRecoveryEmails_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListRecoveryEmails(ctx, req.(*ListRecoveryEmailsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RemoveRecoveryEmail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveRecoveryEmailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RemoveRecoveryEmail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RemoveRecoveryEmail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RemoveRecoveryEmail(ctx, req.(*RemoveRecoveryEmailRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -6918,6 +7182,24 @@ func _IdentityService_LookupUsers_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_MatchTenantMemberPhones_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MatchTenantMemberPhonesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).MatchTenantMemberPhones(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_MatchTenantMemberPhones_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).MatchTenantMemberPhones(ctx, req.(*MatchTenantMemberPhonesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -7068,6 +7350,26 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VerifyPhoneCode",
 			Handler:    _IdentityService_VerifyPhoneCode_Handler,
+		},
+		{
+			MethodName: "RemovePhone",
+			Handler:    _IdentityService_RemovePhone_Handler,
+		},
+		{
+			MethodName: "RequestRecoveryEmail",
+			Handler:    _IdentityService_RequestRecoveryEmail_Handler,
+		},
+		{
+			MethodName: "VerifyRecoveryEmail",
+			Handler:    _IdentityService_VerifyRecoveryEmail_Handler,
+		},
+		{
+			MethodName: "ListRecoveryEmails",
+			Handler:    _IdentityService_ListRecoveryEmails_Handler,
+		},
+		{
+			MethodName: "RemoveRecoveryEmail",
+			Handler:    _IdentityService_RemoveRecoveryEmail_Handler,
 		},
 		{
 			MethodName: "GetCurrentUser",
@@ -7613,6 +7915,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "LookupUsers",
 			Handler:    _IdentityService_LookupUsers_Handler,
 		},
+		{
+			MethodName: "MatchTenantMemberPhones",
+			Handler:    _IdentityService_MatchTenantMemberPhones_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "identity/v1/identity.proto",
@@ -7814,7 +8120,10 @@ type HireGrantServiceClient interface {
 	// session. PERMISSION_DENIED: the caller is not an active person, or is
 	// neither the teammate's owner nor a project admin, or teammate_id is not
 	// an active agent account of the project; every such caller gets the same
-	// answer. INVALID_ARGUMENT: a blank or malformed id.
+	// answer. INVALID_ARGUMENT: a blank or malformed id. FAILED_PRECONDITION
+	// (`recovery_hold`, RecoveryHoldDetails): a session a recovery hold binds;
+	// UNAUTHENTICATED, too, for a session whose recovery email the account no
+	// longer holds.
 	CreateHireGrant(ctx context.Context, in *CreateHireGrantRequest, opts ...grpc.CallOption) (*CreateHireGrantResponse, error)
 }
 
@@ -7850,7 +8159,10 @@ type HireGrantServiceServer interface {
 	// session. PERMISSION_DENIED: the caller is not an active person, or is
 	// neither the teammate's owner nor a project admin, or teammate_id is not
 	// an active agent account of the project; every such caller gets the same
-	// answer. INVALID_ARGUMENT: a blank or malformed id.
+	// answer. INVALID_ARGUMENT: a blank or malformed id. FAILED_PRECONDITION
+	// (`recovery_hold`, RecoveryHoldDetails): a session a recovery hold binds;
+	// UNAUTHENTICATED, too, for a session whose recovery email the account no
+	// longer holds.
 	CreateHireGrant(context.Context, *CreateHireGrantRequest) (*CreateHireGrantResponse, error)
 	mustEmbedUnimplementedHireGrantServiceServer()
 }

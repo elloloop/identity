@@ -20,15 +20,17 @@ import (
 // revoked (their refresh tokens are deleted), forcing re-authentication
 // on all devices — the documented credential-change behavior.
 //
-// The caller's own session is included: this RPC does not carry the
-// current session/token id (the handler only resolves the authenticated
-// user id from the JWT), so we cannot single out and preserve the
-// caller's session. The user re-signs in with their new password. The
-// session revoke is best-effort — the password is already committed when
-// it runs, so a revoke failure is logged rather than failing the RPC.
-func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+// The caller's own session is included: the user re-signs in with their
+// new password. The session revoke is best-effort — the password is
+// already committed when it runs, so a revoke failure is logged rather
+// than failing the RPC. A session a recovery hold binds is refused
+// (RecoveryHoldError).
+func (s *ProfileService) ChangePassword(ctx context.Context, userID string, signIn SessionSignIn, currentPassword, newPassword string) error {
 	if currentPassword == "" || newPassword == "" {
 		return errors.New("both current and new password are required")
+	}
+	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return err
 	}
 
 	userNode, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
@@ -64,7 +66,7 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 
 	op := graph.Operation{
 		Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: userID,
-		Patch: map[string]any{ufPasswordHash: newHash, ufPasswordChangeRequired: false, ufUpdatedAt: nowMs()},
+		Patch: map[string]any{ufPasswordHash: newHash, ufPasswordChangeRequired: false, ufUpdatedAt: s.nowMs()},
 	}
 	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(userID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("update password: %w", err)

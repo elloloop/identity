@@ -24,7 +24,7 @@ func (h *IdentityHandler) CreateDomain(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	created, err := h.domains.CreateDomain(ctx, userID, req.Msg.TenantId, req.Msg.Domain, req.Msg.VerificationMethod)
+	created, err := h.domains.CreateDomain(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId, req.Msg.Domain, req.Msg.VerificationMethod)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -49,7 +49,7 @@ func (h *IdentityHandler) VerifyDomain(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	d, err := h.domains.VerifyDomain(ctx, userID, req.Msg.DomainId)
+	d, err := h.domains.VerifyDomain(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.DomainId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -98,7 +98,7 @@ func (h *IdentityHandler) SetDomainJoin(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	d, err := h.domains.SetDomainJoin(ctx, userID, req.Msg.GetDomainId(), req.Msg.GetAllowJoin(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	d, err := h.domains.SetDomainJoin(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetDomainId(), req.Msg.GetAllowJoin(), clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}

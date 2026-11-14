@@ -751,6 +751,9 @@ type MemRepo struct {
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
+	recoveryEmailCodes map[string]*service.RecoveryEmailCodeRecord
+	recoveryEmails     map[string][]*service.RecoveryEmail
+	phoneClaims        map[string]phoneClaim
 	totpCreds          map[string]*service.TotpCredRecord
 	recoveryCodes      map[string]*service.RecoveryCodeRecord
 	loginChallenges    map[string]*service.LoginChallengeRecord
@@ -785,6 +788,9 @@ func NewMemRepo() *MemRepo {
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
+		recoveryEmailCodes: make(map[string]*service.RecoveryEmailCodeRecord),
+		recoveryEmails:     make(map[string][]*service.RecoveryEmail),
+		phoneClaims:        make(map[string]phoneClaim),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -958,6 +964,9 @@ func (r *MemRepo) GetUser(_ context.Context, userID string) (*service.User, erro
 func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if u.Email != "" && r.recoveryEmailHeldLocked(u.Email) {
+		return "", fmt.Errorf("email %q is a recovery email: %w", u.Email, service.ErrAlreadyExists)
+	}
 	for _, existing := range r.users {
 		// Under service.FoldEmail + ErrAlreadyExists-wrapped, matching the
 		// production memory driver and the cross-driver conformance contract.
@@ -999,6 +1008,9 @@ func (r *MemRepo) UpdateUser(_ context.Context, userID string, fields map[string
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if email, _ := fields["email"].(string); email != "" && r.recoveryEmailHeldLocked(email) {
+		return fmt.Errorf("email %q is a recovery email: %w", email, service.ErrAlreadyExists)
 	}
 	// Same partial unique index as CreateUser: a rename onto a taken handle
 	// is refused BEFORE any mutation, so a rejected update leaves the store
@@ -1066,6 +1078,9 @@ func (r *MemRepo) DeleteUser(_ context.Context, userID string) error {
 // must hold r.mu. Shared with DeleteStaleAnonymousUsers so the sweep
 // cascades exactly like the SQL drivers' foreign keys do.
 func (r *MemRepo) deleteUserRowsLocked(userID string) {
+	delete(r.recoveryEmailCodes, userID)
+	delete(r.recoveryEmails, userID)
+	r.releasePhoneClaimsLocked(userID)
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
 			delete(r.refreshTokens, id)
@@ -1379,6 +1394,9 @@ func (r *MemRepo) FindRefreshTokenByHashIncludingConsumed(_ context.Context, has
 func (r *MemRepo) CreateRefreshToken(_ context.Context, rec *service.RefreshTokenRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if rec.RecoveryEmailID != "" && r.heldRecoveryEmailLocked(rec.UserID, recoveryEmailWithID(rec.RecoveryEmailID)) < 0 {
+		return "", fmt.Errorf("integration: CreateRefreshToken: %w", service.ErrNotFound)
+	}
 	id := r.nextID()
 	rec.NodeID = id
 	cp := *rec
@@ -1646,27 +1664,21 @@ func (r *MemRepo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLogi
 	return id, nil
 }
 
-func (r *MemRepo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+func (r *MemRepo) CountEmailLoginCodeAttempt(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.emailLoginCodes {
-		if c.Email == email {
-			cp := *c
-			return &cp, nil
+		if c.Email != email {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *MemRepo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.emailLoginCodes[nodeID]
-	if !ok {
-		return errors.New("email login code not found")
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *MemRepo) ConsumeEmailLoginCode(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
@@ -1728,27 +1740,21 @@ func (r *MemRepo) UpsertPhoneVerificationCode(_ context.Context, rec *service.Ph
 	return id, nil
 }
 
-func (r *MemRepo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*service.PhoneVerificationCodeRecord, error) {
+func (r *MemRepo) CountPhoneVerificationCodeAttempt(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range r.phoneVerifyCodes {
-		if c.UserID == userID {
-			cp := *c
-			return &cp, nil
+		if c.UserID != userID {
+			continue
 		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs || (c.MaxAttempts > 0 && c.AttemptCount >= c.MaxAttempts) {
+			return nil, nil
+		}
+		c.AttemptCount++
+		cp := *c
+		return &cp, nil
 	}
 	return nil, nil
-}
-
-func (r *MemRepo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.phoneVerifyCodes[nodeID]
-	if !ok {
-		return fmt.Errorf("phone verification code %s not found", nodeID)
-	}
-	c.AttemptCount++
-	return nil
 }
 
 func (r *MemRepo) ConsumePhoneVerificationCode(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
@@ -2108,6 +2114,9 @@ func (r *MemRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, at
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if newEmail != "" && r.recoveryEmailHeldLocked(newEmail) {
+		return fmt.Errorf("email %q is a recovery email: %w", newEmail, service.ErrAlreadyExists)
 	}
 	// Enforce uniqueness across users, on the same terms as CreateUser and the
 	// SQL drivers: under service.FoldEmail, and wrapping ErrAlreadyExists so
@@ -3107,9 +3116,10 @@ func (r *MemRepo) ApplyAccountMerge(_ context.Context, m service.AccountMerge) e
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// A missing account is nil, which ApplyToUsers refuses.
-	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID]); err != nil {
+	if err := m.ApplyToUsers(r.users[m.SurvivorID], r.users[m.OtherID], r.recoveryEmails); err != nil {
 		return err
 	}
+	r.mergePhoneClaimsLocked(m)
 	service.InvalidateAgentCreationReceipts(r.agentCreations, m.OtherID)
 	for _, u := range r.users {
 		before := *u

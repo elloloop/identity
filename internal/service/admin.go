@@ -104,15 +104,36 @@ func (s *AdminService) requireAdmin(ctx context.Context, actorID string) (*User,
 	return requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID)
 }
 
+// requireAdminChange is requireAdmin for a call that adds, merges or
+// reactivates an account, sets a role or sets another account's password:
+// each outlasts the session, so a session a recovery hold binds, or whose
+// recovery email is gone, is refused (refuseHeldSession).
+func (s *AdminService) requireAdminChange(ctx context.Context, actorID string, signIn SessionSignIn) error {
+	if err := refuseHeldSession(ctx, s.repo(ctx), s.logger, actorID, signIn, nowMs()); err != nil {
+		return err
+	}
+	_, err := s.requireAdmin(ctx, actorID)
+	return err
+}
+
+// ErrAdminOwnAccount is returned when an admin asks an admin RPC to delete or
+// deactivate their own account, or to reset its password. An admin changes
+// their own password with ChangePassword or the reset email, and deletes
+// their own account with DeleteMyAccount: those hold a session a recovery
+// email opened as they hold any account's, and an admin RPC would not, so a
+// recovery mailbox behind an admin's account would get a way in no recovery
+// email marks. Mapped to CodePermissionDenied.
+var ErrAdminOwnAccount = errors.New("an admin cannot do this to their own account")
+
 // InviteUser creates a new user (invited or immediately active) and
 // returns the user, an invitation token, setup URL, and optional
 // temporary password.
 func (s *AdminService) InviteUser(
 	ctx context.Context,
-	actorID, email, name, role, recoveryEmail string,
+	actorID string, signIn SessionSignIn, email, name, role, recoveryEmail string,
 	quotaBytes int64, createImmediately bool,
 ) (*InviteResult, error) {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return nil, err
 	}
 
@@ -272,7 +293,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		return errors.New("user_id is required")
 	}
 	if targetUserID == actorID {
-		return errors.New("admins cannot deactivate themselves")
+		return fmt.Errorf("%w: admins cannot deactivate themselves", ErrAdminOwnAccount)
 	}
 
 	node, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(targetUserID), typeUser, targetUserID)
@@ -312,9 +333,10 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 	return nil
 }
 
-// ReactivateUser sets a deactivated user back to active.
-func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID string) error {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+// ReactivateUser sets a deactivated user back to active. It gives back a
+// way in, so a session a recovery hold binds is refused (requireAdminChange).
+func (s *AdminService) ReactivateUser(ctx context.Context, actorID string, signIn SessionSignIn, targetUserID string) error {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return err
 	}
 	if targetUserID == "" {
@@ -358,15 +380,19 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 	return nil
 }
 
-// ResetUserPassword generates a temp password or reset token for a user.
+// ResetUserPassword generates a temp password or reset token for a user
+// other than the caller (ErrAdminOwnAccount).
 func (s *AdminService) ResetUserPassword(
-	ctx context.Context, actorID, targetUserID string, generateTemp bool,
+	ctx context.Context, actorID string, signIn SessionSignIn, targetUserID string, generateTemp bool,
 ) (*ResetPasswordResult, error) {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return nil, err
 	}
 	if targetUserID == "" {
 		return nil, errors.New("user_id is required")
+	}
+	if targetUserID == actorID {
+		return nil, fmt.Errorf("%w: change your own password with ChangePassword or the reset email", ErrAdminOwnAccount)
 	}
 
 	node, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(targetUserID), typeUser, targetUserID)

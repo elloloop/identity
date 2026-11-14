@@ -352,6 +352,9 @@ func TestToConnectErrorTenantSelectionRefused(t *testing.T) {
 		if details.GetReason() != tc.reason {
 			t.Fatalf("%v: reason = %v, want %v", tc.refusal, details.GetReason(), tc.reason)
 		}
+		if codes := details.GetPhoneCallingCodes(); len(codes) != 0 {
+			t.Fatalf("%v: phone_calling_codes = %v, want none on this reason", tc.refusal, codes)
+		}
 	}
 	for _, err := range []error{service.ErrTenantSelectionDisabled, service.ErrPermissionDenied, service.ErrProductAgeRestricted} {
 		if details := toConnectError(err).Details(); len(details) != 0 {

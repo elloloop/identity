@@ -1,0 +1,493 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"math"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/templatemsg"
+)
+
+// fakeTemplateSender records each template message. An optional err makes
+// Send fail.
+type fakeTemplateSender struct {
+	mu       sync.Mutex
+	messages []templatemsg.Message
+	err      error
+}
+
+func (f *fakeTemplateSender) Send(_ context.Context, m templatemsg.Message) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.messages = append(f.messages, m)
+	return nil
+}
+
+func (f *fakeTemplateSender) sent() []templatemsg.Message {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]templatemsg.Message(nil), f.messages...)
+}
+
+// phoneFixture is a phone-verifying AuthService in a project with the
+// given phone policy.
+type phoneFixture struct {
+	svc    *AuthService
+	repo   *fakeRepo
+	sms    *fakeSMSSender
+	mailer *recordingMailer
+	now    time.Time
+	ctx    context.Context
+}
+
+func newPhoneFixture(t *testing.T, cfg ProjectPhoneConfig) *phoneFixture {
+	t.Helper()
+	f := &phoneFixture{repo: newFakeRepo(), sms: &fakeSMSSender{}, mailer: &recordingMailer{}, now: time.Unix(1_800_000_000, 0)}
+	f.svc = newTestPhoneService(t, f.repo, f.sms)
+	f.svc.mailer = f.mailer
+	f.svc.nowFunc = func() time.Time { return f.now }
+	f.ctx = WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-a", Phone: cfg})
+	return f
+}
+
+// verify runs both steps for userID and number, reading the code from the
+// SMS, and returns VerifyPhoneCode's answer.
+func (f *phoneFixture) verify(t *testing.T, userID, number string) (*User, error) {
+	t.Helper()
+	before := f.sms.count()
+	require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, userID, SessionSignIn{}, number))
+	require.Equal(t, before+1, f.sms.count(), "a code is sent whether or not the number is taken")
+	msg, _ := f.sms.last()
+	user, err := f.svc.VerifyPhoneCode(f.ctx, userID, SessionSignIn{}, number, extractCode(t, msg.Body))
+	// Past the per-user send cooldown, for the next request in the test.
+	f.now = f.now.Add(2 * time.Minute)
+	return user, err
+}
+
+func off() *bool { v := false; return &v }
+
+func TestPhone_AProjectCanSwitchVerificationOff(t *testing.T) {
+	f := newPhoneFixture(t, ProjectPhoneConfig{Enabled: off()})
+	id := seedPhoneUser(t, f.repo, "owner@example.com")
+
+	require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrPhoneVerificationUnavailable)
+	_, err := f.svc.VerifyPhoneCode(f.ctx, id, SessionSignIn{}, "+14155550123", "123456")
+	require.ErrorIs(t, err, ErrPhoneVerificationUnavailable)
+	assert.Zero(t, f.sms.count())
+
+	// Another project of the same deployment, with no phone block, is as on
+	// as the deployment is.
+	other := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-b"})
+	require.NoError(t, f.svc.RequestPhoneVerification(other, id, SessionSignIn{}, "+14155550123"))
+	assert.Equal(t, 1, f.sms.count())
+}
+
+func TestPhone_OnlyTheProjectsCountriesAreSentACode(t *testing.T) {
+	f := newPhoneFixture(t, ProjectPhoneConfig{AllowedCallingCodes: []string{"91", "44"}})
+	id := seedPhoneUser(t, f.repo, "owner@example.com")
+
+	require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrPhoneCountryNotAllowed)
+	_, err := f.svc.VerifyPhoneCode(f.ctx, id, SessionSignIn{}, "+14155550123", "123456")
+	require.ErrorIs(t, err, ErrPhoneCountryNotAllowed)
+	assert.Zero(t, f.sms.count(), "a refused country costs no message")
+
+	user, err := f.verify(t, id, "+447700900123")
+	require.NoError(t, err)
+	assert.Equal(t, "+447700900123", user.PhoneNumber)
+}
+
+func TestPhone_ChannelsAreTriedInTheProjectsOrder(t *testing.T) {
+	policy := ProjectPhoneConfig{
+		Channels:        []string{PhoneChannelMessage, PhoneChannelSMS},
+		MessageTemplate: "verification_code", MessageLanguage: "en",
+	}
+
+	t.Run("the message channel goes first and SMS is not used", func(t *testing.T) {
+		f := newPhoneFixture(t, policy)
+		tmpl := &fakeTemplateSender{}
+		f.svc.WithTemplateMessages(tmpl)
+		id := seedPhoneUser(t, f.repo, "owner@example.com")
+
+		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"))
+		sent := tmpl.sent()
+		require.Len(t, sent, 1)
+		assert.Equal(t, "+14155550123", sent[0].To)
+		assert.Equal(t, "verification_code", sent[0].Template)
+		assert.Equal(t, "en", sent[0].Language)
+		require.Len(t, sent[0].Params, 1)
+		assert.Zero(t, f.sms.count())
+
+		user, err := f.svc.VerifyPhoneCode(f.ctx, id, SessionSignIn{}, "+14155550123", sent[0].Params[0])
+		require.NoError(t, err)
+		assert.True(t, user.PhoneVerified)
+	})
+
+	t.Run("a message the provider refuses falls back to SMS", func(t *testing.T) {
+		f := newPhoneFixture(t, policy)
+		f.svc.WithTemplateMessages(&fakeTemplateSender{err: templatemsg.ErrTransport})
+		id := seedPhoneUser(t, f.repo, "owner@example.com")
+		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"))
+		assert.Equal(t, 1, f.sms.count())
+	})
+
+	t.Run("with no template sender the channel is skipped", func(t *testing.T) {
+		f := newPhoneFixture(t, policy)
+		id := seedPhoneUser(t, f.repo, "owner@example.com")
+		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"))
+		assert.Equal(t, 1, f.sms.count())
+	})
+
+	t.Run("a channel the project leaves out is never used", func(t *testing.T) {
+		messageOnly := policy
+		messageOnly.Channels = []string{PhoneChannelMessage}
+		f := newPhoneFixture(t, messageOnly)
+		id := seedPhoneUser(t, f.repo, "owner@example.com")
+
+		// No template sender: the project has no usable channel, though the
+		// deployment could text.
+		require.ErrorIs(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"), ErrPhoneVerificationUnavailable)
+		// A failing sender surfaces as the bare refusal, its error left to
+		// the log, and SMS is still not used.
+		f.svc.WithTemplateMessages(&fakeTemplateSender{err: templatemsg.ErrTransport})
+		err := f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123")
+		require.ErrorIs(t, err, ErrPhoneVerificationUnavailable)
+		require.NotErrorIs(t, err, templatemsg.ErrTransport)
+		assert.Zero(t, f.sms.count())
+	})
+
+	t.Run("the message channel works in a deployment with no SMS provider", func(t *testing.T) {
+		messageOnly := policy
+		messageOnly.Channels = []string{PhoneChannelMessage}
+		f := newPhoneFixture(t, messageOnly)
+		f.svc.cfg.SMSEnabled = false
+		tmpl := &fakeTemplateSender{}
+		f.svc.WithTemplateMessages(tmpl)
+		id := seedPhoneUser(t, f.repo, "owner@example.com")
+		require.NoError(t, f.svc.RequestPhoneVerification(f.ctx, id, SessionSignIn{}, "+14155550123"))
+		assert.Len(t, tmpl.sent(), 1)
+	})
+}
+
+func TestPhone_UniqueNumberBelongsToOneAccount(t *testing.T) {
+	f := newPhoneFixture(t, ProjectPhoneConfig{Unique: true})
+	a := seedPhoneUser(t, f.repo, "a@example.com")
+	b := seedPhoneUser(t, f.repo, "b@example.com")
+	const number = "+14155550123"
+
+	_, err := f.verify(t, a, number)
+	require.NoError(t, err)
+
+	// The second account is sent a code like anyone, and told the number is
+	// taken only once its code is right.
+	_, err = f.verify(t, b, number)
+	require.ErrorIs(t, err, ErrPhoneNumberTaken)
+	got, _ := f.repo.GetUser(f.ctx, b)
+	assert.Empty(t, got.PhoneNumber)
+	assert.False(t, got.PhoneVerified)
+
+	// Released by its holder, the number is free.
+	removed, err := f.svc.RemovePhone(f.ctx, a, SessionSignIn{})
+	require.NoError(t, err)
+	assert.Empty(t, removed.PhoneNumber)
+	assert.False(t, removed.PhoneVerified)
+	user, err := f.verify(t, b, number)
+	require.NoError(t, err)
+	assert.Equal(t, number, user.PhoneNumber)
+}
+
+func TestPhone_WithoutUniqueANumberMaySitOnTwoAccounts(t *testing.T) {
+	f := newPhoneFixture(t, ProjectPhoneConfig{})
+	const number = "+14155550123"
+	for _, addr := range []string{"a@example.com", "b@example.com"} {
+		user, err := f.verify(t, seedPhoneUser(t, f.repo, addr), number)
+		require.NoError(t, err)
+		assert.Equal(t, number, user.PhoneNumber)
+	}
+}
+
+func TestPhone_UniqueNumberMovesAfterTheReassignPeriod(t *testing.T) {
+	f := newPhoneFixture(t, ProjectPhoneConfig{Unique: true, ReassignAfterSeconds: 3600})
+	auditTrail := newRecordingAuditWriter()
+	f.svc.audit = audit.NewLogger(auditTrail, "project-a", nil)
+	a := seedPhoneUser(t, f.repo, "a@example.com")
+	b := seedPhoneUser(t, f.repo, "b@example.com")
+	const number = "+14155550123"
+
+	claimedAt := f.now
+	_, err := f.verify(t, a, number)
+	require.NoError(t, err)
+
+	f.now = claimedAt.Add(time.Hour - time.Second)
+	_, err = f.verify(t, b, number)
+	require.ErrorIs(t, err, ErrPhoneNumberTaken, "a second short of the period")
+
+	// The refused attempt left the clock past the period (and past the send
+	// cooldown).
+	require.False(t, f.now.Before(claimedAt.Add(time.Hour)))
+	user, err := f.verify(t, b, number)
+	require.NoError(t, err)
+	assert.Equal(t, number, user.PhoneNumber)
+
+	previous, _ := f.repo.GetUser(f.ctx, a)
+	assert.Empty(t, previous.PhoneNumber, "the previous holder loses the number")
+	assert.False(t, previous.PhoneVerified)
+	require.Equal(t, 1, f.mailer.count(), "the previous holder is told")
+	notice := f.mailer.last()
+	assert.Equal(t, "a@example.com", notice.To)
+	assert.Equal(t, "Your phone number was removed from your account", notice.Subject)
+	assert.NotContains(t, notice.Text, number, "the notice carries the number redacted")
+	assert.Equal(t, 1, auditTrail.countByEventTypeActorTarget(string(audit.EventPhoneRemoved), b, a),
+		"the account that proved the number moved it from the previous holder")
+}
+
+func TestPhone_RemoveTellsTheAccountAndRespectsTheHold(t *testing.T) {
+	f := newPhoneFixture(t, ProjectPhoneConfig{})
+	id := seedPhoneUser(t, f.repo, "owner@example.com")
+
+	// Nothing to remove is not an error.
+	user, err := f.svc.RemovePhone(f.ctx, id, SessionSignIn{})
+	require.NoError(t, err)
+	assert.Empty(t, user.PhoneNumber)
+	assert.Zero(t, f.mailer.count())
+
+	_, err = f.verify(t, id, "+14155550123")
+	require.NoError(t, err)
+
+	// A sign-in by a recovery email holds the phone as it holds the emails,
+	// for the session that sign-in opened.
+	require.NoError(t, f.repo.AddRecoveryEmail(f.ctx, &RecoveryEmail{UserID: id, Email: "spare@example.net", VerifiedAt: 1}, 5))
+	held, err := f.repo.ListRecoveryEmails(f.ctx, id)
+	require.NoError(t, err)
+	require.Len(t, held, 1)
+	require.NoError(t, f.repo.MarkRecoveryEmailSignIn(f.ctx, id, held[0].ID, f.now.UnixMilli(), (7*24*time.Hour).Milliseconds()))
+	_, err = f.svc.RemovePhone(f.ctx, id, SessionSignIn{AMR: []string{AMRRecoveryEmail}, RecoveryEmailID: held[0].ID})
+	require.ErrorIs(t, err, ErrRecoveryHold)
+
+	f.now = f.now.Add(7 * 24 * time.Hour)
+	// The project switching verification off does not strand a stored number.
+	scope := *ProjectScopeFromContext(f.ctx)
+	scope.Phone.Enabled = off()
+	user, err = f.svc.RemovePhone(WithProjectScope(context.Background(), &scope), id, SessionSignIn{})
+	require.NoError(t, err)
+	assert.Empty(t, user.PhoneNumber)
+	assert.False(t, user.PhoneVerified)
+	assert.Zero(t, user.PhoneVerifiedAt)
+	assert.Equal(t, 2, f.mailer.count(), "the primary and the recovery email are told")
+	assert.Equal(t, "The phone number was removed from your account", f.mailer.last().Subject)
+
+	_, err = f.svc.RemovePhone(f.ctx, "", SessionSignIn{})
+	require.ErrorIs(t, err, ErrUnauthenticated)
+	_, err = f.svc.RemovePhone(f.ctx, "no-such-user", SessionSignIn{})
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// A wait of years never wraps into "every claim is old enough": the value
+// validate refuses is clamped to the bound, and the bound reassigns nothing
+// verified within it.
+func TestProjectPhoneConfig_TakeOverBeforeNeverWraps(t *testing.T) {
+	const nowMs = int64(1_800_000_000_000)
+	assert.Zero(t, ProjectPhoneConfig{Unique: true}.takeOverBefore(nowMs), "0 never reassigns")
+	assert.Equal(t, nowMs-3_600_000+1, ProjectPhoneConfig{Unique: true, ReassignAfterSeconds: 3600}.takeOverBefore(nowMs))
+	bound := nowMs - maxPhoneReassignAfterSeconds*1000 + 1
+	for _, after := range []int64{maxPhoneReassignAfterSeconds, maxPhoneReassignAfterSeconds + 1, math.MaxInt64 / 1000, math.MaxInt64} {
+		got := ProjectPhoneConfig{Unique: true, ReassignAfterSeconds: after}.takeOverBefore(nowMs)
+		assert.Equal(t, bound, got, "reassign_after_seconds=%d", after)
+		assert.Less(t, got, nowMs, "a claim made now is never old enough")
+	}
+	err := ProjectConfig{Phone: ProjectPhoneConfig{Unique: true, ReassignAfterSeconds: math.MaxInt64}}.Validate()
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Contains(t, err.Error(), "315360000", "the refusal names the bound")
+}
+
+func TestProjectPhoneConfig_Validate(t *testing.T) {
+	valid := []ProjectPhoneConfig{
+		{},
+		{Enabled: off()},
+		{Unique: true, ReassignAfterSeconds: 86400},
+		{Unique: true, ReassignAfterSeconds: maxPhoneReassignAfterSeconds},
+		{AllowedCallingCodes: []string{"1", "44", "971"}},
+		{Channels: []string{PhoneChannelSMS}},
+		{Channels: []string{PhoneChannelMessage, PhoneChannelSMS}, MessageTemplate: "code", MessageLanguage: "en_GB"},
+	}
+	for _, c := range valid {
+		require.NoError(t, ProjectConfig{Phone: c}.Validate(), "%+v", c)
+	}
+	invalid := map[string]ProjectPhoneConfig{
+		"negative period":            {Unique: true, ReassignAfterSeconds: -1},
+		"period past ten years":      {Unique: true, ReassignAfterSeconds: maxPhoneReassignAfterSeconds + 1},
+		"period at the int64 limit":  {Unique: true, ReassignAfterSeconds: math.MaxInt64},
+		"period without unique":      {ReassignAfterSeconds: 60},
+		"calling code with a plus":   {AllowedCallingCodes: []string{"+91"}},
+		"calling code too long":      {AllowedCallingCodes: []string{"1242"}},
+		"calling code leading zero":  {AllowedCallingCodes: []string{"044"}},
+		"empty calling code":         {AllowedCallingCodes: []string{""}},
+		"calling code listed twice":  {AllowedCallingCodes: []string{"91", "91"}},
+		"unknown channel":            {Channels: []string{"carrier-pigeon"}},
+		"channel listed twice":       {Channels: []string{PhoneChannelSMS, PhoneChannelSMS}},
+		"message channel no name":    {Channels: []string{PhoneChannelMessage}},
+		"template with a space edge": {MessageTemplate: " code"},
+	}
+	for name, c := range invalid {
+		err := ProjectConfig{Phone: c}.Validate()
+		require.ErrorIs(t, err, ErrInvalidArgument, name)
+	}
+
+	parsed, err := ParseProjectConfig(`{"phone":{"enabled":false,"unique":true,"reassign_after_seconds":60,
+		"allowed_calling_codes":["91"],"channels":["message","sms"],"message_template":"code","message_language":"en"}}`)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Phone.Enabled)
+	assert.False(t, *parsed.Phone.Enabled)
+	assert.True(t, parsed.Phone.off())
+	assert.Equal(t, []string{"message", "sms"}, parsed.Phone.channels())
+	assert.Equal(t, []string{PhoneChannelSMS}, ProjectPhoneConfig{}.channels())
+	assert.False(t, ProjectPhoneConfig{}.off())
+}
+
+func TestHasCallingCode(t *testing.T) {
+	assert.True(t, hasCallingCode("+447700900123", nil), "no list accepts every country")
+	assert.True(t, hasCallingCode("+447700900123", []string{"44", "91"}))
+	assert.False(t, hasCallingCode("+14155550123", []string{"44", "91"}))
+	assert.False(t, hasCallingCode("+9", []string{"91"}))
+}
+
+// A tenant whose login policy requires a verified phone admits no session
+// of an account without one: no token for the tenant is minted, the refresh
+// token is left unspent, and the unselected session it leaves is what the
+// account verifies a phone with. The refusal names the countries the tenant
+// accepts, in the policy's order, so an app can offer only those.
+func TestRefreshToken_SelectionNeedsTheVerifiedPhoneTheTenantRequires(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		policy   *LoginPolicy
+		phone    string
+		verified bool
+		admitted bool
+		codes    []string
+	}{
+		{name: "required, no phone", policy: &LoginPolicy{RequireVerifiedPhone: true}},
+		{name: "required, number stored but unverified", policy: &LoginPolicy{RequireVerifiedPhone: true}, phone: "+14155550123"},
+		{name: "required, verified", policy: &LoginPolicy{RequireVerifiedPhone: true}, phone: "+14155550123", verified: true, admitted: true},
+		{name: "required of one country, no phone", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}}, codes: []string{"91", "44"}},
+		{name: "required of one country, verified in another", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}}, phone: "+14155550123", verified: true, codes: []string{"91", "44"}},
+		{name: "required of one country, verified there", policy: &LoginPolicy{RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"}}, phone: "+447700900123", verified: true, admitted: true},
+		{name: "not required, no phone", policy: &LoginPolicy{SessionAbsoluteTimeoutSeconds: 3600}, admitted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSelectionFixture(t)
+			f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
+			f.governTenant("t-acme", "acme.example.test", tc.policy)
+			if tc.phone != "" {
+				f.repo.mu.Lock()
+				f.repo.users[f.user.ID].PhoneNumber = tc.phone
+				f.repo.users[f.user.ID].PhoneVerified = tc.verified
+				f.repo.mu.Unlock()
+			}
+
+			_, access, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
+			if tc.admitted {
+				require.NoError(t, err)
+				assert.Equal(t, "t-acme", f.tenantClaim(t, access))
+				return
+			}
+			require.ErrorIs(t, err, ErrPhoneVerificationRequired)
+			requireSelectionRefusal(t, err, TenantSelectionPhoneRequired)
+			var refusal *TenantSelectionRefusedError
+			require.ErrorAs(t, err, &refusal)
+			assert.Equal(t, tc.codes, refusal.PhoneCallingCodes)
+			_, access, _, err = f.svc.RefreshToken(context.Background(), f.refresh, "", "", "")
+			require.NoError(t, err, "the refused selection left the refresh token unspent")
+			assert.Equal(t, f.svc.cfg.DefaultTenantID, f.tenantClaim(t, access))
+		})
+	}
+}
+
+// A refusal by the phone rule is a warning where the project cannot verify
+// phones: no account without one could ever meet the rule there.
+func TestRefreshToken_PhoneRuleRefusalWarnsWhereNoPhoneCanBeVerified(t *testing.T) {
+	for _, sms := range []bool{true, false} {
+		f := newSelectionFixture(t)
+		f.svc.cfg.SMSEnabled = sms
+		core, logs := observer.New(zapcore.InfoLevel)
+		f.svc.logger = zap.New(core)
+		f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
+		f.governTenant("t-acme", "acme.example.test", &LoginPolicy{RequireVerifiedPhone: true})
+
+		_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
+		require.ErrorIs(t, err, ErrPhoneVerificationRequired)
+		refusals := logs.FilterMessage("tenant_selection_refused_phone_required").All()
+		require.Len(t, refusals, 1)
+		want, reason := zapcore.WarnLevel, "no_channel_has_a_sender"
+		if sms {
+			want, reason = zapcore.InfoLevel, ""
+		}
+		assert.Equal(t, want, refusals[0].Level, "SMS on: %t", sms)
+		assert.Equal(t, "t-acme", refusals[0].ContextMap()["tenant_id"])
+		if reason != "" {
+			assert.Equal(t, reason, refusals[0].ContextMap()["phone_unverifiable"])
+		}
+	}
+}
+
+// A session past the tenant's timeout is refused for that, not sent to
+// verify a phone it would be refused with anyway.
+func TestRefreshToken_LoginPolicyRefusalComesBeforeThePhoneRule(t *testing.T) {
+	f := newSelectionFixture(t)
+	f.seedTenant(t, "t-acme", TenantStatusClaimed, MembershipStatusActive)
+	f.governTenant("t-acme", "acme.example.test", &LoginPolicy{RequireVerifiedPhone: true, SessionAbsoluteTimeoutSeconds: 60})
+	later := time.Now().Add(2 * time.Minute)
+	f.svc.nowFunc = func() time.Time { return later }
+
+	_, _, _, err := f.svc.RefreshToken(context.Background(), f.refresh, "t-acme", "", "")
+	requireSelectionRefusal(t, err, TenantSelectionLoginPolicy)
+	var refusal *TenantSelectionRefusedError
+	require.ErrorAs(t, err, &refusal)
+	assert.Empty(t, refusal.PhoneCallingCodes, "only the phone refusal names countries")
+}
+
+func TestUpsertLoginPolicy_PhoneRule(t *testing.T) {
+	f := newAdminFixture(policyAdminSecret)
+	ctx := context.Background()
+
+	got, err := f.svc.UpsertLoginPolicy(ctx, policyAdminSecret, &LoginPolicy{
+		ProjectID: "proj-1", TenantID: "tenant-1", RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "44"},
+	})
+	require.NoError(t, err)
+	assert.True(t, got.RequireVerifiedPhone)
+	assert.Equal(t, []string{"91", "44"}, got.PhoneCallingCodes)
+	read, err := f.svc.GetLoginPolicy(ctx, asAdmin(policyAdminSecret), "proj-1", "tenant-1")
+	require.NoError(t, err)
+	assert.True(t, read.RequireVerifiedPhone)
+	assert.Equal(t, []string{"91", "44"}, read.PhoneCallingCodes, "the policy reads back as written")
+
+	for name, bad := range map[string]*LoginPolicy{
+		"codes without the requirement": {PhoneCallingCodes: []string{"91"}},
+		"a plus":                        {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"+91"}},
+		"letters":                       {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"abc"}},
+		"listed twice":                  {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"91", "91"}},
+		"four digits":                   {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"1234"}},
+		"two codes in one entry":        {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"9,1"}},
+		"surrounding space":             {RequireVerifiedPhone: true, PhoneCallingCodes: []string{" 91"}},
+		"an empty entry":                {RequireVerifiedPhone: true, PhoneCallingCodes: []string{""}},
+		"a leading zero":                {RequireVerifiedPhone: true, PhoneCallingCodes: []string{"044"}},
+	} {
+		bad.ProjectID, bad.TenantID = "proj-1", "tenant-1"
+		_, err := f.svc.UpsertLoginPolicy(ctx, policyAdminSecret, bad)
+		require.ErrorIs(t, err, ErrInvalidArgument, name)
+	}
+	// The requirement is not a permission refusal: the account may act in
+	// the tenant once it has a phone.
+	assert.False(t, errors.Is(ErrPhoneVerificationRequired, ErrPermissionDenied))
+}

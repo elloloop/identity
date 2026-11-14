@@ -158,23 +158,24 @@ func TestAnonymousAccount_CannotAttachCredentialsOutsideUpgrade(t *testing.T) {
 	}{
 		{"LinkIdentity", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
 			_, err := svc.LinkIdentity(ctx, id,
+				SessionSignIn{},
 				fakeOAuthCode(testOAuthEmail, "Fed", "", testOAuthProvider),
 				testOAuthProvider, testOAuthRedirect, "", "", "")
 			return err
 		}},
 		{"BeginPasskeyRegistration", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
-			_, _, err := svc.BeginPasskeyRegistration(ctx, id, "device")
+			_, _, err := svc.BeginPasskeyRegistration(ctx, id, SessionSignIn{}, "device")
 			return err
 		}},
 		{"CompletePasskeyRegistration", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
-			_, _, err := svc.CompletePasskeyRegistration(ctx, id, "challenge", `{"id":"x"}`, "device", false, "", "")
+			_, _, err := svc.CompletePasskeyRegistration(ctx, id, SessionSignIn{}, "challenge", `{"id":"x"}`, "device", false, "", "")
 			return err
 		}},
 		{"RequestPhoneVerification", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
-			return svc.RequestPhoneVerification(ctx, id, "+14155550123")
+			return svc.RequestPhoneVerification(ctx, id, SessionSignIn{}, "+14155550123")
 		}},
 		{"VerifyPhoneCode", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
-			_, err := svc.VerifyPhoneCode(ctx, id, "+14155550123", "123456")
+			_, err := svc.VerifyPhoneCode(ctx, id, SessionSignIn{}, "+14155550123", "123456")
 			return err
 		}},
 		// Not a credential in the storage sense, but the same invariant: a

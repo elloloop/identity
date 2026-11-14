@@ -99,4 +99,4 @@ jobs:
           if [[ -n "${{ matrix.build_tag }}" ]]; then
             tag_flag="-tags=${{ matrix.build_tag }}"
           fi
-          go test ${tag_flag} -race -count=1 -timeout=300s -run='^TestConformance$' -v ${{ matrix.package }}
+          go test ${tag_flag} -race -count=1 -timeout=600s -run='^TestConformance$' -v ${{ matrix.package }}

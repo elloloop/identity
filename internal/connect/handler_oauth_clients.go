@@ -29,7 +29,7 @@ func oauthClientToProto(in *service.OAuthClient) *identitypb.OAuthClient {
 }
 
 func (h *IdentityHandler) CreateOAuthClient(ctx context.Context, req *connect.Request[identitypb.CreateOAuthClientRequest]) (*connect.Response[identitypb.CreateOAuthClientResponse], error) {
-	client, err := h.auth.CreateOAuthClient(ctx, authenticatedUserID(req.Header()), oauthRegistrationFromProto(req.Msg.GetRegistration()))
+	client, err := h.auth.CreateOAuthClient(ctx, authenticatedUserID(req.Header()), authenticatedSignIn(req.Header()), oauthRegistrationFromProto(req.Msg.GetRegistration()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -45,7 +45,7 @@ func (h *IdentityHandler) GetOAuthClient(ctx context.Context, req *connect.Reque
 }
 
 func (h *IdentityHandler) UpdateOAuthClient(ctx context.Context, req *connect.Request[identitypb.UpdateOAuthClientRequest]) (*connect.Response[identitypb.UpdateOAuthClientResponse], error) {
-	client, err := h.auth.UpdateOAuthClient(ctx, authenticatedUserID(req.Header()), req.Msg.GetClientId(), req.Msg.GetExpectedRevision(), oauthRegistrationFromProto(req.Msg.GetRegistration()))
+	client, err := h.auth.UpdateOAuthClient(ctx, authenticatedUserID(req.Header()), authenticatedSignIn(req.Header()), req.Msg.GetClientId(), req.Msg.GetExpectedRevision(), oauthRegistrationFromProto(req.Msg.GetRegistration()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}

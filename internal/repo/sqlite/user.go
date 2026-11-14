@@ -363,9 +363,8 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 		return "", errors.New("sqlite: CreateUser: nil user")
 	}
 	id, role, status := defaultNewUserFields(u)
-	_, err := r.db.Exec(ctx, insertUserQuery, insertUserArgs(r.projectID, id, role, status, u)...)
-	if err != nil {
-		return "", wrapErr("CreateUser", err)
+	if _, err := r.execHoldingAddress(ctx, "CreateUser", u.Email, insertUserQuery, insertUserArgs(r.projectID, id, role, status, u)...); err != nil {
+		return "", err
 	}
 	u.ID = id
 	return id, nil
@@ -457,10 +456,9 @@ func (r *sqliteRepository) UpdateUser(ctx context.Context, userID string, fields
 		`UPDATE users SET %s WHERE project_id = $%d AND id = $%d`,
 		strings.Join(sets, ", "), idx, idx+1,
 	)
-	if _, err := r.db.Exec(ctx, q, args...); err != nil {
-		return wrapErr("UpdateUser", err)
-	}
-	return nil
+	email, _ := fields["email"].(string)
+	_, err := r.execHoldingAddress(ctx, "UpdateUser", email, q, args...)
+	return err
 }
 
 // userDeleteNonFKTables lists the user-keyed tables whose user_id column has
@@ -764,10 +762,8 @@ func (r *sqliteRepository) UpdateUserEmail(ctx context.Context, userID, newEmail
 		UPDATE users
 		   SET email = $3, email_verified = 1, email_verified_at_ms = $4, updated_at_ms = $4
 		 WHERE project_id = $1 AND id = $2`
-	if _, err := r.db.Exec(ctx, q, r.projectID, userID, newEmail, atMs); err != nil {
-		return wrapErr("UpdateUserEmail", err)
-	}
-	return nil
+	_, err := r.execHoldingAddress(ctx, "UpdateUserEmail", newEmail, q, r.projectID, userID, newEmail, atMs)
+	return err
 }
 
 func (r *sqliteRepository) AssignAccountAddress(ctx context.Context, userID, address string) (string, error) {
@@ -834,6 +830,100 @@ func (r *sqliteRepository) SetAgentOwnership(ctx context.Context, agentID, expec
 	return tag.RowsAffected() == 1, nil
 }
 
+// mergeRow is the part of one account's row a merge reads and rewrites, its
+// booleans as the INTEGER 0/1 SQLite stores.
+type mergeRow struct {
+	username, password, email, address, phone string
+	verified, phoneVerified                   int64
+	verifiedAt, phoneVerifiedAt               int64
+}
+
+// readMergeRow reads the row of account id while it may still be merged; any
+// other state is a conflict.
+func readMergeRow(ctx context.Context, t *tx, projectID, id string) (mergeRow, error) {
+	var row mergeRow
+	err := t.QueryRow(ctx, `
+		SELECT username, password_hash, email, email_verified, email_verified_at_ms, account_address,
+		       phone_number, phone_verified, phone_verified_at_ms
+		  FROM users
+		 WHERE project_id = $1 AND id = $2 AND status = 'active' AND merged_into_user_id = '' AND kind = 'person'`,
+		projectID, id).
+		Scan(&row.username, &row.password, &row.email, &row.verified, &row.verifiedAt, &row.address,
+			&row.phone, &row.phoneVerified, &row.phoneVerifiedAt)
+	if noRows(err) {
+		return mergeRow{}, service.ErrMergeConflict
+	}
+	if err != nil {
+		return mergeRow{}, wrapErr("ApplyAccountMerge(read)", err)
+	}
+	return row, nil
+}
+
+// mergedRows returns the survivor's and the retired account's rows once m
+// has moved what it moves. A move fills an empty field of the survivor; one
+// the survivor filled since the merge was decided is a conflict, never
+// overwritten. retired.address is the address the retired account ends with.
+func mergedRows(m service.AccountMerge, survivor, other mergeRow) (kept, retired mergeRow, err error) {
+	if (m.MoveUsername && survivor.username != "") || (m.MovePassword && survivor.password != "") ||
+		(m.MoveEmail && survivor.email != "") || (m.MovePhone && survivor.phone != "") {
+		return mergeRow{}, mergeRow{}, service.ErrMergeConflict
+	}
+	kept, retired = survivor, other
+	if m.MoveUsername {
+		kept.username, retired.username = other.username, ""
+	}
+	if m.MovePassword {
+		kept.password = other.password
+	}
+	if m.MoveEmail {
+		kept.email, kept.verified, kept.verifiedAt = other.email, other.verified, other.verifiedAt
+		retired.email, retired.verified, retired.verifiedAt = "", 0, 0
+	}
+	if m.MovePhone {
+		kept.phone, kept.phoneVerified, kept.phoneVerifiedAt = other.phone, other.phoneVerified, other.phoneVerifiedAt
+		retired.phone, retired.phoneVerified, retired.phoneVerifiedAt = "", 0, 0
+	}
+	if m.SwapAddress {
+		kept.address, retired.address = other.address, survivor.address
+	}
+	return kept, retired, nil
+}
+
+// checkMergeRecoveryEmails refuses a merge while a recovery hold is in force
+// on either account, and one that would leave the survivor holding more than
+// m.RecoveryEmailsMax recovery emails.
+func (r *sqliteRepository) checkMergeRecoveryEmails(ctx context.Context, t *tx, m service.AccountMerge) error {
+	var survivorHeld, otherHeld int
+	var latestHold int64
+	if err := t.QueryRow(ctx, `
+		SELECT count(CASE WHEN user_id = $2 THEN 1 END), count(CASE WHEN user_id = $3 THEN 1 END),
+		       coalesce(max(hold_started_at_ms), 0)
+		  FROM user_recovery_emails WHERE project_id = $1 AND user_id IN ($2, $3)`,
+		r.projectID, m.SurvivorID, m.OtherID).Scan(&survivorHeld, &otherHeld, &latestHold); err != nil {
+		return wrapErr("ApplyAccountMerge(recovery emails)", err)
+	}
+	if err := m.HoldRefusal(latestHold); err != nil {
+		return err
+	}
+	if otherHeld > 0 && survivorHeld+otherHeld > m.RecoveryEmailsMax {
+		return service.ErrRecoveryEmailLimit
+	}
+	return nil
+}
+
+// moveMergePhoneClaim gives the retired account's phone claim to the
+// survivor when m moves the number, and releases it otherwise.
+func (r *sqliteRepository) moveMergePhoneClaim(ctx context.Context, t *tx, m service.AccountMerge) error {
+	q, args := `DELETE FROM phone_number_claims WHERE project_id = $1 AND user_id = $2`, []any{r.projectID, m.OtherID}
+	if m.MovePhone {
+		q, args = `UPDATE phone_number_claims SET user_id = $3 WHERE project_id = $1 AND user_id = $2`, append(args, m.SurvivorID)
+	}
+	if _, err := t.Exec(ctx, q, args...); err != nil {
+		return wrapErr("ApplyAccountMerge(phone claims)", err)
+	}
+	return nil
+}
+
 func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.AccountMerge) error {
 	if m.SurvivorID == "" || m.OtherID == "" || m.SurvivorID == m.OtherID {
 		return errors.New("sqlite: ApplyAccountMerge: two distinct account ids are required")
@@ -844,97 +934,53 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	const mergeable = `SELECT username, password_hash, email, email_verified, email_verified_at_ms, account_address
-		FROM users
-		WHERE project_id = $1 AND id = $2 AND status = 'active' AND merged_into_user_id = '' AND kind = 'person'`
-	var (
-		oUsername, oPassword, oEmail, oAddress string
-		sUsername, sPassword, sEmail, sAddress string
-		oVerifiedAt, sVerifiedAt               int64
-		oVerified, sVerified                   int64
-	)
 	// SQLite has no row locks: the database-level write lock serializes
 	// merges, and the guarded writes below catch any change made since these
-	// reads. (The id order mirrors the Postgres driver.)
-	read := func(id string, username, password, email *string, verified *int64, verifiedAt *int64, address *string) error {
-		err := tx.QueryRow(ctx, mergeable, r.projectID, id).Scan(username, password, email, verified, verifiedAt, address)
-		if noRows(err) {
-			return service.ErrMergeConflict
-		}
-		if err != nil {
-			return wrapErr("ApplyAccountMerge(read)", err)
-		}
-		return nil
-	}
-	readOther := func() error {
-		return read(m.OtherID, &oUsername, &oPassword, &oEmail, &oVerified, &oVerifiedAt, &oAddress)
-	}
-	readSurvivor := func() error {
-		return read(m.SurvivorID, &sUsername, &sPassword, &sEmail, &sVerified, &sVerifiedAt, &sAddress)
-	}
-	first, second := readOther, readSurvivor
-	if m.SurvivorID < m.OtherID {
-		first, second = readSurvivor, readOther
-	}
-	if err := first(); err != nil {
+	// reads.
+	survivor, err := readMergeRow(ctx, tx, r.projectID, m.SurvivorID)
+	if err != nil {
 		return err
 	}
-	if err := second(); err != nil {
+	other, err := readMergeRow(ctx, tx, r.projectID, m.OtherID)
+	if err != nil {
 		return err
 	}
-	// A move fills an empty field of the survivor; one the survivor filled
-	// since the merge was decided is a conflict, never overwritten.
-	if (m.MoveUsername && sUsername != "") || (m.MovePassword && sPassword != "") || (m.MoveEmail && sEmail != "") {
-		return service.ErrMergeConflict
+	kept, retired, err := mergedRows(m, survivor, other)
+	if err != nil {
+		return err
+	}
+	if err := r.checkMergeRecoveryEmails(ctx, tx, m); err != nil {
+		return err
 	}
 
-	// Retire first, releasing what the survivor takes (each is unique).
-	retiredUsername, retiredEmail, retiredVerified, retiredVerifiedAt := oUsername, oEmail, oVerified, oVerifiedAt
-	if m.MoveUsername {
-		retiredUsername = ""
-	}
-	if m.MoveEmail {
-		retiredEmail, retiredVerifiedAt = "", 0
-		retiredVerified = 0
-	}
-	// Every write is guarded on the state read above, so a concurrent merge
-	// or deactivation that got in between makes this one a conflict.
+	// Retire first, releasing what the survivor takes (each is unique). Every
+	// write is guarded on the state read above, so a concurrent merge or
+	// deactivation that got in between makes this one a conflict.
 	const guard = ` AND status = 'active' AND merged_into_user_id = '' AND kind = 'person'`
 	tag, err := tx.Exec(ctx, `
 		UPDATE users
 		   SET status = 'deactivated', merged_into_user_id = $3,
 		       username = $4, email = $5, account_address = '',
 		       email_verified = $7, email_verified_at_ms = $8,
+		       phone_number = $9, phone_verified = $10, phone_verified_at_ms = $11,
 		       deactivated_at_ms = $6, updated_at_ms = $6
 		 WHERE project_id = $1 AND id = $2`+guard,
-		r.projectID, m.OtherID, m.SurvivorID, retiredUsername, retiredEmail, m.AtMs, retiredVerified, retiredVerifiedAt)
+		r.projectID, m.OtherID, m.SurvivorID, retired.username, retired.email, m.AtMs, retired.verified, retired.verifiedAt,
+		retired.phone, retired.phoneVerified, retired.phoneVerifiedAt)
 	if err != nil {
 		return wrapErr("ApplyAccountMerge(retire)", err)
 	}
 	if tag.RowsAffected() != 1 {
 		return service.ErrMergeConflict
 	}
-
-	username, password, email, verified, verifiedAt, address := sUsername, sPassword, sEmail, sVerified, sVerifiedAt, sAddress
-	if m.MoveUsername {
-		username = oUsername
-	}
-	if m.MovePassword {
-		password = oPassword
-	}
-	if m.MoveEmail {
-		email, verified, verifiedAt = oEmail, oVerified, oVerifiedAt
-	}
-	retiredAddress := oAddress
-	if m.SwapAddress {
-		address, retiredAddress = oAddress, sAddress
-	}
 	tag, err = tx.Exec(ctx, `
 		UPDATE users
 		   SET username = $3, password_hash = $4, email = $5, email_verified = $6,
-		       email_verified_at_ms = $7, account_address = $8, updated_at_ms = $9
+		       email_verified_at_ms = $7, account_address = $8, updated_at_ms = $9,
+		       phone_number = $10, phone_verified = $11, phone_verified_at_ms = $12
 		 WHERE project_id = $1 AND id = $2`+guard,
-		r.projectID, m.SurvivorID, username, password, email, verified, verifiedAt, address, m.AtMs)
+		r.projectID, m.SurvivorID, kept.username, kept.password, kept.email, kept.verified, kept.verifiedAt, kept.address, m.AtMs,
+		kept.phone, kept.phoneVerified, kept.phoneVerifiedAt)
 	if err != nil {
 		return wrapErr("ApplyAccountMerge(survivor)", err)
 	}
@@ -942,13 +988,20 @@ func (r *sqliteRepository) ApplyAccountMerge(ctx context.Context, m service.Acco
 		return service.ErrMergeConflict
 	}
 	if _, err := tx.Exec(ctx, `UPDATE users SET account_address = $3 WHERE project_id = $1 AND id = $2`,
-		r.projectID, m.OtherID, retiredAddress); err != nil {
+		r.projectID, m.OtherID, retired.address); err != nil {
 		return wrapErr("ApplyAccountMerge(retired address)", err)
 	}
 
 	if _, err := tx.Exec(ctx, `UPDATE oauth_identities SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
 		r.projectID, m.OtherID, m.SurvivorID); err != nil {
 		return wrapErr("ApplyAccountMerge(oauth identities)", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE user_recovery_emails SET user_id = $3 WHERE project_id = $1 AND user_id = $2`,
+		r.projectID, m.OtherID, m.SurvivorID); err != nil {
+		return wrapErr("ApplyAccountMerge(recovery emails)", err)
+	}
+	if err := r.moveMergePhoneClaim(ctx, tx, m); err != nil {
+		return err
 	}
 	// The survivor is the same person, so it owns the retired account's
 	// agents. owner_user_id <> '' matches the owner index's predicate.

@@ -83,6 +83,9 @@ linters:
       - path: internal/repo/memory/assurance\.go
         linters:
           - nilnil
+      - path: internal/repo/memory/recovery_email\.go
+        linters:
+          - nilnil
       - path: internal/repo/postgres/.*\.go
         linters:
           - nilnil

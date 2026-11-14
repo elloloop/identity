@@ -40,6 +40,7 @@ import (
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/sms"
+	"github.com/elloloop/identity/pkg/templatemsg"
 )
 
 // Deps groups the injectable dependencies required to build the
@@ -101,9 +102,10 @@ type Deps struct {
 	// service.ControlPlaneAdminService).
 	ControlPlaneStore service.ControlPlaneProjectStore
 
-	// DirectoryCredentials is the control-plane credential read LookupUsers
-	// authenticates against. Non-nil ONLY for the postgres driver; when nil no
-	// DirectoryService is constructed and LookupUsers returns Unimplemented.
+	// DirectoryCredentials is the control-plane credential read the directory
+	// reads (LookupUsers, MatchTenantMemberPhones) authenticate against.
+	// Non-nil ONLY for the postgres driver; when nil no DirectoryService is
+	// constructed and both return Unimplemented.
 	DirectoryCredentials service.DirectoryCredentialStore
 
 	// ActiveProjects supplies authoritative project policy for guardian admission,
@@ -163,6 +165,13 @@ type Deps struct {
 	// when GATEWAY_SMS_ENABLED is false, otherwise the configured
 	// provider (Twilio / SNS / Azure).
 	SMSSender sms.Sender
+
+	// TemplateMessageSender delivers phone verification codes as
+	// messaging-app template messages, the "message" channel a project's
+	// phone.channels may list. If nil, New constructs the one
+	// GATEWAY_TEMPLATEMSG_PROVIDER names, and none when it names no
+	// provider, which leaves the channel unavailable.
+	TemplateMessageSender templatemsg.Sender
 
 	// OAuthRegistry holds the per-provider Exchangers used for OAuth
 	// login. May be nil — in that case OAuthLogin returns
@@ -315,6 +324,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	signupLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0)
 	loginLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0)
 	domainLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitDomainPerIP, 0)
+	// Adding and removing a recovery email share one budget, and requesting a
+	// phone code and removing the phone another: each is the surface's
+	// budget. A removal that ends sessions clears the session cache, so one
+	// source must not be able to ask for removals without bound.
+	recoveryEmailLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0)
+	phoneLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0)
 	limits := []middleware.PathLimit{
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
@@ -356,11 +371,34 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
 		},
 		{
+			// Recovery-email code request: authenticated, but each call
+			// mails a code to an address the caller names, so it gets a
+			// budget the size of the passwordless code's (a per-account and
+			// a per-address cooldown are the second layer).
+			PathPrefix: "/identity.v1.IdentityService/RequestRecoveryEmail", Tag: "recovery_email",
+			Limiter: recoveryEmailLimiter,
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/RemoveRecoveryEmail", Tag: "recovery_email",
+			Limiter: recoveryEmailLimiter,
+		},
+		{
+			// Recovery-email code check: each call is a guess at a 6-digit
+			// code, so guesses from one source are bounded across codes as
+			// well as by each code's attempt cap.
+			PathPrefix: "/identity.v1.IdentityService/VerifyRecoveryEmail", Tag: "recovery_email_verify",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
+		},
+		{
 			// Phone-verification OTP request: authenticated, but each call
 			// sends an SMS, so a tight per-IP quota bounds cost/abuse (the
 			// per-user cooldown is the second layer).
 			PathPrefix: "/identity.v1.IdentityService/RequestPhoneVerification", Tag: "phone_verify",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0),
+			Limiter: phoneLimiter,
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/RemovePhone", Tag: "phone_verify",
+			Limiter: phoneLimiter,
 		},
 		{
 			// IDV session begin: authenticated, but every admitted call opens
@@ -546,6 +584,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		{
 			PathPrefix: identityconnectgen.IdentityServiceGetManagedChildAuthorizationProcedure, Tag: "managed_child_authorization",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitManagedChildAuthPerIP, 0),
+		},
+		{
+			// Phone match: authenticated like LookupUsers, so it gets the
+			// same per-IP bound on credential reads, as a budget of its own.
+			// The service counts each credential's calls per tenant besides.
+			PathPrefix: identityconnectgen.IdentityServiceMatchTenantMemberPhonesProcedure, Tag: "directory_phone_match",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
 		},
 		{
 			// SCIM: every request carries the deployment-wide bearer token,
@@ -752,19 +797,11 @@ func New(deps Deps) (*Built, error) {
 		repo = middleware.WrapSessionRepository(repo, sessionCache)
 	}
 
-	mailer, mailDelivers := deps.EmailTransport, deps.EmailTransport != nil
-	if mailer == nil {
-		mailer, mailDelivers = buildEmailTransport(deps.Config, logger)
+	senders, err := buildOutboundSenders(deps, logger)
+	if err != nil {
+		return nil, err
 	}
-	mailer = observability.WrapMailer(mailer)
-
-	smsSender := deps.SMSSender
-	if smsSender == nil {
-		smsSender, err = buildSMSSender(deps.Config, logger)
-		if err != nil {
-			return nil, fmt.Errorf("sms sender: %w", err)
-		}
-	}
+	mailer := senders.mailer
 
 	// An embedder's registry is opaque, so only an env-built one can be rebuilt
 	// with a host's own client (ADR-0019).
@@ -798,7 +835,7 @@ func New(deps Deps) (*Built, error) {
 
 	authSvc := service.NewAuthServiceWithOAuth(
 		repo, deps.Config, deps.Signer, deps.Passkeys,
-		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, smsSender, logger,
+		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, senders.sms, logger,
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
@@ -806,6 +843,7 @@ func New(deps Deps) (*Built, error) {
 		// or the driver has no governance stores (memory, SQLite).
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
+		WithTemplateMessages(senders.templates).
 		WithEventPublisher(eventPublisher).
 		WithActiveProjects(deps.ActiveProjects).
 		WithNativeOAuth(nativeVerifier).
@@ -869,9 +907,9 @@ func New(deps Deps) (*Built, error) {
 		return nil, err
 	}
 
-	domainSvc := buildDomainService(deps, auditLog, logger)
+	domainSvc := buildDomainService(deps, repo, auditLog, logger)
 	users := service.RepositoryUserDirectory(repo)
-	membershipSvc := buildMembershipService(deps, users, mailer, mailDelivers, auditLog, logger)
+	membershipSvc := buildMembershipService(deps, repo, users, mailer, senders.mailDelivers, auditLog, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, users, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
@@ -977,28 +1015,7 @@ func New(deps Deps) (*Built, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
-	// default project denies all auth, so a fresh deployment that forgot to open
-	// it isn't silently locked out with no signal.
-	// Surface the retention adjustment Load makes when the operator never
-	// chose a window: silent is wrong (the effective value differs from the
-	// documented default), but failing the boot is worse — see Load.
-	if from := deps.Config.AnonymousRetentionRaisedFrom; from > 0 {
-		logger.Info("anonymous_retention_raised",
-			zap.Int("from_days", from),
-			zap.Int("to_days", deps.Config.AnonymousRetentionDays),
-			zap.String("reason", "the default window did not outlive GATEWAY_REFRESH_EXPIRY_SECONDS; "+
-				"anonymous users would have been reaped while their only credential was still valid"),
-			zap.String("hint", "set GATEWAY_ANONYMOUS_RETENTION_DAYS explicitly to choose the window"))
-	}
-	if deps.Config.PasskeyRelyingPartiesConfigured() {
-		logger.Info("passkey_relying_parties_per_host",
-			zap.Strings("hosts", deps.Config.PasskeyRelyingPartyHosts()))
-	}
-	if defaultAccess.Mode == service.AccessModeClosed || defaultAccess.Mode == "" {
-		logger.Warn("default_project_access_closed",
-			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))
-	}
+	logBootNotices(deps.Config, defaultAccess, logger)
 	projectResolver := service.NewCachingProjectResolver(deps.ProjectResolver, deps.Config.ProjectResolutionCacheTTL(), deps.Config.ProjectResolutionCacheMaxEntries)
 	chain = middleware.NewProjectResolver(
 		middleware.DefaultProject{
@@ -1034,6 +1051,71 @@ func New(deps Deps) (*Built, error) {
 		repairEmails:    emailRepair(deps, adminSvc),
 		drainEvents:     drainEvents,
 	}, nil
+}
+
+// outboundSenders are the transports New hands the services: mail, with
+// whether its Send reports delivery (buildEmailTransport), SMS, and template
+// messages (nil when no provider is wired, which leaves that channel
+// unavailable).
+type outboundSenders struct {
+	mailer       email.Transport
+	mailDelivers bool
+	sms          sms.Sender
+	templates    templatemsg.Sender
+}
+
+// buildOutboundSenders takes each sender the embedder wired in deps and
+// builds the others from the config. The message channel's sender is the one
+// GATEWAY_TEMPLATEMSG_PROVIDER names; no provider builds none, and neither
+// does local_capture, since the service mails those codes itself.
+func buildOutboundSenders(deps Deps, logger *zap.Logger) (outboundSenders, error) {
+	out := outboundSenders{
+		mailer: deps.EmailTransport, mailDelivers: deps.EmailTransport != nil,
+		sms: deps.SMSSender, templates: deps.TemplateMessageSender,
+	}
+	if out.mailer == nil {
+		out.mailer, out.mailDelivers = buildEmailTransport(deps.Config, logger)
+	}
+	out.mailer = observability.WrapMailer(out.mailer)
+	var err error
+	if out.sms == nil {
+		if out.sms, err = buildSMSSender(deps.Config, logger); err != nil {
+			return outboundSenders{}, fmt.Errorf("sms sender: %w", err)
+		}
+	}
+	if out.templates == nil && deps.Config.TemplateMessageProvider == config.TemplateMessageProviderWhatsAppCloud {
+		if out.templates, err = buildWhatsAppCloudSender(deps.Config, logger); err != nil {
+			return outboundSenders{}, fmt.Errorf("template message sender: %w", err)
+		}
+	}
+	return out, nil
+}
+
+// logBootNotices logs what an operator should know about the config at boot
+// without it failing the boot.
+func logBootNotices(cfg *config.Config, defaultAccess service.ProjectAccessConfig, logger *zap.Logger) {
+	// Surface the retention adjustment Load makes when the operator never
+	// chose a window: silent is wrong (the effective value differs from the
+	// documented default), but failing the boot is worse — see Load.
+	if from := cfg.AnonymousRetentionRaisedFrom; from > 0 {
+		logger.Info("anonymous_retention_raised",
+			zap.Int("from_days", from),
+			zap.Int("to_days", cfg.AnonymousRetentionDays),
+			zap.String("reason", "the default window did not outlive GATEWAY_REFRESH_EXPIRY_SECONDS; "+
+				"anonymous users would have been reaped while their only credential was still valid"),
+			zap.String("hint", "set GATEWAY_ANONYMOUS_RETENTION_DAYS explicitly to choose the window"))
+	}
+	if cfg.PasskeyRelyingPartiesConfigured() {
+		logger.Info("passkey_relying_parties_per_host",
+			zap.Strings("hosts", cfg.PasskeyRelyingPartyHosts()))
+	}
+	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when
+	// the default project denies all auth, so a fresh deployment that forgot to
+	// open it isn't silently locked out with no signal.
+	if defaultAccess.Mode == service.AccessModeClosed || defaultAccess.Mode == "" {
+		logger.Warn("default_project_access_closed",
+			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))
+	}
 }
 
 // emailRepair binds the stored-email repair to every project: the control
@@ -1297,9 +1379,10 @@ func tokenTenants(deps Deps, logger *zap.Logger) (middleware.TokenTenants, error
 // domain-verification RPCs, or nil when the governance stores are absent
 // (the memory driver has no control plane). The Connect handler treats nil as
 // "disabled" and returns CodeUnimplemented. A nil deps.DNSResolver lets
-// NewDomainService default to net.DefaultResolver. auditLog receives the
+// NewDomainService default to net.DefaultResolver. accounts is the account
+// store a recovery hold on the caller is read from. auditLog receives the
 // SetDomainJoin trail.
-func buildDomainService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *service.DomainService {
+func buildDomainService(deps Deps, accounts service.Repository, auditLog *audit.Logger, logger *zap.Logger) *service.DomainService {
 	if deps.DomainStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil {
 		return nil
 	}
@@ -1310,7 +1393,7 @@ func buildDomainService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *
 		deps.DNSResolver,
 		deps.Config,
 		logger,
-	).WithAudit(auditLog)
+	).WithAudit(auditLog).WithAccounts(accounts)
 }
 
 // buildMembershipService returns the wired MembershipService backing the
@@ -1325,10 +1408,11 @@ func buildDomainService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *
 // token in its response, so a headless deployment can still complete the
 // flow. users resolves a caller in the request's project
 // (RepositoryUserDirectory over the boot repository), as accounts are
-// partitioned by project. deps.DomainStore, when present, backs joining by
-// domain. auditLog receives the CreateTenant, ownership-transfer and join
-// trail.
-func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, mailDelivers bool, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
+// partitioned by project, and accounts is that repository, which a recovery
+// hold on the caller is read from. deps.DomainStore, when present, backs
+// joining by domain. auditLog receives the CreateTenant, ownership-transfer
+// and join trail.
+func buildMembershipService(deps Deps, accounts service.Repository, users service.UserDirectory, mailer email.Transport, mailDelivers bool, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
 	if !membershipServiceServed(deps) {
 		return nil
 	}
@@ -1341,7 +1425,7 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 		mailDelivers,
 		deps.Config,
 		logger,
-	).WithAudit(auditLog).WithDomains(deps.DomainStore)
+	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts)
 }
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService
@@ -1395,21 +1479,29 @@ func buildManagedChildAuthorization(deps Deps, auth *service.AuthService, logger
 	return service.NewManagedChildAuthorizationService(deps.DirectoryCredentials, auth)
 }
 
-// buildDirectoryService returns the DirectoryService backing LookupUsers, or
-// nil when the build has no control plane to hold directory credentials. The
-// Connect handler treats nil as "disabled" and returns CodeUnimplemented.
-// Either way the outcome is logged once at boot, as SCIM's is.
+// buildDirectoryService returns the DirectoryService backing LookupUsers and,
+// where tenant memberships are stored, MatchTenantMemberPhones, or nil when
+// the build has no control plane to hold directory credentials. The Connect
+// handler treats nil as "disabled" and returns CodeUnimplemented. Either way
+// the outcome is logged once at boot, as SCIM's is.
 func buildDirectoryService(deps Deps, users service.Repository, auditLog *audit.Logger, logger *zap.Logger) *service.DirectoryService {
 	if deps.DirectoryCredentials == nil {
 		logger.Info("directory_lookup_disabled",
-			zap.String("hint", "LookupUsers needs directory_reader credentials, which only the postgres driver's control plane holds"))
+			zap.String("hint", "LookupUsers and MatchTenantMemberPhones need directory_reader credentials, which only the postgres driver's control plane holds"))
 		return nil
 	}
+	window := rateLimitWindow(deps.Config)
 	logger.Info("directory_lookup_enabled",
 		zap.Int("rate_limit_per_ip", deps.Config.RateLimitDirectoryPerIP),
-		zap.Duration("rate_limit_window", rateLimitWindow(deps.Config)),
-		zap.Bool("require_verified_email", deps.Config.AuthRequireVerifiedEmail))
-	return service.NewDirectoryService(deps.DirectoryCredentials, users, deps.Config.AuthRequireVerifiedEmail, auditLog)
+		zap.Duration("rate_limit_window", window),
+		zap.Bool("require_verified_email", deps.Config.AuthRequireVerifiedEmail),
+		zap.Bool("tenant_member_phone_match", deps.MembershipStore != nil),
+		zap.Int("phone_match_per_tenant", deps.Config.RateLimitPhoneMatchPerTenant))
+	directory := service.NewDirectoryService(deps.DirectoryCredentials, users, deps.Config.AuthRequireVerifiedEmail, auditLog)
+	if deps.MembershipStore != nil {
+		directory.WithTenantMemberPhones(deps.MembershipStore, deps.Config.RateLimitPhoneMatchPerTenant, window.Milliseconds())
+	}
+	return directory
 }
 
 // wrapOAuthRegistry returns a registry whose Exchangers are wrapped

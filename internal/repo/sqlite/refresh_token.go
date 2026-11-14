@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -11,14 +12,14 @@ import (
 const refreshTokenColumns = `
 	id, token_hash, user_id, device_info, device_name,
 	ip_address, user_agent,
-	expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms, sid, auth_time_ms`
+	expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms, sid, auth_time_ms, recovery_email_id`
 
 func scanRefreshToken(s scanner) (*service.RefreshTokenRecord, error) {
 	var t service.RefreshTokenRecord
 	if err := s.Scan(
 		&t.NodeID, &t.TokenHash, &t.UserID, &t.DeviceInfo, &t.DeviceName,
 		&t.IPAddress, &t.UserAgent,
-		&t.ExpiresAt, &t.CreatedAt, &t.LastUsedAt, &t.SessionStartedAt, &t.ConsumedAtMs, &t.SID, &t.AuthTimeMs,
+		&t.ExpiresAt, &t.CreatedAt, &t.LastUsedAt, &t.SessionStartedAt, &t.ConsumedAtMs, &t.SID, &t.AuthTimeMs, &t.RecoveryEmailID,
 	); err != nil {
 		return nil, err
 	}
@@ -69,22 +70,35 @@ func (r *sqliteRepository) CreateRefreshToken(ctx context.Context, t *service.Re
 	if id == "" {
 		id = newID()
 	}
-	const q = `
+	q := `
 		INSERT INTO refresh_tokens (
 			id, project_id, token_hash, user_id,
 			device_info, device_name, ip_address, user_agent,
 			expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms, sid,
-			auth_time_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
-	_, err := r.db.Exec(
-		ctx, q,
+			auth_time_ms, recovery_email_id
+		)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16`
+	args := []any{
 		id, r.projectID, t.TokenHash, t.UserID,
 		t.DeviceInfo, t.DeviceName, t.IPAddress, t.UserAgent,
 		t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.SessionStartedAt, t.ConsumedAtMs, t.SID,
-		t.AuthTimeMs,
-	)
+		t.AuthTimeMs, t.RecoveryEmailID,
+	}
+	if t.RecoveryEmailID != "" {
+		// A recovery session's token is stored only while its account holds
+		// the address; SQLite's one writer orders this against
+		// RemoveRecoveryEmail.
+		q += `
+			 WHERE EXISTS (
+				SELECT 1 FROM user_recovery_emails
+				 WHERE project_id = $2 AND user_id = $4 AND id = $16)`
+	}
+	tag, err := r.db.Exec(ctx, q, args...)
 	if err != nil {
 		return "", wrapErr("CreateRefreshToken", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return "", fmt.Errorf("sqlite: CreateRefreshToken: %w", service.ErrNotFound)
 	}
 	t.NodeID = id
 	return id, nil

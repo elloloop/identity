@@ -325,7 +325,7 @@ func TestDOBRequired_PollQrLogin(t *testing.T) {
 
 	init, err := svc.InitiateQrLogin(ctx, "Pixel 8", "agent", "10.0.0.1")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, "", "ApproverAgent")
+	_, err = svc.ApproveQrLogin(ctx, init.SessionID, true, user.ID, SessionSignIn{}, "", "ApproverAgent")
 	require.NoError(t, err)
 
 	_, err = svc.PollQrLogin(ctx, init.SessionID, init.PollSecret, "10.0.0.1", "agent")
@@ -691,7 +691,7 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 		require.ErrorIs(t, err, ErrUnauthenticated, "ticket %q must be refused", ticket)
 	}
 
-	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: user.ID}, 0)
+	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: user.ID}, 0, "")
 	require.NoError(t, err)
 
 	// A valid ticket with an out-of-range date is InvalidArgument.
@@ -712,7 +712,7 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 	repo.setDOBOnceErr = nil
 
 	// A ticket for an account that no longer exists refuses without a panic.
-	ghostTicket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: "no-such-user"}, 0)
+	ghostTicket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: "no-such-user"}, 0, "")
 	require.NoError(t, err)
 	_, err = svc.SubmitDateOfBirth(ctx, ghostTicket, dobAgeMs(30), "", "")
 	require.Error(t, err)
@@ -737,7 +737,7 @@ func TestSubmitDateOfBirth_IsSetOnce(t *testing.T) {
 	require.NoError(t, err)
 	enableAgeGate(t, svc, true)
 
-	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: res.User.ID}, 0)
+	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: res.User.ID}, 0, "")
 	require.NoError(t, err)
 
 	// The child-band submission lands first and gates the account.
@@ -799,7 +799,7 @@ func TestSubmitDateOfBirth_RefusedIssuanceRecordsNoLastLogin(t *testing.T) {
 	enableAgeGate(t, svc, true)
 	ctx := productScope(t, adultMinimumJSON, restrictedProduct)
 	u := seedUser(repo, "teen-nodob@example.com", hashPW(t, strongPW), StatusActive)
-	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: u.ID}, 0)
+	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: u.ID}, 0, "")
 	require.NoError(t, err)
 
 	res, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(15), "1.2.3.4", "agent")

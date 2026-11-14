@@ -63,6 +63,7 @@ type TeammateKeyService struct {
 	audience       string
 	defaultProject string
 	audit          *audit.Logger
+	logger         *zap.Logger
 	now            func() time.Time
 	metrics        teammateKeyMetrics
 }
@@ -94,7 +95,7 @@ func newTeammateKeyMetrics(reg prometheus.Registerer) (teammateKeyMetrics, error
 	return metrics, nil
 }
 
-func NewTeammateKeyService(cfg *config.Config, credentials DirectoryCredentialStore, base Repository, signer jwtpkg.Signer, auditLog *audit.Logger, reg prometheus.Registerer) (*TeammateKeyService, error) {
+func NewTeammateKeyService(cfg *config.Config, credentials DirectoryCredentialStore, base Repository, signer jwtpkg.Signer, auditLog *audit.Logger, logger *zap.Logger, reg prometheus.Registerer) (*TeammateKeyService, error) {
 	if err := cfg.ValidateTeammateKeys(); err != nil {
 		return nil, err
 	}
@@ -115,7 +116,10 @@ func NewTeammateKeyService(cfg *config.Config, credentials DirectoryCredentialSt
 	if auditLog == nil {
 		auditLog = audit.NewLogger(nil, "", zap.NewNop())
 	}
-	return &TeammateKeyService{credentials: credentials, base: base, signer: teammateSigner, issuer: cfg.JWTIssuer, audience: cfg.JWTAudience, defaultProject: cfg.DefaultProjectID, audit: auditLog, now: time.Now, metrics: metrics}, nil
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &TeammateKeyService{credentials: credentials, base: base, signer: teammateSigner, issuer: cfg.JWTIssuer, audience: cfg.JWTAudience, defaultProject: cfg.DefaultProjectID, audit: auditLog, logger: logger, now: time.Now, metrics: metrics}, nil
 }
 
 func (s *TeammateKeyService) repo(project string) TeammateKeyRepository {

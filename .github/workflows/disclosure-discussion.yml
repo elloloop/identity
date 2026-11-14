@@ -13,8 +13,8 @@ name: Disclosure (discussion)
 # purpose: a pull_request_review or pull_request_review_comment run executes
 # the PR branch's copy of the workflow with this repository's secrets, and a
 # branch nobody else has reviewed (a dependency bot's action bump, say)
-# would then run next to the term list. The review gate's Neutrality &
-# Disclosure lens reads reviews and their edit history instead.
+# would then run next to the term list. The review gate's Stage 1
+# (Security & Auth) reads reviews and their edit history instead.
 
 on:
   issues:

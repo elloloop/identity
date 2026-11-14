@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sort"
@@ -718,6 +719,45 @@ func (f *fakeMembershipStore) activeTenant(m *TenantMembership, projectID, userI
 	return &UserTenant{TenantID: t.ID, Name: t.Name, Role: m.Role, Source: m.Source}
 }
 
+// MatchTenantMemberPhones mirrors the postgres store: ErrNotFound for a
+// tenant the project does not hold, nobody for one that is not claimed, and
+// otherwise every member the active-tenant reads admit (a domain one by its
+// account's verified email) whose account is an active person's with a
+// verified number hashing to one of phoneHashes, in id order.
+func (f *fakeMembershipStore) MatchTenantMemberPhones(_ context.Context, projectID, tenantID string, phoneHashes [][]byte) ([]string, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if f.tenants == nil {
+		return nil, fmt.Errorf("%w: tenant", ErrNotFound)
+	}
+	if _, ok := f.tenants.byID[projectID+"/"+tenantID]; !ok {
+		return nil, fmt.Errorf("%w: tenant", ErrNotFound)
+	}
+	wanted := map[[sha256.Size]byte]bool{}
+	for _, h := range phoneHashes {
+		wanted[[sha256.Size]byte(h)] = true
+	}
+	var out []string
+	for _, m := range f.byKey {
+		if m.TenantID != tenantID || f.accounts == nil {
+			continue
+		}
+		u := f.accounts.byID[f.accounts.key(projectID, m.UserID)]
+		if u == nil || u.IsAnonymous || u.IsAgent() || !isActiveStatus(u.Status) || !u.PhoneVerified || u.PhoneNumber == "" {
+			continue
+		}
+		if f.activeTenant(m, projectID, m.UserID, verifiedEmailDomain(u)) == nil {
+			continue
+		}
+		if wanted[sha256.Sum256([]byte(u.PhoneNumber))] {
+			out = append(out, m.UserID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 var _ MembershipStore = (*fakeMembershipStore)(nil)
 
 // fakeDNSResolver returns a fixed TXT record set (or error) per host.
@@ -787,7 +827,7 @@ func TestCreateDomain_ReturnsDeterministicChallenge(t *testing.T) {
 	f := newDomainFixture()
 	f.seedAdmin(testProject, testTenant, testCaller)
 
-	out, err := f.svc.CreateDomain(withProject(testProject), testCaller, testTenant, "ACME.com", DomainVerificationDNSTXT)
+	out, err := f.svc.CreateDomain(withProject(testProject), testCaller, SessionSignIn{}, testTenant, "ACME.com", DomainVerificationDNSTXT)
 	require.NoError(t, err)
 	require.NotNil(t, out.Domain)
 	require.Equal(t, testDomain, out.Domain.Domain, "domain is normalized to lower-case")
@@ -812,7 +852,7 @@ func TestCreateDomain_EmailMethodHasNoTXTChallenge(t *testing.T) {
 	f := newDomainFixture()
 	f.seedAdmin(testProject, testTenant, testCaller)
 
-	out, err := f.svc.CreateDomain(withProject(testProject), testCaller, testTenant, testDomain, DomainVerificationEmail)
+	out, err := f.svc.CreateDomain(withProject(testProject), testCaller, SessionSignIn{}, testTenant, testDomain, DomainVerificationEmail)
 	require.NoError(t, err)
 	require.Equal(t, DomainVerificationEmail, out.Domain.VerificationMethod)
 	require.Empty(t, out.TXTName)
@@ -823,7 +863,7 @@ func TestCreateDomain_RejectsNonAdminCaller(t *testing.T) {
 	f := newDomainFixture()
 	// No membership seeded for the caller.
 
-	_, err := f.svc.CreateDomain(withProject(testProject), testCaller, testTenant, testDomain, DomainVerificationDNSTXT)
+	_, err := f.svc.CreateDomain(withProject(testProject), testCaller, SessionSignIn{}, testTenant, testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -834,7 +874,7 @@ func TestCreateDomain_RejectsPlainMemberCaller(t *testing.T) {
 		Source: MembershipSourceDomain, Role: RoleMember, Status: MembershipStatusActive,
 	})
 
-	_, err := f.svc.CreateDomain(withProject(testProject), testCaller, testTenant, testDomain, DomainVerificationDNSTXT)
+	_, err := f.svc.CreateDomain(withProject(testProject), testCaller, SessionSignIn{}, testTenant, testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -842,7 +882,7 @@ func TestCreateDomain_RejectsWithoutProject(t *testing.T) {
 	f := newDomainFixture()
 	f.seedAdmin(testProject, testTenant, testCaller)
 
-	_, err := f.svc.CreateDomain(context.Background(), testCaller, testTenant, testDomain, DomainVerificationDNSTXT)
+	_, err := f.svc.CreateDomain(context.Background(), testCaller, SessionSignIn{}, testTenant, testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -851,25 +891,25 @@ func TestCreateDomain_RejectsBadInput(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, testCaller)
 	ctx := withProject(testProject)
 
-	_, err := f.svc.CreateDomain(ctx, testCaller, "", testDomain, DomainVerificationDNSTXT)
+	_, err := f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, "", testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrInvalidArgument, "blank tenant")
 
-	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "not a domain", DomainVerificationDNSTXT)
+	_, err = f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, testTenant, "not a domain", DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrInvalidArgument, "domain with whitespace")
 
-	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "localhost", DomainVerificationDNSTXT)
+	_, err = f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, testTenant, "localhost", DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrInvalidArgument, "domain without a dot")
 
-	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "   ", DomainVerificationDNSTXT)
+	_, err = f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, testTenant, "   ", DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrInvalidArgument, "whitespace-only domain")
 
-	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, testDomain, "carrier-pigeon")
+	_, err = f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, testTenant, testDomain, "carrier-pigeon")
 	require.ErrorIs(t, err, ErrInvalidArgument, "unknown method")
 }
 
 func TestCreateDomain_RejectsMissingCaller(t *testing.T) {
 	f := newDomainFixture()
-	_, err := f.svc.CreateDomain(withProject(testProject), "", testTenant, testDomain, DomainVerificationDNSTXT)
+	_, err := f.svc.CreateDomain(withProject(testProject), "", SessionSignIn{}, testTenant, testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrUnauthenticated)
 }
 
@@ -895,7 +935,7 @@ func TestVerifyDomain_SuccessClaimsTenantAndMakesCallerOwner(t *testing.T) {
 	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{"some-unrelated-record", want}
 
-	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.NoError(t, err)
 	require.Equal(t, DomainStatusVerified, got.Status)
 	require.NotZero(t, got.VerifiedAtMs)
@@ -918,7 +958,7 @@ func TestVerifyDomain_TXTAbsentFailsAndMarksDomainFailed(t *testing.T) {
 
 	f.resolver.records[testDomain] = []string{"identity-domain-verify=deadbeef"} // wrong value
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 
 	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
@@ -936,7 +976,7 @@ func TestVerifyDomain_LookupErrorIsVerificationFailure(t *testing.T) {
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 	f.resolver.err = errors.New("no such host")
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -950,7 +990,7 @@ func TestVerifyDomain_FirstVerifierOnLatentTenantBecomesOwner(t *testing.T) {
 	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 
-	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.NoError(t, err)
 	require.Equal(t, DomainStatusVerified, got.Status)
 
@@ -969,7 +1009,7 @@ func TestVerifyDomain_NonMemberRejectedOnClaimedTenant(t *testing.T) {
 	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -984,7 +1024,7 @@ func TestVerifyDomain_NonMemberRejectedOnLatentTenantWithMembers(t *testing.T) {
 	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -1004,16 +1044,16 @@ func TestVerifyDomain_ContestedDomainVerifiesOnlyTheOwnersClaim(t *testing.T) {
 	_, owners := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{owners}
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), squatter, squatID)
+	_, err := f.svc.VerifyDomain(withProject(testProject), squatter, SessionSignIn{}, squatID)
 	require.ErrorIs(t, err, ErrPermissionDenied, "the owner's record is not the squatter's challenge")
 
-	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, ownerID)
+	got, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, ownerID)
 	require.NoError(t, err)
 	require.Equal(t, DomainStatusVerified, got.Status)
 
 	_, squatters := dnsTXTChallenge(testProject, squatterTenant, testDomain)
 	f.resolver.records[testDomain] = []string{owners, squatters}
-	_, err = f.svc.VerifyDomain(withProject(testProject), squatter, squatID)
+	_, err = f.svc.VerifyDomain(withProject(testProject), squatter, SessionSignIn{}, squatID)
 	require.ErrorIs(t, err, ErrAlreadyExists, "a verified domain admits no second verification")
 }
 
@@ -1037,7 +1077,7 @@ func TestVerifyDomain_LegacyChallengeOnlyForLegacyRegistrations(t *testing.T) {
 			f.domains.byID[f.domains.key(testProject, id)].LegacyTXTChallenge = tc.legacy
 			f.resolver.records[testDomain] = []string{legacy}
 
-			_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+			_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 			if tc.want == nil {
 				require.NoError(t, err)
 				return
@@ -1057,7 +1097,7 @@ func TestVerifyDomain_EmailMethodUnimplemented(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err = f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrUnimplemented)
 }
 
@@ -1065,13 +1105,13 @@ func TestVerifyDomain_UnknownDomainNotFound(t *testing.T) {
 	f := newDomainFixture()
 	f.seedAdmin(testProject, testTenant, testCaller)
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, "missing")
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, "missing")
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestVerifyDomain_RejectsWithoutProject(t *testing.T) {
 	f := newDomainFixture()
-	_, err := f.svc.VerifyDomain(context.Background(), testCaller, "dom")
+	_, err := f.svc.VerifyDomain(context.Background(), testCaller, SessionSignIn{}, "dom")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -1118,7 +1158,7 @@ func TestCreateDomain_PropagatesStoreError(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.domains.createErr = errBoom
 
-	_, err := f.svc.CreateDomain(withProject(testProject), testCaller, testTenant, testDomain, DomainVerificationDNSTXT)
+	_, err := f.svc.CreateDomain(withProject(testProject), testCaller, SessionSignIn{}, testTenant, testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -1126,7 +1166,7 @@ func TestCreateDomain_PropagatesMembershipLookupError(t *testing.T) {
 	f := newDomainFixture()
 	f.members.getErr = errBoom
 
-	_, err := f.svc.CreateDomain(withProject(testProject), testCaller, testTenant, testDomain, DomainVerificationDNSTXT)
+	_, err := f.svc.CreateDomain(withProject(testProject), testCaller, SessionSignIn{}, testTenant, testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -1134,7 +1174,7 @@ func TestVerifyDomain_PropagatesGetDomainError(t *testing.T) {
 	f := newDomainFixture()
 	f.domains.getErr = errBoom
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, "any")
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, "any")
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -1147,7 +1187,7 @@ func TestVerifyDomain_PropagatesSetDomainStatusError(t *testing.T) {
 	f.resolver.records[testDomain] = []string{want}
 	f.domains.setErr = errBoom
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -1160,7 +1200,7 @@ func TestVerifyDomain_PropagatesSetTenantStatusError(t *testing.T) {
 	f.resolver.records[testDomain] = []string{want}
 	f.tenants.setErr = errBoom
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -1173,7 +1213,7 @@ func TestVerifyDomain_PropagatesGrantMembershipError(t *testing.T) {
 	f.resolver.records[testDomain] = []string{want}
 	f.members.upsertErr = errBoom
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -1184,7 +1224,7 @@ func TestVerifyDomain_FirstVerifyPropagatesTenantLookupError(t *testing.T) {
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 	f.tenants.getErr = errBoom
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -1194,7 +1234,7 @@ func TestVerifyDomain_FirstVerifyPropagatesMemberListError(t *testing.T) {
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 	f.members.listErr = errBoom
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -1204,7 +1244,7 @@ func TestVerifyDomain_FirstVerifyMissingTenantNotFound(t *testing.T) {
 	// check resolves a (nil, nil) tenant.
 	id := f.seedPendingDomain(t, testProject, testTenant, testDomain)
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
@@ -1218,7 +1258,7 @@ func TestVerifyDomain_RejectsUnknownVerificationMethod(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err = f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrInvalidArgument)
 }
 
@@ -1245,10 +1285,10 @@ func TestListTenantDomains_RejectsMissingProjectAndCaller(t *testing.T) {
 
 func TestVerifyDomain_RejectsMissingCallerAndDomainID(t *testing.T) {
 	f := newDomainFixture()
-	_, err := f.svc.VerifyDomain(withProject(testProject), "", "d")
+	_, err := f.svc.VerifyDomain(withProject(testProject), "", SessionSignIn{}, "d")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 
-	_, err = f.svc.VerifyDomain(withProject(testProject), testCaller, "")
+	_, err = f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
 }
 
@@ -1273,12 +1313,12 @@ func TestVerifyDomain_WritesOnlyWhatChanges(t *testing.T) {
 	id := f.publishedClaim(t, TenantStatusClaimed)
 	ctx := withProject(testProject)
 
-	_, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	_, err := f.svc.VerifyDomain(ctx, testCaller, SessionSignIn{}, id)
 	require.NoError(t, err)
 	require.Equal(t, 1, f.domains.writes)
 	require.Zero(t, f.tenants.writes, "a claimed tenant is not claimed again")
 
-	got, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	got, err := f.svc.VerifyDomain(ctx, testCaller, SessionSignIn{}, id)
 	require.NoError(t, err)
 	require.Equal(t, DomainStatusVerified, got.Status)
 	require.Equal(t, 1, f.domains.writes, "re-verifying a verified domain writes nothing")
@@ -1296,7 +1336,7 @@ func TestVerifyDomain_SuspensionDuringTheCheckStands(t *testing.T) {
 		f.tenants.byID[testProject+"/"+testTenant].Status = TenantStatusSuspended
 	}
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.NoError(t, err)
 	tnt, _ := f.tenants.GetTenant(context.Background(), testProject, testTenant)
 	require.Equal(t, TenantStatusSuspended, tnt.Status, "a claim never lifts a suspension")
@@ -1308,11 +1348,11 @@ func TestVerifyDomain_FailedChecksWriteOnce(t *testing.T) {
 	f := newDomainFixture()
 	id := f.publishedClaim(t, TenantStatusClaimed)
 	ctx := withProject(testProject)
-	_, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	_, err := f.svc.VerifyDomain(ctx, testCaller, SessionSignIn{}, id)
 	require.NoError(t, err)
 
 	f.resolver.records[testDomain] = nil
-	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	_, err = f.svc.VerifyDomain(ctx, testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
 	require.Equal(t, DomainStatusVerified, d.Status, "a lapsed record leaves the domain verified")
@@ -1320,7 +1360,7 @@ func TestVerifyDomain_FailedChecksWriteOnce(t *testing.T) {
 
 	pending := f.seedPendingDomain(t, testProject, testTenant, "other.example.com")
 	for range 2 {
-		_, err = f.svc.VerifyDomain(ctx, testCaller, pending)
+		_, err = f.svc.VerifyDomain(ctx, testCaller, SessionSignIn{}, pending)
 		require.ErrorIs(t, err, ErrPermissionDenied)
 	}
 	d, _ = f.domains.GetDomain(context.Background(), testProject, pending)
@@ -1333,7 +1373,7 @@ func TestVerifyDomain_SuspendedTenantSpendsNoAttempt(t *testing.T) {
 	f := newDomainFixture()
 	id := f.publishedClaim(t, TenantStatusSuspended)
 
-	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, id)
+	_, err := f.svc.VerifyDomain(withProject(testProject), testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	require.Empty(t, f.domains.attempts)
 	require.Zero(t, f.domains.writes)
@@ -1350,24 +1390,24 @@ func TestDomainAttempts_CapRegistrationsAndVerifications(t *testing.T) {
 	f.svc.nowFunc = func() time.Time { return start }
 	ctx := withProject(testProject)
 
-	_, err := f.svc.CreateDomain(ctx, "user-stranger", testTenant, testDomain, DomainVerificationDNSTXT)
+	_, err := f.svc.CreateDomain(ctx, "user-stranger", SessionSignIn{}, testTenant, testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	require.Empty(t, f.domains.attempts, "a refused caller spends no attempt")
 
 	id := f.publishedClaim(t, TenantStatusLatent)
 	f.resolver.records[testDomain] = nil
-	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "second.example.com", DomainVerificationDNSTXT)
+	_, err = f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, testTenant, "second.example.com", DomainVerificationDNSTXT)
 	require.NoError(t, err)
-	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	_, err = f.svc.VerifyDomain(ctx, testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 
 	_, want := dnsTXTChallenge(testProject, testTenant, testDomain)
 	f.resolver.records[testDomain] = []string{want}
-	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	_, err = f.svc.VerifyDomain(ctx, testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, ErrDomainAttemptsLimited)
 	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
 	require.Equal(t, DomainStatusFailed, d.Status, "a refused attempt checks nothing")
-	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "third.example.com", DomainVerificationDNSTXT)
+	_, err = f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, testTenant, "third.example.com", DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrDomainAttemptsLimited)
 	list, _ := f.domains.ListDomainsByTenant(context.Background(), testProject, testTenant)
 	require.Len(t, list, 2, "a refused registration writes nothing")
@@ -1377,7 +1417,7 @@ func TestDomainAttempts_CapRegistrationsAndVerifications(t *testing.T) {
 	require.Equal(t, testTenant, entries[0].ContextMap()["tenant_id"])
 
 	f.svc.nowFunc = func() time.Time { return start.Add(time.Hour + time.Second) }
-	_, err = f.svc.VerifyDomain(ctx, testCaller, id)
+	_, err = f.svc.VerifyDomain(ctx, testCaller, SessionSignIn{}, id)
 	require.NoError(t, err, "the window has moved on")
 }
 
@@ -1387,9 +1427,9 @@ func TestDomainAttempts_PropagatesStoreError(t *testing.T) {
 	f.domains.attemptErr = errBoom
 	ctx := withProject(testProject)
 
-	_, err := f.svc.VerifyDomain(ctx, testCaller, id)
+	_, err := f.svc.VerifyDomain(ctx, testCaller, SessionSignIn{}, id)
 	require.ErrorIs(t, err, errBoom)
-	_, err = f.svc.CreateDomain(ctx, testCaller, testTenant, "second.example.com", DomainVerificationDNSTXT)
+	_, err = f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, testTenant, "second.example.com", DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, errBoom)
 	d, _ := f.domains.GetDomain(context.Background(), testProject, id)
 	require.Equal(t, DomainStatusPending, d.Status)
@@ -1403,7 +1443,7 @@ func TestDomainRPCs_SuspendedTenantRefusesItsAdmins(t *testing.T) {
 	f.tenants.byID[testProject+"/"+testTenant].Status = TenantStatusSuspended
 	ctx := withProject(testProject)
 
-	_, err := f.svc.CreateDomain(ctx, testCaller, testTenant, testDomain, DomainVerificationDNSTXT)
+	_, err := f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, testTenant, testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	_, err = f.svc.ListTenantDomains(ctx, testCaller, testTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied)

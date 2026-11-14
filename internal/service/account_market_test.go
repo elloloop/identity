@@ -188,7 +188,7 @@ func TestSetAccountMarket_RefusedUnderGuardianship(t *testing.T) {
 	}
 	// The guardian still holds management rights.
 	if _, _, gErr := svc.authorizeGuardianAction(
-		ctx, guardianOpViewProfile, guardian.ID, child.ID, strongPW, "", "",
+		ctx, guardianOpViewProfile, guardian.ID, SessionSignIn{}, child.ID, strongPW, "", "",
 	); gErr != nil {
 		t.Fatalf("guardian rights must survive the attempt: %v", gErr)
 	}

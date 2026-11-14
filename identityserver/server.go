@@ -44,10 +44,9 @@ import (
 // New, expose it via Handler and/or RegisterGRPC, run its background
 // workers with Start, and tear everything down with Shutdown.
 type Server struct {
-	built              *app.Built
-	logger             *zap.Logger
-	grpcTrustAuthTime  bool
-	grpcTrustSessionID bool
+	built     *app.Built
+	logger    *zap.Logger
+	grpcTrust grpcTrust
 
 	// shutdownFns run in Shutdown, in reverse construction order, to
 	// release everything New acquired (signer watcher,
@@ -71,7 +70,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	cfg := opts.Config
 
-	s := &Server{logger: logger, grpcTrustAuthTime: opts.GRPCTrustAuthTime, grpcTrustSessionID: opts.GRPCTrustSessionID}
+	s := &Server{logger: logger, grpcTrust: grpcTrust{
+		authTime: opts.GRPCTrustAuthTime, amr: opts.GRPCTrustAMR, sessionID: opts.GRPCTrustSessionID,
+	}}
 
 	otelShutdown, err := observability.Setup(ctx, observability.FromAppConfig(&cfg))
 	if err != nil {
@@ -209,36 +210,37 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	// flusher) own their root context, created and cancelled by
 	// Start/Shutdown, not the construction ctx.
 	built, err := app.New(app.Deps{ //nolint:contextcheck // workers own their context, not New's ctx
-		Config:               &cfg,
-		Logger:               logger,
-		Signer:               signer,
-		Repo:                 authRepo,
-		DB:                   dbAdapter,
-		Passkeys:             webauthnSvc,
-		TOTPKey:              totpKey,
-		TOTPRecoveryPepper:   totpRecoveryPepper,
-		ProjectSecretsKey:    projectSecretsKey,
-		EmailTransport:       opts.EmailTransport,
-		SMSSender:            opts.SMSSender,
-		OAuthRegistry:        opts.OAuthRegistry,
-		IDVProvider:          idvProvider,
-		AssuranceWebVerifier: opts.AssuranceWebVerifier,
-		MetricsRegistry:      opts.MetricsRegistry,
-		ProjectResolver:      projectResolver,
-		TenantAutoFormer:     tenantAutoFormer,
-		DomainStore:          domainStore,
-		TenantStore:          tenantStore,
-		MembershipStore:      membershipStore,
-		InvitationStore:      invitationStore,
-		ControlPlaneStore:    controlPlaneStore,
-		ActiveProjects:       activeProjects,
-		Projects:             projectLister,
-		DirectoryCredentials: directoryCredentials,
-		PlatformAdminStore:   platformAdminStore,
-		LoginPolicyStore:     loginPolicyStore,
-		LoginGovernance:      loginGovernance,
-		DNSResolver:          opts.DNSResolver,
-		SynchronousEmailSend: opts.SynchronousEmailSend,
+		Config:                &cfg,
+		Logger:                logger,
+		Signer:                signer,
+		Repo:                  authRepo,
+		DB:                    dbAdapter,
+		Passkeys:              webauthnSvc,
+		TOTPKey:               totpKey,
+		TOTPRecoveryPepper:    totpRecoveryPepper,
+		ProjectSecretsKey:     projectSecretsKey,
+		EmailTransport:        opts.EmailTransport,
+		SMSSender:             opts.SMSSender,
+		TemplateMessageSender: opts.TemplateMessageSender,
+		OAuthRegistry:         opts.OAuthRegistry,
+		IDVProvider:           idvProvider,
+		AssuranceWebVerifier:  opts.AssuranceWebVerifier,
+		MetricsRegistry:       opts.MetricsRegistry,
+		ProjectResolver:       projectResolver,
+		TenantAutoFormer:      tenantAutoFormer,
+		DomainStore:           domainStore,
+		TenantStore:           tenantStore,
+		MembershipStore:       membershipStore,
+		InvitationStore:       invitationStore,
+		ControlPlaneStore:     controlPlaneStore,
+		ActiveProjects:        activeProjects,
+		Projects:              projectLister,
+		DirectoryCredentials:  directoryCredentials,
+		PlatformAdminStore:    platformAdminStore,
+		LoginPolicyStore:      loginPolicyStore,
+		LoginGovernance:       loginGovernance,
+		DNSResolver:           opts.DNSResolver,
+		SynchronousEmailSend:  opts.SynchronousEmailSend,
 	})
 	if err != nil {
 		s.cleanupOnError(ctx)
@@ -326,10 +328,19 @@ func (s *Server) Handler() http.Handler {
 // HTTP-only. Over native gRPC the host is responsible for authentication
 // — supply a server interceptor that verifies the bearer token and
 // forwards identity's expected metadata (see docs/embedding.md) — and for
-// every per-IP limit except LookupUsers', which the bridge enforces from
-// the same budget as the HTTP surface.
+// every per-IP limit except those of the calls a machine credential makes
+// (the directory reads, the tenant operations and the agent machine
+// calls), which the bridge enforces from the same budgets as the HTTP
+// surface.
 func (s *Server) RegisterGRPC(reg grpc.ServiceRegistrar) {
-	identitypb.RegisterIdentityServiceServer(reg, newGRPCBridge(s.built, s.logger, s.grpcTrustAuthTime, s.grpcTrustSessionID))
+	if (s.grpcTrust.authTime || s.grpcTrust.sessionID) && !s.grpcTrust.amr {
+		s.logger.Warn("grpc_amr_not_trusted",
+			zap.String("hint", "the interceptor forwards the verified token's other keys but GRPCTrustAMR is unset, "+
+				"so every native-gRPC session is treated as one a recovery email may have opened; "+
+				"forward the token's amr as x-authenticated-amr and its recovery_email_id as "+
+				"x-authenticated-recovery-email-id and set GRPCTrustAMR (see the embedding guide)"))
+	}
+	identitypb.RegisterIdentityServiceServer(reg, newGRPCBridge(s.built, s.logger, s.grpcTrust))
 }
 
 // Start launches the background workers: the async audit flusher, the

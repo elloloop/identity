@@ -53,7 +53,7 @@ func TestLinkIdentity_ConcurrentLinksLeaveOne(t *testing.T) {
 		go func(uid string) {
 			defer wg.Done()
 			<-start
-			_, err := svc.LinkIdentity(ctx, uid, fakeOAuthCode("contested@example.com", "C", "", "google"),
+			_, err := svc.LinkIdentity(ctx, uid, SessionSignIn{}, fakeOAuthCode("contested@example.com", "C", "", "google"),
 				"google", "https://app/cb", "", "", "")
 			if err == nil {
 				atomic.AddInt64(&won, 1)
@@ -81,7 +81,7 @@ func TestLinkIdentity_StoreFailureIsNotAlreadyLinked(t *testing.T) {
 	u := seedUser(repo.fakeRepo, "linker@example.com", "hash", StatusActive)
 	repo.failCreateOAuthIdentity = true
 
-	_, err := svc.LinkIdentity(ctx, u.ID, fakeOAuthCode("linker@example.com", "L", "", "google"),
+	_, err := svc.LinkIdentity(ctx, u.ID, SessionSignIn{}, fakeOAuthCode("linker@example.com", "L", "", "google"),
 		"google", "https://app/cb", "", "", "")
 	require.ErrorIs(t, err, errInjected)
 	assert.NotErrorIs(t, err, ErrAlreadyExists)

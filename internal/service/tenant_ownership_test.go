@@ -59,7 +59,7 @@ func (f *selfServiceFixture) role(t *testing.T, userID string) string {
 func TestTransferTenantOwnership_HandsTheTenantOnAndAudits(t *testing.T) {
 	f := newOwnershipFixture()
 
-	out, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, " "+ownTenant+" ", " "+ssOtherID+" ", "203.0.113.7", "test-agent")
+	out, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, SessionSignIn{}, " "+ownTenant+" ", " "+ssOtherID+" ", "203.0.113.7", "test-agent")
 	require.NoError(t, err)
 
 	assert.Equal(t, ssOtherID, out.Owner.UserID)
@@ -76,7 +76,7 @@ func TestTransferTenantOwnership_HandsTheTenantOnAndAudits(t *testing.T) {
 	assert.Equal(t, 1, f.audit.countByEventTypeAndDetail(string(audit.EventTenantOwnershipTransferred), "project_id", ssProject))
 
 	// The previous owner is an admin now, so they cannot hand it on again.
-	_, err = f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, ssOtherID, "", "")
+	_, err = f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	assert.Equal(t, 1, f.audit.countByEventType(string(audit.EventTenantOwnershipTransferred)))
 }
@@ -87,7 +87,7 @@ func TestTransferTenantOwnership_ToACoOwner(t *testing.T) {
 	f := newOwnershipFixture()
 	f.seed(ssOtherID, MembershipSourceInvited, RoleOwner, MembershipStatusActive)
 
-	out, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, ssOtherID, "", "")
+	out, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, RoleOwner, out.Owner.Role)
 	assert.Equal(t, MembershipSourceInvited, out.Owner.Source, "a source other than the domain's is kept")
@@ -113,7 +113,7 @@ func TestTransferTenantOwnership_OnlyAnActiveOwnerOfAGovernableTenant(t *testing
 	} {
 		f := newOwnershipFixture()
 		setup(f)
-		_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, ssOtherID, "", "")
+		_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 		require.ErrorIs(t, err, ErrPermissionDenied, name)
 		assert.Equal(t, RoleMember, f.role(t, ssOtherID), name)
 		assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantOwnershipTransferred)), name)
@@ -124,9 +124,9 @@ func TestTransferTenantOwnership_RefusesBadRequests(t *testing.T) {
 	f := newOwnershipFixture()
 	ctx := withTenantsProject(false)
 
-	_, err := f.svc.TransferTenantOwnership(ctx, "", ownTenant, ssOtherID, "", "")
+	_, err := f.svc.TransferTenantOwnership(ctx, "", SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
-	_, err = f.svc.TransferTenantOwnership(context.Background(), ssOwnerID, ownTenant, ssOtherID, "", "")
+	_, err = f.svc.TransferTenantOwnership(context.Background(), ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "no project in scope")
 
 	for name, args := range map[string][2]string{
@@ -134,15 +134,15 @@ func TestTransferTenantOwnership_RefusesBadRequests(t *testing.T) {
 		"blank user":   {ownTenant, " "},
 		"the caller":   {ownTenant, ssOwnerID},
 	} {
-		_, err := f.svc.TransferTenantOwnership(ctx, ssOwnerID, args[0], args[1], "", "")
+		_, err := f.svc.TransferTenantOwnership(ctx, ssOwnerID, SessionSignIn{}, args[0], args[1], "", "")
 		require.ErrorIs(t, err, ErrInvalidArgument, name)
 	}
 
 	// The new owner must be an active member of the tenant.
-	_, err = f.svc.TransferTenantOwnership(ctx, ssOwnerID, ownTenant, "user-stranger", "", "")
+	_, err = f.svc.TransferTenantOwnership(ctx, ssOwnerID, SessionSignIn{}, ownTenant, "user-stranger", "", "")
 	require.ErrorIs(t, err, ErrNotFound)
 	f.seed(ssOtherID, MembershipSourceInvited, RoleMember, MembershipStatusPending)
-	_, err = f.svc.TransferTenantOwnership(ctx, ssOwnerID, ownTenant, ssOtherID, "", "")
+	_, err = f.svc.TransferTenantOwnership(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.ErrorIs(t, err, ErrNotFound, "a pending membership is not an active one")
 
 	assert.Equal(t, RoleOwner, f.role(t, ssOwnerID))
@@ -163,7 +163,7 @@ func TestTransferTenantOwnership_DomainMemberMustStillBelong(t *testing.T) {
 	} {
 		f := newOwnershipFixture()
 		leave(f)
-		_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, ssOtherID, "", "")
+		_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 		require.ErrorIs(t, err, ErrNotFound, name)
 		assert.Equal(t, RoleMember, f.role(t, ssOtherID), name)
 		assert.Equal(t, RoleOwner, f.role(t, ssOwnerID), name)
@@ -174,7 +174,7 @@ func TestTransferTenantOwnership_DomainMemberMustStillBelong(t *testing.T) {
 	f := newOwnershipFixture()
 	f.seed(ssOtherID, MembershipSourceInvited, RoleMember, MembershipStatusActive)
 	delete(f.members.verified[ssProject+"/"+ownTenant], "example.test")
-	_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, ssOtherID, "", "")
+	_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.NoError(t, err)
 }
 
@@ -185,7 +185,7 @@ func TestTransferTenantOwnership_RefusesAccountsThatCannotOwn(t *testing.T) {
 	ids := append(ineligibleOwners(f.users, ssProject), "user-without-account")
 	for _, id := range ids {
 		f.seed(id, MembershipSourceAdded, RoleMember, MembershipStatusActive)
-		_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, id, "", "")
+		_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, SessionSignIn{}, ownTenant, id, "", "")
 		require.ErrorIs(t, err, ErrIneligibleTenantOwner, id)
 		assert.Equal(t, RoleMember, f.role(t, id), id)
 	}
@@ -202,7 +202,7 @@ func TestTransferTenantOwnership_StoreErrors(t *testing.T) {
 	} {
 		f := newOwnershipFixture()
 		fail(f)
-		_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, ssOtherID, "", "")
+		_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 		require.ErrorIs(t, err, boom, name)
 		assert.Zero(t, f.audit.countByEventType(string(audit.EventTenantOwnershipTransferred)), name)
 	}
@@ -212,7 +212,7 @@ func TestTransferTenantOwnership_WithoutAuditStillTransfers(t *testing.T) {
 	f := newOwnershipFixture()
 	f.svc.WithAudit(nil)
 
-	_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, ownTenant, ssOtherID, "", "")
+	_, err := f.svc.TransferTenantOwnership(withTenantsProject(false), ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, RoleOwner, f.role(t, ssOtherID))
 }
