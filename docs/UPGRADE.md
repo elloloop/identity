@@ -297,8 +297,9 @@ both ask for a password. A recovery email can now be that way.
   what role (`CreateTenantInvitation`, `RemoveTenantMember`,
   `SuspendTenantMember`, `RestoreTenantMember`, `TransferTenantOwnership`,
   `CreateDomain`, `VerifyDomain`, `SetDomainJoin`), or, as a project admin,
-  add an account or set a role or another account's password (`InviteUser`,
-  `CreateUser`, `UpdateUser`, `ResetUserPassword`). Nothing else is held:
+  add, merge or reactivate an account or set a role or another account's
+  password (`InviteUser`, `CreateUser`, `UpdateUser`, `ResetUserPassword`,
+  `MergeUsers`, `ReactivateUser`). Nothing else is held:
   the other reads, calls that take access away (revoking a delegation, a
   machine, an agent transfer or a parental consent, a project admin's
   `DeactivateUser` and `DeleteUser`), the account's own agents, accepting a tenant invitation or
@@ -489,9 +490,11 @@ now keep a list of addresses it has proved it controls.
   each still signs in to, and is removed from, a live account. A merge that
   would leave the survivor holding more than `recovery_emails.max` is refused
   `FAILED_PRECONDITION`, saying to remove some first. `AccountMerge` gains
-  `RecoveryEmailsMax`, and a custom driver's `ApplyAccountMerge` must move the
-  rows and refuse past it with `ErrRecoveryEmailLimit` (the conformance suite
-  checks both).
+  `RecoveryEmailsMax` and `RecoveryHold`, and a custom driver's
+  `ApplyAccountMerge` must move the rows, refuse past the cap with
+  `ErrRecoveryEmailLimit`, and refuse while a recovery hold is in force on
+  either account with `AccountMerge.HoldRefusal`'s `RecoveryHoldError`, read
+  in the merge's transaction (the conformance suite checks all three).
 - **`User.recovery_email` is unchanged** and still unverified and unread. It is
   not a recovery email in this sense; prefer the new RPCs.
 - **Migration 0059** adds `user_recovery_emails` and `recovery_email_codes`

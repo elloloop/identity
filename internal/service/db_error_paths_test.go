@@ -114,7 +114,7 @@ func TestAdminReactivateUser_GetNodeFails(t *testing.T) {
 	db.failGetNodeAfter = 2
 	svc := newAdminWithDB(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "target-1")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "target-1")
 	require.Error(t, err)
 }
 
@@ -125,7 +125,7 @@ func TestAdminReactivateUser_ExecuteFails(t *testing.T) {
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "target-1")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "target-1")
 	require.Error(t, err)
 }
 

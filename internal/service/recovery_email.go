@@ -260,10 +260,17 @@ func recoveryHoldUntil(held []*RecoveryEmail, hold time.Duration, nowMs int64) i
 	for _, e := range held {
 		latest = max(latest, e.HoldStartedAt)
 	}
-	if latest == 0 {
+	return recoveryHoldEnd(latest, hold, nowMs)
+}
+
+// recoveryHoldEnd is when the hold a recovery sign-in started at
+// latestStartMs ends (epoch ms), or 0 when there was none or it ended by
+// nowMs.
+func recoveryHoldEnd(latestStartMs int64, hold time.Duration, nowMs int64) int64 {
+	if latestStartMs == 0 {
 		return 0
 	}
-	if until := latest + hold.Milliseconds(); until > nowMs {
+	if until := latestStartMs + hold.Milliseconds(); until > nowMs {
 		return until
 	}
 	return 0

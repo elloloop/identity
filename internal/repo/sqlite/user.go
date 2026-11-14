@@ -889,15 +889,21 @@ func mergedRows(m service.AccountMerge, survivor, other mergeRow) (kept, retired
 	return kept, retired, nil
 }
 
-// checkMergeRecoveryEmails refuses a merge that would leave the survivor
-// holding more than m.RecoveryEmailsMax recovery emails.
+// checkMergeRecoveryEmails refuses a merge while a recovery hold is in force
+// on either account, and one that would leave the survivor holding more than
+// m.RecoveryEmailsMax recovery emails.
 func (r *sqliteRepository) checkMergeRecoveryEmails(ctx context.Context, t *tx, m service.AccountMerge) error {
 	var survivorHeld, otherHeld int
+	var latestHold int64
 	if err := t.QueryRow(ctx, `
-		SELECT count(CASE WHEN user_id = $2 THEN 1 END), count(CASE WHEN user_id = $3 THEN 1 END)
+		SELECT count(CASE WHEN user_id = $2 THEN 1 END), count(CASE WHEN user_id = $3 THEN 1 END),
+		       coalesce(max(hold_started_at_ms), 0)
 		  FROM user_recovery_emails WHERE project_id = $1 AND user_id IN ($2, $3)`,
-		r.projectID, m.SurvivorID, m.OtherID).Scan(&survivorHeld, &otherHeld); err != nil {
+		r.projectID, m.SurvivorID, m.OtherID).Scan(&survivorHeld, &otherHeld, &latestHold); err != nil {
 		return wrapErr("ApplyAccountMerge(recovery emails)", err)
+	}
+	if err := m.HoldRefusal(latestHold); err != nil {
+		return err
 	}
 	if otherHeld > 0 && survivorHeld+otherHeld > m.RecoveryEmailsMax {
 		return service.ErrRecoveryEmailLimit

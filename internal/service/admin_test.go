@@ -246,7 +246,7 @@ func TestAdminService_ReactivateUser_HappyPath(t *testing.T) {
 	db.addUser("target-1", "target@test.com", "Target", "member", "deactivated")
 	svc := newTestAdminService(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "target-1")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "target-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestAdminService_ReactivateUser_PendingParentalConsentRejected(t *testing.T
 	db.addUser("child-1", "child@test.com", "Child", "member", StatusPendingParentalConsent)
 	svc := newTestAdminService(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "child-1")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "child-1")
 	if !errors.Is(err, ErrParentalConsentRequired) {
 		t.Fatalf("expected ErrParentalConsentRequired, got %v", err)
 	}

@@ -118,14 +118,14 @@ func TestMergeUsers_AdminOnlyNoPassword(t *testing.T) {
 	other := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)
 	other.Username = "ann"
 
-	_, err := svc.MergeUsers(ctx, "member-1", survivor.ID, other.ID, false)
+	_, err := svc.MergeUsers(ctx, "member-1", SessionSignIn{}, survivor.ID, other.ID, false)
 	require.Error(t, err)
-	merged, err := svc.MergeUsers(ctx, "admin-1", survivor.ID, other.ID, false)
+	merged, err := svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, survivor.ID, other.ID, false)
 	require.NoError(t, err)
 	require.Equal(t, "ann", merged.Username)
 	retired, _ := repo.GetUser(ctx, other.ID)
 	require.Equal(t, StatusDeactivated, retired.Status)
-	_, err = svc.MergeUsers(ctx, "admin-1", survivor.ID, "missing", false)
+	_, err = svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, survivor.ID, "missing", false)
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
@@ -211,7 +211,7 @@ func TestMergeUsers_RefusedWhileEitherAccountIsHeld(t *testing.T) {
 	holdAccount(ctx, t, repo, other.ID, "ann-spare@example.net", nowMs())
 
 	var hold *RecoveryHoldError
-	_, err := svc.MergeUsers(ctx, "admin-1", survivor.ID, other.ID, false)
+	_, err := svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, survivor.ID, other.ID, false)
 	require.ErrorAs(t, err, &hold)
 	retired, _ := repo.GetUser(ctx, other.ID)
 	require.Equal(t, StatusActive, retired.Status)
@@ -223,7 +223,7 @@ func TestReactivateUser_RefusesAMergedAccount(t *testing.T) {
 	db.addUser("gone-1", "gone@example.test", "Gone", "member", "deactivated")
 	db.nodes["gone-1"].Payload[ufMergedInto] = "survivor-1"
 	svc := newTestAdminService(db)
-	err := svc.ReactivateUser(context.Background(), "admin-1", "gone-1")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "gone-1")
 	require.ErrorIs(t, err, ErrMergeRefused)
 }
 
@@ -335,16 +335,16 @@ func TestMergeUsers_RefusesTheAdminsOwnAccountAndKeepsTOTPPasswords(t *testing.T
 	svc := newTestAdminServiceWithRepo(db, repo)
 	ctx := accountsScope(t, "accounts.example.test")
 
-	_, err := svc.MergeUsers(ctx, "admin-1", "someone", "admin-1", false)
+	_, err := svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, "someone", "admin-1", false)
 	require.ErrorIs(t, err, ErrMergeRefused, "the admin's account is not merged away")
-	_, err = svc.MergeUsers(ctx, "admin-1", "admin-1", "someone", false)
+	_, err = svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, "admin-1", "someone", false)
 	require.ErrorIs(t, err, ErrMergeRefused, "nor is another merged into it")
 
 	survivor := seedUser(repo, "a@mail.example.com", "", StatusActive)
 	other := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)
 	other.Username = "tia"
 	other.TotpRequired = true
-	merged, err := svc.MergeUsers(ctx, "admin-1", survivor.ID, other.ID, false)
+	merged, err := svc.MergeUsers(ctx, "admin-1", SessionSignIn{}, survivor.ID, other.ID, false)
 	require.NoError(t, err)
 	require.Empty(t, merged.PasswordHash, "a password a second factor protected does not move")
 	require.Equal(t, "tia", merged.Username)

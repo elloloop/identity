@@ -159,7 +159,7 @@ func (h *IdentityHandler) ReactivateUser(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	err := h.admin.ReactivateUser(ctx, callerID, req.Msg.UserId)
+	err := h.admin.ReactivateUser(ctx, callerID, authenticatedSignIn(req.Header()), req.Msg.UserId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

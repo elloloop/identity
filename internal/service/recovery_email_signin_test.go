@@ -1078,17 +1078,23 @@ func TestProjectRecoveryEmailsConfig_Hold(t *testing.T) {
 	}
 }
 
-// A project admin's recovery session adds no account, sets no role and sets
-// no other account's password from the admin seat while the hold is in force,
-// nor once its address is gone, and one that cannot name its address makes
-// none where recovery emails sign in: each would outlast the hold. The admin
-// signed in another way makes them as before.
+// A project admin's recovery session adds, merges or reactivates no account,
+// sets no role and sets no other account's password from the admin seat while
+// the hold is in force, nor once its address is gone, and one that cannot
+// name its address makes none where recovery emails sign in: each would
+// outlast the hold. A merge would move a throwaway account's password onto
+// one that has none. The admin signed in another way makes them as before.
 func TestRecoveryHold_HoldsTheAdminSeatsGrants(t *testing.T) {
 	db := newFakeDB()
 	db.addUser("admin-1", "admin@example.test", "Admin", RoleAdmin, StatusActive)
 	db.addUser("member-1", "member@example.test", "Member", "member", StatusActive)
+	db.addUser("away-1", "away@example.test", "Away", "member", StatusDeactivated)
 	repo := newFakeRepo()
 	repo.users["admin-1"] = &User{ID: "admin-1", Email: "admin@example.test", Role: RoleAdmin, Status: StatusActive}
+	victim := seedUser(repo, "victim@example.test", "", StatusActive)
+	victim.EmailVerified = true
+	throwaway := seedUser(repo, "", hashPW(t, accessTestPassword), StatusActive)
+	throwaway.Username = "throwaway"
 	svc := newTestAdminServiceWithRepo(db, repo)
 	ctx := WithProjectScope(context.Background(), &ProjectScope{
 		ProjectID: "project-a", Access: ProjectAccessConfig{Mode: AccessModeOpen},
@@ -1117,6 +1123,13 @@ func TestRecoveryHold_HoldsTheAdminSeatsGrants(t *testing.T) {
 				_, err := svc.ResetUserPassword(ctx, "admin-1", session, "member-1", true)
 				return err
 			},
+			"MergeUsers": func() error {
+				_, err := svc.MergeUsers(ctx, "admin-1", session, victim.ID, throwaway.ID, false)
+				return err
+			},
+			"ReactivateUser": func() error {
+				return svc.ReactivateUser(ctx, "admin-1", session, "away-1")
+			},
 		}
 	}
 	signedIn := time.Now().Unix()
@@ -1139,7 +1152,19 @@ func TestRecoveryHold_HoldsTheAdminSeatsGrants(t *testing.T) {
 			t.Fatalf("%s by the removed address's session = %v, want ErrUnauthenticated", name, err)
 		}
 	}
-	if _, err := svc.ResetUserPassword(ctx, "admin-1", SessionSignIn{AuthTimeSec: signedIn}, "member-1", true); err != nil {
-		t.Fatalf("the admin's own session resets another account's password: %v", err)
+	if victim.PasswordHash != "" || throwaway.Status != StatusActive {
+		t.Fatalf("a refused merge moved the throwaway's password (%t) or retired it (%s)", victim.PasswordHash != "", throwaway.Status)
+	}
+	if node, _ := db.GetNode(ctx, "", "", typeUser, "away-1"); pstr(node.Payload, ufStatus) != StatusDeactivated {
+		t.Fatalf("a refused reactivation reactivated the account: %s", pstr(node.Payload, ufStatus))
+	}
+	ownSession := grants(SessionSignIn{AuthTimeSec: signedIn})
+	for _, name := range []string{"ResetUserPassword", "MergeUsers", "ReactivateUser"} {
+		if err := ownSession[name](); err != nil {
+			t.Fatalf("%s by the admin's own session: %v", name, err)
+		}
+	}
+	if victim.PasswordHash == "" || throwaway.Status != StatusDeactivated {
+		t.Fatalf("the admin's own merge did not move the password (%t) or retire the throwaway (%s)", victim.PasswordHash != "", throwaway.Status)
 	}
 }

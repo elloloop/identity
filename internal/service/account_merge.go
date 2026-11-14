@@ -37,7 +37,22 @@ type AccountMerge struct {
 	// account's have moved to it: when together they hold more, the merge is
 	// ErrRecoveryEmailLimit and changes nothing.
 	RecoveryEmailsMax int
-	AtMs              int64
+	// RecoveryHold is the project's recovery hold. While one is in force on
+	// either account at AtMs the merge is a RecoveryHoldError (HoldRefusal)
+	// and changes nothing. It is read under the merge's lock, so a recovery
+	// sign-in that lands after the caller's checks still stops the merge.
+	RecoveryHold time.Duration
+	AtMs         int64
+}
+
+// HoldRefusal is the RecoveryHoldError the merge answers while the hold the
+// two accounts' latest recovery sign-in started (latestHoldStartedAtMs, 0 for
+// none) is in force at AtMs, or nil.
+func (m AccountMerge) HoldRefusal(latestHoldStartedAtMs int64) error {
+	if until := recoveryHoldEnd(latestHoldStartedAtMs, m.RecoveryHold, m.AtMs); until != 0 {
+		return &RecoveryHoldError{UntilMs: until}
+	}
+	return nil
 }
 
 // ApplyToUsers is the merge's change to the two account records and to the
@@ -45,7 +60,8 @@ type AccountMerge struct {
 // memory (the memory driver and the test stores): the guards the SQL drivers
 // apply in their transaction, then the moves. It changes nothing and returns
 // ErrMergeConflict when either account is no longer active, unmerged people,
-// or a move would overwrite a field the survivor has filled, and
+// or a move would overwrite a field the survivor has filled, HoldRefusal's
+// RecoveryHoldError while a recovery hold is in force on either, and
 // ErrRecoveryEmailLimit when the survivor could not take the other account's
 // recovery emails. The caller re-points the other account's linked
 // providers, moves or releases its phone claim (MovePhone), applies
@@ -60,6 +76,15 @@ func (m AccountMerge) ApplyToUsers(survivor, other *User, recoveryEmails map[str
 		return ErrMergeConflict
 	}
 	moving := recoveryEmails[m.OtherID]
+	var latestHold int64
+	for _, id := range []string{m.SurvivorID, m.OtherID} {
+		for _, e := range recoveryEmails[id] {
+			latestHold = max(latestHold, e.HoldStartedAt)
+		}
+	}
+	if err := m.HoldRefusal(latestHold); err != nil {
+		return err
+	}
 	if len(moving) > 0 && len(recoveryEmails[m.SurvivorID])+len(moving) > m.RecoveryEmailsMax {
 		return ErrRecoveryEmailLimit
 	}
@@ -251,13 +276,15 @@ func (s *AuthService) auditMerge(ctx context.Context, actorID, targetID, ipAddr,
 // account is asked for, and it does not depend on the self-service switch.
 // It is refused like MergeAccounts while a recovery hold is in force on
 // either account: the owner ends one early by removing, signed in some other
-// way, every recovery email whose hold is still in force. Neither account may be the
-// admin's own: merging one away retires the admin, and merging one in gives
-// the admin's account the other's password and sign-ins, which only
+// way, every recovery email whose hold is still in force. A merge can move a
+// password onto an account that had none, so it is also refused to an
+// admin's session a recovery hold binds (requireAdminChange). Neither account
+// may be the admin's own: merging one away retires the admin, and merging one
+// in gives the admin's account the other's password and sign-ins, which only
 // MergeAccounts, with that account's password and the caller's session
 // checked, may do.
-func (s *AdminService) MergeUsers(ctx context.Context, actorID, survivorID, otherID string, takeAddress bool) (*User, error) {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+func (s *AdminService) MergeUsers(ctx context.Context, actorID string, signIn SessionSignIn, survivorID, otherID string, takeAddress bool) (*User, error) {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return nil, err
 	}
 	if otherID == actorID {
@@ -314,17 +341,14 @@ func announceMerge(ctx context.Context, a mergeAnnouncer, retiredBefore, merged,
 
 // mergeAccounts checks the pair, applies the merge in one transaction and
 // returns both accounts as stored afterwards. The other account's recovery
-// hold is read only here, once the caller has proved it is theirs.
+// hold is read only in that transaction, once the caller has proved it is
+// theirs.
 func mergeAccounts(ctx context.Context, repo Repository, survivor, other *User, takeAddress bool, now int64) (*User, *User, error) {
 	if err := checkMergeable(ctx, repo, survivor, other); err != nil {
 		return nil, nil, err
 	}
-	for _, id := range []string{survivor.ID, other.ID} {
-		if err := recoveryHoldOn(ctx, repo, id, now); err != nil {
-			return nil, nil, err
-		}
-	}
-	recoveryMax := recoveryEmailsConfig(ProjectScopeFromContext(ctx)).max()
+	recoveryCfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
+	recoveryMax := recoveryCfg.max()
 	err := repo.ApplyAccountMerge(ctx, AccountMerge{
 		SurvivorID:   survivor.ID,
 		OtherID:      other.ID,
@@ -336,6 +360,7 @@ func mergeAccounts(ctx context.Context, repo Repository, survivor, other *User, 
 		SwapAddress:       takeAddress && other.AccountAddress != "",
 		MovePhone:         other.PhoneNumber != "" && survivor.PhoneNumber == "",
 		RecoveryEmailsMax: recoveryMax,
+		RecoveryHold:      recoveryCfg.hold(),
 		AtMs:              now,
 	})
 	if errors.Is(err, ErrRecoveryEmailLimit) {

@@ -102,10 +102,11 @@ import { Code } from "astro-expressive-code/components";
       the caller's own account either: an admin deletes it with
       <code>DeleteMyAccount</code>, as anyone does, and has it deactivated by
       another admin. While a <a href="/identity/docs/auth/recovery-emails#the-hold">recovery
-      hold</a> is in force, a session a recovery email opened adds no
-      account, sets no role and resets no account's password from the admin
-      seat (<code>InviteUser</code>, <code>CreateUser</code>,
-      <code>UpdateUser</code>, <code>ResetUserPassword</code>).
+      hold</a> is in force, a session a recovery email opened adds, merges or
+      reactivates no account, sets no role and resets no account's password
+      from the admin seat (<code>InviteUser</code>, <code>CreateUser</code>,
+      <code>UpdateUser</code>, <code>ResetUserPassword</code>,
+      <code>MergeUsers</code>, <code>ReactivateUser</code>).
     </li>
     <li>
       <strong><code>SetUserQuota</code></strong> — set per-user

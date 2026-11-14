@@ -40,7 +40,7 @@ func (h *IdentityHandler) MergeUsers(
 	if callerID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
-	user, err := h.admin.MergeUsers(ctx, callerID, req.Msg.SurvivorUserId, req.Msg.OtherUserId, req.Msg.TakeAddress)
+	user, err := h.admin.MergeUsers(ctx, callerID, authenticatedSignIn(req.Header()), req.Msg.SurvivorUserId, req.Msg.OtherUserId, req.Msg.TakeAddress)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

@@ -5263,9 +5263,9 @@ func (x *ListRecoveryEmailsResponse) GetHoldUntil() int64 {
 // someone else (TransferAgent), change who belongs to a tenant or with what
 // role (CreateTenantInvitation, RemoveTenantMember, SuspendTenantMember,
 // RestoreTenantMember, TransferTenantOwnership, CreateDomain, VerifyDomain,
-// SetDomainJoin), or, as a project admin, add an account or set a role or
-// another account's password (InviteUser, CreateUser, UpdateUser,
-// ResetUserPassword). So whoever got into a recovery mailbox cannot take the
+// SetDomainJoin), or, as a project admin, add, merge or reactivate an account
+// or set a role or another account's password (InviteUser, CreateUser,
+// UpdateUser, ResetUserPassword, MergeUsers, ReactivateUser). So whoever got into a recovery mailbox cannot take the
 // rest of the account, take it from the owner, or hand out what removing the
 // address would not take back, before the owner has had the notice. It can
 // still sign itself out: Logout, or RevokeSession of its own session where

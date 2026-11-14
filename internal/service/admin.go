@@ -104,10 +104,10 @@ func (s *AdminService) requireAdmin(ctx context.Context, actorID string) (*User,
 	return requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID)
 }
 
-// requireAdminChange is requireAdmin for a call that adds an account, sets a
-// role or sets another account's password: each outlasts the session, so a
-// session a recovery hold binds, or whose recovery email is gone, is refused
-// (refuseHeldSession).
+// requireAdminChange is requireAdmin for a call that adds, merges or
+// reactivates an account, sets a role or sets another account's password:
+// each outlasts the session, so a session a recovery hold binds, or whose
+// recovery email is gone, is refused (refuseHeldSession).
 func (s *AdminService) requireAdminChange(ctx context.Context, actorID string, signIn SessionSignIn) error {
 	if err := refuseHeldSession(ctx, s.repo(ctx), s.logger, actorID, signIn, nowMs()); err != nil {
 		return err
@@ -333,9 +333,10 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 	return nil
 }
 
-// ReactivateUser sets a deactivated user back to active.
-func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID string) error {
-	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+// ReactivateUser sets a deactivated user back to active. It gives back a
+// way in, so a session a recovery hold binds is refused (requireAdminChange).
+func (s *AdminService) ReactivateUser(ctx context.Context, actorID string, signIn SessionSignIn, targetUserID string) error {
+	if err := s.requireAdminChange(ctx, actorID, signIn); err != nil {
 		return err
 	}
 	if targetUserID == "" {

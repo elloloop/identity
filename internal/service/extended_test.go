@@ -1035,7 +1035,7 @@ func TestAdminService_ReactivateUser_EmptyTarget(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "")
 	require.Error(t, err)
 }
 
@@ -1044,7 +1044,7 @@ func TestAdminService_ReactivateUser_NotFound(t *testing.T) {
 	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newTestAdminService(db)
 
-	err := svc.ReactivateUser(context.Background(), "admin-1", "ghost")
+	err := svc.ReactivateUser(context.Background(), "admin-1", SessionSignIn{}, "ghost")
 	require.Error(t, err)
 }
 

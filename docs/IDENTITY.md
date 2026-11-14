@@ -823,10 +823,11 @@ default; a control-plane project's `config_json` only).
   agent machine, hires out no teammate, registers or changes no OAuth client,
   takes or uses no guardian's control over a child, gives no agent away,
   changes no tenant's members or roles (domains included), and, as a project
-  admin, adds no account and sets no role or other account's password. So
-  whoever got into one recovery mailbox can neither take the rest of the
-  account, nor take it away from the owner, nor hand out what removing the
-  address would not take back, before the owner has read the notice. The
+  admin, adds, merges or reactivates no account and sets no role or other
+  account's password. So whoever got into one recovery mailbox can neither
+  take the rest of the account, nor take it away from the owner, nor hand out
+  what removing the address would not take back, before the owner has read
+  the notice. The
   notice says what to check if the owner acts only after the hold. The
   session can still sign itself out. It never approves a QR sign-in, hold or not. A session opened any
   other way is not held: the owner can always remove an address they do not

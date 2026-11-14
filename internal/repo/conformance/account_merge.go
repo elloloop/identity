@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -149,6 +150,41 @@ func runAccountMergeConformance(t *testing.T, driver Driver) {
 			}
 			if list, _ := r.ListRecoveryEmails(ctx, other); len(list) != 1 {
 				t.Fatalf("a refused merge moved recovery emails: %#v", list)
+			}
+		})
+
+		// The hold is read in the merge's own transaction, so a recovery
+		// sign-in that lands after the caller's checks still stops it.
+		t.Run("RecoveryHoldOnEitherAccountRefusesTheMerge", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			for _, heldOn := range []string{"survivor", "other"} {
+				survivor := createTestUser(t, r, "am-hold-s-"+heldOn+"@example.com")
+				other := createTestUser(t, r, "am-hold-o-"+heldOn+"@example.com")
+				holder := map[string]string{"survivor": survivor, "other": other}[heldOn]
+				addr := "am-hold-" + heldOn + "@example.net"
+				if err := r.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: holder, Email: addr, VerifiedAt: 1}, 5); err != nil {
+					t.Fatalf("AddRecoveryEmail: %v", err)
+				}
+				const signedInAt, hold = int64(1_000), int64(500)
+				if err := r.MarkRecoveryEmailSignIn(ctx, holder, recoveryEmailIDOf(t, r, holder, addr), signedInAt, hold); err != nil {
+					t.Fatalf("MarkRecoveryEmailSignIn: %v", err)
+				}
+				merge := service.AccountMerge{SurvivorID: survivor, OtherID: other, RecoveryEmailsMax: 5, RecoveryHold: time.Duration(hold) * time.Millisecond, AtMs: signedInAt + hold - 1}
+				var refusal *service.RecoveryHoldError
+				if err := r.ApplyAccountMerge(ctx, merge); !errors.As(err, &refusal) || refusal.UntilMs != signedInAt+hold {
+					t.Fatalf("merge while the %s is held = %v (%+v), want a RecoveryHoldError until %d", heldOn, err, refusal, signedInAt+hold)
+				}
+				if o, _ := r.GetUser(ctx, other); o.Status != "active" || o.MergedIntoUserID != "" {
+					t.Fatalf("a held merge retired the other account: %#v", o)
+				}
+				if list, _ := r.ListRecoveryEmails(ctx, holder); len(list) != 1 || list[0].UserID != holder {
+					t.Fatalf("a held merge moved recovery emails: %#v", list)
+				}
+				merge.AtMs = signedInAt + hold
+				if err := r.ApplyAccountMerge(ctx, merge); err != nil {
+					t.Fatalf("merge once the hold on the %s has ended: %v", heldOn, err)
+				}
 			}
 		})
 
