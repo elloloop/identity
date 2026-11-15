@@ -66,7 +66,7 @@ func TestAccessToken_EmailVerifiedAfterVerification(t *testing.T) {
 	svc, _, rec := newAuthSvcWithMailer(t)
 	ctx := context.Background()
 
-	signup, err := svc.PasswordSignup(ctx, "late@example.com", strongPW, "Late", "", 0, "", EmailLinkParams{})
+	signup, err := svc.PasswordSignup(ctx, "late@example.com", strongPW, "Late", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.NotEmpty(t, signup.AccessToken)
 	assert.Equal(t, false, tokenPayload(t, signup.AccessToken)["email_verified"])
@@ -118,9 +118,9 @@ func TestAccessToken_DuplicateSignupDecoyEmailVerifiedParity(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	ctx := context.Background()
 
-	fresh, err := svc.PasswordSignup(ctx, "twice@example.com", strongPW, "Twice", "", 0, "", EmailLinkParams{})
+	fresh, err := svc.PasswordSignup(ctx, "twice@example.com", strongPW, "Twice", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
-	dup, err := svc.PasswordSignup(ctx, "twice@example.com", strongPW, "Twice", "", 0, "", EmailLinkParams{})
+	dup, err := svc.PasswordSignup(ctx, "twice@example.com", strongPW, "Twice", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 
 	freshClaims, dupClaims := tokenPayload(t, fresh.AccessToken), tokenPayload(t, dup.AccessToken)

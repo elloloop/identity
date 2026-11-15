@@ -168,7 +168,7 @@ func TestInviteOnly_PasswordSignupIsNotAdmittedByAnInvitation(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	svc.WithOpenInvitations(invitationsWith(pending("new@example.com")))
 
-	_, err := svc.PasswordSignup(accessScope(t, inviteOnlyJSON), "new@example.com", accessTestPassword, "N", "", 0, "", EmailLinkParams{})
+	_, err := svc.PasswordSignup(accessScope(t, inviteOnlyJSON), "new@example.com", accessTestPassword, "N", "", nil, "", EmailLinkParams{})
 
 	require.ErrorIs(t, err, ErrSignupByInvitationOnly, "a password proves nothing about the mailbox")
 	u, _ := repo.FindUserByEmail(context.Background(), "new@example.com")

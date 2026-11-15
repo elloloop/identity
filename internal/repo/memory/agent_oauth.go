@@ -56,11 +56,11 @@ func (r *Repo) FindAgentAuthorizationByRefresh(_ context.Context, hash string) (
 func (r *Repo) oauthAuthorityLocked(ownerID, agentID, sid, clientID string) service.AgentOAuthAuthority {
 	a := service.AgentOAuthAuthority{Client: r.oauthClients[clientID].Clone()}
 	if u := r.users[ownerID]; u != nil {
-		copy := *u
+		copy := *u.Clone()
 		a.Owner = &copy
 	}
 	if u := r.users[agentID]; u != nil {
-		copy := *u
+		copy := *u.Clone()
 		a.Agent = &copy
 	}
 	for _, s := range r.sessions {

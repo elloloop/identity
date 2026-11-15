@@ -31,7 +31,7 @@ const userColumns = `
 	market, username, account_address, merged_into_user_id,
 	password_change_required,
 	kind, owner_user_id, pending_owner_user_id,
-	created_at_ms, updated_at_ms`
+	created_at_ms, updated_at_ms, date_of_birth_present`
 
 // userColumnsPrefixed returns userColumns with every column qualified by
 // the given table alias (e.g. "u"). Used by joins that select the user
@@ -57,6 +57,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		deletionScheduledAtMs, anonymousLastSeenMs             int64
 		emailVerified, idvVerified, totpRequired               bool
 		phoneVerified, isAnonymous                             bool
+		dateOfBirthPresent                                     bool
 		id, email, name, role, avatar, status, recovery, phash string
 		phoneNumber                                            string
 		externalID                                             string
@@ -78,7 +79,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		&market, &username, &accountAddress, &mergedInto,
 		&passwordChangeRequired,
 		&u.Kind, &u.OwnerUserID, &u.PendingOwnerUserID,
-		&createdAtMs, &updatedAtMs,
+		&createdAtMs, &updatedAtMs, &dateOfBirthPresent,
 	); err != nil {
 		return nil, err
 	}
@@ -101,7 +102,9 @@ func scanUser(row pgx.Row) (*service.User, error) {
 	u.PhoneNumber = phoneNumber
 	u.PhoneVerified = phoneVerified
 	u.PhoneVerifiedAt = phoneVerifiedAtMs
-	u.DateOfBirthMs = dateOfBirthMs
+	if dateOfBirthMs != 0 || dateOfBirthPresent {
+		u.DateOfBirthMs = new(dateOfBirthMs)
+	}
 	u.LastLoginAtMs = lastLoginAtMs
 	u.ExternalID = externalID
 	u.DeletionScheduledAtMs = deletionScheduledAtMs
@@ -305,7 +308,7 @@ const insertUserQuery = `
 		market, username, account_address, merged_into_user_id,
 		password_change_required,
 		kind, owner_user_id, pending_owner_user_id,
-		created_at_ms, updated_at_ms
+		created_at_ms, updated_at_ms, date_of_birth_present
 	) VALUES (
 		$1, $2, $3, $4, $5, $6, $7,
 		$8, $9, $10, $11,
@@ -313,7 +316,7 @@ const insertUserQuery = `
 		$14, $15,
 		$16, $17,
 		$18, $19, $20,
-		$21,
+		COALESCE($21::BIGINT, 0),
 		$22,
 		$23,
 		$24,
@@ -321,7 +324,7 @@ const insertUserQuery = `
 		$27, $28, $29, $30,
 		$31,
 		$32, $33, $34,
-		$35, $36
+		$35, $36, $37
 	)`
 
 // insertUserArgs renders the bind args for insertUserQuery in column order.
@@ -342,7 +345,7 @@ func insertUserArgs(projectID, id, role, status string, u *service.User) []any {
 		u.Market, u.Username, u.AccountAddress, u.MergedIntoUserID,
 		u.PasswordChangeRequired,
 		u.Kind, u.OwnerUserID, u.PendingOwnerUserID,
-		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
+		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(), u.DateOfBirthMs != nil,
 	}
 }
 
@@ -462,6 +465,9 @@ func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map
 			}
 			arg = n
 		}
+		if k == "date_of_birth_ms" {
+			sets = append(sets, "date_of_birth_present = TRUE")
+		}
 		sets = append(sets, fmt.Sprintf("%s = $%d", spec.col, idx))
 		args = append(args, arg)
 		idx++
@@ -579,9 +585,10 @@ func (r *pgRepository) SetDateOfBirthOnce(
 	const q = `
 		UPDATE users
 		   SET date_of_birth_ms = $3,
+		       date_of_birth_present = TRUE,
 		       status          = CASE WHEN $4 = '' THEN status ELSE $4 END,
 		       updated_at_ms   = $5
-		 WHERE project_id = $1 AND id = $2 AND date_of_birth_ms = 0`
+		 WHERE project_id = $1 AND id = $2 AND date_of_birth_ms = 0 AND NOT date_of_birth_present`
 	tag, err := r.pool.Exec(ctx, q, r.projectID, userID, dobMs, status, nowMs)
 	if err != nil {
 		return false, wrapPgErr("SetDateOfBirthOnce", err)

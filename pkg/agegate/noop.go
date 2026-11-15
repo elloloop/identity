@@ -18,6 +18,6 @@ func (NoopDeterminer) Enabled() bool { return false }
 
 // Determine implements Determiner; always returns the adult, non-minor,
 // no-DOB decision regardless of the supplied date of birth.
-func (NoopDeterminer) Determine(int64, time.Time) Decision {
+func (NoopDeterminer) Determine(*int64, time.Time) Decision {
 	return Decision{Band: BandUnknown, IsMinor: false, HasDOB: false}
 }

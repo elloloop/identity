@@ -35,6 +35,7 @@ var adversarialValues = []struct {
 // happy-path CRUD subtests (which use short ASCII) never touch.
 func runRoundTripConformance(t *testing.T, driver Driver) {
 	t.Helper()
+	runDateOfBirthPresenceConformance(t, driver)
 
 	t.Run(driver.Name+"/RoundTrip", func(t *testing.T) {
 		t.Run("User_StringFields_OnCreate", func(t *testing.T) {
@@ -89,7 +90,7 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 			}
 		})
 
-		// DateOfBirthMs must default to 0 (unknown) when omitted at create
+		// DateOfBirthMs must default to nil (unknown) when omitted at create
 		// and round-trip exactly through both create and update, identically
 		// on every driver. This is the persistence half of age-gating; the
 		// derived band/minor flags are computed in the service layer, not
@@ -98,21 +99,21 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
 
-			// Omitted at create → 0 (unknown).
+			// Omitted at create → nil (unknown).
 			idDefault := createTestUser(t, r, "rt-dob-default@example.com")
 			gotDefault, err := r.GetUser(ctx, idDefault)
 			if err != nil || gotDefault == nil {
 				t.Fatalf("GetUser(default): %v %#v", err, gotDefault)
 			}
-			if gotDefault.DateOfBirthMs != 0 {
-				t.Errorf("default DateOfBirthMs = %d, want 0", gotDefault.DateOfBirthMs)
+			if gotDefault.DateOfBirthMs != nil {
+				t.Errorf("default DateOfBirthMs = %v, want nil", gotDefault.DateOfBirthMs)
 			}
 
 			// Set at create → reads back exactly.
 			const dobCreate int64 = 1_041_465_600_000 // 2003-01-02 UTC
 			idCreate, err := r.CreateUser(ctx, &service.User{
 				Email: "rt-dob-create@example.com", Status: "active", Role: "member",
-				Name: "dob", DateOfBirthMs: dobCreate,
+				Name: "dob", DateOfBirthMs: new(dobCreate),
 			})
 			if err != nil {
 				t.Fatalf("CreateUser(dob): %v", err)
@@ -121,8 +122,8 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 			if err != nil || gotCreate == nil {
 				t.Fatalf("GetUser(create): %v %#v", err, gotCreate)
 			}
-			if gotCreate.DateOfBirthMs != dobCreate {
-				t.Errorf("create DateOfBirthMs = %d, want %d", gotCreate.DateOfBirthMs, dobCreate)
+			if gotCreate.DateOfBirthMs == nil || *gotCreate.DateOfBirthMs != dobCreate {
+				t.Errorf("create DateOfBirthMs = %v, want %d", gotCreate.DateOfBirthMs, dobCreate)
 			}
 
 			// Updated → reads back the new value.
@@ -134,8 +135,8 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 			if err != nil || gotUpdate == nil {
 				t.Fatalf("GetUser(update): %v %#v", err, gotUpdate)
 			}
-			if gotUpdate.DateOfBirthMs != dobUpdate {
-				t.Errorf("update DateOfBirthMs = %d, want %d", gotUpdate.DateOfBirthMs, dobUpdate)
+			if gotUpdate.DateOfBirthMs == nil || *gotUpdate.DateOfBirthMs != dobUpdate {
+				t.Errorf("update DateOfBirthMs = %v, want %d", gotUpdate.DateOfBirthMs, dobUpdate)
 			}
 		})
 

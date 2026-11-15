@@ -101,7 +101,7 @@ func TestAccountAddress_IssuedOnceTheEmailIsVerified(t *testing.T) {
 	ctx := accountsScope(t, "accounts.example.com")
 
 	// A sign-up has not proven it owns the address: no address yet.
-	res, err := svc.PasswordSignup(ctx, "bob@mail.example.com", accessTestPassword, "Bob", "", 0, "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(ctx, "bob@mail.example.com", accessTestPassword, "Bob", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.Empty(t, res.User.AccountAddress)
 	u, err := repo.FindUserByEmail(ctx, "bob@mail.example.com")
@@ -122,9 +122,9 @@ func TestAccountAddress_DuplicateSignupDecoyMatches(t *testing.T) {
 	svc.cfg.AuthRequireVerifiedEmail = false
 	ctx := accountsScope(t, "accounts.example.com")
 
-	fresh, err := svc.PasswordSignup(ctx, "carol@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	fresh, err := svc.PasswordSignup(ctx, "carol@mail.example.com", accessTestPassword, "", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
-	dup, err := svc.PasswordSignup(ctx, "carol@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	dup, err := svc.PasswordSignup(ctx, "carol@mail.example.com", accessTestPassword, "", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.Equal(t, fresh.User.AccountAddress, dup.User.AccountAddress)
 	require.Equal(t, fresh.User.EmailVerified, dup.User.EmailVerified)
@@ -142,7 +142,7 @@ func TestAccountAddress_NoneWithoutDomain(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	ctx := accessScope(t, `{"access":{"mode":"open"}}`)
 
-	_, err := svc.PasswordSignup(ctx, "bob@mail.example.com", accessTestPassword, "Bob", "", 0, "", EmailLinkParams{})
+	_, err := svc.PasswordSignup(ctx, "bob@mail.example.com", accessTestPassword, "Bob", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	u, err := repo.FindUserByEmail(ctx, "bob@mail.example.com")
 	require.NoError(t, err)

@@ -21,7 +21,7 @@ func TestNoop_AlwaysAdultNonMinor(t *testing.T) {
 		t.Fatalf("name = %q", d.Name())
 	}
 	// Even a 5-year-old DOB classifies as unknown/non-minor under noop.
-	dec := d.Determine(dobYearsAgo(5, 0), refNow)
+	dec := d.Determine(new(dobYearsAgo(5, 0)), refNow)
 	if dec.IsMinor || dec.HasDOB || dec.Band != BandUnknown {
 		t.Fatalf("noop decision = %+v", dec)
 	}
@@ -50,19 +50,21 @@ func TestThreshold_Bands(t *testing.T) {
 
 	cases := []struct {
 		name     string
-		dobMs    int64
+		dobMs    *int64
 		wantBand AgeBand
 		wantMin  bool
 		wantHas  bool
 	}{
-		{"unknown-zero", 0, BandUnknown, false, false},
-		{"future-dob", refNow.AddDate(1, 0, 0).UnixMilli(), BandUnknown, false, false},
-		{"age-8-child", dobYearsAgo(8, 0), BandChild, true, true},
-		{"age-12-child-boundary", dobYearsAgo(12, 0), BandChild, true, true},
-		{"age-13-teen", dobYearsAgo(13, 0), BandTeen, true, true},
-		{"age-17-teen", dobYearsAgo(17, 0), BandTeen, true, true},
-		{"age-18-adult-boundary", dobYearsAgo(18, 0), BandAdult, false, true},
-		{"age-40-adult", dobYearsAgo(40, 0), BandAdult, false, true},
+		{"unknown-absent", nil, BandUnknown, false, false},
+		{"epoch-zero", new(int64(0)), BandAdult, false, true},
+		{"before-epoch", new(dobYearsAgo(80, 0)), BandAdult, false, true},
+		{"future-dob", new(refNow.AddDate(1, 0, 0).UnixMilli()), BandUnknown, false, false},
+		{"age-8-child", new(dobYearsAgo(8, 0)), BandChild, true, true},
+		{"age-12-child-boundary", new(dobYearsAgo(12, 0)), BandChild, true, true},
+		{"age-13-teen", new(dobYearsAgo(13, 0)), BandTeen, true, true},
+		{"age-17-teen", new(dobYearsAgo(17, 0)), BandTeen, true, true},
+		{"age-18-adult-boundary", new(dobYearsAgo(18, 0)), BandAdult, false, true},
+		{"age-40-adult", new(dobYearsAgo(40, 0)), BandAdult, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,7 +81,7 @@ func TestThreshold_BirthdayNotYetThisYear(t *testing.T) {
 	// DOB exactly 18 years ago but +1 month means the 18th birthday is one
 	// month in the future, so the user is still 17 (TEEN/minor).
 	dob := refNow.AddDate(-18, 1, 0).UnixMilli()
-	dec := d.Determine(dob, refNow)
+	dec := d.Determine(&dob, refNow)
 	if dec.Band != BandTeen || !dec.IsMinor {
 		t.Fatalf("expected teen/minor just before 18th birthday, got %+v", dec)
 	}

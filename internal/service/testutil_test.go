@@ -644,9 +644,9 @@ func applyUserFields(u *User, fields map[string]any) {
 		case "date_of_birth_ms":
 			switch x := v.(type) {
 			case int64:
-				u.DateOfBirthMs = x
+				u.DateOfBirthMs = new(x)
 			case int:
-				u.DateOfBirthMs = int64(x)
+				u.DateOfBirthMs = new(int64(x))
 			}
 		}
 	}
@@ -1983,11 +1983,11 @@ func (r *fakeRepo) SetDateOfBirthOnce(_ context.Context, userID string, dobMs in
 		return false, r.setDOBOnceErr
 	}
 	u, ok := r.users[userID]
-	if !ok || u.DateOfBirthMs != 0 {
+	if !ok || u.DateOfBirthMs != nil {
 		return false, nil
 	}
 	before := *u
-	u.DateOfBirthMs = dobMs
+	u.DateOfBirthMs = new(dobMs)
 	if status != "" {
 		u.Status = status
 	}

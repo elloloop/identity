@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -76,7 +77,7 @@ func TestDOBRequired_Chokepoint(t *testing.T) {
 		wantRefuse bool
 	}{
 		{"flag on, identified, no DOB", true, &User{ID: "u1", Email: "a@b.com", Status: "active"}, true},
-		{"flag on, identified, DOB on file", true, &User{ID: "u2", Email: "b@b.com", Status: "active", DateOfBirthMs: dobAgeMs(30)}, false},
+		{"flag on, identified, DOB on file", true, &User{ID: "u2", Email: "b@b.com", Status: "active", DateOfBirthMs: new(dobAgeMs(30))}, false},
 		// Anonymous accounts structurally carry no DOB; their age guardrail
 		// is the product minimum-age gate, and a CHILD result would strand
 		// an email-less account in pending_parental_consent.
@@ -132,10 +133,10 @@ func TestDOBRequired_PasswordSignup(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, true)
 
-	_, err := svc.PasswordSignup(context.Background(), "nodob@example.com", strongPW, "NoDOB", "", 0, "", EmailLinkParams{})
+	_, err := svc.PasswordSignup(context.Background(), "nodob@example.com", strongPW, "NoDOB", "", nil, "", EmailLinkParams{})
 	require.ErrorIs(t, err, ErrInvalidArgument)
 
-	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "", dobAgeMs(30), "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "", new(dobAgeMs(30)), "", EmailLinkParams{})
 	require.NoError(t, err)
 	assert.NotEmpty(t, res.AccessToken)
 }
@@ -185,12 +186,23 @@ func TestDOBRequired_CompleteHostedOAuth(t *testing.T) {
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
-	// CompleteHostedOAuth mints the session it parks behind the one-time
-	// code, so the refusal lands here — no code is issued at all.
-	_, err = svc.CompleteHostedOAuth(ctx, "google",
+	// The URL carries only the opaque one-time code, never a profile ticket.
+	cb, err := svc.CompleteHostedOAuth(ctx, "google",
 		fakeOAuthCode("hosted-nodob@example.com", "Hosted", "", "google"),
 		stateToken, "", "1.2.3.4", "agent", []string{"csrf-123"})
+	require.NoError(t, err)
+	require.NotEmpty(t, cb.Code)
+	require.NotContains(t, cb.Code, ".")
+	require.Equal(t, "https://app.test/finish", cb.ReturnTo)
+	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "", "1.2.3.4", "agent")
 	requireDOBRefusal(t, svc, err)
+	ticket := dobTicketFrom(t, err)
+	require.NotContains(t, cb.ReturnTo, ticket)
+	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "", "1.2.3.4", "agent")
+	require.Error(t, err)
+	result, err := svc.SubmitDateOfBirth(ctx, ticket, new(int64(0)), "", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, result.AccessToken)
 }
 
 // A one-time code minted before the flag was enabled is still caught when
@@ -356,7 +368,7 @@ func TestDOBRequired_RefreshToken(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	res, err := svc.PasswordSignup(context.Background(), "preflag@example.com", strongPW, "Pre", "", 0, "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(context.Background(), "preflag@example.com", strongPW, "Pre", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	require.NotEmpty(t, res.RefreshToken)
 
@@ -447,7 +459,7 @@ func TestSubmitDateOfBirth_AdultCompletesAndCanLogin(t *testing.T) {
 	ctx := context.Background()
 	ticket := dobTicketFor(t, svc, repo, "adult@example.com")
 
-	res, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "1.2.3.4", "agent")
+	res, err := svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "1.2.3.4", "agent")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.NotEmpty(t, res.AccessToken)
@@ -460,7 +472,7 @@ func TestSubmitDateOfBirth_AdultCompletesAndCanLogin(t *testing.T) {
 	u, err := repo.FindUserByEmail(ctx, "adult@example.com")
 	require.NoError(t, err)
 	require.NotNil(t, u)
-	assert.Equal(t, dobAgeMs(30), u.DateOfBirthMs)
+	assert.Equal(t, new(dobAgeMs(30)), u.DateOfBirthMs)
 
 	// The completed account logs in normally — no second completion step.
 	login, err := svc.PasswordLogin(ctx, "adult@example.com", strongPW, "1.2.3.4", "agent")
@@ -481,7 +493,7 @@ func TestSubmitDateOfBirth_ChildPendingParentalConsentNoTokens(t *testing.T) {
 	ctx := context.Background()
 	ticket := dobTicketFor(t, svc, repo, "child@example.com")
 
-	res, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(8), "1.2.3.4", "agent")
+	res, err := svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(8)), "1.2.3.4", "agent")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.Empty(t, res.AccessToken, "a child-band completion must not mint tokens")
@@ -494,7 +506,7 @@ func TestSubmitDateOfBirth_ChildPendingParentalConsentNoTokens(t *testing.T) {
 	u, err := repo.FindUserByEmail(ctx, "child@example.com")
 	require.NoError(t, err)
 	require.NotNil(t, u)
-	assert.Equal(t, dobAgeMs(8), u.DateOfBirthMs)
+	assert.Equal(t, new(dobAgeMs(8)), u.DateOfBirthMs)
 	assert.Equal(t, StatusPendingParentalConsent, u.Status)
 
 	// The dead end holds: the pending account cannot password-login.
@@ -512,7 +524,7 @@ func TestSubmitDateOfBirth_TeenGetsTokensAsMinor(t *testing.T) {
 	enableAgeGate(t, svc, true)
 	ticket := dobTicketFor(t, svc, repo, "teen@example.com")
 
-	res, err := svc.SubmitDateOfBirth(context.Background(), ticket, dobAgeMs(15), "1.2.3.4", "agent")
+	res, err := svc.SubmitDateOfBirth(context.Background(), ticket, new(dobAgeMs(15)), "1.2.3.4", "agent")
 	require.NoError(t, err)
 	assert.NotEmpty(t, res.AccessToken)
 	assert.Equal(t, "active", res.User.Status)
@@ -531,7 +543,7 @@ func TestSubmitDateOfBirth_ExpiredTicketRejected(t *testing.T) {
 	}, -time.Minute)
 	require.NoError(t, err)
 
-	_, err = svc.SubmitDateOfBirth(context.Background(), expired, dobAgeMs(30), "", "")
+	_, err = svc.SubmitDateOfBirth(context.Background(), expired, new(dobAgeMs(30)), "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 }
 
@@ -548,14 +560,14 @@ func TestSubmitDateOfBirth_WrongPurposeRejected(t *testing.T) {
 		Sub: u.ID, Tenant: svc.defaultTenantID, Email: u.Email,
 	}, 15*time.Minute)
 	require.NoError(t, err)
-	_, err = svc.SubmitDateOfBirth(ctx, accessToken, dobAgeMs(30), "", "")
+	_, err = svc.SubmitDateOfBirth(ctx, accessToken, new(dobAgeMs(30)), "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated, "a normal access token must not complete a DOB")
 
 	otherPurpose, err := svc.signer.SignAccessToken(ctx, jwt.Claims{
 		Sub: u.ID, Tenant: svc.defaultTenantID, Purpose: "password_reset",
 	}, 10*time.Minute)
 	require.NoError(t, err)
-	_, err = svc.SubmitDateOfBirth(ctx, otherPurpose, dobAgeMs(30), "", "")
+	_, err = svc.SubmitDateOfBirth(ctx, otherPurpose, new(dobAgeMs(30)), "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 }
 
@@ -569,7 +581,7 @@ func TestSubmitDateOfBirth_TicketScopesToItsAccount(t *testing.T) {
 	ticketA := dobTicketFor(t, svc, repo, "user-a@example.com")
 	seedUser(repo, "user-b@example.com", hashPW(t, strongPW), "active")
 
-	_, err := svc.SubmitDateOfBirth(ctx, ticketA, dobAgeMs(30), "", "")
+	_, err := svc.SubmitDateOfBirth(ctx, ticketA, new(dobAgeMs(30)), "", "")
 	require.NoError(t, err)
 
 	a, err := repo.FindUserByEmail(ctx, "user-a@example.com")
@@ -588,17 +600,17 @@ func TestSubmitDateOfBirth_AlreadySetRejected(t *testing.T) {
 	ctx := context.Background()
 	ticket := dobTicketFor(t, svc, repo, "once@example.com")
 
-	_, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+	_, err := svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "", "")
 	require.NoError(t, err)
 
 	// The ticket still verifies, but the DOB is set: the completion step is
 	// not a DOB-change channel.
-	_, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(8), "", "")
+	_, err = svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(8)), "", "")
 	require.ErrorIs(t, err, ErrDOBAlreadySet)
 
 	u, ferr := repo.FindUserByEmail(ctx, "once@example.com")
 	require.NoError(t, ferr)
-	assert.Equal(t, dobAgeMs(30), u.DateOfBirthMs, "the original DOB must survive the replay")
+	assert.Equal(t, new(dobAgeMs(30)), u.DateOfBirthMs, "the original DOB must survive the replay")
 }
 
 func TestSubmitDateOfBirth_InvalidDOBRejected(t *testing.T) {
@@ -609,12 +621,11 @@ func TestSubmitDateOfBirth_InvalidDOBRejected(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		dobMs int64
+		dobMs *int64
 	}{
-		{"zero", 0},
-		{"negative", -1000},
-		{"future", ageGateNow.AddDate(1, 0, 0).UnixMilli()},
-		{"implausibly old", ageGateNow.AddDate(-200, 0, 0).UnixMilli()},
+		{"missing", nil},
+		{"future", new(ageGateNow.AddDate(1, 0, 0).UnixMilli())},
+		{"implausibly old", new(ageGateNow.AddDate(-200, 0, 0).UnixMilli())},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -627,7 +638,7 @@ func TestSubmitDateOfBirth_InvalidDOBRejected(t *testing.T) {
 	u, err := repo.FindUserByEmail(context.Background(), "baddob@example.com")
 	require.NoError(t, err)
 	require.NotNil(t, u)
-	assert.Zero(t, u.DateOfBirthMs)
+	assert.Nil(t, u.DateOfBirthMs)
 }
 
 func TestSubmitDateOfBirth_UnknownUserRejected(t *testing.T) {
@@ -640,7 +651,7 @@ func TestSubmitDateOfBirth_UnknownUserRejected(t *testing.T) {
 	}, 10*time.Minute)
 	require.NoError(t, err)
 
-	_, err = svc.SubmitDateOfBirth(context.Background(), ticket, dobAgeMs(30), "", "")
+	_, err = svc.SubmitDateOfBirth(context.Background(), ticket, new(dobAgeMs(30)), "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 }
 
@@ -649,7 +660,7 @@ func TestSubmitDateOfBirth_GarbageTicketRejected(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, true)
 
-	_, err := svc.SubmitDateOfBirth(context.Background(), "not-a-jwt", dobAgeMs(30), "", "")
+	_, err := svc.SubmitDateOfBirth(context.Background(), "not-a-jwt", new(dobAgeMs(30)), "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 }
 
@@ -679,7 +690,7 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 
 	// Sign up BEFORE the flag so the account is dob-less, then turn the gate
 	// on — the pre-flag account the completion step exists for.
-	res, err := svc.PasswordSignup(ctx, "dob@example.com", strongPW, "D", "", 0, "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(ctx, "dob@example.com", strongPW, "D", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	user := res.User
 	enableAgeGate(t, svc, true)
@@ -687,7 +698,7 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 	// A garbage ticket is refused, and so is a well-formed ACCESS token: the
 	// submit path takes purpose tickets only.
 	for _, ticket := range []string{"", "not-a-jwt", res.AccessToken} {
-		_, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+		_, err := svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "", "")
 		require.ErrorIs(t, err, ErrUnauthenticated, "ticket %q must be refused", ticket)
 	}
 
@@ -695,30 +706,30 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 	require.NoError(t, err)
 
 	// A valid ticket with an out-of-range date is InvalidArgument.
-	for _, dob := range []int64{0, svc.nowFunc().Add(48 * time.Hour).UnixMilli()} {
-		_, err := svc.SubmitDateOfBirth(ctx, ticket, dob, "", "")
+	for _, dob := range []int64{svc.nowFunc().AddDate(-200, 0, 0).UnixMilli(), svc.nowFunc().Add(48 * time.Hour).UnixMilli()} {
+		_, err := svc.SubmitDateOfBirth(ctx, ticket, new(dob), "", "")
 		require.ErrorIs(t, err, ErrInvalidArgument, "dob %d must be refused", dob)
 	}
 
 	// Storage failures propagate rather than becoming a denial.
 	repo.getUserErr = errConsentInjected
-	_, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+	_, err = svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "", "")
 	require.ErrorIs(t, err, errConsentInjected)
 	repo.getUserErr = nil
 
 	repo.setDOBOnceErr = errConsentInjected
-	_, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+	_, err = svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "", "")
 	require.ErrorIs(t, err, errConsentInjected)
 	repo.setDOBOnceErr = nil
 
 	// A ticket for an account that no longer exists refuses without a panic.
 	ghostTicket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: "no-such-user"}, 0, "")
 	require.NoError(t, err)
-	_, err = svc.SubmitDateOfBirth(ctx, ghostTicket, dobAgeMs(30), "", "")
+	_, err = svc.SubmitDateOfBirth(ctx, ghostTicket, new(dobAgeMs(30)), "", "")
 	require.Error(t, err)
 
 	// And the real submission completes the sign-in.
-	done, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+	done, err := svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, done.AccessToken)
 }
@@ -733,7 +744,7 @@ func TestSubmitDateOfBirth_IsSetOnce(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	res, err := svc.PasswordSignup(ctx, "race@example.com", strongPW, "R", "", 0, "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(ctx, "race@example.com", strongPW, "R", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	enableAgeGate(t, svc, true)
 
@@ -741,19 +752,19 @@ func TestSubmitDateOfBirth_IsSetOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	// The child-band submission lands first and gates the account.
-	gated, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(8), "", "")
+	gated, err := svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(8)), "", "")
 	require.NoError(t, err)
 	require.Empty(t, gated.AccessToken, "a child-band completion issues no tokens")
 
 	// The adult-band submission replaying the SAME ticket must not overwrite
 	// the stored date, and must not mint a session.
-	second, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+	second, err := svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "", "")
 	require.ErrorIs(t, err, ErrDOBAlreadySet)
 	require.Nil(t, second)
 
 	stored, err := repo.GetUser(ctx, res.User.ID)
 	require.NoError(t, err)
-	require.Equal(t, dobAgeMs(8), stored.DateOfBirthMs, "the losing submission must not overwrite the date")
+	require.Equal(t, new(dobAgeMs(8)), stored.DateOfBirthMs, "the losing submission must not overwrite the date")
 	require.Equal(t, StatusPendingParentalConsent, stored.Status, "the account must stay gated")
 }
 
@@ -775,7 +786,7 @@ func TestSubmitDateOfBirth_UnverifiedAddressRefusedWithoutStoring(t *testing.T) 
 			repo.users[u.ID].EmailVerified = false
 			repo.mu.Unlock()
 
-			res, err := svc.SubmitDateOfBirth(ctx, ticket, dob, "1.2.3.4", "agent")
+			res, err := svc.SubmitDateOfBirth(ctx, ticket, new(dob), "1.2.3.4", "agent")
 			require.ErrorIs(t, err, ErrEmailVerificationRequired)
 			require.Nil(t, res)
 
@@ -802,8 +813,25 @@ func TestSubmitDateOfBirth_RefusedIssuanceRecordsNoLastLogin(t *testing.T) {
 	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: u.ID}, 0, "")
 	require.NoError(t, err)
 
-	res, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(15), "1.2.3.4", "agent")
+	res, err := svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(15)), "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrProductAgeRestricted)
 	require.Nil(t, res)
 	requireNoLastLogin(t, repo, "teen-nodob@example.com")
+}
+
+func TestSubmitDateOfBirth_HistoricalAndEpochDates(t *testing.T) {
+	for _, dob := range []int64{0, -1000, ageGateNow.AddDate(-80, 0, 0).UnixMilli()} {
+		t.Run(strconv.FormatInt(dob, 10), func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newTestAuthService(t, repo)
+			enableAgeGate(t, svc, true)
+			ticket := dobTicketFor(t, svc, repo, "historical@example.com")
+			result, err := svc.SubmitDateOfBirth(context.Background(), ticket, new(dob), "", "")
+			require.NoError(t, err)
+			require.NotEmpty(t, result.AccessToken)
+			require.Equal(t, new(dob), result.User.DateOfBirthMs)
+			_, err = svc.SubmitDateOfBirth(context.Background(), ticket, new(dobAgeMs(8)), "", "")
+			require.Error(t, err)
+		})
+	}
 }

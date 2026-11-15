@@ -37,7 +37,7 @@ import (
 // available name or not, until the window ends. A date of birth that falls in the child
 // band is refused — a child's username account is a guardian's to create
 // (CreateManagedChildAccount), with consent.
-func (s *AuthService) UsernameSignup(ctx context.Context, username, password, name string, dateOfBirthMs int64, market, ipAddr string) (*LoginResult, error) {
+func (s *AuthService) UsernameSignup(ctx context.Context, username, password, name string, dateOfBirthMs *int64, market, ipAddr string) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
 	}
@@ -54,8 +54,17 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
-	if s.ageGate.Enabled() && s.cfg.AgeGateRequireDOB && dateOfBirthMs <= 0 {
-		return nil, fmt.Errorf("%w: date of birth is required", ErrInvalidArgument)
+	ctx, policyErr := s.activeProjectPolicyContext(ctx)
+	if policyErr != nil {
+		return nil, policyErr
+	}
+	if err := s.requireAgeGateForDOB(ctx); err != nil {
+		return nil, err
+	}
+	if dateOfBirthMs != nil || s.requiresDateOfBirth(ctx) {
+		if err := validateCompletionDOB(dateOfBirthMs, s.nowFunc()); err != nil {
+			return nil, err
+		}
 	}
 	market = normalizeJurisdictionCode(market)
 	if err := s.validateAccountMarket(ctx, market); err != nil {

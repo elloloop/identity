@@ -55,7 +55,7 @@ func userToProto(u *service.User) *identitypb.User {
 		PhoneVerifiedAt:        u.PhoneVerifiedAt,
 		FailedLoginCount:       intToProtoInt32(u.FailedLoginCount),
 		LockedUntil:            u.LockedUntil,
-		DateOfBirthMs:          u.DateOfBirthMs,
+		DateOfBirthUnixMs:      u.DateOfBirthMs,
 		IsMinor:                u.IsMinor,
 		AgeBand:                ageBandToProto(u.AgeBand),
 		ExternalId:             u.ExternalID,
@@ -68,6 +68,9 @@ func userToProto(u *service.User) *identitypb.User {
 		Kind:                   userKindToProto(u),
 		OwnerUserId:            u.OwnerUserID,
 		PendingOwnerUserId:     u.PendingOwnerUserID,
+	}
+	if u.DateOfBirthMs != nil {
+		pb.DateOfBirthMs = *u.DateOfBirthMs
 	}
 	if !u.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(u.CreatedAt)

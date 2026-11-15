@@ -58,7 +58,7 @@ func TestRefusedRefreshAudit_DOBStepPacedOnRefreshOnly(t *testing.T) {
 	svc := newTestAuthServiceWithAudit(t, repo, writer)
 	ctx := context.Background()
 
-	res, err := svc.PasswordSignup(ctx, "dobless@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(ctx, "dobless@example.com", strongPW, "", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	enableAgeGate(t, svc, true)
 

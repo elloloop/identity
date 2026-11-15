@@ -237,7 +237,7 @@ func (r *Repo) FindUserByEmail(_ context.Context, email string) (*service.User, 
 	key := service.FoldEmail(email)
 	for _, u := range r.users {
 		if u.Email != "" && service.FoldEmail(u.Email) == key {
-			cp := *u
+			cp := *u.Clone()
 			return &cp, nil
 		}
 	}
@@ -255,7 +255,7 @@ func (r *Repo) FindUserByUsername(_ context.Context, username string) (*service.
 	defer r.mu.Unlock()
 	for _, u := range r.users {
 		if u.Username != "" && u.Username == username {
-			cp := *u
+			cp := *u.Clone()
 			return &cp, nil
 		}
 	}
@@ -269,7 +269,7 @@ func (r *Repo) GetUser(_ context.Context, userID string) (*service.User, error) 
 	if !ok {
 		return nil, nil
 	}
-	cp := *u
+	cp := *u.Clone()
 	return &cp, nil
 }
 
@@ -292,7 +292,7 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 		if !filter.Matches(u) {
 			continue
 		}
-		cp := *u
+		cp := *u.Clone()
 		matched = append(matched, &cp)
 	}
 	r.mu.Unlock()
@@ -334,7 +334,7 @@ func (r *Repo) ListUsersPendingDeletionBefore(_ context.Context, cutoffMs int64,
 		if u.DeletionScheduledAtMs <= 0 || u.DeletionScheduledAtMs > cutoffMs {
 			continue
 		}
-		cp := *u
+		cp := *u.Clone()
 		matched = append(matched, &cp)
 	}
 	r.mu.Unlock()
@@ -410,7 +410,7 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	if u.Kind == "" {
 		u.Kind = service.UserKindPerson
 	}
-	cp := *u
+	cp := *u.Clone()
 	r.users[id] = &cp
 	return id, nil
 }
@@ -500,7 +500,7 @@ func (r *Repo) GetUsersByIDs(_ context.Context, ids []string) ([]*service.User, 
 		}
 		seen[id] = true
 		if u, ok := r.users[id]; ok {
-			cp := *u
+			cp := *u.Clone()
 			out = append(out, &cp)
 		}
 	}
@@ -523,7 +523,7 @@ func (r *Repo) FindUsersByEmails(_ context.Context, emails []string) ([]*service
 	out := make([]*service.User, 0, len(emails))
 	for _, u := range r.users {
 		if u.Email != "" && wanted[service.FoldEmail(u.Email)] {
-			cp := *u
+			cp := *u.Clone()
 			out = append(out, &cp)
 		}
 	}
@@ -540,11 +540,11 @@ func (r *Repo) SetDateOfBirthOnce(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u, ok := r.users[userID]
-	if !ok || u.DateOfBirthMs != 0 {
+	if !ok || u.DateOfBirthMs != nil {
 		return false, nil
 	}
 	before := *u
-	u.DateOfBirthMs = dobMs
+	u.DateOfBirthMs = new(dobMs)
 	if status != "" {
 		u.Status = status
 	}
@@ -704,7 +704,6 @@ var (
 		"email_verified_at":        func(u *service.User) *int64 { return &u.EmailVerifiedAt },
 		"anonymous_last_seen_ms":   func(u *service.User) *int64 { return &u.AnonymousLastSeenMs },
 		"phone_verified_at":        func(u *service.User) *int64 { return &u.PhoneVerifiedAt },
-		"date_of_birth_ms":         func(u *service.User) *int64 { return &u.DateOfBirthMs },
 		"deletion_scheduled_at_ms": func(u *service.User) *int64 { return &u.DeletionScheduledAtMs },
 	}
 )
@@ -734,6 +733,10 @@ func applyUserFields(u *service.User, fields map[string]any) {
 		}
 		// The two fields whose stored form is not the wire form.
 		switch k {
+		case "date_of_birth_ms":
+			if x, ok := fieldInt64(v); ok {
+				u.DateOfBirthMs = new(x)
+			}
 		case "failed_login_count":
 			if x, ok := fieldInt64(v); ok {
 				u.FailedLoginCount = int(x)
@@ -1532,7 +1535,7 @@ func (r *Repo) FindUserByProviderID(_ context.Context, provider, providerUserID 
 			if !ok {
 				return nil, nil
 			}
-			cp := *u
+			cp := *u.Clone()
 			return &cp, nil
 		}
 	}
@@ -1891,7 +1894,7 @@ func (r *Repo) CreateManagedChildAccount(_ context.Context, u *service.User, edg
 	if u.Kind == "" {
 		u.Kind = service.UserKindPerson
 	}
-	cp := *u
+	cp := *u.Clone()
 	r.users[id] = &cp
 
 	edge.ProjectID = r.projectID

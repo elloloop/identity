@@ -204,7 +204,7 @@ func (s *AuthService) GrantParentalConsent(
 	}
 
 	var err error
-	ctx, err = s.guardianContext(ctx)
+	ctx, err = s.activeProjectPolicyContext(ctx)
 	if err != nil {
 		return nil, err
 	}

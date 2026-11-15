@@ -840,7 +840,7 @@ func (r *MemRepo) FindUserByEmail(_ context.Context, email string) (*service.Use
 	key := service.FoldEmail(email)
 	for _, u := range r.users {
 		if u.Email != "" && service.FoldEmail(u.Email) == key {
-			cp := *u
+			cp := *u.Clone()
 			return &cp, nil
 		}
 	}
@@ -857,7 +857,7 @@ func (r *MemRepo) FindUserByUsername(_ context.Context, username string) (*servi
 	defer r.mu.Unlock()
 	for _, u := range r.users {
 		if u.Username != "" && u.Username == username {
-			cp := *u
+			cp := *u.Clone()
 			return &cp, nil
 		}
 	}
@@ -883,7 +883,7 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 		if !filter.Matches(u) {
 			continue
 		}
-		cp := *u
+		cp := *u.Clone()
 		matched = append(matched, &cp)
 	}
 	r.mu.Unlock()
@@ -933,7 +933,7 @@ func (r *MemRepo) ListUsersPendingDeletionBefore(_ context.Context, cutoffMs int
 		if u.DeletionScheduledAtMs <= 0 || u.DeletionScheduledAtMs > cutoffMs {
 			continue
 		}
-		cp := *u
+		cp := *u.Clone()
 		matched = append(matched, &cp)
 	}
 	r.mu.Unlock()
@@ -957,7 +957,7 @@ func (r *MemRepo) GetUser(_ context.Context, userID string) (*service.User, erro
 	if !ok {
 		return nil, nil
 	}
-	cp := *u
+	cp := *u.Clone()
 	return &cp, nil
 }
 
@@ -997,7 +997,7 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 	if u.Kind == "" {
 		u.Kind = service.UserKindPerson
 	}
-	cp := *u
+	cp := *u.Clone()
 	r.users[id] = &cp
 	return id, nil
 }
@@ -1317,7 +1317,7 @@ func applyUserInt64Field(u *service.User, key string, v any) bool {
 	case "idv_verified_at":
 		u.IDVVerifiedAt = x
 	case "date_of_birth_ms":
-		u.DateOfBirthMs = x
+		u.DateOfBirthMs = new(x)
 	case "deletion_scheduled_at_ms":
 		u.DeletionScheduledAtMs = x
 	case "failed_login_count":
@@ -2090,7 +2090,7 @@ func (r *MemRepo) FindUserByProviderID(_ context.Context, provider, providerUser
 			if !ok {
 				return nil, nil
 			}
-			cp := *u
+			cp := *u.Clone()
 			return &cp, nil
 		}
 	}
@@ -2326,7 +2326,7 @@ func (r *MemRepo) GetUsersByIDs(_ context.Context, ids []string) ([]*service.Use
 		}
 		seen[id] = true
 		if u, ok := r.users[id]; ok {
-			cp := *u
+			cp := *u.Clone()
 			out = append(out, &cp)
 		}
 	}
@@ -2347,7 +2347,7 @@ func (r *MemRepo) FindUsersByEmails(_ context.Context, emails []string) ([]*serv
 		}
 		for _, e := range emails {
 			if service.FoldEmail(u.Email) == service.FoldEmail(e) {
-				cp := *u
+				cp := *u.Clone()
 				out = append(out, &cp)
 				break
 			}
@@ -2361,11 +2361,11 @@ func (r *MemRepo) SetDateOfBirthOnce(_ context.Context, userID string, dobMs int
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u, ok := r.users[userID]
-	if !ok || u.DateOfBirthMs != 0 {
+	if !ok || u.DateOfBirthMs != nil {
 		return false, nil
 	}
 	before := *u
-	u.DateOfBirthMs = dobMs
+	u.DateOfBirthMs = new(dobMs)
 	if status != "" {
 		u.Status = status
 	}
@@ -2537,7 +2537,7 @@ func (r *MemRepo) CreateManagedChildAccount(_ context.Context, u *service.User, 
 		id = r.nextID()
 	}
 	u.ID = id
-	cp := *u
+	cp := *u.Clone()
 	r.users[id] = &cp
 
 	edge.ChildUserID = id

@@ -72,7 +72,7 @@ func seedUserAged(t *testing.T, repo *fakeRepo, addr string, dobMs int64) *User 
 	t.Helper()
 	u := seedUser(repo, addr, hashPW(t, productAgePassword), "active")
 	repo.mu.Lock()
-	repo.users[u.ID].DateOfBirthMs = dobMs
+	repo.users[u.ID].DateOfBirthMs = new(dobMs)
 	repo.mu.Unlock()
 	return u
 }
@@ -331,7 +331,7 @@ func productAgeIssuingPaths() []productAgePath {
 				pkRegCredentialJSON(t), pkVectorEmail, otp, "Key", "1.2.3.4", "agent")
 			require.NoError(t, err)
 			repo.mu.Lock()
-			repo.users[signup.User.ID].DateOfBirthMs = dobMs
+			repo.users[signup.User.ID].DateOfBirthMs = new(dobMs)
 			repo.mu.Unlock()
 
 			_, loginChallengeID, err := svc.BeginPasskeyLogin(ctx, pkVectorEmail)
@@ -366,7 +366,7 @@ func productAgeIssuingPaths() []productAgePath {
 			invited, err := repo.FindUserByEmail(ctx, "invitee@example.com")
 			require.NoError(t, err)
 			repo.mu.Lock()
-			repo.users[invited.ID].DateOfBirthMs = dobMs
+			repo.users[invited.ID].DateOfBirthMs = new(dobMs)
 			repo.mu.Unlock()
 			_, err = svc.AcceptInvitation(ctx, token, productAgePassword, "Invitee", "1.2.3.4", "agent")
 			return err
@@ -480,14 +480,14 @@ func TestProductAgeGate_PasswordSignup(t *testing.T) {
 	t.Run("teen_refused_by_adult_minimum", func(t *testing.T) {
 		svc, _, _ := newProductAgeSvc(t)
 		ctx := productScope(t, adultMinimumJSON, restrictedProduct)
-		_, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15), "", EmailLinkParams{})
+		_, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", new(dobAgeMs(15)), "", EmailLinkParams{})
 		require.ErrorIs(t, err, ErrProductAgeRestricted)
 	})
 
 	t.Run("teen_admitted_by_teen_minimum", func(t *testing.T) {
 		svc, _, _ := newProductAgeSvc(t)
 		ctx := productScope(t, teenMinimumJSON, restrictedProduct)
-		res, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15), "", EmailLinkParams{})
+		res, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", new(dobAgeMs(15)), "", EmailLinkParams{})
 		require.NoError(t, err)
 		assert.NotEmpty(t, res.AccessToken)
 	})
@@ -495,7 +495,7 @@ func TestProductAgeGate_PasswordSignup(t *testing.T) {
 	t.Run("child_parked_for_consent_before_the_gate", func(t *testing.T) {
 		svc, _, _ := newProductAgeSvc(t)
 		ctx := productScope(t, adultMinimumJSON, restrictedProduct)
-		res, err := svc.PasswordSignup(ctx, "kid@example.com", productAgePassword, "Kid", "", dobAgeMs(8), "", EmailLinkParams{})
+		res, err := svc.PasswordSignup(ctx, "kid@example.com", productAgePassword, "Kid", "", new(dobAgeMs(8)), "", EmailLinkParams{})
 		require.NoError(t, err)
 		assert.Empty(t, res.AccessToken, "a child signup issues no session to gate")
 		assert.Equal(t, StatusPendingParentalConsent, res.User.Status)
@@ -540,7 +540,7 @@ func TestProductAgeGate_NativeOAuthLogin(t *testing.T) {
 			userID, err := repo.CreateUser(context.Background(), &User{Email: "native@example.com", Name: "Native"})
 			require.NoError(t, err)
 			repo.mu.Lock()
-			repo.users[userID].DateOfBirthMs = tc.dobMs
+			repo.users[userID].DateOfBirthMs = new(tc.dobMs)
 			repo.mu.Unlock()
 
 			const restrictedProject = "proj-restricted"

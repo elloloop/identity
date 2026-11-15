@@ -27,7 +27,7 @@ func TestManagedChildReaderCredential_StoredAndReadByPublicID(t *testing.T) {
 	store := newProjectStore(ctx, t, dsn)
 	projectID, err := store.CreateProject(ctx, &service.AdminProject{StorageScopeID: "scope-child-reader", Name: "Guardians"})
 	require.NoError(t, err)
-	_, _, err = store.UpdateProjectConfig(ctx, projectID, 0, `{"guardian":{"require_step_up":true,"require_adult_profile":true}}`)
+	_, _, err = store.UpdateProjectConfig(ctx, projectID, 0, `{"guardian":{"require_step_up":true,"require_adult_profile":true},"age_gate":{"require_dob":true}}`)
 	require.NoError(t, err)
 
 	_, err = store.CreateProjectCredential(ctx, &service.AdminProjectCredential{
@@ -51,11 +51,13 @@ func TestManagedChildReaderCredential_StoredAndReadByPublicID(t *testing.T) {
 	require.NotNil(t, resolved)
 	require.True(t, resolved.Guardian.RequireStepUp)
 	require.True(t, resolved.Guardian.RequireAdultProfile)
+	require.True(t, resolved.AgeGate.RequireDOB)
 	active, err := store.ActiveProjectByID(ctx, projectID)
 	require.NoError(t, err)
 	require.NotNil(t, active)
 	require.True(t, active.Guardian.RequireStepUp)
 	require.True(t, active.Guardian.RequireAdultProfile)
+	require.True(t, active.AgeGate.RequireDOB)
 }
 
 // 0061 widens the kind check to admit managed_child_reader; rolling it back

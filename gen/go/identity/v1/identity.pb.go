@@ -869,7 +869,7 @@ type User struct {
 	PhoneNumber      string                 `protobuf:"bytes,19,opt,name=phone_number,json=phoneNumber,proto3" json:"phone_number,omitempty"`                   // E.164 phone number the user has verified ownership of
 	PhoneVerified    bool                   `protobuf:"varint,20,opt,name=phone_verified,json=phoneVerified,proto3" json:"phone_verified,omitempty"`            // true once an SMS OTP for phone_number was confirmed
 	PhoneVerifiedAt  int64                  `protobuf:"varint,21,opt,name=phone_verified_at,json=phoneVerifiedAt,proto3" json:"phone_verified_at,omitempty"`    // epoch ms; 0 = never verified
-	DateOfBirthMs    int64                  `protobuf:"varint,22,opt,name=date_of_birth_ms,json=dateOfBirthMs,proto3" json:"date_of_birth_ms,omitempty"`        // epoch ms of date of birth; 0 = unknown
+	DateOfBirthMs    int64                  `protobuf:"varint,22,opt,name=date_of_birth_ms,json=dateOfBirthMs,proto3" json:"date_of_birth_ms,omitempty"`        // Legacy epoch ms; 0 = unknown. Prefer date_of_birth_unix_ms for presence.
 	IsMinor          bool                   `protobuf:"varint,23,opt,name=is_minor,json=isMinor,proto3" json:"is_minor,omitempty"`                              // derived: true when age < adult age (age-gating on)
 	AgeBand          AgeBand                `protobuf:"varint,24,opt,name=age_band,json=ageBand,proto3,enum=identity.v1.AgeBand" json:"age_band,omitempty"`     // derived age band; UNSPECIFIED when unknown / gate off
 	ExternalId       string                 `protobuf:"bytes,25,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`                      // IdP-owned stable identifier (SCIM externalId); unique per project when set
@@ -932,8 +932,12 @@ type User struct {
 	// The agent stays with owner_user_id until it is accepted. Empty when no
 	// transfer is pending, and always empty on a person.
 	PendingOwnerUserId string `protobuf:"bytes,34,opt,name=pending_owner_user_id,json=pendingOwnerUserId,proto3" json:"pending_owner_user_id,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
+	// negative timestamps are valid dates. On requests, a nonzero legacy
+	// date_of_birth_ms must agree when both fields are supplied.
+	DateOfBirthUnixMs *int64 `protobuf:"varint,35,opt,name=date_of_birth_unix_ms,json=dateOfBirthUnixMs,proto3,oneof" json:"date_of_birth_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -1202,6 +1206,13 @@ func (x *User) GetPendingOwnerUserId() string {
 		return x.PendingOwnerUserId
 	}
 	return ""
+}
+
+func (x *User) GetDateOfBirthUnixMs() int64 {
+	if x != nil && x.DateOfBirthUnixMs != nil {
+		return *x.DateOfBirthUnixMs
+	}
+	return 0
 }
 
 type MergeUsersRequest struct {
@@ -3324,9 +3335,13 @@ type PasswordSignupRequest struct {
 	// product is the slug of the product the sign-up is for. Optional;
 	// validated and carried on the link exactly as on
 	// RequestPasswordResetRequest, and checked before the account is created.
-	Product       string `protobuf:"bytes,8,opt,name=product,proto3" json:"product,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Product string `protobuf:"bytes,8,opt,name=product,proto3" json:"product,omitempty"`
+	// Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
+	// negative timestamps are valid dates. On requests, a nonzero legacy
+	// date_of_birth_ms must agree when both fields are supplied.
+	DateOfBirthUnixMs *int64 `protobuf:"varint,9,opt,name=date_of_birth_unix_ms,json=dateOfBirthUnixMs,proto3,oneof" json:"date_of_birth_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *PasswordSignupRequest) Reset() {
@@ -3406,6 +3421,13 @@ func (x *PasswordSignupRequest) GetProduct() string {
 		return x.Product
 	}
 	return ""
+}
+
+func (x *PasswordSignupRequest) GetDateOfBirthUnixMs() int64 {
+	if x != nil && x.DateOfBirthUnixMs != nil {
+		return *x.DateOfBirthUnixMs
+	}
+	return 0
 }
 
 type PasswordSignupResponse struct {
@@ -3496,14 +3518,18 @@ type UsernameSignupRequest struct {
 	Password string `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
 	// name is the display name. Optional; defaults to the username.
 	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	// date_of_birth_ms: epoch ms. Required when GATEWAY_AGEGATE_REQUIRE_DOB.
+	// date_of_birth_ms: epoch ms. Required when project or deployment policy requires DOB.
 	// A child-band date is refused: a child's account is created by their
 	// guardian (CreateManagedChildAccount).
 	DateOfBirthMs int64 `protobuf:"varint,4,opt,name=date_of_birth_ms,json=dateOfBirthMs,proto3" json:"date_of_birth_ms,omitempty"`
 	// market: as on PasswordSignupRequest.
-	Market        string `protobuf:"bytes,5,opt,name=market,proto3" json:"market,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Market string `protobuf:"bytes,5,opt,name=market,proto3" json:"market,omitempty"`
+	// Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
+	// negative timestamps are valid dates. On requests, a nonzero legacy
+	// date_of_birth_ms must agree when both fields are supplied.
+	DateOfBirthUnixMs *int64 `protobuf:"varint,6,opt,name=date_of_birth_unix_ms,json=dateOfBirthUnixMs,proto3,oneof" json:"date_of_birth_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *UsernameSignupRequest) Reset() {
@@ -3569,6 +3595,13 @@ func (x *UsernameSignupRequest) GetMarket() string {
 		return x.Market
 	}
 	return ""
+}
+
+func (x *UsernameSignupRequest) GetDateOfBirthUnixMs() int64 {
+	if x != nil && x.DateOfBirthUnixMs != nil {
+		return *x.DateOfBirthUnixMs
+	}
+	return 0
 }
 
 type UsernameSignupResponse struct {
@@ -3912,7 +3945,7 @@ func (x *PasswordLoginResponse) GetLoginChallengeId() string {
 
 // DOBRequiredDetails is the error detail attached to the `dob_required`
 // refusal returned by any session-issuing RPC when
-// GATEWAY_AGEGATE_REQUIRE_DOB is on and the account has no date of birth.
+// the project or deployment requires DOB and the account has no date of birth.
 type DOBRequiredDetails struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// A short-lived (10 minute) bearer ticket whose only use is one
@@ -3973,8 +4006,12 @@ type SubmitDateOfBirthRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	CompletionToken string                 `protobuf:"bytes,1,opt,name=completion_token,json=completionToken,proto3" json:"completion_token,omitempty"` // from the dob_required error detail
 	DateOfBirthMs   int64                  `protobuf:"varint,2,opt,name=date_of_birth_ms,json=dateOfBirthMs,proto3" json:"date_of_birth_ms,omitempty"`  // epoch ms; must be a plausible past date
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
+	// negative timestamps are valid dates. On requests, a nonzero legacy
+	// date_of_birth_ms must agree when both fields are supplied.
+	DateOfBirthUnixMs *int64 `protobuf:"varint,3,opt,name=date_of_birth_unix_ms,json=dateOfBirthUnixMs,proto3,oneof" json:"date_of_birth_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SubmitDateOfBirthRequest) Reset() {
@@ -4017,6 +4054,13 @@ func (x *SubmitDateOfBirthRequest) GetCompletionToken() string {
 func (x *SubmitDateOfBirthRequest) GetDateOfBirthMs() int64 {
 	if x != nil {
 		return x.DateOfBirthMs
+	}
+	return 0
+}
+
+func (x *SubmitDateOfBirthRequest) GetDateOfBirthUnixMs() int64 {
+	if x != nil && x.DateOfBirthUnixMs != nil {
+		return *x.DateOfBirthUnixMs
 	}
 	return 0
 }
@@ -9027,8 +9071,12 @@ type CreateManagedChildAccountRequest struct {
 	// creation (verified against the adult's stored password hash), exactly as
 	// in GrantParentalConsent.
 	StepUpPassword string `protobuf:"bytes,9,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
+	// negative timestamps are valid dates. On requests, a nonzero legacy
+	// date_of_birth_ms must agree when both fields are supplied.
+	DateOfBirthUnixMs *int64 `protobuf:"varint,10,opt,name=date_of_birth_unix_ms,json=dateOfBirthUnixMs,proto3,oneof" json:"date_of_birth_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CreateManagedChildAccountRequest) Reset() {
@@ -9122,6 +9170,13 @@ func (x *CreateManagedChildAccountRequest) GetStepUpPassword() string {
 		return x.StepUpPassword
 	}
 	return ""
+}
+
+func (x *CreateManagedChildAccountRequest) GetDateOfBirthUnixMs() int64 {
+	if x != nil && x.DateOfBirthUnixMs != nil {
+		return *x.DateOfBirthUnixMs
+	}
+	return 0
 }
 
 type CreateManagedChildAccountResponse struct {
@@ -23944,7 +23999,7 @@ var File_identity_v1_identity_proto protoreflect.FileDescriptor
 
 const file_identity_v1_identity_proto_rawDesc = "" +
 	"\n" +
-	"\x1aidentity/v1/identity.proto\x12\videntity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x96\n" +
+	"\x1aidentity/v1/identity.proto\x12\videntity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe7\n" +
 	"\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
@@ -23986,7 +24041,9 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x18password_change_required\x18\x1f \x01(\bR\x16passwordChangeRequired\x12)\n" +
 	"\x04kind\x18  \x01(\x0e2\x15.identity.v1.UserKindR\x04kind\x12\"\n" +
 	"\rowner_user_id\x18! \x01(\tR\vownerUserId\x121\n" +
-	"\x15pending_owner_user_id\x18\" \x01(\tR\x12pendingOwnerUserId\"\x84\x01\n" +
+	"\x15pending_owner_user_id\x18\" \x01(\tR\x12pendingOwnerUserId\x125\n" +
+	"\x15date_of_birth_unix_ms\x18# \x01(\x03H\x00R\x11dateOfBirthUnixMs\x88\x01\x01B\x18\n" +
+	"\x16_date_of_birth_unix_ms\"\x84\x01\n" +
 	"\x11MergeUsersRequest\x12(\n" +
 	"\x10survivor_user_id\x18\x01 \x01(\tR\x0esurvivorUserId\x12\"\n" +
 	"\rother_user_id\x18\x02 \x01(\tR\votherUserId\x12!\n" +
@@ -24134,7 +24191,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"\xfd\x01\n" +
+	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"\xce\x02\n" +
 	"\x15PasswordSignupRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12%\n" +
@@ -24142,20 +24199,24 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x10date_of_birth_ms\x18\x05 \x01(\x03R\rdateOfBirthMs\x12\x16\n" +
 	"\x06market\x18\x06 \x01(\tR\x06market\x12\x1b\n" +
 	"\treturn_to\x18\a \x01(\tR\breturnTo\x12\x18\n" +
-	"\aproduct\x18\b \x01(\tR\aproductJ\x04\b\x04\x10\x05R\rcaptcha_token\"\xc1\x01\n" +
+	"\aproduct\x18\b \x01(\tR\aproduct\x125\n" +
+	"\x15date_of_birth_unix_ms\x18\t \x01(\x03H\x00R\x11dateOfBirthUnixMs\x88\x01\x01B\x18\n" +
+	"\x16_date_of_birth_unix_msJ\x04\b\x04\x10\x05R\rcaptcha_token\"\xc1\x01\n" +
 	"\x16PasswordSignupResponse\x12\x19\n" +
 	"\bid_token\x18\x01 \x01(\tR\aidToken\x12%\n" +
 	"\x04user\x18\x02 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x03 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x04 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x05 \x01(\x05R\texpiresIn\"\xa4\x01\n" +
+	"expires_in\x18\x05 \x01(\x05R\texpiresIn\"\xf5\x01\n" +
 	"\x15UsernameSignupRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12'\n" +
 	"\x10date_of_birth_ms\x18\x04 \x01(\x03R\rdateOfBirthMs\x12\x16\n" +
-	"\x06market\x18\x05 \x01(\tR\x06market\"\xa6\x01\n" +
+	"\x06market\x18\x05 \x01(\tR\x06market\x125\n" +
+	"\x15date_of_birth_unix_ms\x18\x06 \x01(\x03H\x00R\x11dateOfBirthUnixMs\x88\x01\x01B\x18\n" +
+	"\x16_date_of_birth_unix_ms\"\xa6\x01\n" +
 	"\x16UsernameSignupResponse\x12%\n" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
@@ -24181,10 +24242,12 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\rtotp_required\x18\x06 \x01(\bR\ftotpRequired\x12,\n" +
 	"\x12login_challenge_id\x18\a \x01(\tR\x10loginChallengeId\"?\n" +
 	"\x12DOBRequiredDetails\x12)\n" +
-	"\x10completion_token\x18\x01 \x01(\tR\x0fcompletionToken\"n\n" +
+	"\x10completion_token\x18\x01 \x01(\tR\x0fcompletionToken\"\xbf\x01\n" +
 	"\x18SubmitDateOfBirthRequest\x12)\n" +
 	"\x10completion_token\x18\x01 \x01(\tR\x0fcompletionToken\x12'\n" +
-	"\x10date_of_birth_ms\x18\x02 \x01(\x03R\rdateOfBirthMs\"\xa9\x01\n" +
+	"\x10date_of_birth_ms\x18\x02 \x01(\x03R\rdateOfBirthMs\x125\n" +
+	"\x15date_of_birth_unix_ms\x18\x03 \x01(\x03H\x00R\x11dateOfBirthUnixMs\x88\x01\x01B\x18\n" +
+	"\x16_date_of_birth_unix_ms\"\xa9\x01\n" +
 	"\x19SubmitDateOfBirthResponse\x12%\n" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
@@ -24457,7 +24520,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x14GetGuardiansResponse\x12/\n" +
 	"\tguardians\x18\x01 \x03(\v2\x11.identity.v1.UserR\tguardians\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"\xdb\x02\n" +
+	"nextCursor\"\xac\x03\n" +
 	" CreateManagedChildAccountRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12'\n" +
@@ -24468,7 +24531,10 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\bpassword\x18\x06 \x01(\tR\bpassword\x12+\n" +
 	"\x11passkey_enrolment\x18\a \x01(\bR\x10passkeyEnrolment\x12%\n" +
 	"\x0epolicy_version\x18\b \x01(\tR\rpolicyVersion\x12(\n" +
-	"\x10step_up_password\x18\t \x01(\tR\x0estepUpPassword\"\xab\x01\n" +
+	"\x10step_up_password\x18\t \x01(\tR\x0estepUpPassword\x125\n" +
+	"\x15date_of_birth_unix_ms\x18\n" +
+	" \x01(\x03H\x00R\x11dateOfBirthUnixMs\x88\x01\x01B\x18\n" +
+	"\x16_date_of_birth_unix_ms\"\xab\x01\n" +
 	"!CreateManagedChildAccountResponse\x12'\n" +
 	"\x05child\x18\x01 \x01(\v2\x11.identity.v1.UserR\x05child\x124\n" +
 	"\aconsent\x18\x02 \x01(\v2\x1a.identity.v1.ConsentRecordR\aconsent\x12'\n" +
@@ -26778,6 +26844,11 @@ func file_identity_v1_identity_proto_init() {
 	if File_identity_v1_identity_proto != nil {
 		return
 	}
+	file_identity_v1_identity_proto_msgTypes[0].OneofWrappers = []any{}
+	file_identity_v1_identity_proto_msgTypes[36].OneofWrappers = []any{}
+	file_identity_v1_identity_proto_msgTypes[38].OneofWrappers = []any{}
+	file_identity_v1_identity_proto_msgTypes[45].OneofWrappers = []any{}
+	file_identity_v1_identity_proto_msgTypes[141].OneofWrappers = []any{}
 	file_identity_v1_identity_proto_msgTypes[339].OneofWrappers = []any{
 		(*UpgradeAnonymousAccountRequest_Password)(nil),
 		(*UpgradeAnonymousAccountRequest_Oauth)(nil),

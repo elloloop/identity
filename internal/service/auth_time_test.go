@@ -56,14 +56,14 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	ctx := context.Background()
 	signedInAt := time.Now().Add(-time.Hour).Truncate(time.Second)
 	svc.nowFunc = func() time.Time { return signedInAt }
-	res, err := svc.PasswordSignup(ctx, "dob-later@example.com", strongPW, "Later", "", 0, "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(ctx, "dob-later@example.com", strongPW, "Later", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	svc.nowFunc = time.Now
 
 	enableAgeGate(t, svc, true)
 	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
 	ticket := dobTicketFrom(t, err)
-	done, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
+	done, err := svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, done.AccessToken), "a refresh behind it: the sign-in that opened the session")
 	row, err := repo.FindRefreshTokenByHash(ctx, sha256Hex(done.RefreshToken))
@@ -76,7 +76,7 @@ func TestAuthTime_DOBCompletionContinuesTheSession(t *testing.T) {
 	_, err = svc.PasswordLogin(ctx, "dob-signin@example.com", strongPW, "203.0.113.10", "agent")
 	svc.nowFunc = time.Now
 	ticket = dobTicketFrom(t, err)
-	done, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
+	done, err = svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Equal(t, signedInAt.Unix(), authTimeOf(t, svc, done.AccessToken), "the sign-in behind it, not now")
 }
@@ -101,7 +101,7 @@ func TestAuthTime_DOBCompletionFromARefreshRewritesAsASignIn(t *testing.T) {
 	enableAgeGate(t, svc, true)
 	_, _, _, err := svc.RefreshToken(ctx, res.RefreshToken, "", "203.0.113.10", "agent")
 	ticket := dobTicketFrom(t, err)
-	_, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "203.0.113.10", "agent")
+	_, err = svc.SubmitDateOfBirth(ctx, ticket, new(dobAgeMs(30)), "203.0.113.10", "agent")
 	require.NoError(t, err)
 	require.Equal(t, "firstlast@gmail.com", storedUserEmail(t, repo, legacy.ID))
 	require.Equal(t, 1, writer.countByEventTypeAndDetail("email_canonicalized", "source", "sign_in"))

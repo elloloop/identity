@@ -314,8 +314,8 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err != nil || got == nil {
 				t.Fatalf("GetUser: %#v %v", got, err)
 			}
-			if got.DateOfBirthMs != 111 {
-				t.Fatalf("date_of_birth_ms = %d, want 111 (the loser must not overwrite)", got.DateOfBirthMs)
+			if got.DateOfBirthMs == nil || *got.DateOfBirthMs != 111 {
+				t.Fatalf("date_of_birth_ms = %v, want 111 (the loser must not overwrite)", got.DateOfBirthMs)
 			}
 			if got.Status == service.StatusPendingParentalConsent {
 				t.Fatal("the losing call must not apply its status either")
@@ -330,7 +330,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err != nil || got == nil {
 				t.Fatalf("GetUser gated: %#v %v", got, err)
 			}
-			if got.DateOfBirthMs != 333 || got.Status != service.StatusPendingParentalConsent {
+			if got.DateOfBirthMs == nil || *got.DateOfBirthMs != 333 || got.Status != service.StatusPendingParentalConsent {
 				t.Fatalf("gated account = dob %d status %q, want 333 / %s",
 					got.DateOfBirthMs, got.Status, service.StatusPendingParentalConsent)
 			}

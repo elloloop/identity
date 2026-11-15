@@ -31,6 +31,10 @@ func (h *IdentityHandler) CreateManagedChildAccount(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
+	dob, err := dateOfBirthInput(req.Msg.DateOfBirthMs, req.Msg.DateOfBirthUnixMs)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
 	result, err := h.auth.CreateManagedChildAccount(
 		ctx,
 		callerUserID,
@@ -38,7 +42,7 @@ func (h *IdentityHandler) CreateManagedChildAccount(
 		service.ManagedChildAccountRequest{
 			Username:         req.Msg.GetUsername(),
 			DisplayName:      req.Msg.GetDisplayName(),
-			DateOfBirthMs:    req.Msg.GetDateOfBirthMs(),
+			DateOfBirthMs:    dob,
 			Market:           req.Msg.GetMarket(),
 			AvatarURL:        req.Msg.GetAvatarUrl(),
 			Password:         req.Msg.GetPassword(),

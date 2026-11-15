@@ -41,7 +41,7 @@ const passkeyEnrolmentTicketTTL = 15 * time.Minute
 const maxRecordedAgeYears = 150
 
 // DOBRequiredError is the typed form of ErrDOBRequired: the refusal every
-// session-issuing path returns when GATEWAY_AGEGATE_REQUIRE_DOB is on and
+// session-issuing path returns when the deployment or project requires DOB and
 // the account has no date of birth. Ticket is the completion credential
 // the Connect layer hands to the client as an error detail.
 type DOBRequiredError struct {
@@ -52,8 +52,8 @@ func (e *DOBRequiredError) Error() string { return ErrDOBRequired.Error() }
 func (e *DOBRequiredError) Unwrap() error { return ErrDOBRequired }
 
 // enforceDOBRequired refuses to issue a session when the deployment
-// requires a known age (GATEWAY_AGEGATE_REQUIRE_DOB under an enabled age
-// gate) and the authenticated account has no date of birth on file. It
+// or project requires a known age and the authenticated account has no
+// date of birth on file. It
 // runs at the token chokepoint so every session-issuing path — and every
 // account created before the flag was enabled, at its next issuance or
 // refresh — is covered by construction.
@@ -70,10 +70,13 @@ func (e *DOBRequiredError) Unwrap() error { return ErrDOBRequired }
 // that session rather than counting as a new sign-in. The refusal is audited
 // with reason dob_required and gate, the step that refused.
 func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTimeMs int64, recoveryEmailID, ipAddr, userAgent string, gate sessionGate) error {
-	if !s.ageGate.Enabled() || !s.cfg.AgeGateRequireDOB || user == nil {
+	if err := s.requireAgeGateForDOB(ctx); err != nil {
+		return err
+	}
+	if !s.requiresDateOfBirth(ctx) || user == nil {
 		return nil
 	}
-	if user.IsAnonymous || user.DateOfBirthMs != 0 {
+	if user.IsAnonymous || user.DateOfBirthMs != nil {
 		return nil
 	}
 	ticket, err := s.mintDOBCompletionTicket(ctx, user, authTimeMs, recoveryEmailID)
@@ -139,11 +142,11 @@ func (s *AuthService) mintDOBCompletionTicket(ctx context.Context, user *User, a
 // date of birth. The future check is load-bearing: agegate.Determine
 // classifies a future DOB as unknown-but-stored, which would otherwise
 // satisfy the "DOB on file" condition while resolving to no band at all.
-func validateCompletionDOB(dobMs int64, now time.Time) error {
-	if dobMs <= 0 {
+func validateCompletionDOB(dobMs *int64, now time.Time) error {
+	if dobMs == nil {
 		return fmt.Errorf("%w: date of birth is required", ErrInvalidArgument)
 	}
-	dob := time.UnixMilli(dobMs).UTC()
+	dob := time.UnixMilli(*dobMs).UTC()
 	if dob.After(now.UTC()) {
 		return fmt.Errorf("%w: date of birth cannot be in the future", ErrInvalidArgument)
 	}
@@ -164,9 +167,16 @@ func validateCompletionDOB(dobMs int64, now time.Time) error {
 // tokens: the correct dead end on a self-signup path, where a child was
 // never supposed to arrive unaccompanied. TEEN and ADULT complete the
 // sign-in with a normal token pair.
-func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken string, dobMs int64, ipAddr, userAgent string) (*LoginResult, error) {
+func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken string, dobMs *int64, ipAddr, userAgent string) (*LoginResult, error) {
 	claims, err := s.verifyPurposeTicket(ctx, completionToken, tokenPurposeDOBCompletion)
 	if err != nil {
+		return nil, err
+	}
+	ctx, err = s.activeProjectPolicyContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireAgeGateForDOB(ctx); err != nil {
 		return nil, err
 	}
 	if err := validateCompletionDOB(dobMs, s.nowFunc()); err != nil {
@@ -180,7 +190,7 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	if user == nil {
 		return nil, fmt.Errorf("%w: invalid or expired completion token", ErrUnauthenticated)
 	}
-	if user.DateOfBirthMs != 0 {
+	if user.DateOfBirthMs != nil {
 		return nil, ErrDOBAlreadySet
 	}
 	// The ticket was minted after this same check passed on the login path,
@@ -210,7 +220,7 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	// compare-and-set picks exactly one winner, and only the winner gets
 	// past here to issue tokens. The loser is told the date is already set,
 	// which it now is.
-	won, err := s.repo(ctx).SetDateOfBirthOnce(ctx, user.ID, dobMs, regate, now)
+	won, err := s.repo(ctx).SetDateOfBirthOnce(ctx, user.ID, *dobMs, regate, now)
 	if err != nil {
 		return nil, fmt.Errorf("storing date of birth: %w", err)
 	}

@@ -48,7 +48,7 @@ func bandAt(ctx context.Context, t *testing.T, svc *AuthService, u *User, ageYea
 	t.Helper()
 	d := svc.determinerForUser(ctx, u)
 	require.True(t, d.Enabled(), "test setup: age gate must be on")
-	return d.Determine(dobAgeMs(ageYears), ageGateNow).Band
+	return d.Determine(new(dobAgeMs(ageYears)), ageGateNow).Band
 }
 
 func TestDeterminerForUser_ResolutionOrder(t *testing.T) {
@@ -113,7 +113,7 @@ func TestDeterminerForUser_GateDisabled_IsNoop(t *testing.T) {
 	ctx := jurisdictionScope(t, jurisdictionsJSON)
 	assert.False(t, svc.determinerForUser(ctx, &User{Market: "IN"}).Enabled())
 
-	u := &User{Market: "IN", DateOfBirthMs: dobAgeMs(8)}
+	u := &User{Market: "IN", DateOfBirthMs: new(dobAgeMs(8))}
 	svc.stampAgeBand(ctx, u)
 	assert.False(t, u.IsMinor)
 	assert.Empty(t, u.AgeBand)
@@ -152,7 +152,7 @@ func TestPasswordSignup_Jurisdiction_MarketStoredAndGated(t *testing.T) {
 			enableAgeGate(t, svc, false)
 			ctx := jurisdictionScope(t, tc.configJSON)
 
-			res, err := svc.PasswordSignup(ctx, "user@example.com", strongPW, "User", "", dobAgeMs(tc.ageYears), tc.market, EmailLinkParams{})
+			res, err := svc.PasswordSignup(ctx, "user@example.com", strongPW, "User", "", new(dobAgeMs(tc.ageYears)), tc.market, EmailLinkParams{})
 			if tc.wantSignErr != nil {
 				require.ErrorIs(t, err, tc.wantSignErr)
 				stored, lerr := repo.FindUserByEmail(context.Background(), "user@example.com")
@@ -186,7 +186,7 @@ func TestPasswordSignup_MarketStored_GateOff(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "", dobAgeMs(8), "us", EmailLinkParams{})
+	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "", new(dobAgeMs(8)), "us", EmailLinkParams{})
 	require.NoError(t, err)
 	assert.Equal(t, StatusActive, res.User.Status)
 	assert.Empty(t, res.User.AgeBand)
@@ -219,14 +219,14 @@ func TestProductAgeGate_IndependentOfJurisdiction(t *testing.T) {
 	t.Run("US teen at 16 is below an adult-minimum product", func(t *testing.T) {
 		svc, _ := newSvc(t)
 		ctx := WithProduct(jurisdictionScope(t, combinedJSON), "product-b")
-		_, err := svc.PasswordSignup(ctx, "teen@example.com", strongPW, "Teen", "", dobAgeMs(16), "US", EmailLinkParams{})
+		_, err := svc.PasswordSignup(ctx, "teen@example.com", strongPW, "Teen", "", new(dobAgeMs(16)), "US", EmailLinkParams{})
 		require.ErrorIs(t, err, ErrProductAgeRestricted)
 	})
 
 	t.Run("US teen at 16 enters an unrestricted product", func(t *testing.T) {
 		svc, _ := newSvc(t)
 		ctx := WithProduct(jurisdictionScope(t, combinedJSON), "product-a")
-		res, err := svc.PasswordSignup(ctx, "teen@example.com", strongPW, "Teen", "", dobAgeMs(16), "US", EmailLinkParams{})
+		res, err := svc.PasswordSignup(ctx, "teen@example.com", strongPW, "Teen", "", new(dobAgeMs(16)), "US", EmailLinkParams{})
 		require.NoError(t, err)
 		assert.Equal(t, "TEEN", res.User.AgeBand)
 		assert.NotEmpty(t, res.AccessToken)
@@ -237,7 +237,7 @@ func TestProductAgeGate_IndependentOfJurisdiction(t *testing.T) {
 		// product-a imposes no minimum; the jurisdiction classification alone
 		// (CHILD under IN) puts the account in PENDING_PARENTAL_CONSENT.
 		ctx := WithProduct(jurisdictionScope(t, combinedJSON), "product-a")
-		res, err := svc.PasswordSignup(ctx, "kid@example.com", strongPW, "Kid", "", dobAgeMs(16), "IN", EmailLinkParams{})
+		res, err := svc.PasswordSignup(ctx, "kid@example.com", strongPW, "Kid", "", new(dobAgeMs(16)), "IN", EmailLinkParams{})
 		require.NoError(t, err)
 		assert.Equal(t, StatusPendingParentalConsent, res.User.Status)
 		assert.Empty(t, res.AccessToken)
@@ -253,7 +253,7 @@ func TestStampAgeBand_UsesResolvedMarket(t *testing.T) {
 	enableAgeGate(t, svc, false)
 	ctx := jurisdictionScope(t, jurisdictionsJSON)
 
-	u := &User{DateOfBirthMs: dobAgeMs(16), Market: "US"}
+	u := &User{DateOfBirthMs: new(dobAgeMs(16)), Market: "US"}
 	svc.stampAgeBand(ctx, u)
 	assert.Equal(t, "TEEN", u.AgeBand)
 	assert.True(t, u.IsMinor)
@@ -333,7 +333,7 @@ func TestDeterminerForUser_InvalidThresholdsFallBackStrictest(t *testing.T) {
 	// Under the strictest VALID pair (IN: child_max 17) a 15-year-old is a
 	// child. Under the env pair (12) they would be a teen — the fail-open
 	// this branch exists to prevent.
-	if got := d.Determine(dobAgeMs(15), ageGateNow).Band; got != agegate.BandChild {
+	if got := d.Determine(new(dobAgeMs(15)), ageGateNow).Band; got != agegate.BandChild {
 		t.Fatalf("band = %v, want CHILD via the strictest configured ceiling", got)
 	}
 }

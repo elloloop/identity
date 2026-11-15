@@ -33,7 +33,7 @@ func TestTagOnlyAddressIsRefusedOnEveryAccountPath(t *testing.T) {
 	t.Run("password signup", func(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
-		_, err := svc.PasswordSignup(ctx, tagOnlyAddress, "Str0ng!Pass1-x", "X", "", 0, "", EmailLinkParams{})
+		_, err := svc.PasswordSignup(ctx, tagOnlyAddress, "Str0ng!Pass1-x", "X", "", nil, "", EmailLinkParams{})
 		require.ErrorIs(t, err, ErrInvalidArgument)
 		got, _ := repo.FindUserByEmail(ctx, "@corp.com")
 		require.Nil(t, got, "no account stored under @corp.com")

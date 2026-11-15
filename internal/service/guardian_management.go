@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"go.uber.org/zap"
-
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -99,31 +97,6 @@ func (s *AuthService) stepUp(ctx context.Context, user *User, stepUpPassword str
 	return ok, ok
 }
 
-// Guardian admission must read the project's policy even when transport routing
-// used the default pin, or a native gRPC host supplied no project scope.
-func (s *AuthService) guardianContext(ctx context.Context) (context.Context, error) {
-	if s.activeProjects == nil {
-		return ctx, nil
-	}
-	projectID := s.projectID(ctx)
-	project, err := s.activeProjects.ActiveProjectByID(ctx, projectID)
-	if err != nil {
-		s.logger.Warn("guardian_project_policy_unavailable", zap.Error(err))
-		return nil, fmt.Errorf("%w: guardian project policy unavailable", ErrServiceUnavailable)
-	}
-	if project == nil || project.ID != projectID {
-		return nil, fmt.Errorf("%w: guardian project is not active", ErrPermissionDenied)
-	}
-	scope := ProjectScope{ProjectID: projectID}
-	if existing := ProjectScopeFromContext(ctx); existing != nil {
-		scope = *existing
-	}
-	scope.ProjectID = projectID
-	scope.Guardian = project.Guardian
-	scope.Jurisdictions = project.Jurisdictions
-	return WithProjectScope(ctx, &scope), nil
-}
-
 func (s *AuthService) guardianProfileAllowed(ctx context.Context, user *User) bool {
 	scope := ProjectScopeFromContext(ctx)
 	if scope == nil || !scope.Guardian.RequireAdultProfile {
@@ -167,7 +140,7 @@ func (s *AuthService) authorizeGuardianAction(
 		return nil, nil, fmt.Errorf("%w: child_user_id is required", ErrInvalidArgument)
 	}
 	var err error
-	ctx, err = s.guardianContext(ctx)
+	ctx, err = s.activeProjectPolicyContext(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

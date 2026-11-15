@@ -274,6 +274,7 @@ func (s *AuthService) resolveNativeProject(ctx context.Context, product string) 
 		return &ProjectScope{
 			ProjectID: p.ID, StorageScopeID: p.StorageScopeID, OAuth: p.OAuth, Access: p.Access,
 			Products: p.Products, Jurisdictions: p.Jurisdictions, Accounts: p.Accounts, Branding: p.Branding,
+			AgeGate: p.AgeGate, Guardian: p.Guardian,
 		}, nil
 	}
 

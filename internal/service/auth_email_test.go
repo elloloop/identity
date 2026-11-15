@@ -643,7 +643,7 @@ func TestVerifyEmail_AlreadyVerifiedIsIdempotent(t *testing.T) {
 
 func TestPasswordSignup_FiresVerificationEmail(t *testing.T) {
 	svc, _, rec := newAuthSvcWithMailer(t)
-	res, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", 0, "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", nil, "", EmailLinkParams{})
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -928,7 +928,7 @@ func TestSendEmailVerification_RefusedLinkParamsSendNothing(t *testing.T) {
 func TestPasswordSignup_VerificationLinkCarriesParams(t *testing.T) {
 	svc, _, rec := newHubLinkAuthSvc(t)
 
-	if _, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", 0, "", hubLinkParams); err != nil {
+	if _, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", nil, "", hubLinkParams); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	text := rec.Sent()[0].Text
@@ -945,7 +945,7 @@ func TestPasswordSignup_VerificationLinkCarriesParams(t *testing.T) {
 func TestPasswordSignup_RefusedLinkParamsCreateNoAccount(t *testing.T) {
 	svc, repo, rec := newHubLinkAuthSvc(t)
 
-	_, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", 0, "",
+	_, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", nil, "",
 		EmailLinkParams{ReturnTo: "https://evil.test/"})
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("err = %v, want ErrInvalidArgument", err)

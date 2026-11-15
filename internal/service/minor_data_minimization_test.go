@@ -34,7 +34,7 @@ func TestMinorDataMinimizer_Disabled_NeverBlocks(t *testing.T) {
 	if m.Enabled() {
 		t.Fatal("Enabled() = true; want false")
 	}
-	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: dobAgeMs(8)}) {
+	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: new(dobAgeMs(8))}) {
 		t.Fatal("BlocksChildFor(child) = true while disabled; want false")
 	}
 }
@@ -47,7 +47,7 @@ func TestMinorDataMinimizer_GateOff_DisablesEvenIfFlagOn(t *testing.T) {
 	if m.Enabled() {
 		t.Fatal("Enabled() = true with age gate off; want false")
 	}
-	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: dobAgeMs(8)}) {
+	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: new(dobAgeMs(8))}) {
 		t.Fatal("BlocksChildFor = true with age gate off; want false")
 	}
 }
@@ -58,13 +58,13 @@ func TestMinorDataMinimizer_Enabled_BlocksOnlyChild(t *testing.T) {
 	if !m.Enabled() {
 		t.Fatal("Enabled() = false; want true")
 	}
-	if !m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: dobAgeMs(8)}) {
+	if !m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: new(dobAgeMs(8))}) {
 		t.Fatal("BlocksChildFor(child) = false; want true")
 	}
-	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: dobAgeMs(15)}) {
+	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: new(dobAgeMs(15))}) {
 		t.Fatal("BlocksChildFor(teen) = true; want false (only CHILD is minimized)")
 	}
-	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: dobAgeMs(30)}) {
+	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: new(dobAgeMs(30))}) {
 		t.Fatal("BlocksChildFor(adult) = true; want false")
 	}
 	if m.BlocksChildFor(context.Background(), &User{}) {
@@ -76,7 +76,7 @@ func TestNewMinorDataMinimizer_NilNowDefaults(t *testing.T) {
 	t.Parallel()
 	// A nil now must not panic; the minimizer defaults to time.Now.
 	m := NewMinorDataMinimizer(false, nil, nil)
-	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: 123}) {
+	if m.BlocksChildFor(context.Background(), &User{DateOfBirthMs: new(int64(123))}) {
 		t.Fatal("BlocksChildFor = true on disabled minimizer with nil deps")
 	}
 }
@@ -97,7 +97,7 @@ func TestRequestPhoneVerification_Minor_Blocked(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableMinorData(t, svc)
 	svc.cfg.SMSEnabled = true
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: dobAgeMs(8)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: new(dobAgeMs(8))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestRequestPhoneVerification_MinimizationOff_ChildAllowed(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, false) // age gate on, but minimization OFF
 	svc.cfg.SMSEnabled = true
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: dobAgeMs(8)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: new(dobAgeMs(8))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestRequestPhoneVerification_Minor_AdultAllowed(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableMinorData(t, svc)
 	svc.cfg.SMSEnabled = true
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "adult@example.com", Status: "active", DateOfBirthMs: dobAgeMs(30)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "adult@example.com", Status: "active", DateOfBirthMs: new(dobAgeMs(30))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -156,7 +156,7 @@ func requestRecoveryEmailAt(t *testing.T, minimize bool, ageYears int) (int, err
 	}
 	mailer := &recordingMailer{}
 	svc.mailer = mailer
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "account@example.com", Status: "active", EmailVerified: true, DateOfBirthMs: dobAgeMs(ageYears)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "account@example.com", Status: "active", EmailVerified: true, DateOfBirthMs: new(dobAgeMs(ageYears))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestRequestRecoveryEmail_Minor_AdultAllowed(t *testing.T) {
 
 func TestBeginIdentityVerification_Minor_Blocked(t *testing.T) {
 	repo := newFakeRepo()
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: dobAgeMs(8)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: new(dobAgeMs(8))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestBeginIdentityVerification_Minor_Blocked(t *testing.T) {
 
 func TestBeginIdentityVerification_MinimizationOff_ChildAllowed(t *testing.T) {
 	repo := newFakeRepo()
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: dobAgeMs(8)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: new(dobAgeMs(8))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestBeginIdentityVerification_MinimizationOff_ChildAllowed(t *testing.T) {
 
 func TestBeginIdentityVerification_Minor_AdultAllowed(t *testing.T) {
 	repo := newFakeRepo()
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "adult@example.com", Status: "active", DateOfBirthMs: dobAgeMs(30)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "adult@example.com", Status: "active", DateOfBirthMs: new(dobAgeMs(30))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestPasswordSignup_Minor_RecoveryEmailDropped(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableMinorData(t, svc)
 
-	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "guardian@example.com", dobAgeMs(8), "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "guardian@example.com", new(dobAgeMs(8)), "", EmailLinkParams{})
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestPasswordSignup_MinimizationOff_ChildRecoveryEmailKept(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, false) // gate on, minimization off
 
-	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "guardian@example.com", dobAgeMs(8), "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "guardian@example.com", new(dobAgeMs(8)), "", EmailLinkParams{})
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestPasswordSignup_Minor_AdultRecoveryEmailKept(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableMinorData(t, svc)
 
-	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "alt@example.com", dobAgeMs(30), "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "alt@example.com", new(dobAgeMs(30)), "", EmailLinkParams{})
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
@@ -303,7 +303,7 @@ func newMinorProfileService(t *testing.T, repo *fakeRepo, m MinorDataMinimizer) 
 
 func TestUpdateProfile_Minor_AvatarDropped(t *testing.T) {
 	repo := newFakeRepo()
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Name: "Kid", Status: "active", DateOfBirthMs: dobAgeMs(8)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Name: "Kid", Status: "active", DateOfBirthMs: new(dobAgeMs(8))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestUpdateProfile_Minor_AvatarDropped(t *testing.T) {
 
 func TestUpdateProfile_MinimizationOff_ChildAvatarKept(t *testing.T) {
 	repo := newFakeRepo()
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: dobAgeMs(8)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "kid@example.com", Status: "active", DateOfBirthMs: new(dobAgeMs(8))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestUpdateProfile_MinimizationOff_ChildAvatarKept(t *testing.T) {
 
 func TestUpdateProfile_Minor_AdultAvatarKept(t *testing.T) {
 	repo := newFakeRepo()
-	uid, err := repo.CreateUser(context.Background(), &User{Email: "adult@example.com", Status: "active", DateOfBirthMs: dobAgeMs(30)})
+	uid, err := repo.CreateUser(context.Background(), &User{Email: "adult@example.com", Status: "active", DateOfBirthMs: new(dobAgeMs(30))})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestMinorDataMinimizer_UsesJurisdictionThresholds(t *testing.T) {
 	t.Parallel()
 	m := childMinimizer(t, true) // env ceiling: child_max 12, adult 18
 
-	teenUnderEnv := &User{DateOfBirthMs: dobAgeMs(15), Market: "IN"}
+	teenUnderEnv := &User{DateOfBirthMs: new(dobAgeMs(15)), Market: "IN"}
 	if m.BlocksChildFor(context.Background(), teenUnderEnv) {
 		t.Fatal("with no project scope the env ceiling applies: 15 is a teen")
 	}
@@ -381,7 +381,7 @@ func TestMinorDataMinimizer_UsesJurisdictionThresholds(t *testing.T) {
 		t.Fatal("an account the project classifies CHILD must be data-minimized")
 	}
 	// And a US account of the same age is still a teen under that project.
-	if m.BlocksChildFor(ctx, &User{DateOfBirthMs: dobAgeMs(15), Market: "US"}) {
+	if m.BlocksChildFor(ctx, &User{DateOfBirthMs: new(dobAgeMs(15)), Market: "US"}) {
 		t.Fatal("US ceiling is 12: a 15-year-old is a teen, not minimized")
 	}
 }

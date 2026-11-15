@@ -53,7 +53,7 @@ func TestGuardianPolicy_DefaultHTTPAndNativeGRPCCannotBypass(t *testing.T) {
 	}
 	scoped := repo.WithProject(cfg.DefaultProjectID)
 	ctx := context.Background()
-	parent, err := scoped.CreateUser(ctx, &service.User{Email: "parent@example.test", Status: service.StatusActive, Kind: service.UserKindPerson, DateOfBirthMs: time.Now().AddDate(-35, 0, 0).UnixMilli(), PhoneVerified: true})
+	parent, err := scoped.CreateUser(ctx, &service.User{Email: "parent@example.test", Status: service.StatusActive, Kind: service.UserKindPerson, DateOfBirthMs: new(time.Now().AddDate(-35, 0, 0).UnixMilli()), PhoneVerified: true})
 	if err != nil {
 		t.Fatal(err)
 	}

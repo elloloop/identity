@@ -74,6 +74,7 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 	}
 	return &service.ResolvedProject{
 		Guardian:           cfg.Guardian,
+		AgeGate:            cfg.AgeGate,
 		ID:                 p.ID,
 		StorageScopeID:     p.StorageScopeID,
 		PrimaryAuthDomain:  primary,

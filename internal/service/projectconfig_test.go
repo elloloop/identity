@@ -654,3 +654,16 @@ func TestParseProjectConfig_GuardianAdultProfile(t *testing.T) {
 	_, err = ParseProjectConfig(`{"guardian":{"require_adult_profile":"true"}}`)
 	require.Error(t, err)
 }
+
+func TestParseProjectConfig_DOBCompletion(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"age_gate":{}}`, `{"age_gate":{"require_dob":false}}`} {
+		cfg, err := ParseProjectConfig(raw)
+		require.NoError(t, err)
+		require.False(t, cfg.AgeGate.RequireDOB)
+	}
+	cfg, err := ParseProjectConfig(`{"age_gate":{"require_dob":true}}`)
+	require.NoError(t, err)
+	require.True(t, cfg.AgeGate.RequireDOB)
+	_, err = ParseProjectConfig(`{"age_gate":{"require_dob":"true"}}`)
+	require.Error(t, err)
+}

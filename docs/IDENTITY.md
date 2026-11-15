@@ -401,6 +401,35 @@ below.
 
 ### Required date of birth (the completion step)
 
+A control-plane project can set `age_gate.require_dob: true` in its
+`config_json` to require this completion step for that project alone. It is
+additive to `GATEWAY_AGEGATE_REQUIRE_DOB`; false or absent never relaxes the
+deployment requirement. Age classification must be enabled; a project that
+requires a DOB while classification is disabled refuses session issuance.
+The stored project policy is checked on default, explicit-project and native
+routes, before refresh consumption or profile writes.
+
+Use the optional `date_of_birth_unix_ms` field on signup, managed-child creation
+and `SubmitDateOfBirth`. Omitted means unknown; explicit zero is 1970-01-01;
+negative timestamps represent earlier dates. The original `date_of_birth_ms`
+field remains accepted with zero meaning unknown. Conflicting supplied values
+are rejected. User responses include both fields, with presence retained in
+`date_of_birth_unix_ms`.
+
+Hosted OAuth returns its opaque one-time code even when DOB completion is
+required. Redeeming that code returns `DOBRequiredDetails`; completion tickets
+never appear in redirect URLs. Other authentication and access denials still
+refuse the callback, and a redeemed code cannot be reused.
+
+**Storage rollout:** PostgreSQL migration 0062 and SQLite migration 0030 add
+an explicit presence marker, backfilled from existing nonzero dates. Upgrade
+all serving replicas before accepting presence-aware writes: older replicas
+interpret epoch zero as missing and cannot enforce its set-once semantics.
+Downgrading removes that marker and makes an epoch-zero DOB unknown again;
+stop completion/signup writes during rollback. Existing nonzero dates survive
+both directions. DOB presence changes revoke agent authority just like date
+changes.
+
 `GATEWAY_AGEGATE_REQUIRE_DOB` (with `GATEWAY_AGEGATE_ENABLED`) makes a date
 of birth a precondition of holding a session, on **every** session-issuing
 path — not just password signup. Without it, only `PasswordSignup` collects
@@ -416,7 +445,7 @@ RPC fails with `failed_precondition`, a message leading with the stable
 token `dob_required`, and an error detail (`DOBRequiredDetails`) carrying a
 **completion ticket** — a 10-minute JWT with a `purpose` claim, which
 authenticates no other RPC. The client collects the date of birth and calls
-`SubmitDateOfBirth(completion_token, date_of_birth_ms)`, the only RPC that
+`SubmitDateOfBirth(completion_token, date_of_birth_unix_ms)`, the only RPC that
 accepts the ticket. The DOB is validated (not missing, not future, not
 implausibly old), stored, run through the normal jurisdiction-aware band
 derivation, and only then is a session issued. A CHILD-band result lands in
