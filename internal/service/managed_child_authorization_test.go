@@ -35,7 +35,7 @@ func TestManagedChildAuthorization_LivePairAndProject(t *testing.T) {
 	}
 	check(true)
 	auth.WithActiveProjects(&fakeActiveProjects{err: ErrServiceUnavailable})
-	if allowed, err := svc.GetManagedChildAuthorization(ctx, key.RawKey, child.ID, guardian.ID); allowed || !errors.Is(err, ErrServiceUnavailable) {
+	if allowed, err := svc.GetManagedChildAuthorization(ctx, key.RawKey, child.ID, guardian.ID); allowed || !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("authoritative policy error failed open: %v %v", allowed, err)
 	}
 	auth.WithActiveProjects(nil)
