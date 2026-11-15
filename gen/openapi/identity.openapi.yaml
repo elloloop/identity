@@ -13679,9 +13679,8 @@ components:
           title: date_of_birth_unix_ms
           format: int64
           description: |-
-            Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
-             negative timestamps are valid dates. On requests, a nonzero legacy
-             date_of_birth_ms must agree when both fields are supplied.
+            Presence-aware UTC epoch milliseconds. Absent means unknown; zero is
+             1970-01-01 and negative timestamps represent earlier dates.
       title: User
       additionalProperties: false
     identity.v1.UserKind:

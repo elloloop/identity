@@ -124,3 +124,73 @@ func TestProjectDOBPolicy_NativeOAuthCompletion(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result.AccessToken)
 }
+
+type countedActiveProjects struct {
+	ActiveProjectStore
+	calls int
+}
+
+func (s *countedActiveProjects) ActiveProjectByID(ctx context.Context, id string) (*AdminProject, error) {
+	s.calls++
+	return s.ActiveProjectStore.ActiveProjectByID(ctx, id)
+}
+
+func TestProjectDOBPolicy_OneReadPerCallAndNoCrossProjectReuse(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	enableAgeGate(t, svc, false)
+	projectID := svc.cfg.DefaultProjectID
+	project := &AdminProject{ID: projectID}
+	projects := &countedActiveProjects{ActiveProjectStore: &fakeActiveProjects{active: map[string]*AdminProject{projectID: project, "other": {ID: "other"}}}}
+	svc.WithActiveProjects(projects)
+	ctx := context.Background()
+	signup, err := svc.PasswordSignup(ctx, "count@example.com", strongPW, "", "", nil, "", EmailLinkParams{})
+	require.NoError(t, err)
+	require.Equal(t, 1, projects.calls)
+	_, _, _, err = svc.RefreshToken(ctx, signup.RefreshToken, "", "", "")
+	require.NoError(t, err)
+	require.Equal(t, 2, projects.calls)
+	project.AgeGate.RequireDOB = true
+	_, err = svc.PasswordLogin(ctx, "count@example.com", strongPW, "", "")
+	requireDOBRefusal(t, svc, err)
+	require.Equal(t, 3, projects.calls)
+	_, err = svc.SubmitDateOfBirth(ctx, dobTicketFrom(t, err), new(int64(0)), "", "")
+	require.NoError(t, err)
+	require.Equal(t, 4, projects.calls)
+	scoped, err := svc.activeProjectPolicyContext(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 5, projects.calls)
+	_, err = svc.activeProjectPolicyContext(scoped)
+	require.NoError(t, err)
+	require.Equal(t, 5, projects.calls)
+	_, err = svc.activeProjectPolicyContext(WithProjectScope(scoped, &ProjectScope{ProjectID: "other"}))
+	require.NoError(t, err)
+	require.Equal(t, 6, projects.calls)
+	_, err = svc.activeProjectPolicyContext(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 7, projects.calls)
+}
+
+func TestProjectDOBPolicy_ImplausibleStoredDateCannotAdmitAdult(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	enableAgeGate(t, svc, true)
+	for _, dob := range []int64{ageGateNow.AddDate(-200, 0, 0).UnixMilli(), ageGateNow.AddDate(1, 0, 0).UnixMilli()} {
+		user := &User{ID: "invalid-age", Status: StatusActive, Kind: UserKindPerson, DateOfBirthMs: new(dob)}
+		require.False(t, svc.isKnownAdultPerson(context.Background(), user))
+		access, refresh, err := svc.issueTokens(context.Background(), user, "", "")
+		require.ErrorIs(t, err, ErrInvalidArgument)
+		require.Empty(t, access)
+		require.Empty(t, refresh)
+	}
+}
+
+func TestOptionalDOBSignupRejectsFutureBeforeWrites(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	_, err := svc.PasswordSignup(context.Background(), "future@example.com", strongPW, "", "", new(svc.nowFunc().AddDate(1, 0, 0).UnixMilli()), "", EmailLinkParams{})
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	user, err := repo.FindUserByEmail(context.Background(), "future@example.com")
+	require.NoError(t, err)
+	require.Nil(t, user)
+}

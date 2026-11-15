@@ -35,11 +35,6 @@ const dobCompletionTicketTTL = 10 * time.Minute
 // expires quickly.
 const passkeyEnrolmentTicketTTL = 15 * time.Minute
 
-// maxRecordedAgeYears bounds a submitted date of birth: no living user is
-// older, and an implausibly old DOB would classify ADULT under any
-// threshold, defeating the gate it was submitted to satisfy.
-const maxRecordedAgeYears = 150
-
 // DOBRequiredError is the typed form of ErrDOBRequired: the refusal every
 // session-issuing path returns when the deployment or project requires DOB and
 // the account has no date of birth. Ticket is the completion credential
@@ -76,8 +71,11 @@ func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTi
 	if !s.requiresDateOfBirth(ctx) || user == nil {
 		return nil
 	}
-	if user.IsAnonymous || user.DateOfBirthMs != nil {
+	if user.IsAnonymous {
 		return nil
+	}
+	if user.DateOfBirthMs != nil {
+		return validateCompletionDOB(user.DateOfBirthMs, s.nowFunc())
 	}
 	ticket, err := s.mintDOBCompletionTicket(ctx, user, authTimeMs, recoveryEmailID)
 	if err != nil {
@@ -150,7 +148,7 @@ func validateCompletionDOB(dobMs *int64, now time.Time) error {
 	if dob.After(now.UTC()) {
 		return fmt.Errorf("%w: date of birth cannot be in the future", ErrInvalidArgument)
 	}
-	if dob.Before(now.UTC().AddDate(-maxRecordedAgeYears, 0, 0)) {
+	if dob.Before(now.UTC().AddDate(-agegate.MaxRecordedAgeYears, 0, 0)) {
 		return fmt.Errorf("%w: date of birth is implausibly old", ErrInvalidArgument)
 	}
 	return nil

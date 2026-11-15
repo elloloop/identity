@@ -731,7 +731,7 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			}
 			continue
 		}
-		// The two fields whose stored form is not the wire form.
+		// These fields have a different domain representation.
 		switch k {
 		case "date_of_birth_ms":
 			if x, ok := fieldInt64(v); ok {

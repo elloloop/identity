@@ -227,8 +227,13 @@ func (s *AgentOAuthService) admitOwner(ctx context.Context, user *User, product 
 	if s.auth.cfg.IDVRequired && !user.IDVVerified {
 		return ErrIDVRequired
 	}
-	if s.auth.requiresDateOfBirth(ctx) && user.DateOfBirthMs == nil {
-		return ErrDOBRequired
+	if s.auth.requiresDateOfBirth(ctx) {
+		if user.DateOfBirthMs == nil {
+			return ErrDOBRequired
+		}
+		if err := validateCompletionDOB(user.DateOfBirthMs, s.auth.nowFunc()); err != nil {
+			return ErrDOBRequired
+		}
 	}
 	if err := s.auth.requireAgeGateForDOB(ctx); err != nil {
 		return err

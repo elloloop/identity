@@ -13,7 +13,10 @@ Clients should send optional `date_of_birth_unix_ms` on signup, managed-child
 creation and `SubmitDateOfBirth`. Explicit zero means 1970-01-01; negative values
 are valid historical dates; omission means unknown. The original `date_of_birth_ms`
 remains supported with zero meaning unknown. Conflicting values are rejected.
-Responses populate the optional field to retain presence. The internal Go
+Responses populate the optional field to retain presence. Supplied dates at signup
+are now validated even when optional: future dates and ages above 150 years are
+rejected. Implausible stored dates never classify as known adults, and cannot
+satisfy a required-DOB policy; an operator must correct such existing records. The internal Go
 `User.DateOfBirthMs`, signup parameters and age determiner now use `*int64`;
 embedding users must update callers, passing nil for an absent date.
 

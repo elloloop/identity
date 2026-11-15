@@ -13,6 +13,9 @@ package agegate
 
 import "time"
 
+// MaxRecordedAgeYears bounds plausible recorded dates of birth.
+const MaxRecordedAgeYears = 150
+
 // AgeBand is the coarse age classification derived from a date of birth.
 type AgeBand string
 

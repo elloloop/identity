@@ -58,6 +58,8 @@ func TestThreshold_Bands(t *testing.T) {
 		{"unknown-absent", nil, BandUnknown, false, false},
 		{"epoch-zero", new(int64(0)), BandAdult, false, true},
 		{"before-epoch", new(dobYearsAgo(80, 0)), BandAdult, false, true},
+		{"oldest-plausible", new(refNow.AddDate(-MaxRecordedAgeYears, 0, 0).UnixMilli()), BandAdult, false, true},
+		{"implausibly-old", new(refNow.AddDate(-MaxRecordedAgeYears, 0, -1).UnixMilli()), BandUnknown, false, false},
 		{"future-dob", new(refNow.AddDate(1, 0, 0).UnixMilli()), BandUnknown, false, false},
 		{"age-8-child", new(dobYearsAgo(8, 0)), BandChild, true, true},
 		{"age-12-child-boundary", new(dobYearsAgo(12, 0)), BandChild, true, true},

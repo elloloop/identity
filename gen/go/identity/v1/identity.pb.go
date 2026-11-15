@@ -932,9 +932,8 @@ type User struct {
 	// The agent stays with owner_user_id until it is accepted. Empty when no
 	// transfer is pending, and always empty on a person.
 	PendingOwnerUserId string `protobuf:"bytes,34,opt,name=pending_owner_user_id,json=pendingOwnerUserId,proto3" json:"pending_owner_user_id,omitempty"`
-	// Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
-	// negative timestamps are valid dates. On requests, a nonzero legacy
-	// date_of_birth_ms must agree when both fields are supplied.
+	// Presence-aware UTC epoch milliseconds. Absent means unknown; zero is
+	// 1970-01-01 and negative timestamps represent earlier dates.
 	DateOfBirthUnixMs *int64 `protobuf:"varint,35,opt,name=date_of_birth_unix_ms,json=dateOfBirthUnixMs,proto3,oneof" json:"date_of_birth_unix_ms,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
