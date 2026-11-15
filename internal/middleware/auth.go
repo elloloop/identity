@@ -45,10 +45,11 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/CompleteRequiredPasswordChange": true,
 	// Passwordless email login: the caller is anonymous, proving control
 	// of an inbox via an OTP code or a magic-link token rather than a JWT.
-	"/identity.v1.IdentityService/RequestEmailLoginCode": true,
-	"/identity.v1.IdentityService/VerifyEmailLoginCode":  true,
-	"/identity.v1.IdentityService/RequestMagicLink":      true,
-	"/identity.v1.IdentityService/RedeemMagicLink":       true,
+	"/identity.v1.IdentityService/RequestEmailLoginCode":   true,
+	"/identity.v1.IdentityService/GetProjectEmailDelivery": true,
+	"/identity.v1.IdentityService/VerifyEmailLoginCode":    true,
+	"/identity.v1.IdentityService/RequestMagicLink":        true,
+	"/identity.v1.IdentityService/RedeemMagicLink":         true,
 	// Client assurance: a client proves what it IS (genuine app on genuine
 	// hardware, or a human-passed web client) before anyone signs in, so
 	// none of these can carry a user JWT.

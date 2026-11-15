@@ -197,6 +197,7 @@ const (
 	IdentityService_GetManagedChildAuthorization_FullMethodName      = "/identity.v1.IdentityService/GetManagedChildAuthorization"
 	IdentityService_LookupUsers_FullMethodName                       = "/identity.v1.IdentityService/LookupUsers"
 	IdentityService_MatchTenantMemberPhones_FullMethodName           = "/identity.v1.IdentityService/MatchTenantMemberPhones"
+	IdentityService_GetProjectEmailDelivery_FullMethodName           = "/identity.v1.IdentityService/GetProjectEmailDelivery"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -920,6 +921,10 @@ type IdentityServiceClient interface {
 	// as directory_phone_match with the tenant and the number of hashes asked
 	// for and matched, never the hashes.
 	MatchTenantMemberPhones(ctx context.Context, in *MatchTenantMemberPhonesRequest, opts ...grpc.CallOption) (*MatchTenantMemberPhonesResponse, error)
+	// GetProjectEmailDelivery exposes only the resolved project's email policy.
+	// Resolve the project exactly as for authentication and recovery calls.
+	// This request requires no user session or email address.
+	GetProjectEmailDelivery(ctx context.Context, in *GetProjectEmailDeliveryRequest, opts ...grpc.CallOption) (*GetProjectEmailDeliveryResponse, error)
 }
 
 type identityServiceClient struct {
@@ -2710,6 +2715,16 @@ func (c *identityServiceClient) MatchTenantMemberPhones(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *identityServiceClient) GetProjectEmailDelivery(ctx context.Context, in *GetProjectEmailDeliveryRequest, opts ...grpc.CallOption) (*GetProjectEmailDeliveryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProjectEmailDeliveryResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetProjectEmailDelivery_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
@@ -3431,6 +3446,10 @@ type IdentityServiceServer interface {
 	// as directory_phone_match with the tenant and the number of hashes asked
 	// for and matched, never the hashes.
 	MatchTenantMemberPhones(context.Context, *MatchTenantMemberPhonesRequest) (*MatchTenantMemberPhonesResponse, error)
+	// GetProjectEmailDelivery exposes only the resolved project's email policy.
+	// Resolve the project exactly as for authentication and recovery calls.
+	// This request requires no user session or email address.
+	GetProjectEmailDelivery(context.Context, *GetProjectEmailDeliveryRequest) (*GetProjectEmailDeliveryResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
 }
 
@@ -3974,6 +3993,9 @@ func (UnimplementedIdentityServiceServer) LookupUsers(context.Context, *LookupUs
 }
 func (UnimplementedIdentityServiceServer) MatchTenantMemberPhones(context.Context, *MatchTenantMemberPhonesRequest) (*MatchTenantMemberPhonesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MatchTenantMemberPhones not implemented")
+}
+func (UnimplementedIdentityServiceServer) GetProjectEmailDelivery(context.Context, *GetProjectEmailDeliveryRequest) (*GetProjectEmailDeliveryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetProjectEmailDelivery not implemented")
 }
 func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
 func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
@@ -7200,6 +7222,24 @@ func _IdentityService_MatchTenantMemberPhones_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_GetProjectEmailDelivery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProjectEmailDeliveryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetProjectEmailDelivery(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetProjectEmailDelivery_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetProjectEmailDelivery(ctx, req.(*GetProjectEmailDeliveryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -7918,6 +7958,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MatchTenantMemberPhones",
 			Handler:    _IdentityService_MatchTenantMemberPhones_Handler,
+		},
+		{
+			MethodName: "GetProjectEmailDelivery",
+			Handler:    _IdentityService_GetProjectEmailDelivery_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

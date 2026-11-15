@@ -291,6 +291,19 @@ func (h *IdentityHandler) CompleteRequiredPasswordChange(
 
 // ─── Passwordless Email Login RPCs ──────────────────────────────────────────
 
+func (h *IdentityHandler) GetProjectEmailDelivery(
+	ctx context.Context,
+	_ *connect.Request[identitypb.GetProjectEmailDeliveryRequest],
+) (*connect.Response[identitypb.GetProjectEmailDeliveryResponse], error) {
+	disabled, err := h.auth.ProjectEmailDeliveryDisabled(ctx)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	response := connect.NewResponse(&identitypb.GetProjectEmailDeliveryResponse{Disabled: disabled})
+	response.Header().Set("Cache-Control", "no-store")
+	return response, nil
+}
+
 // RequestEmailLoginCode emails a 6-digit OTP. The response is identical
 // whether or not the email has an account (anti-enumeration); the service
 // always returns nil for a well-formed request.

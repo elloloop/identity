@@ -54,6 +54,9 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 	if s.cfg != nil && !s.cfg.PasskeySignupEnabled {
 		return "", "", ErrPasskeySignupDisabled
 	}
+	if err := s.requireEmailDelivery(ctx); err != nil {
+		return "", "", err
+	}
 	email = strings.TrimSpace(strings.ToLower(email))
 	if err := validateEmailFormat(email); err != nil {
 		return "", "", fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())

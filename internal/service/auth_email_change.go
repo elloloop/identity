@@ -39,6 +39,9 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID string, sig
 	if userID == "" {
 		return fmt.Errorf("%w: user id is required", ErrUnauthenticated)
 	}
+	if err := s.requireEmailDelivery(ctx); err != nil {
+		return err
+	}
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return err
 	}

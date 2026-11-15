@@ -114,6 +114,11 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	if policyErr != nil {
 		return nil, policyErr
 	}
+	if s.cfg.AuthRequireVerifiedEmail {
+		if err := s.requireEmailDelivery(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.requireAgeGateForDOB(ctx); err != nil {
 		return nil, err
 	}
@@ -369,6 +374,9 @@ func (s *AuthService) handleDuplicatePasskeySignup(ctx context.Context, user *Us
 }
 
 func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) error {
+	if err := s.requireEmailDelivery(ctx); err != nil {
+		return err
+	}
 	loginURL := appBaseURL(ctx, s.cfg)
 	text := strings.Join([]string{
 		fmt.Sprintf("Hi %s,", displayNameOrEmail(user)),

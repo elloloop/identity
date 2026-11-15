@@ -3009,6 +3009,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.GetProjectConfigResponse'
+  /identity.v1.IdentityService/GetProjectEmailDelivery:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetProjectEmailDelivery
+      description: |-
+        GetProjectEmailDelivery exposes only the resolved project's email policy.
+         Resolve the project exactly as for authentication and recovery calls.
+         This request requires no user session or email address.
+      operationId: identity.v1.IdentityService.GetProjectEmailDelivery
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetProjectEmailDeliveryRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetProjectEmailDeliveryResponse'
   /identity.v1.IdentityService/GetQrLoginSession:
     post:
       tags:
@@ -9704,6 +9743,21 @@ components:
           title: config_json
           description: config_json is the project's stored config blob ("{}" when unset).
       title: GetProjectConfigResponse
+      additionalProperties: false
+    identity.v1.GetProjectEmailDeliveryRequest:
+      type: object
+      title: GetProjectEmailDeliveryRequest
+      additionalProperties: false
+    identity.v1.GetProjectEmailDeliveryResponse:
+      type: object
+      properties:
+        disabled:
+          type: boolean
+          title: disabled
+          description: |-
+            True when the resolved project's policy denies outbound email.
+             False does not guarantee delivery or that a particular flow is enabled.
+      title: GetProjectEmailDeliveryResponse
       additionalProperties: false
     identity.v1.GetQrLoginSessionRequest:
       type: object

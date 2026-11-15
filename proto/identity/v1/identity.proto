@@ -3610,6 +3610,14 @@ message RegisterAgentMachineAgentKeyResponse {
   string delegation_id = 1;
 }
 
+message GetProjectEmailDeliveryRequest {}
+
+message GetProjectEmailDeliveryResponse {
+  // True when the resolved project's policy denies outbound email.
+  // False does not guarantee delivery or that a particular flow is enabled.
+  bool disabled = 1;
+}
+
 service IdentityService {
   rpc CreateAgentMachineChallenge(CreateAgentMachineChallengeRequest) returns (CreateAgentMachineChallengeResponse);
   rpc RegisterAgentMachineAgentKey(RegisterAgentMachineAgentKeyRequest) returns (RegisterAgentMachineAgentKeyResponse);
@@ -4371,6 +4379,13 @@ service IdentityService {
   // as directory_phone_match with the tenant and the number of hashes asked
   // for and matched, never the hashes.
   rpc MatchTenantMemberPhones(MatchTenantMemberPhonesRequest) returns (MatchTenantMemberPhonesResponse);
+
+  // GetProjectEmailDelivery exposes only the resolved project's email policy.
+  // Resolve the project exactly as for authentication and recovery calls.
+  // This request requires no user session or email address.
+  rpc GetProjectEmailDelivery(GetProjectEmailDeliveryRequest) returns (GetProjectEmailDeliveryResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // ─── Teammate keys (machine credential) ─────────────────────────────

@@ -359,6 +359,10 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitVerifyPerIP, 0),
 		},
 		{
+			PathPrefix: "/identity.v1.IdentityService/GetProjectEmailDelivery", Tag: "project_email_delivery",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitVerifyPerIP, 0),
+		},
+		{
 			// Passwordless OTP request: unauthenticated, sends an email.
 			// Tight per-IP quota so a single source can't pump codes at a
 			// victim inbox (the per-email cooldown is the second layer).
@@ -1076,7 +1080,7 @@ func buildOutboundSenders(deps Deps, logger *zap.Logger) (outboundSenders, error
 	if out.mailer == nil {
 		out.mailer, out.mailDelivers = buildEmailTransport(deps.Config, logger)
 	}
-	out.mailer = observability.WrapMailer(out.mailer)
+	out.mailer = service.NewProjectMailTransport(observability.WrapMailer(out.mailer), deps.Config.DefaultProjectID, deps.ActiveProjects)
 	var err error
 	if out.sms == nil {
 		if out.sms, err = buildSMSSender(deps.Config, logger); err != nil {
@@ -1425,7 +1429,7 @@ func buildMembershipService(deps Deps, accounts service.Repository, users servic
 		mailDelivers,
 		deps.Config,
 		logger,
-	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts)
+	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts).WithActiveProjects(deps.ActiveProjects)
 }
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService

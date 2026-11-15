@@ -569,6 +569,9 @@ const (
 	// IdentityServiceMatchTenantMemberPhonesProcedure is the fully-qualified name of the
 	// IdentityService's MatchTenantMemberPhones RPC.
 	IdentityServiceMatchTenantMemberPhonesProcedure = "/identity.v1.IdentityService/MatchTenantMemberPhones"
+	// IdentityServiceGetProjectEmailDeliveryProcedure is the fully-qualified name of the
+	// IdentityService's GetProjectEmailDelivery RPC.
+	IdentityServiceGetProjectEmailDeliveryProcedure = "/identity.v1.IdentityService/GetProjectEmailDelivery"
 	// TeammateKeyServiceRegisterTeammateKeyProcedure is the fully-qualified name of the
 	// TeammateKeyService's RegisterTeammateKey RPC.
 	TeammateKeyServiceRegisterTeammateKeyProcedure = "/identity.v1.TeammateKeyService/RegisterTeammateKey"
@@ -1299,6 +1302,10 @@ type IdentityServiceClient interface {
 	// as directory_phone_match with the tenant and the number of hashes asked
 	// for and matched, never the hashes.
 	MatchTenantMemberPhones(context.Context, *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error)
+	// GetProjectEmailDelivery exposes only the resolved project's email policy.
+	// Resolve the project exactly as for authentication and recovery calls.
+	// This request requires no user session or email address.
+	GetProjectEmailDelivery(context.Context, *connect.Request[v1.GetProjectEmailDeliveryRequest]) (*connect.Response[v1.GetProjectEmailDeliveryResponse], error)
 }
 
 // NewIdentityServiceClient constructs a client for the identity.v1.IdentityService service. By
@@ -2380,6 +2387,13 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("MatchTenantMemberPhones")),
 			connect.WithClientOptions(opts...),
 		),
+		getProjectEmailDelivery: connect.NewClient[v1.GetProjectEmailDeliveryRequest, v1.GetProjectEmailDeliveryResponse](
+			httpClient,
+			baseURL+IdentityServiceGetProjectEmailDeliveryProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetProjectEmailDelivery")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -2563,6 +2577,7 @@ type identityServiceClient struct {
 	getManagedChildAuthorization      *connect.Client[v1.GetManagedChildAuthorizationRequest, v1.GetManagedChildAuthorizationResponse]
 	lookupUsers                       *connect.Client[v1.LookupUsersRequest, v1.LookupUsersResponse]
 	matchTenantMemberPhones           *connect.Client[v1.MatchTenantMemberPhonesRequest, v1.MatchTenantMemberPhonesResponse]
+	getProjectEmailDelivery           *connect.Client[v1.GetProjectEmailDeliveryRequest, v1.GetProjectEmailDeliveryResponse]
 }
 
 // CreateAgentMachineChallenge calls identity.v1.IdentityService.CreateAgentMachineChallenge.
@@ -3457,6 +3472,11 @@ func (c *identityServiceClient) MatchTenantMemberPhones(ctx context.Context, req
 	return c.matchTenantMemberPhones.CallUnary(ctx, req)
 }
 
+// GetProjectEmailDelivery calls identity.v1.IdentityService.GetProjectEmailDelivery.
+func (c *identityServiceClient) GetProjectEmailDelivery(ctx context.Context, req *connect.Request[v1.GetProjectEmailDeliveryRequest]) (*connect.Response[v1.GetProjectEmailDeliveryResponse], error) {
+	return c.getProjectEmailDelivery.CallUnary(ctx, req)
+}
+
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
 type IdentityServiceHandler interface {
 	CreateAgentMachineChallenge(context.Context, *connect.Request[v1.CreateAgentMachineChallengeRequest]) (*connect.Response[v1.CreateAgentMachineChallengeResponse], error)
@@ -4176,6 +4196,10 @@ type IdentityServiceHandler interface {
 	// as directory_phone_match with the tenant and the number of hashes asked
 	// for and matched, never the hashes.
 	MatchTenantMemberPhones(context.Context, *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error)
+	// GetProjectEmailDelivery exposes only the resolved project's email policy.
+	// Resolve the project exactly as for authentication and recovery calls.
+	// This request requires no user session or email address.
+	GetProjectEmailDelivery(context.Context, *connect.Request[v1.GetProjectEmailDeliveryRequest]) (*connect.Response[v1.GetProjectEmailDeliveryResponse], error)
 }
 
 // NewIdentityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -5253,6 +5277,13 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("MatchTenantMemberPhones")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceGetProjectEmailDeliveryHandler := connect.NewUnaryHandler(
+		IdentityServiceGetProjectEmailDeliveryProcedure,
+		svc.GetProjectEmailDelivery,
+		connect.WithSchema(identityServiceMethods.ByName("GetProjectEmailDelivery")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case IdentityServiceCreateAgentMachineChallengeProcedure:
@@ -5611,6 +5642,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceLookupUsersHandler.ServeHTTP(w, r)
 		case IdentityServiceMatchTenantMemberPhonesProcedure:
 			identityServiceMatchTenantMemberPhonesHandler.ServeHTTP(w, r)
+		case IdentityServiceGetProjectEmailDeliveryProcedure:
+			identityServiceGetProjectEmailDeliveryHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -6330,6 +6363,10 @@ func (UnimplementedIdentityServiceHandler) LookupUsers(context.Context, *connect
 
 func (UnimplementedIdentityServiceHandler) MatchTenantMemberPhones(context.Context, *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.MatchTenantMemberPhones is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetProjectEmailDelivery(context.Context, *connect.Request[v1.GetProjectEmailDeliveryRequest]) (*connect.Response[v1.GetProjectEmailDeliveryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetProjectEmailDelivery is not implemented"))
 }
 
 // TeammateKeyServiceClient is a client for the identity.v1.TeammateKeyService service.

@@ -51,6 +51,7 @@ func (s *ProjectStore) ActiveProjectByID(ctx context.Context, projectID string) 
 	return &service.AdminProject{
 		Guardian:       cfg.Guardian,
 		AgeGate:        cfg.AgeGate,
+		EmailDelivery:  cfg.EmailDelivery,
 		ID:             p.ID,
 		StorageScopeID: p.StorageScopeID,
 		Name:           p.Name,

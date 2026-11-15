@@ -1,5 +1,24 @@
 # Upgrade guide
 
+## Next — project outbound email policy (additive config and RPC)
+
+After upgrading every replica, set `config_json.email_delivery.disabled: true`
+on any project that must send no email. An omitted or false value leaves the
+deployment's existing email behavior in effect for that project. The deny also
+applies to embedded mail transports, synchronous notifications and detached
+credential emails. If the active policy cannot be read, Identity refuses the
+send. Wait for in-flight sends to finish when switching an active project.
+Do not roll back to a version that lacks the policy while relying on the deny.
+
+Clients can call `GetProjectEmailDelivery` without a user session. The response
+contains only `disabled` for the project selected by the usual routing. Check it
+before presenting an email-dependent action. If an anonymous request has a
+generic response to protect account privacy, that response remains generic when
+mail is disabled. Direct refusals use `failed_precondition` with the
+`email_delivery_disabled` reason. Already-issued email credentials keep their
+normal expiry, and existing password sign-in and previously verified factors
+remain governed by the usual authentication policies.
+
 ## Next — project DOB completion and historical dates (off by default; PostgreSQL 0062 / SQLite 0030; additive protobuf fields; Go API change)
 
 Projects can require an age profile with `config_json.age_gate.require_dob: true`.
