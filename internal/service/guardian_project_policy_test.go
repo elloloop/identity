@@ -77,7 +77,7 @@ func TestProjectGuardianPolicy_KnownAdultBeforeWrites(t *testing.T) {
 		t.Run(strconv.Itoa(age), func(t *testing.T) {
 			f := newManagedChildFixture(t, true)
 			if age > 0 {
-				f.adult.DateOfBirthMs = dobAgeMs(age)
+				f.adult.DateOfBirthMs = new(dobAgeMs(age))
 			}
 			ctx := WithProjectScope(context.Background(), &ProjectScope{Guardian: ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true}})
 			result, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, f.req(), "", "")
@@ -125,7 +125,7 @@ func TestProjectGuardianPolicy_ManagementUsesBothGuards(t *testing.T) {
 	if f.writer.countByEventTypeAndDetail(string(audit.EventGuardianChildProfileViewed), "step", "adult_profile") != 1 {
 		t.Fatal("missing adult profile management refusal audit")
 	}
-	f.guardian.DateOfBirthMs = dobAgeMs(35)
+	f.guardian.DateOfBirthMs = new(dobAgeMs(35))
 	f.guardian.PasswordHash = ""
 	f.svc.cfg.GuardianStepUpAllowNoPassword = true
 	if _, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
@@ -156,7 +156,7 @@ func TestProjectGuardianPolicy_DefaultAndUnscopedAdmission(t *testing.T) {
 		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("unknown profile through default/native path: %v", err)
 		}
-		f.adult.DateOfBirthMs = dobAgeMs(35)
+		f.adult.DateOfBirthMs = new(dobAgeMs(35))
 		f.adult.PasswordHash = ""
 		req.StepUpPassword = ""
 		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
@@ -177,7 +177,7 @@ func TestProjectGuardianPolicy_DefaultAndUnscopedAdmission(t *testing.T) {
 			t.Fatal("consent written without proof")
 		}
 		projects.err = ErrServiceUnavailable
-		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrServiceUnavailable) {
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", ""); !errors.Is(err, ErrUnavailable) {
 			t.Fatalf("policy error failed open: %v", err)
 		}
 		projects.err = nil
@@ -196,7 +196,7 @@ func TestProjectGuardianPolicy_DoesNotObstructConsentWithdrawal(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.adult.PasswordHash = ""
-	f.adult.DateOfBirthMs = 0
+	f.adult.DateOfBirthMs = nil
 	ctx = WithProjectScope(ctx, &ProjectScope{Guardian: ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true}})
 	_, childStatus, err := f.svc.RevokeParentalConsent(ctx, f.adult.ID, created.Child.ID, "withdrawal")
 	if err != nil || childStatus != StatusPendingParentalConsent {
@@ -211,7 +211,7 @@ func TestProjectGuardianPolicy_DoesNotObstructConsentWithdrawal(t *testing.T) {
 func TestProjectGuardianPolicy_DefaultJurisdictionsRemainConsistent(t *testing.T) {
 	ctx := context.Background()
 	f := newGuardianFixture(ctx, t)
-	f.child.DateOfBirthMs = dobAgeMs(19)
+	f.child.DateOfBirthMs = new(dobAgeMs(19))
 	projectID := f.svc.cfg.DefaultProjectID
 	policy := ProjectJurisdictionsConfig{Default: "EX", Thresholds: map[string]JurisdictionThresholds{"EX": {ChildMaxAge: 12, AdultAge: 21}}}
 	f.svc.WithActiveProjects(&fakeActiveProjects{active: map[string]*AdminProject{projectID: {ID: projectID, Jurisdictions: policy}}})
@@ -232,7 +232,7 @@ func TestProjectGuardianPolicy_DefaultJurisdictionsRemainConsistent(t *testing.T
 // a recovery session whose address is no longer held by the account.
 func TestProjectGuardianPolicy_DoesNotBypassRecoverySessionRefusal(t *testing.T) {
 	f := newManagedChildFixture(t, true)
-	f.adult.DateOfBirthMs = dobAgeMs(35)
+	f.adult.DateOfBirthMs = new(dobAgeMs(35))
 	ctx := WithProjectScope(context.Background(), &ProjectScope{
 		Guardian:       ProjectGuardianConfig{RequireStepUp: true, RequireAdultProfile: true},
 		RecoveryEmails: ProjectRecoveryEmailsConfig{Enabled: true, SignIn: true},

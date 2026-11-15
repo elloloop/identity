@@ -25,6 +25,7 @@ import (
 type ProjectConfig struct {
 	// Guardian controls fresh reauthentication and known adult admission for child accounts.
 	Guardian ProjectGuardianConfig `json:"guardian"`
+	AgeGate  ProjectAgeGateConfig  `json:"age_gate"`
 
 	// CORS holds the project's browser cross-origin policy.
 	CORS ProjectCORSConfig `json:"cors"`
@@ -117,6 +118,11 @@ type ProjectConfig struct {
 	// the delivery channels. Unset is the deployment's behaviour unchanged.
 	// A control-plane project only. See ProjectPhoneConfig.
 	Phone ProjectPhoneConfig `json:"phone"`
+}
+
+// ProjectAgeGateConfig may require DOB completion without changing sibling projects.
+type ProjectAgeGateConfig struct {
+	RequireDOB bool `json:"require_dob"`
 }
 
 // ProjectGuardianConfig may strengthen, but never weaken, the deployment policy.

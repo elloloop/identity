@@ -13,6 +13,9 @@ package agegate
 
 import "time"
 
+// MaxRecordedAgeYears bounds plausible recorded dates of birth.
+const MaxRecordedAgeYears = 150
+
 // AgeBand is the coarse age classification derived from a date of birth.
 type AgeBand string
 
@@ -50,8 +53,8 @@ type Determiner interface {
 	// skips all age-band derivation and consent gating.
 	Enabled() bool
 
-	// Determine classifies dobMs (date of birth as epoch milliseconds; 0 =
-	// unknown) relative to now. A zero or future dobMs yields BandUnknown /
+	// Determine classifies dobMs (date of birth as epoch milliseconds; nil =
+	// unknown) relative to now. An absent or future dobMs yields BandUnknown /
 	// HasDOB=false.
-	Determine(dobMs int64, now time.Time) Decision
+	Determine(dobMs *int64, now time.Time) Decision
 }

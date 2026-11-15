@@ -213,6 +213,11 @@ func (s *AgentOAuthService) human(ctx context.Context, human AgentOAuthHuman, gr
 }
 
 func (s *AgentOAuthService) admitOwner(ctx context.Context, user *User, product string) error {
+	var err error
+	ctx, err = s.auth.activeProjectPolicyContext(ctx)
+	if err != nil {
+		return err
+	}
 	if !isEligibleAgentOwner(user) {
 		return ErrPermissionDenied
 	}
@@ -222,8 +227,16 @@ func (s *AgentOAuthService) admitOwner(ctx context.Context, user *User, product 
 	if s.auth.cfg.IDVRequired && !user.IDVVerified {
 		return ErrIDVRequired
 	}
-	if s.auth.cfg.AgeGateRequireDOB && user.DateOfBirthMs == 0 {
-		return ErrDOBRequired
+	if s.auth.requiresDateOfBirth(ctx) {
+		if user.DateOfBirthMs == nil {
+			return ErrDOBRequired
+		}
+		if err := validateCompletionDOB(user.DateOfBirthMs, s.auth.nowFunc()); err != nil {
+			return ErrDOBRequired
+		}
+	}
+	if err := s.auth.requireAgeGateForDOB(ctx); err != nil {
+		return err
 	}
 	ctx = WithProduct(ctx, product)
 	if err := s.auth.enforceAccountAccessLogin(ctx, user); err != nil {

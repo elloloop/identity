@@ -55,7 +55,7 @@ func TestPasswordSignup_RecoveryEmailAnswersLikeAFreeOrTakenAddress(t *testing.T
 
 		shapes := map[string]signupShape{}
 		for _, addr := range []string{"free@example.com", "holder@example.com", "spare@example.com"} {
-			res, err := svc.PasswordSignup(ctx, addr, strongPW, "Same Name", "", 0, "", EmailLinkParams{})
+			res, err := svc.PasswordSignup(ctx, addr, strongPW, "Same Name", "", nil, "", EmailLinkParams{})
 			shape := shapeOfSignup(t, svc, res, err)
 			require.NoError(t, shape.err, addr)
 			shape.email = strings.Replace(shape.email, strings.SplitN(addr, "@", 2)[0], "x", 1)

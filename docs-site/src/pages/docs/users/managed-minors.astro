@@ -143,6 +143,16 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>Project guardian policy</h2>
   <p>
+    Set <code>age_gate.require_dob: true</code> for a project whose existing or
+    OAuth-authenticated parents must complete their age profile. It applies
+    at sign-in and refresh without changing sibling projects. Clients receive
+    <code>DOBRequiredDetails</code> and submit its completion token with
+    <code>date_of_birth_unix_ms</code> to <code>SubmitDateOfBirth</code>.
+    This optional field preserves dates before 1970 and distinguishes a
+    missing date from 1970-01-01. Age classification must be enabled.
+  </p>
+
+  <p>
     The Postgres control plane supports two opt-in project settings. Set
     <code>guardian.require_step_up: true</code> to require fresh password proof
     even when the deployment permits passwordless guardians. A registered

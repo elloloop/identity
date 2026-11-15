@@ -188,7 +188,7 @@ func linkParamSenders(ctx context.Context) []linkParamSender {
 			return svc.SendEmailVerification(ctx, user.ID, params)
 		}},
 		{"PasswordSignup", emailLinkPageVerifyEmail, func(svc *AuthService, _ *fakeRepo, params EmailLinkParams) error {
-			_, err := svc.PasswordSignup(ctx, "alice@test.com", "Str0ng!Pass1", "Alice", "", 0, "", params)
+			_, err := svc.PasswordSignup(ctx, "alice@test.com", "Str0ng!Pass1", "Alice", "", nil, "", params)
 			return err
 		}},
 	}

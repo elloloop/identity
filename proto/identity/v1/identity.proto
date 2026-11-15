@@ -72,7 +72,7 @@ message User {
   string phone_number = 19; // E.164 phone number the user has verified ownership of
   bool phone_verified = 20; // true once an SMS OTP for phone_number was confirmed
   int64 phone_verified_at = 21; // epoch ms; 0 = never verified
-  int64 date_of_birth_ms = 22; // epoch ms of date of birth; 0 = unknown
+  int64 date_of_birth_ms = 22; // Legacy epoch ms; 0 = unknown. Prefer date_of_birth_unix_ms for presence.
   bool is_minor = 23; // derived: true when age < adult age (age-gating on)
   AgeBand age_band = 24; // derived age band; UNSPECIFIED when unknown / gate off
   string external_id = 25; // IdP-owned stable identifier (SCIM externalId); unique per project when set
@@ -135,6 +135,9 @@ message User {
   // The agent stays with owner_user_id until it is accepted. Empty when no
   // transfer is pending, and always empty on a person.
   string pending_owner_user_id = 34;
+  // Presence-aware UTC epoch milliseconds. Absent means unknown; zero is
+  // 1970-01-01 and negative timestamps represent earlier dates.
+  optional int64 date_of_birth_unix_ms = 35;
 }
 
 message MergeUsersRequest {
@@ -425,6 +428,10 @@ message PasswordSignupRequest {
   // validated and carried on the link exactly as on
   // RequestPasswordResetRequest, and checked before the account is created.
   string product = 8;
+  // Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
+  // negative timestamps are valid dates. On requests, a nonzero legacy
+  // date_of_birth_ms must agree when both fields are supplied.
+  optional int64 date_of_birth_unix_ms = 9;
 }
 
 message PasswordSignupResponse {
@@ -446,12 +453,16 @@ message UsernameSignupRequest {
   string password = 2;
   // name is the display name. Optional; defaults to the username.
   string name = 3;
-  // date_of_birth_ms: epoch ms. Required when GATEWAY_AGEGATE_REQUIRE_DOB.
+  // date_of_birth_ms: epoch ms. Required when project or deployment policy requires DOB.
   // A child-band date is refused: a child's account is created by their
   // guardian (CreateManagedChildAccount).
   int64 date_of_birth_ms = 4;
   // market: as on PasswordSignupRequest.
   string market = 5;
+  // Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
+  // negative timestamps are valid dates. On requests, a nonzero legacy
+  // date_of_birth_ms must agree when both fields are supplied.
+  optional int64 date_of_birth_unix_ms = 6;
 }
 
 message UsernameSignupResponse {
@@ -512,9 +523,9 @@ message PasswordLoginResponse {
 }
 
 // ─── Required-DOB completion ──────────────────────────────────────────
-// When GATEWAY_AGEGATE_REQUIRE_DOB is on, every session-issuing path
+// When the project age_gate.require_dob or GATEWAY_AGEGATE_REQUIRE_DOB is on, every session-issuing path
 // refuses to mint tokens for an account with no date of birth
-// (date_of_birth_ms = 0) and instead fails with CodeFailedPrecondition,
+// (date_of_birth_ms absent) and instead fails with CodeFailedPrecondition,
 // the stable `dob_required` token in the message, and a
 // DOBRequiredDetails error detail carrying a short-lived completion
 // ticket. The client submits the date of birth through SubmitDateOfBirth,
@@ -528,7 +539,7 @@ message PasswordLoginResponse {
 
 // DOBRequiredDetails is the error detail attached to the `dob_required`
 // refusal returned by any session-issuing RPC when
-// GATEWAY_AGEGATE_REQUIRE_DOB is on and the account has no date of birth.
+// the project or deployment requires DOB and the account has no date of birth.
 message DOBRequiredDetails {
   // A short-lived (10 minute) bearer ticket whose only use is one
   // SubmitDateOfBirth call for the account it was minted for. It is NOT
@@ -548,6 +559,10 @@ message DOBRequiredDetails {
 message SubmitDateOfBirthRequest {
   string completion_token = 1; // from the dob_required error detail
   int64 date_of_birth_ms = 2; // epoch ms; must be a plausible past date
+  // Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
+  // negative timestamps are valid dates. On requests, a nonzero legacy
+  // date_of_birth_ms must agree when both fields are supplied.
+  optional int64 date_of_birth_unix_ms = 3;
 }
 
 message SubmitDateOfBirthResponse {
@@ -1538,6 +1553,10 @@ message CreateManagedChildAccountRequest {
   // creation (verified against the adult's stored password hash), exactly as
   // in GrantParentalConsent.
   string step_up_password = 9;
+  // Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
+  // negative timestamps are valid dates. On requests, a nonzero legacy
+  // date_of_birth_ms must agree when both fields are supplied.
+  optional int64 date_of_birth_unix_ms = 10;
 }
 
 message CreateManagedChildAccountResponse {

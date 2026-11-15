@@ -99,7 +99,7 @@ func fallbackDisplayName(email, preferred string) string {
 // project configures per-jurisdiction thresholds, must name one of them.
 // linkParams go on the verification email's link; refused ones are
 // ErrInvalidArgument before any account work (see checkEmailLinkParams).
-func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string, dateOfBirthMs int64, market string, linkParams EmailLinkParams) (*LoginResult, error) {
+func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string, dateOfBirthMs *int64, market string, linkParams EmailLinkParams) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
 	}
@@ -110,8 +110,17 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	if err != nil {
 		return nil, err
 	}
-	if s.ageGate.Enabled() && s.cfg.AgeGateRequireDOB && dateOfBirthMs <= 0 {
-		return nil, fmt.Errorf("%w: date of birth is required", ErrInvalidArgument)
+	ctx, policyErr := s.activeProjectPolicyContext(ctx)
+	if policyErr != nil {
+		return nil, policyErr
+	}
+	if err := s.requireAgeGateForDOB(ctx); err != nil {
+		return nil, err
+	}
+	if dateOfBirthMs != nil || s.requiresDateOfBirth(ctx) {
+		if err := validateCompletionDOB(dateOfBirthMs, s.nowFunc()); err != nil {
+			return nil, err
+		}
 	}
 	market = normalizeJurisdictionCode(market)
 	if err := s.validateAccountMarket(ctx, market); err != nil {
@@ -893,6 +902,11 @@ func (s *AuthService) OAuthLogin(
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
 	if err != nil {
+		// Hosted OAuth carries only the authenticated subject to its opaque code.
+		// No session is issued until the required profile step completes.
+		if errors.Is(err, ErrDOBRequired) {
+			return &LoginResult{User: user}, err
+		}
 		return nil, err
 	}
 	s.logger.Info(

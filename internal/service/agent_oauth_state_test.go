@@ -104,7 +104,7 @@ func TestAgentOAuthAuthorityLost(t *testing.T) {
 	next.Name = "New display"
 	next.PendingOwnerUserID = "pending"
 	require.False(t, AgentOAuthAuthorityLost(before, &next))
-	changes := []func(*User){func(u *User) { u.Status = StatusDeactivated }, func(u *User) { u.OwnerUserID = "other" }, func(u *User) { u.Kind = UserKindAgent }, func(u *User) { u.IsAnonymous = true }, func(u *User) { u.MergedIntoUserID = "other" }, func(u *User) { u.Email = "x@example.test" }, func(u *User) { u.EmailVerified = true }, func(u *User) { u.IDVVerified = true }, func(u *User) { u.DateOfBirthMs = 1 }, func(u *User) { u.Market = "IN" }, func(u *User) { u.Role = RoleAdmin }}
+	changes := []func(*User){func(u *User) { u.Status = StatusDeactivated }, func(u *User) { u.OwnerUserID = "other" }, func(u *User) { u.Kind = UserKindAgent }, func(u *User) { u.IsAnonymous = true }, func(u *User) { u.MergedIntoUserID = "other" }, func(u *User) { u.Email = "x@example.test" }, func(u *User) { u.EmailVerified = true }, func(u *User) { u.IDVVerified = true }, func(u *User) { u.DateOfBirthMs = new(int64(1)) }, func(u *User) { u.Market = "IN" }, func(u *User) { u.Role = RoleAdmin }}
 	for _, change := range changes {
 		next := *before
 		change(&next)

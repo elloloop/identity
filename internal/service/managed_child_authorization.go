@@ -54,7 +54,7 @@ func (s *ManagedChildAuthorizationService) GetManagedChildAuthorization(ctx cont
 	if childID == "" || guardianID == "" || len(childID) > maxManagedChildAuthorizationIDBytes || len(guardianID) > maxManagedChildAuthorizationIDBytes {
 		return false, fmt.Errorf("%w: child_user_id and guardian_user_id must be 1..%d bytes", ErrInvalidArgument, maxManagedChildAuthorizationIDBytes)
 	}
-	ctx, err = s.auth.guardianContext(ctx)
+	ctx, err = s.auth.activeProjectPolicyContext(ctx)
 	if err != nil {
 		return false, err
 	}

@@ -36,7 +36,7 @@ func (f *managedChildFixture) req() ManagedChildAccountRequest {
 	return ManagedChildAccountRequest{
 		Username:       "kid.one",
 		DisplayName:    "Kid One",
-		DateOfBirthMs:  dobAgeMs(8),
+		DateOfBirthMs:  new(dobAgeMs(8)),
 		Password:       strongPW,
 		PolicyVersion:  consentPolicyVersion,
 		StepUpPassword: strongPW,
@@ -216,7 +216,7 @@ func TestCreateManagedChildAccount_Refusals(t *testing.T) {
 			name: "caller is a minor",
 			gate: true,
 			mutateAdult: func(u *User) {
-				u.DateOfBirthMs = dobAgeMs(10)
+				u.DateOfBirthMs = new(dobAgeMs(10))
 			},
 			mutateReq:    func(r *ManagedChildAccountRequest) {},
 			wantErr:      ErrPermissionDenied,
@@ -264,21 +264,21 @@ func TestCreateManagedChildAccount_Refusals(t *testing.T) {
 		{
 			name: "date of birth missing",
 			mutateReq: func(r *ManagedChildAccountRequest) {
-				r.DateOfBirthMs = 0
+				r.DateOfBirthMs = nil
 			},
 			wantErr: ErrInvalidArgument,
 		},
 		{
 			name: "date of birth in the future",
 			mutateReq: func(r *ManagedChildAccountRequest) {
-				r.DateOfBirthMs = time.Now().AddDate(1, 0, 0).UnixMilli()
+				r.DateOfBirthMs = new(time.Now().AddDate(1, 0, 0).UnixMilli())
 			},
 			wantErr: ErrInvalidArgument,
 		},
 		{
 			name: "date of birth implausibly old",
 			mutateReq: func(r *ManagedChildAccountRequest) {
-				r.DateOfBirthMs = time.Now().AddDate(-200, 0, 0).UnixMilli()
+				r.DateOfBirthMs = new(time.Now().AddDate(-200, 0, 0).UnixMilli())
 			},
 			wantErr: ErrInvalidArgument,
 		},
@@ -286,7 +286,7 @@ func TestCreateManagedChildAccount_Refusals(t *testing.T) {
 			name: "adult-band date of birth",
 			gate: true,
 			mutateReq: func(r *ManagedChildAccountRequest) {
-				r.DateOfBirthMs = dobAgeMs(30)
+				r.DateOfBirthMs = new(dobAgeMs(30))
 			},
 			wantErr:      ErrManagedChildNotMinor,
 			wantFailStep: "band",
@@ -421,7 +421,7 @@ func TestCreateManagedChildAccount_GateOff(t *testing.T) {
 	ctx := context.Background()
 
 	req := f.req()
-	req.DateOfBirthMs = dobAgeMs(8)
+	req.DateOfBirthMs = new(dobAgeMs(8))
 	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
@@ -437,13 +437,13 @@ func TestCreateManagedChildAccount_GateOff(t *testing.T) {
 	// thresholds to classify against); a missing one is still refused.
 	req2 := f.req()
 	req2.Username = "grown.kid"
-	req2.DateOfBirthMs = dobAgeMs(30)
+	req2.DateOfBirthMs = new(dobAgeMs(30))
 	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req2, "", ""); err != nil {
 		t.Fatalf("gate-off adult-age dob: %v", err)
 	}
 	req3 := f.req()
 	req3.Username = "no.dob"
-	req3.DateOfBirthMs = 0
+	req3.DateOfBirthMs = nil
 	if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req3, "", ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("gate-off missing dob: err = %v, want ErrInvalidArgument", err)
 	}
@@ -459,7 +459,7 @@ func TestCreateManagedChildAccount_MarketValidation(t *testing.T) {
 
 	// Age 13: TEEN under US (child_max 12), CHILD under IN (child_max 17).
 	req := f.req()
-	req.DateOfBirthMs = dobAgeMs(13)
+	req.DateOfBirthMs = new(dobAgeMs(13))
 	req.Market = "in" // canonicalized on store
 	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")
 	if err != nil {
@@ -483,7 +483,7 @@ func TestCreateManagedChildAccount_MarketValidation(t *testing.T) {
 	// no market of its own.
 	req3 := f.req()
 	req3.Username = "kid.three"
-	req3.DateOfBirthMs = dobAgeMs(10)
+	req3.DateOfBirthMs = new(dobAgeMs(10))
 	res3, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req3, "", "")
 	if err != nil {
 		t.Fatalf("no-market create: %v", err)
@@ -690,7 +690,7 @@ func TestCreateManagedChildAccount_RepoFailuresAndBranches(t *testing.T) {
 		f.svc.minorData = NewMinorDataMinimizer(true, f.svc.ageGate, f.svc.nowFunc)
 		req := f.req()
 		req.Username = "kid.teen"
-		req.DateOfBirthMs = dobAgeMs(15) // TEEN: minimization covers CHILD only
+		req.DateOfBirthMs = new(dobAgeMs(15)) // TEEN: minimization covers CHILD only
 		req.AvatarURL = "https://example.org/teen.png"
 
 		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, SessionSignIn{}, req, "", "")

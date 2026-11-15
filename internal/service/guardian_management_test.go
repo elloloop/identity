@@ -63,7 +63,7 @@ func seedManagedChild(t *testing.T, repo *fakeRepo, username string, dobMs int64
 	u := seedUser(repo, "", hashPW(t, strongPW), StatusActive)
 	repo.mu.Lock()
 	u.Username = username
-	u.DateOfBirthMs = dobMs
+	u.DateOfBirthMs = new(dobMs)
 	u.Name = username
 	repo.mu.Unlock()
 	return u

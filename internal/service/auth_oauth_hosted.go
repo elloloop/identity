@@ -204,7 +204,9 @@ func (s *AuthService) CompleteHostedOAuth(
 		IPAddr:           ipAddr,
 		UserAgent:        userAgent,
 	})
-	if err != nil {
+	// The DOB ticket belongs in the authenticated redemption response, never
+	// a redirect URL. Every other denial still refuses the callback.
+	if err != nil && (!errors.Is(err, ErrDOBRequired) || result == nil || result.User == nil) {
 		return nil, &HostedOAuthRefusalError{ReturnTo: claims.ReturnTo, CSRFToken: claims.CSRFToken, Code: hostedOAuthErrorCode(err), Err: err}
 	}
 

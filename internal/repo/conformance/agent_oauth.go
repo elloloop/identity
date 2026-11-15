@@ -164,7 +164,7 @@ func RunAgentOAuthConformance(t *testing.T, driver Driver) {
 			require.NotNil(t, got)
 		})
 
-		for _, operation := range []string{"owner-status", "agent-status", "owner-email", "owner-dob", "owner-idv", "owner-market", "owner-delete", "sid-revoke", "sid-global", "client-revision", "owner-password", "owner-password-required", "refresh-delete", "refresh-global", "guardian-delete"} {
+		for _, operation := range []string{"owner-status", "agent-status", "owner-email", "owner-dob", "owner-epoch-dob", "owner-idv", "owner-market", "owner-delete", "sid-revoke", "sid-global", "client-revision", "owner-password", "owner-password-required", "refresh-delete", "refresh-global", "guardian-delete"} {
 			t.Run(operation, func(t *testing.T) {
 				base := driver.NewRepo(t)
 				repo, r, m := seedAgentOAuth(t, base)
@@ -207,6 +207,9 @@ func RunAgentOAuthConformance(t *testing.T, driver Driver) {
 					require.NoError(t, base.UpdateUser(ctx, m.AgentID, map[string]any{"status": service.StatusActive}))
 				case "owner-email":
 					require.NoError(t, base.UpdateUserEmail(ctx, m.OwnerID, "new@example.test", m.AtMs+1))
+				case "owner-epoch-dob":
+					_, err = base.SetDateOfBirthOnce(ctx, m.OwnerID, 0, "", m.AtMs+1)
+					require.NoError(t, err)
 				case "owner-dob":
 					_, err = base.SetDateOfBirthOnce(ctx, m.OwnerID, 1, "", m.AtMs+1)
 					require.NoError(t, err)

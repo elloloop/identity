@@ -144,13 +144,17 @@ func (h *IdentityHandler) PasswordSignup(
 	if err := h.requireAssurance(ctx, h.assuranceEnforcePasswordSignup(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
+	dob, err := dateOfBirthInput(req.Msg.DateOfBirthMs, req.Msg.DateOfBirthUnixMs)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
 	result, err := h.auth.PasswordSignup(
 		ctx,
 		req.Msg.Email,
 		req.Msg.Password,
 		"", // name — not in proto; service derives from email
 		req.Msg.RecoveryEmail,
-		req.Msg.DateOfBirthMs,
+		dob,
 		req.Msg.Market,
 		service.EmailLinkParams{Product: req.Msg.Product, ReturnTo: req.Msg.ReturnTo},
 	)
@@ -180,9 +184,13 @@ func (h *IdentityHandler) UsernameSignup(
 	if err := h.requireAssurance(ctx, h.assuranceEnforcePasswordSignup(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
+	dob, err := dateOfBirthInput(req.Msg.DateOfBirthMs, req.Msg.DateOfBirthUnixMs)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
 	result, err := h.auth.UsernameSignup(
 		ctx, req.Msg.Username, req.Msg.Password, req.Msg.Name,
-		req.Msg.DateOfBirthMs, req.Msg.Market, clientIP(req.Header()),
+		dob, req.Msg.Market, clientIP(req.Header()),
 	)
 	if err != nil {
 		return nil, toConnectError(err)
@@ -242,7 +250,11 @@ func (h *IdentityHandler) SubmitDateOfBirth(
 	ipAddr := clientIP(req.Header())
 	userAgent := clientUserAgent(req.Header())
 
-	result, err := h.auth.SubmitDateOfBirth(ctx, req.Msg.CompletionToken, req.Msg.DateOfBirthMs, ipAddr, userAgent)
+	dob, err := dateOfBirthInput(req.Msg.DateOfBirthMs, req.Msg.DateOfBirthUnixMs)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	result, err := h.auth.SubmitDateOfBirth(ctx, req.Msg.CompletionToken, dob, ipAddr, userAgent)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

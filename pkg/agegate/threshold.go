@@ -38,14 +38,14 @@ func (ThresholdDeterminer) Name() string { return "threshold" }
 // Enabled implements Determiner; always true.
 func (ThresholdDeterminer) Enabled() bool { return true }
 
-// Determine implements Determiner. A zero or future dobMs yields an
+// Determine implements Determiner. An absent, future or implausibly old dobMs yields an
 // unknown, non-minor decision (HasDOB=false).
-func (d ThresholdDeterminer) Determine(dobMs int64, now time.Time) Decision {
-	if dobMs <= 0 {
+func (d ThresholdDeterminer) Determine(dobMs *int64, now time.Time) Decision {
+	if dobMs == nil {
 		return Decision{Band: BandUnknown, IsMinor: false, HasDOB: false}
 	}
-	dob := time.UnixMilli(dobMs).UTC()
-	if dob.After(now.UTC()) {
+	dob := time.UnixMilli(*dobMs).UTC()
+	if dob.After(now.UTC()) || dob.Before(now.UTC().AddDate(-MaxRecordedAgeYears, 0, 0)) {
 		return Decision{Band: BandUnknown, IsMinor: false, HasDOB: false}
 	}
 	age := wholeYearsBetween(dob, now.UTC())

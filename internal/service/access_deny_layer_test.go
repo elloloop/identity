@@ -422,7 +422,7 @@ func TestAccessDenyLayer_RefreshDenialDoesNotBurnTheToken(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	// Signed up before the project switched to work-email-only.
-	result, err := svc.PasswordSignup(context.Background(), "legacy@gmail.com", strongPW, "", "", 0, "", EmailLinkParams{})
+	result, err := svc.PasswordSignup(context.Background(), "legacy@gmail.com", strongPW, "", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 
 	ctx := accessScope(t, workEmailOnlyJSON)

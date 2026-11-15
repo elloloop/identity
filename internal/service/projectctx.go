@@ -17,6 +17,7 @@ import (
 // installed; nothing downstream is forced to special-case its absence.
 type ProjectScope struct {
 	Guardian ProjectGuardianConfig
+	AgeGate  ProjectAgeGateConfig
 
 	// ProjectID is the resolved control-plane project id.
 	ProjectID string
@@ -164,6 +165,7 @@ func ProjectScopeFromContext(ctx context.Context) *ProjectScope {
 // driver-agnostic value so the resolver contract does not leak a concrete
 // store type into the middleware or app wiring.
 type ResolvedProject struct {
+	AgeGate  ProjectAgeGateConfig
 	Guardian ProjectGuardianConfig
 
 	ID                 string

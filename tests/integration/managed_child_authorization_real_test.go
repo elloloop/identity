@@ -43,7 +43,7 @@ func TestReviewManagedChildAuthorizationRealPostgres(t *testing.T) {
 	users := h.Stores.users.WithProject(h.ProjectID)
 	seed := func(name string, age int) string {
 		t.Helper()
-		id, err := users.CreateUser(ctx, &service.User{Username: name, Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: time.Now().AddDate(-age, 0, 0).UnixMilli()})
+		id, err := users.CreateUser(ctx, &service.User{Username: name, Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: new(time.Now().AddDate(-age, 0, 0).UnixMilli())})
 		if err != nil {
 			t.Fatal(err)
 		}

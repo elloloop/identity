@@ -82,7 +82,7 @@ type AgentOAuthAuthority struct {
 type agentOAuthUserAuthority struct {
 	ID, Kind, OwnerID, Status, MergedID, Email, Username, Role, PasswordHash, Market string
 	Anonymous, EmailVerified, IDVVerified, PasswordChangeRequired                    bool
-	DOB                                                                              int64
+	DOB                                                                              *int64
 }
 
 func agentOAuthUserSnapshot(u *User) *agentOAuthUserAuthority {
@@ -253,7 +253,11 @@ func AgentOAuthAuthorityLost(before, after *User) bool {
 	return after == nil || before.OwnerUserID != after.OwnerUserID || before.Kind != after.Kind ||
 		before.Status != after.Status || before.IsAnonymous != after.IsAnonymous || before.MergedIntoUserID != after.MergedIntoUserID ||
 		before.PasswordHash != after.PasswordHash || before.PasswordChangeRequired != after.PasswordChangeRequired || before.Email != after.Email || before.EmailVerified != after.EmailVerified || before.IDVVerified != after.IDVVerified ||
-		before.DateOfBirthMs != after.DateOfBirthMs || before.Market != after.Market || before.Role != after.Role
+		!sameDateOfBirth(before.DateOfBirthMs, after.DateOfBirthMs) || before.Market != after.Market || before.Role != after.Role
+}
+
+func sameDateOfBirth(before, after *int64) bool {
+	return before == after || (before != nil && after != nil && *before == *after)
 }
 
 func applyAgentOAuthConsent(next *AgentAuthorization, authority AgentOAuthAuthority, m AgentOAuthMutation) (*AgentAuthorization, error) {

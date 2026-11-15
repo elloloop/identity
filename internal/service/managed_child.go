@@ -105,7 +105,7 @@ func validateUsernameFormat(username string) error {
 type ManagedChildAccountRequest struct {
 	Username         string
 	DisplayName      string
-	DateOfBirthMs    int64
+	DateOfBirthMs    *int64
 	Market           string
 	AvatarURL        string
 	Password         string // parent-chosen password credential
@@ -180,7 +180,7 @@ func (s *AuthService) CreateManagedChildAccount(
 		return nil, err
 	}
 	var err error
-	ctx, err = s.guardianContext(ctx)
+	ctx, err = s.activeProjectPolicyContext(ctx)
 	if err != nil {
 		return nil, err
 	}

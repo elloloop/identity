@@ -53,7 +53,14 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 	// date_of_birth_ms=0 that is permanently classified non-minor and can
 	// never enter the parental-consent flow. Collecting a DOB on the
 	// upgrade is a compatible future addition (ADR-0013 "Not shipped").
-	if s.ageGate.Enabled() && s.cfg.AgeGateRequireDOB {
+	ctx, policyErr := s.activeProjectPolicyContext(ctx)
+	if policyErr != nil {
+		return nil, policyErr
+	}
+	if err := s.requireAgeGateForDOB(ctx); err != nil {
+		return nil, err
+	}
+	if s.requiresDateOfBirth(ctx) {
 		return nil, fmt.Errorf("%w: this deployment requires a date of birth at signup; the anonymous upgrade cannot collect one", ErrInvalidArgument)
 	}
 	email := strings.TrimSpace(strings.ToLower(cred.Email))

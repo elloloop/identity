@@ -312,7 +312,7 @@ func newSelectionFixture(t *testing.T) *selectionFixture {
 	linkFakeTenantStores(tnt, mem)
 	svc.WithTenantSelection(mem)
 
-	signup, err := svc.PasswordSignup(context.Background(), "member@example.com", strongPW, "", "", 0, "", EmailLinkParams{})
+	signup, err := svc.PasswordSignup(context.Background(), "member@example.com", strongPW, "", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 	return &selectionFixture{svc: svc, repo: repo, tenants: tnt, members: mem, user: signup.User, refresh: signup.RefreshToken}
 }

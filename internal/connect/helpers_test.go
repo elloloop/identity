@@ -1451,11 +1451,11 @@ func (r *fakeRepo) SetDateOfBirthOnce(_ context.Context, userID string, dobMs in
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u, ok := r.users[userID]
-	if !ok || u.DateOfBirthMs != 0 {
+	if !ok || u.DateOfBirthMs != nil {
 		return false, nil
 	}
 	before := *u
-	u.DateOfBirthMs = dobMs
+	u.DateOfBirthMs = new(dobMs)
 	if status != "" {
 		u.Status = status
 	}

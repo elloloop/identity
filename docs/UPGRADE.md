@@ -1,6 +1,41 @@
 # Upgrade guide
 
-## Next — project guardian admission and live machine authorization (off by default; migration 0061; additive RPC, credential, audit event and rate-limit config; Go API)
+## Next — project DOB completion and historical dates (off by default; PostgreSQL 0062 / SQLite 0030; additive protobuf fields; Go API change)
+
+Projects can require an age profile with `config_json.age_gate.require_dob: true`.
+The deployment's `GATEWAY_AGEGATE_REQUIRE_DOB` remains an independent floor.
+Age classification must be enabled; a required profile with disabled classification
+fails closed. Existing identified users complete their DOB at sign-in or refresh;
+refresh refusal leaves their refresh credential unconsumed. Default HTTP, explicit
+project routing and native OAuth/gRPC use the stored project policy.
+
+Clients should send optional `date_of_birth_unix_ms` on signup, managed-child
+creation and `SubmitDateOfBirth`. Explicit zero means 1970-01-01; negative values
+are valid historical dates; omission means unknown. The original `date_of_birth_ms`
+remains supported with zero meaning unknown. Conflicting values are rejected.
+Responses populate the optional field to retain presence. Supplied dates at signup
+are now validated even when optional: future dates and ages above 150 years are
+rejected. Implausible stored dates never classify as known adults, and cannot
+satisfy a required-DOB policy; an operator must correct such existing records. The internal Go
+`User.DateOfBirthMs`, signup parameters and age determiner now use `*int64`;
+embedding users must update callers, passing nil for an absent date.
+
+Hosted OAuth carries only an opaque one-time code in its redirect, then returns
+`DOBRequiredDetails` from `RedeemOAuthCode` when completion is needed. The existing
+`SubmitDateOfBirth` RPC consumes the completion credential. A completion credential
+is never an access token or a query parameter. Other callback denials are unchanged.
+
+Migrations add a presence marker, backfilled only for existing positive dates.
+Legacy negative values remain stored but unknown, matching their prior age
+classification; their authenticated owners can complete the profile again. New
+presence-aware negative values are known historical dates. Upgrade
+all serving replicas before enabling presence-aware writes: older replicas treat
+zero as absent and cannot protect its set-once semantics. Pause completion/signup
+writes for rollback; down migration removes presence, so explicit epoch-zero dates
+become unknown again, while all nonzero dates survive. DOB presence changes revoke
+agent delegation authority. The previously documented pre-1970 limitation is fixed.
+
+## v4.41.0 — project guardian admission and live machine authorization (off by default; migration 0061; additive RPC, credential, audit event and rate-limit config; Go API)
 
 Projects may opt in with `config_json.guardian.require_step_up: true` and
 `config_json.guardian.require_adult_profile: true`. Both default to false; no

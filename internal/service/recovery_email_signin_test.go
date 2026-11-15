@@ -726,7 +726,7 @@ func TestRecoveryEmailSignIn_DOBStepContinuesTheRecoverySessionWhileItsAddressIs
 	}
 
 	held, ticket := ticketFor("held@example.com", "spare@example.net")
-	done, err := f.svc.SubmitDateOfBirth(f.ctx, ticket, adult, "", "")
+	done, err := f.svc.SubmitDateOfBirth(f.ctx, ticket, new(adult), "", "")
 	if err != nil || done.AccessToken == "" {
 		t.Fatalf("SubmitDateOfBirth = %+v %v, want the recovery session", done, err)
 	}
@@ -747,7 +747,7 @@ func TestRecoveryEmailSignIn_DOBStepContinuesTheRecoverySessionWhileItsAddressIs
 	if _, err := f.svc.RemoveRecoveryEmail(f.ctx, removed.ID, f.signedInNow(), "lost@example.net"); err != nil {
 		t.Fatalf("RemoveRecoveryEmail: %v", err)
 	}
-	if done, err := f.svc.SubmitDateOfBirth(f.ctx, ticket, adult, "", ""); !errors.Is(err, ErrUnauthenticated) {
+	if done, err := f.svc.SubmitDateOfBirth(f.ctx, ticket, new(adult), "", ""); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("SubmitDateOfBirth after the address was removed = %+v %v, want ErrUnauthenticated", done, err)
 	}
 	f.repo.mu.Lock()

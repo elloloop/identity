@@ -20,7 +20,7 @@ func marketSvc(t *testing.T, ageYears int, market string) (*AuthService, *fakeRe
 	svc := newTestAuthServiceWithAudit(t, repo, writer)
 	enableAgeGate(t, svc, false)
 	ctx := jurisdictionScope(t, jurisdictionsUSDefaultJSON)
-	res, err := svc.PasswordSignup(ctx, "user@example.com", strongPW, "User", "", dobAgeMs(ageYears), market, EmailLinkParams{})
+	res, err := svc.PasswordSignup(ctx, "user@example.com", strongPW, "User", "", new(dobAgeMs(ageYears)), market, EmailLinkParams{})
 	require.NoError(t, err)
 	return svc, repo, writer, ctx, res
 }
@@ -144,7 +144,7 @@ func TestSetAccountMarket_GateDisabled_StoresOnly(t *testing.T) {
 	writer := newRecordingAuditWriter()
 	svc := newTestAuthServiceWithAudit(t, repo, writer)
 	// No enableAgeGate: the gate is off. No project scope: any market stores.
-	res, err := svc.PasswordSignup(context.Background(), "user@example.com", strongPW, "User", "", 0, "", EmailLinkParams{})
+	res, err := svc.PasswordSignup(context.Background(), "user@example.com", strongPW, "User", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 
 	u, err := svc.SetAccountMarket(context.Background(), res.User.ID, "IN")
@@ -173,7 +173,7 @@ func TestSetAccountMarket_RefusedUnderGuardianship(t *testing.T) {
 	guardian := seedConsentingAdult(t, repo, "parent@example.com", hashPW(t, strongPW), adultFactors{phoneVerified: true})
 	child := seedUser(repo, "", hashPW(t, strongPW), StatusActive)
 	repo.mu.Lock()
-	child.DateOfBirthMs = dobAgeMs(15)
+	child.DateOfBirthMs = new(dobAgeMs(15))
 	child.Market = "IN"
 	repo.mu.Unlock()
 	seedGuardianEdge(ctx, t, repo, guardian.ID, child.ID)

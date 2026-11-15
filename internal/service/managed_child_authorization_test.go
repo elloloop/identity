@@ -19,9 +19,9 @@ func TestManagedChildAuthorization_LivePairAndProject(t *testing.T) {
 	svc := NewManagedChildAuthorizationService(f.store, auth)
 	key := f.mint(t, dirTestProjectA, CredentialKindManagedChildReader)
 	child := seedPerson(repo, "child@example.test")
-	child.DateOfBirthMs = dobAgeMs(8)
+	child.DateOfBirthMs = new(dobAgeMs(8))
 	guardian := seedPerson(repo, "guardian@example.test")
-	guardian.DateOfBirthMs = dobAgeMs(35)
+	guardian.DateOfBirthMs = new(dobAgeMs(35))
 	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: dirTestProjectA})
 	if err := repo.UpsertGuardianEdge(ctx, &GuardianEdge{ChildUserID: child.ID, GuardianUserID: guardian.ID}); err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestManagedChildAuthorization_LivePairAndProject(t *testing.T) {
 	}
 	check(true)
 	auth.WithActiveProjects(&fakeActiveProjects{err: ErrServiceUnavailable})
-	if allowed, err := svc.GetManagedChildAuthorization(ctx, key.RawKey, child.ID, guardian.ID); allowed || !errors.Is(err, ErrServiceUnavailable) {
+	if allowed, err := svc.GetManagedChildAuthorization(ctx, key.RawKey, child.ID, guardian.ID); allowed || !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("authoritative policy error failed open: %v %v", allowed, err)
 	}
 	auth.WithActiveProjects(nil)
@@ -45,11 +45,11 @@ func TestManagedChildAuthorization_LivePairAndProject(t *testing.T) {
 		t.Fatalf("cross-project rows leaked: %v %v", allowed, err)
 	}
 	strictMarket := WithProjectScope(ctx, &ProjectScope{ProjectID: dirTestProjectA, Jurisdictions: ProjectJurisdictionsConfig{Default: "EX", Thresholds: map[string]JurisdictionThresholds{"EX": {ChildMaxAge: 12, AdultAge: 21}}}})
-	guardian.DateOfBirthMs = dobAgeMs(19)
+	guardian.DateOfBirthMs = new(dobAgeMs(19))
 	if allowed, err := svc.GetManagedChildAuthorization(strictMarket, key.RawKey, child.ID, guardian.ID); allowed || err != nil {
 		t.Fatalf("ignored project adult threshold: %v %v", allowed, err)
 	}
-	guardian.DateOfBirthMs = dobAgeMs(35)
+	guardian.DateOfBirthMs = new(dobAgeMs(35))
 	repo.getGuardianEdgeErr = ErrServiceUnavailable
 	if allowed, err := svc.GetManagedChildAuthorization(ctx, key.RawKey, child.ID, guardian.ID); allowed || !errors.Is(err, ErrServiceUnavailable) {
 		t.Fatalf("edge error: %v %v", allowed, err)
@@ -80,16 +80,16 @@ func TestManagedChildAuthorization_LivePairAndProject(t *testing.T) {
 	guardian.MergedIntoUserID = "replacement"
 	check(false)
 	guardian.MergedIntoUserID = ""
-	guardian.DateOfBirthMs = 0
+	guardian.DateOfBirthMs = nil
 	check(false)
-	guardian.DateOfBirthMs = dobAgeMs(8)
+	guardian.DateOfBirthMs = new(dobAgeMs(8))
 	check(false)
-	guardian.DateOfBirthMs = dobAgeMs(35)
-	child.DateOfBirthMs = dobAgeMs(25)
+	guardian.DateOfBirthMs = new(dobAgeMs(35))
+	child.DateOfBirthMs = new(dobAgeMs(25))
 	check(false)
-	child.DateOfBirthMs = 0
+	child.DateOfBirthMs = nil
 	check(false)
-	child.DateOfBirthMs = dobAgeMs(8)
+	child.DateOfBirthMs = new(dobAgeMs(8))
 	for _, scope := range []*ProjectScope{nil, {}, {ProjectID: dirTestProjectB}} {
 		callCtx := context.Background()
 		if scope != nil {
@@ -171,9 +171,9 @@ func TestManagedChildAuthorization_AuditScopeAndDecision(t *testing.T) {
 			svc := NewManagedChildAuthorizationService(f.store, auth)
 			minted := f.mint(t, dirTestProjectA, CredentialKindManagedChildReader)
 			child := seedPerson(repo, "child@example.test")
-			child.DateOfBirthMs = dobAgeMs(8)
+			child.DateOfBirthMs = new(dobAgeMs(8))
 			parent := seedPerson(repo, "parent@example.test")
-			parent.DateOfBirthMs = dobAgeMs(35)
+			parent.DateOfBirthMs = new(dobAgeMs(35))
 			ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: dirTestProjectA})
 			key := minted.RawKey
 			if scenario != "no_edge" {

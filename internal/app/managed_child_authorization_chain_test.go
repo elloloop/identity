@@ -73,11 +73,11 @@ func TestManagedChildAuthorization_ServedChain(t *testing.T) {
 	h, repo := newManagedChildChainApp(t, cfg, managedChildChainResolver{})
 	ctx := context.Background()
 	scoped := repo.WithProject(chainDirectoryProject)
-	child, err := scoped.CreateUser(ctx, &service.User{Username: "child", Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: time.Now().AddDate(-8, 0, 0).UnixMilli()})
+	child, err := scoped.CreateUser(ctx, &service.User{Username: "child", Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: new(time.Now().AddDate(-8, 0, 0).UnixMilli())})
 	if err != nil {
 		t.Fatal(err)
 	}
-	guardian, err := scoped.CreateUser(ctx, &service.User{Email: "parent@example.test", Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: time.Now().AddDate(-35, 0, 0).UnixMilli()})
+	guardian, err := scoped.CreateUser(ctx, &service.User{Email: "parent@example.test", Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: new(time.Now().AddDate(-35, 0, 0).UnixMilli())})
 	if err != nil {
 		t.Fatal(err)
 	}

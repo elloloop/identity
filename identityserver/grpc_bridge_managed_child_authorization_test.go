@@ -79,11 +79,11 @@ func nativeChildFixture(t *testing.T) (identitypb.IdentityServiceClient, service
 		t.Fatal(err)
 	}
 	scoped := repo.WithProject(nativeChildProject)
-	child, err := scoped.CreateUser(context.Background(), &service.User{Username: "child", Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: time.Now().AddDate(-8, 0, 0).UnixMilli()})
+	child, err := scoped.CreateUser(context.Background(), &service.User{Username: "child", Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: new(time.Now().AddDate(-8, 0, 0).UnixMilli())})
 	if err != nil {
 		t.Fatal(err)
 	}
-	guardian, err := scoped.CreateUser(context.Background(), &service.User{Email: "guardian@example.test", Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: time.Now().AddDate(-35, 0, 0).UnixMilli()})
+	guardian, err := scoped.CreateUser(context.Background(), &service.User{Email: "guardian@example.test", Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: new(time.Now().AddDate(-35, 0, 0).UnixMilli())})
 	if err != nil {
 		t.Fatal(err)
 	}

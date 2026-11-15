@@ -439,7 +439,7 @@ func TestListManagedChildren_SummariesOnly(t *testing.T) {
 	child := seedChildPendingConsent(repo, "kid@example.com")
 	repo.mu.Lock()
 	child.Username = "kid.one"
-	child.DateOfBirthMs = dobAgeMs(8)
+	child.DateOfBirthMs = new(dobAgeMs(8))
 	child.PhoneNumber = "+14155550100"
 	child.RecoveryEmail = "backup@example.com"
 	repo.mu.Unlock()
@@ -453,7 +453,7 @@ func TestListManagedChildren_SummariesOnly(t *testing.T) {
 	if got.ID != child.ID || got.Username != "kid.one" || got.AgeBand != "CHILD" {
 		t.Fatalf("summary lost its identity/classification: %+v", got)
 	}
-	if got.Email != "" || got.PhoneNumber != "" || got.RecoveryEmail != "" || got.DateOfBirthMs != 0 {
+	if got.Email != "" || got.PhoneNumber != "" || got.RecoveryEmail != "" || got.DateOfBirthMs != nil {
 		t.Fatalf("summary must not carry contact details or DOB: %+v", got)
 	}
 }
@@ -471,8 +471,8 @@ func TestListManagedChildren_OmitsAgedOut(t *testing.T) {
 	kid := seedChildPendingConsent(repo, "kid@example.com")
 	grown := seedChildPendingConsent(repo, "grown@example.com")
 	repo.mu.Lock()
-	kid.DateOfBirthMs = dobAgeMs(8)
-	grown.DateOfBirthMs = dobAgeMs(21)
+	kid.DateOfBirthMs = new(dobAgeMs(8))
+	grown.DateOfBirthMs = new(dobAgeMs(21))
 	repo.mu.Unlock()
 	seedGuardianEdge(ctx, t, repo, guardian.ID, kid.ID)
 	seedGuardianEdge(ctx, t, repo, guardian.ID, grown.ID)

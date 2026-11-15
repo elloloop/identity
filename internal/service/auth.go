@@ -119,8 +119,8 @@ type User struct {
 	IDVVerifiedAt    int64 // epoch ms; 0 = never verified
 	PhoneNumber      string
 	PhoneVerified    bool
-	PhoneVerifiedAt  int64 // epoch ms; 0 = never verified
-	DateOfBirthMs    int64 // epoch ms of date of birth; 0 = unknown (persisted)
+	PhoneVerifiedAt  int64  // epoch ms; 0 = never verified
+	DateOfBirthMs    *int64 // epoch ms; nil means unknown, including in storage
 	// Market is the jurisdiction/market code (e.g. "IN", "US") the account
 	// belongs to, captured at account creation or set via SetAccountMarket
 	// (persisted, canonicalized to the trimmed upper-case form). When the
@@ -2283,6 +2283,11 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 // has already checked the user may act in; empty keeps the deployment's
 // default tenant.
 func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, recoveryEmailID, tenantID string) (string, string, error) {
+	var err error
+	ctx, err = s.activeProjectPolicyContext(ctx)
+	if err != nil {
+		return "", "", err
+	}
 	// The verified-email gate's backstop: every path that mints a session (and
 	// any added later) honours it. Sign-ins and refreshes run the audited gate
 	// before reaching here, so this refuses silently.
@@ -2666,10 +2671,15 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*User,
 // the next refresh that names no tenant returns to the default, and
 // switching tenants is a refresh naming another.
 func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantID, ipAddr, userAgent string) (*User, string, string, error) {
+	var err error
+	ctx, err = s.activeProjectPolicyContext(ctx)
+	if err != nil {
+		return nil, "", "", err
+	}
 	if rawRefreshToken == "" {
 		return nil, "", "", fmt.Errorf("%w: missing refresh token", ErrUnauthenticated)
 	}
-	tenantID, err := s.selectedTenant(ctx, tenantID)
+	tenantID, err = s.selectedTenant(ctx, tenantID)
 	if err != nil {
 		return nil, "", "", err
 	}

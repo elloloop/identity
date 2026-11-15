@@ -52,15 +52,15 @@ func TestEmailSignup_AdminOnlyAndOff(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 
 	admin := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"admin"}}`)
-	_, err := svc.PasswordSignup(admin, "new@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	_, err := svc.PasswordSignup(admin, "new@mail.example.com", accessTestPassword, "", "", nil, "", EmailLinkParams{})
 	require.ErrorIs(t, err, ErrSignupByInvitationOnly)
 
 	off := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"off"}}`)
-	_, err = svc.PasswordSignup(off, "new@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	_, err = svc.PasswordSignup(off, "new@mail.example.com", accessTestPassword, "", "", nil, "", EmailLinkParams{})
 	require.ErrorIs(t, err, ErrAccountKindOff)
 
 	self := signupScope(t, `{"access":{"mode":"open"},"accounts":{"email_signup":"self"}}`)
-	_, err = svc.PasswordSignup(self, "new@mail.example.com", accessTestPassword, "", "", 0, "", EmailLinkParams{})
+	_, err = svc.PasswordSignup(self, "new@mail.example.com", accessTestPassword, "", "", nil, "", EmailLinkParams{})
 	require.NoError(t, err)
 }
 
@@ -151,7 +151,7 @@ func TestUsernameSignup(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"domain":"accounts.example.com","username_signup":"self"}}`)
 
-	res, err := svc.UsernameSignup(ctx, "Bob", accessTestPassword, "Bob B", 0, "", "")
+	res, err := svc.UsernameSignup(ctx, "Bob", accessTestPassword, "Bob B", nil, "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
 	require.Equal(t, "bob", res.User.Username)
@@ -169,14 +169,14 @@ func TestUsernameSignup(t *testing.T) {
 	require.Equal(t, res.User.ID, login.User.ID)
 
 	// Taken usernames are reported as taken.
-	_, err = svc.UsernameSignup(ctx, "bob", accessTestPassword, "", 0, "", "")
+	_, err = svc.UsernameSignup(ctx, "bob", accessTestPassword, "", nil, "", "")
 	require.ErrorIs(t, err, ErrAlreadyExists)
 
-	_, err = svc.UsernameSignup(ctx, "x", accessTestPassword, "", 0, "", "")
+	_, err = svc.UsernameSignup(ctx, "x", accessTestPassword, "", nil, "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
-	_, err = svc.UsernameSignup(ctx, "carol", "", "", 0, "", "")
+	_, err = svc.UsernameSignup(ctx, "carol", "", "", nil, "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
-	_, err = svc.UsernameSignup(ctx, "carol", "short", "", 0, "", "")
+	_, err = svc.UsernameSignup(ctx, "carol", "short", "", nil, "", "")
 	require.ErrorIs(t, err, ErrWeakPassword)
 }
 
@@ -195,13 +195,13 @@ func TestUsernameSignup_Refusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := svc.UsernameSignup(signupScope(t, tc.config), "dave", accessTestPassword, "", 0, "", "")
+			_, err := svc.UsernameSignup(signupScope(t, tc.config), "dave", accessTestPassword, "", nil, "", "")
 			require.ErrorIs(t, err, tc.want)
 		})
 	}
 
 	svc.cfg.PasswordSignupEnabled = false
-	_, err := svc.UsernameSignup(signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`), "dave", accessTestPassword, "", 0, "", "")
+	_, err := svc.UsernameSignup(signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`), "dave", accessTestPassword, "", nil, "", "")
 	require.ErrorIs(t, err, ErrSignupDisabled)
 }
 
@@ -209,9 +209,9 @@ func TestUsernameSignup_ChildIsAGuardiansToCreate(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	enableAgeGate(t, svc, false)
 	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
-	_, err := svc.UsernameSignup(ctx, "kiddo", accessTestPassword, "", dobAgeMs(8), "", "")
+	_, err := svc.UsernameSignup(ctx, "kiddo", accessTestPassword, "", new(dobAgeMs(8)), "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
-	_, err = svc.UsernameSignup(ctx, "grownup", accessTestPassword, "", dobAgeMs(30), "", "")
+	_, err = svc.UsernameSignup(ctx, "grownup", accessTestPassword, "", new(dobAgeMs(30)), "", "")
 	require.NoError(t, err)
 }
 
@@ -222,12 +222,12 @@ func TestUsernameSignup_Throttled(t *testing.T) {
 
 	// Spend the username's bucket.
 	require.True(t, svc.signupThrottle.allow(usernameThrottleKey("project-a", "erin"), svc.nowMs()))
-	_, err := svc.UsernameSignup(ctx, "erin", accessTestPassword, "", 0, "", "")
+	_, err := svc.UsernameSignup(ctx, "erin", accessTestPassword, "", nil, "", "")
 	require.ErrorIs(t, err, ErrSignupThrottled)
 
 	// Other buckets are untouched: another username, the same username in
 	// another project, and the same string as an email key.
-	_, err = svc.UsernameSignup(ctx, "frank", accessTestPassword, "", 0, "", "")
+	_, err = svc.UsernameSignup(ctx, "frank", accessTestPassword, "", nil, "", "")
 	require.NoError(t, err)
 	require.True(t, svc.signupThrottle.allow(usernameThrottleKey("project-b", "erin"), svc.nowMs()))
 	require.True(t, svc.signupThrottle.allow("erin", svc.nowMs()))
@@ -244,7 +244,7 @@ func TestValidateUsernameFormat_ReservedRoleNames(t *testing.T) {
 func TestUsernameAccount_AccessRuleOnSignInAndRefresh(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	open := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
-	res, err := svc.UsernameSignup(open, "gina", accessTestPassword, "", 0, "", "")
+	res, err := svc.UsernameSignup(open, "gina", accessTestPassword, "", nil, "", "")
 	require.NoError(t, err)
 
 	// The project is closed afterwards: the self-signed-up account can
@@ -284,7 +284,7 @@ func TestUsernameAccount_AccessRuleOnSignInAndRefresh(t *testing.T) {
 func TestUsernameSignup_RefusedUnderADenyLayer(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	ctx := signupScope(t, `{"access":{"mode":"open","block_public_email_domains":true},"accounts":{"username_signup":"self"}}`)
-	_, err := svc.UsernameSignup(ctx, "hank", accessTestPassword, "", 0, "", "")
+	_, err := svc.UsernameSignup(ctx, "hank", accessTestPassword, "", nil, "", "")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 }
 
@@ -293,7 +293,7 @@ func TestUsernameSignup_RefusedUnderADenyLayer(t *testing.T) {
 func TestUsernameAccount_WithEmailJudgedByEmail(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	open := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
-	res, err := svc.UsernameSignup(open, "ivan", accessTestPassword, "", 0, "", "")
+	res, err := svc.UsernameSignup(open, "ivan", accessTestPassword, "", nil, "", "")
 	require.NoError(t, err)
 	require.NoError(t, repo.UpdateUser(open, res.User.ID, map[string]any{"email": "ivan@other.example.com"}))
 
@@ -318,13 +318,13 @@ func TestUsernameAccount_CannotAddAnEmailWhereEmailSignupIsNotSelf(t *testing.T)
 	svc, _, _ := newAuthSvcWithMailer(t)
 	for mode, want := range map[string]error{"admin": ErrSignupByInvitationOnly, "off": ErrAccountKindOff} {
 		ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self","email_signup":"`+mode+`"}}`)
-		res, err := svc.UsernameSignup(ctx, "jo-"+mode, accessTestPassword, "", 0, "", "")
+		res, err := svc.UsernameSignup(ctx, "jo-"+mode, accessTestPassword, "", nil, "", "")
 		require.NoError(t, err)
 		err = svc.RequestEmailChange(ctx, res.User.ID, SessionSignIn{}, "jo@mail.example.test", accessTestPassword)
 		require.ErrorIs(t, err, want, mode)
 	}
 	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
-	res, err := svc.UsernameSignup(ctx, "jo-self", accessTestPassword, "", 0, "", "")
+	res, err := svc.UsernameSignup(ctx, "jo-self", accessTestPassword, "", nil, "", "")
 	require.NoError(t, err)
 	require.NoError(t, svc.RequestEmailChange(ctx, res.User.ID, SessionSignIn{}, "jo@mail.example.test", accessTestPassword))
 }
@@ -336,20 +336,20 @@ func TestUsernameSignup_TakenAnswersAreBudgetedPerIP(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	svc.usernameProbes = newProbeBudget(60_000, 2)
 	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
-	_, err := svc.UsernameSignup(ctx, "kim", accessTestPassword, "", 0, "", "198.51.100.7")
+	_, err := svc.UsernameSignup(ctx, "kim", accessTestPassword, "", nil, "", "198.51.100.7")
 	require.NoError(t, err)
 
 	for i := 0; i < 2; i++ {
-		_, err = svc.UsernameSignup(ctx, "kim", accessTestPassword, "", 0, "", "198.51.100.7")
+		_, err = svc.UsernameSignup(ctx, "kim", accessTestPassword, "", nil, "", "198.51.100.7")
 		require.ErrorIs(t, err, ErrAlreadyExists)
 	}
-	_, err = svc.UsernameSignup(ctx, "kim", accessTestPassword, "", 0, "", "198.51.100.7")
+	_, err = svc.UsernameSignup(ctx, "kim", accessTestPassword, "", nil, "", "198.51.100.7")
 	require.ErrorIs(t, err, ErrSignupThrottled, "budget spent: a taken name is throttled")
-	_, err = svc.UsernameSignup(ctx, "lee", accessTestPassword, "", 0, "", "198.51.100.7")
+	_, err = svc.UsernameSignup(ctx, "lee", accessTestPassword, "", nil, "", "198.51.100.7")
 	require.ErrorIs(t, err, ErrSignupThrottled, "budget spent: a free name is throttled the same way")
 
 	// Another IP is unaffected.
-	_, err = svc.UsernameSignup(ctx, "lee", accessTestPassword, "", 0, "", "198.51.100.8")
+	_, err = svc.UsernameSignup(ctx, "lee", accessTestPassword, "", nil, "", "198.51.100.8")
 	require.NoError(t, err)
 }
 
@@ -371,7 +371,7 @@ func TestUsernameSignup_ParallelTakenAnswersStayWithinTheBudget(t *testing.T) {
 	svc.usernameProbes = newProbeBudget(60_000, 3)
 	svc.signupThrottle = newKeyCooldown(0, 0)
 	ctx := signupScope(t, `{"access":{"mode":"open"},"accounts":{"username_signup":"self"}}`)
-	_, err := svc.UsernameSignup(ctx, "taken", accessTestPassword, "", 0, "", "")
+	_, err := svc.UsernameSignup(ctx, "taken", accessTestPassword, "", nil, "", "")
 	require.NoError(t, err)
 
 	const n = 20
@@ -382,7 +382,7 @@ func TestUsernameSignup_ParallelTakenAnswersStayWithinTheBudget(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := svc.UsernameSignup(ctx, "taken", accessTestPassword, "", 0, "", "198.51.100.9")
+			_, err := svc.UsernameSignup(ctx, "taken", accessTestPassword, "", nil, "", "198.51.100.9")
 			if errors.Is(err, ErrAlreadyExists) {
 				mu.Lock()
 				taken++
