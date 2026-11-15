@@ -57,6 +57,11 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 	if policyErr != nil {
 		return nil, policyErr
 	}
+	if s.cfg.AuthRequireVerifiedEmail {
+		if err := s.requireEmailDelivery(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.requireAgeGateForDOB(ctx); err != nil {
 		return nil, err
 	}

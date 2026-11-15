@@ -146,6 +146,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrRecoveryReauthenticationRequired),
 		errors.Is(err, service.ErrRecoverySession),
 		errors.Is(err, service.ErrRecoveryEmailsDisabled),
+		errors.Is(err, service.ErrEmailDeliveryDisabled),
 		errors.Is(err, service.ErrPhoneCountryNotAllowed),
 		errors.Is(err, service.ErrPhoneVerificationRequired),
 		errors.Is(err, service.ErrAccountKindOff),

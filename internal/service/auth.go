@@ -1915,6 +1915,12 @@ func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send fun
 		}()
 		sendCtx, cancel := context.WithTimeout(detached, asyncEmailSendTimeout)
 		defer cancel()
+		if err := requireProjectEmailDelivery(sendCtx, s.cfg.DefaultProjectID, s.activeProjects); err != nil {
+			if !errors.Is(err, ErrEmailDeliveryDisabled) {
+				s.logger.Warn("email_dispatch_refused", zap.String("op", op), zap.Error(err))
+			}
+			return
+		}
 		send(sendCtx)
 	}
 	if s.emailSendSlots == nil {

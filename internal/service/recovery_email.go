@@ -60,6 +60,9 @@ func (s *AuthService) recoveryEmailCaller(ctx context.Context, userID string, si
 // sign-in, a recovery hold on the session, the caller's own address, and a
 // full list.
 func (s *AuthService) RequestRecoveryEmail(ctx context.Context, userID string, signIn SessionSignIn, emailAddr string) error {
+	if err := s.requireEmailDelivery(ctx); err != nil {
+		return err
+	}
 	cfg := recoveryEmailsConfig(ProjectScopeFromContext(ctx))
 	if !cfg.Enabled {
 		return ErrRecoveryEmailsDisabled

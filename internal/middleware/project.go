@@ -238,6 +238,7 @@ func ScopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		Tenants:            rp.Tenants,
 		Guardian:           rp.Guardian,
 		AgeGate:            rp.AgeGate,
+		EmailDelivery:      rp.EmailDelivery,
 		RecoveryEmails:     rp.RecoveryEmails,
 		Phone:              rp.Phone,
 	}

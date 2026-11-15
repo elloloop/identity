@@ -46,13 +46,14 @@ type grpcBridge struct {
 	h *identityconnect.IdentityHandler
 	// directoryLimits holds the per-IP limit of each directory read, by
 	// procedure.
-	directoryLimits map[string]middleware.PathLimit
-	machineLimits   map[string]middleware.PathLimit
-	operatorLimits  map[string]middleware.PathLimit
-	trustedProxies  []*net.IPNet
-	projectResolver service.ProjectResolver
-	logger          *zap.Logger
-	trust           grpcTrust
+	directoryLimits  map[string]middleware.PathLimit
+	machineLimits    map[string]middleware.PathLimit
+	operatorLimits   map[string]middleware.PathLimit
+	emailPolicyLimit middleware.PathLimit
+	trustedProxies   []*net.IPNet
+	projectResolver  service.ProjectResolver
+	logger           *zap.Logger
+	trust            grpcTrust
 }
 
 // grpcTrust names the x-authenticated-* keys besides the user id that the
@@ -94,15 +95,17 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 		}
 		operatorLimits[procedure] = limit
 	}
+	emailPolicyLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceGetProjectEmailDeliveryProcedure)
 	return &grpcBridge{
-		machineLimits:   machineLimits,
-		operatorLimits:  operatorLimits,
-		h:               built.ConnectHandler,
-		directoryLimits: directoryLimits,
-		trustedProxies:  built.TrustedProxies,
-		projectResolver: built.ProjectResolver,
-		logger:          logger,
-		trust:           trust,
+		machineLimits:    machineLimits,
+		operatorLimits:   operatorLimits,
+		emailPolicyLimit: emailPolicyLimit,
+		h:                built.ConnectHandler,
+		directoryLimits:  directoryLimits,
+		trustedProxies:   built.TrustedProxies,
+		projectResolver:  built.ProjectResolver,
+		logger:           logger,
+		trust:            trust,
 	}
 }
 
@@ -288,6 +291,16 @@ func (b *grpcBridge) CompleteRequiredPasswordChange(ctx context.Context, in *ide
 
 func (b *grpcBridge) SubmitDateOfBirth(ctx context.Context, in *identitypb.SubmitDateOfBirthRequest) (*identitypb.SubmitDateOfBirthResponse, error) {
 	return invoke(ctx, b, in, b.h.SubmitDateOfBirth)
+}
+
+func (b *grpcBridge) GetProjectEmailDelivery(ctx context.Context, in *identitypb.GetProjectEmailDeliveryRequest) (*identitypb.GetProjectEmailDeliveryResponse, error) {
+	if b.emailPolicyLimit.Limiter == nil {
+		return nil, status.Error(codes.Unavailable, "project email policy unavailable")
+	}
+	if err := b.throttle(ctx, b.emailPolicyLimit); err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.GetProjectEmailDelivery)
 }
 
 func (b *grpcBridge) RequestEmailLoginCode(ctx context.Context, in *identitypb.RequestEmailLoginCodeRequest) (*identitypb.RequestEmailLoginCodeResponse, error) {

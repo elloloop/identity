@@ -323,6 +323,9 @@ func (s *AuthService) sendEmailVerification(ctx context.Context, userID string, 
 	if userID == "" {
 		return fmt.Errorf("%w: user id is required", ErrInvalidArgument)
 	}
+	if err := s.requireEmailDelivery(ctx); err != nil {
+		return err
+	}
 	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("fetching user: %w", err)

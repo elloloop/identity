@@ -76,6 +76,7 @@ type AdminProject struct {
 	// Guardian is populated on active-project reads and ignored on creation.
 	Guardian       ProjectGuardianConfig
 	AgeGate        ProjectAgeGateConfig
+	EmailDelivery  ProjectEmailDeliveryConfig
 	ID             string
 	StorageScopeID string
 	Name           string

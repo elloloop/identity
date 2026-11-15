@@ -118,6 +118,7 @@ type MembershipService struct {
 	// (WithAccounts); nil refuses every tenant role change by a session a
 	// recovery email may have opened.
 	accounts Repository
+	projects ActiveProjectStore
 	nowFunc  func() time.Time
 }
 
@@ -220,6 +221,11 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
 		return nil, err
+	}
+	if s.mailerDelivers {
+		if err := requireProjectEmailDelivery(ctx, projectID, s.projects); err != nil {
+			return nil, err
+		}
 	}
 
 	rawToken := randomToken(invitationTokenBytes)
@@ -674,6 +680,11 @@ func (s *MembershipService) requireProject(ctx context.Context) (string, error) 
 // account is read from.
 func (s *MembershipService) WithAccounts(accounts Repository) *MembershipService {
 	s.accounts = accounts
+	return s
+}
+
+func (s *MembershipService) WithActiveProjects(projects ActiveProjectStore) *MembershipService {
+	s.projects = projects
 	return s
 }
 

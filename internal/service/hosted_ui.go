@@ -79,6 +79,9 @@ func (s *AuthService) HostedUIOptions(ctx context.Context, pageOrigin string) Ho
 	signupOn := opts.PasswordLoginEnabled && s.cfg.PasswordSignupEnabled
 	accounts := accountsFor(scope)
 	opts.PasswordSignupEnabled = signupOn && accounts.emailSignup() == SignupSelf
+	if opts.PasswordSignupEnabled && s.cfg.AuthRequireVerifiedEmail && s.requireEmailDelivery(ctx) != nil {
+		opts.PasswordSignupEnabled = false
+	}
 	opts.UsernameSignupEnabled = signupOn && usernameSelfSignupRefusal(scope) == nil
 	opts.UsernameLoginEnabled = opts.PasswordLoginEnabled && accounts.usernameSignup() != SignupOff
 	if methodAllowed(LoginMethodOAuth) {

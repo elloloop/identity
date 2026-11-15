@@ -38,6 +38,7 @@ func (s *AuthService) activeProjectPolicyContext(ctx context.Context) (context.C
 	scope.ProjectID = projectID
 	scope.Guardian = project.Guardian
 	scope.AgeGate = project.AgeGate
+	scope.EmailDelivery = project.EmailDelivery
 	scope.Jurisdictions = project.Jurisdictions
 	return context.WithValue(WithProjectScope(ctx, &scope), resolvedProjectPolicyKey{}, projectID), nil
 }
