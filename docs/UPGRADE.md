@@ -25,7 +25,10 @@ Hosted OAuth carries only an opaque one-time code in its redirect, then returns
 `SubmitDateOfBirth` RPC consumes the completion credential. A completion credential
 is never an access token or a query parameter. Other callback denials are unchanged.
 
-Migrations add a presence marker and preserve all existing nonzero dates. Upgrade
+Migrations add a presence marker, backfilled only for existing positive dates.
+Legacy negative values remain stored but unknown, matching their prior age
+classification; their authenticated owners can complete the profile again. New
+presence-aware negative values are known historical dates. Upgrade
 all serving replicas before enabling presence-aware writes: older replicas treat
 zero as absent and cannot protect its set-once semantics. Pause completion/signup
 writes for rollback; down migration removes presence, so explicit epoch-zero dates

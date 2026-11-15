@@ -422,7 +422,9 @@ never appear in redirect URLs. Other authentication and access denials still
 refuse the callback, and a redeemed code cannot be reused.
 
 **Storage rollout:** PostgreSQL migration 0062 and SQLite migration 0030 add
-an explicit presence marker, backfilled from existing nonzero dates. Upgrade
+an explicit presence marker, backfilled from existing positive dates. Legacy negative dates remain unknown
+until the authenticated user completes the profile again; new presence-aware
+negative dates are known historical dates. Upgrade
 all serving replicas before accepting presence-aware writes: older replicas
 interpret epoch zero as missing and cannot enforce its set-once semantics.
 Downgrading removes that marker and makes an epoch-zero DOB unknown again;

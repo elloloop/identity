@@ -1,6 +1,6 @@
 SET LOCAL lock_timeout = '10s';
 ALTER TABLE users ADD COLUMN date_of_birth_present BOOLEAN NOT NULL DEFAULT FALSE;
-UPDATE users SET date_of_birth_present = TRUE WHERE date_of_birth_ms <> 0;
+UPDATE users SET date_of_birth_present = TRUE WHERE date_of_birth_ms > 0;
 DROP TRIGGER agent_oauth_user_update ON users;
 CREATE TRIGGER agent_oauth_user_update AFTER UPDATE OF password_hash,password_change_required,owner_user_id,kind,status,is_anonymous,merged_into_user_id,email,email_verified,idv_verified,date_of_birth_ms,date_of_birth_present,market,role ON users
  FOR EACH ROW WHEN (OLD.password_hash IS DISTINCT FROM NEW.password_hash OR OLD.password_change_required IS DISTINCT FROM NEW.password_change_required OR OLD.owner_user_id IS DISTINCT FROM NEW.owner_user_id OR OLD.kind IS DISTINCT FROM NEW.kind OR OLD.status IS DISTINCT FROM NEW.status OR OLD.is_anonymous IS DISTINCT FROM NEW.is_anonymous OR OLD.merged_into_user_id IS DISTINCT FROM NEW.merged_into_user_id OR OLD.email IS DISTINCT FROM NEW.email OR OLD.email_verified IS DISTINCT FROM NEW.email_verified OR OLD.idv_verified IS DISTINCT FROM NEW.idv_verified OR OLD.date_of_birth_ms IS DISTINCT FROM NEW.date_of_birth_ms OR OLD.date_of_birth_present IS DISTINCT FROM NEW.date_of_birth_present OR OLD.market IS DISTINCT FROM NEW.market OR OLD.role IS DISTINCT FROM NEW.role) EXECUTE FUNCTION revoke_agent_oauth_user_authority();

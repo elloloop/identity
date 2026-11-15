@@ -98,7 +98,7 @@ func scanUser(s scanner) (*service.User, error) {
 	u.PhoneNumber = phoneNumber
 	u.PhoneVerified = phoneVerified != 0
 	u.PhoneVerifiedAt = phoneVerifiedAtMs
-	if dateOfBirthMs != 0 || dateOfBirthPresent {
+	if dateOfBirthMs > 0 || dateOfBirthPresent {
 		u.DateOfBirthMs = new(dateOfBirthMs)
 	}
 	u.LastLoginAtMs = lastLoginAtMs
@@ -568,7 +568,7 @@ func (r *sqliteRepository) SetDateOfBirthOnce(
 		       date_of_birth_present = TRUE,
 		       status          = CASE WHEN $4 = '' THEN status ELSE $4 END,
 		       updated_at_ms   = $5
-		 WHERE project_id = $1 AND id = $2 AND date_of_birth_ms = 0 AND NOT date_of_birth_present`
+		 WHERE project_id = $1 AND id = $2 AND date_of_birth_ms <= 0 AND NOT date_of_birth_present`
 	res, err := r.db.Exec(ctx, q, r.projectID, userID, dobMs, status, nowMs)
 	if err != nil {
 		return false, wrapErr("SetDateOfBirthOnce", err)
